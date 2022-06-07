@@ -1,14 +1,15 @@
 import {
-  ExpressionOperand,
-  IQueryPlanResponse,
-  IQueryPlanExpression,
-  IQueryPlanValue,
-  IQueryPlanVariable,
-  QueryPlanKind,
-} from "cerbos";
+  PlanResourcesResponse,
+  PlanExpressionOperand,
+  PlanExpression,
+  PlanExpressionValue,
+  PlanExpressionVariable,
+  PlanResourcesConditionalResponse,
+  PlanKind
+} from "@cerbos/core";
 
 interface QueryPlanToPrismaArgs {
-  queryPlan: IQueryPlanResponse;
+  queryPlan: PlanResourcesResponse;
   fieldNameMapper:
   | {
     [key: string]: string;
@@ -20,10 +21,10 @@ export default function queryPlanToPrisma({
   queryPlan,
   fieldNameMapper,
 }: QueryPlanToPrismaArgs): any {
-  if (queryPlan.filter.kind === QueryPlanKind.KIND_ALWAYS_ALLOWED) return {};
-  if (queryPlan.filter.kind === QueryPlanKind.KIND_ALWAYS_DENIED) return { "1": { "equals": 0 } };
+  if (queryPlan.kind === PlanKind.ALWAYS_ALLOWED) return {};
+  if (queryPlan.kind === PlanKind.ALWAYS_DENIED) return { "1": { "equals": 0 } };
   return mapOperand(
-    queryPlan.filter.condition,
+    (queryPlan as PlanResourcesConditionalResponse).condition,
     (key: string) => {
       if (typeof fieldNameMapper === "function") {
         return fieldNameMapper(key);
@@ -35,83 +36,83 @@ export default function queryPlanToPrisma({
   );
 }
 
-function isExpression(e: ExpressionOperand): e is IQueryPlanExpression {
+function isExpression(e: PlanExpressionOperand): e is PlanExpression {
   return (e as any).expression !== undefined;
 }
 
-function isValue(e: ExpressionOperand): e is IQueryPlanValue {
+function isValue(e: PlanExpressionOperand): e is PlanExpressionValue {
   return (e as any).value !== undefined;
 }
 
-function isVariable(e: ExpressionOperand): e is IQueryPlanVariable {
+function isVariable(e: PlanExpressionOperand): e is PlanExpressionVariable {
   return (e as any).variable !== undefined;
 }
 
 function mapOperand(
-  operand: ExpressionOperand,
+  operand: PlanExpressionOperand,
   getFieldName: (key: string) => string,
   output: any = {}
 ): any {
   if (isExpression(operand)) {
-    const { expression } = operand;
-    switch (expression.operator) {
+    const { operator, operands } = operand;
+    switch (operator) {
       case "and":
-        output.AND = expression.operands.map((o) =>
+        output.AND = operands.map((o) =>
           mapOperand(o, getFieldName, {})
         );
         break;
       case "or":
-        output.OR = expression.operands.map((o) =>
+        output.OR = operands.map((o) =>
           mapOperand(o, getFieldName, {})
         );
         break;
       case "eq":
         output[
-          getFieldName((expression.operands[0] as IQueryPlanVariable).variable)
+          getFieldName((operands[0] as PlanExpressionVariable).name)
         ] = {
-          equals: (expression.operands[1] as IQueryPlanValue).value,
+          equals: (operands[1] as PlanExpressionValue).value,
         };
         break;
       case "ne":
         output[
-          getFieldName((expression.operands[0] as IQueryPlanVariable).variable)
+          getFieldName((operands[0] as PlanExpressionVariable).name)
         ] = {
-          not: (expression.operands[1] as IQueryPlanValue).value,
+          not: (operands[1] as PlanExpressionValue).value,
         };
         break;
       case "lt":
         output[
-          getFieldName((expression.operands[0] as IQueryPlanVariable).variable)
+          getFieldName((operands[0] as PlanExpressionVariable).name)
         ] = {
-          lt: (expression.operands[1] as IQueryPlanValue).value,
+          lt: (operands[1] as PlanExpressionValue).value,
         };
         break;
       case "gt":
         output[
-          getFieldName((expression.operands[0] as IQueryPlanVariable).variable)
+          getFieldName((operands[0] as PlanExpressionVariable).name)
         ] = {
-          gt: (expression.operands[1] as IQueryPlanValue).value,
+          gt: (operands[1] as PlanExpressionValue).value,
         };
         break;
       case "lte":
         output[
-          getFieldName((expression.operands[0] as IQueryPlanVariable).variable)
+          getFieldName((operands[0] as PlanExpressionVariable).name)
         ] = {
-          lte: (expression.operands[1] as IQueryPlanValue).value,
+          lte: (operands[1] as PlanExpressionValue).value,
         };
         break;
       case "gte":
         output[
-          getFieldName((expression.operands[0] as IQueryPlanVariable).variable)
+          getFieldName((operands[0] as PlanExpressionVariable).name)
         ] = {
-          gte: (expression.operands[1] as IQueryPlanValue).value,
+          gte: (operands[1] as PlanExpressionValue).value,
         };
         break;
       case "in":
         output[
-          getFieldName((expression.operands[0] as IQueryPlanVariable).variable)
+          getFieldName((operands[0] as PlanExpressionVariable).name)
         ] = {
-          in: (expression.operands[1] as IQueryPlanValue).value,
+          in: (operands[1] as PlanExpressionValue).value,
         };
         break;
     }

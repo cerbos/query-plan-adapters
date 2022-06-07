@@ -1,6 +1,6 @@
 {
   "name": "cerbos-orm-prisma",
-  "version": "0.0.2",
+  "version": "0.1.0",
   "homepage": "https://cerbos.dev",
   "description": "",
   "main": "./lib/cjs/index.js",
@@ -17,11 +17,11 @@
   },
   "author": "Cerbos",
   "license": "Apache-2.0",
-  "dependencies": {
-    "cerbos": "github:cerbos/cerbos-sdk-node#query-plan"
-  },
   "devDependencies": {
     "ts-node": "^10.4.0",
     "typescript": "^4.5.4"
+  },
+  "dependencies": {
+    "@cerbos/core": "^0.5.0"
   }
 }
