@@ -37,7 +37,7 @@ export default function queryPlanToPrisma({
 }
 
 function isExpression(e: PlanExpressionOperand): e is PlanExpression {
-  return (e as any).expression !== undefined;
+  return (e as any).operator !== undefined;
 }
 
 function isValue(e: PlanExpressionOperand): e is PlanExpressionValue {
