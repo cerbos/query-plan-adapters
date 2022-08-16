@@ -1,17 +1,6 @@
 from cerbos.sdk.model import PlanResourcesFilter, PlanResourcesFilterKind, PlanResourcesResponse
 
 from cerbos_sqlalchemy.query import get_query, AttributeColumnMap
-from sqlalchemy import Column, Integer, MetaData, String, Table
-
-metadata_obj = MetaData()
-
-user_table = Table(
-    "user_account",
-    metadata_obj,
-    Column("id", Integer, primary_key=True),
-    Column("name", String(30)),
-    Column("fullname", String),
-)
 
 
 class TestCerbosClient:
