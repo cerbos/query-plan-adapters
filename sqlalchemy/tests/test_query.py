@@ -1,6 +1,10 @@
-from cerbos.sdk.model import PlanResourcesFilter, PlanResourcesFilterKind, PlanResourcesResponse
+from cerbos.sdk.model import (
+    PlanResourcesFilter,
+    PlanResourcesFilterKind,
+    PlanResourcesResponse,
+)
 
-from cerbos_sqlalchemy.query import get_query, AttributeColumnMap
+from cerbos_sqlalchemy.query import AttributeColumnMap, get_query
 
 
 class TestCerbosClient:
@@ -29,4 +33,5 @@ class TestCerbosClient:
             ),
         )
         query = get_query(plan_resource_resp, user_table, AttributeColumnMap())
-        assert query is None
+        res = session.execute(query).fetchall()
+        assert len(res) == 0
