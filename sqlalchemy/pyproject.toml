@@ -1,0 +1,47 @@
+[project]
+name = "cerbos-sqlalchemy"
+version = "0.1.0"
+description = "SQLAlchemy adapter for generating queries with Cerbos: an open core, language-agnostic, scalable authorization solution"
+authors = [
+    {name = "Cerbos Developers", email = "sdk+sqlalchemy@cerbos.dev"},
+]
+dependencies = [
+    "cerbos>=0.4.0",
+    "SQLAlchemy>=1.4.40",
+]
+requires-python = ">=3.8"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Topic :: Security",
+    "Topic :: Software Development :: Libraries",
+]
+readme = "README.md"
+license = {text = "Apache-2.0"}
+
+[project.urls]
+Homepage = "https://cerbos.dev"
+
+[project.optional-dependencies]
+[build-system]
+requires = ["pdm-pep517>=1.0.0"]
+build-backend = "pdm.pep517.api"
+
+[tool]
+[tool.pdm]
+[tool.pdm.dev-dependencies]
+test = [
+    "pytest>=7.1.2",
+]
+lint = [
+    "black>=22.6.0",
+    "isort>=5.10.1",
+]
+[tool.pdm.scripts]
+test = "pytest"
+lint = "black ."
+sort = "isort ."
+format = {composite = ["lint", "sort"]}
+
+[tool.isort]
+profile = 'black'
