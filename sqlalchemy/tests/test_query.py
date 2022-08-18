@@ -16,7 +16,7 @@ def _default_resp_params():
     }
 
 
-class TestCerbosClient:
+class TestGetQuery:
     def test_always_allow(self, user_table, session):
         plan_resource_resp = PlanResourcesResponse(
             filter=PlanResourcesFilter(
