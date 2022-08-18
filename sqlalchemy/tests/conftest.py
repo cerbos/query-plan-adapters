@@ -1,6 +1,6 @@
 import pytest
 
-from sqlalchemy import Column, Integer, String, create_engine, insert
+from sqlalchemy import Column, ForeignKey, Integer, String, create_engine, insert
 from sqlalchemy.orm import Session, declarative_base, relationship
 
 Base = declarative_base()
@@ -12,8 +12,7 @@ class User(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String(30))
     role = Column(String(255))
-
-    contacts = relationship("Contact", back_populates="owner")
+    contacts = relationship("Contact")
 
 
 class Contact(Base):
@@ -21,8 +20,8 @@ class Contact(Base):
 
     id = Column(Integer, primary_key=True)
     name = Column(String(30))
-
-    owner = relationship("User", back_populates="contacts")
+    age = Column(Integer)
+    user = Column(Integer, ForeignKey("user.id"))
 
 
 @pytest.fixture
@@ -36,11 +35,15 @@ def engine():
     # Populate with test data
     engine.execute(
         insert(User.__table__),
-        [{"name": "sam", "role": "admin"}, {"name": "frankie", "role": "user"}],
+        [{"name": "user1", "role": "admin"}, {"name": "user2", "role": "user"}],
     )
     engine.execute(
         insert(Contact.__table__),
-        [{"name": "ollie", "owner": "sam"}, {"name": "robin", "owner": "frankie"}],
+        [
+            {"name": "contact1", "age": 32, "user": "user1"},
+            {"name": "contact2", "age": 42, "user": "user2"},
+            {"name": "contact3", "age": 52, "user": "user1"},
+        ],
     )
 
     yield engine
