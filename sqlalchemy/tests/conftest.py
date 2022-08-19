@@ -62,10 +62,5 @@ def session(engine):
 
 
 @pytest.fixture
-def user_table():
-    return User.__table__
-
-
-@pytest.fixture
 def contact_table():
     return Contact.__table__

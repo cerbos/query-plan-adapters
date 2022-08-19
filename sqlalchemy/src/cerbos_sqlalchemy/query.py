@@ -55,7 +55,8 @@ def get_query(
             return column >= value
         if operator == "in":
             return column.in_(value)
-        # TODO check docs for other operators
+
+        raise ValueError(f"Unrecognised operator: {operator}")
 
     return select(table).where(
         traverse_and_map_operands(query_plan.filter.condition.to_dict())

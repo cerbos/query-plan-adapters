@@ -1,3 +1,4 @@
+import pytest
 from cerbos.sdk.model import (
     PlanResourcesFilter,
     PlanResourcesFilterKind,
@@ -11,31 +12,31 @@ def _default_resp_params():
     return {
         "request_id": "1",
         "action": "action",
-        "resource_kind": "resource",
+        "resource_kind": "contact",
         "policy_version": "default",
     }
 
 
 class TestGetQuery:
-    def test_always_allow(self, user_table, session):
+    def test_always_allow(self, contact_table, session):
         plan_resource_resp = PlanResourcesResponse(
             filter=PlanResourcesFilter(
                 PlanResourcesFilterKind.ALWAYS_ALLOWED,
             ),
             **_default_resp_params(),
         )
-        query = get_query(plan_resource_resp, user_table, AttributeColumnMap())
+        query = get_query(plan_resource_resp, contact_table, AttributeColumnMap())
         res = session.execute(query).fetchall()
-        assert len(res) == 2
+        assert len(res) == 3
 
-    def test_always_deny(self, user_table, session):
+    def test_always_deny(self, contact_table, session):
         plan_resource_resp = PlanResourcesResponse(
             filter=PlanResourcesFilter(
                 PlanResourcesFilterKind.ALWAYS_DENIED,
             ),
             **_default_resp_params(),
         )
-        query = get_query(plan_resource_resp, user_table, AttributeColumnMap())
+        query = get_query(plan_resource_resp, contact_table, AttributeColumnMap())
         res = session.execute(query).fetchall()
         assert len(res) == 0
 
@@ -329,3 +330,32 @@ class TestGetQuery:
         res = conn.execute(query).fetchall()
         assert len(res) == 2
         assert all(map(lambda x: x.name in {"contact1", "contact2"}, res))
+
+    def test_get_unrecognised_filter(self, contact_table):
+        unknown_op = "unknown"
+        plan_resources_filter = PlanResourcesFilter.from_dict(
+            {
+                "kind": PlanResourcesFilterKind.CONDITIONAL,
+                "condition": {
+                    "expression": {
+                        "operator": unknown_op,
+                        "operands": [
+                            {"variable": "request.resource.attr.user"},
+                            {"value": "user1"},
+                        ],
+                    },
+                },
+            }
+        )
+        plan_resource_resp = PlanResourcesResponse(
+            filter=plan_resources_filter,
+            **_default_resp_params(),
+        )
+        attr = AttributeColumnMap(
+            {
+                "request.resource.attr.user": "user",
+            }
+        )
+        with pytest.raises(ValueError) as exc_info:
+            get_query(plan_resource_resp, contact_table, attr)
+        assert exc_info.value.args[0] == f"Unrecognised operator: {unknown_op}"
