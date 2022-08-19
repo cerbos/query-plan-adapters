@@ -5,7 +5,7 @@ from cerbos.sdk.model import (
     PlanResourcesResponse,
 )
 
-from cerbos_sqlalchemy.query import AttributeColumnMap, get_query
+from cerbos_sqlalchemy import get_query
 
 
 def _default_resp_params():
@@ -25,7 +25,7 @@ class TestGetQuery:
             ),
             **_default_resp_params(),
         )
-        query = get_query(plan_resource_resp, contact_table, AttributeColumnMap())
+        query = get_query(plan_resource_resp, contact_table, {})
         res = session.execute(query).fetchall()
         assert len(res) == 3
 
@@ -36,7 +36,7 @@ class TestGetQuery:
             ),
             **_default_resp_params(),
         )
-        query = get_query(plan_resource_resp, contact_table, AttributeColumnMap())
+        query = get_query(plan_resource_resp, contact_table, {})
         res = session.execute(query).fetchall()
         assert len(res) == 0
 
@@ -59,11 +59,9 @@ class TestGetQuery:
             filter=plan_resources_filter,
             **_default_resp_params(),
         )
-        attr = AttributeColumnMap(
-            {
-                "request.resource.attr.user": "user",
-            }
-        )
+        attr = {
+            "request.resource.attr.user": "user",
+        }
         query = get_query(plan_resource_resp, contact_table, attr)
         res = conn.execute(query).fetchall()
         assert len(res) == 2
@@ -88,11 +86,9 @@ class TestGetQuery:
             filter=plan_resources_filter,
             **_default_resp_params(),
         )
-        attr = AttributeColumnMap(
-            {
-                "request.resource.attr.user": "user",
-            }
-        )
+        attr = {
+            "request.resource.attr.user": "user",
+        }
         query = get_query(plan_resource_resp, contact_table, attr)
         res = conn.execute(query).fetchall()
         assert len(res) == 1
@@ -133,11 +129,9 @@ class TestGetQuery:
             filter=plan_resources_filter,
             **_default_resp_params(),
         )
-        attr = AttributeColumnMap(
-            {
-                "request.resource.attr.user": "user",
-            }
-        )
+        attr = {
+            "request.resource.attr.user": "user",
+        }
         query = get_query(plan_resource_resp, contact_table, attr)
         res = conn.execute(query).fetchall()
         assert len(res) == 0
@@ -177,11 +171,9 @@ class TestGetQuery:
             filter=plan_resources_filter,
             **_default_resp_params(),
         )
-        attr = AttributeColumnMap(
-            {
-                "request.resource.attr.user": "user",
-            }
-        )
+        attr = {
+            "request.resource.attr.user": "user",
+        }
         query = get_query(plan_resource_resp, contact_table, attr)
         res = conn.execute(query).fetchall()
         assert len(res) == 3
@@ -205,11 +197,9 @@ class TestGetQuery:
             filter=plan_resources_filter,
             **_default_resp_params(),
         )
-        attr = AttributeColumnMap(
-            {
-                "request.resource.attr.age": "age",
-            }
-        )
+        attr = {
+            "request.resource.attr.age": "age",
+        }
         query = get_query(plan_resource_resp, contact_table, attr)
         res = conn.execute(query).fetchall()
         assert len(res) == 2
@@ -234,11 +224,9 @@ class TestGetQuery:
             filter=plan_resources_filter,
             **_default_resp_params(),
         )
-        attr = AttributeColumnMap(
-            {
-                "request.resource.attr.age": "age",
-            }
-        )
+        attr = {
+            "request.resource.attr.age": "age",
+        }
         query = get_query(plan_resource_resp, contact_table, attr)
         res = conn.execute(query).fetchall()
         assert len(res) == 1
@@ -263,11 +251,9 @@ class TestGetQuery:
             filter=plan_resources_filter,
             **_default_resp_params(),
         )
-        attr = AttributeColumnMap(
-            {
-                "request.resource.attr.age": "age",
-            }
-        )
+        attr = {
+            "request.resource.attr.age": "age",
+        }
         query = get_query(plan_resource_resp, contact_table, attr)
         res = conn.execute(query).fetchall()
         assert len(res) == 2
@@ -292,11 +278,9 @@ class TestGetQuery:
             filter=plan_resources_filter,
             **_default_resp_params(),
         )
-        attr = AttributeColumnMap(
-            {
-                "request.resource.attr.age": "age",
-            }
-        )
+        attr = {
+            "request.resource.attr.age": "age",
+        }
         query = get_query(plan_resource_resp, contact_table, attr)
         res = conn.execute(query).fetchall()
         assert len(res) == 2
@@ -321,15 +305,73 @@ class TestGetQuery:
             filter=plan_resources_filter,
             **_default_resp_params(),
         )
-        attr = AttributeColumnMap(
-            {
-                "request.resource.attr.name": "name",
-            }
-        )
+        attr = {
+            "request.resource.attr.name": "name",
+        }
         query = get_query(plan_resource_resp, contact_table, attr)
         res = conn.execute(query).fetchall()
         assert len(res) == 2
         assert all(map(lambda x: x.name in {"contact1", "contact2"}, res))
+
+    def test_get_unrecognised_response_attribute(self, contact_table):
+        unknown_attribute = "request.resource.attr.foo"
+        plan_resources_filter = PlanResourcesFilter.from_dict(
+            {
+                "kind": PlanResourcesFilterKind.CONDITIONAL,
+                "condition": {
+                    "expression": {
+                        "operator": "eq",
+                        "operands": [
+                            {"variable": unknown_attribute},
+                            {"value": "user1"},
+                        ],
+                    },
+                },
+            }
+        )
+        plan_resource_resp = PlanResourcesResponse(
+            filter=plan_resources_filter,
+            **_default_resp_params(),
+        )
+        attr = {
+            "request.resource.attr.user": "user",
+        }
+        with pytest.raises(KeyError) as exc_info:
+            get_query(plan_resource_resp, contact_table, attr)
+        assert (
+            exc_info.value.args[0]
+            == f"Attribute does not exist in the attribute column map: {unknown_attribute}"
+        )
+
+    def test_get_unrecognised_map_attribute(self, contact_table):
+        plan_resources_filter = PlanResourcesFilter.from_dict(
+            {
+                "kind": PlanResourcesFilterKind.CONDITIONAL,
+                "condition": {
+                    "expression": {
+                        "operator": "eq",
+                        "operands": [
+                            {"variable": "request.resource.attr.user"},
+                            {"value": "user1"},
+                        ],
+                    },
+                },
+            }
+        )
+        plan_resource_resp = PlanResourcesResponse(
+            filter=plan_resources_filter,
+            **_default_resp_params(),
+        )
+        unknown_column = "foo"
+        attr = {
+            "request.resource.attr.user": unknown_column,
+        }
+        with pytest.raises(AttributeError) as exc_info:
+            get_query(plan_resource_resp, contact_table, attr)
+        assert (
+            exc_info.value.args[0]
+            == f"Table column name does not match key in attribute column map: {unknown_column}"
+        )
 
     def test_get_unrecognised_filter(self, contact_table):
         unknown_op = "unknown"
@@ -351,11 +393,9 @@ class TestGetQuery:
             filter=plan_resources_filter,
             **_default_resp_params(),
         )
-        attr = AttributeColumnMap(
-            {
-                "request.resource.attr.user": "user",
-            }
-        )
+        attr = {
+            "request.resource.attr.user": "user",
+        }
         with pytest.raises(ValueError) as exc_info:
             get_query(plan_resource_resp, contact_table, attr)
         assert exc_info.value.args[0] == f"Unrecognised operator: {unknown_op}"

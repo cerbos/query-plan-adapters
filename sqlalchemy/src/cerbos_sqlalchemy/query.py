@@ -3,11 +3,9 @@ from cerbos.sdk.model import PlanResourcesFilterKind, PlanResourcesResponse
 from sqlalchemy import Table, and_, or_, select
 from sqlalchemy.orm import Query
 
-AttributeColumnMap = dict[str, str]
-
 
 def get_query(
-    query_plan: PlanResourcesResponse, table: Table, attr_map: AttributeColumnMap
+    query_plan: PlanResourcesResponse, table: Table, attr_map: dict[str, str]
 ) -> Query:
     if (
         query_plan.filter is None
@@ -34,10 +32,15 @@ def get_query(
         # otherwise, they are a list[dict] (len==2), in the form: `[{'variable': 'foo'}, {'value': 'bar'}]`
         variable, value = [next(iter(l.values())) for l in child_operands]
 
-        column = getattr(table.c, attr_map[variable])
-        if column is None:
+        try:
+            column = getattr(table.c, attr_map[variable])
+        except KeyError:
+            raise KeyError(
+                f"Attribute does not exist in the attribute column map: {variable}"
+            )
+        except AttributeError:
             raise AttributeError(
-                "Table column name does not match key in AttributeColumnMap"
+                f"Table column name does not match key in attribute column map: {attr_map[variable]}"
             )
 
         # the operator handlers here are the leaf nodes of the recursion
