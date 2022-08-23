@@ -21,6 +21,7 @@ license = {text = "Apache-2.0"}
 
 [project.urls]
 Homepage = "https://cerbos.dev"
+Repository = "https://github.com/cerbos/query-plan-adapters/tree/main/sqlalchemy"
 
 [project.optional-dependencies]
 [build-system]
