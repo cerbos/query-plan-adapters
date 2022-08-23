@@ -16,7 +16,9 @@ pip install cerbos-sqlalchemy
 ```python
 from cerbos.sdk.client import CerbosClient
 from cerbos.sdk.model import Principal, ResourceDesc
-from cerbos-sqlalchemy import get_query
+
+from cerbos_sqlalchemy import get_query
+from sqlalchemy import Column, Integer, String
 from sqlalchemy.orm import declarative_base, Query
 
 Base = declarative_base()
@@ -44,14 +46,16 @@ with CerbosClient(host="http://localhost:3592") as c:
     rd = ResourceDesc("leave_request", policy_version="20210210")
     plan = c.plan_resources("view", p, rd)
 
+
 # the attr_map arg of get_query expects a map[string, string], with cerbos attribute strings mapped to table column names
-attr = {
+attr_map = {
     "request.resource.attr.department": "department",
     "request.resource.attr.geography": "geography",
     "request.resource.attr.team": "team",
+    "request.resource.attr.priority": "priority",
 }
-query: Query = get_query(plan, LeaveRequest.__table__, attr)
+query: Query = get_query(plan, LeaveRequest.__table__, attr_map)
 
 # optionally extend the query
-query.where(LeaveRequest.__table__.c.priority < 5)
+query = query.where(LeaveRequest.__table__.c.priority < 5)
 ```
