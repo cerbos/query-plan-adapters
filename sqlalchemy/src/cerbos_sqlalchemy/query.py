@@ -1,6 +1,6 @@
 from cerbos.sdk.model import PlanResourcesFilterKind, PlanResourcesResponse
 
-from sqlalchemy import Table, and_, or_, select
+from sqlalchemy import Table, and_, not_, or_, select
 from sqlalchemy.orm import Query
 
 
@@ -28,6 +28,8 @@ def get_query(
             return and_(*[traverse_and_map_operands(o) for o in child_operands])
         if operator == "or":
             return or_(*[traverse_and_map_operands(o) for o in child_operands])
+        if operator == "not":
+            return not_(*[traverse_and_map_operands(o) for o in child_operands])
 
         # otherwise, they are a list[dict] (len==2), in the form: `[{'variable': 'foo'}, {'value': 'bar'}]`
         variable, value = [next(iter(l.values())) for l in child_operands]
