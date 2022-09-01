@@ -1,11 +1,14 @@
 from cerbos.sdk.model import PlanResourcesFilterKind, PlanResourcesResponse
 
-from sqlalchemy import Table, and_, not_, or_, select
+from sqlalchemy import Column, Table, and_, not_, or_, select
 from sqlalchemy.orm import Query
 
 
 def get_query(
-    query_plan: PlanResourcesResponse, table: Table, attr_map: dict[str, str]
+    query_plan: PlanResourcesResponse,
+    table: Table,
+    attr_map: dict[str, Column],
+    table_mapping: list[tuple[Column, Column]] | None = None,
 ) -> Query:
     if (
         query_plan.filter is None
@@ -14,6 +17,25 @@ def get_query(
         return select(table).where(False)
     if query_plan.filter.kind == PlanResourcesFilterKind.ALWAYS_ALLOWED:
         return select(table)
+
+    # Inspect passed columns. If > 1 origin table, assert that the mapping has been defined
+    required_tables = set()
+    for c in attr_map.values():
+        required_tables.add(c.table.name)
+    if len(required_tables) > 1:
+        if table_mapping is None:
+            raise TypeError(
+                "get_query() missing 1 required positional argument: 'table_mapping'"
+            )
+        for c1, c2 in table_mapping:
+            required_tables.discard(c1.table.name)
+            required_tables.discard(c2.table.name)
+        if len(required_tables):
+            raise TypeError(
+                "positional argument 'table_mapping' missing mapping for table(s): '{0}'".format(
+                    "', '".join(required_tables)
+                )
+            )
 
     def traverse_and_map_operands(operand: dict):
         if exp := operand.get("expression"):
@@ -33,16 +55,11 @@ def get_query(
 
         # otherwise, they are a list[dict] (len==2), in the form: `[{'variable': 'foo'}, {'value': 'bar'}]`
         variable, value = [next(iter(l.values())) for l in child_operands]
-
         try:
-            column = getattr(table.c, attr_map[variable])
+            column = attr_map[variable]
         except KeyError:
             raise KeyError(
                 f"Attribute does not exist in the attribute column map: {variable}"
-            )
-        except AttributeError:
-            raise AttributeError(
-                f"Table column name does not match key in attribute column map: {attr_map[variable]}"
             )
 
         # the operator handlers here are the leaf nodes of the recursion
@@ -63,6 +80,11 @@ def get_query(
 
         raise ValueError(f"Unrecognised operator: {operator}")
 
-    return select(table).where(
+    q = select(table).where(
         traverse_and_map_operands(query_plan.filter.condition.to_dict())
     )
+
+    if table_mapping:
+        q = q.where(*[m[0] == m[1] for m in table_mapping])
+
+    return q

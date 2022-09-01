@@ -2,7 +2,7 @@
 
 An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanResources API](https://docs.cerbos.dev/cerbos/latest/api/index.html#resources-query-plan)) response and converts it into a [SQLAlchemy](https://docs.sqlalchemy.org/en/14/) Query object. This is designed to work alongside a project using the [Cerbos Python SDK](https://github.com/cerbos/cerbos-sdk-python).
 
-The following conditions are supported: `and`, `or`, `eq`, `ne`, `lt`, `gt`, `lte`, `gte` and `in`. Other operators (eg math operators) can be implemented programatically, and attached to the query object via the `query.where(...)` API.
+The following conditions are supported: `and`, `or`, `not`, `eq`, `ne`, `lt`, `gt`, `lte`, `gte` and `in`. Other operators (eg math operators) can be implemented programatically, and attached to the query object via the `query.where(...)` API.
 
 ## Requirements
 - Cerbos > v0.16
@@ -47,15 +47,40 @@ with CerbosClient(host="http://localhost:3592") as c:
     plan = c.plan_resources("view", p, rd)
 
 
-# the attr_map arg of get_query expects a map[string, string], with cerbos attribute strings mapped to table column names
+# the attr_map arg of get_query expects a map[string, Column], with cerbos attribute strings mapped to Column instances
 attr_map = {
-    "request.resource.attr.department": "department",
-    "request.resource.attr.geography": "geography",
-    "request.resource.attr.team": "team",
-    "request.resource.attr.priority": "priority",
+    "request.resource.attr.department": LeaveRequest.department,
+    "request.resource.attr.geography": LeaveRequest.geography,
+    "request.resource.attr.team": LeaveRequest.team,
+    "request.resource.attr.priority": LeaveRequest.priority,
 }
+
+
+# `get_query` supports both `Table` instances and ORM entities:
+# ORM entity - honouring object level relationships via the sqlalchemy ORM
+query: Query = get_query(plan, LeaveRequest, attr_map)
+# Alternatively it can generate legacy queries by passing the Table instance
 query: Query = get_query(plan, LeaveRequest.__table__, attr_map)
 
+
+# NOTE: if columns defined within the attr_map originate from more than one Table, we need to define a mapping as the optional 4th positional arg to `get_query`, e.g.:
+query: Query = get_query(
+    plan,
+    Table1,
+    {
+        "request.resource.attr.foo": Table1.foo,
+        "request.resource.attr.bar": Table2.bar,
+    },
+    [(Table1.table2_id, Table2.id)]
+)
+
+
 # optionally extend the query
-query = query.where(LeaveRequest.__table__.c.priority < 5)
+query = query.where(LeaveRequest.priority < 5)
+
+# or return a subset of the selected columns (via a new `select`)
+query = query.with_only_columns(
+    LeaveRequest.department,
+    LeaveRequest.geography,
+)
 ```
