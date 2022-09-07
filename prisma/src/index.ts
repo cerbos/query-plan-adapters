@@ -48,6 +48,15 @@ function isVariable(e: PlanExpressionOperand): e is PlanExpressionVariable {
   return (e as any).variable !== undefined;
 }
 
+function getOperandName(operands: PlanExpressionOperand[]) {
+  return ((operands.find(o => o.hasOwnProperty("name"))) as PlanExpressionVariable).name
+}
+
+function getOperandValue(operands: PlanExpressionOperand[]) {
+  return ((operands.find(o => o.hasOwnProperty("value"))) as PlanExpressionValue).value
+}
+
+
 function mapOperand(
   operand: PlanExpressionOperand,
   getFieldName: (key: string) => string,
@@ -68,51 +77,51 @@ function mapOperand(
         break;
       case "eq":
         output[
-          getFieldName((operands[0] as PlanExpressionVariable).name)
+          getFieldName(getOperandName(operands))
         ] = {
-          equals: (operands[1] as PlanExpressionValue).value,
+          equals: getOperandValue(operands),
         };
         break;
       case "ne":
         output[
-          getFieldName((operands[0] as PlanExpressionVariable).name)
+          getFieldName(getOperandName(operands))
         ] = {
-          not: (operands[1] as PlanExpressionValue).value,
+          not: getOperandValue(operands),
         };
         break;
       case "lt":
         output[
-          getFieldName((operands[0] as PlanExpressionVariable).name)
+          getFieldName(getOperandName(operands))
         ] = {
-          lt: (operands[1] as PlanExpressionValue).value,
+          lt: getOperandValue(operands),
         };
         break;
       case "gt":
         output[
-          getFieldName((operands[0] as PlanExpressionVariable).name)
+          getFieldName(getOperandName(operands))
         ] = {
-          gt: (operands[1] as PlanExpressionValue).value,
+          gt: getOperandValue(operands),
         };
         break;
       case "lte":
         output[
-          getFieldName((operands[0] as PlanExpressionVariable).name)
+          getFieldName(getOperandName(operands))
         ] = {
-          lte: (operands[1] as PlanExpressionValue).value,
+          lte: getOperandValue(operands),
         };
         break;
       case "gte":
         output[
-          getFieldName((operands[0] as PlanExpressionVariable).name)
+          getFieldName(getOperandName(operands))
         ] = {
-          gte: (operands[1] as PlanExpressionValue).value,
+          gte: getOperandValue(operands),
         };
         break;
       case "in":
         output[
-          getFieldName((operands[0] as PlanExpressionVariable).name)
+          getFieldName(getOperandName(operands))
         ] = {
-          in: (operands[1] as PlanExpressionValue).value,
+          in: getOperandValue(operands),
         };
         break;
     }

@@ -59,6 +59,30 @@ test("conditional - eq", () => {
   expect(result).toStrictEqual({ ownerId: { equals: "sally" } });
 });
 
+test("conditional - eq - inverted order", () => {
+  const queryPlan: PlanResourcesResponse = {
+    requestId: "",
+    metadata: undefined,
+    kind: PlanKind.CONDITIONAL,
+    condition: {
+      operator: "eq",
+      operands: [
+        { value: "sally" },
+        { name: "request.resource.attr.ownerId" }
+      ],
+    },
+  };
+
+  const result = queryPlanToPrisma({
+    queryPlan,
+    fieldNameMapper: {
+      "request.resource.attr.ownerId": "ownerId",
+    },
+  });
+
+  expect(result).toStrictEqual({ ownerId: { equals: "sally" } });
+});
+
 
 test("conditional - and", () => {
   const queryPlan: PlanResourcesResponse = {
@@ -329,4 +353,6 @@ test("conditional - lte", () => {
     amount: { lte: 1000 }
   });
 });
+
+
 
