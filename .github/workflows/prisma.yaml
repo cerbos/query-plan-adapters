@@ -1,0 +1,24 @@
+name: Prisma Test
+
+on:
+  pull_request:
+    paths:
+      - "prisma/**"
+
+defaults:
+  run:
+    working-directory: prisma
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Test using Node.js
+        uses: actions/setup-node@v1
+        with:
+          node-version: "16"
+
+      - run: npm install
+      - run: npm run test
