@@ -4,6 +4,9 @@ on:
   pull_request:
     paths:
       - "prisma/**"
+  push:
+    tags:
+      - v*
 
 defaults:
   run:
