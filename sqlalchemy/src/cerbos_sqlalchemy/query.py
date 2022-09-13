@@ -54,7 +54,11 @@ def get_query(
             return not_(*[traverse_and_map_operands(o) for o in child_operands])
 
         # otherwise, they are a list[dict] (len==2), in the form: `[{'variable': 'foo'}, {'value': 'bar'}]`
-        variable, value = [next(iter(l.values())) for l in child_operands]
+        # The order of the keys `variable` and `value` is not guaranteed.
+        d = {k: v for o in child_operands for k, v in o.items()}
+        variable = d["variable"]
+        value = d["value"]
+
         try:
             column = attr_map[variable]
         except KeyError:
