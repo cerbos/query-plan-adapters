@@ -1,15 +1,29 @@
 from cerbos.sdk.model import PlanResourcesFilterKind, PlanResourcesResponse
 
 from sqlalchemy import Column, Table, and_, not_, or_, select
-from sqlalchemy.orm import Query
+from sqlalchemy.orm import DeclarativeMeta, InstrumentedAttribute
+from sqlalchemy.sql import Select
+from sqlalchemy.sql.expression import BinaryExpression, ColumnOperators
+
+
+def _get_table_name(t: DeclarativeMeta | Table) -> str:
+    try:
+        # `DeclarativeMeta` type
+        return t.__table__.name
+    except AttributeError:
+        # `Table` type
+        return t.name
 
 
 def get_query(
     query_plan: PlanResourcesResponse,
-    table: Table,
-    attr_map: dict[str, Column],
-    table_mapping: list[tuple[Column, Column]] | None = None,
-) -> Query:
+    table: Table | DeclarativeMeta,
+    attr_map: dict[str, Column | InstrumentedAttribute],
+    table_mapping: list[
+        tuple[Table | DeclarativeMeta, BinaryExpression | ColumnOperators]
+    ]
+    | None = None,
+) -> Select:
     if (
         query_plan.filter is None
         or query_plan.filter.kind == PlanResourcesFilterKind.ALWAYS_DENIED
@@ -21,15 +35,17 @@ def get_query(
     # Inspect passed columns. If > 1 origin table, assert that the mapping has been defined
     required_tables = set()
     for c in attr_map.values():
-        required_tables.add(c.table.name)
-    if len(required_tables) > 1:
+        # c is of type Column | InstrumentedAttribute - both have a `table` attribute returning a `Table` type
+        if (n := c.table.name) != _get_table_name(table):
+            required_tables.add(n)
+
+    if len(required_tables):
         if table_mapping is None:
             raise TypeError(
                 "get_query() missing 1 required positional argument: 'table_mapping'"
             )
-        for c1, c2 in table_mapping:
-            required_tables.discard(c1.table.name)
-            required_tables.discard(c2.table.name)
+        for t, _ in table_mapping:
+            required_tables.discard(_get_table_name(t))
         if len(required_tables):
             raise TypeError(
                 "positional argument 'table_mapping' missing mapping for table(s): '{0}'".format(
@@ -89,6 +105,8 @@ def get_query(
     )
 
     if table_mapping:
-        q = q.where(*[m[0] == m[1] for m in table_mapping])
+        q = q.select_from(table)
+        for join_table, predicate in table_mapping:
+            q = q.join(join_table, predicate)
 
     return q
