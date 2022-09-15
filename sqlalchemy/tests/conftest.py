@@ -63,4 +63,4 @@ def session(engine):
 
 @pytest.fixture
 def contact_table():
-    return Contact.__table__
+    return Contact

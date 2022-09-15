@@ -1,6 +1,6 @@
 [project]
 name = "cerbos-sqlalchemy"
-version = "0.1.0"
+version = "0.1.3"
 description = "SQLAlchemy adapter for generating queries with Cerbos: an open core, language-agnostic, scalable authorization solution"
 authors = [
     {name = "Cerbos Developers", email = "sdk+sqlalchemy@cerbos.dev"},
