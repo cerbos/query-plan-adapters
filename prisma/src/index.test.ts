@@ -1,40 +1,48 @@
 import queryPlanToPrisma from ".";
 import { PlanKind, PlanResourcesResponse } from "@cerbos/core";
+import { PrismaClient } from '@prisma/client'
+import { GRPC as Cerbos } from "@cerbos/grpc";
 
-test("always allowed", () => {
+const prisma = new PrismaClient()
+const cerbos = new Cerbos("127.0.0.1:3593", { tls: false })
 
-  const queryPlan: PlanResourcesResponse = {
-    requestId: "",
-    metadata: undefined,
-    kind: PlanKind.ALWAYS_ALLOWED,
-  };
+test("always allowed", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "sally", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "always-allow"
+  })
 
   const result = queryPlanToPrisma({
     queryPlan,
-    fieldNameMapper: {
-      "request.resource.attr.ownerId": "ownerId",
-    },
+    fieldNameMapper: {},
   });
 
   expect(result).toStrictEqual({});
+
+  const query = await prisma.resource.findMany({ where: { ...result } })
+  expect(query.length).toEqual(0)
+
 });
 
-test("always denied", () => {
+test("always denied", async () => {
 
-  const queryPlan: PlanResourcesResponse = {
-    requestId: "",
-    metadata: undefined,
-    kind: PlanKind.ALWAYS_DENIED,
-  };
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "sally", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "always-deny"
+  })
 
   const result = queryPlanToPrisma({
     queryPlan,
-    fieldNameMapper: {
-      "request.resource.attr.ownerId": "ownerId",
-    },
+    fieldNameMapper: {},
   });
 
   expect(result).toStrictEqual({ "1": { "equals": 0 } });
+
+  const query = await prisma.resource.findMany({ where: { ...result } })
+  expect(query.length).toEqual(0)
+
 });
 
 

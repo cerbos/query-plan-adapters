@@ -1,0 +1,16 @@
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: resource
+  rules:
+    - actions:
+        - "always-allow"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+
+    - actions:
+        - "always-deny"
+      effect: EFFECT_DENY
+      roles:
+        - USER
