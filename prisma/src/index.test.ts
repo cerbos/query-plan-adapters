@@ -25,6 +25,11 @@ const fixtureResources: Prisma.ResourceCreateInput[] = [
     aBool: true,
     aNumber: 1,
     aString: "string",
+    creator: {
+      connect: {
+        id: "user1"
+      }
+    },
     owners: {
       connect: [{
         id: "user1"
@@ -36,6 +41,11 @@ const fixtureResources: Prisma.ResourceCreateInput[] = [
     aBool: false,
     aNumber: 2,
     aString: "string2",
+    creator: {
+      connect: {
+        id: "user2"
+      }
+    },
     owners: {
       connect: [{
         id: "user2"
@@ -47,6 +57,11 @@ const fixtureResources: Prisma.ResourceCreateInput[] = [
     aBool: false,
     aNumber: 3,
     aString: "string3",
+    creator: {
+      connect: {
+        id: "user1"
+      }
+    },
     owners: {
       connect: [{
         id: "user1"
@@ -136,8 +151,8 @@ test("conditional - eq", async () => {
     filters: { aBool: { equals: true } }
   });
   const query = await prisma.resource.findMany({ where: { ...result.filters } })
-  expect(query).toEqual(fixtureResources.filter(a => a.aBool).map(f => ({ ...f, owners: undefined })))
-});
+  expect(query.map(r => r.id)).toEqual(fixtureResources.filter(a => a.aBool).map(r => r.id))
+})
 
 test("conditional - eq - inverted order", async () => {
   const queryPlan = await cerbos.planResources({
@@ -171,7 +186,7 @@ test("conditional - eq - inverted order", async () => {
   });
 
   const query = await prisma.resource.findMany({ where: { ...result.filters } })
-  expect(query).toEqual(fixtureResources.filter(a => a.aBool).map(f => ({ ...f, owners: undefined })))
+  expect(query.map(r => r.id)).toEqual(fixtureResources.filter(a => a.aBool).map(r => r.id))
 });
 
 
@@ -194,7 +209,7 @@ test("conditional - ne", async () => {
     filters: { aString: { not: "string" } }
   });
   const query = await prisma.resource.findMany({ where: { ...result.filters } })
-  expect(query).toEqual(fixtureResources.filter(a => a.aString != "string").map(f => ({ ...f, owners: undefined })))
+  expect(query.map(r => r.id)).toEqual(fixtureResources.filter(a => a.aString != "string").map(r => r.id))
 });
 
 
@@ -217,7 +232,7 @@ test("conditional - explicit-deny", async () => {
     filters: { NOT: { aBool: { equals: true } } }
   });
   const query = await prisma.resource.findMany({ where: { ...result.filters } })
-  expect(query).toEqual(fixtureResources.filter(a => !a.aBool).map(f => ({ ...f, owners: undefined })))
+  expect(query.map(r => r.id)).toEqual(fixtureResources.filter(a => !a.aBool).map(r => r.id))
 });
 
 test("conditional - and", async () => {
@@ -287,9 +302,9 @@ test("conditional - or", async () => {
   });
 
   const query = await prisma.resource.findMany({ where: { ...result.filters } })
-  expect(query).toEqual(fixtureResources.filter(r => {
+  expect(query.map(r => r.id)).toEqual(fixtureResources.filter(r => {
     return r.aBool || r.aString != "string"
-  }).map(f => ({ ...f, owners: undefined })))
+  }).map(r => r.id))
 });
 
 test("conditional - in", async () => {
@@ -314,9 +329,9 @@ test("conditional - in", async () => {
   });
 
   const query = await prisma.resource.findMany({ where: { ...result.filters } })
-  expect(query).toEqual(fixtureResources.filter(r => {
+  expect(query.map(r => r.id)).toEqual(fixtureResources.filter(r => {
     return ["string", "anotherString"].includes(r.aString)
-  }).map(f => ({ ...f, owners: undefined })))
+  }).map(r => r.id))
 });
 
 
@@ -342,9 +357,9 @@ test("conditional - gt", async () => {
   });
 
   const query = await prisma.resource.findMany({ where: { ...result.filters } })
-  expect(query).toEqual(fixtureResources.filter(r => {
+  expect(query.map(r => r.id)).toEqual(fixtureResources.filter(r => {
     return r.aNumber > 1
-  }).map(f => ({ ...f, owners: undefined })))
+  }).map(r => r.id))
 });
 
 test("conditional - lt", async () => {
@@ -369,9 +384,9 @@ test("conditional - lt", async () => {
   });
 
   const query = await prisma.resource.findMany({ where: { ...result.filters } })
-  expect(query).toEqual(fixtureResources.filter(r => {
+  expect(query.map(r => r.id)).toEqual(fixtureResources.filter(r => {
     return r.aNumber < 2
-  }).map(f => ({ ...f, owners: undefined })))
+  }).map(r => r.id))
 });
 
 
@@ -399,9 +414,9 @@ test("conditional - gte", async () => {
   });
 
   const query = await prisma.resource.findMany({ where: { ...result.filters } })
-  expect(query).toEqual(fixtureResources.filter(r => {
+  expect(query.map(r => r.id)).toEqual(fixtureResources.filter(r => {
     return r.aNumber >= 1
-  }).map(f => ({ ...f, owners: undefined })))
+  }).map(r => r.id))
 });
 
 test("conditional - lte", async () => {
@@ -428,9 +443,9 @@ test("conditional - lte", async () => {
   });
 
   const query = await prisma.resource.findMany({ where: { ...result.filters } })
-  expect(query).toEqual(fixtureResources.filter(r => {
+  expect(query.map(r => r.id)).toEqual(fixtureResources.filter(r => {
     return r.aNumber <= 2
-  }).map(f => ({ ...f, owners: undefined })))
+  }).map(r => r.id))
 });
 
 
@@ -468,10 +483,10 @@ test("conditional - relation some", async () => {
 
   const query = await prisma.resource.findMany({ where: { ...result.filters } })
 
-  expect(query).toEqual(fixtureResources.filter(r => {
+  expect(query.map(r => r.id)).toEqual(fixtureResources.filter(r => {
     if (!r.owners?.connect) return false;
     return (r.owners.connect as { id: string }[]).filter(o => o.id == "user1").length > 0
-  }).map(f => ({ ...f, owners: undefined })))
+  }).map(r => r.id))
 });
 
 
@@ -507,11 +522,93 @@ test("conditional - relation none", async () => {
     }
   });
 
+
   const query = await prisma.resource.findMany({ where: { ...result.filters } })
 
-  expect(query).toEqual(fixtureResources.filter(r => {
+  expect(query.map(r => r.id)).toEqual(fixtureResources.filter(r => {
     if (!r.owners?.connect) return false;
     return (r.owners.connect as { id: string }[]).filter(o => o.id == "user1").length == 0
-  }).map(f => ({ ...f, owners: undefined })))
+  }).map(r => r.id))
+});
+
+
+
+
+test("conditional - relation is", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "relation-is"
+  })
+
+  const result = queryPlanToPrisma({
+    queryPlan,
+    fieldNameMapper: {},
+    relationMapper: {
+      "request.resource.attr.creator": {
+        "relation": "creator",
+        "field": "id"
+      }
+    }
+  });
+
+  expect(result).toStrictEqual({
+    kind: PlanKind.CONDITIONAL,
+    filters: {
+      creator: {
+        is: {
+          id: "user1"
+        }
+      }
+    }
+  });
+
+
+  const query = await prisma.resource.findMany({ where: { ...result.filters } })
+
+  expect(query.map(r => r.id)).toEqual(fixtureResources.filter(r => {
+    if (!r.creator?.connect) return false;
+    return (r.creator.connect as { id: string }).id == "user1"
+  }).map(r => r.id))
+});
+
+test("conditional - relation is not", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "relation-is-not"
+  })
+
+  const result = queryPlanToPrisma({
+    queryPlan,
+    fieldNameMapper: {},
+    relationMapper: {
+      "request.resource.attr.creator": {
+        "relation": "creator",
+        "field": "id"
+      }
+    }
+  });
+
+  expect(result).toStrictEqual({
+    kind: PlanKind.CONDITIONAL,
+    filters: {
+      NOT: {
+        creator: {
+          is: {
+            id: "user1"
+          }
+        }
+      }
+    }
+  });
+
+
+  const query = await prisma.resource.findMany({ where: { ...result.filters } })
+
+  expect(query.map(r => r.id)).toEqual(fixtureResources.filter(r => {
+    if (!r.creator?.connect) return false;
+    return (r.creator.connect as { id: string }).id != "user1"
+  }).map(r => r.id))
 });
 

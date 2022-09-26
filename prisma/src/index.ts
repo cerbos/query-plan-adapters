@@ -84,11 +84,15 @@ function isVariable(e: PlanExpressionOperand): e is PlanExpressionVariable {
 }
 
 function getOperandName(operands: PlanExpressionOperand[]) {
-  return ((operands.find(o => o.hasOwnProperty("name"))) as PlanExpressionVariable).name
+  const op = operands.find(o => o.hasOwnProperty("name"));
+  if (!op) return;
+  return (op as PlanExpressionVariable).name
 }
 
 function getOperandValue(operands: PlanExpressionOperand[]) {
-  return ((operands.find(o => o.hasOwnProperty("value"))) as PlanExpressionValue).value
+  const op = operands.find(o => o.hasOwnProperty("value"));
+  if (!op) return;
+  return (op as PlanExpressionValue).value
 }
 
 
@@ -100,80 +104,96 @@ function mapOperand(
 ): any {
   if (isExpression(operand)) {
     const { operator, operands } = operand;
-    switch (operator) {
-      case "and":
-        output.AND = operands.map((o) =>
-          mapOperand(o, getFieldName, getRelationName, {})
-        );
-        break;
-      case "or":
-        output.OR = operands.map((o) =>
-          mapOperand(o, getFieldName, getRelationName, {})
-        );
-        break;
-      case "not":
-        output.NOT = operands.map((o) =>
-          mapOperand(o, getFieldName, getRelationName, {})
-        )[0];
-        break;
-      case "eq":
-        output[
-          getFieldName(getOperandName(operands))
-        ] = {
-          equals: getOperandValue(operands),
-        };
-        break;
-      case "ne":
-        output[
-          getFieldName(getOperandName(operands))
-        ] = {
-          not: getOperandValue(operands),
-        };
-        break;
-      case "lt":
-        output[
-          getFieldName(getOperandName(operands))
-        ] = {
-          lt: getOperandValue(operands),
-        };
-        break;
-      case "gt":
-        output[
-          getFieldName(getOperandName(operands))
-        ] = {
-          gt: getOperandValue(operands),
-        };
-        break;
-      case "le":
-        output[
-          getFieldName(getOperandName(operands))
-        ] = {
-          lte: getOperandValue(operands),
-        };
-        break;
-      case "ge":
-        output[
-          getFieldName(getOperandName(operands))
-        ] = {
-          gte: getOperandValue(operands),
-        };
-        break;
-      case "in":
-        const relation = getRelationName(getOperandName(operands));
-        if (relation) {
-          output[relation.relation] = {
-            some: {
-              [relation.field]: getOperandValue(operands)
-            }
+    const opName = getOperandName(operands);
+    const opValue = getOperandValue(operands);
+    const relation = opName && getRelationName(opName);
+    const fieldName = opName && getFieldName(opName)
+
+    if (operator == "and") {
+      if (operands.length < 2) throw Error("Expected atleast 2 operands")
+      output.AND = operands.map((o) =>
+        mapOperand(o, getFieldName, getRelationName, {})
+      );
+    }
+
+    if (operator == "or") {
+      if (operands.length < 2) throw Error("Expected atleast 2 operands")
+      output.OR = operands.map((o) =>
+        mapOperand(o, getFieldName, getRelationName, {})
+      );
+    }
+
+    if (operator == "not") {
+      if (operands.length > 1) throw Error("Expected only one operand")
+      output.NOT = operands.map((o) =>
+        mapOperand(o, getFieldName, getRelationName, {})
+      )[0];
+    }
+
+    if (operator == "eq") {
+      if (relation) {
+        output[relation.relation] = {
+          is: {
+            [relation.field]: opValue
           }
-        } else {
-          output[
-            getFieldName(getOperandName(operands))
-          ] = {
-            in: getOperandValue(operands),
-          };
         }
-        break;
+      } else if (fieldName) {
+        output[fieldName] = {
+          equals: opValue,
+        };
+      }
+    }
+
+    if (operator == "ne") {
+      if (relation) {
+        output[relation.relation] = {
+          isNot: {
+            [relation.field]: opValue
+          }
+        }
+      } else if (fieldName) {
+        output[fieldName] = {
+          not: opValue,
+        };
+      }
+    }
+
+    if (operator == "lt" && fieldName) {
+      output[fieldName] = {
+        lt: opValue,
+      };
+    }
+
+    if (operator == "gt" && fieldName) {
+      output[fieldName] = {
+        gt: opValue,
+      };
+    }
+
+    if (operator == "le" && fieldName) {
+      output[fieldName] = {
+        lte: opValue,
+      };
+    }
+
+    if (operator == "ge" && fieldName) {
+      output[fieldName] = {
+        gte: opValue,
+      };
+    }
+
+    if (operator == "in") {
+      if (relation) {
+        output[relation.relation] = {
+          some: {
+            [relation.field]: opValue
+          }
+        }
+      } else if (fieldName) {
+        output[fieldName] = {
+          in: opValue,
+        };
+      }
     }
   }
 
