@@ -103,14 +103,14 @@ function mapOperand(
           gt: getOperandValue(operands),
         };
         break;
-      case "lte":
+      case "le":
         output[
           getFieldName(getOperandName(operands))
         ] = {
           lte: getOperandValue(operands),
         };
         break;
-      case "gte":
+      case "ge":
         output[
           getFieldName(getOperandName(operands))
         ] = {

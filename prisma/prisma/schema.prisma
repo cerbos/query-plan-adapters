@@ -11,7 +11,7 @@ datasource db {
 }
 
 model Resource {
-  id      Int     @id @default(autoincrement())
+  id      String  @id @default(cuid())
   aString String
   aNumber Int
   aBool   Boolean
@@ -19,10 +19,9 @@ model Resource {
 }
 
 model User {
-  id         Int       @id @default(autoincrement())
-  resources  Resource? @relation(fields: [resourceId], references: [id])
-  resourceId Int?
-  aString    String
-  aNumber    Int
-  aBool      Boolean
+  id        String     @id @default(cuid())
+  aString   String
+  aNumber   Int
+  aBool     Boolean
+  resources Resource[]
 }
