@@ -466,11 +466,7 @@ test("conditional - relation some", async () => {
     }
   });
 
-
-
   const query = await prisma.resource.findMany({ where: { ...result.filters } })
-
-  console.log(query)
 
   expect(query).toEqual(fixtureResources.filter(r => {
     if (!r.owners?.connect) return false;
