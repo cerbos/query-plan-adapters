@@ -1,357 +1,364 @@
 import queryPlanToPrisma from ".";
-import { PlanKind, PlanResourcesResponse } from "@cerbos/core";
+import { PlanExpression, PlanKind, PlanResourcesConditionalResponse, PlanResourcesResponse } from "@cerbos/core";
+import { Prisma, PrismaClient, Resource, User } from '@prisma/client'
+import { GRPC as Cerbos } from "@cerbos/grpc";
 
-test("always allowed", () => {
+const prisma = new PrismaClient()
+const cerbos = new Cerbos("127.0.0.1:3593", { tls: false })
 
-  const queryPlan: PlanResourcesResponse = {
-    requestId: "",
-    metadata: undefined,
-    kind: PlanKind.ALWAYS_ALLOWED,
-  };
+const fixtureUsers: Prisma.UserCreateInput[] = [{
+  id: "user1",
+  aBool: true,
+  aNumber: 1,
+  aString: "string"
+}]
+const fixtureResources: Prisma.ResourceCreateInput[] = [
+  {
+    id: "resource1",
+    aBool: true,
+    aNumber: 1,
+    aString: "string",
+    owners: {
+      connect: [{
+        id: "user1"
+      }]
+    }
+  },
+  {
+    id: "resource2",
+    aBool: false,
+    aNumber: 2,
+    aString: "string2",
+    owners: {
+      connect: [{
+        id: "user1"
+      }]
+    }
+  }
+]
+
+beforeAll(async () => {
+  await prisma.resource.deleteMany();
+  await prisma.user.deleteMany();
+})
+
+beforeEach(async () => {
+  for (const user of fixtureUsers) {
+    await prisma.user.create({ data: user })
+  }
+  for (const resource of fixtureResources) {
+    await prisma.resource.create({ data: resource })
+  }
+});
+
+afterEach(async () => {
+  await prisma.resource.deleteMany();
+  await prisma.user.deleteMany();
+});
+
+
+test("always allowed", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "sally", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "always-allow"
+  })
 
   const result = queryPlanToPrisma({
     queryPlan,
-    fieldNameMapper: {
-      "request.resource.attr.ownerId": "ownerId",
-    },
+    fieldNameMapper: {},
   });
 
   expect(result).toStrictEqual({});
+
+  const query = await prisma.resource.findMany({ where: { ...result } })
+  expect(query.length).toEqual(fixtureResources.length)
 });
 
-test("always denied", () => {
+test("always denied", async () => {
 
-  const queryPlan: PlanResourcesResponse = {
-    requestId: "",
-    metadata: undefined,
-    kind: PlanKind.ALWAYS_DENIED,
-  };
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "sally", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "always-deny"
+  })
 
   const result = queryPlanToPrisma({
     queryPlan,
-    fieldNameMapper: {
-      "request.resource.attr.ownerId": "ownerId",
-    },
+    fieldNameMapper: {},
   });
 
   expect(result).toStrictEqual({ "1": { "equals": 0 } });
+
+  // TODO FIX THIS AS PRISMA NOW REJECTS
+
+  // const query = await prisma.resource.findMany({ where: { ...result } })
+  // expect(query.length).toEqual(0)
+
 });
 
 
-test("conditional - eq", () => {
-  const queryPlan: PlanResourcesResponse = {
-    requestId: "",
-    metadata: undefined,
-    kind: PlanKind.CONDITIONAL,
-    condition: {
-      operator: "eq",
-      operands: [{ name: "request.resource.attr.ownerId" }, { value: "sally" }],
-    },
-  };
+test("conditional - eq", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "sally", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "equal"
+  })
 
   const result = queryPlanToPrisma({
     queryPlan,
     fieldNameMapper: {
-      "request.resource.attr.ownerId": "ownerId",
+      "request.resource.attr.aBool": "aBool",
     },
   });
 
-  expect(result).toStrictEqual({ ownerId: { equals: "sally" } });
+  expect(result).toStrictEqual({ aBool: { equals: true } });
+  const query = await prisma.resource.findMany({ where: { ...result } })
+  expect(query).toEqual(fixtureResources.filter(a => a.aBool).map(f => ({ ...f, owners: undefined })))
 });
 
-test("conditional - eq - inverted order", () => {
-  const queryPlan: PlanResourcesResponse = {
-    requestId: "",
-    metadata: undefined,
-    kind: PlanKind.CONDITIONAL,
+test("conditional - eq - inverted order", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "sally", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "equal"
+  })
+  const typeQp = (queryPlan as PlanResourcesConditionalResponse);
+
+  const invertedQueryPlan: PlanResourcesConditionalResponse = {
+    ...typeQp,
     condition: {
-      operator: "eq",
+      ...typeQp.condition,
       operands: [
-        { value: "sally" },
-        { name: "request.resource.attr.ownerId" }
-      ],
-    },
-  };
+        (typeQp.condition as PlanExpression).operands[1],
+        (typeQp.condition as PlanExpression).operands[0],
+      ]
+    }
+  }
 
   const result = queryPlanToPrisma({
-    queryPlan,
+    queryPlan: invertedQueryPlan,
     fieldNameMapper: {
-      "request.resource.attr.ownerId": "ownerId",
+      "request.resource.attr.aBool": "aBool",
     },
   });
 
-  expect(result).toStrictEqual({ ownerId: { equals: "sally" } });
+  expect(result).toStrictEqual({ aBool: { equals: true } });
+  const query = await prisma.resource.findMany({ where: { ...result } })
+  expect(query).toEqual(fixtureResources.filter(a => a.aBool).map(f => ({ ...f, owners: undefined })))
 });
 
 
-test("conditional - and", () => {
-  const queryPlan: PlanResourcesResponse = {
-    requestId: "",
-    metadata: undefined,
-    kind: PlanKind.CONDITIONAL,
-    condition: {
-      "operator": "and",
-      "operands": [
-        {
-          "operator": "eq",
-          "operands": [
-            {
-              "name": "request.resource.attr.department"
-            },
-            {
-              "value": "marketing"
-            }
-          ]
-
-        },
-        {
-          "operator": "ne",
-          "operands": [
-            {
-              "name": "request.resource.attr.team"
-            },
-            {
-              "value": "design"
-            }
-          ]
-        }
-
-      ]
-    },
-  };
+test("conditional - ne", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "sally", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "ne"
+  })
 
   const result = queryPlanToPrisma({
     queryPlan,
     fieldNameMapper: {
-      "request.resource.attr.department": "department",
-      "request.resource.attr.team": "team",
+      "request.resource.attr.aString": "aString",
+    },
+  });
+
+  expect(result).toStrictEqual({ aString: {not: "string" }});
+  const query = await prisma.resource.findMany({ where: { ...result } })
+  expect(query).toEqual(fixtureResources.filter(a => a.aString!="string").map(f => ({ ...f, owners: undefined })))
+});
+
+
+test("conditional - and", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "sally", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "and"
+  })
+
+  const result = queryPlanToPrisma({
+    queryPlan,
+    fieldNameMapper: {
+      "request.resource.attr.aBool": "aBool",
+      "request.resource.attr.aString": "aString",
     },
   });
 
   expect(result).toStrictEqual({
     AND: [
       {
-        department: { equals: "marketing" }
+        aBool: { equals: true }
       },
       {
-        team: { not: "design" }
+        aString: { not: "string" }
       }
     ]
   });
+
+  const query = await prisma.resource.findMany({ where: { ...result } })
+  expect(query).toEqual(fixtureResources.filter(r => {
+    return r.aBool && r.aString != "string"
+  }).map(f => ({ ...f, owners: undefined })))
 });
 
 
-test("conditional - or", () => {
-  const queryPlan: PlanResourcesResponse = {
-    requestId: "",
-    metadata: undefined,
-    kind: PlanKind.CONDITIONAL,
-    condition: {
-      "operator": "or",
-      "operands": [
-        {
-          "operator": "eq",
-          "operands": [
-            {
-              "name": "request.resource.attr.department"
-            },
-            {
-              "value": "marketing"
-            }
-          ]
 
-        },
-        {
-          "operator": "ne",
-          "operands": [
-            {
-              "name": "request.resource.attr.team"
-            },
-            {
-              "value": "design"
-            }
-          ]
-        }
-
-      ]
-    },
-  };
+test("conditional - or", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "sally", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "or"
+  })
 
   const result = queryPlanToPrisma({
     queryPlan,
     fieldNameMapper: {
-      "request.resource.attr.department": "department",
-      "request.resource.attr.team": "team",
+      "request.resource.attr.aBool": "aBool",
+      "request.resource.attr.aString": "aString",
     },
   });
 
   expect(result).toStrictEqual({
     OR: [
       {
-        department: { equals: "marketing" }
+        aBool: { equals: true }
       },
       {
-        team: { not: "design" }
+        aString: { not: "string" }
       }
     ]
   });
+
+  const query = await prisma.resource.findMany({ where: { ...result } })
+  expect(query).toEqual(fixtureResources.filter(r => {
+    return r.aBool || r.aString != "string"
+  }).map(f => ({ ...f, owners: undefined })))
 });
 
-test("conditional - in", () => {
-  const queryPlan: PlanResourcesResponse = {
-    requestId: "",
-    metadata: undefined,
-    kind: PlanKind.CONDITIONAL,
-    condition: {
-
-      "operator": "in",
-      "operands": [
-        {
-          "name": "request.resource.attr.department"
-        },
-        {
-          "value": ["marketing", "design"]
-        }
-      ]
-    },
-  };
+test("conditional - in", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "sally", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "in"
+  })
 
   const result = queryPlanToPrisma({
     queryPlan,
     fieldNameMapper: {
-      "request.resource.attr.department": "department",
+      "request.resource.attr.aString": "aString",
     },
   });
 
   expect(result).toStrictEqual({
-    department: { in: ["marketing", "design"] }
+    aString: { in: ["string", "anotherString"] }
   });
+
+  const query = await prisma.resource.findMany({ where: { ...result } })
+  expect(query).toEqual(fixtureResources.filter(r => {
+    return ["string", "anotherString"].includes(r.aString)
+  }).map(f => ({ ...f, owners: undefined })))
 });
 
 
-test("conditional - gt", () => {
-  const queryPlan: PlanResourcesResponse = {
-    requestId: "",
-    metadata: undefined,
-    kind: PlanKind.CONDITIONAL,
-    condition: {
-
-      "operator": "gt",
-      "operands": [
-        {
-          "name": "request.resource.attr.amount"
-        },
-        {
-          "value": 1000
-        }
-      ]
-    },
-  };
+test("conditional - gt", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "sally", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "gt"
+  })
 
   const result = queryPlanToPrisma({
     queryPlan,
     fieldNameMapper: {
-      "request.resource.attr.amount": "amount",
+      "request.resource.attr.aNumber": "aNumber",
     },
   });
 
   expect(result).toStrictEqual({
-    amount: { gt: 1000 }
+    aNumber: { gt: 1 }
   });
+
+  const query = await prisma.resource.findMany({ where: { ...result } })
+  expect(query).toEqual(fixtureResources.filter(r => {
+    return r.aNumber > 1
+  }).map(f => ({ ...f, owners: undefined })))
 });
 
-test("conditional - lt", () => {
-  const queryPlan: PlanResourcesResponse = {
-    requestId: "",
-    metadata: undefined,
-    kind: PlanKind.CONDITIONAL,
-    condition: {
-
-      "operator": "lt",
-      "operands": [
-        {
-          "name": "request.resource.attr.amount"
-        },
-        {
-          "value": 1000
-        }
-      ]
-    },
-  };
+test("conditional - lt", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "sally", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "lt"
+  })
 
   const result = queryPlanToPrisma({
     queryPlan,
     fieldNameMapper: {
-      "request.resource.attr.amount": "amount",
+      "request.resource.attr.aNumber": "aNumber",
     },
   });
 
   expect(result).toStrictEqual({
-    amount: { lt: 1000 }
+    aNumber: { lt: 2 }
   });
+
+  const query = await prisma.resource.findMany({ where: { ...result } })
+  expect(query).toEqual(fixtureResources.filter(r => {
+    return r.aNumber < 2
+  }).map(f => ({ ...f, owners: undefined })))
 });
 
 
-test("conditional - gte", () => {
-  const queryPlan: PlanResourcesResponse = {
-    requestId: "",
-    metadata: undefined,
-    kind: PlanKind.CONDITIONAL,
-    condition: {
+test("conditional - gte", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "sally", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "gte"
+  })
 
-      "operator": "gte",
-      "operands": [
-        {
-          "name": "request.resource.attr.amount"
-        },
-        {
-          "value": 1000
-        }
-      ]
-    },
-  };
 
   const result = queryPlanToPrisma({
     queryPlan,
     fieldNameMapper: {
-      "request.resource.attr.amount": "amount",
+      "request.resource.attr.aNumber": "aNumber",
     },
   });
+
 
   expect(result).toStrictEqual({
-    amount: { gte: 1000 }
+    aNumber: { gte: 1 }
   });
+
+  const query = await prisma.resource.findMany({ where: { ...result } })
+  expect(query).toEqual(fixtureResources.filter(r => {
+    return r.aNumber >= 1
+  }).map(f => ({ ...f, owners: undefined })))
 });
 
-test("conditional - lte", () => {
-  const queryPlan: PlanResourcesResponse = {
-    requestId: "",
-    metadata: undefined,
-    kind: PlanKind.CONDITIONAL,
-    condition: {
+test("conditional - lte", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "sally", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "lte"
+  })
 
-      "operator": "lte",
-      "operands": [
-        {
-          "name": "request.resource.attr.amount"
-        },
-        {
-          "value": 1000
-        }
-      ]
-    },
-  };
 
   const result = queryPlanToPrisma({
     queryPlan,
     fieldNameMapper: {
-      "request.resource.attr.amount": "amount",
+      "request.resource.attr.aNumber": "aNumber",
     },
   });
 
+
   expect(result).toStrictEqual({
-    amount: { lte: 1000 }
+    aNumber: { lte: 2 }
   });
+
+  const query = await prisma.resource.findMany({ where: { ...result } })
+  expect(query).toEqual(fixtureResources.filter(r => {
+    return r.aNumber <= 2
+  }).map(f => ({ ...f, owners: undefined })))
 });
 
 
