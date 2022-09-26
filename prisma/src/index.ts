@@ -8,32 +8,48 @@ import {
   PlanKind
 } from "@cerbos/core";
 
+type Mapper = {
+  [key: string]: string;
+}
+  | ((key: string) => string)
+
 interface QueryPlanToPrismaArgs {
   queryPlan: PlanResourcesResponse;
-  fieldNameMapper:
-  | {
-    [key: string]: string;
-  }
-  | ((key: string) => string);
+  fieldNameMapper: Mapper,
+  relationMapper?: Mapper
+}
+
+interface QueryPlanToPrismaResult {
+  kind: PlanKind,
+  filters?: any
 }
 
 export default function queryPlanToPrisma({
   queryPlan,
   fieldNameMapper,
-}: QueryPlanToPrismaArgs): any {
-  if (queryPlan.kind === PlanKind.ALWAYS_ALLOWED) return {};
-  if (queryPlan.kind === PlanKind.ALWAYS_DENIED) return { "1": { "equals": 0 } };
-  return mapOperand(
-    (queryPlan as PlanResourcesConditionalResponse).condition,
-    (key: string) => {
-      if (typeof fieldNameMapper === "function") {
-        return fieldNameMapper(key);
-      } else {
-        return (fieldNameMapper[key] = fieldNameMapper[key] || key);
-      }
-    },
-    {}
-  );
+  relationMapper = {}
+}: QueryPlanToPrismaArgs): QueryPlanToPrismaResult {
+  if (queryPlan.kind === PlanKind.ALWAYS_ALLOWED) return {
+    kind: PlanKind.ALWAYS_ALLOWED,
+    filters: {}
+  };
+  if (queryPlan.kind === PlanKind.ALWAYS_DENIED) return {
+    kind: PlanKind.ALWAYS_DENIED
+  };
+  return {
+    kind: PlanKind.CONDITIONAL,
+    filters: mapOperand(
+      (queryPlan as PlanResourcesConditionalResponse).condition,
+      (key: string) => {
+        if (typeof fieldNameMapper === "function") {
+          return fieldNameMapper(key);
+        } else {
+          return (fieldNameMapper[key] = fieldNameMapper[key] || key);
+        }
+      },
+      {}
+    )
+  };
 }
 
 function isExpression(e: PlanExpressionOperand): e is PlanExpression {

@@ -16,8 +16,11 @@ npm install @cerbos/orm-prisma
 
 This package exports a single function:
 
-```js
-queryPlanToPrisma({ queryPlan, fieldNameMapper }): PrismaCondition
+```ts
+queryPlanToPrisma({ queryPlan, fieldNameMapper, relationMapper }): {
+  kind: PlanKind,
+  filters?: any // a filter to pass to the findMany() function of Prisma
+}
 ```
 
 The function reqiures the full query plan from Cerbos to be passed in an object along with a `fieldNameMapper`.
@@ -40,18 +43,24 @@ const queryPlan = await cerbos.planResources({
 })
 
 // Generate the prisma filter from the query plan
-const filters = queryPlanToPrisma({
+const result = queryPlanToPrisma({
   queryPlan,
   fieldNameMapper: {
     "request.resource.attr.aFieldName": "prismaModelFieldName"
   }
 });
 
+// The query plan says the user would always be denied
+// return empty or throw an error depending on your app.
+if(result.kind == PlanKind.ALWAYS_DENIED) {
+  return console.log([]);
+}
+
 // Pass the filters in as where conditions
 // If you have prexisting where conditions, you can pass them in an AND clause
 const result = await prisma.myModel.findMany({
   where: {
-    AND: filters
+    AND: result.filters
   },
 });
 

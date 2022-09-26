@@ -35,7 +35,6 @@ resourcePolicy:
         match:
           expr: request.resource.attr.aString != "string"
 
-
     - actions:
         - "and"
       effect: EFFECT_ALLOW
@@ -104,3 +103,12 @@ resourcePolicy:
       condition:
         match:
           expr: request.resource.attr.aNumber <= 2
+
+    - actions:
+        - "relation-some"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: P.id in request.resource.attr.owners
