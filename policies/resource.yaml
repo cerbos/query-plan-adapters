@@ -27,6 +27,15 @@ resourcePolicy:
           expr: request.resource.attr.aBool == true
 
     - actions:
+        - "explicit-deny"
+      effect: EFFECT_DENY
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.aBool == true
+
+    - actions:
         - "ne"
       effect: EFFECT_ALLOW
       roles:

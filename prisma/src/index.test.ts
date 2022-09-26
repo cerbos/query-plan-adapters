@@ -198,6 +198,28 @@ test("conditional - ne", async () => {
 });
 
 
+test("conditional - explicit-deny", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "explicit-deny"
+  })
+
+  const result = queryPlanToPrisma({
+    queryPlan,
+    fieldNameMapper: {
+      "request.resource.attr.aBool": "aBool",
+    },
+  });
+
+  expect(result).toStrictEqual({
+    kind: PlanKind.CONDITIONAL,
+    filters: { NOT: { aBool: { equals: true } } }
+  });
+  const query = await prisma.resource.findMany({ where: { ...result.filters } })
+  expect(query).toEqual(fixtureResources.filter(a => !a.aBool).map(f => ({ ...f, owners: undefined })))
+});
+
 test("conditional - and", async () => {
   const queryPlan = await cerbos.planResources({
     principal: { id: "user1", roles: ["USER"] },
@@ -415,36 +437,36 @@ test("conditional - lte", async () => {
 
 
 
-test("conditional - relation some", async () => {
-  const queryPlan = await cerbos.planResources({
-    principal: { id: "user1", roles: ["USER"] },
-    resource: { kind: "resource" },
-    action: "relation-some"
-  })
+// test("conditional - relation some", async () => {
+//   const queryPlan = await cerbos.planResources({
+//     principal: { id: "user1", roles: ["USER"] },
+//     resource: { kind: "resource" },
+//     action: "relation-some"
+//   })
 
-  const result = queryPlanToPrisma({
-    queryPlan,
-    fieldNameMapper: {},
-    relationMapper: {
-      "request.resource.attr.owners": "owners",
-    }
-  });
+//   const result = queryPlanToPrisma({
+//     queryPlan,
+//     fieldNameMapper: {},
+//     relationMapper: {
+//       "request.resource.attr.owners": "owners",
+//     }
+//   });
 
-  expect(result).toStrictEqual({
-    kind: PlanKind.CONDITIONAL,
-    filters: {
-      some: {
-        users: {
-          id: "user1"
-        }
-      }
-    }
-  });
+//   expect(result).toStrictEqual({
+//     kind: PlanKind.CONDITIONAL,
+//     filters: {
+//       some: {
+//         users: {
+//           id: "user1"
+//         }
+//       }
+//     }
+//   });
 
-  const query = await prisma.resource.findMany({ where: { ...result.filters } })
+//   const query = await prisma.resource.findMany({ where: { ...result.filters } })
 
-  // expect(query).toEqual(fixtureResources.filter(r => {
-  //   return r.owners?.connect.filter(c=>c.)
-  // }).map(f => ({ ...f, owners: undefined })))
-});
+//   // expect(query).toEqual(fixtureResources.filter(r => {
+//   //   return r.owners?.connect.filter(c=>c.)
+//   // }).map(f => ({ ...f, owners: undefined })))
+// });
 

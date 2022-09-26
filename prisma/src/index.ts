@@ -91,6 +91,11 @@ function mapOperand(
           mapOperand(o, getFieldName, {})
         );
         break;
+      case "not":
+        output.NOT = operands.map((o) =>
+          mapOperand(o, getFieldName, {})
+        )[0];
+        break;
       case "eq":
         output[
           getFieldName(getOperandName(operands))
