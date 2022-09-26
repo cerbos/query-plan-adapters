@@ -27,6 +27,16 @@ resourcePolicy:
           expr: request.resource.attr.aBool == true
 
     - actions:
+        - "ne"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.aString != "string"
+
+
+    - actions:
         - "and"
       effect: EFFECT_ALLOW
       roles:

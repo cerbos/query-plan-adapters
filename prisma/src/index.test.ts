@@ -149,6 +149,26 @@ test("conditional - eq - inverted order", async () => {
 });
 
 
+test("conditional - ne", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "sally", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "ne"
+  })
+
+  const result = queryPlanToPrisma({
+    queryPlan,
+    fieldNameMapper: {
+      "request.resource.attr.aString": "aString",
+    },
+  });
+
+  expect(result).toStrictEqual({ aString: {not: "string" }});
+  const query = await prisma.resource.findMany({ where: { ...result } })
+  expect(query).toEqual(fixtureResources.filter(a => a.aString!="string").map(f => ({ ...f, owners: undefined })))
+});
+
+
 test("conditional - and", async () => {
   const queryPlan = await cerbos.planResources({
     principal: { id: "sally", roles: ["USER"] },
