@@ -121,3 +121,13 @@ resourcePolicy:
       condition:
         match:
           expr: P.id in request.resource.attr.owners
+
+    - actions:
+        - "relation-none"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: >
+            !(P.id in request.resource.attr.owners)

@@ -14,7 +14,7 @@ The following conditions are supported: `and`, `or`, `eq`, `ne`, `lt`, `gt`, `lt
 npm install @cerbos/orm-prisma
 ```
 
-This package exports a single function:
+This package exports a function:
 
 ```ts
 queryPlanToPrisma({ queryPlan, fieldNameMapper, relationMapper }): {
@@ -30,6 +30,8 @@ A basic implementation can be as simple as:
 ```js
 import { GRPC as Cerbos } from "@cerbos/grpc";
 import { PrismaClient } from "@prisma/client";
+
+import { queryPlanToPrisma, PlanKind } from "@cerbos/orm-prisma";
 
 const prisma = new PrismaClient();
 const cerbos = new Cerbos("localhost:3592", { tls: false });

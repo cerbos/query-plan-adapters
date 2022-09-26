@@ -1,5 +1,5 @@
-import queryPlanToPrisma from ".";
-import { PlanExpression, PlanKind, PlanResourcesConditionalResponse } from "@cerbos/core";
+import { queryPlanToPrisma, PlanKind } from ".";
+import { PlanExpression, PlanResourcesConditionalResponse } from "@cerbos/core";
 import { Prisma, PrismaClient } from '@prisma/client'
 import { GRPC as Cerbos } from "@cerbos/grpc";
 
@@ -437,36 +437,85 @@ test("conditional - lte", async () => {
 
 
 
-// test("conditional - relation some", async () => {
-//   const queryPlan = await cerbos.planResources({
-//     principal: { id: "user1", roles: ["USER"] },
-//     resource: { kind: "resource" },
-//     action: "relation-some"
-//   })
+test("conditional - relation some", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "relation-some"
+  })
 
-//   const result = queryPlanToPrisma({
-//     queryPlan,
-//     fieldNameMapper: {},
-//     relationMapper: {
-//       "request.resource.attr.owners": "owners",
-//     }
-//   });
+  const result = queryPlanToPrisma({
+    queryPlan,
+    fieldNameMapper: {},
+    relationMapper: {
+      "request.resource.attr.owners": {
+        "relation": "owners",
+        "field": "id"
+      }
+    }
+  });
 
-//   expect(result).toStrictEqual({
-//     kind: PlanKind.CONDITIONAL,
-//     filters: {
-//       some: {
-//         users: {
-//           id: "user1"
-//         }
-//       }
-//     }
-//   });
+  expect(result).toStrictEqual({
+    kind: PlanKind.CONDITIONAL,
+    filters: {
+      owners: {
+        some: {
+          id: "user1"
+        }
+      }
+    }
+  });
 
-//   const query = await prisma.resource.findMany({ where: { ...result.filters } })
 
-//   // expect(query).toEqual(fixtureResources.filter(r => {
-//   //   return r.owners?.connect.filter(c=>c.)
-//   // }).map(f => ({ ...f, owners: undefined })))
-// });
+
+  const query = await prisma.resource.findMany({ where: { ...result.filters } })
+
+  console.log(query)
+
+  expect(query).toEqual(fixtureResources.filter(r => {
+    if (!r.owners?.connect) return false;
+    return (r.owners.connect as { id: string }[]).filter(o => o.id == "user1").length > 0
+  }).map(f => ({ ...f, owners: undefined })))
+});
+
+
+
+test("conditional - relation none", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "relation-none"
+  })
+
+  const result = queryPlanToPrisma({
+    queryPlan,
+    fieldNameMapper: {},
+    relationMapper: {
+      "request.resource.attr.owners": {
+        "relation": "owners",
+        "field": "id"
+      }
+    }
+  });
+
+  expect(result).toStrictEqual({
+    kind: PlanKind.CONDITIONAL,
+    filters: {
+      NOT: {
+        owners: {
+          some: {
+            id: "user1"
+          }
+        }
+      }
+    }
+  });
+
+  const query = await prisma.resource.findMany({ where: { ...result.filters } })
+
+  expect(query).toEqual(fixtureResources.filter(r => {
+    if (!r.owners?.connect) return false;
+    return (r.owners.connect as { id: string }[]).filter(o => o.id == "user1").length == 0
+  }).map(f => ({ ...f, owners: undefined })))
+});
 

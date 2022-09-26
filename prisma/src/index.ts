@@ -5,18 +5,29 @@ import {
   PlanExpressionValue,
   PlanExpressionVariable,
   PlanResourcesConditionalResponse,
-  PlanKind
+  PlanKind as PK
 } from "@cerbos/core";
 
-type Mapper = {
+export type PlanKind = PK;
+export const PlanKind = PK;
+
+type FieldMapper = {
   [key: string]: string;
+} | ((key: string) => string)
+
+type Relation = {
+  relation: string,
+  field: string
 }
-  | ((key: string) => string)
+
+type RelationMapper = {
+  [key: string]: Relation;
+} | ((key: string) => Relation)
 
 interface QueryPlanToPrismaArgs {
   queryPlan: PlanResourcesResponse;
-  fieldNameMapper: Mapper,
-  relationMapper?: Mapper
+  fieldNameMapper: FieldMapper,
+  relationMapper?: RelationMapper
 }
 
 interface QueryPlanToPrismaResult {
@@ -24,7 +35,7 @@ interface QueryPlanToPrismaResult {
   filters?: any
 }
 
-export default function queryPlanToPrisma({
+export function queryPlanToPrisma({
   queryPlan,
   fieldNameMapper,
   relationMapper = {}
@@ -46,6 +57,14 @@ export default function queryPlanToPrisma({
         } else {
           return (fieldNameMapper[key] = fieldNameMapper[key] || key);
         }
+      },
+      (key: string) => {
+        if (typeof relationMapper === "function") {
+          return relationMapper(key);
+        } else if (relationMapper[key]) {
+          return relationMapper[key];
+        }
+        return null;
       },
       {}
     )
@@ -76,6 +95,7 @@ function getOperandValue(operands: PlanExpressionOperand[]) {
 function mapOperand(
   operand: PlanExpressionOperand,
   getFieldName: (key: string) => string,
+  getRelationName: (key: string) => Relation | null,
   output: any = {}
 ): any {
   if (isExpression(operand)) {
@@ -83,17 +103,17 @@ function mapOperand(
     switch (operator) {
       case "and":
         output.AND = operands.map((o) =>
-          mapOperand(o, getFieldName, {})
+          mapOperand(o, getFieldName, getRelationName, {})
         );
         break;
       case "or":
         output.OR = operands.map((o) =>
-          mapOperand(o, getFieldName, {})
+          mapOperand(o, getFieldName, getRelationName, {})
         );
         break;
       case "not":
         output.NOT = operands.map((o) =>
-          mapOperand(o, getFieldName, {})
+          mapOperand(o, getFieldName, getRelationName, {})
         )[0];
         break;
       case "eq":
@@ -139,11 +159,20 @@ function mapOperand(
         };
         break;
       case "in":
-        output[
-          getFieldName(getOperandName(operands))
-        ] = {
-          in: getOperandValue(operands),
-        };
+        const relation = getRelationName(getOperandName(operands));
+        if (relation) {
+          output[relation.relation] = {
+            some: {
+              [relation.field]: getOperandValue(operands)
+            }
+          }
+        } else {
+          output[
+            getFieldName(getOperandName(operands))
+          ] = {
+            in: getOperandValue(operands),
+          };
+        }
         break;
     }
   }
