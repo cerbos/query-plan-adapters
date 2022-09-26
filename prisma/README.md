@@ -156,7 +156,8 @@ const filters = queryPlanToPrisma({
 
 const filters = queryPlanToPrisma({
   queryPlan,
-  fieldNameMapper: (fieldName: string): string => {
+  fieldNameMapper: {},
+  relationMapper: (fieldName: string): string => {
     if(fieldName.indexOf("request.resource.") > 0) {
       return {
         "relation": fieldName.replace("request.resource.attr.", ""),
