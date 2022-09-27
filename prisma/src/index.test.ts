@@ -25,12 +25,12 @@ const fixtureResources: Prisma.ResourceCreateInput[] = [
     aBool: true,
     aNumber: 1,
     aString: "string",
-    creator: {
+    createdBy: {
       connect: {
         id: "user1"
       }
     },
-    owners: {
+    ownedBy: {
       connect: [{
         id: "user1"
       }]
@@ -41,12 +41,12 @@ const fixtureResources: Prisma.ResourceCreateInput[] = [
     aBool: false,
     aNumber: 2,
     aString: "string2",
-    creator: {
+    createdBy: {
       connect: {
         id: "user2"
       }
     },
-    owners: {
+    ownedBy: {
       connect: [{
         id: "user2"
       }]
@@ -57,12 +57,12 @@ const fixtureResources: Prisma.ResourceCreateInput[] = [
     aBool: false,
     aNumber: 3,
     aString: "string3",
-    creator: {
+    createdBy: {
       connect: {
         id: "user1"
       }
     },
-    owners: {
+    ownedBy: {
       connect: [{
         id: "user1"
       }, {
@@ -463,8 +463,8 @@ test("conditional - relation some", async () => {
     queryPlan,
     fieldNameMapper: {},
     relationMapper: {
-      "request.resource.attr.owners": {
-        "relation": "owners",
+      "request.resource.attr.ownedBy": {
+        "relation": "ownedBy",
         "field": "id"
       }
     }
@@ -473,7 +473,7 @@ test("conditional - relation some", async () => {
   expect(result).toStrictEqual({
     kind: PlanKind.CONDITIONAL,
     filters: {
-      owners: {
+      ownedBy: {
         some: {
           id: "user1"
         }
@@ -484,8 +484,8 @@ test("conditional - relation some", async () => {
   const query = await prisma.resource.findMany({ where: { ...result.filters } })
 
   expect(query.map(r => r.id)).toEqual(fixtureResources.filter(r => {
-    if (!r.owners?.connect) return false;
-    return (r.owners.connect as { id: string }[]).filter(o => o.id == "user1").length > 0
+    if (!r.ownedBy?.connect) return false;
+    return (r.ownedBy.connect as { id: string }[]).filter(o => o.id == "user1").length > 0
   }).map(r => r.id))
 });
 
@@ -502,8 +502,8 @@ test("conditional - relation none", async () => {
     queryPlan,
     fieldNameMapper: {},
     relationMapper: {
-      "request.resource.attr.owners": {
-        "relation": "owners",
+      "request.resource.attr.ownedBy": {
+        "relation": "ownedBy",
         "field": "id"
       }
     }
@@ -513,7 +513,7 @@ test("conditional - relation none", async () => {
     kind: PlanKind.CONDITIONAL,
     filters: {
       NOT: {
-        owners: {
+        ownedBy: {
           some: {
             id: "user1"
           }
@@ -526,8 +526,8 @@ test("conditional - relation none", async () => {
   const query = await prisma.resource.findMany({ where: { ...result.filters } })
 
   expect(query.map(r => r.id)).toEqual(fixtureResources.filter(r => {
-    if (!r.owners?.connect) return false;
-    return (r.owners.connect as { id: string }[]).filter(o => o.id == "user1").length == 0
+    if (!r.ownedBy?.connect) return false;
+    return (r.ownedBy.connect as { id: string }[]).filter(o => o.id == "user1").length == 0
   }).map(r => r.id))
 });
 
@@ -545,8 +545,8 @@ test("conditional - relation is", async () => {
     queryPlan,
     fieldNameMapper: {},
     relationMapper: {
-      "request.resource.attr.creator": {
-        "relation": "creator",
+      "request.resource.attr.createdBy": {
+        "relation": "createdBy",
         "field": "id"
       }
     }
@@ -555,7 +555,7 @@ test("conditional - relation is", async () => {
   expect(result).toStrictEqual({
     kind: PlanKind.CONDITIONAL,
     filters: {
-      creator: {
+      createdBy: {
         is: {
           id: "user1"
         }
@@ -567,8 +567,8 @@ test("conditional - relation is", async () => {
   const query = await prisma.resource.findMany({ where: { ...result.filters } })
 
   expect(query.map(r => r.id)).toEqual(fixtureResources.filter(r => {
-    if (!r.creator?.connect) return false;
-    return (r.creator.connect as { id: string }).id == "user1"
+    if (!r.createdBy?.connect) return false;
+    return (r.createdBy.connect as { id: string }).id == "user1"
   }).map(r => r.id))
 });
 
@@ -583,8 +583,8 @@ test("conditional - relation is not", async () => {
     queryPlan,
     fieldNameMapper: {},
     relationMapper: {
-      "request.resource.attr.creator": {
-        "relation": "creator",
+      "request.resource.attr.createdBy": {
+        "relation": "createdBy",
         "field": "id"
       }
     }
@@ -594,7 +594,7 @@ test("conditional - relation is not", async () => {
     kind: PlanKind.CONDITIONAL,
     filters: {
       NOT: {
-        creator: {
+        createdBy: {
           is: {
             id: "user1"
           }
@@ -607,8 +607,8 @@ test("conditional - relation is not", async () => {
   const query = await prisma.resource.findMany({ where: { ...result.filters } })
 
   expect(query.map(r => r.id)).toEqual(fixtureResources.filter(r => {
-    if (!r.creator?.connect) return false;
-    return (r.creator.connect as { id: string }).id != "user1"
+    if (!r.createdBy?.connect) return false;
+    return (r.createdBy.connect as { id: string }).id != "user1"
   }).map(r => r.id))
 });
 

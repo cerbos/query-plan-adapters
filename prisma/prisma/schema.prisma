@@ -15,16 +15,16 @@ model Resource {
   aString   String
   aNumber   Int
   aBool     Boolean
-  creator   User    @relation(fields: [creatorId], references: [id], name: "creator")
-  owners    User[]
+  ownedBy   User[]
+  createdBy User    @relation(fields: [creatorId], references: [id], name: "creator")
   creatorId String
 }
 
 model User {
-  id      String     @id @default(cuid())
-  aString String
-  aNumber Int
-  aBool   Boolean
-  creator Resource[] @relation(name: "creator")
-  owners  Resource[]
+  id               String     @id @default(cuid())
+  aString          String
+  aNumber          Int
+  aBool            Boolean
+  resources        Resource[]
+  createdResources Resource[] @relation(name: "creator")
 }

@@ -12,8 +12,8 @@ Not Supported:
 - `mode`
 - `startsWith`
 - `endsWith`
+- `isSet`
 - Scalar filters
-- Composite type filters
 - Atomic number operations
 - Composite keys
 

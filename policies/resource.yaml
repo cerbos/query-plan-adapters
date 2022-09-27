@@ -120,7 +120,7 @@ resourcePolicy:
         - USER
       condition:
         match:
-          expr: P.id in request.resource.attr.owners
+          expr: P.id in request.resource.attr.ownedBy
 
     - actions:
         - "relation-none"
@@ -130,7 +130,7 @@ resourcePolicy:
       condition:
         match:
           expr: >
-            !(P.id in request.resource.attr.owners)
+            !(P.id in request.resource.attr.ownedBy)
 
     - actions:
         - "relation-is"
@@ -139,7 +139,7 @@ resourcePolicy:
         - USER
       condition:
         match:
-          expr: request.resource.attr.creator == P.id
+          expr: request.resource.attr.createdBy == P.id
 
     - actions:
         - "relation-is-not"
@@ -149,4 +149,4 @@ resourcePolicy:
       condition:
         match:
           expr: >
-            !(request.resource.attr.creator == P.id)
+            !(request.resource.attr.createdBy == P.id)
