@@ -45,7 +45,6 @@ export function queryPlanToPrisma({
     } else if (fieldNameMapper[key]) {
       return fieldNameMapper[key];
     } else {
-      // throw Error(`Failed to map unknown field ${key}`)
       return key;
     }
   }
