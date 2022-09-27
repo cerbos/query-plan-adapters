@@ -11,17 +11,20 @@ datasource db {
 }
 
 model Resource {
-  id      String  @id @default(cuid())
-  aString String
-  aNumber Int
-  aBool   Boolean
-  owners  User[]
-}
-
-model User {
-  id        String     @id @default(cuid())
+  id        String  @id @default(cuid())
   aString   String
   aNumber   Int
   aBool     Boolean
-  resources Resource[]
+  ownedBy   User[]
+  createdBy User    @relation(fields: [creatorId], references: [id], name: "creator")
+  creatorId String
+}
+
+model User {
+  id               String     @id @default(cuid())
+  aString          String
+  aNumber          Int
+  aBool            Boolean
+  resources        Resource[]
+  createdResources Resource[] @relation(name: "creator")
 }

@@ -27,6 +27,15 @@ resourcePolicy:
           expr: request.resource.attr.aBool == true
 
     - actions:
+        - "explicit-deny"
+      effect: EFFECT_DENY
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.aBool == true
+
+    - actions:
         - "ne"
       effect: EFFECT_ALLOW
       roles:
@@ -34,7 +43,6 @@ resourcePolicy:
       condition:
         match:
           expr: request.resource.attr.aString != "string"
-
 
     - actions:
         - "and"
@@ -104,3 +112,41 @@ resourcePolicy:
       condition:
         match:
           expr: request.resource.attr.aNumber <= 2
+
+    - actions:
+        - "relation-some"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: P.id in request.resource.attr.ownedBy
+
+    - actions:
+        - "relation-none"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: >
+            !(P.id in request.resource.attr.ownedBy)
+
+    - actions:
+        - "relation-is"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.createdBy == P.id
+
+    - actions:
+        - "relation-is-not"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: >
+            !(request.resource.attr.createdBy == P.id)
