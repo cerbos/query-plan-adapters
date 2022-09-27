@@ -6,6 +6,7 @@ The following conditions are supported: `and`, `or`, `not`, `eq`, `ne`, `lt`, `g
 
 ## Requirements
 - Cerbos > v0.16
+- SQLAlchemy >= 1.4 / 2.0
 
 ## Usage
 
