@@ -96,7 +96,7 @@ def get_query(
         if operator == "gte":
             return column >= value
         if operator == "in":
-            # handle both single instance, as well as lists
+            # handle both single instances as well as lists
             if not isinstance(value, list):
                 value = [value]
             return column.in_(value)
