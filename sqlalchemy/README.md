@@ -92,4 +92,7 @@ query = query.with_only_columns(
     LeaveRequest.department,
     LeaveRequest.geography,
 )
+
+# Print the compiled query (for debug purposes)
+print(query.compile(compile_kwargs={"literal_binds": True}))
 ```
