@@ -1,6 +1,6 @@
 # Cerbos + SQLAlchemy Adapter
 
-An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanResources API](https://docs.cerbos.dev/cerbos/latest/api/index.html#resources-query-plan)) response and converts it into a [SQLAlchemy](https://docs.sqlalchemy.org/en/14/) Query object. This is designed to work alongside a project using the [Cerbos Python SDK](https://github.com/cerbos/cerbos-sdk-python).
+An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanResources API](https://docs.cerbos.dev/cerbos/latest/api/index.html#resources-query-plan)) response and converts it into a [SQLAlchemy](https://docs.sqlalchemy.org/en/14/) Select instance. This is designed to work alongside a project using the [Cerbos Python SDK](https://github.com/cerbos/cerbos-sdk-python).
 
 The following conditions are supported: `and`, `or`, `not`, `eq`, `ne`, `lt`, `gt`, `lte`, `gte` and `in`. Other operators (eg math operators) can be implemented programatically, and attached to the query object via the `query.where(...)` API.
 
@@ -20,7 +20,8 @@ from cerbos.sdk.model import Principal, ResourceDesc
 
 from cerbos_sqlalchemy import get_query
 from sqlalchemy import Column, Integer, String
-from sqlalchemy.orm import declarative_base, Query
+from sqlalchemy.orm import declarative_base
+from sqlalchemy.sql import Select
 
 Base = declarative_base()
 
@@ -59,16 +60,16 @@ attr_map = {
 
 # `get_query` supports both `Table` instances and ORM entities:
 # ORM entity - honouring object level relationships via the sqlalchemy ORM
-query: Query = get_query(plan, LeaveRequest, attr_map)
+query: Select = get_query(plan, LeaveRequest, attr_map)
 # Alternatively it can generate legacy queries by passing the Table instance
-query: Query = get_query(plan, LeaveRequest.__table__, attr_map)
+query: Select = get_query(plan, LeaveRequest.__table__, attr_map)
 
 
 # NOTE: if columns defined within the attr_map originate from more than one table, we need to define a mapping as the optional 4th positional arg to `get_query`.
 # The argument is in the form:
 #   `list[tuple[Table | DeclarativeMeta, BinaryExpression | ColumnOperators]]`
 # e.g.:
-query: Query = get_query(
+query: Select = get_query(
     plan,
     Table1,
     {
