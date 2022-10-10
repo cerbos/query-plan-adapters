@@ -1,0 +1,55 @@
+name: SQLAlchemy Publish
+
+on:
+  push:
+    tags:
+      - sqla/v*
+
+defaults:
+  run:
+    working-directory: sqlalchemy
+
+jobs:
+  release-sqla:
+    name: Publish
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+
+    - uses: actions/cache@v3
+      with:
+        path: |
+          ./__pypackages__
+        key: ${{ runner.os }}-python-${{ hashFiles('**/pdm.lock') }}
+
+    - uses: pdm-project/setup-pdm@main
+      name: Setup PDM
+      with:
+        python-version: "3.10"  # Version range or exact version of a Python version to use, the same as actions/setup-python
+        prerelease: true     # Allow prerelease versions to be installed
+        enable-pep582: true  # Enable PEP 582 package loading globally
+
+    - run: pdm install
+
+    - run: pdm build
+
+    #- name: Publish to Test PyPI
+      #uses: pypa/gh-action-pypi-publish@release/v1
+      #with:
+        #user: __token__
+        #password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+        #repository_url: https://test.pypi.org/legacy/
+        #packages_dir: sqlalchemy/dist/
+
+    - name: Publish to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        user: __token__
+        password: ${{ secrets.PYPI_API_TOKEN }}
+        packages_dir: sqlalchemy/dist/
+
+    #- name: Create release
+      #run: |-
+        #gh release create "$GITHUB_REF_NAME" --generate-notes
+      #env:
+        #GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -14,7 +14,7 @@ from sqlalchemy import (
     create_engine,
     insert,
 )
-from sqlalchemy.orm import Session, declarative_base, relationship
+from sqlalchemy.orm import declarative_base, relationship
 
 USER_ROLE = "USER"
 
@@ -119,7 +119,7 @@ def resource_desc():
 
 
 @pytest.fixture(scope="module")
-def cerbos_container():
+def cerbos_container_host() -> str:
     policy_dir = os.path.realpath(
         os.path.join(os.path.dirname(__file__), "../..", "policies")
     )
@@ -131,13 +131,13 @@ def cerbos_container():
     container.start()
     container.wait_until_ready()
 
-    yield container
+    yield container.http_host()
 
     container.stop()
 
 
 @pytest.fixture(scope="function")
-def cerbos_client(cerbos_container):
-    client = CerbosClient(cerbos_container.http_host(), debug=True)
+def cerbos_client(cerbos_container_host):
+    client = CerbosClient(cerbos_container_host, debug=True, tls_verify=False)
     yield client
     client.close()
