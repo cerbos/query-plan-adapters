@@ -1,3 +1,6 @@
+from types import MappingProxyType
+from typing import Any, Callable
+
 from cerbos.sdk.model import PlanResourcesFilterKind, PlanResourcesResponse
 
 from sqlalchemy import Column, Table, and_, not_, or_, select
@@ -5,8 +8,29 @@ from sqlalchemy.orm import DeclarativeMeta, InstrumentedAttribute
 from sqlalchemy.sql import Select
 from sqlalchemy.sql.expression import BinaryExpression, ColumnOperators
 
+GenericTable = Table | DeclarativeMeta
+GenericColumn = Column | InstrumentedAttribute
+GenericExpression = BinaryExpression | ColumnOperators
+OperatorFnMap = dict[str, Callable[[GenericColumn, Any], GenericExpression]]
 
-def _get_table_name(t: DeclarativeMeta | Table) -> str:
+
+# We want to make the base dict "immutable", and enforce explicit (optional) overrides on
+# each call to `get_query` (rather than allowing keys in this dict to be overridden, which
+# could wreak havoc if different calls from the same memory space weren't aware of each other's
+# overrides)
+__operator_fns: OperatorFnMap = {
+    "eq": lambda c, v: c == v,  # c, v denotes column, value respectively
+    "ne": lambda c, v: c != v,
+    "lt": lambda c, v: c < v,
+    "gt": lambda c, v: c > v,
+    "lte": lambda c, v: c <= v,
+    "gte": lambda c, v: c >= v,
+    "in": lambda c, v: c.in_([v]) if not isinstance(v, list) else c.in_(v),
+}
+OPERATOR_FNS = MappingProxyType(__operator_fns)
+
+
+def _get_table_name(t: GenericTable) -> str:
     try:
         # `DeclarativeMeta` type
         return t.__table__.name
@@ -17,12 +41,11 @@ def _get_table_name(t: DeclarativeMeta | Table) -> str:
 
 def get_query(
     query_plan: PlanResourcesResponse,
-    table: Table | DeclarativeMeta,
-    attr_map: dict[str, Column | InstrumentedAttribute],
-    table_mapping: list[
-        tuple[Table | DeclarativeMeta, BinaryExpression | ColumnOperators]
-    ]
+    table: GenericTable,
+    attr_map: dict[str, GenericColumn],
+    table_mapping: list[tuple[GenericTable, BinaryExpression | ColumnOperators]]
     | None = None,
+    operator_override_fns: OperatorFnMap | None = None,
 ) -> Select:
     if (
         query_plan.filter is None
@@ -52,6 +75,20 @@ def get_query(
                     "', '".join(required_tables)
                 )
             )
+
+    def get_operator_fn(op: str, c: GenericColumn, v: Any) -> GenericExpression:
+        # Check to see if the client has overridden the function
+        if (
+            operator_override_fns
+            and (override_fn := operator_override_fns.get(op)) is not None
+        ):
+            return override_fn(c, v)
+
+        # Otherwise, fall back to default handlers
+        if (default_fn := OPERATOR_FNS.get(op)) is not None:
+            return default_fn(c, v)
+
+        raise ValueError(f"Unrecognised operator: {op}")
 
     def traverse_and_map_operands(operand: dict):
         if exp := operand.get("expression"):
@@ -83,25 +120,7 @@ def get_query(
             )
 
         # the operator handlers here are the leaf nodes of the recursion
-        if operator == "eq":
-            return column == value
-        if operator == "ne":
-            return column != value
-        if operator == "lt":
-            return column < value
-        if operator == "gt":
-            return column > value
-        if operator == "lte":
-            return column <= value
-        if operator == "gte":
-            return column >= value
-        if operator == "in":
-            # handle both single instances as well as lists
-            if not isinstance(value, list):
-                value = [value]
-            return column.in_(value)
-
-        raise ValueError(f"Unrecognised operator: {operator}")
+        return get_operator_fn(operator, column, value)
 
     q = select(table).where(
         traverse_and_map_operands(query_plan.filter.condition.to_dict())

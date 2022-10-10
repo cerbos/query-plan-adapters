@@ -429,7 +429,37 @@ class TestGetQuery:
             "request.resource.attr.name": contact_table.name,
         }
         query = get_query(plan_resource_resp, contact_table, attr)
-        print(query.compile(compile_kwargs={"literal_binds": True}))
         res = conn.execute(query).fetchall()
         assert len(res) == 2
         assert all(map(lambda x: x.name in {"contact2", "contact3"}, res))
+
+    def test_get_in_equals_override(self, contact_table, conn):
+        plan_resources_filter = PlanResourcesFilter.from_dict(
+            {
+                "kind": PlanResourcesFilterKind.CONDITIONAL,
+                "condition": {
+                    "expression": {
+                        "operator": "in",
+                        "operands": [
+                            {"variable": "request.resource.attr.name"},
+                            {"value": "contact1"},
+                        ],
+                    },
+                },
+            }
+        )
+        plan_resource_resp = PlanResourcesResponse(
+            filter=plan_resources_filter,
+            **_default_resp_params(),
+        )
+        attr = {
+            "request.resource.attr.name": contact_table.name,
+        }
+        operator_override_fns = {
+                "in": lambda c, v: c == v,
+        }
+        query = get_query(plan_resource_resp, contact_table, attr, operator_override_fns=operator_override_fns)
+        print(query.compile(compile_kwargs={"literal_binds": True}))
+        res = conn.execute(query).fetchall()
+        assert len(res) == 1
+        assert res[0].name == "contact1"
