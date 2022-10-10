@@ -459,7 +459,6 @@ class TestGetQuery:
                 "in": lambda c, v: c == v,
         }
         query = get_query(plan_resource_resp, contact_table, attr, operator_override_fns=operator_override_fns)
-        print(query.compile(compile_kwargs={"literal_binds": True}))
         res = conn.execute(query).fetchall()
         assert len(res) == 1
         assert res[0].name == "contact1"
