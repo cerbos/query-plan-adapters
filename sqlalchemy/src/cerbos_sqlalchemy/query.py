@@ -43,7 +43,7 @@ def get_query(
     query_plan: PlanResourcesResponse,
     table: GenericTable,
     attr_map: dict[str, GenericColumn],
-    table_mapping: list[tuple[GenericTable, BinaryExpression | ColumnOperators]]
+    table_mapping: list[tuple[GenericTable, GenericExpression]]
     | None = None,
     operator_override_fns: OperatorFnMap | None = None,
 ) -> Select:
