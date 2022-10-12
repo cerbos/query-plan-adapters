@@ -97,3 +97,36 @@ query = query.with_only_columns(
 # Print the compiled query (for debug purposes)
 print(query.compile(compile_kwargs={"literal_binds": True}))
 ```
+
+### Overriding default predicates
+
+By default, the library provides a base set of operators which are widely supported across a range of SQL dialects. However, in some cases, users may wish to override a particular operator for a more idiomatic/optimised alternative for a given database. An example of this could be postgres users preferring to use `= ANY` over `IN`:
+
+```python
+from sqlalchemy.sql.expression import any_
+
+query = get_query(
+    plan_resource_resp,
+    some_table,
+    attr_map={
+        "request.resource.attr.foo": Table1.foo,
+    },
+    # override handler functions in the map below
+    operator_override_fns={
+        "in": lambda c, v: c == any_(v),
+    },
+)
+```
+
+The types are as follows:
+
+```python
+from sqlalchemy import Column
+from sqlalchemy.orm import InstrumentedAttribute
+from sqlalchemy.sql.expression import BinaryExpression, ColumnOperators
+
+GenericColumn = Column | InstrumentedAttribute
+GenericExpression = BinaryExpression | ColumnOperators
+# and the actual map arg to `get_query` ⬇️
+OperatorFnMap = dict[str, Callable[[GenericColumn, Any], GenericExpression]]
+```
