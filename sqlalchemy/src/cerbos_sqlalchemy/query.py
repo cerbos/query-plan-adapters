@@ -23,8 +23,8 @@ __operator_fns: OperatorFnMap = {
     "ne": lambda c, v: c != v,
     "lt": lambda c, v: c < v,
     "gt": lambda c, v: c > v,
-    "lte": lambda c, v: c <= v,
-    "gte": lambda c, v: c >= v,
+    "le": lambda c, v: c <= v,
+    "ge": lambda c, v: c >= v,
     "in": lambda c, v: c.in_([v]) if not isinstance(v, list) else c.in_(v),
 }
 OPERATOR_FNS = MappingProxyType(__operator_fns)
@@ -43,8 +43,7 @@ def get_query(
     query_plan: PlanResourcesResponse,
     table: GenericTable,
     attr_map: dict[str, GenericColumn],
-    table_mapping: list[tuple[GenericTable, GenericExpression]]
-    | None = None,
+    table_mapping: list[tuple[GenericTable, GenericExpression]] | None = None,
     operator_override_fns: OperatorFnMap | None = None,
 ) -> Select:
     if (

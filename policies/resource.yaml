@@ -69,6 +69,30 @@ resourcePolicy:
               - expr: request.resource.attr.aString != "string"
 
     - actions:
+        - "nand"
+      effect: EFFECT_DENY
+      roles:
+        - USER
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.resource.attr.aBool == true
+              - expr: request.resource.attr.aString != "string"
+
+    - actions:
+        - "nor"
+      effect: EFFECT_DENY
+      roles:
+        - USER
+      condition:
+        match:
+          any:
+            of:
+              - expr: request.resource.attr.aBool == true
+              - expr: request.resource.attr.aString != "string"
+
+    - actions:
         - "in"
       effect: EFFECT_ALLOW
       roles:
