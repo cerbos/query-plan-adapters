@@ -6,7 +6,7 @@ on:
       - "prisma/**"
   push:
     tags:
-      - v*
+      - prisma/v*
 
 defaults:
   run:
