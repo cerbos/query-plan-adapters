@@ -1,0 +1,25 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "schedule:earlyMondays",
+    "config:base",
+    "docker:disable",
+    "group:allNonMajor",
+    ":separateMultipleMajorReleases",
+    ":gitSignOff"
+  ],
+  "automerge": true,
+  "automergeSchedule": [
+    "after 9am and before 5pm Monday"
+  ],
+  "major": {
+    "automerge": false
+  },
+  "masterIssue": true,
+  "baseBranches": [
+    "main"
+  ],
+  "additionalReviewers": [
+    "alexolivier"
+  ]
+}
