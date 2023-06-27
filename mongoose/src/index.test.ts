@@ -106,7 +106,6 @@ test("always allowed", async () => {
   const query = await Resource.find({
     ...result.filters,
   });
-  console.log(query);
   expect(query.length).toEqual(fixtureResources.length);
 });
 
