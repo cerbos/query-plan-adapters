@@ -4,40 +4,44 @@ import {
   PlanExpression,
   PlanExpressionValue,
   PlanExpressionVariable,
-  PlanKind as PK
+  PlanKind as PK,
 } from "@cerbos/core";
 
 export type PlanKind = PK;
 export const PlanKind = PK;
 
-type FieldMapper = {
-  [key: string]: string;
-} | ((key: string) => string)
+type FieldMapper =
+  | {
+      [key: string]: string;
+    }
+  | ((key: string) => string);
 
 type Relation = {
-  relation: string,
-  field: string
-}
+  relation: string;
+  field: string;
+};
 
-type RelationMapper = {
-  [key: string]: Relation;
-} | ((key: string) => Relation)
+type RelationMapper =
+  | {
+      [key: string]: Relation;
+    }
+  | ((key: string) => Relation);
 
 interface QueryPlanToPrismaArgs {
   queryPlan: PlanResourcesResponse;
-  fieldNameMapper: FieldMapper,
-  relationMapper?: RelationMapper
+  fieldNameMapper: FieldMapper;
+  relationMapper?: RelationMapper;
 }
 
 interface QueryPlanToPrismaResult {
-  kind: PlanKind,
-  filters?: any
+  kind: PlanKind;
+  filters?: any;
 }
 
 export function queryPlanToPrisma({
   queryPlan,
   fieldNameMapper,
-  relationMapper = {}
+  relationMapper = {},
 }: QueryPlanToPrismaArgs): QueryPlanToPrismaResult {
   const toFieldName = (key: string) => {
     if (typeof fieldNameMapper === "function") {
@@ -47,7 +51,7 @@ export function queryPlanToPrisma({
     } else {
       return key;
     }
-  }
+  };
 
   const toRelationName = (key: string) => {
     if (typeof relationMapper === "function") {
@@ -56,29 +60,25 @@ export function queryPlanToPrisma({
       return relationMapper[key];
     }
     return null;
-  }
+  };
 
   switch (queryPlan.kind) {
     case PlanKind.ALWAYS_ALLOWED:
       return {
         kind: PlanKind.ALWAYS_ALLOWED,
-        filters: {}
-      }
+        filters: {},
+      };
     case PlanKind.ALWAYS_DENIED:
       return {
-        kind: PlanKind.ALWAYS_DENIED
+        kind: PlanKind.ALWAYS_DENIED,
       };
     case PlanKind.CONDITIONAL:
       return {
         kind: PlanKind.CONDITIONAL,
-        filters: mapOperand(
-          queryPlan.condition,
-          toFieldName,
-          toRelationName
-        )
+        filters: mapOperand(queryPlan.condition, toFieldName, toRelationName),
       };
     default:
-      throw Error(`Invalid query plan.`)
+      throw Error(`Invalid query plan.`);
   }
 }
 
@@ -95,49 +95,48 @@ function isVariable(e: PlanExpressionOperand): e is PlanExpressionVariable {
 }
 
 function getOperandVariable(operands: PlanExpressionOperand[]) {
-  const op = operands.find(o => o.hasOwnProperty("name"));
+  const op = operands.find((o) => o.hasOwnProperty("name"));
   if (!op) return;
-  return (op as PlanExpressionVariable).name
+  return (op as PlanExpressionVariable).name;
 }
 
 function getOperandValue(operands: PlanExpressionOperand[]) {
-  const op = operands.find(o => isValue(o));
+  const op = operands.find((o) => isValue(o));
   if (!op) return;
-  return (op as PlanExpressionValue).value
+  return (op as PlanExpressionValue).value;
 }
-
 
 const OPERATORS: {
   [key: string]: {
-    relationalCondition?: string,
-    fieldCondition: string
-  }
+    relationalCondition?: string;
+    fieldCondition: string;
+  };
 } = {
-  "eq": {
+  eq: {
     relationalCondition: "is",
-    fieldCondition: "equals"
+    fieldCondition: "equals",
   },
-  "ne": {
+  ne: {
     relationalCondition: "isNot",
-    fieldCondition: "not"
+    fieldCondition: "not",
   },
-  "in": {
+  in: {
     relationalCondition: "some",
-    fieldCondition: "in"
+    fieldCondition: "in",
   },
-  "lt": {
-    fieldCondition: "lt"
+  lt: {
+    fieldCondition: "lt",
   },
-  "gt": {
-    fieldCondition: "gt"
+  gt: {
+    fieldCondition: "gt",
   },
-  "le": {
-    fieldCondition: "lte"
+  le: {
+    fieldCondition: "lte",
   },
-  "ge": {
-    fieldCondition: "gte"
-  }
-}
+  ge: {
+    fieldCondition: "gte",
+  },
+};
 
 function mapOperand(
   operand: PlanExpressionOperand,
@@ -145,13 +144,16 @@ function mapOperand(
   getRelationName: (key: string) => Relation | null,
   output: any = {}
 ): any {
-  if (!isExpression(operand)) throw Error(`Query plan did not contain an expression for operand ${operand}`)
+  if (!isExpression(operand))
+    throw Error(
+      `Query plan did not contain an expression for operand ${operand}`
+    );
 
   const { operator, operands } = operand;
 
   // HANDLE NESTING OPERATIONS: AND/OR/NOT
   if (operator == "and") {
-    if (operands.length < 2) throw Error("Expected atleast 2 operands")
+    if (operands.length < 2) throw Error("Expected atleast 2 operands");
     output.AND = operands.map((o) =>
       mapOperand(o, getFieldName, getRelationName, {})
     );
@@ -159,7 +161,7 @@ function mapOperand(
   }
 
   if (operator == "or") {
-    if (operands.length < 2) throw Error("Expected atleast 2 operands")
+    if (operands.length < 2) throw Error("Expected atleast 2 operands");
     output.OR = operands.map((o) =>
       mapOperand(o, getFieldName, getRelationName, {})
     );
@@ -167,7 +169,7 @@ function mapOperand(
   }
 
   if (operator == "not") {
-    if (operands.length > 1) throw Error("Expected only one operand")
+    if (operands.length > 1) throw Error("Expected only one operand");
     output.NOT = operands.map((o) =>
       mapOperand(o, getFieldName, getRelationName, {})
     )[0];
@@ -176,31 +178,55 @@ function mapOperand(
 
   // get the operation parameters
   const operation = OPERATORS[operator];
-  if (!operation) throw Error(`Unsupported operator ${operator}`)
+  if (!operation) throw Error(`Unsupported operator ${operator}`);
 
   const opVariable = getOperandVariable(operands);
-  if (!opVariable) throw Error(`Unexpected variable ${operands}`)
+  if (!opVariable) throw Error(`Unexpected variable ${operands}`);
 
   const opValue = getOperandValue(operands);
   const relation = getRelationName(opVariable);
-  const fieldName = getFieldName(opVariable)
+  const fieldName = getFieldName(opVariable);
 
   // There is a relational mapper for this variable
   if (relation && operation.relationalCondition) {
     output[relation.relation] = {
       [operation.relationalCondition]: {
-        [relation.field]: opValue
-      }
-    }
+        [relation.field]: opValue,
+      },
+    };
     return output;
   } else if (fieldName && operation.fieldCondition) {
     // There is a field mapper for this variable
-    output[fieldName] = {
-      [operation.fieldCondition]: opValue,
-    };
+
+    const fieldPath = fieldName.split(".");
+    if (fieldPath.length > 1) {
+      output[fieldPath[0]] = convertPathToJSON(fieldPath.splice(1), {
+        [operation.fieldCondition]: opValue,
+      });
+    } else {
+      output[fieldPath[0]] = {
+        [operation.fieldCondition]: opValue,
+      };
+    }
     return output;
   } else {
-    throw Error("Failed to map")
+    throw Error("Failed to map");
+  }
+}
+
+function convertPathToJSON(segments: string[], value: any): Object {
+  const result = {};
+
+  let current: Record<string, any> = result;
+  for (let i = 0; i < segments.length; i++) {
+    const segment = segments[i];
+    if (i === segments.length - 1) {
+      current[segment] = value;
+    } else {
+      current[segment] = {};
+      current = current[segment];
+    }
   }
 
+  return result;
 }
