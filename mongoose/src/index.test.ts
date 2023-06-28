@@ -5,47 +5,31 @@ import mongoose, { Schema, model } from "mongoose";
 
 const cerbos = new Cerbos("127.0.0.1:3593", { tls: false });
 
-interface IUser {
-  aBool: Boolean;
-  aNumber: Number;
-  aString: String;
-}
-
 interface IResource {
   key: string;
   aBool: Boolean;
   aNumber: Number;
   aString: String;
+  nested: {
+    aBool: Boolean;
+    aNumber: Number;
+    aString: String;
+  };
 }
-
-const userSchema = new Schema<IUser>({
-  aBool: { type: Boolean },
-  aNumber: { type: Number, required: true },
-  aString: String,
-});
 
 const resourceSchema = new Schema<IResource>({
   key: String,
   aBool: { type: Boolean },
   aNumber: { type: Number, required: true },
   aString: String,
+  nested: {
+    aBool: { type: Boolean },
+    aNumber: { type: Number, required: true },
+    aString: String,
+  },
 });
 
-const User = model<IUser>("User", userSchema);
 const Resource = model<IResource>("Resource", resourceSchema);
-
-const fixtureUsers: IUser[] = [
-  {
-    aBool: true,
-    aNumber: 1,
-    aString: "string",
-  },
-  {
-    aBool: true,
-    aNumber: 2,
-    aString: "string",
-  },
-];
 
 const fixtureResources: IResource[] = [
   {
@@ -53,18 +37,33 @@ const fixtureResources: IResource[] = [
     aBool: true,
     aNumber: 1,
     aString: "string",
+    nested: {
+      aBool: true,
+      aNumber: 1,
+      aString: "string",
+    },
   },
   {
     key: "b",
     aBool: false,
     aNumber: 2,
     aString: "string2",
+    nested: {
+      aBool: true,
+      aNumber: 1,
+      aString: "string",
+    },
   },
   {
     key: "c",
     aBool: false,
     aNumber: 3,
     aString: "string3",
+    nested: {
+      aBool: true,
+      aNumber: 1,
+      aString: "string",
+    },
   },
 ];
 
@@ -72,12 +71,8 @@ beforeAll(async () => {
   await mongoose.connect("mongodb://127.0.0.1:27017/test");
   mongoose.set("debug", true);
   console.log("Clearing data");
-  await User.deleteMany({});
   await Resource.deleteMany({});
   console.log("Creating data");
-  for (const user of fixtureUsers) {
-    await User.create(user);
-  }
   for (const resource of fixtureResources) {
     await Resource.create(resource);
   }
@@ -105,7 +100,7 @@ test("always allowed", async () => {
   });
 
   const query = await Resource.find({
-    ...result.filters,
+    $and: [result.filters],
   });
   expect(query.length).toEqual(fixtureResources.length);
 });
@@ -146,7 +141,7 @@ test("conditional - eq", async () => {
     filters: { aBool: true },
   });
   const query = await Resource.find({
-    ...result.filters,
+    $and: [result.filters],
   });
   expect(query.map((r) => r.key)).toEqual(
     fixtureResources.filter((a) => a.aBool).map((r) => r.key)
@@ -185,7 +180,7 @@ test("conditional - eq - inverted order", async () => {
   });
 
   const query = await Resource.find({
-    ...result.filters,
+    $and: [result.filters],
   });
   expect(query.map((r) => r.key)).toEqual(
     fixtureResources.filter((a) => a.aBool).map((r) => r.key)
@@ -211,7 +206,7 @@ test("conditional - ne", async () => {
     filters: { aString: { $ne: "string" } },
   });
   const query = await Resource.find({
-    ...result.filters,
+    $and: [result.filters],
   });
   expect(query.map((r) => r.key)).toEqual(
     fixtureResources.filter((a) => a.aString != "string").map((r) => r.key)
@@ -237,7 +232,7 @@ test("conditional - explicit-deny", async () => {
     filters: { $nor: [{ aBool: true }] },
   });
   const query = await Resource.find({
-    ...result.filters,
+    $and: [result.filters],
   });
   expect(query.map((r) => r.key)).toEqual(
     fixtureResources.filter((a) => !a.aBool).map((r) => r.key)
@@ -274,7 +269,7 @@ test("conditional - and", async () => {
   });
 
   const query = await Resource.find({
-    ...result.filters,
+    $and: [result.filters],
   });
   expect(query).toEqual(
     fixtureResources
@@ -315,7 +310,7 @@ test("conditional - or", async () => {
   });
 
   const query = await Resource.find({
-    ...result.filters,
+    $and: [result.filters],
   });
   expect(query.map((r) => r.key)).toEqual(
     fixtureResources
@@ -348,7 +343,7 @@ test("conditional - in", async () => {
   });
 
   const query = await Resource.find({
-    ...result.filters,
+    $and: [result.filters],
   });
   expect(query.map((r) => r.key)).toEqual(
     fixtureResources
@@ -381,7 +376,7 @@ test("conditional - gt", async () => {
   });
 
   const query = await Resource.find({
-    ...result.filters,
+    $and: [result.filters],
   });
   expect(query.map((r) => r.key)).toEqual(
     fixtureResources
@@ -414,7 +409,7 @@ test("conditional - lt", async () => {
   });
 
   const query = await Resource.find({
-    ...result.filters,
+    $and: [result.filters],
   });
   expect(query.map((r) => r.key)).toEqual(
     fixtureResources
@@ -447,7 +442,7 @@ test("conditional - gte", async () => {
   });
 
   const query = await Resource.find({
-    ...result.filters,
+    $and: [result.filters],
   });
   expect(query.map((r) => r.key)).toEqual(
     fixtureResources
@@ -480,7 +475,7 @@ test("conditional - lte", async () => {
   });
 
   const query = await Resource.find({
-    ...result.filters,
+    $and: [result.filters],
   });
   expect(query.map((r) => r.key)).toEqual(
     fixtureResources
@@ -488,5 +483,31 @@ test("conditional - lte", async () => {
         return (r.aNumber as number) <= 2;
       })
       .map((r) => r.key)
+  );
+});
+
+test("conditional - eq nested", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "equal-nested",
+  });
+
+  const result = queryPlanToMongoose({
+    queryPlan,
+    fieldNameMapper: {
+      "request.resource.attr.nested.aBool": "nested.aBool",
+    },
+  });
+
+  expect(result).toStrictEqual({
+    kind: PlanKind.CONDITIONAL,
+    filters: { "nested.aBool": true },
+  });
+  const query = await Resource.find({
+    $and: [result.filters],
+  });
+  expect(query.map((r) => r.key)).toEqual(
+    fixtureResources.filter((a) => a.nested.aBool).map((r) => r.key)
   );
 });
