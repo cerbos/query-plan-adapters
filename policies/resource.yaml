@@ -174,3 +174,12 @@ resourcePolicy:
         match:
           expr: >
             !(request.resource.attr.createdBy == P.id)
+
+    - actions:
+        - "equal-nested"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.nested.aBool == true
