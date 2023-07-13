@@ -1,6 +1,6 @@
 # Cerbos + Prisma ORM Adapter
 
-An adapater library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanResources API](https://docs.cerbos.dev/cerbos/latest/api/index.html#resources-query-plan)) response and converts it into a [Prisma](https://prisma.io) where class object. This is designed to work alongside a project using the [Cerbos Javascript SDK](https://github.com/cerbos/cerbos-sdk-javascript).
+An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanResources API](https://docs.cerbos.dev/cerbos/latest/api/index.html#resources-query-plan)) response and converts it into a [Prisma](https://prisma.io) where class object. This is designed to work alongside a project using the [Cerbos Javascript SDK](https://github.com/cerbos/cerbos-sdk-javascript).
 
 The following conditions are supported: `and`, `or`, `eq`, `ne`, `lt`, `gt`, `lte`, `gte` and `in`, as well as relational filters `some`, `none`, `is` and `isNot`.
 
@@ -18,6 +18,7 @@ Not Supported:
 - Composite keys
 
 ## Requirements
+
 - Cerbos > v0.16
 - `@cerbos/http` or `@cerbos/grpc` client
 
@@ -117,8 +118,8 @@ The `fieldNameMapper` is used to convert the field names in the query plan respo
 const filters = queryPlanToPrisma({
   queryPlan,
   fieldNameMapper: {
-    "request.resource.attr.aFieldName": "prismaModelFieldName"
-  }
+    "request.resource.attr.aFieldName": "prismaModelFieldName",
+  },
 });
 
 //or
@@ -126,17 +127,16 @@ const filters = queryPlanToPrisma({
 const filters = queryPlanToPrisma({
   queryPlan,
   fieldNameMapper: (fieldName: string): string => {
-    if(fieldName.indexOf("request.resource.") > 0) {
-      return fieldName.replace("request.resource.attr", "")
+    if (fieldName.indexOf("request.resource.") > 0) {
+      return fieldName.replace("request.resource.attr", "");
     }
 
-    if(fieldName.indexOf("request.principal.") > 0) {
-      return fieldName.replace("request.principal.attr", "")
+    if (fieldName.indexOf("request.principal.") > 0) {
+      return fieldName.replace("request.principal.attr", "");
     }
-  }
+  },
 });
 ```
-
 
 The `relationMapper` is used to convert references to fields which are joins at the database level
 
@@ -146,10 +146,10 @@ const filters = queryPlanToPrisma({
   fieldNameMapper: {},
   relationMapper: {
     "request.resource.attr.aRelatedModel": {
-      "relation": "aRelatedModel",
-      "field": "id" // the column it is joined on
-    }
-  }
+      relation: "aRelatedModel",
+      field: "id", // the column it is joined on
+    },
+  },
 });
 
 //or
@@ -158,13 +158,13 @@ const filters = queryPlanToPrisma({
   queryPlan,
   fieldNameMapper: {},
   relationMapper: (fieldName: string): string => {
-    if(fieldName.indexOf("request.resource.") > 0) {
+    if (fieldName.indexOf("request.resource.") > 0) {
       return {
-        "relation": fieldName.replace("request.resource.attr.", ""),
-        "field": "id" // the column it is joined on
-      }
+        relation: fieldName.replace("request.resource.attr.", ""),
+        field: "id", // the column it is joined on
+      };
     }
-  }
+  },
 });
 ```
 
