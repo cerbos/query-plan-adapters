@@ -1,6 +1,6 @@
 {
   "name": "@cerbos/orm-prisma",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "homepage": "https://cerbos.dev",
   "description": "",
   "private": false,
@@ -25,12 +25,12 @@
     "@types/jest": "^29.0.3",
     "@types/node": "^18.7.21",
     "prisma": "^4.3.1",
-    "ts-jest": "^28.0.8",
+    "ts-jest": "^29.0.0",
     "ts-node": "^10.4.0",
     "typescript": "^4.5.4"
   },
   "dependencies": {
-    "@cerbos/core": "^0.5.1",
-    "@cerbos/grpc": "^0.8.0"
+    "@cerbos/core": "^0.11.0",
+    "@cerbos/grpc": "^0.11.0"
   }
 }

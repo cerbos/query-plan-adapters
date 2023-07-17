@@ -11,13 +11,15 @@ datasource db {
 }
 
 model Resource {
-  id        String  @id @default(cuid())
-  aString   String
-  aNumber   Int
-  aBool     Boolean
-  ownedBy   User[]
-  createdBy User    @relation(fields: [creatorId], references: [id], name: "creator")
-  creatorId String
+  id               String         @id @default(cuid())
+  aString          String
+  aNumber          Int
+  aBool            Boolean
+  ownedBy          User[]
+  createdBy        User           @relation(fields: [creatorId], references: [id], name: "creator")
+  creatorId        String
+  nested           NestedResource @relation(fields: [nestedResourceId], references: [id])
+  nestedResourceId String
 }
 
 model User {
@@ -27,4 +29,12 @@ model User {
   aBool            Boolean
   resources        Resource[]
   createdResources Resource[] @relation(name: "creator")
+}
+
+model NestedResource {
+  id       String     @id @default(cuid())
+  aString  String
+  aNumber  Int
+  aBool    Boolean
+  Resource Resource[]
 }
