@@ -6,3 +6,4 @@ Current supported adapters:
 
 - [Prisma](https://github.com/cerbos/query-plan-adapters/tree/main/prisma)
 - [SQLAlchemy](https://github.com/cerbos/query-plan-adapters/tree/main/sqlalchemy)
+- [Mongoose](https://github.com/cerbos/query-plan-adapters/tree/main/mongoose)
