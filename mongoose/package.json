@@ -1,6 +1,6 @@
 {
   "name": "@cerbos/orm-mongoose",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "homepage": "https://cerbos.dev",
   "description": "",
   "private": false,
@@ -24,11 +24,10 @@
   "devDependencies": {
     "@types/jest": "^29.0.3",
     "@types/node": "^18.7.21",
-    "prisma": "^4.3.1",
+    "mongoose": "^7.3.1",
     "ts-jest": "^29.0.0",
     "ts-node": "^10.4.0",
-    "typescript": "^5.0.0",
-    "mongoose": "^7.3.1"
+    "typescript": "^5.0.0"
   },
   "dependencies": {
     "@cerbos/core": "^0.12.0",
