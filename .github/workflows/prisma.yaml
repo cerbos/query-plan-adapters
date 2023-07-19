@@ -16,7 +16,7 @@ jobs:
   test:
     strategy:
       matrix:
-        cerbo-version: ["latest", "v0.29.0", "v0.28.0", "v0.27.0", "v0.26.0"]
+        cerbos-version: ["latest", "v0.29.0", "v0.28.0", "v0.27.0", "v0.26.0"]
         node-version: ["20", "18", "16"]
     runs-on: ubuntu-latest
     steps:
@@ -25,7 +25,7 @@ jobs:
       - name: Setup Cerbos
         uses: cerbos/cerbos-setup-action@v1
         with:
-          version: ${{ matrix.cerbo-version }}
+          version: ${{ matrix.cerbos-version }}
 
       - name: Test using Node.js
         uses: actions/setup-node@v3
