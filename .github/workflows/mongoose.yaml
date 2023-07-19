@@ -1,0 +1,37 @@
+name: Mongoose Test
+
+on:
+  pull_request:
+    paths:
+      - "mongoose/**"
+  push:
+    tags:
+      - mongoose/v*
+
+defaults:
+  run:
+    working-directory: mongoose
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Setup Cerbos
+        uses: cerbos/cerbos-setup-action@v1
+        with:
+          version: latest
+
+      - name: Start MongoDB
+        uses: supercharge/mongodb-github-action@1.8.0
+        with:
+          mongodb-version: "6.0"
+
+      - name: Test using Node.js
+        uses: actions/setup-node@v1
+        with:
+          node-version: "16"
+
+      - run: npm install
+      - run: npm run test

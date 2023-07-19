@@ -174,7 +174,7 @@ resourcePolicy:
         match:
           expr: >
             !(request.resource.attr.createdBy == P.id)
-            
+
     - actions:
         - "equal-nested"
       effect: EFFECT_ALLOW
