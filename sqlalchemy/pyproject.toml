@@ -23,6 +23,11 @@ dynamic = ["version"]
 Homepage = "https://cerbos.dev"
 Repository = "https://github.com/cerbos/query-plan-adapters/tree/main/sqlalchemy"
 
+[project.optional-dependencies]
+testcontainers = [
+    "testcontainers>=3.5.3",
+]
+
 [build-system]
 requires = ["pdm-pep517>=1.0.0"]
 build-backend = "pdm.pep517.api"
