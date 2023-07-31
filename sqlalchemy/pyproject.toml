@@ -5,8 +5,8 @@ authors = [
     {name = "Cerbos Developers", email = "sdk+sqlalchemy@cerbos.dev"},
 ]
 dependencies = [
-    "cerbos>=0.4.0",
-    "SQLAlchemy>=1.4.40",
+    "cerbos>=0.10.0",
+    "SQLAlchemy<2.0",
 ]
 requires-python = ">=3.8"
 classifiers = [
@@ -22,8 +22,6 @@ dynamic = ["version"]
 [project.urls]
 Homepage = "https://cerbos.dev"
 Repository = "https://github.com/cerbos/query-plan-adapters/tree/main/sqlalchemy"
-
-[project.optional-dependencies]
 
 [build-system]
 requires = ["pdm-pep517>=1.0.0"]
@@ -47,9 +45,9 @@ lint = [
 
 [tool.pdm.scripts]
 test = "pytest"
-lint = "black ."
-sort = "isort ."
-format = {composite = ["lint", "sort"]}
+isort = {cmd = "isort ."}
+black = {cmd = "black ."}
+format = {composite = ["isort", "black"]}
 
 [tool.isort]
 profile = 'black'
