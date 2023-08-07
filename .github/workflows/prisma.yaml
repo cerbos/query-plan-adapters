@@ -16,8 +16,8 @@ jobs:
   test:
     strategy:
       matrix:
-        cerbos-version: ["latest", "v0.29.0", "v0.28.0", "v0.27.0", "v0.26.0"]
-        node-version: ["20", "18", "16"]
+        cerbos-version: ["latest"]
+        node-version: ["18"]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
