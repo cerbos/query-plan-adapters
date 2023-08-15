@@ -31,6 +31,6 @@ jobs:
           prerelease: true     # Allow prerelease versions to be installed
           enable-pep582: true  # Enable PEP 582 package loading globally
 
-      - run: pdm install
+      - run: pdm install -G testcontainers
 
       - run: pdm run test

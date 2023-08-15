@@ -29,7 +29,7 @@ jobs:
           prerelease: true     # Allow prerelease versions to be installed
           enable-pep582: true  # Enable PEP 582 package loading globally
 
-      - run: pdm install
+      - run: pdm install -G testcontainers
 
       - name: Set PDM version env
         run: echo "PDM_PEP517_SCM_VERSION=${GITHUB_REF_NAME#*\/}" >> $GITHUB_ENV

@@ -22,8 +22,7 @@ class TestGetQuery:
     def test_always_allow(
         self, cerbos_client, principal, resource_desc, resource_table, conn
     ):
-        with cerbos_client as c:
-            plan = c.plan_resources("always-allow", principal, resource_desc)
+        plan = cerbos_client.plan_resources("always-allow", principal, resource_desc)
         query = get_query(plan, resource_table, {})
         res = conn.execute(query).fetchall()
         assert len(res) == 3
@@ -31,8 +30,7 @@ class TestGetQuery:
     def test_always_deny(
         self, cerbos_client, principal, resource_desc, resource_table, conn
     ):
-        with cerbos_client as c:
-            plan = c.plan_resources("always-deny", principal, resource_desc)
+        plan = cerbos_client.plan_resources("always-deny", principal, resource_desc)
         query = get_query(plan, resource_table, {})
         res = conn.execute(query).fetchall()
         assert len(res) == 0
@@ -40,8 +38,7 @@ class TestGetQuery:
     def test_equals(
         self, cerbos_client, principal, resource_desc, resource_table, conn
     ):
-        with cerbos_client as c:
-            plan = c.plan_resources("equal", principal, resource_desc)
+        plan = cerbos_client.plan_resources("equal", principal, resource_desc)
         attr = {
             "request.resource.attr.aBool": resource_table.aBool,
         }
@@ -53,8 +50,7 @@ class TestGetQuery:
     def test_not_equals(
         self, cerbos_client, principal, resource_desc, resource_table, conn
     ):
-        with cerbos_client as c:
-            plan = c.plan_resources("ne", principal, resource_desc)
+        plan = cerbos_client.plan_resources("ne", principal, resource_desc)
         attr = {
             "request.resource.attr.aString": resource_table.aString,
         }
@@ -64,8 +60,7 @@ class TestGetQuery:
         assert all(map(lambda x: x.name in {"resource2", "resource3"}, res))
 
     def test_and(self, cerbos_client, principal, resource_desc, resource_table, conn):
-        with cerbos_client as c:
-            plan = c.plan_resources("and", principal, resource_desc)
+        plan = cerbos_client.plan_resources("and", principal, resource_desc)
         attr = {
             "request.resource.attr.aBool": resource_table.aBool,
             "request.resource.attr.aString": resource_table.aString,
@@ -78,8 +73,7 @@ class TestGetQuery:
     def test_not_and(
         self, cerbos_client, principal, resource_desc, resource_table, conn
     ):
-        with cerbos_client as c:
-            plan = c.plan_resources("nand", principal, resource_desc)
+        plan = cerbos_client.plan_resources("nand", principal, resource_desc)
         attr = {
             "request.resource.attr.aBool": resource_table.aBool,
             "request.resource.attr.aString": resource_table.aString,
@@ -90,8 +84,7 @@ class TestGetQuery:
         assert all(map(lambda x: x.name in {"resource1", "resource2"}, res))
 
     def test_or(self, cerbos_client, principal, resource_desc, resource_table, conn):
-        with cerbos_client as c:
-            plan = c.plan_resources("or", principal, resource_desc)
+        plan = cerbos_client.plan_resources("or", principal, resource_desc)
         attr = {
             "request.resource.attr.aBool": resource_table.aBool,
             "request.resource.attr.aString": resource_table.aString,
@@ -103,8 +96,7 @@ class TestGetQuery:
     def test_not_or(
         self, cerbos_client, principal, resource_desc, resource_table, conn
     ):
-        with cerbos_client as c:
-            plan = c.plan_resources("nor", principal, resource_desc)
+        plan = cerbos_client.plan_resources("nor", principal, resource_desc)
         attr = {
             "request.resource.attr.aBool": resource_table.aBool,
             "request.resource.attr.aString": resource_table.aString,
@@ -114,8 +106,7 @@ class TestGetQuery:
         assert len(res) == 0
 
     def test_in(self, cerbos_client, principal, resource_desc, resource_table, conn):
-        with cerbos_client as c:
-            plan = c.plan_resources("in", principal, resource_desc)
+        plan = cerbos_client.plan_resources("in", principal, resource_desc)
         attr = {
             "request.resource.attr.aString": resource_table.aString,
         }
@@ -125,8 +116,7 @@ class TestGetQuery:
         assert all(map(lambda x: x.name in {"resource1", "resource3"}, res))
 
     def test_lt(self, cerbos_client, principal, resource_desc, resource_table, conn):
-        with cerbos_client as c:
-            plan = c.plan_resources("lt", principal, resource_desc)
+        plan = cerbos_client.plan_resources("lt", principal, resource_desc)
         attr = {
             "request.resource.attr.aNumber": resource_table.aNumber,
         }
@@ -136,8 +126,7 @@ class TestGetQuery:
         assert res[0].name == "resource1"
 
     def test_gt(self, cerbos_client, principal, resource_desc, resource_table, conn):
-        with cerbos_client as c:
-            plan = c.plan_resources("gt", principal, resource_desc)
+        plan = cerbos_client.plan_resources("gt", principal, resource_desc)
         attr = {
             "request.resource.attr.aNumber": resource_table.aNumber,
         }
@@ -147,8 +136,7 @@ class TestGetQuery:
         assert all(map(lambda x: x.name in {"resource2", "resource3"}, res))
 
     def test_lte(self, cerbos_client, principal, resource_desc, resource_table, conn):
-        with cerbos_client as c:
-            plan = c.plan_resources("lte", principal, resource_desc)
+        plan = cerbos_client.plan_resources("lte", principal, resource_desc)
         attr = {
             "request.resource.attr.aNumber": resource_table.aNumber,
         }
@@ -158,8 +146,7 @@ class TestGetQuery:
         assert all(map(lambda x: x.name in {"resource1", "resource2"}, res))
 
     def test_gte(self, cerbos_client, principal, resource_desc, resource_table, conn):
-        with cerbos_client as c:
-            plan = c.plan_resources("gte", principal, resource_desc)
+        plan = cerbos_client.plan_resources("gte", principal, resource_desc)
         attr = {
             "request.resource.attr.aNumber": resource_table.aNumber,
         }
@@ -170,8 +157,7 @@ class TestGetQuery:
     def test_relation_some(
         self, cerbos_client, principal, resource_desc, user_table, resource_table, conn
     ):
-        with cerbos_client as c:
-            plan = c.plan_resources("relation-some", principal, resource_desc)
+        plan = cerbos_client.plan_resources("relation-some", principal, resource_desc)
         attr = {
             "request.resource.attr.ownedBy": resource_table.ownedBy,
         }
@@ -184,8 +170,7 @@ class TestGetQuery:
     def test_relation_none(
         self, cerbos_client, principal, resource_desc, user_table, resource_table, conn
     ):
-        with cerbos_client as c:
-            plan = c.plan_resources("relation-none", principal, resource_desc)
+        plan = cerbos_client.plan_resources("relation-none", principal, resource_desc)
         attr = {
             "request.resource.attr.ownedBy": resource_table.ownedBy,
         }
@@ -198,8 +183,7 @@ class TestGetQuery:
     def test_relation_is(
         self, cerbos_client, principal, resource_desc, user_table, resource_table, conn
     ):
-        with cerbos_client as c:
-            plan = c.plan_resources("relation-is", principal, resource_desc)
+        plan = cerbos_client.plan_resources("relation-is", principal, resource_desc)
         attr = {
             "request.resource.attr.createdBy": resource_table.createdBy,
         }
@@ -212,8 +196,7 @@ class TestGetQuery:
     def test_relation_is_not(
         self, cerbos_client, principal, resource_desc, user_table, resource_table, conn
     ):
-        with cerbos_client as c:
-            plan = c.plan_resources("relation-is-not", principal, resource_desc)
+        plan = cerbos_client.plan_resources("relation-is-not", principal, resource_desc)
         attr = {
             "request.resource.attr.createdBy": resource_table.createdBy,
         }
@@ -372,8 +355,7 @@ class TestGetQueryOverrides:
         assert res[0].name == "resource1"
 
     def test_in_override(self, cerbos_client, principal, resource_desc, resource_table):
-        with cerbos_client as c:
-            plan = c.plan_resources("in", principal, resource_desc)
+        plan = cerbos_client.plan_resources("in", principal, resource_desc)
         attr = {
             "request.resource.attr.aString": resource_table.aString,
         }

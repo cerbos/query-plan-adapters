@@ -1,8 +1,11 @@
 import os
+from contextlib import contextmanager
 
 import pytest
+from cerbos.engine.v1 import engine_pb2
 from cerbos.sdk.client import CerbosClient
 from cerbos.sdk.container import CerbosContainer
+from cerbos.sdk.grpc.client import CerbosClient as GrpcCerbosClient
 from cerbos.sdk.model import Principal, ResourceDesc
 
 from sqlalchemy import (
@@ -108,18 +111,8 @@ def resource_table():
     return Resource
 
 
-@pytest.fixture
-def principal():
-    return Principal(id="1", roles={USER_ROLE})
-
-
-@pytest.fixture
-def resource_desc():
-    return ResourceDesc("resource")
-
-
-@pytest.fixture(scope="module")
-def cerbos_container_host() -> str:
+@contextmanager
+def cerbos_container_host(client_type: str) -> str:
     policy_dir = os.path.realpath(
         os.path.join(os.path.dirname(__file__), "../..", "policies")
     )
@@ -131,13 +124,35 @@ def cerbos_container_host() -> str:
     container.start()
     container.wait_until_ready()
 
-    yield container.http_host()
+    yield container.http_host() if client_type == "http" else container.grpc_host()
 
     container.stop()
 
 
-@pytest.fixture(scope="function")
-def cerbos_client(cerbos_container_host):
-    client = CerbosClient(cerbos_container_host, debug=True, tls_verify=False)
-    yield client
-    client.close()
+@pytest.fixture(scope="module", params=["http", "grpc"])
+def cerbos_client(request):
+    client_type = request.param
+    with cerbos_container_host(client_type) as host:
+        client_cls = CerbosClient if client_type == "http" else GrpcCerbosClient
+        with client_cls(host, tls_verify=False) as client:
+            yield client
+
+
+@pytest.fixture
+def principal(cerbos_client):
+    principal_cls = (
+        engine_pb2.Principal
+        if isinstance(cerbos_client, GrpcCerbosClient)
+        else Principal
+    )
+    return principal_cls(id="1", roles={USER_ROLE})
+
+
+@pytest.fixture
+def resource_desc(cerbos_client):
+    desc_cls = (
+        engine_pb2.PlanResourcesInput.Resource
+        if isinstance(cerbos_client, GrpcCerbosClient)
+        else ResourceDesc
+    )
+    return desc_cls(kind="resource")

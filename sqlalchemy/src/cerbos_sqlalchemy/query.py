@@ -1,12 +1,15 @@
 from types import MappingProxyType
 from typing import Any, Callable
 
-from cerbos.sdk.model import PlanResourcesFilterKind, PlanResourcesResponse
-
+from google.protobuf.json_format import MessageToDict
 from sqlalchemy import Column, Table, and_, not_, or_, select
 from sqlalchemy.orm import DeclarativeMeta, InstrumentedAttribute
 from sqlalchemy.sql import Select
 from sqlalchemy.sql.expression import BinaryExpression, ColumnOperators
+
+from cerbos.engine.v1 import engine_pb2
+from cerbos.response.v1 import response_pb2
+from cerbos.sdk.model import PlanResourcesFilterKind, PlanResourcesResponse
 
 GenericTable = Table | DeclarativeMeta
 GenericColumn = Column | InstrumentedAttribute
@@ -29,6 +32,20 @@ __operator_fns: OperatorFnMap = {
 }
 OPERATOR_FNS = MappingProxyType(__operator_fns)
 
+# We support both the legacy HTTP and gRPC clients, so therefore we need to accept both input types
+_deny_types = frozenset(
+    [
+        PlanResourcesFilterKind.ALWAYS_DENIED,
+        engine_pb2.PlanResourcesFilter.KIND_ALWAYS_DENIED,
+    ]
+)
+_allow_types = frozenset(
+    [
+        PlanResourcesFilterKind.ALWAYS_ALLOWED,
+        engine_pb2.PlanResourcesFilter.KIND_ALWAYS_ALLOWED,
+    ]
+)
+
 
 def _get_table_name(t: GenericTable) -> str:
     try:
@@ -40,18 +57,16 @@ def _get_table_name(t: GenericTable) -> str:
 
 
 def get_query(
-    query_plan: PlanResourcesResponse,
+    query_plan: PlanResourcesResponse | response_pb2.PlanResourcesResponse,
     table: GenericTable,
     attr_map: dict[str, GenericColumn],
     table_mapping: list[tuple[GenericTable, GenericExpression]] | None = None,
     operator_override_fns: OperatorFnMap | None = None,
 ) -> Select:
-    if (
-        query_plan.filter is None
-        or query_plan.filter.kind == PlanResourcesFilterKind.ALWAYS_DENIED
-    ):
+    if query_plan.filter is None or query_plan.filter.kind in _deny_types:
         return select(table).where(False)
-    if query_plan.filter.kind == PlanResourcesFilterKind.ALWAYS_ALLOWED:
+
+    if query_plan.filter.kind in _allow_types:
         return select(table)
 
     # Inspect passed columns. If > 1 origin table, assert that the mapping has been defined
@@ -121,9 +136,13 @@ def get_query(
         # the operator handlers here are the leaf nodes of the recursion
         return get_operator_fn(operator, column, value)
 
-    q = select(table).where(
-        traverse_and_map_operands(query_plan.filter.condition.to_dict())
+    cond = (
+        MessageToDict(query_plan.filter.condition)
+        if isinstance(query_plan, response_pb2.PlanResourcesResponse)
+        else query_plan.filter.condition.to_dict()
     )
+
+    q = select(table).where(traverse_and_map_operands(cond))
 
     if table_mapping:
         q = q.select_from(table)
