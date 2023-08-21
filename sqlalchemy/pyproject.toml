@@ -6,7 +6,7 @@ authors = [
 ]
 dependencies = [
     "cerbos>=0.10.0",
-    "SQLAlchemy<2.0",
+    "SQLAlchemy<2.1",
 ]
 requires-python = ">=3.8"
 classifiers = [
