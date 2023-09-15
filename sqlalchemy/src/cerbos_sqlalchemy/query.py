@@ -1,15 +1,15 @@
 from types import MappingProxyType
 from typing import Any, Callable
 
+from cerbos.engine.v1 import engine_pb2
+from cerbos.response.v1 import response_pb2
+from cerbos.sdk.model import PlanResourcesFilterKind, PlanResourcesResponse
 from google.protobuf.json_format import MessageToDict
+
 from sqlalchemy import Column, Table, and_, not_, or_, select
 from sqlalchemy.orm import DeclarativeMeta, InstrumentedAttribute
 from sqlalchemy.sql import Select
 from sqlalchemy.sql.expression import BinaryExpression, ColumnOperators
-
-from cerbos.engine.v1 import engine_pb2
-from cerbos.response.v1 import response_pb2
-from cerbos.sdk.model import PlanResourcesFilterKind, PlanResourcesResponse
 
 GenericTable = Table | DeclarativeMeta
 GenericColumn = Column | InstrumentedAttribute
@@ -57,7 +57,7 @@ def _get_table_name(t: GenericTable) -> str:
 
 
 def get_query(
-    query_plan: PlanResourcesResponse | response_pb2.PlanResourcesResponse,
+    query_plan: PlanResourcesResponse | response_pb2.PlanResourcesResponse,  # type: ignore (https://github.com/microsoft/pyright/issues/1035)
     table: GenericTable,
     attr_map: dict[str, GenericColumn],
     table_mapping: list[tuple[GenericTable, GenericExpression]] | None = None,

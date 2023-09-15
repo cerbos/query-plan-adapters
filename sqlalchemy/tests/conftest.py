@@ -1,5 +1,7 @@
 import os
 from contextlib import contextmanager
+from importlib.metadata import version
+from typing import Generator
 
 import pytest
 from cerbos.engine.v1 import engine_pb2
@@ -22,6 +24,17 @@ from sqlalchemy.orm import declarative_base, relationship
 USER_ROLE = "USER"
 
 Base = declarative_base()
+
+_IS_SQLA_14 = None
+
+
+def _is_sqla_14() -> bool:
+    global _IS_SQLA_14
+    if _IS_SQLA_14 is not None:
+        return _IS_SQLA_14
+
+    _IS_SQLA_14 = version("sqlalchemy").startswith("1.4")
+    return _IS_SQLA_14
 
 
 class User(Base):
@@ -46,7 +59,7 @@ class Resource(Base):
     creator = relationship("User", foreign_keys=[createdBy])
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def engine():
     # in-memory database
     engine = create_engine("sqlite://")
@@ -55,42 +68,46 @@ def engine():
     Base.metadata.create_all(engine)
 
     # Populate with test data
-    engine.execute(
-        insert(User.__table__),
-        [
-            {"id": "1", "name": "user1", "role": "admin"},
-            {"id": "2", "name": "user2", "role": "user"},
-        ],
-    )
-    engine.execute(
-        insert(Resource.__table__),
-        [
-            {
-                "name": "resource1",
-                "aBool": True,
-                "aString": "string",
-                "aNumber": 1,
-                "ownedBy": "1",
-                "createdBy": "1",
-            },
-            {
-                "name": "resource2",
-                "aBool": False,
-                "aString": "amIAString?",
-                "aNumber": 2,
-                "ownedBy": "1",
-                "createdBy": "2",
-            },
-            {
-                "name": "resource3",
-                "aBool": True,
-                "aString": "anotherString",
-                "aNumber": 3,
-                "ownedBy": "2",
-                "createdBy": "2",
-            },
-        ],
-    )
+    with engine.connect() as conn:
+        conn.execute(
+            insert(User.__table__),
+            [
+                {"id": "1", "name": "user1", "role": "admin"},
+                {"id": "2", "name": "user2", "role": "user"},
+            ],
+        )
+        conn.execute(
+            insert(Resource.__table__),
+            [
+                {
+                    "name": "resource1",
+                    "aBool": True,
+                    "aString": "string",
+                    "aNumber": 1,
+                    "ownedBy": "1",
+                    "createdBy": "1",
+                },
+                {
+                    "name": "resource2",
+                    "aBool": False,
+                    "aString": "amIAString?",
+                    "aNumber": 2,
+                    "ownedBy": "1",
+                    "createdBy": "2",
+                },
+                {
+                    "name": "resource3",
+                    "aBool": True,
+                    "aString": "anotherString",
+                    "aNumber": 3,
+                    "ownedBy": "2",
+                    "createdBy": "2",
+                },
+            ],
+        )
+
+        if not _is_sqla_14():
+            conn.commit()
 
     yield engine
 
@@ -112,7 +129,7 @@ def resource_table():
 
 
 @contextmanager
-def cerbos_container_host(client_type: str) -> str:
+def cerbos_container_host(client_type: str) -> Generator[str, None, None]:
     policy_dir = os.path.realpath(
         os.path.join(os.path.dirname(__file__), "../..", "policies")
     )
