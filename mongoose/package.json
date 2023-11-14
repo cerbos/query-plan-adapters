@@ -24,7 +24,7 @@
   "devDependencies": {
     "@types/jest": "^29.0.3",
     "@types/node": "^18.7.21",
-    "mongoose": "^7.3.1",
+    "mongoose": "^8.0.0",
     "ts-jest": "^29.0.0",
     "ts-node": "^10.4.0",
     "typescript": "^5.0.0"
