@@ -5,8 +5,8 @@ authors = [
     {name = "Cerbos Developers", email = "sdk+sqlalchemy@cerbos.dev"},
 ]
 dependencies = [
-    "cerbos>=0.10.0",
     "sqlalchemy>=1.4",
+    "cerbos>=0.10.4",
 ]
 requires-python = ">=3.8"
 classifiers = [
@@ -29,8 +29,8 @@ testcontainers = [
 ]
 
 [build-system]
-requires = ["pdm-pep517>=1.0.0"]
-build-backend = "pdm.pep517.api"
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
 
 [tool]
 
@@ -46,6 +46,9 @@ test = [
 lint = [
     "black>=22.6.0",
     "isort>=5.10.1",
+]
+tools = [
+    "ptpython>=3.0.25",
 ]
 
 [tool.pdm.scripts]
