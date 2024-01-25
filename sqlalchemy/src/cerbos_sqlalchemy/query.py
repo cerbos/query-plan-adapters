@@ -1,5 +1,5 @@
 from types import MappingProxyType
-from typing import Any, Callable
+from typing import Any, Callable, Dict, List, Tuple, Union
 
 from cerbos.engine.v1 import engine_pb2
 from cerbos.response.v1 import response_pb2
@@ -11,10 +11,10 @@ from sqlalchemy.orm import DeclarativeMeta, InstrumentedAttribute
 from sqlalchemy.sql import Select
 from sqlalchemy.sql.expression import BinaryExpression, ColumnOperators
 
-GenericTable = Table | DeclarativeMeta
-GenericColumn = Column | InstrumentedAttribute
-GenericExpression = BinaryExpression | ColumnOperators
-OperatorFnMap = dict[str, Callable[[GenericColumn, Any], GenericExpression]]
+GenericTable = Union[Table, DeclarativeMeta]
+GenericColumn = Union[Column, InstrumentedAttribute]
+GenericExpression = Union[BinaryExpression, ColumnOperators]
+OperatorFnMap = Dict[str, Callable[[GenericColumn, Any], GenericExpression]]
 
 
 # We want to make the base dict "immutable", and enforce explicit (optional) overrides on
@@ -57,11 +57,11 @@ def _get_table_name(t: GenericTable) -> str:
 
 
 def get_query(
-    query_plan: PlanResourcesResponse | response_pb2.PlanResourcesResponse,  # type: ignore (https://github.com/microsoft/pyright/issues/1035)
+    query_plan: Union[PlanResourcesResponse, response_pb2.PlanResourcesResponse],  # type: ignore (https://github.com/microsoft/pyright/issues/1035)
     table: GenericTable,
-    attr_map: dict[str, GenericColumn],
-    table_mapping: list[tuple[GenericTable, GenericExpression]] | None = None,
-    operator_override_fns: OperatorFnMap | None = None,
+    attr_map: Dict[str, GenericColumn],
+    table_mapping: Union[List[Tuple[GenericTable, GenericExpression]], None] = None,
+    operator_override_fns: Union[OperatorFnMap, None] = None,
 ) -> Select:
     if query_plan.filter is None or query_plan.filter.kind in _deny_types:
         return select(table).where(False)
@@ -72,7 +72,7 @@ def get_query(
     # Inspect passed columns. If > 1 origin table, assert that the mapping has been defined
     required_tables = set()
     for c in attr_map.values():
-        # c is of type Column | InstrumentedAttribute - both have a `table` attribute returning a `Table` type
+        # c is of type Union[Column, InstrumentedAttribute] - both have a `table` attribute returning a `Table` type
         if (n := c.table.name) != _get_table_name(table):
             required_tables.add(n)
 
