@@ -1,0 +1,4 @@
+storage:
+  driver: disk
+  disk:
+    directory: /Users/pete/IdeaProjects/query-plan-adapters/policies
