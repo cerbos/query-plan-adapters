@@ -1,6 +1,6 @@
 {
-  "name": "@cerbos/orm-prisma",
-  "version": "1.1.1",
+  "name": "@cerbos/postgresql",
+  "version": "0.0.1",
   "homepage": "https://cerbos.dev",
   "description": "",
   "private": false,
@@ -23,7 +23,7 @@
   "license": "Apache-2.0",
   "devDependencies": {
     "@prisma/client": "^5.0.0",
-    "@types/jest": "^29.0.3",
+    "@types/jest": "^29.5.13",
     "@types/node": "^20.0.0",
     "ts-jest": "^29.0.0",
     "ts-node": "^10.4.0",
