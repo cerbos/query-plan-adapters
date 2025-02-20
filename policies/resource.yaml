@@ -189,3 +189,105 @@ resourcePolicy:
       condition:
         match:
           expr: request.resource.attr.nested.aBool == true
+
+    - actions:
+        - "relation-eq-number"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.nested.aNumber == 1
+
+    - actions:
+        - "relation-lt-number"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.nested.aNumber < 2
+
+    - actions:
+        - "relation-lte-number"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.nested.aNumber <= 2
+
+    - actions:
+        - "relation-gte-number"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.nested.aNumber >= 1
+
+    - actions:
+        - "has-tag"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: >
+            "public" in request.resource.attr.tags
+
+    - actions:
+        - "has-no-tag"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: >
+            !("private" in request.resource.attr.tags)
+
+    - actions:
+        - "relation-gt-number"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.nested.aNumber > 1
+
+    - actions:
+        - "relation-multiple-all"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.resource.attr.nested.aNumber > 1
+              - expr: request.resource.attr.nested.aNumber < 3
+
+    - actions:
+        - "relation-multiple-or"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          any:
+            of:
+              - expr: request.resource.attr.createdBy == P.id
+              - expr: P.id in request.resource.attr.ownedBy
+
+    - actions:
+        - "relation-multiple-none"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          none:
+            of:
+              - expr: request.resource.attr.createdBy == P.id
+              - expr: >
+                  "public" in request.resource.attr.tags

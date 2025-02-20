@@ -2,9 +2,17 @@
 
 An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanResources API](https://docs.cerbos.dev/cerbos/latest/api/index.html#resources-query-plan)) response and converts it into a [Prisma](https://prisma.io) where class object. This is designed to work alongside a project using the [Cerbos Javascript SDK](https://github.com/cerbos/cerbos-sdk-javascript).
 
-The following conditions are supported: `and`, `or`, `eq`, `ne`, `lt`, `gt`, `lte`, `gte` and `in`, as well as relational filters `some`, `none`, `is` and `isNot`.
+## Features
 
-Not Supported:
+### Supported Operators
+
+- Logical operators: `and`, `or`, `not`
+- Comparison operators: `eq`, `ne`, `lt`, `gt`, `lte`, `gte`, `in`
+- Relation operators: `some`, `none`, `is`, `isNot`
+- Support for nested fields and relations
+- Support for both one-to-one and one-to-many relationships
+
+### Not Supported
 
 - `every`
 - `contains`
@@ -22,152 +30,177 @@ Not Supported:
 - Cerbos > v0.16
 - `@cerbos/http` or `@cerbos/grpc` client
 
-## Usage
+## Installation
 
-```
+```bash
 npm install @cerbos/orm-prisma
 ```
 
-This package exports a function:
+## Usage
+
+The package exports a function:
 
 ```ts
 import { queryPlanToPrisma, PlanKind } from "@cerbos/orm-prisma";
 
-queryPlanToPrisma({ queryPlan, fieldNameMapper, relationMapper }): {
+queryPlanToPrisma({
+  queryPlan,                // The Cerbos query plan response
+  fieldNameMapper,         // Map Cerbos field names to Prisma field names
+  relationMapper?: {}      // Optional: Map relation fields and their types
+}): {
   kind: PlanKind,
-  filters?: any // a filter to pass to the findMany() function of Prisma
+  filters?: any           // Prisma where conditions
 }
 ```
 
-where `PlanKind` is:
+### Basic Example
 
 ```ts
-export enum PlanKind {
-  /**
-   * The specified action is always allowed for the principal on resources matching the input.
-   */
-  ALWAYS_ALLOWED = "KIND_ALWAYS_ALLOWED",
-
-  /**
-   * The specified action is always denied for the principal on resources matching the input.
-   */
-  ALWAYS_DENIED = "KIND_ALWAYS_DENIED",
-
-  /**
-   * The specified action is conditionally allowed for the principal on resources matching the input.
-   */
-  CONDITIONAL = "KIND_CONDITIONAL",
-}
-```
-
-The function reqiures the full query plan from Cerbos to be passed in an object along with a `fieldNameMapper` and option `relationMapper` if the model has relations.
-
-A basic implementation can be as simple as:
-
-```js
 import { GRPC as Cerbos } from "@cerbos/grpc";
 import { PrismaClient } from "@prisma/client";
-
 import { queryPlanToPrisma, PlanKind } from "@cerbos/orm-prisma";
 
 const prisma = new PrismaClient();
 const cerbos = new Cerbos("localhost:3592", { tls: false });
 
-// Fetch the query plan from Cerbos passing in the principal
-// resource type and action
+// Fetch query plan from Cerbos
 const queryPlan = await cerbos.planResources({
-  principal: {....},
-  resource: { kind: "resourceKind" },
-  action: "view"
-})
+  principal: { id: "user1", roles: ["USER"] },
+  resource: { kind: "resource" },
+  action: "view",
+});
 
-// Generate the prisma filter from the query plan
+// Convert query plan to Prisma filters
 const result = queryPlanToPrisma({
   queryPlan,
   fieldNameMapper: {
-    "request.resource.attr.aFieldName": "prismaModelFieldName"
+    "request.resource.attr.title": "title",
+    "request.resource.attr.status": "status",
   },
-  relationMapper: {
-    "request.resource.attr.aRelatedModel": {
-      "relation": "aRelatedModel",
-      "field": "id" // the column it is joined on
-    }
-  }
 });
 
-// The query plan says the user would always be denied
-// return empty or throw an error depending on your app.
-if(result.kind == PlanKind.ALWAYS_DENIED) {
-  return console.log([]);
+if (result.kind === PlanKind.ALWAYS_DENIED) {
+  return [];
 }
 
-// Pass the filters in as where conditions
-// If you have prexisting where conditions, you can pass them in an AND clause
-const result = await prisma.myModel.findMany({
-  where: {
-    AND: result.filters
-  },
+// Use filters in Prisma query
+const records = await prisma.resource.findMany({
+  where: result.filters,
 });
-
-console.log(result)
 ```
 
-The `fieldNameMapper` is used to convert the field names in the query plan response to names of fields in the Prisma model - this can be done as a map or a function:
+### Field Name Mapping
 
-```js
-const filters = queryPlanToPrisma({
+Field names can be mapped using either an object or a function:
+
+```ts
+// Object mapping
+const result = queryPlanToPrisma({
   queryPlan,
   fieldNameMapper: {
-    "request.resource.attr.aFieldName": "prismaModelFieldName",
+    "request.resource.attr.fieldName": "prismaFieldName",
   },
 });
 
-//or
-
-const filters = queryPlanToPrisma({
+// Function mapping
+const result = queryPlanToPrisma({
   queryPlan,
-  fieldNameMapper: (fieldName: string): string => {
-    if (fieldName.indexOf("request.resource.") > 0) {
-      return fieldName.replace("request.resource.attr", "");
-    }
-
-    if (fieldName.indexOf("request.principal.") > 0) {
-      return fieldName.replace("request.principal.attr", "");
-    }
-  },
+  fieldNameMapper: (fieldName) =>
+    fieldName.replace("request.resource.attr.", ""),
 });
 ```
 
-The `relationMapper` is used to convert references to fields which are joins at the database level
+### Relations Mapping
 
-```js
-const filters = queryPlanToPrisma({
+Relations can be mapped with their types (one-to-one or one-to-many):
+
+```ts
+const result = queryPlanToPrisma({
   queryPlan,
   fieldNameMapper: {},
   relationMapper: {
-    "request.resource.attr.aRelatedModel": {
-      relation: "aRelatedModel",
-      field: "id", // the column it is joined on
+    "request.resource.attr.owner": {
+      relation: "owner",
+      field: "id",
+      type: "one", // "one" for one-to-one, "many" for one-to-many
+    },
+    "request.resource.attr.tags": {
+      relation: "tags",
+      field: "name",
+      type: "many",
     },
   },
 });
 
-//or
-
-const filters = queryPlanToPrisma({
+// Function-based relation mapping
+const result = queryPlanToPrisma({
   queryPlan,
   fieldNameMapper: {},
-  relationMapper: (fieldName: string): string => {
-    if (fieldName.indexOf("request.resource.") > 0) {
+  relationMapper: (fieldName) => {
+    if (fieldName.includes("owner")) {
       return {
-        relation: fieldName.replace("request.resource.attr.", ""),
-        field: "id", // the column it is joined on
+        relation: "owner",
+        field: "id",
+        type: "one",
       };
     }
+    // ...
   },
 });
 ```
 
+### Complex Examples
+
+#### Multiple Conditions
+
+```ts
+// Combining multiple conditions with AND
+const result = queryPlanToPrisma({
+  queryPlan,
+  fieldNameMapper: {},
+  relationMapper: {
+    "request.resource.attr.status": {
+      relation: "status",
+      field: "value",
+      type: "one",
+    },
+    "request.resource.attr.owner": {
+      relation: "owner",
+      field: "id",
+      type: "one",
+    },
+  },
+});
+
+// Results in Prisma filters like:
+{
+  AND: [
+    { status: { is: { value: { equals: "active" } } } },
+    { owner: { is: { id: { equals: "user1" } } } },
+  ];
+}
+```
+
+#### Nested Relations
+
+```ts
+const result = queryPlanToPrisma({
+  queryPlan,
+  fieldNameMapper: {
+    "request.resource.attr.nested.field": "nestedModel.field",
+  },
+});
+
+// Results in Prisma filters like:
+{
+  nestedModel: {
+    field: {
+      equals: "value";
+    }
+  }
+}
+```
+
 ## Full Example
 
-A full Prisma application making use of this adapater can be found at [https://github.com/cerbos/express-prisma-cerbos](https://github.com/cerbos/express-prisma-cerbos)
+A complete example application using this adapter can be found at [https://github.com/cerbos/express-prisma-cerbos](https://github.com/cerbos/express-prisma-cerbos)
