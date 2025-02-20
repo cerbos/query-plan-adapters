@@ -291,3 +291,30 @@ resourcePolicy:
               - expr: request.resource.attr.createdBy == P.id
               - expr: >
                   "public" in request.resource.attr.tags
+
+    - actions:
+        - "contains"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.aString.contains("str")
+
+    - actions:
+        - "starts-with"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.aString.startsWith("str")
+
+    - actions:
+        - "is-set"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.aOptionalString != null

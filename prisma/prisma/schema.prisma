@@ -21,6 +21,7 @@ model Resource {
   nested           NestedResource @relation(fields: [nestedResourceId], references: [id])
   nestedResourceId String
   tags             Tag[] // Add many-to-many relationship
+  aOptionalString  String?
 }
 
 model User {

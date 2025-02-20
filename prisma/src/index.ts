@@ -248,6 +248,83 @@ const buildPrismaFilterFromCerbosExpression = (
         {}
       );
     }
+
+    case "contains":
+    case "startsWith":
+    case "endsWith": {
+      const leftOperand = operands.find(
+        (o: PlanExpressionOperand) => "name" in o
+      );
+      if (!leftOperand) throw new Error("No operand with 'name' found");
+
+      const rightOperand = operands.find(
+        (o: PlanExpressionOperand) => "value" in o
+      );
+      if (!rightOperand) throw new Error("No operand with 'value' found");
+
+      const { path, relation } = resolveOperand(leftOperand);
+      const { value } = resolveOperand(rightOperand);
+
+      if (typeof value !== "string") {
+        throw new Error(`${operator} operator requires string value`);
+      }
+
+      if (relation) {
+        const relationOperator = getPrismaRelationOperator(relation, operator);
+        return {
+          [relation.relation]: {
+            [relationOperator]: {
+              [relation.field]: { [operator]: value },
+            },
+          },
+        };
+      }
+
+      return path.reduceRight(
+        (acc: PrismaFilter, key: string, index: number) => {
+          return index === path.length - 1
+            ? { [key]: { [operator]: value } }
+            : { [key]: acc };
+        },
+        {}
+      );
+    }
+
+    case "isSet": {
+      const leftOperand = operands.find(
+        (o: PlanExpressionOperand) => "name" in o
+      );
+      if (!leftOperand) throw new Error("No operand with 'name' found");
+
+      const rightOperand = operands.find(
+        (o: PlanExpressionOperand) => "value" in o
+      );
+      if (!rightOperand) throw new Error("No operand with 'value' found");
+
+      const { path, relation } = resolveOperand(leftOperand);
+      const { value } = resolveOperand(rightOperand);
+
+      if (relation) {
+        const relationOperator = getPrismaRelationOperator(relation, "isSet");
+        return {
+          [relation.relation]: {
+            [relationOperator]: {
+              [relation.field]: value ? { not: null } : { equals: null },
+            },
+          },
+        };
+      }
+
+      return path.reduceRight(
+        (acc: PrismaFilter, key: string, index: number) => {
+          return index === path.length - 1
+            ? { [key]: value ? { not: null } : { equals: null } }
+            : { [key]: acc };
+        },
+        {}
+      );
+    }
+
     default: {
       throw new Error(`Unsupported operator: ${operator}`);
     }

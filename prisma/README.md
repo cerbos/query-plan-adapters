@@ -9,6 +9,7 @@ An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanRe
 - Logical operators: `and`, `or`, `not`
 - Comparison operators: `eq`, `ne`, `lt`, `gt`, `lte`, `gte`, `in`
 - Relation operators: `some`, `none`, `is`, `isNot`
+- String operations: `startsWith`, `endsWith`, `contains`
 - Support for nested fields and relations
 - Support for both one-to-one and one-to-many relationships
 
@@ -18,8 +19,6 @@ An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanRe
 - `contains`
 - `search`
 - `mode`
-- `startsWith`
-- `endsWith`
 - `isSet`
 - Scalar filters
 - Atomic number operations
@@ -27,7 +26,7 @@ An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanRe
 
 ## Requirements
 
-- Cerbos > v0.16
+- Cerbos > v0.40
 - `@cerbos/http` or `@cerbos/grpc` client
 
 ## Installation
