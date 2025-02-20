@@ -382,20 +382,26 @@ const buildPrismaFilterFromCerbosExpression = (
       );
     }
 
-    case "exists": {
+    case "exists":
+    case "exists_one":
+    case "all":
+    case "except":
+    case "filter": {
       if (operands.length !== 2) {
-        throw new Error("exists requires exactly two operands");
+        throw new Error(`${operator} requires exactly two operands`);
       }
 
       const [collection, lambda] = operands;
       if (!("name" in collection)) {
         throw new Error(
-          "First operand of exists must be a collection reference"
+          "First operand of exists/all/except must be a collection reference"
         );
       }
 
       if (!("operator" in lambda)) {
-        throw new Error("Second operand of exists must be a lambda expression");
+        throw new Error(
+          "Second operand of exists/all/except must be a lambda expression"
+        );
       }
 
       const { relation } = resolveFieldReference(
@@ -405,7 +411,7 @@ const buildPrismaFilterFromCerbosExpression = (
       );
 
       if (!relation) {
-        throw new Error("exists operator requires a relation mapping");
+        throw new Error(`${operator} operator requires a relation mapping`);
       }
 
       const lambdaCondition = buildPrismaFilterFromCerbosExpression(
@@ -414,11 +420,43 @@ const buildPrismaFilterFromCerbosExpression = (
         relationMapper
       );
 
-      return {
-        [relation.relation]: {
-          some: lambdaCondition,
-        },
-      };
+      switch (operator) {
+        case "exists":
+          return {
+            [relation.relation]: {
+              some: lambdaCondition,
+            },
+          };
+        case "exists_one":
+          return {
+            [relation.relation]: {
+              some: lambdaCondition,
+            },
+            AND: [
+              {
+                [relation.relation]: {
+                  every: {
+                    OR: [lambdaCondition, { NOT: lambdaCondition }],
+                  },
+                },
+              },
+            ],
+          };
+        case "all":
+          return {
+            [relation.relation]: {
+              every: lambdaCondition,
+            },
+          };
+        case "filter":
+          return {
+            [relation.relation]: {
+              some: lambdaCondition,
+            },
+          };
+        default:
+          throw new Error(`Unexpected operator: ${operator}`);
+      }
     }
 
     default: {
