@@ -325,6 +325,48 @@ const buildPrismaFilterFromCerbosExpression = (
       );
     }
 
+    case "hasIntersection": {
+      if (operands.length !== 2) {
+        throw new Error("hasIntersection requires exactly two operands");
+      }
+
+      const [leftOperand, rightOperand] = operands;
+
+      if (!("name" in leftOperand) || !("value" in rightOperand)) {
+        throw new Error("Invalid operands for hasIntersection");
+      }
+
+      const { path, relation } = resolveFieldReference(
+        leftOperand.name,
+        fieldMapper,
+        relationMapper
+      );
+      const { value } = resolveOperand(rightOperand);
+
+      if (!Array.isArray(value)) {
+        throw new Error("hasIntersection requires an array value");
+      }
+
+      if (relation) {
+        return {
+          [relation.relation]: {
+            some: {
+              [relation.field]: { in: value },
+            },
+          },
+        };
+      }
+
+      return path.reduceRight(
+        (acc: PrismaFilter, key: string, index: number) => {
+          return index === path.length - 1
+            ? { [key]: { hasSome: value } }
+            : { [key]: acc };
+        },
+        {}
+      );
+    }
+
     default: {
       throw new Error(`Unsupported operator: ${operator}`);
     }

@@ -318,3 +318,12 @@ resourcePolicy:
       condition:
         match:
           expr: request.resource.attr.aOptionalString != null
+
+    - actions:
+        - "has-intersection"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: hasIntersection(request.resource.attr.tags, request.principal.attr.tags)

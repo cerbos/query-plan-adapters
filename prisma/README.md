@@ -8,20 +8,10 @@ An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanRe
 
 - Logical operators: `and`, `or`, `not`
 - Comparison operators: `eq`, `ne`, `lt`, `gt`, `lte`, `gte`, `in`
-- Relation operators: `some`, `none`, `is`, `isNot`
+- Relation operators: `some`, `none`, `is`, `isNot`, `hasIntersection`
 - String operations: `startsWith`, `endsWith`, `contains`, `isSet`
 - Support for nested fields and relations
 - Support for both one-to-one and one-to-many relationships
-
-### Not Supported
-
-- `every`
-- `contains`
-- `search`
-- `mode`
-- Scalar filters
-- Atomic number operations
-- Composite keys
 
 ## Requirements
 

@@ -1284,6 +1284,111 @@ test("conditional - has-no-tag", async () => {
   expect(query.map((r) => r.id)).toEqual(["resource1", "resource3"]);
 });
 
+test("conditional - has-intersection", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: {
+      id: "user1",
+      roles: ["USER"],
+      attr: { tags: ["public", "draft"] },
+    },
+    resource: { kind: "resource" },
+    action: "has-intersection",
+  });
+
+  expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+  expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+    operator: "hasIntersection",
+    operands: [
+      { name: "request.resource.attr.tags" },
+      { value: ["public", "draft"] },
+    ],
+  });
+
+  const result = queryPlanToPrisma({
+    queryPlan,
+    fieldNameMapper: {},
+    relationMapper: {
+      "request.resource.attr.tags": {
+        relation: "tags",
+        field: "name",
+        type: "many",
+      },
+    },
+  });
+
+  expect(result).toStrictEqual({
+    kind: PlanKind.CONDITIONAL,
+    filters: {
+      tags: {
+        some: {
+          name: { in: ["public", "draft"] },
+        },
+      },
+    },
+  });
+
+  const query = await prisma.resource.findMany({
+    where: { ...result.filters },
+    include: { tags: true },
+  });
+
+  // Should return resources that have either "public" or "draft" tags
+  expect(query.map((r) => r.id)).toEqual(["resource1", "resource3"]);
+});
+
+test("conditional - relation-gt-number", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "relation-gt-number",
+  });
+
+  expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+  const conditions = (queryPlan as PlanResourcesConditionalResponse).condition;
+  expect(conditions).toEqual({
+    operator: "gt",
+    operands: [{ name: "request.resource.attr.nested.aNumber" }, { value: 1 }],
+  });
+
+  const result = queryPlanToPrisma({
+    queryPlan,
+    fieldNameMapper: {},
+    relationMapper: {
+      "request.resource.attr.nested.aNumber": {
+        relation: "nested",
+        field: "aNumber",
+        type: "one",
+      },
+    },
+  });
+
+  expect(result).toStrictEqual({
+    kind: PlanKind.CONDITIONAL,
+    filters: {
+      nested: {
+        is: {
+          aNumber: { gt: 1 },
+        },
+      },
+    },
+  });
+
+  const query = await prisma.resource.findMany({
+    where: { ...result.filters },
+  });
+
+  expect(query.map((r) => r.id)).toEqual(
+    fixtureResources
+      .filter((r) => {
+        const nestedResource = fixtureNestedResources.find(
+          (n) => n.id === r.nested.connect?.id
+        );
+        return (nestedResource?.aNumber ?? 0) > 1;
+      })
+      .map((r) => r.id)
+  );
+});
+
 test("conditional - relation multiple all", async () => {
   const queryPlan = await cerbos.planResources({
     principal: { id: "user1", roles: ["USER"] },
