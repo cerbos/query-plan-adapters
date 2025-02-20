@@ -16,7 +16,7 @@ type FieldMapper =
 
 type Relation = {
   relation: string;
-  field: string;
+  field?: string; // Make field optional
   type: "one" | "many"; // Add type field to Relation interface
 };
 
@@ -98,7 +98,7 @@ const resolveFieldReference = (
 
   if (relation) {
     return {
-      path: [relation.relation, relation.field],
+      path: [relation.relation, relation.field].filter(Boolean) as string[],
       relation,
     };
   }
@@ -204,7 +204,7 @@ const buildPrismaFilterFromCerbosExpression = (
         return {
           [relation.relation]: {
             [relationOperator]: {
-              [relation.field]: { [prismaOperator]: value },
+              [relation.field!]: { [prismaOperator]: value },
             },
           },
         };
@@ -233,7 +233,7 @@ const buildPrismaFilterFromCerbosExpression = (
         return {
           [relation.relation]: {
             [relationOperator]: {
-              [relation.field]: value,
+              [relation.field!]: value,
             },
           },
         };
@@ -274,7 +274,7 @@ const buildPrismaFilterFromCerbosExpression = (
         return {
           [relation.relation]: {
             [relationOperator]: {
-              [relation.field]: { [operator]: value },
+              [relation.field!]: { [operator]: value },
             },
           },
         };
@@ -309,7 +309,7 @@ const buildPrismaFilterFromCerbosExpression = (
         return {
           [relation.relation]: {
             [relationOperator]: {
-              [relation.field]: value ? { not: null } : { equals: null },
+              [relation.field!]: value ? { not: null } : { equals: null },
             },
           },
         };
@@ -351,7 +351,7 @@ const buildPrismaFilterFromCerbosExpression = (
         return {
           [relation.relation]: {
             some: {
-              [relation.field]: { in: value },
+              [relation.field!]: { in: value },
             },
           },
         };
@@ -365,6 +365,60 @@ const buildPrismaFilterFromCerbosExpression = (
         },
         {}
       );
+    }
+
+    case "lambda": {
+      // Lambda expressions are typically used with exists/forAll operators
+      // The first operand is the condition, second is the variable definition
+      const [condition, variable] = operands;
+      if (!("name" in variable)) {
+        throw new Error("Lambda variable must have a name");
+      }
+
+      return buildPrismaFilterFromCerbosExpression(
+        condition,
+        (key: string) => key.replace(`${variable.name}.`, ""),
+        relationMapper
+      );
+    }
+
+    case "exists": {
+      if (operands.length !== 2) {
+        throw new Error("exists requires exactly two operands");
+      }
+
+      const [collection, lambda] = operands;
+      if (!("name" in collection)) {
+        throw new Error(
+          "First operand of exists must be a collection reference"
+        );
+      }
+
+      if (!("operator" in lambda)) {
+        throw new Error("Second operand of exists must be a lambda expression");
+      }
+
+      const { relation } = resolveFieldReference(
+        collection.name,
+        fieldMapper,
+        relationMapper
+      );
+
+      if (!relation) {
+        throw new Error("exists operator requires a relation mapping");
+      }
+
+      const lambdaCondition = buildPrismaFilterFromCerbosExpression(
+        lambda,
+        fieldMapper,
+        relationMapper
+      );
+
+      return {
+        [relation.relation]: {
+          some: lambdaCondition,
+        },
+      };
     }
 
     default: {

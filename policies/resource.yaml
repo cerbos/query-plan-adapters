@@ -327,3 +327,21 @@ resourcePolicy:
       condition:
         match:
           expr: hasIntersection(request.resource.attr.tags, request.principal.attr.tags)
+
+    - actions:
+        - "exists-single"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.tags.exists(tag, tag.id == "tag1")
+
+    - actions:
+        - "exists-multiple"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.tags.exists(tag, tag.id == "tag1" && tag.name == "public")

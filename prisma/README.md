@@ -100,7 +100,7 @@ const result = queryPlanToPrisma({
 
 ### Relations Mapping
 
-Relations can be mapped with their types (one-to-one or one-to-many):
+Relations can be mapped with their types (one-to-one or one-to-many). The `field` property is only required when using direct field comparisons and can be omitted when using lambda expressions or exists operators:
 
 ```ts
 const result = queryPlanToPrisma({

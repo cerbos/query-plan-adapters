@@ -1892,3 +1892,188 @@ test("conditional - isSet", async () => {
     fixtureResources.filter((a) => a.aOptionalString).map((r) => r.id)
   );
 });
+
+test("conditional - exists single", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "exists-single",
+  });
+
+  expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+
+  expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+    operator: "exists",
+    operands: [
+      {
+        name: "request.resource.attr.tags",
+      },
+      {
+        operator: "lambda",
+        operands: [
+          {
+            operator: "eq",
+            operands: [
+              {
+                name: "tag.id",
+              },
+              {
+                value: "tag1",
+              },
+            ],
+          },
+          {
+            name: "tag",
+          },
+        ],
+      },
+    ],
+  });
+
+  const result = queryPlanToPrisma({
+    queryPlan,
+    fieldNameMapper: {},
+    relationMapper: {
+      "request.resource.attr.tags": {
+        relation: "tags",
+        type: "many",
+      },
+    },
+  });
+
+  expect(result).toStrictEqual({
+    kind: PlanKind.CONDITIONAL,
+    filters: {
+      tags: {
+        some: {
+          id: {
+            equals: "tag1",
+          },
+        },
+      },
+    },
+  });
+
+  const query = await prisma.resource.findMany({
+    where: { ...result.filters },
+  });
+
+  expect(query.map((r) => r.id)).toEqual(
+    fixtureResources
+      .filter(
+        (a) =>
+          Array.isArray(a.tags?.connect) &&
+          a.tags?.connect
+            .map((t) => {
+              return fixtureTags.find((f) => f.id === t.id);
+            })
+            .filter((t) => t?.id == "tag1").length > 0
+      )
+      .map((r) => r.id)
+  );
+});
+
+test("conditional - exists multiple", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "exists-multiple",
+  });
+
+  expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+
+  expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+    operator: "exists",
+    operands: [
+      {
+        name: "request.resource.attr.tags",
+      },
+      {
+        operator: "lambda",
+        operands: [
+          {
+            operator: "and",
+            operands: [
+              {
+                operator: "eq",
+                operands: [
+                  {
+                    name: "tag.id",
+                  },
+                  {
+                    value: "tag1",
+                  },
+                ],
+              },
+              {
+                operator: "eq",
+                operands: [
+                  {
+                    name: "tag.name",
+                  },
+                  {
+                    value: "public",
+                  },
+                ],
+              },
+            ],
+          },
+          {
+            name: "tag",
+          },
+        ],
+      },
+    ],
+  });
+
+  const result = queryPlanToPrisma({
+    queryPlan,
+    fieldNameMapper: {},
+    relationMapper: {
+      "request.resource.attr.tags": {
+        relation: "tags",
+        type: "many",
+      },
+    },
+  });
+
+  expect(result).toStrictEqual({
+    kind: PlanKind.CONDITIONAL,
+    filters: {
+      tags: {
+        some: {
+          AND: [
+            {
+              id: {
+                equals: "tag1",
+              },
+            },
+            {
+              name: {
+                equals: "public",
+              },
+            },
+          ],
+        },
+      },
+    },
+  });
+
+  const query = await prisma.resource.findMany({
+    where: { ...result.filters },
+  });
+
+  expect(query.map((r) => r.id)).toEqual(
+    fixtureResources
+      .filter(
+        (a) =>
+          Array.isArray(a.tags?.connect) &&
+          a.tags?.connect
+            .map((t) => {
+              return fixtureTags.find((f) => f.id === t.id);
+            })
+            .filter((t) => t?.id === "tag1" && t?.name === "public").length > 0
+      )
+      .map((r) => r.id)
+  );
+});
