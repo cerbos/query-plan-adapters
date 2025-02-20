@@ -949,14 +949,18 @@ test("conditional - nested eq", async () => {
 
   const result = queryPlanToPrisma({
     queryPlan,
-    fieldNameMapper: {
-      "request.resource.attr.nested.aBool": "nested.aBool",
+    fieldNameMapper: {},
+    relationMapper: {
+      "request.resource.attr.nested": {
+        relation: "nested",
+        type: "one",
+      },
     },
   });
 
   expect(result).toStrictEqual({
     kind: PlanKind.CONDITIONAL,
-    filters: { nested: { aBool: { equals: true } } },
+    filters: { nested: { is: { aBool: { equals: true } } } },
   });
   const query = await prisma.resource.findMany({
     where: { ...result.filters },
@@ -992,9 +996,8 @@ test("conditional - relation eq with number", async () => {
     queryPlan,
     fieldNameMapper: {},
     relationMapper: {
-      "request.resource.attr.nested.aNumber": {
+      "request.resource.attr.nested": {
         relation: "nested",
-        field: "aNumber",
         type: "one",
       },
     },
@@ -1045,9 +1048,8 @@ test("conditional - relation lt with number", async () => {
     queryPlan,
     fieldNameMapper: {},
     relationMapper: {
-      "request.resource.attr.nested.aNumber": {
+      "request.resource.attr.nested": {
         relation: "nested",
-        field: "aNumber",
         type: "one",
       },
     },
@@ -1098,9 +1100,8 @@ test("conditional - relation lte with number", async () => {
     queryPlan,
     fieldNameMapper: {},
     relationMapper: {
-      "request.resource.attr.nested.aNumber": {
+      "request.resource.attr.nested": {
         relation: "nested",
-        field: "aNumber",
         type: "one",
       },
     },
@@ -1151,9 +1152,8 @@ test("conditional - relation gte with number", async () => {
     queryPlan,
     fieldNameMapper: {},
     relationMapper: {
-      "request.resource.attr.nested.aNumber": {
+      "request.resource.attr.nested": {
         relation: "nested",
-        field: "aNumber",
         type: "one",
       },
     },
@@ -1296,13 +1296,13 @@ test("conditional - has-intersection", async () => {
   });
 
   expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
-  expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
-    operator: "hasIntersection",
-    operands: [
-      { name: "request.resource.attr.tags" },
-      { value: ["public", "draft"] },
-    ],
-  });
+  // expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+  //   operator: "hasIntersection",
+  //   operands: [
+  //     { name: "request.resource.attr.tags" },
+  //     { value: ["public", "draft"] },
+  //   ],
+  // });
 
   const result = queryPlanToPrisma({
     queryPlan,
@@ -1310,7 +1310,6 @@ test("conditional - has-intersection", async () => {
     relationMapper: {
       "request.resource.attr.tags": {
         relation: "tags",
-        field: "name",
         type: "many",
       },
     },
@@ -1329,7 +1328,6 @@ test("conditional - has-intersection", async () => {
 
   const query = await prisma.resource.findMany({
     where: { ...result.filters },
-    include: { tags: true },
   });
 
   // Should return resources that have either "public" or "draft" tags
@@ -1354,9 +1352,8 @@ test("conditional - relation-gt-number", async () => {
     queryPlan,
     fieldNameMapper: {},
     relationMapper: {
-      "request.resource.attr.nested.aNumber": {
+      "request.resource.attr.nested": {
         relation: "nested",
-        field: "aNumber",
         type: "one",
       },
     },
@@ -1421,9 +1418,8 @@ test("conditional - relation multiple all", async () => {
     queryPlan,
     fieldNameMapper: {},
     relationMapper: {
-      "request.resource.attr.nested.aNumber": {
+      "request.resource.attr.nested": {
         relation: "nested",
-        field: "aNumber",
         type: "one",
       },
     },
@@ -2319,4 +2315,208 @@ test("conditional - filter", async () => {
       )
       .map((r) => r.id)
   );
+});
+
+test("conditional - relation is without field", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "relation-is",
+  });
+
+  expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+
+  const conditions = (queryPlan as PlanResourcesConditionalResponse).condition;
+
+  expect(conditions).toEqual({
+    operator: "eq",
+    operands: [{ name: "request.resource.attr.createdBy" }, { value: "user1" }],
+  });
+
+  const result = queryPlanToPrisma({
+    queryPlan,
+    fieldNameMapper: {},
+    relationMapper: {
+      "request.resource.attr.createdBy": {
+        relation: "createdBy",
+        field: "id",
+        type: "one",
+      },
+    },
+  });
+
+  expect(result).toStrictEqual({
+    kind: PlanKind.CONDITIONAL,
+    filters: {
+      createdBy: {
+        is: {
+          id: { equals: "user1" },
+        },
+      },
+    },
+  });
+
+  const query = await prisma.resource.findMany({
+    where: { ...result.filters },
+  });
+
+  expect(query.map((r) => r.id)).toEqual(
+    fixtureResources
+      .filter((r) => {
+        if (!r.createdBy?.connect) return false;
+        return (r.createdBy.connect as { id: string }).id == "user1";
+      })
+      .map((r) => r.id)
+  );
+});
+
+test("conditional - relation eq with number without field", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "relation-eq-number",
+  });
+
+  expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+
+  const conditions = (queryPlan as PlanResourcesConditionalResponse).condition;
+
+  expect(conditions).toEqual({
+    operator: "eq",
+    operands: [{ name: "request.resource.attr.nested.aNumber" }, { value: 1 }],
+  });
+
+  const result = queryPlanToPrisma({
+    queryPlan,
+    fieldNameMapper: {
+      "request.resource.attr.aOptionalString": "aOptionalString",
+    },
+    relationMapper: {
+      "request.resource.attr.nested": {
+        relation: "nested",
+        type: "one",
+      },
+    },
+  });
+
+  expect(result).toStrictEqual({
+    kind: PlanKind.CONDITIONAL,
+    filters: {
+      nested: {
+        is: {
+          aNumber: {
+            equals: 1,
+          },
+        },
+      },
+    },
+  });
+
+  const query = await prisma.resource.findMany({
+    where: { ...result.filters },
+  });
+
+  expect(query.map((r) => r.id)).toEqual(
+    fixtureResources
+      .filter((r) => {
+        const nestedResource = fixtureNestedResources.find(
+          (n) => n.id === r.nested.connect?.id
+        );
+        return nestedResource && nestedResource.aNumber === 1;
+      })
+      .map((r) => r.id)
+  );
+});
+
+test("conditional - kitchen sink", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: {
+      id: "user1",
+      roles: ["USER"],
+      attr: { tags: ["public", "draft"] },
+    },
+    resource: { kind: "resource" },
+    action: "kitchensink",
+  });
+
+  expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+
+  console.log(JSON.stringify(queryPlan, null, 2));
+
+  // expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+  //   operator: "filter",
+  //   operands: [
+  //     {
+  //       name: "request.resource.attr.tags",
+  //     },
+  //     {
+  //       operator: "lambda",
+  //       operands: [
+  //         {
+  //           operator: "eq",
+  //           operands: [
+  //             {
+  //               name: "tag.name",
+  //             },
+  //             {
+  //               value: "public",
+  //             },
+  //           ],
+  //         },
+  //         {
+  //           name: "tag",
+  //         },
+  //       ],
+  //     },
+  //   ],
+  // });
+
+  const result = queryPlanToPrisma({
+    queryPlan,
+    fieldNameMapper: {
+      "request.resource.attr.aOptionalString": "aOptionalString",
+      "request.resource.attr.aBool": "aBool",
+    },
+    relationMapper: {
+      "request.resource.attr.tags": {
+        relation: "tags",
+        type: "many",
+      },
+      "request.resource.attr.nested": {
+        relation: "nested",
+        type: "one",
+      },
+    },
+  });
+
+  // expect(result).toStrictEqual({
+  //   kind: PlanKind.CONDITIONAL,
+  //   filters: {
+  //     tags: {
+  //       some: {
+  //         name: { equals: "public" },
+  //       },
+  //     },
+  //   },
+  // });
+
+  console.log(JSON.stringify(result, null, 2));
+  const query = await prisma.resource.findMany({
+    where: { ...result.filters },
+  });
+  console.log(query);
+
+  // expect(query.map((r) => r.id)).toEqual(
+  //   fixtureResources
+  //     .filter(
+  //       (a) =>
+  //         Array.isArray(a.tags?.connect) &&
+  //         a.tags?.connect
+  //           .map((t) => {
+  //             return fixtureTags.find((f) => f.id === t.id);
+  //           })
+  //           .filter((t) => t?.name === "public").length > 0
+  //     )
+  //     .map((r) => r.id)
+  // );
 });

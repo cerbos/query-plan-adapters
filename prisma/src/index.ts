@@ -91,6 +91,7 @@ const resolveFieldReference = (
     return { path: mappedReference.split(".") };
   }
 
+  // Check for relation using the full path first
   const relation =
     typeof relationMapper === "function"
       ? relationMapper(mappedReference)
@@ -101,6 +102,26 @@ const resolveFieldReference = (
       path: [relation.relation, relation.field].filter(Boolean) as string[],
       relation,
     };
+  }
+
+  // If no direct match, check for relation prefix
+  const parts = mappedReference.split(".");
+  for (let i = parts.length - 1; i > 0; i--) {
+    const prefix = parts.slice(0, i).join(".");
+    const relationForPrefix =
+      typeof relationMapper === "function"
+        ? relationMapper(prefix)
+        : relationMapper[prefix];
+
+    if (relationForPrefix) {
+      return {
+        path: [relationForPrefix.relation, ...parts.slice(i)],
+        relation: {
+          ...relationForPrefix,
+          field: parts.slice(i).join("."),
+        },
+      };
+    }
   }
 
   return { path: mappedReference.split(".") };
@@ -332,8 +353,43 @@ const buildPrismaFilterFromCerbosExpression = (
 
       const [leftOperand, rightOperand] = operands;
 
-      if (!("name" in leftOperand) || !("value" in rightOperand)) {
-        throw new Error("Invalid operands for hasIntersection");
+      // Handle case where first operand is a map expression
+      if ("operator" in leftOperand && leftOperand.operator === "map") {
+        const mapResult = buildPrismaFilterFromCerbosExpression(
+          leftOperand,
+          fieldMapper,
+          relationMapper
+        );
+
+        // Get the relation and field from the map result
+        const relationKey = Object.keys(mapResult)[0];
+        const relation = mapResult[relationKey];
+        const selectKey = Object.keys(
+          relation[Object.keys(relation)[0]].select
+        )[0];
+
+        if (!("value" in rightOperand)) {
+          throw new Error("Second operand of hasIntersection must be a value");
+        }
+
+        return {
+          [relationKey]: {
+            some: {
+              [selectKey]: { in: rightOperand.value },
+            },
+          },
+        };
+      }
+
+      // Original logic for direct field reference
+      if (!("name" in leftOperand)) {
+        throw new Error(
+          "First operand of hasIntersection must be a field reference or map expression"
+        );
+      }
+
+      if (!("value" in rightOperand)) {
+        throw new Error("Second operand of hasIntersection must be a value");
       }
 
       const { path, relation } = resolveFieldReference(
@@ -341,9 +397,8 @@ const buildPrismaFilterFromCerbosExpression = (
         fieldMapper,
         relationMapper
       );
-      const { value } = resolveOperand(rightOperand);
 
-      if (!Array.isArray(value)) {
+      if (!Array.isArray(rightOperand.value)) {
         throw new Error("hasIntersection requires an array value");
       }
 
@@ -351,7 +406,7 @@ const buildPrismaFilterFromCerbosExpression = (
         return {
           [relation.relation]: {
             some: {
-              [relation.field!]: { in: value },
+              [relation.field!]: { in: rightOperand.value },
             },
           },
         };
@@ -360,7 +415,7 @@ const buildPrismaFilterFromCerbosExpression = (
       return path.reduceRight(
         (acc: PrismaFilter, key: string, index: number) => {
           return index === path.length - 1
-            ? { [key]: { hasSome: value } }
+            ? { [key]: { hasSome: rightOperand.value } }
             : { [key]: acc };
         },
         {}
@@ -457,6 +512,47 @@ const buildPrismaFilterFromCerbosExpression = (
         default:
           throw new Error(`Unexpected operator: ${operator}`);
       }
+    }
+
+    case "map": {
+      if (operands.length !== 2) {
+        throw new Error("map requires exactly two operands");
+      }
+
+      const [collection, lambda] = operands;
+      if (!("name" in collection)) {
+        throw new Error("First operand of map must be a collection reference");
+      }
+
+      if (!("operator" in lambda) || lambda.operator !== "lambda") {
+        throw new Error("Second operand of map must be a lambda expression");
+      }
+
+      const { relation } = resolveFieldReference(
+        collection.name,
+        fieldMapper,
+        relationMapper
+      );
+
+      if (!relation) {
+        throw new Error("map operator requires a relation mapping");
+      }
+
+      const [projection, variable] = lambda.operands;
+      if (!("name" in projection) || !("name" in variable)) {
+        throw new Error("Invalid map lambda expression structure");
+      }
+
+      // For map operations, we project the field specified in the lambda
+      return {
+        [relation.relation]: {
+          [getPrismaRelationOperator(relation, "map")]: {
+            select: {
+              [projection.name.replace(`${variable.name}.`, "")]: true,
+            },
+          },
+        },
+      };
     }
 
     default: {

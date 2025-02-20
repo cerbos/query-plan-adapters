@@ -326,7 +326,7 @@ resourcePolicy:
         - USER
       condition:
         match:
-          expr: hasIntersection(request.resource.attr.tags, request.principal.attr.tags)
+          expr: hasIntersection(request.resource.attr.tags.map(t, t.name), request.principal.attr.tags)
 
     - actions:
         - "exists-single"
@@ -372,3 +372,25 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.tags.filter(tag, tag.name == "public")
+
+    - actions:
+        - "kitchensink"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          all:
+            of:
+              - expr: R.attr.tags.filter(tag, tag.name == "public")
+              - any:
+                  of:
+                    - expr: request.resource.attr.aOptionalString != null
+                    - expr: request.resource.attr.aBool == true
+                    - expr: R.attr.tags.exists(tag, tag.id == "tag1" && tag.name == "public")
+                    - expr: request.resource.attr.nested.aNumber > 1
+              - all:
+                  of:
+                    - expr: hasIntersection(request.resource.attr.tags.map(t, t.name), request.principal.attr.tags)
+                    - expr: >
+                        "public" in request.principal.attr.tags
