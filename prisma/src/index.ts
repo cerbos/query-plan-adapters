@@ -8,28 +8,28 @@ export type PlanKind = PK;
 export const PlanKind = PK;
 
 type PrismaFilter = Record<string, any>;
-type FieldMapper =
-  | {
-      [key: string]: string;
-    }
-  | ((key: string) => string);
 
-type Relation = {
-  relation: string;
-  field?: string; // Make field optional
-  type: "one" | "many"; // Add type field to Relation interface
+type MapperConfig = {
+  field?: string;
+  relation?: {
+    name: string;
+    type: "one" | "many";
+    field?: string;
+    fields?: {
+      [key: string]: MapperConfig;
+    };
+  };
 };
 
-type RelationMapper =
+type Mapper =
   | {
-      [key: string]: Relation;
+      [key: string]: MapperConfig;
     }
-  | ((key: string) => Relation);
+  | ((key: string) => MapperConfig);
 
 interface QueryPlanToPrismaArgs {
   queryPlan: PlanResourcesResponse;
-  fieldNameMapper: FieldMapper;
-  relationMapper?: RelationMapper;
+  mapper: Mapper;
 }
 
 interface QueryPlanToPrismaResult {
@@ -39,8 +39,7 @@ interface QueryPlanToPrismaResult {
 
 export function queryPlanToPrisma({
   queryPlan,
-  fieldNameMapper,
-  relationMapper = {},
+  mapper,
 }: QueryPlanToPrismaArgs): QueryPlanToPrismaResult {
   switch (queryPlan.kind) {
     case PlanKind.ALWAYS_ALLOWED:
@@ -57,8 +56,7 @@ export function queryPlanToPrisma({
         kind: PlanKind.CONDITIONAL,
         filters: buildPrismaFilterFromCerbosExpression(
           queryPlan.condition,
-          fieldNameMapper,
-          relationMapper
+          mapper
         ),
       };
     default:
@@ -67,73 +65,82 @@ export function queryPlanToPrisma({
 }
 
 /**
- * Maps a field using the field mapper
- */
-const mapField = (field: string, fieldMapper?: FieldMapper): string => {
-  if (!fieldMapper) return field;
-
-  return typeof fieldMapper === "function"
-    ? fieldMapper(field)
-    : fieldMapper[field] || field;
-};
-
-/**
  * Resolves a field reference considering relations
  */
 const resolveFieldReference = (
   reference: string,
-  fieldMapper?: FieldMapper,
-  relationMapper?: RelationMapper
-): { path: string[]; relation?: Relation } => {
-  const mappedReference = mapField(reference, fieldMapper);
+  mapper: Mapper
+): {
+  path: string[];
+  relation?: {
+    name: string;
+    type: "one" | "many";
+    field?: string;
+    nestedMapper?: { [key: string]: MapperConfig };
+  };
+} => {
+  const parts = reference.split(".");
+  const lastPart = parts[parts.length - 1];
 
-  if (!relationMapper) {
-    return { path: mappedReference.split(".") };
-  }
+  // First try exact match
+  const config =
+    typeof mapper === "function" ? mapper(reference) : mapper[reference];
 
-  // Check for relation using the full path first
-  const relation =
-    typeof relationMapper === "function"
-      ? relationMapper(mappedReference)
-      : relationMapper[mappedReference];
-
-  if (relation) {
-    return {
-      path: [relation.relation, relation.field].filter(Boolean) as string[],
-      relation,
-    };
-  }
-
-  // If no direct match, check for relation prefix
-  const parts = mappedReference.split(".");
-  for (let i = parts.length - 1; i > 0; i--) {
-    const prefix = parts.slice(0, i).join(".");
-    const relationForPrefix =
-      typeof relationMapper === "function"
-        ? relationMapper(prefix)
-        : relationMapper[prefix];
-
-    if (relationForPrefix) {
+  if (config) {
+    if (config.relation) {
+      const { name, type, field, fields } = config.relation;
       return {
-        path: [relationForPrefix.relation, ...parts.slice(i)],
+        path: [name, field].filter(Boolean) as string[],
         relation: {
-          ...relationForPrefix,
-          field: parts.slice(i).join("."),
+          name,
+          type,
+          field,
+          nestedMapper: fields,
+        },
+      };
+    }
+    return { path: [config.field || reference] };
+  }
+
+  // If no exact match and we have multiple parts, check for parent relation
+  if (parts.length > 1) {
+    const parentPath = parts.slice(0, -1).join(".");
+    const parentConfig =
+      typeof mapper === "function" ? mapper(parentPath) : mapper[parentPath];
+
+    if (parentConfig?.relation) {
+      const { name, type, fields } = parentConfig.relation;
+
+      // Check if there's an explicit field mapping
+      const fieldConfig = fields?.[lastPart];
+      const fieldName = fieldConfig?.field || lastPart;
+
+      return {
+        path: [name],
+        relation: {
+          name,
+          type,
+          field: fieldName,
+          nestedMapper: fields,
         },
       };
     }
   }
 
-  return { path: mappedReference.split(".") };
+  // Default to using the raw reference if no mapping found
+  return { path: [reference] };
 };
 
 /**
  * Determines the appropriate Prisma operator based on relation type and operation
  */
-const getPrismaRelationOperator = (relation: Relation, operator: string) => {
+const getPrismaRelationOperator = (relation: {
+  name: string;
+  type: "one" | "many";
+  field?: string;
+}) => {
   // Use 'is' for one-to-one relations, 'some' for one-to-many/many-to-many
   const relationOperator = relation.type === "one" ? "is" : "some";
-
   return relationOperator;
 };
 
@@ -142,8 +149,7 @@ const getPrismaRelationOperator = (relation: Relation, operator: string) => {
  */
 const buildPrismaFilterFromCerbosExpression = (
   expression: PlanExpressionOperand,
-  fieldMapper?: FieldMapper,
-  relationMapper?: RelationMapper
+  mapper: Mapper
 ): PrismaFilter => {
   if (!("operator" in expression) || !("operands" in expression)) {
     throw new Error("Invalid Cerbos expression structure");
@@ -153,15 +159,14 @@ const buildPrismaFilterFromCerbosExpression = (
 
   const resolveOperand = (operand: PlanExpressionOperand): any => {
     if ("name" in operand && operand.name) {
-      return resolveFieldReference(operand.name, fieldMapper, relationMapper);
+      return resolveFieldReference(operand.name, mapper);
     } else if ("value" in operand && operand.value !== undefined) {
       return { value: operand.value };
     } else if ("operator" in operand) {
       // Handle nested expressions
       const nestedResult = buildPrismaFilterFromCerbosExpression(
         operand,
-        fieldMapper,
-        relationMapper
+        mapper
       );
       return { value: nestedResult };
     }
@@ -172,32 +177,20 @@ const buildPrismaFilterFromCerbosExpression = (
     case "and": {
       return {
         AND: operands.map((operand: PlanExpressionOperand) =>
-          buildPrismaFilterFromCerbosExpression(
-            operand,
-            fieldMapper,
-            relationMapper
-          )
+          buildPrismaFilterFromCerbosExpression(operand, mapper)
         ),
       };
     }
     case "or": {
       return {
         OR: operands.map((operand: PlanExpressionOperand) =>
-          buildPrismaFilterFromCerbosExpression(
-            operand,
-            fieldMapper,
-            relationMapper
-          )
+          buildPrismaFilterFromCerbosExpression(operand, mapper)
         ),
       };
     }
     case "not": {
       return {
-        NOT: buildPrismaFilterFromCerbosExpression(
-          operands[0],
-          fieldMapper,
-          relationMapper
-        ),
+        NOT: buildPrismaFilterFromCerbosExpression(operands[0], mapper),
       };
     }
     case "eq":
@@ -229,18 +222,22 @@ const buildPrismaFilterFromCerbosExpression = (
       }[operator];
 
       if ("path" in left) {
-        // Field reference case
         const { path, relation } = left;
         if (relation) {
-          const relationOperator = getPrismaRelationOperator(
-            relation,
-            operator
-          );
-          return {
-            [relation.relation]: {
-              [relationOperator]: {
-                [relation.field!]: { [prismaOperator]: right.value },
+          const relationOperator = getPrismaRelationOperator(relation);
+          if (relation.field) {
+            return {
+              [relation.name]: {
+                [relationOperator]: {
+                  [relation.field]: { [prismaOperator]: right.value },
+                },
               },
+            };
+          }
+          // If no field specified, apply directly to the relation
+          return {
+            [relation.name]: {
+              [relationOperator]: { [prismaOperator]: right.value },
             },
           };
         }
@@ -255,7 +252,6 @@ const buildPrismaFilterFromCerbosExpression = (
         );
       }
 
-      // Handle nested expression case
       return { [prismaOperator]: right.value };
     }
 
@@ -268,9 +264,9 @@ const buildPrismaFilterFromCerbosExpression = (
       );
 
       if (relation) {
-        const relationOperator = getPrismaRelationOperator(relation, "in");
+        const relationOperator = getPrismaRelationOperator(relation);
         return {
-          [relation.relation]: {
+          [relation.name]: {
             [relationOperator]: {
               [relation.field!]: value,
             },
@@ -309,9 +305,9 @@ const buildPrismaFilterFromCerbosExpression = (
       }
 
       if (relation) {
-        const relationOperator = getPrismaRelationOperator(relation, operator);
+        const relationOperator = getPrismaRelationOperator(relation);
         return {
-          [relation.relation]: {
+          [relation.name]: {
             [relationOperator]: {
               [relation.field!]: { [operator]: value },
             },
@@ -344,9 +340,9 @@ const buildPrismaFilterFromCerbosExpression = (
       const { value } = resolveOperand(rightOperand);
 
       if (relation) {
-        const relationOperator = getPrismaRelationOperator(relation, "isSet");
+        const relationOperator = getPrismaRelationOperator(relation);
         return {
-          [relation.relation]: {
+          [relation.name]: {
             [relationOperator]: {
               [relation.field!]: value ? { not: null } : { equals: null },
             },
@@ -375,8 +371,7 @@ const buildPrismaFilterFromCerbosExpression = (
       if ("operator" in leftOperand && leftOperand.operator === "map") {
         const mapResult = buildPrismaFilterFromCerbosExpression(
           leftOperand,
-          fieldMapper,
-          relationMapper
+          mapper
         );
 
         // Get the relation and field from the map result
@@ -412,8 +407,7 @@ const buildPrismaFilterFromCerbosExpression = (
 
       const { path, relation } = resolveFieldReference(
         leftOperand.name,
-        fieldMapper,
-        relationMapper
+        mapper
       );
 
       if (!Array.isArray(rightOperand.value)) {
@@ -422,7 +416,7 @@ const buildPrismaFilterFromCerbosExpression = (
 
       if (relation) {
         return {
-          [relation.relation]: {
+          [relation.name]: {
             some: {
               [relation.field!]: { in: rightOperand.value },
             },
@@ -450,8 +444,9 @@ const buildPrismaFilterFromCerbosExpression = (
 
       return buildPrismaFilterFromCerbosExpression(
         condition,
-        (key: string) => key.replace(`${variable.name}.`, ""),
-        relationMapper
+        (key: string) => ({
+          field: key.replace(`${variable.name}.`, ""),
+        })
       );
     }
 
@@ -477,11 +472,7 @@ const buildPrismaFilterFromCerbosExpression = (
         );
       }
 
-      const { relation } = resolveFieldReference(
-        collection.name,
-        fieldMapper,
-        relationMapper
-      );
+      const { relation } = resolveFieldReference(collection.name, mapper);
 
       if (!relation) {
         throw new Error(`${operator} operator requires a relation mapping`);
@@ -489,25 +480,24 @@ const buildPrismaFilterFromCerbosExpression = (
 
       const lambdaCondition = buildPrismaFilterFromCerbosExpression(
         lambda,
-        fieldMapper,
-        relationMapper
+        mapper
       );
 
       switch (operator) {
         case "exists":
           return {
-            [relation.relation]: {
+            [relation.name]: {
               some: lambdaCondition,
             },
           };
         case "exists_one":
           return {
-            [relation.relation]: {
+            [relation.name]: {
               some: lambdaCondition,
             },
             AND: [
               {
-                [relation.relation]: {
+                [relation.name]: {
                   every: {
                     OR: [lambdaCondition, { NOT: lambdaCondition }],
                   },
@@ -517,13 +507,13 @@ const buildPrismaFilterFromCerbosExpression = (
           };
         case "all":
           return {
-            [relation.relation]: {
+            [relation.name]: {
               every: lambdaCondition,
             },
           };
         case "filter":
           return {
-            [relation.relation]: {
+            [relation.name]: {
               some: lambdaCondition,
             },
           };
@@ -546,11 +536,7 @@ const buildPrismaFilterFromCerbosExpression = (
         throw new Error("Second operand of map must be a lambda expression");
       }
 
-      const { relation } = resolveFieldReference(
-        collection.name,
-        fieldMapper,
-        relationMapper
-      );
+      const { relation } = resolveFieldReference(collection.name, mapper);
 
       if (!relation) {
         throw new Error("map operator requires a relation mapping");
@@ -563,8 +549,8 @@ const buildPrismaFilterFromCerbosExpression = (
 
       // For map operations, we project the field specified in the lambda
       return {
-        [relation.relation]: {
-          [getPrismaRelationOperator(relation, "map")]: {
+        [relation.name]: {
+          [getPrismaRelationOperator(relation)]: {
             select: {
               [projection.name.replace(`${variable.name}.`, "")]: true,
             },
