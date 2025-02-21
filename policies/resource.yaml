@@ -311,6 +311,15 @@ resourcePolicy:
           expr: request.resource.attr.aString.startsWith("str")
 
     - actions:
+        - "ends-with"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.aString.endsWith("ing")
+
+    - actions:
         - "is-set"
       effect: EFFECT_ALLOW
       roles:
@@ -327,6 +336,15 @@ resourcePolicy:
       condition:
         match:
           expr: hasIntersection(request.resource.attr.tags.map(t, t.name), request.principal.attr.tags)
+
+    - actions:
+        - "has-intersection-direct"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: hasIntersection(request.resource.attr.tags, ["public", "draft"])
 
     - actions:
         - "exists-single"
@@ -389,6 +407,9 @@ resourcePolicy:
                     - expr: request.resource.attr.aBool == true
                     - expr: R.attr.tags.exists(tag, tag.id == "tag1" && tag.name == "public")
                     - expr: request.resource.attr.nested.aNumber > 1
+                    - expr: request.resource.attr.aString.endsWith("ing")
+                    - expr: request.resource.attr.aString.startsWith("ing")
+                    - expr: request.resource.attr.aString.contains("ing")
               - all:
                   of:
                     - expr: hasIntersection(request.resource.attr.tags.map(t, t.name), request.principal.attr.tags)

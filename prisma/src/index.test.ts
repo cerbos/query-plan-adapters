@@ -2428,6 +2428,91 @@ test("conditional - relation eq with number without field", async () => {
   );
 });
 
+test("conditional - endsWith", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "ends-with",
+  });
+
+  expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+  expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+    operands: [
+      {
+        name: "request.resource.attr.aString",
+      },
+      {
+        value: "ing",
+      },
+    ],
+    operator: "endsWith",
+  });
+
+  const result = queryPlanToPrisma({
+    queryPlan,
+    fieldNameMapper: {
+      "request.resource.attr.aString": "aString",
+    },
+  });
+
+  expect(result).toStrictEqual({
+    kind: PlanKind.CONDITIONAL,
+    filters: { aString: { endsWith: "ing" } },
+  });
+
+  const query = await prisma.resource.findMany({
+    where: { ...result.filters },
+  });
+  expect(query.map((r) => r.id)).toEqual(
+    fixtureResources.filter((a) => a.aString.endsWith("ing")).map((r) => r.id)
+  );
+});
+
+test("conditional - hasIntersection with direct value", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "has-intersection-direct",
+  });
+
+  expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+  expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+    operator: "hasIntersection",
+    operands: [
+      { name: "request.resource.attr.tags" },
+      { value: ["public", "draft"] },
+    ],
+  });
+
+  const result = queryPlanToPrisma({
+    queryPlan,
+    fieldNameMapper: {},
+    relationMapper: {
+      "request.resource.attr.tags": {
+        relation: "tags",
+        field: "name",
+        type: "many",
+      },
+    },
+  });
+
+  expect(result).toStrictEqual({
+    kind: PlanKind.CONDITIONAL,
+    filters: {
+      tags: {
+        some: {
+          name: { in: ["public", "draft"] },
+        },
+      },
+    },
+  });
+
+  const query = await prisma.resource.findMany({
+    where: { ...result.filters },
+  });
+  expect(query.map((r) => r.id)).toEqual(["resource1", "resource3"]);
+});
+
 test("conditional - kitchen sink", async () => {
   const queryPlan = await cerbos.planResources({
     principal: {
@@ -2440,8 +2525,6 @@ test("conditional - kitchen sink", async () => {
   });
 
   expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
-
-  console.log(JSON.stringify(queryPlan, null, 2));
 
   // expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
   //   operator: "filter",
@@ -2476,6 +2559,7 @@ test("conditional - kitchen sink", async () => {
     fieldNameMapper: {
       "request.resource.attr.aOptionalString": "aOptionalString",
       "request.resource.attr.aBool": "aBool",
+      "request.resource.attr.aString": "aString",
     },
     relationMapper: {
       "request.resource.attr.tags": {
@@ -2500,11 +2584,10 @@ test("conditional - kitchen sink", async () => {
   //   },
   // });
 
-  console.log(JSON.stringify(result, null, 2));
-  const query = await prisma.resource.findMany({
+  // console.log(JSON.stringify(result, null, 2));
+  await prisma.resource.findMany({
     where: { ...result.filters },
   });
-  console.log(query);
 
   // expect(query.map((r) => r.id)).toEqual(
   //   fixtureResources
