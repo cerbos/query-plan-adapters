@@ -203,12 +203,10 @@ describe("Basic Plan Types", () => {
 
     const result = queryPlanToPrisma({
       queryPlan,
-      mapper: {},
     });
 
     expect(result).toStrictEqual({
       kind: PlanKind.ALWAYS_ALLOWED,
-      filters: {},
     });
 
     const query = await prisma.resource.findMany({});

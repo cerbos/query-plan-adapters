@@ -1,6 +1,6 @@
 {
   "name": "@cerbos/orm-prisma",
-  "version": "2.0.0-beta.1",
+  "version": "2.0.0-alpha.1",
   "homepage": "https://cerbos.dev",
   "description": "",
   "private": false,

@@ -1,15 +1,14 @@
 import {
   PlanResourcesResponse,
   PlanExpressionOperand,
-  PlanKind as PK,
+  PlanKind,
 } from "@cerbos/core";
 
-export type PlanKind = PK;
-export const PlanKind = PK;
+export { PlanKind };
 
-type PrismaFilter = Record<string, any>;
+export type PrismaFilter = Record<string, any>;
 
-type MapperConfig = {
+export type MapperConfig = {
   field?: string;
   relation?: {
     name: string;
@@ -21,36 +20,39 @@ type MapperConfig = {
   };
 };
 
-type Mapper =
+export type Mapper =
   | {
       [key: string]: MapperConfig;
     }
   | ((key: string) => MapperConfig);
 
-interface QueryPlanToPrismaArgs {
+export interface QueryPlanToPrismaArgs {
   queryPlan: PlanResourcesResponse;
-  mapper: Mapper;
+  mapper?: Mapper;
 }
 
-interface QueryPlanToPrismaResult {
+export interface QueryPlanToPrismaResult {
   kind: PlanKind;
   filters?: Record<string, any>;
 }
 
+/**
+ * Converts a Cerbos query plan to a Prisma filter.
+ * @param {QueryPlanToPrismaArgs} args - The arguments containing the query plan and mapper.
+ * @returns {QueryPlanToPrismaResult} The result containing the kind and filters.
+ */
 export function queryPlanToPrisma({
   queryPlan,
-  mapper,
+  mapper = {},
 }: QueryPlanToPrismaArgs): QueryPlanToPrismaResult {
+  // Choose filter conversion based on plan kind
   switch (queryPlan.kind) {
     case PlanKind.ALWAYS_ALLOWED:
       return {
         kind: PlanKind.ALWAYS_ALLOWED,
-        filters: {},
       };
     case PlanKind.ALWAYS_DENIED:
-      return {
-        kind: PlanKind.ALWAYS_DENIED,
-      };
+      return { kind: PlanKind.ALWAYS_DENIED };
     case PlanKind.CONDITIONAL:
       return {
         kind: PlanKind.CONDITIONAL,
@@ -65,7 +67,10 @@ export function queryPlanToPrisma({
 }
 
 /**
- * Resolves a field reference considering relations
+ * Resolves a field reference considering relations.
+ * @param {string} reference - The field reference.
+ * @param {Mapper} mapper - The mapper configuration.
+ * @returns {object} The resolved field reference with path and relation.
  */
 const resolveFieldReference = (
   reference: string,
@@ -91,18 +96,13 @@ const resolveFieldReference = (
       const { name, type, field, fields } = config.relation;
       return {
         path: [name, field].filter(Boolean) as string[],
-        relation: {
-          name,
-          type,
-          field,
-          nestedMapper: fields,
-        },
+        relation: { name, type, field, nestedMapper: fields },
       };
     }
     return { path: [config.field || reference] };
   }
 
-  // If no exact match and we have multiple parts, check for parent relation
+  // Check for parent relation with multiple parts
   if (parts.length > 1) {
     const parentPath = parts.slice(0, -1).join(".");
     const parentConfig =
@@ -110,42 +110,35 @@ const resolveFieldReference = (
 
     if (parentConfig?.relation) {
       const { name, type, fields } = parentConfig.relation;
-
-      // Check if there's an explicit field mapping
       const fieldConfig = fields?.[lastPart];
       const fieldName = fieldConfig?.field || lastPart;
-
       return {
         path: [name],
-        relation: {
-          name,
-          type,
-          field: fieldName,
-          nestedMapper: fields,
-        },
+        relation: { name, type, field: fieldName, nestedMapper: fields },
       };
     }
   }
 
-  // Default to using the raw reference if no mapping found
+  // Fallback to raw reference if no mapper fits
   return { path: [reference] };
 };
 
 /**
- * Determines the appropriate Prisma operator based on relation type and operation
+ * Determines the appropriate Prisma operator based on relation type.
+ * @param {object} relation - The relation configuration.
+ * @returns {string} The Prisma relation operator.
  */
 const getPrismaRelationOperator = (relation: {
   name: string;
   type: "one" | "many";
   field?: string;
-}) => {
-  // Use 'is' for one-to-one relations, 'some' for one-to-many/many-to-many
-  const relationOperator = relation.type === "one" ? "is" : "some";
-  return relationOperator;
-};
+}) => (relation.type === "one" ? "is" : "some");
 
 /**
- * Builds Prisma WHERE conditions from a Cerbos expression
+ * Builds Prisma WHERE conditions from a Cerbos expression.
+ * @param {PlanExpressionOperand} expression - The Cerbos expression.
+ * @param {Mapper} mapper - The mapper configuration.
+ * @returns {PrismaFilter} The Prisma filter.
  */
 const buildPrismaFilterFromCerbosExpression = (
   expression: PlanExpressionOperand,
@@ -154,16 +147,20 @@ const buildPrismaFilterFromCerbosExpression = (
   if (!("operator" in expression) || !("operands" in expression)) {
     throw new Error("Invalid Cerbos expression structure");
   }
-
   const { operator, operands } = expression;
 
+  /**
+   * Helper function to resolve an operand.
+   * @param {PlanExpressionOperand} operand - The operand from expression.
+   * @returns {any} An object with a field reference or value.
+   */
   const resolveOperand = (operand: PlanExpressionOperand): any => {
     if ("name" in operand && operand.name) {
       return resolveFieldReference(operand.name, mapper);
     } else if ("value" in operand && operand.value !== undefined) {
       return { value: operand.value };
     } else if ("operator" in operand) {
-      // Handle nested expressions
+      // Nested expression resolution
       const nestedResult = buildPrismaFilterFromCerbosExpression(
         operand,
         mapper
@@ -173,22 +170,26 @@ const buildPrismaFilterFromCerbosExpression = (
     throw new Error("Operand must have name, value, or be an expression");
   };
 
+  // Process the operator type
   switch (operator) {
     case "and": {
+      // Combine operands with logical AND
       return {
-        AND: operands.map((operand: PlanExpressionOperand) =>
+        AND: operands.map((operand) =>
           buildPrismaFilterFromCerbosExpression(operand, mapper)
         ),
       };
     }
     case "or": {
+      // Combine operands with logical OR
       return {
-        OR: operands.map((operand: PlanExpressionOperand) =>
+        OR: operands.map((operand) =>
           buildPrismaFilterFromCerbosExpression(operand, mapper)
         ),
       };
     }
     case "not": {
+      // Negate the operand filter
       return {
         NOT: buildPrismaFilterFromCerbosExpression(operands[0], mapper),
       };
@@ -199,19 +200,13 @@ const buildPrismaFilterFromCerbosExpression = (
     case "le":
     case "gt":
     case "ge": {
-      const leftOperand = operands.find(
-        (o: PlanExpressionOperand) => "name" in o || "operator" in o
-      );
+      // Relational operators: find left and right operands
+      const leftOperand = operands.find((o) => "name" in o || "operator" in o);
       if (!leftOperand) throw new Error("No valid left operand found");
-
-      const rightOperand = operands.find(
-        (o: PlanExpressionOperand) => o !== leftOperand
-      );
+      const rightOperand = operands.find((o) => o !== leftOperand);
       if (!rightOperand) throw new Error("No valid right operand found");
-
       const left = resolveOperand(leftOperand);
       const right = resolveOperand(rightOperand);
-
       const prismaOperator = {
         eq: "equals",
         ne: "not",
@@ -220,7 +215,6 @@ const buildPrismaFilterFromCerbosExpression = (
         gt: "gt",
         ge: "gte",
       }[operator];
-
       if ("path" in left) {
         const { path, relation } = left;
         if (relation) {
@@ -234,111 +228,77 @@ const buildPrismaFilterFromCerbosExpression = (
               },
             };
           }
-          // If no field specified, apply directly to the relation
           return {
             [relation.name]: {
               [relationOperator]: { [prismaOperator]: right.value },
             },
           };
         }
-
+        // Create nested filter for field path
         return path.reduceRight(
-          (acc: PrismaFilter, key: string, index: number) => {
-            return index === path.length - 1
+          (acc: any, key: string, index: number) =>
+            index === path.length - 1
               ? { [key]: { [prismaOperator]: right.value } }
-              : { [key]: acc };
-          },
+              : { [key]: acc },
           {}
         );
       }
-
       return { [prismaOperator]: right.value };
     }
-
     case "in": {
+      // Inclusion operator for lists
       const { path, relation } = resolveOperand(
-        operands.find((o: PlanExpressionOperand) => "name" in o)!
+        operands.find((o) => "name" in o)!
       );
-      const { value } = resolveOperand(
-        operands.find((o: PlanExpressionOperand) => "value" in o)!
-      );
-
+      const { value } = resolveOperand(operands.find((o) => "value" in o)!);
       if (relation) {
         const relationOperator = getPrismaRelationOperator(relation);
         return {
-          [relation.name]: {
-            [relationOperator]: {
-              [relation.field!]: value,
-            },
-          },
+          [relation.name]: { [relationOperator]: { [relation.field!]: value } },
         };
       }
-
       return path.reduceRight(
-        (acc: PrismaFilter, key: string, index: number) => {
-          return index === path.length - 1
-            ? { [key]: { in: value } }
-            : { [key]: acc };
-        },
+        (acc: any, key: string, index: number) =>
+          index === path.length - 1 ? { [key]: { in: value } } : { [key]: acc },
         {}
       );
     }
-
     case "contains":
     case "startsWith":
     case "endsWith": {
-      const leftOperand = operands.find(
-        (o: PlanExpressionOperand) => "name" in o
-      );
+      // String operators; ensure value is a string
+      const leftOperand = operands.find((o) => "name" in o);
       if (!leftOperand) throw new Error("No operand with 'name' found");
-
-      const rightOperand = operands.find(
-        (o: PlanExpressionOperand) => "value" in o
-      );
+      const rightOperand = operands.find((o) => "value" in o);
       if (!rightOperand) throw new Error("No operand with 'value' found");
-
       const { path, relation } = resolveOperand(leftOperand);
       const { value } = resolveOperand(rightOperand);
-
-      if (typeof value !== "string") {
+      if (typeof value !== "string")
         throw new Error(`${operator} operator requires string value`);
-      }
-
       if (relation) {
         const relationOperator = getPrismaRelationOperator(relation);
         return {
           [relation.name]: {
-            [relationOperator]: {
-              [relation.field!]: { [operator]: value },
-            },
+            [relationOperator]: { [relation.field!]: { [operator]: value } },
           },
         };
       }
-
       return path.reduceRight(
-        (acc: PrismaFilter, key: string, index: number) => {
-          return index === path.length - 1
+        (acc: any, key: string, index: number) =>
+          index === path.length - 1
             ? { [key]: { [operator]: value } }
-            : { [key]: acc };
-        },
+            : { [key]: acc },
         {}
       );
     }
-
     case "isSet": {
-      const leftOperand = operands.find(
-        (o: PlanExpressionOperand) => "name" in o
-      );
+      // Check if a field is set (not null) or unset (null)
+      const leftOperand = operands.find((o) => "name" in o);
       if (!leftOperand) throw new Error("No operand with 'name' found");
-
-      const rightOperand = operands.find(
-        (o: PlanExpressionOperand) => "value" in o
-      );
+      const rightOperand = operands.find((o) => "value" in o);
       if (!rightOperand) throw new Error("No operand with 'value' found");
-
       const { path, relation } = resolveOperand(leftOperand);
       const { value } = resolveOperand(rightOperand);
-
       if (relation) {
         const relationOperator = getPrismaRelationOperator(relation);
         return {
@@ -349,205 +309,135 @@ const buildPrismaFilterFromCerbosExpression = (
           },
         };
       }
-
       return path.reduceRight(
-        (acc: PrismaFilter, key: string, index: number) => {
-          return index === path.length - 1
+        (acc: any, key: string, index: number) =>
+          index === path.length - 1
             ? { [key]: value ? { not: null } : { equals: null } }
-            : { [key]: acc };
-        },
+            : { [key]: acc },
         {}
       );
     }
-
     case "hasIntersection": {
-      if (operands.length !== 2) {
+      // Ensure exactly two operands for intersection check
+      if (operands.length !== 2)
         throw new Error("hasIntersection requires exactly two operands");
-      }
-
       const [leftOperand, rightOperand] = operands;
-
-      // Handle case where first operand is a map expression
+      // Handle map expressions as first operand
       if ("operator" in leftOperand && leftOperand.operator === "map") {
         const mapResult = buildPrismaFilterFromCerbosExpression(
           leftOperand,
           mapper
         );
-
-        // Get the relation and field from the map result
         const relationKey = Object.keys(mapResult)[0];
         const relation = mapResult[relationKey];
         const selectKey = Object.keys(
           relation[Object.keys(relation)[0]].select
         )[0];
-
-        if (!("value" in rightOperand)) {
+        if (!("value" in rightOperand))
           throw new Error("Second operand of hasIntersection must be a value");
-        }
-
         return {
-          [relationKey]: {
-            some: {
-              [selectKey]: { in: rightOperand.value },
-            },
-          },
+          [relationKey]: { some: { [selectKey]: { in: rightOperand.value } } },
         };
       }
-
-      // Original logic for direct field reference
-      if (!("name" in leftOperand)) {
+      // Handle direct field reference
+      if (!("name" in leftOperand))
         throw new Error(
           "First operand of hasIntersection must be a field reference or map expression"
         );
-      }
-
-      if (!("value" in rightOperand)) {
+      if (!("value" in rightOperand))
         throw new Error("Second operand of hasIntersection must be a value");
-      }
-
       const { path, relation } = resolveFieldReference(
         leftOperand.name,
         mapper
       );
-
-      if (!Array.isArray(rightOperand.value)) {
+      if (!Array.isArray(rightOperand.value))
         throw new Error("hasIntersection requires an array value");
-      }
-
       if (relation) {
         return {
           [relation.name]: {
-            some: {
-              [relation.field!]: { in: rightOperand.value },
-            },
+            some: { [relation.field!]: { in: rightOperand.value } },
           },
         };
       }
-
       return path.reduceRight(
-        (acc: PrismaFilter, key: string, index: number) => {
-          return index === path.length - 1
+        (acc, key, index) =>
+          index === path.length - 1
             ? { [key]: { hasSome: rightOperand.value } }
-            : { [key]: acc };
-        },
+            : { [key]: acc },
         {}
       );
     }
-
     case "lambda": {
-      // Lambda expressions are typically used with exists/forAll operators
-      // The first operand is the condition, second is the variable definition
+      // Handle lambda expressions by replacing variable prefix on keys
       const [condition, variable] = operands;
-      if (!("name" in variable)) {
+      if (!("name" in variable))
         throw new Error("Lambda variable must have a name");
-      }
-
       return buildPrismaFilterFromCerbosExpression(
         condition,
-        (key: string) => ({
-          field: key.replace(`${variable.name}.`, ""),
-        })
+        (key: string) => ({ field: key.replace(`${variable.name}.`, "") })
       );
     }
-
     case "exists":
     case "exists_one":
     case "all":
     case "except":
     case "filter": {
-      if (operands.length !== 2) {
+      // Operators applying conditions on collections via lambda expressions
+      if (operands.length !== 2)
         throw new Error(`${operator} requires exactly two operands`);
-      }
-
       const [collection, lambda] = operands;
-      if (!("name" in collection)) {
+      if (!("name" in collection))
         throw new Error(
           "First operand of exists/all/except must be a collection reference"
         );
-      }
-
-      if (!("operator" in lambda)) {
+      if (!("operator" in lambda))
         throw new Error(
           "Second operand of exists/all/except must be a lambda expression"
         );
-      }
-
       const { relation } = resolveFieldReference(collection.name, mapper);
-
-      if (!relation) {
+      if (!relation)
         throw new Error(`${operator} operator requires a relation mapping`);
-      }
-
       const lambdaCondition = buildPrismaFilterFromCerbosExpression(
         lambda,
         mapper
       );
-
       switch (operator) {
         case "exists":
-          return {
-            [relation.name]: {
-              some: lambdaCondition,
-            },
-          };
+          return { [relation.name]: { some: lambdaCondition } };
         case "exists_one":
           return {
-            [relation.name]: {
-              some: lambdaCondition,
-            },
+            [relation.name]: { some: lambdaCondition },
             AND: [
               {
                 [relation.name]: {
-                  every: {
-                    OR: [lambdaCondition, { NOT: lambdaCondition }],
-                  },
+                  every: { OR: [lambdaCondition, { NOT: lambdaCondition }] },
                 },
               },
             ],
           };
         case "all":
-          return {
-            [relation.name]: {
-              every: lambdaCondition,
-            },
-          };
+          return { [relation.name]: { every: lambdaCondition } };
         case "filter":
-          return {
-            [relation.name]: {
-              some: lambdaCondition,
-            },
-          };
+          return { [relation.name]: { some: lambdaCondition } };
         default:
           throw new Error(`Unexpected operator: ${operator}`);
       }
     }
-
     case "map": {
-      if (operands.length !== 2) {
+      // Process map operator to project field values
+      if (operands.length !== 2)
         throw new Error("map requires exactly two operands");
-      }
-
       const [collection, lambda] = operands;
-      if (!("name" in collection)) {
+      if (!("name" in collection))
         throw new Error("First operand of map must be a collection reference");
-      }
-
-      if (!("operator" in lambda) || lambda.operator !== "lambda") {
+      if (!("operator" in lambda) || lambda.operator !== "lambda")
         throw new Error("Second operand of map must be a lambda expression");
-      }
-
       const { relation } = resolveFieldReference(collection.name, mapper);
-
-      if (!relation) {
+      if (!relation)
         throw new Error("map operator requires a relation mapping");
-      }
-
       const [projection, variable] = lambda.operands;
-      if (!("name" in projection) || !("name" in variable)) {
+      if (!("name" in projection) || !("name" in variable))
         throw new Error("Invalid map lambda expression structure");
-      }
-
-      // For map operations, we project the field specified in the lambda
       return {
         [relation.name]: {
           [getPrismaRelationOperator(relation)]: {
@@ -558,9 +448,7 @@ const buildPrismaFilterFromCerbosExpression = (
         },
       };
     }
-
-    default: {
+    default:
       throw new Error(`Unsupported operator: ${operator}`);
-    }
   }
 };
