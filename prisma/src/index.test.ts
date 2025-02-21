@@ -1717,7 +1717,7 @@ test("throws error for invalid operand structure", () => {
       queryPlan: invalidQueryPlan as unknown as PlanResourcesResponse,
       fieldNameMapper: {},
     })
-  ).toThrow("No operand with 'name' found");
+  ).toThrow("No valid left operand found");
 });
 
 test("function mapper for field names", async () => {

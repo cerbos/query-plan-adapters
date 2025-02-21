@@ -156,8 +156,16 @@ const buildPrismaFilterFromCerbosExpression = (
       return resolveFieldReference(operand.name, fieldMapper, relationMapper);
     } else if ("value" in operand && operand.value !== undefined) {
       return { value: operand.value };
+    } else if ("operator" in operand) {
+      // Handle nested expressions
+      const nestedResult = buildPrismaFilterFromCerbosExpression(
+        operand,
+        fieldMapper,
+        relationMapper
+      );
+      return { value: nestedResult };
     }
-    throw new Error("Operand must have name or value");
+    throw new Error("Operand must have name, value, or be an expression");
   };
 
   switch (operator) {
@@ -199,17 +207,17 @@ const buildPrismaFilterFromCerbosExpression = (
     case "gt":
     case "ge": {
       const leftOperand = operands.find(
-        (o: PlanExpressionOperand) => "name" in o
+        (o: PlanExpressionOperand) => "name" in o || "operator" in o
       );
-      if (!leftOperand) throw new Error("No operand with 'name' found");
+      if (!leftOperand) throw new Error("No valid left operand found");
 
       const rightOperand = operands.find(
-        (o: PlanExpressionOperand) => "value" in o
+        (o: PlanExpressionOperand) => o !== leftOperand
       );
-      if (!rightOperand) throw new Error("No operand with 'value' found");
+      if (!rightOperand) throw new Error("No valid right operand found");
 
-      const { path, relation } = resolveOperand(leftOperand);
-      const { value } = resolveOperand(rightOperand);
+      const left = resolveOperand(leftOperand);
+      const right = resolveOperand(rightOperand);
 
       const prismaOperator = {
         eq: "equals",
@@ -220,25 +228,35 @@ const buildPrismaFilterFromCerbosExpression = (
         ge: "gte",
       }[operator];
 
-      if (relation) {
-        const relationOperator = getPrismaRelationOperator(relation, operator);
-        return {
-          [relation.relation]: {
-            [relationOperator]: {
-              [relation.field!]: { [prismaOperator]: value },
+      if ("path" in left) {
+        // Field reference case
+        const { path, relation } = left;
+        if (relation) {
+          const relationOperator = getPrismaRelationOperator(
+            relation,
+            operator
+          );
+          return {
+            [relation.relation]: {
+              [relationOperator]: {
+                [relation.field!]: { [prismaOperator]: right.value },
+              },
             },
+          };
+        }
+
+        return path.reduceRight(
+          (acc: PrismaFilter, key: string, index: number) => {
+            return index === path.length - 1
+              ? { [key]: { [prismaOperator]: right.value } }
+              : { [key]: acc };
           },
-        };
+          {}
+        );
       }
 
-      return path.reduceRight(
-        (acc: PrismaFilter, key: string, index: number) => {
-          return index === path.length - 1
-            ? { [key]: { [prismaOperator]: value } }
-            : { [key]: acc };
-        },
-        {}
-      );
+      // Handle nested expression case
+      return { [prismaOperator]: right.value };
     }
 
     case "in": {
