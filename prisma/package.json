@@ -1,6 +1,6 @@
 {
   "name": "@cerbos/orm-prisma",
-  "version": "2.0.0-alpha.1",
+  "version": "2.0.0-alpha.2",
   "homepage": "https://cerbos.dev",
   "description": "",
   "private": false,
@@ -21,10 +21,10 @@
   "author": "Cerbos",
   "license": "Apache-2.0",
   "devDependencies": {
-    "@prisma/client": "^6.0.0",
+    "@prisma/client": "^6.4.1",
     "@types/jest": "^29.0.3",
     "@types/node": "^22.0.0",
-    "prisma": "^6.0.0",
+    "prisma": "^6.4.1",
     "ts-jest": "^29.0.0",
     "ts-node": "^10.4.0",
     "typescript": "^5.0.0"

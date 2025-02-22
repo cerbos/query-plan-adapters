@@ -191,6 +191,15 @@ resourcePolicy:
           expr: request.resource.attr.nested.aBool == true
 
     - actions:
+        - "equal-deeply-nested"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.nested.nextlevel.aBool == true
+
+    - actions:
         - "relation-eq-number"
       effect: EFFECT_ALLOW
       roles:

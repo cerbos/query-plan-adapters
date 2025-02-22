@@ -34,11 +34,22 @@ model User {
 }
 
 model NestedResource {
-  id       String     @id @default(cuid())
-  aString  String
-  aNumber  Int
-  aBool    Boolean
-  Resource Resource[]
+  id      String  @id @default(cuid())
+  aString String
+  aNumber Int
+  aBool   Boolean
+
+  Resource                  Resource[]
+  nextlevel                 NextLevelNestedResource @relation(fields: [nextLevelNestedResourceId], references: [id])
+  nextLevelNestedResourceId String
+}
+
+model NextLevelNestedResource {
+  id             String           @id @default(cuid())
+  aString        String
+  aNumber        Int
+  aBool          Boolean
+  NestedResource NestedResource[]
 }
 
 model Tag {
