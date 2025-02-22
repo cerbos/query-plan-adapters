@@ -425,3 +425,22 @@ resourcePolicy:
                     - expr: >
                         "public" in request.principal.attr.tags
                     - expr: request.resource.attr.nested.nextlevel.aBool == true
+
+    - actions:
+        - "deep-nested-category-label"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          # Fix the exists expression to properly handle nested relations
+          expr: request.resource.attr.categories.exists(cat, cat.subCategories.exists(sub, sub.labels.exists(label, label.name == "important")))
+
+    - actions:
+        - "deep-nested-exists"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.categories.exists(cat, cat.name == "business" && cat.subCategories.exists(sub, sub.name == "finance"))

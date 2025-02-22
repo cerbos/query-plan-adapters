@@ -22,6 +22,7 @@ model Resource {
   nestedResourceId String
   tags             Tag[] // Add many-to-many relationship
   aOptionalString  String?
+  categories       Category[] // Add categories relation
 }
 
 model User {
@@ -56,4 +57,25 @@ model Tag {
   id        String     @id @default(cuid())
   name      String     @unique
   resources Resource[]
+}
+
+// Add new models for nested many-to-many relations
+model Category {
+  id            String        @id @default(cuid())
+  name          String        @unique
+  resources     Resource[]
+  subCategories SubCategory[]
+}
+
+model SubCategory {
+  id         String     @id @default(cuid())
+  name       String     @unique
+  categories Category[]
+  labels     Label[]
+}
+
+model Label {
+  id            String        @id @default(cuid())
+  name          String        @unique
+  subCategories SubCategory[]
 }

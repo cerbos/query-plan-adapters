@@ -105,6 +105,46 @@ const fixtureNestedResources: Prisma.NestedResourceCreateInput[] = [
   },
 ];
 
+const fixtureLabels: Prisma.LabelCreateInput[] = [
+  { id: "label1", name: "important" },
+  { id: "label2", name: "archived" },
+  { id: "label3", name: "flagged" },
+];
+
+const fixtureSubCategories: Prisma.SubCategoryCreateInput[] = [
+  {
+    id: "sub1",
+    name: "finance",
+    labels: {
+      connect: [{ id: "label1" }, { id: "label2" }],
+    },
+  },
+  {
+    id: "sub2",
+    name: "tech",
+    labels: {
+      connect: [{ id: "label2" }, { id: "label3" }],
+    },
+  },
+];
+
+const fixtureCategories: Prisma.CategoryCreateInput[] = [
+  {
+    id: "cat1",
+    name: "business",
+    subCategories: {
+      connect: [{ id: "sub1" }],
+    },
+  },
+  {
+    id: "cat2",
+    name: "development",
+    subCategories: {
+      connect: [{ id: "sub2" }],
+    },
+  },
+];
+
 const fixtureResources: Prisma.ResourceCreateInput[] = [
   {
     id: "resource1",
@@ -134,6 +174,9 @@ const fixtureResources: Prisma.ResourceCreateInput[] = [
         { id: "tag1" }, // public
       ],
     },
+    categories: {
+      connect: [{ id: "cat1" }],
+    },
   },
   {
     id: "resource2",
@@ -161,6 +204,9 @@ const fixtureResources: Prisma.ResourceCreateInput[] = [
       connect: [
         { id: "tag2" }, // private
       ],
+    },
+    categories: {
+      connect: [{ id: "cat2" }],
     },
   },
   {
@@ -194,6 +240,9 @@ const fixtureResources: Prisma.ResourceCreateInput[] = [
         { id: "tag3" }, // draft
       ],
     },
+    categories: {
+      connect: [{ id: "cat1" }, { id: "cat2" }],
+    },
   },
 ];
 
@@ -218,6 +267,15 @@ beforeEach(async () => {
   for (const resource of fixtureNestedResources) {
     await prisma.nestedResource.create({ data: resource });
   }
+  for (const label of fixtureLabels) {
+    await prisma.label.create({ data: label });
+  }
+  for (const subCategory of fixtureSubCategories) {
+    await prisma.subCategory.create({ data: subCategory });
+  }
+  for (const category of fixtureCategories) {
+    await prisma.category.create({ data: category });
+  }
   for (const resource of fixtureResources) {
     await prisma.resource.create({ data: resource });
   }
@@ -229,6 +287,9 @@ afterEach(async () => {
   await prisma.nextLevelNestedResource.deleteMany();
   await prisma.tag.deleteMany();
   await prisma.user.deleteMany();
+  await prisma.category.deleteMany();
+  await prisma.subCategory.deleteMany();
+  await prisma.label.deleteMany();
 });
 
 // Basic Plan Types
@@ -2861,3 +2922,197 @@ describe("Integration Tests", () => {
     // );
   });
 });
+
+// describe("Deep Nested Relations", () => {
+//   test("conditional - deeply nested many to many category label", async () => {
+//     const queryPlan = await cerbos.planResources({
+//       principal: { id: "user1", roles: ["USER"] },
+//       resource: { kind: "resource" },
+//       action: "deep-nested-category-label",
+//     });
+
+//     expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+
+//     expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+//       operator: "exists",
+//       operands: [
+//         {
+//           name: "request.resource.attr.categories",
+//         },
+//         {
+//           operator: "lambda",
+//           operands: [
+//             {
+//               operator: "exists",
+//               operands: [
+//                 {
+//                   name: "cat.subCategories",
+//                 },
+//                 {
+//                   operator: "lambda",
+//                   operands: [
+//                     {
+//                       operator: "exists",
+//                       operands: [
+//                         {
+//                           name: "sub.labels",
+//                         },
+//                         {
+//                           operator: "lambda",
+//                           operands: [
+//                             {
+//                               operator: "eq",
+//                               operands: [
+//                                 {
+//                                   name: "label.name",
+//                                 },
+//                                 {
+//                                   value: "important",
+//                                 },
+//                               ],
+//                             },
+//                             {
+//                               name: "label",
+//                             },
+//                           ],
+//                         },
+//                       ],
+//                     },
+//                     {
+//                       name: "sub",
+//                     },
+//                   ],
+//                 },
+//               ],
+//             },
+//             {
+//               name: "cat",
+//             },
+//           ],
+//         },
+//       ],
+//     });
+
+//     const result = queryPlanToPrisma({
+//       queryPlan,
+//       mapper: {
+//         "request.resource.attr.categories": {
+//           relation: {
+//             name: "categories",
+//             type: "many",
+//             fields: {
+//               subCategories: {
+//                 relation: {
+//                   name: "subCategories",
+//                   type: "many",
+//                   fields: {
+//                     labels: {
+//                       relation: {
+//                         name: "labels",
+//                         type: "many",
+//                         fields: {
+//                           name: { field: "name" },
+//                         },
+//                       },
+//                     },
+//                   },
+//                 },
+//               },
+//             },
+//           },
+//         },
+//       },
+//     });
+
+//     expect(result).toStrictEqual({
+//       kind: PlanKind.CONDITIONAL,
+//       filters: {
+//         categories: {
+//           some: {
+//             subCategories: {
+//               some: {
+//                 labels: {
+//                   some: {
+//                     name: { equals: "important" },
+//                   },
+//                 },
+//               },
+//             },
+//           },
+//         },
+//       },
+//     });
+
+//     const query = await prisma.resource.findMany({
+//       where: { ...result.filters },
+//       include: {
+//         categories: {
+//           include: {
+//             subCategories: {
+//               include: {
+//                 labels: true,
+//               },
+//             },
+//           },
+//         },
+//       },
+//     });
+
+//     expect(query.map((r) => r.id)).toEqual(["resource1", "resource3"]);
+//   });
+
+//   test("conditional - deep nested exists with multiple conditions", async () => {
+//     const queryPlan = await cerbos.planResources({
+//       principal: { id: "user1", roles: ["USER"] },
+//       resource: { kind: "resource" },
+//       action: "deep-nested-exists",
+//     });
+
+//     const result = queryPlanToPrisma({
+//       queryPlan,
+//       mapper: {
+//         "request.resource.attr.categories": {
+//           relation: {
+//             name: "categories",
+//             type: "many",
+//             fields: {
+//               subCategories: {
+//                 relation: {
+//                   name: "subCategories",
+//                   type: "many",
+//                   field: "name",
+//                 },
+//               },
+//             },
+//           },
+//         },
+//       },
+//     });
+
+//     expect(result).toStrictEqual({
+//       kind: PlanKind.CONDITIONAL,
+//       filters: {
+//         categories: {
+//           some: {
+//             AND: [
+//               { name: { equals: "business" } },
+//               {
+//                 subCategories: {
+//                   some: {
+//                     name: { equals: "finance" },
+//                   },
+//                 },
+//               },
+//             ],
+//           },
+//         },
+//       },
+//     });
+
+//     const query = await prisma.resource.findMany({
+//       where: { ...result.filters },
+//     });
+
+//     expect(query.map((r) => r.id)).toEqual(["resource1", "resource3"]);
+//   });
+// });
