@@ -95,7 +95,6 @@ const resolveFieldReference = (
   let matchedConfig: MapperConfig | undefined;
 
   if (!config) {
-    // Try to find partial matches
     for (let i = parts.length - 1; i >= 0; i--) {
       const prefix = parts.slice(0, i + 1).join(".");
       const prefixConfig =
@@ -122,19 +121,52 @@ const resolveFieldReference = (
       // Otherwise check if there's a mapping in the fields object
       // Finally fall back to the last part of the reference
       let field: string | undefined;
-      if (activeConfig.relation.field) {
-        field = activeConfig.relation.field;
-      } else if (fields && remainingParts.length > 0) {
-        const fieldConfig = fields[remainingParts[remainingParts.length - 1]];
-        if (fieldConfig?.field) {
-          field = fieldConfig.field;
+      const relations: Array<{
+        name: string;
+        type: "one" | "many";
+        field?: string;
+        nestedMapper?: { [key: string]: MapperConfig };
+      }> = [];
+
+      // Add the current relation
+      relations.push({
+        name,
+        type,
+        field: activeConfig.relation.field,
+        nestedMapper: fields,
+      });
+
+      // Check for nested relations in the remaining parts
+      if (fields && remainingParts.length > 0) {
+        let currentMapper = fields;
+        let currentParts = remainingParts;
+
+        while (currentParts.length > 0) {
+          const nextConfig = currentMapper[currentParts[0]];
+          if (nextConfig?.relation) {
+            relations.push({
+              name: nextConfig.relation.name,
+              type: nextConfig.relation.type,
+              field: nextConfig.relation.field,
+              nestedMapper: nextConfig.relation.fields,
+            });
+            currentMapper = nextConfig.relation.fields || {};
+            currentParts = currentParts.slice(1);
+          } else {
+            // Found a field config or no config
+            if (nextConfig?.field) {
+              field = nextConfig.field;
+            } else {
+              field = currentParts[currentParts.length - 1];
+            }
+            break;
+          }
         }
       }
 
-      // The path should be the remaining parts after the relation, or just the field if specified
       return {
         path: field ? [field] : remainingParts,
-        relations: [{ name, type, nestedMapper: fields }],
+        relations,
       };
     }
     return { path: [activeConfig.field || reference] };
@@ -174,23 +206,22 @@ const buildNestedRelationFilter = (
     return fieldFilter;
   }
 
-  // Process relations from innermost to outermost
+  // Start with the innermost relation and work outward
   let currentFilter = fieldFilter;
   for (let i = relations.length - 1; i >= 0; i--) {
     const relation = relations[i];
     const relationOperator = getPrismaRelationOperator(relation);
 
     // When using a field in a relation, we want to apply it directly to the relation's filter
-    if (relation.field) {
-      // Only apply the field name change at the leaf level (where the actual comparison happens)
-      if (i === relations.length - 1) {
-        const [filterField, filterValue] = Object.entries(currentFilter)[0];
-        currentFilter = {
-          [relation.field]: filterValue,
-        };
-      }
+    if (relation.field && i === relations.length - 1) {
+      // Only apply field name change at leaf level
+      const [, filterValue] = Object.entries(currentFilter)[0];
+      currentFilter = {
+        [relation.field]: filterValue,
+      };
     }
 
+    // Build the filter for this relation level
     currentFilter = {
       [relation.name]: {
         [relationOperator]: currentFilter,
