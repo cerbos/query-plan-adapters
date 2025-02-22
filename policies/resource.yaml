@@ -189,3 +189,363 @@ resourcePolicy:
       condition:
         match:
           expr: request.resource.attr.nested.aBool == true
+
+    - actions:
+        - "equal-deeply-nested"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.nested.nextlevel.aBool == true
+
+    - actions:
+        - "relation-eq-number"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.nested.aNumber == 1
+
+    - actions:
+        - "relation-lt-number"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.nested.aNumber < 2
+
+    - actions:
+        - "relation-lte-number"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.nested.aNumber <= 2
+
+    - actions:
+        - "relation-gte-number"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.nested.aNumber >= 1
+
+    - actions:
+        - "has-tag"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: >
+            "public" in request.resource.attr.tags
+
+    - actions:
+        - "has-no-tag"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: >
+            !("private" in request.resource.attr.tags)
+
+    - actions:
+        - "relation-gt-number"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.nested.aNumber > 1
+
+    - actions:
+        - "relation-multiple-all"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.resource.attr.nested.aNumber > 1
+              - expr: request.resource.attr.nested.aNumber < 3
+
+    - actions:
+        - "relation-multiple-or"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          any:
+            of:
+              - expr: request.resource.attr.createdBy == P.id
+              - expr: P.id in request.resource.attr.ownedBy
+
+    - actions:
+        - "relation-multiple-none"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          none:
+            of:
+              - expr: request.resource.attr.createdBy == P.id
+              - expr: >
+                  "public" in request.resource.attr.tags
+
+    - actions:
+        - "contains"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.aString.contains("str")
+
+    - actions:
+        - "starts-with"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.aString.startsWith("str")
+
+    - actions:
+        - "ends-with"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.aString.endsWith("ing")
+
+    - actions:
+        - "is-set"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.aOptionalString != null
+
+    - actions:
+        - "has-intersection"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: hasIntersection(request.resource.attr.tags.map(t, t.name), request.principal.attr.tags)
+
+    - actions:
+        - "has-intersection-direct"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: hasIntersection(request.resource.attr.tags, ["public", "draft"])
+
+    - actions:
+        - "exists-single"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.tags.exists(tag, tag.id == "tag1")
+
+    - actions:
+        - "exists-multiple"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.tags.exists(tag, tag.id == "tag1" && tag.name == "public")
+
+    - actions:
+        - "exists-one"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.tags.exists_one(tag, tag.name == "public")
+
+    - actions:
+        - "all"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.tags.all(tag, tag.name == "public")
+
+    - actions:
+        - "filter"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.tags.filter(tag, tag.name == "public")
+
+    - actions:
+        - "kitchensink"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          all:
+            of:
+              - expr: R.attr.tags.filter(tag, tag.name == "public")
+              - any:
+                  of:
+                    - expr: request.resource.attr.aOptionalString != null
+                    - expr: request.resource.attr.aBool == true
+                    - expr: R.attr.tags.exists(tag, tag.id == "tag1" && tag.name == "public")
+                    - expr: request.resource.attr.nested.aNumber > 1
+                    - expr: request.resource.attr.aString.endsWith("ing")
+                    - expr: request.resource.attr.aString.startsWith("ing")
+                    - expr: request.resource.attr.aString.contains("ing")
+              - all:
+                  of:
+                    - expr: hasIntersection(request.resource.attr.tags.map(t, t.name), request.principal.attr.tags)
+                    - expr: >
+                        "public" in request.principal.attr.tags
+                    - expr: request.resource.attr.nested.nextlevel.aBool == true
+
+    - actions:
+        - "deep-nested-category-label"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.categories.exists(cat, cat.subCategories.exists(sub, sub.labels.exists(label, label.name == "important")))
+
+    - actions:
+        - "deep-nested-exists"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.categories.exists(cat, cat.name == "business" && cat.subCategories.exists(sub, sub.name == "finance"))
+
+    - actions:
+        - "map-collection"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: hasIntersection(request.resource.attr.tags.map(tag, tag.name), ["public", "private"])
+
+    - actions:
+        - "nested-contains"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.nested.aString.contains("str")
+
+    - actions:
+        - "deeply-nested-starts-with"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.nested.nextlevel.aString.startsWith("str")
+
+    - actions:
+        - "exists-nested-collection"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.categories.exists(cat, cat.name == "business" && cat.subCategories.exists(sub, sub.name == "finance"))
+
+    - actions:
+        - "is-set-nested"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.nested.aOptionalString != null
+
+    - actions:
+        - "has-intersection-nested"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: hasIntersection(request.resource.attr.categories.subCategories.map(sub, sub.name), ["finance", "tech"])
+
+    - actions:
+        - "filter-deeply-nested"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.categories.exists(cat, cat.subCategories.exists(sub, sub.labels.exists(label, label.name == "important")))
+
+    - actions:
+        - "map-deeply-nested"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: hasIntersection(request.resource.attr.categories.subCategories.map(sub, sub.name), ["finance", "tech"])
+
+    - actions:
+        - "combined-and"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.resource.attr.aBool == true
+              - expr: request.resource.attr.nested.aString.contains("test")
+
+    - actions:
+        - "combined-or"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          any:
+            of:
+              - expr: request.resource.attr.nested.nextlevel.aBool == true
+              - expr: request.resource.attr.categories.exists(cat, cat.name == "business")
+
+    - actions:
+        - "combined-not"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: >
+            !(request.resource.attr.categories.exists(cat, cat.subCategories.exists(sub, sub.name == "finance")))

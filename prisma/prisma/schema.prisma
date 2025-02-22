@@ -20,6 +20,9 @@ model Resource {
   creatorId        String
   nested           NestedResource @relation(fields: [nestedResourceId], references: [id])
   nestedResourceId String
+  tags             Tag[] // Add many-to-many relationship
+  aOptionalString  String?
+  categories       Category[] // Add categories relation
 }
 
 model User {
@@ -32,9 +35,48 @@ model User {
 }
 
 model NestedResource {
-  id       String     @id @default(cuid())
-  aString  String
-  aNumber  Int
-  aBool    Boolean
-  Resource Resource[]
+  id              String  @id @default(cuid())
+  aString         String
+  aNumber         Int
+  aBool           Boolean
+  aOptionalString String?
+
+  Resource                  Resource[]
+  nextlevel                 NextLevelNestedResource @relation(fields: [nextLevelNestedResourceId], references: [id])
+  nextLevelNestedResourceId String
+}
+
+model NextLevelNestedResource {
+  id             String           @id @default(cuid())
+  aString        String
+  aNumber        Int
+  aBool          Boolean
+  NestedResource NestedResource[]
+}
+
+model Tag {
+  id        String     @id @default(cuid())
+  name      String     @unique
+  resources Resource[]
+}
+
+// Add new models for nested many-to-many relations
+model Category {
+  id            String        @id @default(cuid())
+  name          String        @unique
+  resources     Resource[]
+  subCategories SubCategory[]
+}
+
+model SubCategory {
+  id         String     @id @default(cuid())
+  name       String     @unique
+  categories Category[]
+  labels     Label[]
+}
+
+model Label {
+  id            String        @id @default(cuid())
+  name          String        @unique
+  subCategories SubCategory[]
 }
