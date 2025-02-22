@@ -35,10 +35,11 @@ model User {
 }
 
 model NestedResource {
-  id      String  @id @default(cuid())
-  aString String
-  aNumber Int
-  aBool   Boolean
+  id              String  @id @default(cuid())
+  aString         String
+  aNumber         Int
+  aBool           Boolean
+  aOptionalString String?
 
   Resource                  Resource[]
   nextlevel                 NextLevelNestedResource @relation(fields: [nextLevelNestedResourceId], references: [id])

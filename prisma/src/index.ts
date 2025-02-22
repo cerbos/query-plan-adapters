@@ -162,7 +162,7 @@ const getPrismaRelationOperator = (relation: {
   name: string;
   type: "one" | "many";
   field?: string;
-}) => (relation.type === "one" ? "is" : "some");
+}): string => (relation.type === "one" ? "is" : "some");
 
 /**
  * Builds a nested relation filter for Prisma queries.
@@ -327,7 +327,7 @@ const buildPrismaFilterFromCerbosExpression = (
     operator: string,
     left: ResolvedOperand,
     right: ResolvedOperand
-  ) => {
+  ): PrismaFilter => {
     const prismaOperator = {
       eq: "equals",
       ne: "not",

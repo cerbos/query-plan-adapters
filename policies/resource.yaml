@@ -433,7 +433,6 @@ resourcePolicy:
         - USER
       condition:
         match:
-          # Fix the exists expression to properly handle nested relations
           expr: request.resource.attr.categories.exists(cat, cat.subCategories.exists(sub, sub.labels.exists(label, label.name == "important")))
 
     - actions:
@@ -453,3 +452,100 @@ resourcePolicy:
       condition:
         match:
           expr: hasIntersection(request.resource.attr.tags.map(tag, tag.name), ["public", "private"])
+
+    - actions:
+        - "nested-contains"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.nested.aString.contains("str")
+
+    - actions:
+        - "deeply-nested-starts-with"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.nested.nextlevel.aString.startsWith("str")
+
+    - actions:
+        - "exists-nested-collection"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.categories.exists(cat, cat.name == "business" && cat.subCategories.exists(sub, sub.name == "finance"))
+
+    - actions:
+        - "is-set-nested"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.nested.aOptionalString != null
+
+    - actions:
+        - "has-intersection-nested"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: hasIntersection(request.resource.attr.categories.subCategories.map(sub, sub.name), ["finance", "tech"])
+
+    - actions:
+        - "filter-deeply-nested"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.categories.exists(cat, cat.subCategories.exists(sub, sub.labels.exists(label, label.name == "important")))
+
+    - actions:
+        - "map-deeply-nested"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: hasIntersection(request.resource.attr.categories.subCategories.map(sub, sub.name), ["finance", "tech"])
+
+    - actions:
+        - "combined-and"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.resource.attr.aBool == true
+              - expr: request.resource.attr.nested.aString.contains("test")
+
+    - actions:
+        - "combined-or"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          any:
+            of:
+              - expr: request.resource.attr.nested.nextlevel.aBool == true
+              - expr: request.resource.attr.categories.exists(cat, cat.name == "business")
+
+    - actions:
+        - "combined-not"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: >
+            !(request.resource.attr.categories.exists(cat, cat.subCategories.exists(sub, sub.name == "finance")))
