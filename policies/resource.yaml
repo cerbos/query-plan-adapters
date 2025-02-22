@@ -444,3 +444,12 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.categories.exists(cat, cat.name == "business" && cat.subCategories.exists(sub, sub.name == "finance"))
+
+    - actions:
+        - "map-collection"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: hasIntersection(request.resource.attr.tags.map(tag, tag.name), ["public", "private"])

@@ -482,6 +482,21 @@ const buildPrismaFilterFromCerbosExpression = (
             "First operand of map must be a collection reference"
           );
 
+        // Get variable name from lambda
+        if (!isPlanExpressionWithOperator(lambda)) {
+          throw new Error("Lambda expression must have operands");
+        }
+        const [, variable] = lambda.operands;
+        if (!("name" in variable))
+          throw new Error("Lambda variable must have a name");
+
+        // Create scoped mapper for the collection
+        const scopedMapper = createScopedMapper(
+          collection.name,
+          variable.name,
+          mapper
+        );
+
         const { relations } = resolveFieldReference(collection.name, mapper);
         if (!relations || relations.length === 0)
           throw new Error("Map operation requires relations");
@@ -492,7 +507,9 @@ const buildPrismaFilterFromCerbosExpression = (
         if (!("name" in projection))
           throw new Error("Invalid map lambda expression structure");
 
-        const fieldName = projection.name.split(".").pop()!;
+        // Use scoped mapper for resolving the projection
+        const resolved = resolveFieldReference(projection.name, scopedMapper);
+        const fieldName = resolved.path[resolved.path.length - 1];
 
         return buildNestedRelationFilter(relations, {
           [fieldName]: { in: rightOperand.value },
@@ -547,43 +564,62 @@ const buildPrismaFilterFromCerbosExpression = (
         throw new Error(
           "Second operand of exists/all/except must be a lambda expression"
         );
+
+      // Get variable name from lambda
+      const [, variable] = lambda.operands;
+      if (!("name" in variable))
+        throw new Error("Lambda variable must have a name");
+
+      // Create scoped mapper for the collection
+      const scopedMapper = createScopedMapper(
+        collection.name,
+        variable.name,
+        mapper
+      );
+
       const { relations } = resolveFieldReference(collection.name, mapper);
       if (!relations)
         throw new Error(`${operator} operator requires a relation mapping`);
 
       const lambdaCondition = buildPrismaFilterFromCerbosExpression(
-        lambda,
-        mapper
+        lambda.operands[0], // Use the condition part of the lambda
+        scopedMapper
       );
 
       const relation = relations[0];
-      const filterField = relation.field || Object.keys(lambdaCondition)[0];
-      const filterValue = lambdaCondition[Object.keys(lambdaCondition)[0]];
+      let filterValue = lambdaCondition;
+
+      // If the lambda condition already has a relation structure, merge it
+      if (lambdaCondition.AND || lambdaCondition.OR) {
+        filterValue = lambdaCondition;
+      } else {
+        const filterField = relation.field || Object.keys(lambdaCondition)[0];
+        filterValue = {
+          [filterField]: lambdaCondition[Object.keys(lambdaCondition)[0]],
+        };
+      }
 
       switch (operator) {
         case "exists":
         case "filter":
-          return { [relation.name]: { some: { [filterField]: filterValue } } };
+          return { [relation.name]: { some: filterValue } };
         case "exists_one":
           return {
             [relation.name]: {
-              some: { [filterField]: filterValue },
+              some: filterValue,
             },
             AND: [
               {
                 [relation.name]: {
                   every: {
-                    OR: [
-                      { [filterField]: filterValue },
-                      { NOT: { [filterField]: filterValue } },
-                    ],
+                    OR: [filterValue, { NOT: filterValue }],
                   },
                 },
               },
             ],
           };
         case "all":
-          return { [relation.name]: { every: { [filterField]: filterValue } } };
+          return { [relation.name]: { every: filterValue } };
         default:
           throw new Error(`Unexpected operator: ${operator}`);
       }
@@ -596,15 +632,30 @@ const buildPrismaFilterFromCerbosExpression = (
         throw new Error("First operand of map must be a collection reference");
       if (!("operator" in lambda) || lambda.operator !== "lambda")
         throw new Error("Second operand of map must be a lambda expression");
-      const { relations } = resolveFieldReference(collection.name, mapper);
-      if (!relations)
-        throw new Error("map operator requires a relation mapping");
+
+      // Get variable name from lambda
       const [projection, variable] = lambda.operands;
       if (!("name" in projection) || !("name" in variable))
         throw new Error("Invalid map lambda expression structure");
+
+      // Create scoped mapper for the collection
+      const scopedMapper = createScopedMapper(
+        collection.name,
+        variable.name,
+        mapper
+      );
+
+      const { relations } = resolveFieldReference(collection.name, mapper);
+      if (!relations)
+        throw new Error("map operator requires a relation mapping");
+
+      // Use scoped mapper for resolving the projection
+      const resolved = resolveFieldReference(projection.name, scopedMapper);
+      const fieldName = resolved.path[resolved.path.length - 1];
+
       return buildNestedRelationFilter(relations, {
         [getPrismaRelationOperator(relations[relations.length - 1])]: {
-          select: { [projection.name.replace(`${variable.name}.`, "")]: true },
+          select: { [fieldName]: true },
         },
       });
     }
@@ -612,3 +663,46 @@ const buildPrismaFilterFromCerbosExpression = (
       throw new Error(`Unsupported operator: ${operator}`);
   }
 };
+
+/**
+ * Creates a scoped mapper for collection operations that preserves access to parent scope
+ * and handles nested collections
+ */
+const createScopedMapper =
+  (collectionPath: string, variableName: string, fullMapper: Mapper): Mapper =>
+  (key: string) => {
+    // If the key starts with the variable name, it's accessing the collection item
+    if (key.startsWith(variableName + ".")) {
+      const strippedKey = key.replace(variableName + ".", "");
+      const parts = strippedKey.split(".");
+
+      // Get the collection's relation config
+      const collectionConfig =
+        typeof fullMapper === "function"
+          ? fullMapper(collectionPath)
+          : fullMapper[collectionPath];
+
+      if (collectionConfig?.relation?.fields) {
+        // For nested paths, traverse the fields configuration
+        let currentConfig = collectionConfig.relation.fields;
+        let field = parts[0];
+
+        for (let i = 0; i < parts.length - 1; i++) {
+          const part = parts[i];
+          if (currentConfig[part]?.relation?.fields) {
+            currentConfig = currentConfig[part].relation.fields;
+            field = parts[i + 1];
+          } else {
+            break;
+          }
+        }
+
+        // Return the field config if it exists, otherwise create a default one
+        return currentConfig[field] || { field };
+      }
+      return { field: strippedKey };
+    }
+
+    // For keys not referencing the collection item, use the full mapper
+    return typeof fullMapper === "function" ? fullMapper(key) : fullMapper[key];
+  };
