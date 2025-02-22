@@ -33,21 +33,21 @@ const fixtureUsers: Prisma.UserCreateInput[] = [
   },
 ];
 
-const fixtureNestedResources: Prisma.NestedResourceCreateInput[] = [
+const fixtureNextLevelResources: Prisma.NextLevelNestedResourceCreateInput[] = [
   {
-    id: "nested1",
+    id: "nextLevel1",
     aBool: true,
     aNumber: 1,
     aString: "string",
   },
   {
-    id: "nested2",
+    id: "nextLevel2",
     aBool: false,
     aNumber: 1,
     aString: "string",
   },
   {
-    id: "nested3",
+    id: "nextLevel3",
     aBool: true,
     aNumber: 1,
     aString: "string",
@@ -66,6 +66,42 @@ const fixtureTags: Prisma.TagCreateInput[] = [
   {
     id: "tag3",
     name: "draft",
+  },
+];
+
+const fixtureNestedResources: Prisma.NestedResourceCreateInput[] = [
+  {
+    id: "nested1",
+    aBool: true,
+    aNumber: 1,
+    aString: "string",
+    nextlevel: {
+      connect: {
+        id: "nextLevel1",
+      },
+    },
+  },
+  {
+    id: "nested2",
+    aBool: false,
+    aNumber: 1,
+    aString: "string",
+    nextlevel: {
+      connect: {
+        id: "nextLevel2",
+      },
+    },
+  },
+  {
+    id: "nested3",
+    aBool: true,
+    aNumber: 1,
+    aString: "string",
+    nextlevel: {
+      connect: {
+        id: "nextLevel3",
+      },
+    },
   },
 ];
 
@@ -163,6 +199,7 @@ const fixtureResources: Prisma.ResourceCreateInput[] = [
 
 beforeAll(async () => {
   await prisma.resource.deleteMany();
+  await prisma.nextLevelNestedResource.deleteMany();
   await prisma.nestedResource.deleteMany();
   await prisma.tag.deleteMany();
   await prisma.user.deleteMany();
@@ -175,6 +212,9 @@ beforeEach(async () => {
   for (const user of fixtureUsers) {
     await prisma.user.create({ data: user });
   }
+  for (const resource of fixtureNextLevelResources) {
+    await prisma.nextLevelNestedResource.create({ data: resource });
+  }
   for (const resource of fixtureNestedResources) {
     await prisma.nestedResource.create({ data: resource });
   }
@@ -186,6 +226,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await prisma.resource.deleteMany();
   await prisma.nestedResource.deleteMany();
+  await prisma.nextLevelNestedResource.deleteMany();
   await prisma.tag.deleteMany();
   await prisma.user.deleteMany();
 });
@@ -1446,6 +1487,87 @@ describe("Nested Relations", () => {
     );
   });
 
+  test("conditional - deeply nested eq", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "equal-deeply-nested",
+    });
+
+    expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+
+    const conditions = (queryPlan as PlanResourcesConditionalResponse)
+      .condition;
+
+    expect(conditions).toEqual({
+      operator: "eq",
+      operands: [
+        { name: "request.resource.attr.nested.nextlevel.aBool" },
+        { value: true },
+      ],
+    });
+
+    const result = queryPlanToPrisma({
+      queryPlan,
+      mapper: {
+        "request.resource.attr.nested": {
+          relation: {
+            name: "nested",
+            type: "one",
+            fields: {
+              nextlevel: {
+                relation: {
+                  name: "nextlevel",
+                  type: "one",
+                  fields: {
+                    aBool: { field: "aBool" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    console.log(JSON.stringify(result, null, 2));
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        nested: {
+          is: {
+            nextlevel: {
+              is: {
+                aBool: {
+                  equals: true,
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const query = await prisma.resource.findMany({
+      where: { ...result.filters },
+    });
+
+    expect(query.map((r) => r.id)).toEqual(
+      fixtureResources
+        .filter((a) => {
+          const nestedResource = fixtureNestedResources.find(
+            (f) => f.id === a.nested.connect?.id
+          );
+          const nextLevelResource = fixtureNextLevelResources.find(
+            (f) => f.id === nestedResource?.nextlevel.connect?.id
+          );
+          return nextLevelResource?.aBool === true;
+        })
+        .map((r) => r.id)
+    );
+  });
+
   test("conditional - relation eq with number", async () => {
     const queryPlan = await cerbos.planResources({
       principal: { id: "user1", roles: ["USER"] },
@@ -2576,7 +2698,7 @@ describe("Error Cases", () => {
         queryPlan: invalidQueryPlan as unknown as PlanResourcesResponse,
         mapper: {},
       })
-    ).toThrow("No valid left operand found");
+    ).toThrow("No operand with 'name' found");
   });
 });
 
