@@ -1,22 +1,37 @@
 # Cerbos + Prisma ORM Adapter
 
-An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanResources API](https://docs.cerbos.dev/cerbos/latest/api/index.html#resources-query-plan)) response and converts it into a [Prisma](https://prisma.io) where class object. This is designed to work alongside a project using the [Cerbos Javascript SDK](https://github.com/cerbos/cerbos-sdk-javascript).
+An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanResources API](https://docs.cerbos.dev/cerbos/latest/api/index.html#resources-query-plan)) response and converts it into a [Prisma](https://prisma.io) where clause object. This is designed to work alongside a project using the [Cerbos Javascript SDK](https://github.com/cerbos/cerbos-sdk-javascript).
 
 ## Features
 
 ### Supported Operators
 
+#### Basic Operators
+
 - Logical operators: `and`, `or`, `not`
 - Comparison operators: `eq`, `ne`, `lt`, `gt`, `lte`, `gte`, `in`
-- Relation operators: `some`, `none`, `is`, `isNot`, `hasIntersection`
 - String operations: `startsWith`, `endsWith`, `contains`, `isSet`
-- Support for nested fields and relations
-- Support for both one-to-one, one-to-many and many-to-many relationships
+
+#### Relation Operators
+
+- One-to-one: `is`, `isNot`
+- One-to-many/Many-to-many: `some`, `none`, `every`
+- Collection operators: `exists`, `exists_one`, `all`, `filter`
+- Set operations: `hasIntersection`
+
+#### Advanced Features
+
+- Deep nested relations support
+- Automatic field inference
+- Collection mapping and filtering
+- Complex condition combinations
+- Type-safe field mappings
 
 ## Requirements
 
 - Cerbos > v0.40
 - `@cerbos/http` or `@cerbos/grpc` client
+- Prisma > v6.0
 
 ## Installation
 
@@ -41,6 +56,49 @@ queryPlanToPrisma({
 ```
 
 ### Basic Example
+
+1. Create a basic policy file in the `policies` directory:
+
+```yaml
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  resource: resource
+  version: default
+  rules:
+    - actions: ["view"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: request.resource.attr.status == "active"
+```
+
+2. Start Cerbos PDP:
+
+```bash
+docker run --rm -i -p 3592:3592 -v $(pwd)/policies:/policies ghcr.io/cerbos/cerbos:latest
+```
+
+3. Create Prisma schema (`prisma/schema.prisma`):
+
+```prisma
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Resource {
+  id     Int     @id @default(autoincrement())
+  title  String
+  status String
+}
+```
+
+4. Implement the mapper
 
 ```ts
 import { GRPC as Cerbos } from "@cerbos/grpc";
@@ -266,3 +324,31 @@ const result = await primsa.resource.findMany({
 ## Full Example
 
 A complete example application using this adapter can be found at [https://github.com/cerbos/express-prisma-cerbos](https://github.com/cerbos/express-prisma-cerbos)
+
+## Resources
+
+### Documentation
+
+- [Cerbos Documentation](https://docs.cerbos.dev)
+- [Prisma Documentation](https://www.prisma.io/docs)
+- [Query Plan API Reference](https://docs.cerbos.dev/cerbos/latest/api/index.html#resources-query-plan)
+
+### Examples and Tutorials
+
+- [Express + Prisma + Cerbos Example](https://github.com/cerbos/express-prisma-cerbos)
+- [Cerbos Query Planning Guide](https://docs.cerbos.dev/cerbos/latest/policies/compile.html)
+- [Prisma Filtering Guide](https://www.prisma.io/docs/concepts/components/prisma-client/filtering-and-sorting)
+
+### Related Projects
+
+- [Cerbos JavaScript SDK](https://github.com/cerbos/cerbos-sdk-javascript)
+
+### Community
+
+- [Cerbos Discord](https://community.cerbos.dev)
+- [Cerbos GitHub Discussions](https://github.com/cerbos/cerbos/discussions)
+- [Prisma Discord](https://discord.gg/prisma)
+
+## License
+
+Apache 2.0 - See [LICENSE](../LICENSE) for more information.
