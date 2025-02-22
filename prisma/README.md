@@ -345,9 +345,8 @@ A complete example application using this adapter can be found at [https://githu
 
 ### Community
 
-- [Cerbos Discord](https://community.cerbos.dev)
+- [Cerbos Slack](https://community.cerbos.dev)
 - [Cerbos GitHub Discussions](https://github.com/cerbos/cerbos/discussions)
-- [Prisma Discord](https://discord.gg/prisma)
 
 ## License
 
