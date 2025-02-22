@@ -1530,8 +1530,6 @@ describe("Nested Relations", () => {
       },
     });
 
-    console.log(JSON.stringify(result, null, 2));
-
     expect(result).toStrictEqual({
       kind: PlanKind.CONDITIONAL,
       filters: {
@@ -2757,98 +2755,109 @@ describe("Mapper Function Tests", () => {
   });
 });
 
-// // Integration Tests
-// describe("Integration Tests", () => {
-//   test("conditional - kitchen sink", async () => {
-//     const queryPlan = await cerbos.planResources({
-//       principal: {
-//         id: "user1",
-//         roles: ["USER"],
-//         attr: { tags: ["public", "draft"] },
-//       },
-//       resource: { kind: "resource" },
-//       action: "kitchensink",
-//     });
+// Integration Tests
+describe("Integration Tests", () => {
+  test("conditional - kitchen sink", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: {
+        id: "user1",
+        roles: ["USER"],
+        attr: { tags: ["public", "draft"] },
+      },
+      resource: { kind: "resource" },
+      action: "kitchensink",
+    });
 
-//     expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+    expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
 
-//     // expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
-//     //   operator: "filter",
-//     //   operands: [
-//     //     {
-//     //       name: "request.resource.attr.tags",
-//     //     },
-//     //     {
-//     //       operator: "lambda",
-//     //       operands: [
-//     //         {
-//     //           operator: "eq",
-//     //           operands: [
-//     //             {
-//     //               name: "tag.name",
-//     //             },
-//     //             {
-//     //               value: "public",
-//     //             },
-//     //           ],
-//     //         },
-//     //         {
-//     //           name: "tag",
-//     //         },
-//     //       ],
-//     //     },
-//     //   ],
-//     // });
+    // expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+    //   operator: "filter",
+    //   operands: [
+    //     {
+    //       name: "request.resource.attr.tags",
+    //     },
+    //     {
+    //       operator: "lambda",
+    //       operands: [
+    //         {
+    //           operator: "eq",
+    //           operands: [
+    //             {
+    //               name: "tag.name",
+    //             },
+    //             {
+    //               value: "public",
+    //             },
+    //           ],
+    //         },
+    //         {
+    //           name: "tag",
+    //         },
+    //       ],
+    //     },
+    //   ],
+    // });
 
-//     const result = queryPlanToPrisma({
-//       queryPlan,
-//       mapper: {
-//         "request.resource.attr.aOptionalString": { field: "aOptionalString" },
-//         "request.resource.attr.aBool": { field: "aBool" },
-//         "request.resource.attr.aString": { field: "aString" },
-//         "request.resource.attr.tags": {
-//           relation: {
-//             name: "tags",
-//             type: "many",
-//           },
-//         },
-//         "request.resource.attr.nested": {
-//           relation: {
-//             name: "nested",
-//             type: "one",
-//           },
-//         },
-//       },
-//     });
+    const result = queryPlanToPrisma({
+      queryPlan,
+      mapper: {
+        "request.resource.attr.aOptionalString": { field: "aOptionalString" },
+        "request.resource.attr.aBool": { field: "aBool" },
+        "request.resource.attr.aString": { field: "aString" },
+        "request.resource.attr.tags": {
+          relation: {
+            name: "tags",
+            type: "many",
+          },
+        },
+        "request.resource.attr.nested": {
+          relation: {
+            name: "nested",
+            type: "one",
+            fields: {
+              nextlevel: {
+                relation: {
+                  name: "nextlevel",
+                  type: "one",
+                  fields: {
+                    aBool: { field: "aBool" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
 
-//     // expect(result).toStrictEqual({
-//     //   kind: PlanKind.CONDITIONAL,
-//     //   filters: {
-//     //     tags: {
-//     //       some: {
-//     //         name: { equals: "public" },
-//     //       },
-//     //     },
-//     //   },
-//     // });
+    // expect(result).toStrictEqual({
+    //   kind: PlanKind.CONDITIONAL,
+    //   filters: {
+    //     tags: {
+    //       some: {
+    //         name: { equals: "public" },
+    //       },
+    //     },
+    //   },
+    // });
 
-//     // console.log(JSON.stringify(result, null, 2));
-//     await prisma.resource.findMany({
-//       where: { ...result.filters },
-//     });
+    // console.log(JSON.stringify(result, null, 2));
+    await prisma.resource.findMany({
+      where: { ...result.filters },
+    });
 
-//     // expect(query.map((r) => r.id)).toEqual(
-//     //   fixtureResources
-//     //     .filter(
-//     //       (a) =>
-//     //         Array.isArray(a.tags?.connect) &&
-//     //         a.tags?.connect
-//     //           .map((t) => {
-//     //             return fixtureTags.find((f) => f.id === t.id);
-//     //           })
-//     //           .filter((t) => t?.name === "public").length > 0
-//     //     )
-//     //     .map((r) => r.id)
-//     // );
-//   });
-// });
+    // expect(query.map((r) => r.id)).toEqual(
+    //   fixtureResources
+    //     .filter(
+    //       (a) =>
+    //         Array.isArray(a.tags?.connect) &&
+    //         a.tags?.connect
+    //           .map((t) => {
+    //             return fixtureTags.find((f) => f.id === t.id);
+    //           })
+    //           .filter((t) => t?.name === "public").length > 0
+    //     )
+    //     .map((r) => r.id)
+    // );
+  });
+});

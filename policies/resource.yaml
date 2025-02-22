@@ -424,3 +424,4 @@ resourcePolicy:
                     - expr: hasIntersection(request.resource.attr.tags.map(t, t.name), request.principal.attr.tags)
                     - expr: >
                         "public" in request.principal.attr.tags
+                    - expr: request.resource.attr.nested.nextlevel.aBool == true

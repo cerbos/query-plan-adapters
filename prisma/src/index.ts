@@ -2,6 +2,7 @@ import {
   PlanResourcesResponse,
   PlanExpressionOperand,
   PlanKind,
+  Value,
 } from "@cerbos/core";
 
 export { PlanKind };
@@ -232,6 +233,56 @@ const buildNestedRelationFilter = (
   return currentFilter;
 };
 
+type ResolvedFieldReference = {
+  path: string[];
+  relations?: Array<{
+    name: string;
+    type: "one" | "many";
+    field?: string;
+    nestedMapper?: { [key: string]: MapperConfig };
+  }>;
+};
+
+type ResolvedValue = {
+  value: any;
+};
+
+type ResolvedOperand = ResolvedFieldReference | ResolvedValue;
+
+// Add these type guards after the type definitions and before buildPrismaFilterFromCerbosExpression
+function isResolvedFieldReference(
+  operand: ResolvedOperand
+): operand is ResolvedFieldReference {
+  return "path" in operand;
+}
+
+function isResolvedValue(operand: ResolvedOperand): operand is ResolvedValue {
+  return "value" in operand;
+}
+
+function isPlanExpressionWithName(
+  operand: PlanExpressionOperand
+): operand is { name: string } {
+  return "name" in operand && typeof operand.name === "string";
+}
+
+function isPlanExpressionWithValue(
+  operand: PlanExpressionOperand
+): operand is { value: Value } {
+  return "value" in operand && operand.value !== undefined;
+}
+
+function isPlanExpressionWithOperator(
+  operand: PlanExpressionOperand
+): operand is { operator: string; operands: PlanExpressionOperand[] } {
+  return (
+    "operator" in operand &&
+    typeof operand.operator === "string" &&
+    "operands" in operand &&
+    Array.isArray(operand.operands)
+  );
+}
+
 const buildPrismaFilterFromCerbosExpression = (
   expression: PlanExpressionOperand,
   mapper: Mapper
@@ -244,14 +295,14 @@ const buildPrismaFilterFromCerbosExpression = (
   /**
    * Helper function to resolve an operand.
    * @param {PlanExpressionOperand} operand - The operand from expression.
-   * @returns {any} An object with a field reference or value.
+   * @returns {ResolvedOperand} An object with either a field reference or value.
    */
-  const resolveOperand = (operand: PlanExpressionOperand): any => {
-    if ("name" in operand && operand.name) {
+  const resolveOperand = (operand: PlanExpressionOperand): ResolvedOperand => {
+    if (isPlanExpressionWithName(operand)) {
       return resolveFieldReference(operand.name, mapper);
-    } else if ("value" in operand && operand.value !== undefined) {
+    } else if (isPlanExpressionWithValue(operand)) {
       return { value: operand.value };
-    } else if ("operator" in operand) {
+    } else if (isPlanExpressionWithOperator(operand)) {
       // Nested expression resolution
       const nestedResult = buildPrismaFilterFromCerbosExpression(
         operand,
@@ -293,7 +344,9 @@ const buildPrismaFilterFromCerbosExpression = (
     case "gt":
     case "ge": {
       // Relational operators: find left and right operands
-      const leftOperand = operands.find((o) => "name" in o || "operator" in o);
+      const leftOperand = operands.find(
+        (o) => isPlanExpressionWithName(o) || isPlanExpressionWithOperator(o)
+      );
       if (!leftOperand) throw new Error("No valid left operand found");
       const rightOperand = operands.find((o) => o !== leftOperand);
       if (!rightOperand) throw new Error("No valid right operand found");
@@ -307,8 +360,11 @@ const buildPrismaFilterFromCerbosExpression = (
         gt: "gt",
         ge: "gte",
       }[operator];
-      if ("path" in left) {
+      if (isResolvedFieldReference(left)) {
         const { path, relations } = left;
+        if (!isResolvedValue(right)) {
+          throw new Error("Right operand must be a value");
+        }
         const filterValue = { [prismaOperator]: right.value };
         const fieldFilter = {
           [path[path.length - 1]]: filterValue,
@@ -320,14 +376,32 @@ const buildPrismaFilterFromCerbosExpression = (
 
         return fieldFilter;
       }
+      if (!isResolvedValue(right)) {
+        throw new Error("Right operand must be a value");
+      }
       return { [prismaOperator]: right.value };
     }
     case "in": {
       // For relations, the operands might be in reverse order (value first, then name)
-      const nameOperand = operands.find((o) => "name" in o)!;
-      const valueOperand = operands.find((o) => "value" in o)!;
-      const { path, relations } = resolveOperand(nameOperand);
-      const { value } = resolveOperand(valueOperand);
+      const nameOperand = operands.find(isPlanExpressionWithName);
+      if (!nameOperand) {
+        throw new Error("Name operand is undefined");
+      }
+      const valueOperand = operands.find(isPlanExpressionWithValue);
+      if (!valueOperand) {
+        throw new Error("Value operand is undefined");
+      }
+
+      const resolved = resolveOperand(nameOperand);
+      if (!isResolvedFieldReference(resolved)) {
+        throw new Error("Name operand must resolve to a field reference");
+      }
+      const { path, relations } = resolved;
+      const resolvedValue = resolveOperand(valueOperand);
+      if (!isResolvedValue(resolvedValue)) {
+        throw new Error("Value operand must resolve to a value");
+      }
+      const { value } = resolvedValue;
 
       // If we have relations, handle differently than direct field
       if (relations && relations.length > 0) {
@@ -345,10 +419,25 @@ const buildPrismaFilterFromCerbosExpression = (
     case "contains":
     case "startsWith":
     case "endsWith": {
-      const { path, relations } = resolveOperand(
-        operands.find((o) => "name" in o)!
-      );
-      const { value } = resolveOperand(operands.find((o) => "value" in o)!);
+      const nameOperand = operands.find(isPlanExpressionWithName);
+      if (!nameOperand) {
+        throw new Error("Name operand is undefined");
+      }
+      const resolved = resolveOperand(nameOperand);
+      if (!isResolvedFieldReference(resolved)) {
+        throw new Error("Name operand must resolve to a field reference");
+      }
+      const { path, relations } = resolved;
+
+      const valueOperand = operands.find(isPlanExpressionWithValue);
+      if (!valueOperand) {
+        throw new Error("Value operand is undefined");
+      }
+      const resolvedValue = resolveOperand(valueOperand);
+      if (!isResolvedValue(resolvedValue)) {
+        throw new Error("Value operand must resolve to a value");
+      }
+      const { value } = resolvedValue;
       if (typeof value !== "string") {
         throw new Error(`${operator} operator requires string value`);
       }
@@ -361,12 +450,25 @@ const buildPrismaFilterFromCerbosExpression = (
       return fieldFilter;
     }
     case "isSet": {
-      const { path, relations } = resolveOperand(
-        operands.find((o) => "name" in o)!
-      );
-      const { value } = resolveOperand(operands.find((o) => "value" in o)!);
+      const nameOperand = operands.find(isPlanExpressionWithName);
+      if (!nameOperand) {
+        throw new Error("Name operand is undefined");
+      }
+      const resolved = resolveOperand(nameOperand);
+      if (!isResolvedFieldReference(resolved)) {
+        throw new Error("Name operand must resolve to a field reference");
+      }
+      const { path, relations } = resolved;
+
+      const valueOperand = operands.find(isPlanExpressionWithValue);
+      if (!valueOperand) {
+        throw new Error("Value operand is undefined");
+      }
+      const resolvedValue = resolveOperand(valueOperand);
       const fieldFilter = {
-        [path[path.length - 1]]: value ? { not: null } : { equals: null },
+        [path[path.length - 1]]: resolvedValue
+          ? { not: null }
+          : { equals: null },
       };
 
       if (relations && relations.length > 0) {
