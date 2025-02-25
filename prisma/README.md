@@ -321,6 +321,62 @@ const result = await primsa.resource.findMany({
 });
 ```
 
+## Types
+
+### Query Plan Response Types
+
+The adapter is fully typed and provides clear type definitions for all responses:
+
+```ts
+import { PlanKind, QueryPlanToPrismaResult } from "@cerbos/orm-prisma";
+
+// The result will be one of these types:
+type QueryPlanToPrismaResult =
+  | {
+      kind: PlanKind.ALWAYS_ALLOWED | PlanKind.ALWAYS_DENIED;
+    }
+  | {
+      kind: PlanKind.CONDITIONAL;
+      filters: Record<string, any>;
+    };
+
+// Example usage with type narrowing:
+const result = queryPlanToPrisma({ queryPlan });
+
+if (result.kind === PlanKind.CONDITIONAL) {
+  // TypeScript knows `filters` exists here
+  const records = await prisma.resource.findMany({
+    where: result.filters,
+  });
+} else if (result.kind === PlanKind.ALWAYS_ALLOWED) {
+  // No filters needed
+  const records = await prisma.resource.findMany();
+} else {
+  // Must be ALWAYS_DENIED
+  return [];
+}
+```
+
+### Mapper Types
+
+The mapper configuration is also fully typed:
+
+```ts
+type MapperConfig = {
+  field?: string;
+  relation?: {
+    name: string;
+    type: "one" | "many";
+    field?: string;
+    fields?: {
+      [key: string]: MapperConfig; // Recursive for nested fields
+    };
+  };
+};
+
+type Mapper = { [key: string]: MapperConfig } | ((key: string) => MapperConfig);
+```
+
 ## Full Example
 
 A complete example application using this adapter can be found at [https://github.com/cerbos/express-prisma-cerbos](https://github.com/cerbos/express-prisma-cerbos)

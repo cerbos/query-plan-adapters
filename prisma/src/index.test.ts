@@ -1,4 +1,4 @@
-import { queryPlanToPrisma, PlanKind } from ".";
+import { queryPlanToPrisma, PlanKind, QueryPlanToPrismaResult } from ".";
 import {
   beforeAll,
   beforeEach,
@@ -7,6 +7,7 @@ import {
   test,
   expect,
 } from "@jest/globals";
+import { expectTypeOf } from "expect-type";
 import {
   PlanExpression,
   PlanResourcesConditionalResponse,
@@ -365,7 +366,8 @@ describe("Field Operations", () => {
         filters: { aBool: { equals: true } },
       });
       const query = await prisma.resource.findMany({
-        where: { ...result.filters },
+        where:
+          result.kind === PlanKind.CONDITIONAL ? { ...result.filters } : {},
       });
       expect(query.map((r) => r.id)).toEqual(
         fixtureResources.filter((a) => a.aBool).map((r) => r.id)
@@ -413,6 +415,10 @@ describe("Field Operations", () => {
         filters: { aBool: { equals: true } },
       });
 
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
+
       const query = await prisma.resource.findMany({
         where: { ...result.filters },
       });
@@ -450,6 +456,11 @@ describe("Field Operations", () => {
         kind: PlanKind.CONDITIONAL,
         filters: { aString: { not: "string" } },
       });
+
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
+
       const query = await prisma.resource.findMany({
         where: { ...result.filters },
       });
@@ -492,6 +503,11 @@ describe("Field Operations", () => {
         kind: PlanKind.CONDITIONAL,
         filters: { NOT: { aBool: { equals: true } } },
       });
+
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
+
       const query = await prisma.resource.findMany({
         where: { ...result.filters },
       });
@@ -530,6 +546,10 @@ describe("Field Operations", () => {
           aNumber: { gt: 1 },
         },
       });
+
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
 
       const query = await prisma.resource.findMany({
         where: { ...result.filters },
@@ -572,6 +592,10 @@ describe("Field Operations", () => {
         },
       });
 
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
+
       const query = await prisma.resource.findMany({
         where: { ...result.filters },
       });
@@ -613,6 +637,10 @@ describe("Field Operations", () => {
         },
       });
 
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
+
       const query = await prisma.resource.findMany({
         where: { ...result.filters },
       });
@@ -653,6 +681,10 @@ describe("Field Operations", () => {
           aNumber: { lte: 2 },
         },
       });
+
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
 
       const query = await prisma.resource.findMany({
         where: { ...result.filters },
@@ -702,6 +734,10 @@ describe("Field Operations", () => {
         filters: { aString: { contains: "str" } },
       });
 
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
+
       const query = await prisma.resource.findMany({
         where: { ...result.filters },
       });
@@ -745,6 +781,10 @@ describe("Field Operations", () => {
         kind: PlanKind.CONDITIONAL,
         filters: { aString: { startsWith: "str" } },
       });
+
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
 
       const query = await prisma.resource.findMany({
         where: { ...result.filters },
@@ -790,6 +830,10 @@ describe("Field Operations", () => {
         filters: { aString: { endsWith: "ing" } },
       });
 
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
+
       const query = await prisma.resource.findMany({
         where: { ...result.filters },
       });
@@ -833,6 +877,10 @@ describe("Field Operations", () => {
         kind: PlanKind.CONDITIONAL,
         filters: { aOptionalString: { not: null } },
       });
+
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
 
       const query = await prisma.resource.findMany({
         where: { ...result.filters },
@@ -878,6 +926,10 @@ describe("Collection Operations", () => {
           aString: { in: ["string", "anotherString"] },
         },
       });
+
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
 
       const query = await prisma.resource.findMany({
         where: { ...result.filters },
@@ -954,6 +1006,10 @@ describe("Collection Operations", () => {
           },
         },
       });
+
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
 
       const query = await prisma.resource.findMany({
         where: { ...result.filters },
@@ -1063,6 +1119,10 @@ describe("Collection Operations", () => {
         },
       });
 
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
+
       const query = await prisma.resource.findMany({
         where: { ...result.filters },
       });
@@ -1156,6 +1216,10 @@ describe("Collection Operations", () => {
         },
       });
 
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
+
       const query = await prisma.resource.findMany({
         where: { ...result.filters },
       });
@@ -1237,6 +1301,10 @@ describe("Collection Operations", () => {
         },
       });
 
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
+
       const query = await prisma.resource.findMany({
         where: { ...result.filters },
       });
@@ -1317,6 +1385,10 @@ describe("Collection Operations", () => {
         },
       });
 
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
+
       const query = await prisma.resource.findMany({
         where: { ...result.filters },
       });
@@ -1388,6 +1460,10 @@ describe("Collection Operations", () => {
           },
         },
       });
+
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
 
       const query = await prisma.resource.findMany({
         where: { ...result.filters },
@@ -1462,6 +1538,10 @@ describe("Relations", () => {
           },
         });
 
+        if (result.kind !== PlanKind.CONDITIONAL) {
+          throw new Error("Expected CONDITIONAL result");
+        }
+
         const query = await prisma.resource.findMany({
           where: { ...result.filters },
         });
@@ -1529,6 +1609,10 @@ describe("Relations", () => {
           },
         });
 
+        if (result.kind !== PlanKind.CONDITIONAL) {
+          throw new Error("Expected CONDITIONAL result");
+        }
+
         const query = await prisma.resource.findMany({
           where: { ...result.filters },
         });
@@ -1586,6 +1670,10 @@ describe("Relations", () => {
             },
           },
         });
+
+        if (result.kind !== PlanKind.CONDITIONAL) {
+          throw new Error("Expected CONDITIONAL result");
+        }
 
         const query = await prisma.resource.findMany({
           where: { ...result.filters },
@@ -1646,6 +1734,10 @@ describe("Relations", () => {
             },
           },
         });
+
+        if (result.kind !== PlanKind.CONDITIONAL) {
+          throw new Error("Expected CONDITIONAL result");
+        }
 
         const query = await prisma.resource.findMany({
           where: { ...result.filters },
@@ -1716,6 +1808,10 @@ describe("Relations", () => {
           },
         });
 
+        if (result.kind !== PlanKind.CONDITIONAL) {
+          throw new Error("Expected CONDITIONAL result");
+        }
+
         const query = await prisma.resource.findMany({
           where: { ...result.filters },
         });
@@ -1776,6 +1872,10 @@ describe("Relations", () => {
           },
         });
 
+        if (result.kind !== PlanKind.CONDITIONAL) {
+          throw new Error("Expected CONDITIONAL result");
+        }
+
         const query = await prisma.resource.findMany({
           where: { ...result.filters },
           include: { tags: true },
@@ -1833,6 +1933,10 @@ describe("Relations", () => {
           },
         });
 
+        if (result.kind !== PlanKind.CONDITIONAL) {
+          throw new Error("Expected CONDITIONAL result");
+        }
+
         const query = await prisma.resource.findMany({
           where: { ...result.filters },
           include: { tags: true },
@@ -1884,6 +1988,10 @@ describe("Relations", () => {
           },
         });
 
+        if (result.kind !== PlanKind.CONDITIONAL) {
+          throw new Error("Expected CONDITIONAL result");
+        }
+
         const query = await prisma.resource.findMany({
           where: { ...result.filters },
         });
@@ -1933,6 +2041,10 @@ describe("Relations", () => {
             },
           },
         });
+
+        if (result.kind !== PlanKind.CONDITIONAL) {
+          throw new Error("Expected CONDITIONAL result");
+        }
 
         const query = await prisma.resource.findMany({
           where: { ...result.filters },
@@ -1993,6 +2105,11 @@ describe("Relations", () => {
           kind: PlanKind.CONDITIONAL,
           filters: { nested: { is: { aBool: { equals: true } } } },
         });
+
+        if (result.kind !== PlanKind.CONDITIONAL) {
+          throw new Error("Expected CONDITIONAL result");
+        }
+
         const query = await prisma.resource.findMany({
           where: { ...result.filters },
         });
@@ -2051,6 +2168,10 @@ describe("Relations", () => {
             },
           },
         });
+
+        if (result.kind !== PlanKind.CONDITIONAL) {
+          throw new Error("Expected CONDITIONAL result");
+        }
 
         const query = await prisma.resource.findMany({
           where: { ...result.filters },
@@ -2113,6 +2234,10 @@ describe("Relations", () => {
           },
         });
 
+        if (result.kind !== PlanKind.CONDITIONAL) {
+          throw new Error("Expected CONDITIONAL result");
+        }
+
         const query = await prisma.resource.findMany({
           where: { ...result.filters },
         });
@@ -2169,6 +2294,10 @@ describe("Relations", () => {
             },
           },
         });
+
+        if (result.kind !== PlanKind.CONDITIONAL) {
+          throw new Error("Expected CONDITIONAL result");
+        }
 
         const query = await prisma.resource.findMany({
           where: { ...result.filters },
@@ -2227,6 +2356,10 @@ describe("Relations", () => {
           },
         });
 
+        if (result.kind !== PlanKind.CONDITIONAL) {
+          throw new Error("Expected CONDITIONAL result");
+        }
+
         const query = await prisma.resource.findMany({
           where: { ...result.filters },
         });
@@ -2284,6 +2417,10 @@ describe("Relations", () => {
           },
         });
 
+        if (result.kind !== PlanKind.CONDITIONAL) {
+          throw new Error("Expected CONDITIONAL result");
+        }
+
         const query = await prisma.resource.findMany({
           where: { ...result.filters },
         });
@@ -2340,6 +2477,10 @@ describe("Relations", () => {
             },
           },
         });
+
+        if (result.kind !== PlanKind.CONDITIONAL) {
+          throw new Error("Expected CONDITIONAL result");
+        }
 
         const query = await prisma.resource.findMany({
           where: { ...result.filters },
@@ -2418,6 +2559,10 @@ describe("Relations", () => {
             },
           },
         });
+
+        if (result.kind !== PlanKind.CONDITIONAL) {
+          throw new Error("Expected CONDITIONAL result");
+        }
 
         const query = await prisma.resource.findMany({
           where: { ...result.filters },
@@ -2559,6 +2704,10 @@ describe("Relations", () => {
           },
         });
 
+        if (result.kind !== PlanKind.CONDITIONAL) {
+          throw new Error("Expected CONDITIONAL result");
+        }
+
         const query = await prisma.resource.findMany({
           where: { ...result.filters },
           include: {
@@ -2656,6 +2805,10 @@ describe("Relations", () => {
           },
         });
 
+        if (result.kind !== PlanKind.CONDITIONAL) {
+          throw new Error("Expected CONDITIONAL result");
+        }
+
         const query = await prisma.resource.findMany({
           where: { ...result.filters },
         });
@@ -2723,6 +2876,10 @@ describe("Relations", () => {
           },
         });
 
+        if (result.kind !== PlanKind.CONDITIONAL) {
+          throw new Error("Expected CONDITIONAL result");
+        }
+
         const query = await prisma.resource.findMany({
           where: { ...result.filters },
         });
@@ -2783,6 +2940,10 @@ describe("Relations", () => {
             },
           },
         });
+
+        if (result.kind !== PlanKind.CONDITIONAL) {
+          throw new Error("Expected CONDITIONAL result");
+        }
 
         const query = await prisma.resource.findMany({
           where: { ...result.filters },
@@ -2861,6 +3022,10 @@ describe("Complex Operations", () => {
         },
       });
 
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
+
       const query = await prisma.resource.findMany({
         where: { ...result.filters },
       });
@@ -2924,6 +3089,10 @@ describe("Complex Operations", () => {
           ],
         },
       });
+
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
 
       const query = await prisma.resource.findMany({
         where: { ...result.filters },
@@ -3000,6 +3169,10 @@ describe("Complex Operations", () => {
           ],
         },
       });
+
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
 
       const query = await prisma.resource.findMany({
         where: { ...result.filters },
@@ -3093,6 +3266,10 @@ describe("Complex Operations", () => {
           ],
         },
       });
+
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
 
       const query = await prisma.resource.findMany({
         where: { ...result.filters },
@@ -3200,6 +3377,10 @@ describe("Complex Operations", () => {
         },
       });
 
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
+
       const query = await prisma.resource.findMany({
         where: { ...result.filters },
       });
@@ -3270,6 +3451,10 @@ describe("Complex Operations", () => {
           },
         },
       });
+
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
 
       const query = await prisma.resource.findMany({
         where: { ...result.filters },
@@ -3699,6 +3884,10 @@ describe("Integration", () => {
     //   },
     // });
 
+    if (result.kind !== PlanKind.CONDITIONAL) {
+      throw new Error("Expected CONDITIONAL result");
+    }
+
     // console.log(JSON.stringify(result, null, 2));
     await prisma.resource.findMany({
       where: { ...result.filters },
@@ -3840,6 +4029,10 @@ describe("Deep Nested Relations", () => {
       },
     });
 
+    if (result.kind !== PlanKind.CONDITIONAL) {
+      throw new Error("Expected CONDITIONAL result");
+    }
+
     const query = await prisma.resource.findMany({
       where: { ...result.filters },
       include: {
@@ -3931,6 +4124,10 @@ describe("Deep Nested Relations", () => {
       },
     });
 
+    if (result.kind !== PlanKind.CONDITIONAL) {
+      throw new Error("Expected CONDITIONAL result");
+    }
+
     const query = await prisma.resource.findMany({
       where: { ...result.filters },
     });
@@ -3998,6 +4195,10 @@ describe("Nested Relations String Operations", () => {
       },
     });
 
+    if (result.kind !== PlanKind.CONDITIONAL) {
+      throw new Error("Expected CONDITIONAL result");
+    }
+
     const query = await prisma.resource.findMany({
       where: { ...result.filters },
     });
@@ -4058,6 +4259,10 @@ describe("Nested Relations String Operations", () => {
         },
       },
     });
+
+    if (result.kind !== PlanKind.CONDITIONAL) {
+      throw new Error("Expected CONDITIONAL result");
+    }
 
     const query = await prisma.resource.findMany({
       where: { ...result.filters },
@@ -4131,6 +4336,10 @@ describe("Collection Operations with Nested Relations", () => {
       },
     });
 
+    if (result.kind !== PlanKind.CONDITIONAL) {
+      throw new Error("Expected CONDITIONAL result");
+    }
+
     const query = await prisma.resource.findMany({
       where: { ...result.filters },
     });
@@ -4159,5 +4368,100 @@ describe("Collection Operations with Nested Relations", () => {
         })
         .map((r) => r.id)
     );
+  });
+});
+
+// Types
+describe("Return Types", () => {
+  test("returns ALWAYS_ALLOWED type", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "always-allow",
+    });
+
+    const result = queryPlanToPrisma({
+      queryPlan,
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.ALWAYS_ALLOWED,
+    });
+
+    // Type assertion check
+    if (result.kind === PlanKind.ALWAYS_ALLOWED) {
+      expect(Object.keys(result)).toEqual(["kind"]);
+    } else {
+      throw new Error("Expected ALWAYS_ALLOWED result");
+    }
+  });
+
+  test("returns ALWAYS_DENIED type", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "always-deny",
+    });
+
+    const result = queryPlanToPrisma({
+      queryPlan,
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.ALWAYS_DENIED,
+    });
+
+    // Type assertion check
+    if (result.kind === PlanKind.ALWAYS_DENIED) {
+      expect(Object.keys(result)).toEqual(["kind"]);
+    } else {
+      throw new Error("Expected ALWAYS_DENIED result");
+    }
+  });
+
+  test("returns CONDITIONAL type with filters", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "equal",
+    });
+
+    const result = queryPlanToPrisma({
+      queryPlan,
+      mapper: {
+        "request.resource.attr.aBool": { field: "aBool" },
+      },
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { aBool: { equals: true } },
+    });
+
+    // Type assertion check
+    if (result.kind === PlanKind.CONDITIONAL) {
+      expect(Object.keys(result).sort()).toEqual(["filters", "kind"].sort());
+      expect(typeof result.filters).toBe("object");
+    } else {
+      throw new Error("Expected CONDITIONAL result");
+    }
+  });
+
+  test("validates result type structure at compile time", () => {
+    // Type-level test
+    type ResultType = QueryPlanToPrismaResult;
+
+    // These should compile
+    const allowed: ResultType = { kind: PlanKind.ALWAYS_ALLOWED };
+    const denied: ResultType = { kind: PlanKind.ALWAYS_DENIED };
+    const conditional: ResultType = {
+      kind: PlanKind.CONDITIONAL,
+      filters: { someField: { equals: true } },
+    };
+
+    // Verify the objects exist to prevent unused variable warnings
+    expect(allowed.kind).toBe(PlanKind.ALWAYS_ALLOWED);
+    expect(denied.kind).toBe(PlanKind.ALWAYS_DENIED);
+    expect(conditional.kind).toBe(PlanKind.CONDITIONAL);
   });
 });

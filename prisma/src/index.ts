@@ -32,10 +32,14 @@ export interface QueryPlanToPrismaArgs {
   mapper?: Mapper;
 }
 
-export interface QueryPlanToPrismaResult {
-  kind: PlanKind;
-  filters?: Record<string, any>;
-}
+export type QueryPlanToPrismaResult =
+  | {
+      kind: PlanKind.ALWAYS_ALLOWED | PlanKind.ALWAYS_DENIED;
+    }
+  | {
+      kind: PlanKind.CONDITIONAL;
+      filters: Record<string, any>;
+    };
 
 /**
  * Converts a Cerbos query plan to a Prisma filter.
