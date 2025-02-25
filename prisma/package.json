@@ -1,6 +1,6 @@
 {
   "name": "@cerbos/orm-prisma",
-  "version": "1.1.1",
+  "version": "2.0.0",
   "homepage": "https://cerbos.dev",
   "description": "",
   "private": false,
@@ -12,7 +12,6 @@
   "scripts": {
     "build": "tsc -p tsconfig.json && tsc -p tsconfig-cjs.json",
     "prepare": "npm run build",
-    "preversion": "npm run lint",
     "version": "git add -A src",
     "postversion": "git push && git push --tags",
     "test": "npx prisma db push --force-reset && cerbos run --log-level=error --set=storage.disk.directory=../policies --set=telemetry.disabled=true -- jest src/**.test.ts",
@@ -21,13 +20,14 @@
   "author": "Cerbos",
   "license": "Apache-2.0",
   "devDependencies": {
-    "@prisma/client": "^6.0.0",
+    "@prisma/client": "^6.4.1",
     "@types/jest": "^29.0.3",
     "@types/node": "^22.0.0",
-    "prisma": "^6.0.0",
+    "prisma": "^6.4.1",
     "ts-jest": "^29.0.0",
     "ts-node": "^10.4.0",
-    "typescript": "^5.0.0"
+    "typescript": "^5.0.0",
+    "expect-type": "^1.1.0"
   },
   "dependencies": {
     "@cerbos/core": "^0.21.0",
