@@ -1,0 +1,51 @@
+{
+  "name": "@cerbos/orm-mikroorm",
+  "version": "0.0.1",
+  "private": false,
+  "main": "./lib/cjs/index.js",
+  "module": "./lib/esm/index.js",
+  "types": "./lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "require": "./lib/cjs/index.js",
+      "import": "./lib/esm/index.js",
+      "types": "./lib/types/index.d.ts"
+    }
+  },
+  "files": [
+    "lib",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "clean": "rimraf lib",
+    "build": "npm run clean && npm run build:types && npm run build:cjs && npm run build:esm",
+    "build:types": "tsc -p tsconfig.types.json",
+    "build:cjs": "tsc -p tsconfig.cjs.json",
+    "build:esm": "tsc -p tsconfig.esm.json",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm test",
+    "version": "git add -A src",
+    "test": "cerbos run --log-level=error --set=storage.disk.directory=../policies --set=telemetry.disabled=true -- jest src/**.test.ts",
+    "cerbos": "cerbos server --config=./cerbos-config.yaml"
+  },
+  "devDependencies": {
+    "@mikro-orm/sqlite": "^6.4.7",
+    "@types/jest": "^29.0.3",
+    "@types/node": "^22.0.0",
+    "prisma": "^6.4.1",
+    "rimraf": "^5.0.0",
+    "ts-jest": "^29.0.0",
+    "ts-node": "^10.4.0",
+    "typescript": "^5.0.0",
+    "@cerbos/grpc": "^0.20.1"
+  },
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@cerbos/core": "^0.21.0",
+    "@mikro-orm/core": "^6.4.7"
+  }
+}
