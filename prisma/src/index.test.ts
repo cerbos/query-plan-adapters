@@ -7,7 +7,6 @@ import {
   test,
   expect,
 } from "@jest/globals";
-import { expectTypeOf } from "expect-type";
 import {
   PlanExpression,
   PlanResourcesConditionalResponse,
