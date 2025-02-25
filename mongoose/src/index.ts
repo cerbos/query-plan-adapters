@@ -125,6 +125,38 @@ const resolveFieldReference = (reference: string, mapper: Mapper) => {
 };
 
 /**
+ * Creates a scoped mapper for collection operations
+ */
+const createScopedMapper =
+  (collectionPath: string, variableName: string, fullMapper: Mapper): Mapper =>
+  (key: string) => {
+    if (key.startsWith(variableName + ".")) {
+      const strippedKey = key.replace(variableName + ".", "");
+
+      // Get the collection's relation config
+      const collectionConfig =
+        typeof fullMapper === "function"
+          ? fullMapper(collectionPath)
+          : fullMapper[collectionPath];
+
+      if (collectionConfig?.relation?.fields) {
+        const fieldConfig = collectionConfig.relation.fields[strippedKey];
+        if (fieldConfig) {
+          return fieldConfig;
+        }
+      }
+
+      // If no specific field mapping found, return default mapping
+      return { field: strippedKey };
+    }
+
+    // For non-variable keys, use the full mapper
+    return typeof fullMapper === "function"
+      ? fullMapper(key)
+      : fullMapper[key] || { field: key };
+  };
+
+/**
  * Builds Mongoose conditions from a Cerbos expression
  */
 const buildMongooseFilterFromCerbosExpression = (
@@ -375,7 +407,6 @@ const buildMongooseFilterFromCerbosExpression = (
     // Collection operations
     case "exists":
     case "exists_one":
-    case "all":
     case "filter": {
       if (operands.length !== 2) {
         throw new Error(`${operator} requires exactly two operands`);
@@ -386,41 +417,61 @@ const buildMongooseFilterFromCerbosExpression = (
         throw new Error("Invalid operands for collection operation");
       }
 
+      if (lambda.operator !== "lambda") {
+        throw new Error("Second operand must be a lambda expression");
+      }
+
+      const [condition, variable] = lambda.operands;
+      if (!isVariable(variable)) {
+        throw new Error("Lambda variable must have a name");
+      }
+
+      // Create scoped mapper for the collection
+      const scopedMapper = createScopedMapper(
+        collection.name,
+        variable.name,
+        mapper
+      );
+
       const { relation } = resolveFieldReference(collection.name, mapper);
       if (!relation) {
         throw new Error(`${operator} operator requires a relation mapping`);
       }
 
-      const condition = buildMongooseFilterFromCerbosExpression(lambda, mapper);
+      const lambdaCondition = buildMongooseFilterFromCerbosExpression(
+        condition,
+        scopedMapper
+      );
 
-      switch (operator) {
-        case "exists":
-        case "filter":
-          return {
-            [relation.name]: {
-              $elemMatch: condition,
-            },
-          };
-        case "exists_one":
-          return {
-            $and: [
-              { [relation.name]: { $elemMatch: condition } },
-              { [relation.name]: { $size: 1 } },
-            ],
-          };
-        case "all":
-          return {
-            [relation.name]: {
-              $not: {
-                $elemMatch: {
-                  $nor: [condition],
-                },
-              },
-            },
-          };
-        default:
-          throw new Error(`Unexpected operator: ${operator}`);
+      if (operator === "exists_one") {
+        return {
+          $and: [
+            { [relation.name]: { $size: 1 } },
+            { [relation.name]: { $elemMatch: lambdaCondition } },
+          ],
+        };
       }
+
+      return {
+        [relation.name]: {
+          $elemMatch: lambdaCondition,
+        },
+      };
+    }
+
+    case "lambda": {
+      const [condition, variable] = operands;
+      if (!isVariable(variable)) {
+        throw new Error("Lambda variable must have a name");
+      }
+
+      // Create a mapper that strips the variable prefix from field references
+      return buildMongooseFilterFromCerbosExpression(
+        condition,
+        (key: string) => ({
+          field: key.replace(`${variable.name}.`, ""),
+        })
+      );
     }
 
     case "map": {
@@ -455,6 +506,53 @@ const buildMongooseFilterFromCerbosExpression = (
         [relation.name]: {
           $elemMatch: {
             [projectionField!]: { $exists: true },
+          },
+        },
+      };
+    }
+
+    case "all": {
+      if (operands.length !== 2) {
+        throw new Error(`${operator} requires exactly two operands`);
+      }
+
+      const [collection, lambda] = operands;
+      if (!isVariable(collection) || !isExpression(lambda)) {
+        throw new Error("Invalid operands for collection operation");
+      }
+
+      if (lambda.operator !== "lambda") {
+        throw new Error("Second operand must be a lambda expression");
+      }
+
+      const [condition, variable] = lambda.operands;
+      if (!isVariable(variable)) {
+        throw new Error("Lambda variable must have a name");
+      }
+
+      // Create scoped mapper for the collection
+      const scopedMapper = createScopedMapper(
+        collection.name,
+        variable.name,
+        mapper
+      );
+
+      const { relation } = resolveFieldReference(collection.name, mapper);
+      if (!relation) {
+        throw new Error(`${operator} operator requires a relation mapping`);
+      }
+
+      const lambdaCondition = buildMongooseFilterFromCerbosExpression(
+        condition,
+        scopedMapper
+      );
+
+      return {
+        [relation.name]: {
+          $not: {
+            $elemMatch: {
+              $nor: [lambdaCondition],
+            },
           },
         },
       };

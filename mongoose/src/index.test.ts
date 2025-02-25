@@ -1,6 +1,10 @@
-import { beforeAll, test, expect, afterAll } from "@jest/globals";
+import { beforeAll, test, expect, afterAll, describe } from "@jest/globals";
 import { queryPlanToMongoose, PlanKind, Mapper } from ".";
-import { PlanExpression, PlanResourcesConditionalResponse } from "@cerbos/core";
+import {
+  PlanExpression,
+  PlanResourcesConditionalResponse,
+  PlanResourcesResponse,
+} from "@cerbos/core";
 import { GRPC as Cerbos } from "@cerbos/grpc";
 import mongoose, { Schema, model } from "mongoose";
 
@@ -208,480 +212,752 @@ const defaultMapper: Mapper = {
   "request.resource.attr.nested.aString": { field: "nested.aString" },
 };
 
-test("always allowed", async () => {
-  const queryPlan = await cerbos.planResources({
-    principal: { id: "user1", roles: ["USER"] },
-    resource: { kind: "resource" },
-    action: "always-allow",
+describe("Core Functionality", () => {
+  test("always allowed", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "always-allow",
+    });
+
+    const result = queryPlanToMongoose({
+      queryPlan,
+      mapper: defaultMapper,
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.ALWAYS_ALLOWED,
+    });
+
+    const query = await Resource.find({});
+    expect(query.length).toEqual(fixtureResources.length);
   });
 
-  const result = queryPlanToMongoose({
-    queryPlan,
-    mapper: defaultMapper,
-  });
+  test("always denied", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "always-deny",
+    });
 
-  expect(result).toStrictEqual({
-    kind: PlanKind.ALWAYS_ALLOWED,
-  });
+    const result = queryPlanToMongoose({
+      queryPlan,
+      mapper: defaultMapper,
+    });
 
-  const query = await Resource.find({});
-  expect(query.length).toEqual(fixtureResources.length);
+    expect(result).toStrictEqual({
+      kind: PlanKind.ALWAYS_DENIED,
+    });
+  });
 });
 
-test("always denied", async () => {
-  const queryPlan = await cerbos.planResources({
-    principal: { id: "user1", roles: ["USER"] },
-    resource: { kind: "resource" },
-    action: "always-deny",
-  });
+describe("Field Operations", () => {
+  describe("Basic Field Tests", () => {
+    test("conditional - eq", async () => {
+      const queryPlan = await cerbos.planResources({
+        principal: { id: "user1", roles: ["USER"] },
+        resource: { kind: "resource" },
+        action: "equal",
+      });
 
-  const result = queryPlanToMongoose({
-    queryPlan,
-    mapper: defaultMapper,
-  });
+      const result = queryPlanToMongoose({
+        queryPlan,
+        mapper: defaultMapper,
+      });
 
-  expect(result).toStrictEqual({
-    kind: PlanKind.ALWAYS_DENIED,
-  });
-});
-
-test("conditional - eq", async () => {
-  const queryPlan = await cerbos.planResources({
-    principal: { id: "user1", roles: ["USER"] },
-    resource: { kind: "resource" },
-    action: "equal",
-  });
-
-  const result = queryPlanToMongoose({
-    queryPlan,
-    mapper: defaultMapper,
-  });
-
-  expect(result).toStrictEqual({
-    kind: PlanKind.CONDITIONAL,
-    filters: {
-      aBool: {
-        $eq: true,
-      },
-    },
-  });
-
-  const query = await Resource.find(result.filters || {});
-  expect(query.map((r) => r.key)).toEqual(
-    fixtureResources.filter((a) => a.aBool).map((r) => r.key)
-  );
-});
-
-test("conditional - eq - inverted order", async () => {
-  const queryPlan = await cerbos.planResources({
-    principal: { id: "user1", roles: ["USER"] },
-    resource: { kind: "resource" },
-    action: "equal",
-  });
-  const typeQp = queryPlan as PlanResourcesConditionalResponse;
-
-  const invertedQueryPlan: PlanResourcesConditionalResponse = {
-    ...typeQp,
-    condition: {
-      ...typeQp.condition,
-      operands: [
-        (typeQp.condition as PlanExpression).operands[1],
-        (typeQp.condition as PlanExpression).operands[0],
-      ],
-    },
-  };
-
-  const result = queryPlanToMongoose({
-    queryPlan: invertedQueryPlan,
-    mapper: defaultMapper,
-  });
-
-  expect(result).toStrictEqual({
-    kind: PlanKind.CONDITIONAL,
-    filters: {
-      aBool: {
-        $eq: true,
-      },
-    },
-  });
-
-  const query = await Resource.find(result.filters || {});
-  expect(query.map((r) => r.key)).toEqual(
-    fixtureResources.filter((a) => a.aBool).map((r) => r.key)
-  );
-});
-
-test("conditional - ne", async () => {
-  const queryPlan = await cerbos.planResources({
-    principal: { id: "user1", roles: ["USER"] },
-    resource: { kind: "resource" },
-    action: "ne",
-  });
-
-  const result = queryPlanToMongoose({
-    queryPlan,
-    mapper: defaultMapper,
-  });
-
-  expect(result).toStrictEqual({
-    kind: PlanKind.CONDITIONAL,
-    filters: { aString: { $ne: "string" } },
-  });
-  const query = await Resource.find(result.filters || {});
-  expect(query.map((r) => r.key)).toEqual(
-    fixtureResources.filter((a) => a.aString != "string").map((r) => r.key)
-  );
-});
-
-test("conditional - explicit-deny", async () => {
-  const queryPlan = await cerbos.planResources({
-    principal: { id: "user1", roles: ["USER"] },
-    resource: { kind: "resource" },
-    action: "explicit-deny",
-  });
-
-  const result = queryPlanToMongoose({
-    queryPlan,
-    mapper: defaultMapper,
-  });
-
-  expect(result).toStrictEqual({
-    kind: PlanKind.CONDITIONAL,
-    filters: { $nor: [{ aBool: { $eq: true } }] },
-  });
-  const query = await Resource.find(result.filters || {});
-  expect(query.map((r) => r.key)).toEqual(
-    fixtureResources.filter((a) => !a.aBool).map((r) => r.key)
-  );
-});
-
-test("conditional - and", async () => {
-  const queryPlan = await cerbos.planResources({
-    principal: { id: "user1", roles: ["USER"] },
-    resource: { kind: "resource" },
-    action: "and",
-  });
-
-  const result = queryPlanToMongoose({
-    queryPlan,
-    mapper: defaultMapper,
-  });
-
-  expect(result).toStrictEqual({
-    kind: PlanKind.CONDITIONAL,
-    filters: {
-      $and: [{ aBool: { $eq: true } }, { aString: { $ne: "string" } }],
-    },
-  });
-
-  const query = await Resource.find(result.filters || {});
-  expect(query.map((r) => r.key)).toEqual(
-    fixtureResources
-      .filter((r) => r.aBool && r.aString !== "string")
-      .map((r) => r.key)
-  );
-});
-
-test("conditional - or", async () => {
-  const queryPlan = await cerbos.planResources({
-    principal: { id: "user1", roles: ["USER"] },
-    resource: { kind: "resource" },
-    action: "or",
-  });
-
-  const result = queryPlanToMongoose({
-    queryPlan,
-    mapper: defaultMapper,
-  });
-
-  expect(result).toStrictEqual({
-    kind: PlanKind.CONDITIONAL,
-    filters: {
-      $or: [
-        {
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
           aBool: {
             $eq: true,
           },
         },
-        {
-          aString: { $ne: "string" },
+      });
+
+      const query = await Resource.find(result.filters || {});
+      expect(query.map((r) => r.key)).toEqual(
+        fixtureResources.filter((a) => a.aBool).map((r) => r.key)
+      );
+    });
+
+    test("conditional - eq - inverted order", async () => {
+      const queryPlan = await cerbos.planResources({
+        principal: { id: "user1", roles: ["USER"] },
+        resource: { kind: "resource" },
+        action: "equal",
+      });
+      const typeQp = queryPlan as PlanResourcesConditionalResponse;
+
+      const invertedQueryPlan: PlanResourcesConditionalResponse = {
+        ...typeQp,
+        condition: {
+          ...typeQp.condition,
+          operands: [
+            (typeQp.condition as PlanExpression).operands[1],
+            (typeQp.condition as PlanExpression).operands[0],
+          ],
         },
-      ],
-    },
-  });
+      };
 
-  const query = await Resource.find(result.filters || {});
-  expect(query.map((r) => r.key)).toEqual(
-    fixtureResources
-      .filter((r) => {
-        return r.aBool || r.aString != "string";
-      })
-      .map((r) => r.key)
-  );
-});
+      const result = queryPlanToMongoose({
+        queryPlan: invertedQueryPlan,
+        mapper: defaultMapper,
+      });
 
-test("conditional - in", async () => {
-  const queryPlan = await cerbos.planResources({
-    principal: { id: "user1", roles: ["USER"] },
-    resource: { kind: "resource" },
-    action: "in",
-  });
-
-  const result = queryPlanToMongoose({
-    queryPlan,
-    mapper: defaultMapper,
-  });
-
-  expect(result).toStrictEqual({
-    kind: PlanKind.CONDITIONAL,
-    filters: {
-      aString: { $in: ["string", "anotherString"] },
-    },
-  });
-
-  const query = await Resource.find(result.filters || {});
-  expect(query.map((r) => r.key)).toEqual(
-    fixtureResources
-      .filter((r) => {
-        return ["string", "anotherString"].includes(r.aString as string);
-      })
-      .map((r) => r.key)
-  );
-});
-
-test("conditional - gt", async () => {
-  const queryPlan = await cerbos.planResources({
-    principal: { id: "user1", roles: ["USER"] },
-    resource: { kind: "resource" },
-    action: "gt",
-  });
-
-  const result = queryPlanToMongoose({
-    queryPlan,
-    mapper: defaultMapper,
-  });
-
-  expect(result).toStrictEqual({
-    kind: PlanKind.CONDITIONAL,
-    filters: {
-      aNumber: { $gt: 1 },
-    },
-  });
-
-  const query = await Resource.find(result.filters || {});
-  expect(query.map((r) => r.key)).toEqual(
-    fixtureResources
-      .filter((r) => {
-        return (r.aNumber as number) > 1;
-      })
-      .map((r) => r.key)
-  );
-});
-
-test("conditional - lt", async () => {
-  const queryPlan = await cerbos.planResources({
-    principal: { id: "user1", roles: ["USER"] },
-    resource: { kind: "resource" },
-    action: "lt",
-  });
-
-  const result = queryPlanToMongoose({
-    queryPlan,
-    mapper: defaultMapper,
-  });
-
-  expect(result).toStrictEqual({
-    kind: PlanKind.CONDITIONAL,
-    filters: {
-      aNumber: { $lt: 2 },
-    },
-  });
-
-  const query = await Resource.find(result.filters || {});
-  expect(query.map((r) => r.key)).toEqual(
-    fixtureResources
-      .filter((r) => {
-        return (r.aNumber as number) < 2;
-      })
-      .map((r) => r.key)
-  );
-});
-
-test("conditional - gte", async () => {
-  const queryPlan = await cerbos.planResources({
-    principal: { id: "user1", roles: ["USER"] },
-    resource: { kind: "resource" },
-    action: "gte",
-  });
-
-  const result = queryPlanToMongoose({
-    queryPlan,
-    mapper: defaultMapper,
-  });
-
-  expect(result).toStrictEqual({
-    kind: PlanKind.CONDITIONAL,
-    filters: {
-      aNumber: { $gte: 1 },
-    },
-  });
-
-  const query = await Resource.find(result.filters || {});
-  expect(query.map((r) => r.key)).toEqual(
-    fixtureResources
-      .filter((r) => {
-        return (r.aNumber as number) >= 1;
-      })
-      .map((r) => r.key)
-  );
-});
-
-test("conditional - lte", async () => {
-  const queryPlan = await cerbos.planResources({
-    principal: { id: "user1", roles: ["USER"] },
-    resource: { kind: "resource" },
-    action: "lte",
-  });
-
-  const result = queryPlanToMongoose({
-    queryPlan,
-    mapper: defaultMapper,
-  });
-
-  expect(result).toStrictEqual({
-    kind: PlanKind.CONDITIONAL,
-    filters: {
-      aNumber: { $lte: 2 },
-    },
-  });
-
-  const query = await Resource.find(result.filters || {});
-  expect(query.map((r) => r.key)).toEqual(
-    fixtureResources
-      .filter((r) => {
-        return (r.aNumber as number) <= 2;
-      })
-      .map((r) => r.key)
-  );
-});
-
-test("conditional - eq nested", async () => {
-  const queryPlan = await cerbos.planResources({
-    principal: { id: "user1", roles: ["USER"] },
-    resource: { kind: "resource" },
-    action: "equal-nested",
-  });
-
-  const result = queryPlanToMongoose({
-    queryPlan,
-    mapper: defaultMapper,
-  });
-
-  expect(result).toStrictEqual({
-    kind: PlanKind.CONDITIONAL,
-    filters: {
-      "nested.aBool": {
-        $eq: true,
-      },
-    },
-  });
-  const query = await Resource.find(result.filters || {});
-  expect(query.map((r) => r.key)).toEqual(
-    fixtureResources.filter((a) => a.nested.aBool).map((r) => r.key)
-  );
-});
-
-test("conditional - contains", async () => {
-  const queryPlan = await cerbos.planResources({
-    principal: { id: "user1", roles: ["USER"] },
-    resource: { kind: "resource" },
-    action: "contains",
-  });
-
-  const result = queryPlanToMongoose({
-    queryPlan,
-    mapper: defaultMapper,
-  });
-
-  expect(result).toStrictEqual({
-    kind: PlanKind.CONDITIONAL,
-    filters: {
-      aString: { $regex: "str" },
-    },
-  });
-
-  const query = await Resource.find(result.filters || {});
-  expect(query.map((r) => r.key)).toEqual(
-    fixtureResources.filter((r) => r.aString.includes("str")).map((r) => r.key)
-  );
-});
-
-test("conditional - isSet", async () => {
-  const queryPlan = await cerbos.planResources({
-    principal: { id: "user1", roles: ["USER"] },
-    resource: { kind: "resource" },
-    action: "is-set",
-  });
-
-  const result = queryPlanToMongoose({
-    queryPlan,
-    mapper: defaultMapper,
-  });
-
-  expect(result).toStrictEqual({
-    kind: PlanKind.CONDITIONAL,
-    filters: {
-      aOptionalString: { $ne: null },
-    },
-  });
-
-  const query = await Resource.find(result.filters || {});
-  expect(query.map((r) => r.key)).toEqual(
-    fixtureResources.filter((r) => r.aOptionalString != null).map((r) => r.key)
-  );
-});
-
-test("conditional - hasIntersection", async () => {
-  const queryPlan = await cerbos.planResources({
-    principal: {
-      id: "user1",
-      roles: ["USER"],
-      attr: { tags: ["public", "draft"] },
-    },
-    resource: { kind: "resource" },
-    action: "has-intersection",
-  });
-
-  const result = queryPlanToMongoose({
-    queryPlan,
-    mapper: {
-      ...defaultMapper,
-      "request.resource.attr.tags": {
-        relation: {
-          name: "tags",
-          type: "many",
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          aBool: {
+            $eq: true,
+          },
         },
-      },
-    },
+      });
+
+      const query = await Resource.find(result.filters || {});
+      expect(query.map((r) => r.key)).toEqual(
+        fixtureResources.filter((a) => a.aBool).map((r) => r.key)
+      );
+    });
+
+    test("conditional - ne", async () => {
+      const queryPlan = await cerbos.planResources({
+        principal: { id: "user1", roles: ["USER"] },
+        resource: { kind: "resource" },
+        action: "ne",
+      });
+
+      const result = queryPlanToMongoose({
+        queryPlan,
+        mapper: defaultMapper,
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: { aString: { $ne: "string" } },
+      });
+      const query = await Resource.find(result.filters || {});
+      expect(query.map((r) => r.key)).toEqual(
+        fixtureResources.filter((a) => a.aString != "string").map((r) => r.key)
+      );
+    });
+
+    test("conditional - explicit-deny", async () => {
+      const queryPlan = await cerbos.planResources({
+        principal: { id: "user1", roles: ["USER"] },
+        resource: { kind: "resource" },
+        action: "explicit-deny",
+      });
+
+      const result = queryPlanToMongoose({
+        queryPlan,
+        mapper: defaultMapper,
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: { $nor: [{ aBool: { $eq: true } }] },
+      });
+      const query = await Resource.find(result.filters || {});
+      expect(query.map((r) => r.key)).toEqual(
+        fixtureResources.filter((a) => !a.aBool).map((r) => r.key)
+      );
+    });
   });
 
-  expect(result).toStrictEqual({
-    kind: PlanKind.CONDITIONAL,
-    filters: {
-      tags: {
-        $elemMatch: {
-          name: {
-            $in: ["public", "draft"],
+  describe("Comparison Tests", () => {
+    test("conditional - gt", async () => {
+      const queryPlan = await cerbos.planResources({
+        principal: { id: "user1", roles: ["USER"] },
+        resource: { kind: "resource" },
+        action: "gt",
+      });
+
+      const result = queryPlanToMongoose({
+        queryPlan,
+        mapper: defaultMapper,
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          aNumber: { $gt: 1 },
+        },
+      });
+
+      const query = await Resource.find(result.filters || {});
+      expect(query.map((r) => r.key)).toEqual(
+        fixtureResources
+          .filter((r) => {
+            return (r.aNumber as number) > 1;
+          })
+          .map((r) => r.key)
+      );
+    });
+
+    test("conditional - lt", async () => {
+      const queryPlan = await cerbos.planResources({
+        principal: { id: "user1", roles: ["USER"] },
+        resource: { kind: "resource" },
+        action: "lt",
+      });
+
+      const result = queryPlanToMongoose({
+        queryPlan,
+        mapper: defaultMapper,
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          aNumber: { $lt: 2 },
+        },
+      });
+
+      const query = await Resource.find(result.filters || {});
+      expect(query.map((r) => r.key)).toEqual(
+        fixtureResources
+          .filter((r) => {
+            return (r.aNumber as number) < 2;
+          })
+          .map((r) => r.key)
+      );
+    });
+
+    test("conditional - gte", async () => {
+      const queryPlan = await cerbos.planResources({
+        principal: { id: "user1", roles: ["USER"] },
+        resource: { kind: "resource" },
+        action: "gte",
+      });
+
+      const result = queryPlanToMongoose({
+        queryPlan,
+        mapper: defaultMapper,
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          aNumber: { $gte: 1 },
+        },
+      });
+
+      const query = await Resource.find(result.filters || {});
+      expect(query.map((r) => r.key)).toEqual(
+        fixtureResources
+          .filter((r) => {
+            return (r.aNumber as number) >= 1;
+          })
+          .map((r) => r.key)
+      );
+    });
+
+    test("conditional - lte", async () => {
+      const queryPlan = await cerbos.planResources({
+        principal: { id: "user1", roles: ["USER"] },
+        resource: { kind: "resource" },
+        action: "lte",
+      });
+
+      const result = queryPlanToMongoose({
+        queryPlan,
+        mapper: defaultMapper,
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          aNumber: { $lte: 2 },
+        },
+      });
+
+      const query = await Resource.find(result.filters || {});
+      expect(query.map((r) => r.key)).toEqual(
+        fixtureResources
+          .filter((r) => {
+            return (r.aNumber as number) <= 2;
+          })
+          .map((r) => r.key)
+      );
+    });
+  });
+
+  describe("String Operations", () => {
+    test("conditional - contains", async () => {
+      const queryPlan = await cerbos.planResources({
+        principal: { id: "user1", roles: ["USER"] },
+        resource: { kind: "resource" },
+        action: "contains",
+      });
+
+      const result = queryPlanToMongoose({
+        queryPlan,
+        mapper: defaultMapper,
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          aString: { $regex: "str" },
+        },
+      });
+
+      const query = await Resource.find(result.filters || {});
+      expect(query.map((r) => r.key)).toEqual(
+        fixtureResources
+          .filter((r) => r.aString.includes("str"))
+          .map((r) => r.key)
+      );
+    });
+
+    test("conditional - startsWith", async () => {
+      const queryPlan = await cerbos.planResources({
+        principal: { id: "user1", roles: ["USER"] },
+        resource: { kind: "resource" },
+        action: "starts-with",
+      });
+
+      const result = queryPlanToMongoose({
+        queryPlan,
+        mapper: defaultMapper,
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          aString: { $regex: "^str" },
+        },
+      });
+
+      const query = await Resource.find(result.filters || {});
+      expect(query.map((r) => r.key)).toEqual(
+        fixtureResources
+          .filter((r) => r.aString.startsWith("str"))
+          .map((r) => r.key)
+      );
+    });
+
+    test("conditional - endsWith", async () => {
+      const queryPlan = await cerbos.planResources({
+        principal: { id: "user1", roles: ["USER"] },
+        resource: { kind: "resource" },
+        action: "ends-with",
+      });
+
+      const result = queryPlanToMongoose({
+        queryPlan,
+        mapper: defaultMapper,
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          aString: { $regex: "ing$" },
+        },
+      });
+
+      const query = await Resource.find(result.filters || {});
+      expect(query.map((r) => r.key)).toEqual(
+        fixtureResources
+          .filter((r) => r.aString.endsWith("ing"))
+          .map((r) => r.key)
+      );
+    });
+  });
+});
+
+describe("Collection Operations", () => {
+  test("conditional - in", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "in",
+    });
+
+    const result = queryPlanToMongoose({
+      queryPlan,
+      mapper: defaultMapper,
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        aString: { $in: ["string", "anotherString"] },
+      },
+    });
+
+    const query = await Resource.find(result.filters || {});
+    expect(query.map((r) => r.key)).toEqual(
+      fixtureResources
+        .filter((r) => {
+          return ["string", "anotherString"].includes(r.aString as string);
+        })
+        .map((r) => r.key)
+    );
+  });
+
+  test("conditional - exists", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "exists",
+    });
+
+    const result = queryPlanToMongoose({
+      queryPlan,
+      mapper: {
+        ...defaultMapper,
+        "request.resource.attr.tags": {
+          relation: {
+            name: "tags",
+            type: "many",
+            field: "name",
           },
         },
       },
-    },
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        tags: {
+          $elemMatch: {
+            name: { $eq: "public" },
+          },
+        },
+      },
+    });
+
+    const query = await Resource.find(result.filters || {});
+    expect(query.map((r) => r.key)).toEqual(
+      fixtureResources
+        .filter((r) => r.tags.some((t) => t.name === "public"))
+        .map((r) => r.key)
+    );
   });
 
-  const query = await Resource.find(result.filters || {});
-  expect(query.map((r) => r.key)).toEqual(
-    fixtureResources
-      .filter((r) => r.tags.some((t) => ["public", "draft"].includes(t.name)))
-      .map((r) => r.key)
-  );
+  test("conditional - exists_one", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "exists-one",
+    });
+
+    const result = queryPlanToMongoose({
+      queryPlan,
+      mapper: {
+        ...defaultMapper,
+        "request.resource.attr.tags": {
+          relation: {
+            name: "tags",
+            type: "many",
+            field: "name",
+          },
+        },
+      },
+    });
+
+    console.log(JSON.stringify(result.filters));
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        $and: [
+          { tags: { $size: 1 } },
+          { tags: { $elemMatch: { name: { $eq: "public" } } } },
+        ],
+      },
+    });
+
+    const query = await Resource.find(result.filters || {});
+    expect(query.map((r) => r.key)).toEqual(
+      fixtureResources
+        .filter((r) => r.tags.filter((t) => t.name === "public").length === 1)
+        .map((r) => r.key)
+    );
+  });
+
+  test("conditional - all", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "all",
+    });
+
+    const result = queryPlanToMongoose({
+      queryPlan,
+      mapper: {
+        ...defaultMapper,
+        "request.resource.attr.tags": {
+          relation: {
+            name: "tags",
+            type: "many",
+            field: "name",
+          },
+        },
+      },
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        tags: {
+          $not: {
+            $elemMatch: {
+              $nor: [{ name: { $eq: "public" } }],
+            },
+          },
+        },
+      },
+    });
+
+    const query = await Resource.find(result.filters || {});
+    expect(query.map((r) => r.key)).toEqual(
+      fixtureResources
+        .filter((r) => r.tags.every((t) => t.name === "public"))
+        .map((r) => r.key)
+    );
+  });
+
+  test("conditional - hasIntersection", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: {
+        id: "user1",
+        roles: ["USER"],
+        attr: { tags: ["public", "draft"] },
+      },
+      resource: { kind: "resource" },
+      action: "has-intersection",
+    });
+
+    const result = queryPlanToMongoose({
+      queryPlan,
+      mapper: {
+        ...defaultMapper,
+        "request.resource.attr.tags": {
+          relation: {
+            name: "tags",
+            type: "many",
+          },
+        },
+      },
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        tags: {
+          $elemMatch: {
+            name: {
+              $in: ["public", "draft"],
+            },
+          },
+        },
+      },
+    });
+
+    const query = await Resource.find(result.filters || {});
+    expect(query.map((r) => r.key)).toEqual(
+      fixtureResources
+        .filter((r) => r.tags.some((t) => ["public", "draft"].includes(t.name)))
+        .map((r) => r.key)
+    );
+  });
+});
+
+describe("Logical Operations", () => {
+  test("conditional - and", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "and",
+    });
+
+    const result = queryPlanToMongoose({
+      queryPlan,
+      mapper: defaultMapper,
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        $and: [{ aBool: { $eq: true } }, { aString: { $ne: "string" } }],
+      },
+    });
+
+    const query = await Resource.find(result.filters || {});
+    expect(query.map((r) => r.key)).toEqual(
+      fixtureResources
+        .filter((r) => r.aBool && r.aString !== "string")
+        .map((r) => r.key)
+    );
+  });
+
+  test("conditional - or", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "or",
+    });
+
+    const result = queryPlanToMongoose({
+      queryPlan,
+      mapper: defaultMapper,
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        $or: [
+          {
+            aBool: {
+              $eq: true,
+            },
+          },
+          {
+            aString: { $ne: "string" },
+          },
+        ],
+      },
+    });
+
+    const query = await Resource.find(result.filters || {});
+    expect(query.map((r) => r.key)).toEqual(
+      fixtureResources
+        .filter((r) => {
+          return r.aBool || r.aString != "string";
+        })
+        .map((r) => r.key)
+    );
+  });
+});
+
+describe("Relations", () => {
+  describe("Nested Relations", () => {
+    test("conditional - eq nested", async () => {
+      const queryPlan = await cerbos.planResources({
+        principal: { id: "user1", roles: ["USER"] },
+        resource: { kind: "resource" },
+        action: "equal-nested",
+      });
+
+      const result = queryPlanToMongoose({
+        queryPlan,
+        mapper: defaultMapper,
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          "nested.aBool": {
+            $eq: true,
+          },
+        },
+      });
+      const query = await Resource.find(result.filters || {});
+      expect(query.map((r) => r.key)).toEqual(
+        fixtureResources.filter((a) => a.nested.aBool).map((r) => r.key)
+      );
+    });
+  });
+});
+
+describe("Mapper Functions", () => {
+  test("function mapper for field names", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "equal",
+    });
+
+    const result = queryPlanToMongoose({
+      queryPlan,
+      mapper: (key: string) => ({
+        field: key.replace("request.resource.attr.", ""),
+      }),
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { aBool: { $eq: true } },
+    });
+  });
+
+  test("function mapper for relations", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "relation-is",
+    });
+
+    const result = queryPlanToMongoose({
+      queryPlan,
+      mapper: (key: string) => ({
+        relation: {
+          name: "createdBy",
+          type: "one",
+          field: "id",
+        },
+      }),
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        createdBy: {
+          $elemMatch: {
+            id: { $eq: "user1" },
+          },
+        },
+      },
+    });
+  });
+});
+
+describe("Error Handling", () => {
+  test("throws error for invalid query plan", () => {
+    const invalidQueryPlan = {
+      kind: "INVALID_KIND" as PlanKind,
+    };
+
+    expect(() =>
+      queryPlanToMongoose({
+        queryPlan: invalidQueryPlan as unknown as PlanResourcesResponse,
+        mapper: {},
+      })
+    ).toThrow("Invalid query plan.");
+  });
+
+  test("throws error for invalid expression structure", () => {
+    const invalidQueryPlan = {
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        // Missing operator and operands
+      },
+    };
+
+    expect(() =>
+      queryPlanToMongoose({
+        queryPlan: invalidQueryPlan as unknown as PlanResourcesResponse,
+        mapper: {},
+      })
+    ).toThrow("Invalid Cerbos expression structure");
+  });
+
+  test("throws error for unsupported operator", () => {
+    const invalidQueryPlan = {
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "unsupported",
+        operands: [],
+      },
+    };
+
+    expect(() =>
+      queryPlanToMongoose({
+        queryPlan: invalidQueryPlan as unknown as PlanResourcesResponse,
+        mapper: {},
+      })
+    ).toThrow("Unsupported operator: unsupported");
+  });
 });
