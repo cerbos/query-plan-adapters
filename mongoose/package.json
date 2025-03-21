@@ -31,6 +31,6 @@
   },
   "dependencies": {
     "@cerbos/core": "^0.21.0",
-    "@cerbos/grpc": "^0.20.0"
+    "@cerbos/grpc": "^0.21.0"
   }
 }
