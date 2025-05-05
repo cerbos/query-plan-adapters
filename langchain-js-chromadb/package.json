@@ -1,0 +1,34 @@
+{
+  "name": "@cerbos/lanchain-chromadb",
+  "version": "0.0.1",
+  "homepage": "https://cerbos.dev",
+  "description": "",
+  "private": false,
+  "main": "./lib/cjs/index.js",
+  "module": "./lib/esm/index.js",
+  "files": [
+    "lib/**/*"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig-cjs.json",
+    "prepare": "npm run build",
+    "preversion": "npm run lint",
+    "version": "git add -A src",
+    "postversion": "git push && git push --tags",
+    "test": "cerbos run --log-level=error --set=storage.disk.directory=../policies --set=telemetry.disabled=true -- jest src/**.test.ts",
+    "cerbos": "cerbos server --config=./cerbos-config.yaml"
+  },
+  "author": "Cerbos",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "@types/jest": "^29.0.3",
+    "@types/node": "^20.0.0",
+    "ts-jest": "^29.0.0",
+    "ts-node": "^10.4.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "@cerbos/core": "^0.18.0",
+    "@cerbos/grpc": "^0.18.0"
+  }
+}
