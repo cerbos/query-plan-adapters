@@ -237,8 +237,12 @@ function buildNestedRelationFilter(
 
     // Handle special case for the deepest relation
     if (relation.field && i === relations.length - 1) {
-      const [, filterValue] = Object.entries(currentFilter)[0];
-      currentFilter = { [relation.field]: filterValue };
+      const [key, filterValue] = Object.entries(currentFilter)[0];
+      if (key === "NOT") {
+        currentFilter = { NOT: { [relation.field]: filterValue } };
+      } else {
+        currentFilter = { [relation.field]: filterValue };
+      }
     }
 
     currentFilter = { [relation.name]: { [relationOperator]: currentFilter } };
@@ -476,13 +480,20 @@ function handleInOperator(
   }
 
   const { value } = resolvedValue;
+  const values = Array.isArray(value) ? value : [value];
+  const fieldName = path[path.length - 1];
 
   if (relations && relations.length > 0) {
-    const fieldFilter = { [path[path.length - 1]]: value };
+    const fieldFilter =
+      values.length === 1
+        ? { [fieldName]: values[0] }
+        : { [fieldName]: { in: values } };
     return buildNestedRelationFilter(relations, fieldFilter);
   }
 
-  return { [path[path.length - 1]]: { in: value } };
+  return values.length === 1
+    ? { [fieldName]: values[0] }
+    : { [fieldName]: { in: values } };
 }
 
 /**
@@ -735,6 +746,8 @@ function handleCollectionOperator(
     case "exists":
     case "filter":
       return { [relation.name]: { some: filterValue } };
+    case "except":
+      return { [relation.name]: { some: { NOT: filterValue } } };
     case "exists_one":
       return {
         [relation.name]: {
