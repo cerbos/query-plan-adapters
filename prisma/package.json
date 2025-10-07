@@ -41,19 +41,20 @@
     "@prisma/client": "^6.4.1",
     "@types/jest": "^29.0.3",
     "@types/node": "^22.0.0",
+    "expect-type": "^1.1.0",
     "prisma": "^6.4.1",
+    "rimraf": "^6.0.0",
     "ts-jest": "^29.0.0",
     "ts-node": "^10.4.0",
-    "typescript": "^5.0.0",
-    "expect-type": "^1.1.0",
-    "rimraf": "^5.0.0"
+    "typescript": "^5.0.0"
   },
   "peerDependencies": {
     "@prisma/client": "^5.0.0 || ^6.0.0"
   },
   "dependencies": {
-    "@cerbos/core": "^0.21.0",
-    "@cerbos/grpc": "^0.20.0"
+    "@cerbos/core": "^0.24.0",
+    "@cerbos/grpc": "^0.23.0",
+    "tslib": "^2.8.1"
   },
   "publishConfig": {
     "access": "public"

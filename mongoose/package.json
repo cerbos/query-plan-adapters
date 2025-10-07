@@ -30,7 +30,7 @@
     "typescript": "^5.0.0"
   },
   "dependencies": {
-    "@cerbos/core": "^0.21.0",
-    "@cerbos/grpc": "^0.20.0"
+    "@cerbos/core": "^0.24.0",
+    "@cerbos/grpc": "^0.23.0"
   }
 }
