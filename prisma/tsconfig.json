@@ -1,17 +1,29 @@
 {
   "compilerOptions": {
-    "target": "ES2015",
-    "module": "ES2020",
-    "strict": true,
-    "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true,
+    "target": "ES2020",
+    "lib": ["ES2020"],
+    "module": "ESNext",
+    "moduleResolution": "node",
+    "rootDir": "./src",
+    "baseUrl": "./src",
     "outDir": "./lib",
     "declaration": true,
-    "moduleResolution": "node",
-    "types": [
-      "@types/jest"
-    ]
+    "declarationMap": true,
+    "sourceMap": true,
+    "importHelpers": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "allowSyntheticDefaultImports": true,
+    "isolatedModules": true,
+    "types": ["node", "jest"]
   },
-  "include": ["src"],
-  "exclude": ["**/*.test.ts"]
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "lib", "**/*.test.ts"]
 }

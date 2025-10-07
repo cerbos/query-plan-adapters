@@ -7,7 +7,6 @@ import {
   test,
   expect,
 } from "@jest/globals";
-import { expectTypeOf } from "expect-type";
 import {
   PlanExpression,
   PlanResourcesConditionalResponse,
@@ -3774,7 +3773,7 @@ describe("Mapper Functions", () => {
 
     const result = queryPlanToPrisma({
       queryPlan,
-      mapper: (key: string) => ({
+      mapper: () => ({
         relation: {
           name: "createdBy",
           type: "one",

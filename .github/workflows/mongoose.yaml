@@ -21,7 +21,7 @@ jobs:
         node-version: ["18", "20", "22"]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Setup Cerbos
         uses: cerbos/cerbos-setup-action@v1
@@ -34,7 +34,7 @@ jobs:
           mongodb-version: ${{ matrix.mongodb-version }}
 
       - name: Test using Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node-version }}
 
