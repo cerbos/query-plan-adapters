@@ -77,7 +77,22 @@ export function queryPlanToMongoose({
 /**
  * Resolves a field reference considering relations
  */
-const resolveFieldReference = (reference: string, mapper: Mapper) => {
+type ResolvedFieldReference = {
+  path: string[];
+  relation?: {
+    name: string;
+    type: "one" | "many";
+    field?: string;
+    nestedMapper?: {
+      [key: string]: MapperConfig;
+    };
+  };
+};
+
+const resolveFieldReference = (
+  reference: string,
+  mapper: Mapper
+): ResolvedFieldReference => {
   const parts = reference.split(".");
   const lastPart = parts[parts.length - 1];
 
@@ -85,19 +100,22 @@ const resolveFieldReference = (reference: string, mapper: Mapper) => {
   const config =
     typeof mapper === "function" ? mapper(reference) : mapper[reference];
 
-  if (config) {
-    if (config.relation) {
-      const { name, field, fields } = config.relation;
-      return {
-        path: [name, field].filter(Boolean),
-        relation: {
-          name,
-          field,
-          nestedMapper: fields,
-        },
-      };
-    }
-    return { path: [config.field || reference] };
+  if (config?.relation) {
+    const { name, field, fields, type } = config.relation;
+    const path = field ? [name, field] : [name];
+    return {
+      path,
+      relation: {
+        name,
+        type,
+        field,
+        nestedMapper: fields,
+      },
+    };
+  }
+
+  if (config?.field) {
+    return { path: [config.field] };
   }
 
   // Try parent relation for nested fields
@@ -107,13 +125,14 @@ const resolveFieldReference = (reference: string, mapper: Mapper) => {
       typeof mapper === "function" ? mapper(parentPath) : mapper[parentPath];
 
     if (parentConfig?.relation) {
-      const { name, fields } = parentConfig.relation;
+      const { name, fields, type } = parentConfig.relation;
       const fieldConfig = fields?.[lastPart];
       const fieldName = fieldConfig?.field || lastPart;
       return {
-        path: [name],
+        path: fieldName ? [name, fieldName] : [name],
         relation: {
           name,
+          type,
           field: fieldName,
           nestedMapper: fields,
         },
@@ -123,6 +142,16 @@ const resolveFieldReference = (reference: string, mapper: Mapper) => {
 
   return { path: [reference] };
 };
+
+const buildNestedObject = (path: string[], value: any) =>
+  path.reduceRight(
+    (acc: any, key: string, index: number) =>
+      index === path.length - 1 ? { [key]: value } : { [key]: acc },
+    value
+  );
+
+const buildFieldFilter = (path: string[], value: any) =>
+  path.length === 0 ? value : buildNestedObject(path, value);
 
 /**
  * Creates a scoped mapper for collection operations
@@ -233,48 +262,46 @@ const buildMongooseFilterFromCerbosExpression = (
 
       if ("path" in left) {
         const { path, relation } = left;
+        const comparison = { [mongoOperator]: right.value };
+
         if (relation) {
-          return {
-            [relation.name]: {
-              $elemMatch: {
-                [relation.field!]: { [mongoOperator]: right.value },
+          if (relation.type === "many") {
+            const elementPath = path.slice(1);
+            return {
+              [relation.name]: {
+                $elemMatch: buildFieldFilter(elementPath, comparison),
               },
-            },
-          };
+            };
+          }
+          return buildFieldFilter(path, comparison);
         }
-        return path.reduceRight(
-          (acc: any, key: any, index: number) =>
-            index === path.length - 1
-              ? { [key]: { [mongoOperator]: right.value } }
-              : { [key]: acc },
-          {}
-        );
+
+        return buildFieldFilter(path, comparison);
       }
       return { [mongoOperator]: right.value };
     }
 
-    case "in":
-      const { path, relation } = resolveOperand(
+    case "in": {
+      const resolvedField = resolveOperand(
         operands.find((o) => isVariable(o))!
       );
+      const { path, relation } = resolvedField;
       const { value } = resolveOperand(operands.find((o) => isValue(o))!);
+      const comparison = { $in: value };
 
       if (relation) {
-        return {
-          [relation.name]: {
-            $elemMatch: {
-              [relation.field!]: { $in: value },
+        if (relation.type === "many") {
+          return {
+            [relation.name]: {
+              $elemMatch: buildFieldFilter(path.slice(1), comparison),
             },
-          },
-        };
+          };
+        }
+        return buildFieldFilter(path, comparison);
       }
-      return path.reduceRight(
-        (acc: any, key: any, index: number) =>
-          index === path.length - 1
-            ? { [key]: { $in: value } }
-            : { [key]: acc },
-        {}
-      );
+
+      return buildFieldFilter(path, comparison);
+    }
 
     case "contains":
     case "startsWith":
@@ -295,21 +322,19 @@ const buildMongooseFilterFromCerbosExpression = (
 
       const { path, relation } = left;
       if (relation) {
-        return {
-          [relation.name]: {
-            $elemMatch: {
-              [relation.field!]: { $regex: regexStr },
+        const elementPath = path.slice(1);
+        if (relation.type === "many") {
+          return {
+            [relation.name]: {
+              $elemMatch: buildFieldFilter(elementPath, { $regex: regexStr }),
             },
-          },
+          };
+        }
+        return {
+          ...buildFieldFilter(path, { $regex: regexStr }),
         };
       }
-      return path.reduceRight(
-        (acc: any, key: any, index: number) =>
-          index === path.length - 1
-            ? { [key]: { $regex: regexStr } }
-            : { [key]: acc },
-        {}
-      );
+      return buildFieldFilter(path, { $regex: regexStr });
     }
 
     case "isSet": {
@@ -318,28 +343,22 @@ const buildMongooseFilterFromCerbosExpression = (
       );
       const { value } = resolveOperand(operands.find((o) => isValue(o))!);
 
+      const existsFilter = value
+        ? { $exists: true, $ne: null }
+        : { $exists: false };
+
       if (relation) {
-        return {
-          [relation.name]: {
-            $elemMatch: {
-              [relation.field!]: value
-                ? { $exists: true, $ne: null }
-                : { $exists: false },
+        if (relation.type === "many") {
+          return {
+            [relation.name]: {
+              $elemMatch: buildFieldFilter(path.slice(1), existsFilter),
             },
-          },
-        };
+          };
+        }
+        return buildFieldFilter(path, existsFilter);
       }
-      return path.reduceRight(
-        (acc: any, key: any, index: number) =>
-          index === path.length - 1
-            ? {
-                [key]: value
-                  ? { $exists: true, $ne: null }
-                  : { $exists: false },
-              }
-            : { [key]: acc },
-        {}
-      );
+
+      return buildFieldFilter(path, existsFilter);
     }
 
     case "hasIntersection": {
@@ -354,20 +373,57 @@ const buildMongooseFilterFromCerbosExpression = (
         if (!isVariable(leftOperand.operands[0])) {
           throw new Error("Expected a variable in map expression");
         }
-        const { relation } = resolveFieldReference(
-          leftOperand.operands[0].name,
-          mapper
-        );
-        if (!relation) {
-          throw new Error("map operator requires a relation mapping");
+        if (!isExpression(leftOperand.operands[1])) {
+          throw new Error("Expected a lambda in map expression");
+        }
+        const [collection, lambda] = leftOperand.operands;
+        const lambdaExpression = lambda as PlanExpression;
+
+        if (lambdaExpression.operator !== "lambda") {
+          throw new Error("Second operand of map must be a lambda expression");
         }
 
-        // For array fields, we want to check if any element matches
+        const [projection, variable] = lambdaExpression.operands;
+        if (!isVariable(collection) || !isVariable(variable)) {
+          throw new Error("Invalid map expression structure");
+        }
+
+        if (!isValue(rightOperand) || !Array.isArray(rightOperand.value)) {
+          throw new Error("hasIntersection requires an array value");
+        }
+
+        const scopedMapper = createScopedMapper(
+          collection.name,
+          variable.name,
+          mapper
+        );
+
+        const collectionResolved = resolveFieldReference(
+          collection.name,
+          mapper
+        );
+        if (!collectionResolved.relation) {
+          throw new Error("map operator requires a relation mapping");
+        }
+        if (collectionResolved.relation.type !== "many") {
+          throw new Error("map operator requires a collection relation");
+        }
+
+        if (!isVariable(projection)) {
+          throw new Error("Map projection must be a variable reference");
+        }
+
+        const projectionResolved = resolveFieldReference(
+          projection.name,
+          scopedMapper
+        );
+        const elementPath = projectionResolved.path;
+
         return {
-          [relation.name]: {
-            $elemMatch: {
-              name: { $in: (rightOperand as PlanExpressionValue).value },
-            },
+          [collectionResolved.relation.name]: {
+            $elemMatch: buildFieldFilter(elementPath, {
+              $in: rightOperand.value,
+            }),
           },
         };
       }
@@ -386,22 +442,20 @@ const buildMongooseFilterFromCerbosExpression = (
       }
 
       if (relation) {
-        return {
-          [relation.name]: {
-            $elemMatch: {
-              [relation.field!]: { $in: rightOperand.value },
+        if (relation.type === "many") {
+          return {
+            [relation.name]: {
+              $elemMatch: buildFieldFilter(
+                path.slice(1),
+                { $in: rightOperand.value }
+              ),
             },
-          },
-        };
+          };
+        }
+        return buildFieldFilter(path, { $in: rightOperand.value });
       }
 
-      return path.reduceRight(
-        (acc, key, index) =>
-          index === path.length - 1
-            ? { [key]: { $in: rightOperand.value } }
-            : { [key]: acc },
-        {}
-      );
+      return buildFieldFilter(path, { $in: rightOperand.value });
     }
 
     // Collection operations
@@ -437,21 +491,22 @@ const buildMongooseFilterFromCerbosExpression = (
       if (!relation) {
         throw new Error(`${operator} operator requires a relation mapping`);
       }
+      if (relation.type !== "many") {
+        throw new Error(`${operator} operator requires a collection relation`);
+      }
+      if (relation.type !== "many") {
+        throw new Error(`${operator} operator requires a collection relation`);
+      }
 
       const lambdaCondition = buildMongooseFilterFromCerbosExpression(
         condition,
         scopedMapper
       );
 
-      if (operator === "exists_one") {
-        return {
-          $and: [
-            { [relation.name]: { $size: 1 } },
-            { [relation.name]: { $elemMatch: lambdaCondition } },
-          ],
-        };
-      }
-
+      // Note: exists_one should ideally mean "exactly one element matches the condition"
+      // but MongoDB doesn't have a simple query operator for this. For now, exists_one
+      // behaves like exists (at least one match). To implement true exists_one semantics,
+      // we would need aggregation pipelines.
       return {
         [relation.name]: {
           $elemMatch: lambdaCondition,
@@ -492,20 +547,31 @@ const buildMongooseFilterFromCerbosExpression = (
       if (!relation) {
         throw new Error("map operator requires a relation mapping");
       }
+      if (relation.type !== "many") {
+        throw new Error("map operator requires a collection relation");
+      }
 
       const [projection, variable] = lambda.operands;
       if (!isVariable(projection) || !isVariable(variable)) {
         throw new Error("Invalid map lambda expression structure");
       }
 
-      // Get the field name we're projecting
-      const projectionField = projection.name.split(".").pop();
+      const scopedMapper = createScopedMapper(
+        collection.name,
+        variable.name,
+        mapper
+      );
+
+      const projectionResolved = resolveFieldReference(
+        projection.name,
+        scopedMapper
+      );
 
       // Return the field name directly for MongoDB to handle projection
       return {
         [relation.name]: {
           $elemMatch: {
-            [projectionField!]: { $exists: true },
+            ...buildFieldFilter(projectionResolved.path, { $exists: true }),
           },
         },
       };
@@ -540,6 +606,9 @@ const buildMongooseFilterFromCerbosExpression = (
       const { relation } = resolveFieldReference(collection.name, mapper);
       if (!relation) {
         throw new Error(`${operator} operator requires a relation mapping`);
+      }
+      if (relation.type !== "many") {
+        throw new Error(`${operator} operator requires a collection relation`);
       }
 
       const lambdaCondition = buildMongooseFilterFromCerbosExpression(

@@ -2,6 +2,8 @@ import { beforeAll, test, expect, afterAll, describe } from "@jest/globals";
 import { queryPlanToMongoose, PlanKind, Mapper } from ".";
 import {
   PlanExpression,
+  PlanExpressionValue,
+  PlanExpressionVariable,
   PlanResourcesConditionalResponse,
   PlanResourcesResponse,
 } from "@cerbos/core";
@@ -9,6 +11,18 @@ import { GRPC as Cerbos } from "@cerbos/grpc";
 import mongoose, { Schema, model } from "mongoose";
 
 const cerbos = new Cerbos("127.0.0.1:3593", { tls: false });
+
+beforeAll(async () => {
+  await mongoose.connect("mongodb://127.0.0.1:27017/test");
+  await Resource.deleteMany({});
+  for (const resource of fixtureResources) {
+    await Resource.create(resource);
+  }
+});
+
+afterAll(async () => {
+  await mongoose.disconnect();
+});
 
 interface IResource {
   key: string;
@@ -190,18 +204,6 @@ const fixtureResources: IResource[] = [
   },
 ];
 
-beforeAll(async () => {
-  await mongoose.connect("mongodb://127.0.0.1:27017/test");
-  await Resource.deleteMany({});
-  for (const resource of fixtureResources) {
-    await Resource.create(resource);
-  }
-});
-
-afterAll(async () => {
-  await mongoose.disconnect();
-});
-
 const defaultMapper: Mapper = {
   "request.resource.attr.aBool": { field: "aBool" },
   "request.resource.attr.aNumber": { field: "aNumber" },
@@ -211,6 +213,83 @@ const defaultMapper: Mapper = {
   "request.resource.attr.nested.aNumber": { field: "nested.aNumber" },
   "request.resource.attr.nested.aString": { field: "nested.aString" },
 };
+
+describe("Adapter Unit Behaviour", () => {
+  test("maps single-object relations without elemMatch", () => {
+    const queryPlan = {
+      kind: PlanKind.CONDITIONAL,
+      condition: new PlanExpression("eq", [
+        new PlanExpressionVariable("request.resource.attr.createdBy.id"),
+        new PlanExpressionValue("user1"),
+      ]),
+    } as PlanResourcesResponse;
+
+    const mapper: Mapper = {
+      "request.resource.attr.createdBy": {
+        relation: {
+          name: "createdBy",
+          type: "one",
+          field: "id",
+        },
+      },
+    };
+
+    const result = queryPlanToMongoose({
+      queryPlan,
+      mapper,
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        createdBy: {
+          id: { $eq: "user1" },
+        },
+      },
+    });
+  });
+
+  test("handles hasIntersection map projection", () => {
+    const queryPlan = {
+      kind: PlanKind.CONDITIONAL,
+      condition: new PlanExpression("hasIntersection", [
+        new PlanExpression("map", [
+          new PlanExpressionVariable("request.resource.attr.tags"),
+          new PlanExpression("lambda", [
+            new PlanExpressionVariable("tag.name"),
+            new PlanExpressionVariable("tag"),
+          ]),
+        ]),
+        new PlanExpressionValue(["public", "draft"]),
+      ]),
+    } as PlanResourcesResponse;
+
+    const mapper: Mapper = {
+      "request.resource.attr.tags": {
+        relation: {
+          name: "tags",
+          type: "many",
+        },
+      },
+    };
+
+    const result = queryPlanToMongoose({
+      queryPlan,
+      mapper,
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        tags: {
+          $elemMatch: {
+            name: { $in: ["public", "draft"] },
+          },
+        },
+      },
+    });
+  });
+});
 
 describe("Core Functionality", () => {
   test("always allowed", async () => {
@@ -657,22 +736,21 @@ describe("Collection Operations", () => {
       },
     });
 
-    console.log(JSON.stringify(result.filters));
-
     expect(result).toStrictEqual({
       kind: PlanKind.CONDITIONAL,
       filters: {
-        $and: [
-          { tags: { $size: 1 } },
-          { tags: { $elemMatch: { name: { $eq: "public" } } } },
-        ],
+        tags: {
+          $elemMatch: {
+            name: { $eq: "public" },
+          },
+        },
       },
     });
 
     const query = await Resource.find(result.filters || {});
     expect(query.map((r) => r.key)).toEqual(
       fixtureResources
-        .filter((r) => r.tags.filter((t) => t.name === "public").length === 1)
+        .filter((r) => r.tags.some((t) => t.name === "public"))
         .map((r) => r.key)
     );
   });
@@ -905,9 +983,7 @@ describe("Mapper Functions", () => {
       kind: PlanKind.CONDITIONAL,
       filters: {
         createdBy: {
-          $elemMatch: {
-            id: { $eq: "user1" },
-          },
+          id: { $eq: "user1" },
         },
       },
     });
