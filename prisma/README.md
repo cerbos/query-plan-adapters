@@ -16,7 +16,7 @@ An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanRe
 
 - One-to-one: `is`, `isNot`
 - One-to-many/Many-to-many: `some`, `none`, `every`
-- Collection operators: `exists`, `exists_one`, `all`, `filter`
+- Collection operators: `exists`, `exists_one`, `all`, `filter`, `except`
 - Set operations: `hasIntersection`
 
 #### Advanced Features
@@ -145,6 +145,37 @@ const records = await prisma.resource.findMany({
 });
 ```
 
+### Collection Operators
+
+The adapter understands the full Cerbos collection operator set, including `except`. For example, the configuration below ensures a resource’s categories do not have any sub-category named `finance`:
+
+```ts
+const result = queryPlanToPrisma({
+  queryPlan,
+  mapper: {
+    "request.resource.attr.categories": {
+      relation: {
+        name: "categories",
+        type: "many",
+        fields: {
+          subCategories: {
+            relation: {
+              name: "subCategories",
+              type: "many",
+              fields: {
+                name: { field: "name" },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+});
+```
+
+`queryPlanToPrisma` emits the necessary nested `NOT` structure so Prisma receives a valid filter for the entire relation chain.
+
 ### Field Name Mapping
 
 Fields can be mapped using either an object or a function:
@@ -237,6 +268,14 @@ When using relations, fields are automatically inferred from the path unless exp
 }
 ```
 
+### Handling `in` Operators
+
+`queryPlanToPrisma` normalises Cerbos `in` expressions to match Prisma expectations:
+
+- Single values become equality comparisons (`{ field: "value" }`).
+- Arrays remain `{ field: { in: [...] } }`.
+- Relation-backed fields retain their relation structure while still applying the appropriate equality or `in` operator at the leaf.
+
 ### Complex Example with Multiple Relations and Direct Fields
 
 ```ts
@@ -320,6 +359,18 @@ const result = await primsa.resource.findMany({
   },
 });
 ```
+
+## Development
+
+### Running Tests
+
+```bash
+npm test
+```
+
+> **Note:** The suite seeds `prisma/dev.db` and invokes `prisma db push --force-reset`. Only run it against disposable development databases.
+
+The tests populate Prisma with fixture data and assert query results directly against those fixtures, covering scalar and relation `in` operators, collection behaviour (including `except`), nested relations, and lambda expressions.
 
 ## Types
 
