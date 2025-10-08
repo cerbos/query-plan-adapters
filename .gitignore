@@ -3,5 +3,9 @@ __pypackages__/
 __pycache__/
 dist/
 
+node_modules/
+
+coverage/
+
 *.pyc
 .pdm.toml
