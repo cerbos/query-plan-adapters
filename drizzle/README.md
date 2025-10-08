@@ -8,6 +8,7 @@ An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanRe
 - Supports comparison operators: `eq`, `ne`, `lt`, `gt`, `le`, `ge`, `in`
 - Supports string operators: `contains`, `startsWith`, `endsWith`
 - Supports nullability checks via the `isSet` operator
+- Supports relation-aware mappings, including nested relations and many-to-many joins
 - Works with Drizzle SQLite, PostgreSQL, MySQL and PlanetScale drivers
 
 ## Installation
@@ -67,6 +68,52 @@ const result = queryPlanToDrizzle({
   },
 });
 ```
+
+### Mapping relations
+
+Relations can be described using the `relation` option, mirroring the structure of the Prisma adapter. The adapter will wrap
+comparisons in `EXISTS` subqueries and automatically infer relation fields when they match the column names on the related table.
+
+```ts
+const result = queryPlanToDrizzle({
+  queryPlan,
+  mapper: {
+    "request.resource.attr.owner": {
+      relation: {
+        type: "one",
+        table: owners,
+        sourceColumn: resources.ownerId,
+        targetColumn: owners.id,
+        fields: {
+          email: owners.email,
+        },
+      },
+    },
+    "request.resource.attr.tags": {
+      relation: {
+        type: "many",
+        table: resourceTags,
+        sourceColumn: resources.id,
+        targetColumn: resourceTags.resourceId,
+        fields: {
+          name: {
+            relation: {
+              type: "one",
+              table: tags,
+              sourceColumn: resourceTags.tagId,
+              targetColumn: tags.id,
+              field: tags.name,
+            },
+          },
+        },
+      },
+    },
+  },
+});
+```
+
+With the above mapper, query plan references such as `request.resource.attr.owner.email` and `request.resource.attr.tags.name`
+are translated into `EXISTS` expressions that join the `owners` and `tags` tables respectively.
 
 ## Testing
 

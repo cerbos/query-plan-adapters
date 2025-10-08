@@ -17,8 +17,13 @@ import {
   inArray,
   isNull,
   sql,
+  exists,
 } from "drizzle-orm";
 import type { AnyColumn, SQLWrapper } from "drizzle-orm";
+
+const TABLE_NAME = Symbol.for("drizzle:Name");
+
+type RelationTable = unknown;
 
 export { PlanKind };
 
@@ -46,8 +51,9 @@ export type MapperEntry =
   | AnyColumn
   | SQLWrapper
   | {
-      column: AnyColumn | SQLWrapper;
+      column?: AnyColumn | SQLWrapper;
       transform?: MapperTransform;
+      relation?: RelationMapping;
     }
   | MapperTransform;
 
@@ -71,10 +77,25 @@ export type QueryPlanToDrizzleResult =
       filter: DrizzleFilter;
     };
 
-const isMappingConfig = (
-  entry: MapperEntry
-): entry is { column: AnyColumn | SQLWrapper; transform?: MapperTransform } =>
-  typeof entry === "object" && entry !== null && "column" in entry;
+export interface RelationMapping {
+  type: "one" | "many";
+  table: RelationTable;
+  sourceColumn: AnyColumn;
+  targetColumn: AnyColumn;
+  field?: MapperEntry;
+  fields?: { [key: string]: MapperEntry };
+}
+
+type MappingConfig = {
+  column?: AnyColumn | SQLWrapper;
+  transform?: MapperTransform;
+  relation?: RelationMapping;
+};
+
+const isMappingConfig = (entry: MapperEntry): entry is MappingConfig =>
+  typeof entry === "object" &&
+  entry !== null &&
+  ("column" in entry || "transform" in entry || "relation" in entry);
 
 const isNameOperand = (
   operand: PlanExpressionOperand
@@ -90,15 +111,112 @@ const isExpressionOperand = (
 ): operand is { operator: string; operands: PlanExpressionOperand[] } =>
   "operator" in operand && Array.isArray((operand as any).operands);
 
-const resolveMapping = (reference: string, mapper: Mapper): MapperEntry => {
-  const mapping =
-    typeof mapper === "function" ? mapper(reference) : mapper[reference];
+const getMappingEntry = (reference: string, mapper: Mapper): MapperEntry | undefined =>
+  typeof mapper === "function" ? mapper(reference) : mapper[reference];
 
-  if (!mapping) {
-    throw new Error(`No mapping found for reference: ${reference}`);
+const getTableName = (table: RelationTable, reference: string): string => {
+  const name = (table as { [key: symbol]: string | undefined })[TABLE_NAME];
+  if (!name) {
+    throw new Error(`Unable to resolve table name for relation: ${reference}`);
+  }
+  return name;
+};
+
+const wrapWithRelations = (
+  relations: RelationMapping[],
+  filter: SQLWrapper,
+  reference: string
+): SQLWrapper => {
+  return relations
+    .slice()
+    .reverse()
+    .reduce((currentFilter, relation) => {
+      const joinCondition = eq(relation.targetColumn, relation.sourceColumn);
+      const condition = and(joinCondition, currentFilter);
+      const tableName = getTableName(relation.table, reference);
+      return exists(
+        sql`(select 1 from ${sql.raw(tableName)} where ${condition})`
+      );
+    }, filter);
+};
+
+const resolveRelationField = (
+  relation: RelationMapping,
+  path: string[],
+  reference: string,
+  accumulated: RelationMapping[]
+): { relations: RelationMapping[]; mapping: MapperEntry } => {
+  const relations = [...accumulated, relation];
+
+  if (path.length === 0) {
+    if (!relation.field) {
+      throw new Error(
+        `Relation mapping for '${reference}' does not define a default field`
+      );
+    }
+    return { relations, mapping: relation.field };
   }
 
-  return mapping;
+  const [segment, ...rest] = path;
+  const fields = relation.fields ?? {};
+  const fieldEntry = fields[segment];
+
+  if (fieldEntry !== undefined) {
+    if (isMappingConfig(fieldEntry) && fieldEntry.relation) {
+      return resolveRelationField(
+        fieldEntry.relation,
+        rest,
+        reference,
+        relations
+      );
+    }
+    if (rest.length > 0) {
+      throw new Error(
+        `Mapping for '${segment}' does not support further nesting in '${reference}'`
+      );
+    }
+    return { relations, mapping: fieldEntry };
+  }
+
+  const inferredColumn = (relation.table as Record<string, MapperEntry>)[
+    segment
+  ];
+
+  if (inferredColumn !== undefined) {
+    if (rest.length > 0) {
+      throw new Error(
+        `Unable to resolve nested path '${segment}.${rest.join(".")}' for relation '${reference}'`
+      );
+    }
+    return { relations, mapping: inferredColumn };
+  }
+
+  throw new Error(
+    `No mapping found for relation segment '${segment}' in reference '${reference}'`
+  );
+};
+
+const resolveFieldReference = (
+  reference: string,
+  mapper: Mapper
+): { relations: RelationMapping[]; mapping: MapperEntry } => {
+  const direct = getMappingEntry(reference, mapper);
+  if (direct !== undefined) {
+    return { relations: [], mapping: direct };
+  }
+
+  const parts = reference.split(".");
+  for (let i = parts.length - 1; i > 0; i--) {
+    const prefix = parts.slice(0, i).join(".");
+    const suffix = parts.slice(i);
+    const entry = getMappingEntry(prefix, mapper);
+    if (!entry || !isMappingConfig(entry) || !entry.relation) {
+      continue;
+    }
+    return resolveRelationField(entry.relation, suffix, reference, []);
+  }
+
+  throw new Error(`No mapping found for reference: ${reference}`);
 };
 
 const applyComparison = (
@@ -111,8 +229,14 @@ const applyComparison = (
   }
 
   if (isMappingConfig(mapping)) {
+    if (mapping.relation) {
+      throw new Error("Relation mappings must be resolved before comparison");
+    }
     if (mapping.transform) {
       return mapping.transform({ operator, value });
+    }
+    if (!mapping.column) {
+      throw new Error("Mapping configuration requires a column or transform");
     }
     return applyComparison(mapping.column, operator, value);
   }
@@ -218,8 +342,11 @@ const buildFilterFromExpression = (
       if (!valueOperand) {
         throw new Error("Comparison operator missing value operand");
       }
-      const mapping = resolveMapping(fieldOperand.name, mapper);
-      return applyComparison(mapping, operator, valueOperand.value);
+      const resolved = resolveFieldReference(fieldOperand.name, mapper);
+      const filter = applyComparison(resolved.mapping, operator, valueOperand.value);
+      return resolved.relations.length
+        ? wrapWithRelations(resolved.relations, filter, fieldOperand.name)
+        : filter;
     }
     default:
       throw new Error(`Unsupported operator: ${operator}`);

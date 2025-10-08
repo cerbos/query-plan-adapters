@@ -5,24 +5,92 @@ exports.queryPlanToDrizzle = queryPlanToDrizzle;
 const core_1 = require("@cerbos/core");
 Object.defineProperty(exports, "PlanKind", { enumerable: true, get: function () { return core_1.PlanKind; } });
 const drizzle_orm_1 = require("drizzle-orm");
-const isMappingConfig = (entry) => typeof entry === "object" && entry !== null && "column" in entry;
+const TABLE_NAME = Symbol.for("drizzle:Name");
+const isMappingConfig = (entry) => typeof entry === "object" &&
+    entry !== null &&
+    ("column" in entry || "transform" in entry || "relation" in entry);
 const isNameOperand = (operand) => "name" in operand && typeof operand.name === "string";
 const isValueOperand = (operand) => "value" in operand;
 const isExpressionOperand = (operand) => "operator" in operand && Array.isArray(operand.operands);
-const resolveMapping = (reference, mapper) => {
-    const mapping = typeof mapper === "function" ? mapper(reference) : mapper[reference];
-    if (!mapping) {
-        throw new Error(`No mapping found for reference: ${reference}`);
+const getMappingEntry = (reference, mapper) => typeof mapper === "function" ? mapper(reference) : mapper[reference];
+const getTableName = (table, reference) => {
+    const name = table[TABLE_NAME];
+    if (!name) {
+        throw new Error(`Unable to resolve table name for relation: ${reference}`);
     }
-    return mapping;
+    return name;
+};
+const wrapWithRelations = (relations, filter, reference) => {
+    return relations
+        .slice()
+        .reverse()
+        .reduce((currentFilter, relation) => {
+        const joinCondition = (0, drizzle_orm_1.eq)(relation.targetColumn, relation.sourceColumn);
+        const condition = (0, drizzle_orm_1.and)(joinCondition, currentFilter);
+        const tableName = getTableName(relation.table, reference);
+        return (0, drizzle_orm_1.exists)((0, drizzle_orm_1.sql) `(select 1 from ${drizzle_orm_1.sql.raw(tableName)} where ${condition})`);
+    }, filter);
+};
+const resolveRelationField = (relation, path, reference, accumulated) => {
+    var _a;
+    const relations = [...accumulated, relation];
+    if (path.length === 0) {
+        if (!relation.field) {
+            throw new Error(`Relation mapping for '${reference}' does not define a default field`);
+        }
+        return { relations, mapping: relation.field };
+    }
+    const [segment, ...rest] = path;
+    const fields = (_a = relation.fields) !== null && _a !== void 0 ? _a : {};
+    const fieldEntry = fields[segment];
+    if (fieldEntry !== undefined) {
+        if (isMappingConfig(fieldEntry) && fieldEntry.relation) {
+            return resolveRelationField(fieldEntry.relation, rest, reference, relations);
+        }
+        if (rest.length > 0) {
+            throw new Error(`Mapping for '${segment}' does not support further nesting in '${reference}'`);
+        }
+        return { relations, mapping: fieldEntry };
+    }
+    const inferredColumn = relation.table[segment];
+    if (inferredColumn !== undefined) {
+        if (rest.length > 0) {
+            throw new Error(`Unable to resolve nested path '${segment}.${rest.join(".")}' for relation '${reference}'`);
+        }
+        return { relations, mapping: inferredColumn };
+    }
+    throw new Error(`No mapping found for relation segment '${segment}' in reference '${reference}'`);
+};
+const resolveFieldReference = (reference, mapper) => {
+    const direct = getMappingEntry(reference, mapper);
+    if (direct !== undefined) {
+        return { relations: [], mapping: direct };
+    }
+    const parts = reference.split(".");
+    for (let i = parts.length - 1; i > 0; i--) {
+        const prefix = parts.slice(0, i).join(".");
+        const suffix = parts.slice(i);
+        const entry = getMappingEntry(prefix, mapper);
+        if (!entry || !isMappingConfig(entry) || !entry.relation) {
+            continue;
+        }
+        return resolveRelationField(entry.relation, suffix, reference, []);
+    }
+    throw new Error(`No mapping found for reference: ${reference}`);
 };
 const applyComparison = (mapping, operator, value) => {
     if (typeof mapping === "function") {
         return mapping({ operator, value });
     }
     if (isMappingConfig(mapping)) {
+        if (mapping.relation) {
+            throw new Error("Relation mappings must be resolved before comparison");
+        }
         if (mapping.transform) {
             return mapping.transform({ operator, value });
+        }
+        if (!mapping.column) {
+            throw new Error("Mapping configuration requires a column or transform");
         }
         return applyComparison(mapping.column, operator, value);
     }
@@ -116,8 +184,11 @@ const buildFilterFromExpression = (expression, mapper) => {
             if (!valueOperand) {
                 throw new Error("Comparison operator missing value operand");
             }
-            const mapping = resolveMapping(fieldOperand.name, mapper);
-            return applyComparison(mapping, operator, valueOperand.value);
+            const resolved = resolveFieldReference(fieldOperand.name, mapper);
+            const filter = applyComparison(resolved.mapping, operator, valueOperand.value);
+            return resolved.relations.length
+                ? wrapWithRelations(resolved.relations, filter, fieldOperand.name)
+                : filter;
         }
         default:
             throw new Error(`Unsupported operator: ${operator}`);
