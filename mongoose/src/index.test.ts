@@ -215,7 +215,7 @@ const defaultMapper: Mapper = {
 };
 
 describe("Adapter Unit Behaviour", () => {
-  test("maps single-object relations without elemMatch", () => {
+  test("maps single-object relations without elemMatch", async () => {
     const queryPlan = {
       kind: PlanKind.CONDITIONAL,
       condition: new PlanExpression("eq", [
@@ -247,9 +247,16 @@ describe("Adapter Unit Behaviour", () => {
         },
       },
     });
+
+    const query = await Resource.find(result.filters || {});
+    expect(query.map((r) => r.key)).toEqual(
+      fixtureResources
+        .filter((resource) => resource.createdBy.id === "user1")
+        .map((resource) => resource.key)
+    );
   });
 
-  test("handles hasIntersection map projection", () => {
+  test("handles hasIntersection map projection", async () => {
     const queryPlan = {
       kind: PlanKind.CONDITIONAL,
       condition: new PlanExpression("hasIntersection", [
@@ -288,6 +295,15 @@ describe("Adapter Unit Behaviour", () => {
         },
       },
     });
+
+    const query = await Resource.find(result.filters || {});
+    expect(query.map((r) => r.key)).toEqual(
+      fixtureResources
+        .filter((resource) =>
+          resource.tags.some((tag) => ["public", "draft"].includes(tag.name))
+        )
+        .map((resource) => resource.key)
+    );
   });
 });
 
@@ -959,6 +975,13 @@ describe("Mapper Functions", () => {
       kind: PlanKind.CONDITIONAL,
       filters: { aBool: { $eq: true } },
     });
+
+    const query = await Resource.find(result.filters || {});
+    expect(query.map((r) => r.key)).toEqual(
+      fixtureResources
+        .filter((resource) => resource.aBool === true)
+        .map((resource) => resource.key)
+    );
   });
 
   test("function mapper for relations", async () => {
@@ -987,6 +1010,13 @@ describe("Mapper Functions", () => {
         },
       },
     });
+
+    const query = await Resource.find(result.filters || {});
+    expect(query.map((r) => r.key)).toEqual(
+      fixtureResources
+        .filter((resource) => resource.createdBy.id === "user1")
+        .map((resource) => resource.key)
+    );
   });
 });
 
