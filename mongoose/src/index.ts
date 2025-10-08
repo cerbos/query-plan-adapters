@@ -102,7 +102,11 @@ const resolveFieldReference = (
 
   if (config?.relation) {
     const { name, field, fields, type } = config.relation;
-    const path = field ? [name, field] : [name];
+    const path = field
+      ? type === "one"
+        ? [`${name}.${field}`]
+        : [name, field]
+      : [name];
     return {
       path,
       relation: {
@@ -129,7 +133,11 @@ const resolveFieldReference = (
       const fieldConfig = fields?.[lastPart];
       const fieldName = fieldConfig?.field || lastPart;
       return {
-        path: fieldName ? [name, fieldName] : [name],
+        path: fieldName
+          ? type === "one"
+            ? [`${name}.${fieldName}`]
+            : [name, fieldName]
+          : [name],
         relation: {
           name,
           type,

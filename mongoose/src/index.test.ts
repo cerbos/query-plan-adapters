@@ -204,6 +204,9 @@ const fixtureResources: IResource[] = [
   },
 ];
 
+const allowedTagNames = new Set<string>(["public", "draft"]);
+const allowedStringValues = new Set<string>(["string", "anotherString"]);
+
 const defaultMapper: Mapper = {
   "request.resource.attr.aBool": { field: "aBool" },
   "request.resource.attr.aNumber": { field: "aNumber" },
@@ -242,9 +245,7 @@ describe("Adapter Unit Behaviour", () => {
     expect(result).toStrictEqual({
       kind: PlanKind.CONDITIONAL,
       filters: {
-        createdBy: {
-          id: { $eq: "user1" },
-        },
+        "createdBy.id": { $eq: "user1" },
       },
     });
 
@@ -300,7 +301,7 @@ describe("Adapter Unit Behaviour", () => {
     expect(query.map((r) => r.key)).toEqual(
       fixtureResources
         .filter((resource) =>
-          resource.tags.some((tag) => ["public", "draft"].includes(tag.name))
+          resource.tags.some((tag) => allowedTagNames.has(tag.name))
         )
         .map((resource) => resource.key)
     );
@@ -685,7 +686,7 @@ describe("Collection Operations", () => {
     expect(query.map((r) => r.key)).toEqual(
       fixtureResources
         .filter((r) => {
-          return ["string", "anotherString"].includes(r.aString as string);
+          return allowedStringValues.has(r.aString as string);
         })
         .map((r) => r.key)
     );
@@ -853,7 +854,7 @@ describe("Collection Operations", () => {
     const query = await Resource.find(result.filters || {});
     expect(query.map((r) => r.key)).toEqual(
       fixtureResources
-        .filter((r) => r.tags.some((t) => ["public", "draft"].includes(t.name)))
+        .filter((r) => r.tags.some((t) => allowedTagNames.has(t.name)))
         .map((r) => r.key)
     );
   });
@@ -1005,9 +1006,7 @@ describe("Mapper Functions", () => {
     expect(result).toStrictEqual({
       kind: PlanKind.CONDITIONAL,
       filters: {
-        createdBy: {
-          id: { $eq: "user1" },
-        },
+        "createdBy.id": { $eq: "user1" },
       },
     });
 
