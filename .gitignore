@@ -3,5 +3,11 @@ __pypackages__/
 __pycache__/
 dist/
 
+node_modules/
+
+drizzle/lib/
+
+coverage/
+
 *.pyc
 .pdm.toml

@@ -1,0 +1,36 @@
+name: Drizzle Test
+
+on:
+  pull_request:
+    paths:
+      - "drizzle/**"
+  push:
+    tags:
+      - drizzle/v*
+
+defaults:
+  run:
+    working-directory: drizzle
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        cerbos-version: ["latest"]
+        node-version: ["18", "20", "22"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Cerbos
+        uses: cerbos/cerbos-setup-action@v1
+        with:
+          version: ${{ matrix.cerbos-version }}
+
+      - name: Test using Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - run: npm install
+      - run: npm run test
