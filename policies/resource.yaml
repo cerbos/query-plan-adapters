@@ -374,6 +374,15 @@ resourcePolicy:
           expr: R.attr.tags.exists(tag, tag.id == "tag1" && tag.name == "public")
 
     - actions:
+        - "exists"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.tags.exists(tag, tag.name == "public")
+
+    - actions:
         - "exists-one"
       effect: EFFECT_ALLOW
       roles:

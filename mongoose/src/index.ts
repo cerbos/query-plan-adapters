@@ -4,189 +4,638 @@ import {
   PlanExpression,
   PlanExpressionValue,
   PlanExpressionVariable,
-  PlanKind as PK,
+  PlanKind,
 } from "@cerbos/core";
 
-export type PlanKind = PK;
-export const PlanKind = PK;
+export { PlanKind };
 
-type FieldMapper =
-  | {
-      [key: string]: string;
-    }
-  | ((key: string) => string);
+export type MongooseFilter = Record<string, any>;
 
-type Relation = {
-  relation: string;
-  field: string;
+export type MapperConfig = {
+  field?: string;
+  relation?: {
+    name: string;
+    type: "one" | "many";
+    field?: string;
+    fields?: {
+      [key: string]: MapperConfig;
+    };
+  };
 };
 
-type RelationMapper =
+export type Mapper =
   | {
-      [key: string]: Relation;
+      [key: string]: MapperConfig;
     }
-  | ((key: string) => Relation);
+  | ((key: string) => MapperConfig);
 
-interface QueryPlanToPrismaArgs {
+export interface QueryPlanToMongooseArgs {
   queryPlan: PlanResourcesResponse;
-  fieldNameMapper: FieldMapper;
+  mapper?: Mapper;
 }
 
-interface QueryPlanToPrismaResult {
+export interface QueryPlanToMongooseResult {
   kind: PlanKind;
-  filters?: any;
+  filters?: MongooseFilter;
 }
 
+// Helper functions for type checking
+const isExpression = (e: PlanExpressionOperand): e is PlanExpression =>
+  "operator" in e;
+const isValue = (e: PlanExpressionOperand): e is PlanExpressionValue =>
+  "value" in e;
+const isVariable = (e: PlanExpressionOperand): e is PlanExpressionVariable =>
+  "name" in e;
+
+/**
+ * Converts a Cerbos query plan to a Mongoose filter
+ */
 export function queryPlanToMongoose({
   queryPlan,
-  fieldNameMapper,
-}: QueryPlanToPrismaArgs): QueryPlanToPrismaResult {
-  const toFieldName = (key: string) => {
-    if (typeof fieldNameMapper === "function") {
-      return fieldNameMapper(key);
-    } else if (fieldNameMapper[key]) {
-      return fieldNameMapper[key];
-    } else {
-      return key;
-    }
-  };
-
+  mapper = {},
+}: QueryPlanToMongooseArgs): QueryPlanToMongooseResult {
   switch (queryPlan.kind) {
     case PlanKind.ALWAYS_ALLOWED:
       return {
         kind: PlanKind.ALWAYS_ALLOWED,
-        filters: {},
       };
     case PlanKind.ALWAYS_DENIED:
-      return {
-        kind: PlanKind.ALWAYS_DENIED,
-      };
+      return { kind: PlanKind.ALWAYS_DENIED };
     case PlanKind.CONDITIONAL:
       return {
         kind: PlanKind.CONDITIONAL,
-        filters: mapOperand(queryPlan.condition, toFieldName),
+        filters: buildMongooseFilterFromCerbosExpression(
+          queryPlan.condition,
+          mapper
+        ),
       };
     default:
       throw Error(`Invalid query plan.`);
   }
 }
 
-function isExpression(e: PlanExpressionOperand): e is PlanExpression {
-  return (e as any).operator !== undefined;
-}
-
-function isValue(e: PlanExpressionOperand): e is PlanExpressionValue {
-  return (e as any).value !== undefined;
-}
-
-function isVariable(e: PlanExpressionOperand): e is PlanExpressionVariable {
-  return (e as any).variable !== undefined;
-}
-
-function getOperandVariable(operands: PlanExpressionOperand[]) {
-  const op = operands.find((o) => o.hasOwnProperty("name"));
-  if (!op) return;
-  return (op as PlanExpressionVariable).name;
-}
-
-function getOperandValue(operands: PlanExpressionOperand[]) {
-  const op = operands.find((o) => isValue(o));
-  if (!op) return;
-  return (op as PlanExpressionValue).value;
-}
-
-const OPERATORS: {
-  [key: string]: {
-    relationalCondition?: string;
-    fieldCondition: string;
+/**
+ * Resolves a field reference considering relations
+ */
+type ResolvedFieldReference = {
+  path: string[];
+  relation?: {
+    name: string;
+    type: "one" | "many";
+    field?: string;
+    nestedMapper?: {
+      [key: string]: MapperConfig;
+    };
   };
-} = {
-  eq: {
-    relationalCondition: "is",
-    fieldCondition: "equals",
-  },
-  ne: {
-    relationalCondition: "isNot",
-    fieldCondition: "$ne",
-  },
-  in: {
-    relationalCondition: "some",
-    fieldCondition: "$in",
-  },
-  lt: {
-    fieldCondition: "$lt",
-  },
-  gt: {
-    fieldCondition: "$gt",
-  },
-  le: {
-    fieldCondition: "$lte",
-  },
-  ge: {
-    fieldCondition: "$gte",
-  },
 };
 
-function mapOperand(
-  operand: PlanExpressionOperand,
-  getFieldName: (key: string) => string,
-  output: any = {}
-): any {
-  if (!isExpression(operand))
-    throw Error(
-      `Query plan did not contain an expression for operand ${operand}`
-    );
+const resolveFieldReference = (
+  reference: string,
+  mapper: Mapper
+): ResolvedFieldReference => {
+  const parts = reference.split(".");
+  const lastPart = parts[parts.length - 1];
 
-  const { operator, operands } = operand;
+  // Try exact match first
+  const config =
+    typeof mapper === "function" ? mapper(reference) : mapper[reference];
 
-  // HANDLE NESTING OPERATIONS: AND/OR/NOT
-  if (operator == "and") {
-    if (operands.length < 2) throw Error("Expected atleast 2 operands");
-    output["$and"] = operands.map((o) => mapOperand(o, getFieldName, {}));
-    return output;
+  if (config?.relation) {
+    const { name, field, fields, type } = config.relation;
+    const path = field
+      ? type === "one"
+        ? [`${name}.${field}`]
+        : [name, field]
+      : [name];
+    return {
+      path,
+      relation: {
+        name,
+        type,
+        field,
+        nestedMapper: fields,
+      },
+    };
   }
 
-  if (operator == "or") {
-    if (operands.length < 2) throw Error("Expected atleast 2 operands");
-    output["$or"] = operands.map((o) => mapOperand(o, getFieldName, {}));
-    return output;
+  if (config?.field) {
+    return { path: [config.field] };
   }
 
-  if (operator == "not") {
-    if (operands.length > 1) throw Error("Expected only one operand");
-    if (Object.keys(output).length === 0) {
-      output["$nor"] = [
-        operands.map((o) => mapOperand(o, getFieldName, {}))[0],
-      ];
-    } else {
-      output["$not"] = operands.map((o) => mapOperand(o, getFieldName, {}))[0];
-    }
-    return output;
-  }
+  // Try parent relation for nested fields
+  if (parts.length > 1) {
+    const parentPath = parts.slice(0, -1).join(".");
+    const parentConfig =
+      typeof mapper === "function" ? mapper(parentPath) : mapper[parentPath];
 
-  // get the operation parameters
-  const operation = OPERATORS[operator];
-  if (!operation) throw Error(`Unsupported operator ${operator}`);
-
-  const opVariable = getOperandVariable(operands);
-  if (!opVariable) throw Error(`Unexpected variable ${operands}`);
-
-  const opValue = getOperandValue(operands);
-  const fieldName = getFieldName(opVariable);
-
-  // There is a relational mapper for this variable
-  if (fieldName && operation.fieldCondition) {
-    // There is a field mapper for this variable
-
-    if (operation.fieldCondition === "equals") {
-      output[fieldName] = opValue;
-    } else {
-      output[fieldName] = {
-        [operation.fieldCondition]: opValue,
+    if (parentConfig?.relation) {
+      const { name, fields, type } = parentConfig.relation;
+      const fieldConfig = fields?.[lastPart];
+      const fieldName = fieldConfig?.field || lastPart;
+      return {
+        path: fieldName
+          ? type === "one"
+            ? [`${name}.${fieldName}`]
+            : [name, fieldName]
+          : [name],
+        relation: {
+          name,
+          type,
+          field: fieldName,
+          nestedMapper: fields,
+        },
       };
     }
-    return output;
-  } else {
-    throw Error("Failed to map");
   }
-}
+
+  return { path: [reference] };
+};
+
+const buildNestedObject = (path: string[], value: any) =>
+  path.reduceRight(
+    (acc: any, key: string, index: number) =>
+      index === path.length - 1 ? { [key]: value } : { [key]: acc },
+    value
+  );
+
+const buildFieldFilter = (path: string[], value: any) =>
+  path.length === 0 ? value : buildNestedObject(path, value);
+
+/**
+ * Creates a scoped mapper for collection operations
+ */
+const createScopedMapper =
+  (collectionPath: string, variableName: string, fullMapper: Mapper): Mapper =>
+  (key: string) => {
+    if (key.startsWith(variableName + ".")) {
+      const strippedKey = key.replace(variableName + ".", "");
+
+      // Get the collection's relation config
+      const collectionConfig =
+        typeof fullMapper === "function"
+          ? fullMapper(collectionPath)
+          : fullMapper[collectionPath];
+
+      if (collectionConfig?.relation?.fields) {
+        const fieldConfig = collectionConfig.relation.fields[strippedKey];
+        if (fieldConfig) {
+          return fieldConfig;
+        }
+      }
+
+      // If no specific field mapping found, return default mapping
+      return { field: strippedKey };
+    }
+
+    // For non-variable keys, use the full mapper
+    return typeof fullMapper === "function"
+      ? fullMapper(key)
+      : fullMapper[key] || { field: key };
+  };
+
+/**
+ * Builds Mongoose conditions from a Cerbos expression
+ */
+const buildMongooseFilterFromCerbosExpression = (
+  expression: PlanExpressionOperand,
+  mapper: Mapper
+): MongooseFilter => {
+  if (!isExpression(expression)) {
+    throw new Error("Invalid Cerbos expression structure");
+  }
+
+  const { operator, operands } = expression;
+
+  const resolveOperand = (operand: PlanExpressionOperand): any => {
+    if (isVariable(operand)) {
+      return resolveFieldReference(operand.name, mapper);
+    } else if (isValue(operand)) {
+      return { value: operand.value };
+    } else if (isExpression(operand)) {
+      const nestedResult = buildMongooseFilterFromCerbosExpression(
+        operand,
+        mapper
+      );
+      return { value: nestedResult };
+    }
+    throw new Error("Invalid operand structure");
+  };
+
+  switch (operator) {
+    case "and":
+      return {
+        $and: operands.map((op) =>
+          buildMongooseFilterFromCerbosExpression(op, mapper)
+        ),
+      };
+
+    case "or":
+      return {
+        $or: operands.map((op) =>
+          buildMongooseFilterFromCerbosExpression(op, mapper)
+        ),
+      };
+
+    case "not":
+      return {
+        $nor: [buildMongooseFilterFromCerbosExpression(operands[0], mapper)],
+      };
+
+    case "eq":
+    case "ne":
+    case "lt":
+    case "le":
+    case "gt":
+    case "ge": {
+      const mongoOperator = {
+        eq: "$eq",
+        ne: "$ne",
+        lt: "$lt",
+        le: "$lte",
+        gt: "$gt",
+        ge: "$gte",
+      }[operator];
+
+      const leftOperand = operands.find(
+        (o) => isVariable(o) || isExpression(o)
+      );
+      const rightOperand = operands.find((o) => o !== leftOperand);
+
+      if (!leftOperand || !rightOperand) {
+        throw new Error("Missing operands for comparison");
+      }
+
+      const left = resolveOperand(leftOperand);
+      const right = resolveOperand(rightOperand);
+
+      if ("path" in left) {
+        const { path, relation } = left;
+        const comparison = { [mongoOperator]: right.value };
+
+        if (relation) {
+          if (relation.type === "many") {
+            const elementPath = path.slice(1);
+            return {
+              [relation.name]: {
+                $elemMatch: buildFieldFilter(elementPath, comparison),
+              },
+            };
+          }
+          return buildFieldFilter(path, comparison);
+        }
+
+        return buildFieldFilter(path, comparison);
+      }
+      return { [mongoOperator]: right.value };
+    }
+
+    case "in": {
+      const resolvedField = resolveOperand(
+        operands.find((o) => isVariable(o))!
+      );
+      const { path, relation } = resolvedField;
+      const { value } = resolveOperand(operands.find((o) => isValue(o))!);
+      const comparison = { $in: value };
+
+      if (relation) {
+        if (relation.type === "many") {
+          return {
+            [relation.name]: {
+              $elemMatch: buildFieldFilter(path.slice(1), comparison),
+            },
+          };
+        }
+        return buildFieldFilter(path, comparison);
+      }
+
+      return buildFieldFilter(path, comparison);
+    }
+
+    case "contains":
+    case "startsWith":
+    case "endsWith": {
+      const left = resolveOperand(operands.find((o) => isVariable(o))!);
+      const right = resolveOperand(operands.find((o) => isValue(o))!);
+
+      if (typeof right.value !== "string") {
+        throw new Error(`${operator} operator requires string value`);
+      }
+
+      const regexStr =
+        operator === "contains"
+          ? right.value
+          : operator === "startsWith"
+          ? `^${right.value}`
+          : `${right.value}$`;
+
+      const { path, relation } = left;
+      if (relation) {
+        const elementPath = path.slice(1);
+        if (relation.type === "many") {
+          return {
+            [relation.name]: {
+              $elemMatch: buildFieldFilter(elementPath, { $regex: regexStr }),
+            },
+          };
+        }
+        return {
+          ...buildFieldFilter(path, { $regex: regexStr }),
+        };
+      }
+      return buildFieldFilter(path, { $regex: regexStr });
+    }
+
+    case "isSet": {
+      const { path, relation } = resolveOperand(
+        operands.find((o) => isVariable(o))!
+      );
+      const { value } = resolveOperand(operands.find((o) => isValue(o))!);
+
+      const existsFilter = value
+        ? { $exists: true, $ne: null }
+        : { $exists: false };
+
+      if (relation) {
+        if (relation.type === "many") {
+          return {
+            [relation.name]: {
+              $elemMatch: buildFieldFilter(path.slice(1), existsFilter),
+            },
+          };
+        }
+        return buildFieldFilter(path, existsFilter);
+      }
+
+      return buildFieldFilter(path, existsFilter);
+    }
+
+    case "hasIntersection": {
+      if (operands.length !== 2) {
+        throw new Error("hasIntersection requires exactly two operands");
+      }
+
+      const [leftOperand, rightOperand] = operands;
+
+      // Handle map expressions specially for hasIntersection
+      if (isExpression(leftOperand) && leftOperand.operator === "map") {
+        if (!isVariable(leftOperand.operands[0])) {
+          throw new Error("Expected a variable in map expression");
+        }
+        if (!isExpression(leftOperand.operands[1])) {
+          throw new Error("Expected a lambda in map expression");
+        }
+        const [collection, lambda] = leftOperand.operands;
+        const lambdaExpression = lambda as PlanExpression;
+
+        if (lambdaExpression.operator !== "lambda") {
+          throw new Error("Second operand of map must be a lambda expression");
+        }
+
+        const [projection, variable] = lambdaExpression.operands;
+        if (!isVariable(collection) || !isVariable(variable)) {
+          throw new Error("Invalid map expression structure");
+        }
+
+        if (!isValue(rightOperand) || !Array.isArray(rightOperand.value)) {
+          throw new Error("hasIntersection requires an array value");
+        }
+
+        const scopedMapper = createScopedMapper(
+          collection.name,
+          variable.name,
+          mapper
+        );
+
+        const collectionResolved = resolveFieldReference(
+          collection.name,
+          mapper
+        );
+        if (!collectionResolved.relation) {
+          throw new Error("map operator requires a relation mapping");
+        }
+        if (collectionResolved.relation.type !== "many") {
+          throw new Error("map operator requires a collection relation");
+        }
+
+        if (!isVariable(projection)) {
+          throw new Error("Map projection must be a variable reference");
+        }
+
+        const projectionResolved = resolveFieldReference(
+          projection.name,
+          scopedMapper
+        );
+        const elementPath = projectionResolved.path;
+
+        return {
+          [collectionResolved.relation.name]: {
+            $elemMatch: buildFieldFilter(elementPath, {
+              $in: rightOperand.value,
+            }),
+          },
+        };
+      }
+
+      if (!isVariable(leftOperand) || !isValue(rightOperand)) {
+        throw new Error("Invalid operands for hasIntersection");
+      }
+
+      const { path, relation } = resolveFieldReference(
+        leftOperand.name,
+        mapper
+      );
+
+      if (!Array.isArray(rightOperand.value)) {
+        throw new Error("hasIntersection requires an array value");
+      }
+
+      if (relation) {
+        if (relation.type === "many") {
+          return {
+            [relation.name]: {
+              $elemMatch: buildFieldFilter(
+                path.slice(1),
+                { $in: rightOperand.value }
+              ),
+            },
+          };
+        }
+        return buildFieldFilter(path, { $in: rightOperand.value });
+      }
+
+      return buildFieldFilter(path, { $in: rightOperand.value });
+    }
+
+    // Collection operations
+    case "exists":
+    case "exists_one":
+    case "filter": {
+      if (operands.length !== 2) {
+        throw new Error(`${operator} requires exactly two operands`);
+      }
+
+      const [collection, lambda] = operands;
+      if (!isVariable(collection) || !isExpression(lambda)) {
+        throw new Error("Invalid operands for collection operation");
+      }
+
+      if (lambda.operator !== "lambda") {
+        throw new Error("Second operand must be a lambda expression");
+      }
+
+      const [condition, variable] = lambda.operands;
+      if (!isVariable(variable)) {
+        throw new Error("Lambda variable must have a name");
+      }
+
+      // Create scoped mapper for the collection
+      const scopedMapper = createScopedMapper(
+        collection.name,
+        variable.name,
+        mapper
+      );
+
+      const { relation } = resolveFieldReference(collection.name, mapper);
+      if (!relation) {
+        throw new Error(`${operator} operator requires a relation mapping`);
+      }
+      if (relation.type !== "many") {
+        throw new Error(`${operator} operator requires a collection relation`);
+      }
+      if (relation.type !== "many") {
+        throw new Error(`${operator} operator requires a collection relation`);
+      }
+
+      const lambdaCondition = buildMongooseFilterFromCerbosExpression(
+        condition,
+        scopedMapper
+      );
+
+      // Note: exists_one should ideally mean "exactly one element matches the condition"
+      // but MongoDB doesn't have a simple query operator for this. For now, exists_one
+      // behaves like exists (at least one match). To implement true exists_one semantics,
+      // we would need aggregation pipelines.
+      return {
+        [relation.name]: {
+          $elemMatch: lambdaCondition,
+        },
+      };
+    }
+
+    case "lambda": {
+      const [condition, variable] = operands;
+      if (!isVariable(variable)) {
+        throw new Error("Lambda variable must have a name");
+      }
+
+      // Create a mapper that strips the variable prefix from field references
+      return buildMongooseFilterFromCerbosExpression(
+        condition,
+        (key: string) => ({
+          field: key.replace(`${variable.name}.`, ""),
+        })
+      );
+    }
+
+    case "map": {
+      if (operands.length !== 2) {
+        throw new Error("map requires exactly two operands");
+      }
+
+      const [collection, lambda] = operands;
+      if (
+        !isVariable(collection) ||
+        !isExpression(lambda) ||
+        lambda.operator !== "lambda"
+      ) {
+        throw new Error("Invalid map expression structure");
+      }
+
+      const { relation } = resolveFieldReference(collection.name, mapper);
+      if (!relation) {
+        throw new Error("map operator requires a relation mapping");
+      }
+      if (relation.type !== "many") {
+        throw new Error("map operator requires a collection relation");
+      }
+
+      const [projection, variable] = lambda.operands;
+      if (!isVariable(projection) || !isVariable(variable)) {
+        throw new Error("Invalid map lambda expression structure");
+      }
+
+      const scopedMapper = createScopedMapper(
+        collection.name,
+        variable.name,
+        mapper
+      );
+
+      const projectionResolved = resolveFieldReference(
+        projection.name,
+        scopedMapper
+      );
+
+      // Return the field name directly for MongoDB to handle projection
+      return {
+        [relation.name]: {
+          $elemMatch: {
+            ...buildFieldFilter(projectionResolved.path, { $exists: true }),
+          },
+        },
+      };
+    }
+
+    case "all": {
+      if (operands.length !== 2) {
+        throw new Error(`${operator} requires exactly two operands`);
+      }
+
+      const [collection, lambda] = operands;
+      if (!isVariable(collection) || !isExpression(lambda)) {
+        throw new Error("Invalid operands for collection operation");
+      }
+
+      if (lambda.operator !== "lambda") {
+        throw new Error("Second operand must be a lambda expression");
+      }
+
+      const [condition, variable] = lambda.operands;
+      if (!isVariable(variable)) {
+        throw new Error("Lambda variable must have a name");
+      }
+
+      // Create scoped mapper for the collection
+      const scopedMapper = createScopedMapper(
+        collection.name,
+        variable.name,
+        mapper
+      );
+
+      const { relation } = resolveFieldReference(collection.name, mapper);
+      if (!relation) {
+        throw new Error(`${operator} operator requires a relation mapping`);
+      }
+      if (relation.type !== "many") {
+        throw new Error(`${operator} operator requires a collection relation`);
+      }
+
+      const lambdaCondition = buildMongooseFilterFromCerbosExpression(
+        condition,
+        scopedMapper
+      );
+
+      return {
+        [relation.name]: {
+          $not: {
+            $elemMatch: {
+              $nor: [lambdaCondition],
+            },
+          },
+        },
+      };
+    }
+
+    default:
+      throw new Error(`Unsupported operator: ${operator}`);
+  }
+};
