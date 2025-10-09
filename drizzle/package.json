@@ -29,7 +29,7 @@
     "prepare": "npm run build",
     "prepublishOnly": "npm test",
     "version": "git add -A src",
-    "test": "jest"
+    "test": "cerbos run --log-level=error --set=storage.disk.directory=../policies --set=telemetry.disabled=true -- jest --runInBand"
   },
   "engines": {
     "node": ">=18.0.0"
@@ -53,6 +53,7 @@
   },
   "dependencies": {
     "@cerbos/core": "^0.24.0",
+    "@cerbos/grpc": "^0.23.0",
     "tslib": "^2.8.1"
   },
   "publishConfig": {
