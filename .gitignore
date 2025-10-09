@@ -5,6 +5,8 @@ dist/
 
 node_modules/
 
+drizzle/lib/
+
 coverage/
 
 *.pyc
