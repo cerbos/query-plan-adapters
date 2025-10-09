@@ -654,11 +654,9 @@ const ensureFilter = (result: QueryPlanToDrizzleResult) => {
 };
 
 const selectIds = (filter?: ReturnType<typeof ensureFilter>) => {
-  let query = db.select({ id: resources.id }).from(resources);
-  if (filter) {
-    query = query.where(filter);
-  }
-  return query
+  const baseQuery = db.select({ id: resources.id }).from(resources);
+  const queryWithFilter = filter ? baseQuery.where(filter) : baseQuery;
+  return queryWithFilter
     .all()
     .map((row) => row.id)
     .sort();

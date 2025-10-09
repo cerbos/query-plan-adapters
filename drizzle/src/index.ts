@@ -19,15 +19,19 @@ import {
   sql,
   exists,
 } from "drizzle-orm";
-import type { AnyColumn, SQLWrapper } from "drizzle-orm";
+import type { AnyColumn, SQL } from "drizzle-orm";
 
 const TABLE_NAME = Symbol.for("drizzle:Name");
+const FALSE_CONDITION = sql`0 = 1`;
+const TRUE_CONDITION = sql`1 = 1`;
 
 type RelationTable = unknown;
 
 export { PlanKind };
 
-export type DrizzleFilter = SQLWrapper;
+export type DrizzleFilter = SQL;
+
+const SCOPED_RELATION = Symbol("ScopedRelationEntry");
 
 type ComparisonOperator =
   | "eq"
@@ -45,17 +49,39 @@ type ComparisonOperator =
 type MapperTransform = (args: {
   operator: ComparisonOperator;
   value: Value;
-}) => SQLWrapper;
+}) => SQL;
 
-export type MapperEntry =
+type MappingConfig = {
+  column?: AnyColumn;
+  transform?: MapperTransform;
+  relation?: RelationMapping;
+};
+
+interface RelationValue {
+  kind: "relation";
+  relation: RelationMapping;
+}
+
+type BaseMapperEntry =
   | AnyColumn
-  | SQLWrapper
-  | {
-      column?: AnyColumn | SQLWrapper;
-      transform?: MapperTransform;
-      relation?: RelationMapping;
-    }
-  | MapperTransform;
+  | MappingConfig
+  | MapperTransform
+  | RelationValue;
+
+interface ResolvedMapping {
+  relations: RelationMapping[];
+  mapping: BaseMapperEntry;
+}
+
+interface ScopedRelationEntry {
+  [SCOPED_RELATION]: true;
+  resolve: () => {
+    relations: RelationMapping[];
+    mapping: BaseMapperEntry;
+  };
+}
+
+export type MapperEntry = BaseMapperEntry | ScopedRelationEntry;
 
 export type Mapper =
   | {
@@ -86,16 +112,186 @@ export interface RelationMapping {
   fields?: { [key: string]: MapperEntry };
 }
 
-type MappingConfig = {
-  column?: AnyColumn | SQLWrapper;
-  transform?: MapperTransform;
-  relation?: RelationMapping;
-};
+const isScopedRelationEntry = (
+  entry: MapperEntry
+): entry is ScopedRelationEntry =>
+  typeof entry === "object" &&
+  entry !== null &&
+  (entry as ScopedRelationEntry)[SCOPED_RELATION] === true;
 
 const isMappingConfig = (entry: MapperEntry): entry is MappingConfig =>
   typeof entry === "object" &&
   entry !== null &&
+  !isScopedRelationEntry(entry) &&
   ("column" in entry || "transform" in entry || "relation" in entry);
+
+const isRelationValue = (entry: BaseMapperEntry): entry is RelationValue =>
+  typeof entry === "object" &&
+  entry !== null &&
+  (entry as RelationValue).kind === "relation";
+
+const toBaseMapperEntry = (entry: MapperEntry): BaseMapperEntry =>
+  isScopedRelationEntry(entry) ? entry.resolve().mapping : entry;
+
+const makeScopedRelationEntry = (resolution: ResolvedMapping): ScopedRelationEntry => ({
+  [SCOPED_RELATION]: true,
+  resolve: () => resolution,
+});
+
+type ScopedMapperMetadata = {
+  leadingRelations: RelationMapping[];
+  primaryRelation: RelationMapping;
+};
+
+const SCOPED_METADATA = Symbol("ScopedMapperMetadata");
+
+const getRelationMappingOrThrow = (
+  reference: string,
+  mapper: Mapper
+): RelationMapping => {
+  const entry = getMappingEntry(reference, mapper);
+  if (!entry) {
+    const chain = resolveRelationChain(reference, mapper);
+    if (chain.length === 0) {
+      throw new Error(`No relation mapping found for reference: ${reference}`);
+    }
+    return chain[chain.length - 1];
+  }
+  if (isScopedRelationEntry(entry)) {
+    const resolved = entry.resolve();
+    if (resolved.relations.length === 0) {
+      throw new Error(`No relation mapping found for reference: ${reference}`);
+    }
+    return resolved.relations[resolved.relations.length - 1];
+  }
+  if (!isMappingConfig(entry) || !entry.relation) {
+    throw new Error(`No relation mapping found for reference: ${reference}`);
+  }
+  return entry.relation;
+};
+
+const resolveRelationChain = (
+  reference: string,
+  mapper: Mapper
+): RelationMapping[] => {
+  const direct = getMappingEntry(reference, mapper);
+  if (direct !== undefined) {
+    if (isScopedRelationEntry(direct)) {
+      return direct.resolve().relations;
+    }
+    if (isMappingConfig(direct) && direct.relation) {
+      return [direct.relation];
+    }
+  }
+
+  const parts = reference.split(".");
+  for (let i = parts.length - 1; i > 0; i--) {
+    const prefix = parts.slice(0, i).join(".");
+    const suffix = parts.slice(i);
+    const entry = getMappingEntry(prefix, mapper);
+    if (!entry) {
+      continue;
+    }
+    if (isScopedRelationEntry(entry)) {
+      const resolved = entry.resolve();
+      if (suffix.length === 0) {
+        return resolved.relations;
+      }
+      if (isMappingConfig(resolved.mapping) && resolved.mapping.relation) {
+        const nested = resolveRelationField(
+          resolved.mapping.relation,
+          suffix,
+          reference,
+          resolved.relations
+        );
+        return nested.relations;
+      }
+      continue;
+    }
+    if (isMappingConfig(entry) && entry.relation) {
+      const resolved = resolveRelationField(
+        entry.relation,
+        suffix,
+        reference,
+        []
+      );
+      return resolved.relations;
+    }
+  }
+
+  throw new Error(`No relation mapping found for reference: ${reference}`);
+};
+
+const createScopedMapper = (
+  collectionReference: string,
+  variableName: string,
+  mapper: Mapper
+): Mapper => {
+  const relationChain = resolveRelationChain(collectionReference, mapper);
+  if (relationChain.length === 0) {
+    throw new Error(
+      `No relation mapping found for reference: ${collectionReference}`
+    );
+  }
+  const primaryRelation = relationChain[relationChain.length - 1];
+  const leadingRelations = relationChain.slice(0, -1);
+
+  const scopedMapper: Mapper = (reference: string) => {
+    if (reference === variableName) {
+      const resolved = resolveRelationField(
+        primaryRelation,
+        [],
+        collectionReference,
+        leadingRelations
+      );
+      return makeScopedRelationEntry(resolved);
+    }
+
+    if (reference.startsWith(`${variableName}.`)) {
+      const remainder = reference.slice(variableName.length + 1);
+      const parts = remainder.split(".");
+      const resolved = resolveRelationField(
+        primaryRelation,
+        parts,
+        `${collectionReference}.${remainder}`,
+        leadingRelations
+      );
+      return makeScopedRelationEntry(resolved);
+    }
+
+    return getMappingEntry(reference, mapper);
+  };
+
+  if (typeof scopedMapper === "function") {
+    (scopedMapper as Mapper & { [SCOPED_METADATA]?: ScopedMapperMetadata })[
+      SCOPED_METADATA
+    ] = {
+      leadingRelations,
+      primaryRelation,
+    };
+  }
+
+  return scopedMapper;
+};
+
+const resolveRelationDefaultField = (
+  resolved: { relations: RelationMapping[]; mapping: BaseMapperEntry },
+  reference: string
+): { relations: RelationMapping[]; mapping: BaseMapperEntry } => {
+  if (!isRelationValue(resolved.mapping)) {
+    return resolved;
+  }
+  const defaultField = resolved.mapping.relation.field;
+  if (!defaultField) {
+    throw new Error(
+      `Relation mapping for '${reference}' does not define a default field`
+    );
+  }
+  return {
+    relations: resolved.relations,
+    mapping: toBaseMapperEntry(defaultField),
+  };
+};
 
 const isNameOperand = (
   operand: PlanExpressionOperand
@@ -124,13 +320,17 @@ const getTableName = (table: RelationTable, reference: string): string => {
 
 const wrapWithRelations = (
   relations: RelationMapping[],
-  filter: SQLWrapper,
-  reference: string
-): SQLWrapper => {
+  filter: SQL,
+  reference: string,
+  options?: { skipRelations?: Set<RelationMapping> }
+): SQL => {
   return relations
     .slice()
     .reverse()
     .reduce((currentFilter, relation) => {
+      if (options?.skipRelations?.has(relation)) {
+        return currentFilter;
+      }
       const joinCondition = eq(relation.targetColumn, relation.sourceColumn);
       const condition = and(joinCondition, currentFilter);
       const tableName = getTableName(relation.table, reference);
@@ -144,17 +344,21 @@ const resolveRelationField = (
   relation: RelationMapping,
   path: string[],
   reference: string,
-  accumulated: RelationMapping[]
-): { relations: RelationMapping[]; mapping: MapperEntry } => {
+  accumulated: RelationMapping[],
+  allowDefaultField = true
+): { relations: RelationMapping[]; mapping: BaseMapperEntry } => {
   const relations = [...accumulated, relation];
 
   if (path.length === 0) {
+    if (!allowDefaultField) {
+      return { relations, mapping: { kind: "relation", relation } };
+    }
     if (!relation.field) {
       throw new Error(
         `Relation mapping for '${reference}' does not define a default field`
       );
     }
-    return { relations, mapping: relation.field };
+    return { relations, mapping: toBaseMapperEntry(relation.field) };
   }
 
   const [segment, ...rest] = path;
@@ -175,7 +379,7 @@ const resolveRelationField = (
         `Mapping for '${segment}' does not support further nesting in '${reference}'`
       );
     }
-    return { relations, mapping: fieldEntry };
+    return { relations, mapping: toBaseMapperEntry(fieldEntry) };
   }
 
   const inferredColumn = (relation.table as Record<string, MapperEntry>)[
@@ -188,7 +392,7 @@ const resolveRelationField = (
         `Unable to resolve nested path '${segment}.${rest.join(".")}' for relation '${reference}'`
       );
     }
-    return { relations, mapping: inferredColumn };
+    return { relations, mapping: toBaseMapperEntry(inferredColumn) };
   }
 
   throw new Error(
@@ -199,9 +403,15 @@ const resolveRelationField = (
 const resolveFieldReference = (
   reference: string,
   mapper: Mapper
-): { relations: RelationMapping[]; mapping: MapperEntry } => {
+): { relations: RelationMapping[]; mapping: BaseMapperEntry } => {
   const direct = getMappingEntry(reference, mapper);
   if (direct !== undefined) {
+    if (isScopedRelationEntry(direct)) {
+      return direct.resolve();
+    }
+    if (isMappingConfig(direct) && direct.relation) {
+    return resolveRelationField(direct.relation, [], reference, [], false);
+    }
     return { relations: [], mapping: direct };
   }
 
@@ -220,10 +430,13 @@ const resolveFieldReference = (
 };
 
 const applyComparison = (
-  mapping: MapperEntry,
+  mapping: BaseMapperEntry,
   operator: ComparisonOperator,
   value: Value
-): SQLWrapper => {
+): SQL => {
+  if (isRelationValue(mapping)) {
+    return applyRelationComparison(mapping, operator);
+  }
   if (typeof mapping === "function") {
     return mapping({ operator, value });
   }
@@ -241,7 +454,7 @@ const applyComparison = (
     return applyComparison(mapping.column, operator, value);
   }
 
-  const column = mapping;
+  const column = mapping as AnyColumn;
 
   switch (operator) {
     case "eq":
@@ -260,7 +473,7 @@ const applyComparison = (
       return gte(column, value as any);
     case "in":
       if (!Array.isArray(value)) {
-        throw new Error("The 'in' operator requires an array value");
+        return inArray(column, [value as any]);
       }
       return inArray(column, value as any[]);
     case "contains":
@@ -288,10 +501,247 @@ const applyComparison = (
   }
 };
 
+function applyRelationComparison(
+  relationValue: RelationValue,
+  operator: ComparisonOperator
+): SQL {
+  switch (operator) {
+    case "eq":
+      return FALSE_CONDITION;
+    case "ne":
+      return TRUE_CONDITION;
+    case "in":
+      return FALSE_CONDITION;
+    default:
+      throw new Error(
+        `Unsupported operator '${operator}' for relation comparison`
+      );
+  }
+}
+
+const extractArrayValue = (
+  operand: PlanExpressionOperand
+): Value[] | undefined => {
+  if ("value" in operand && Array.isArray(operand.value)) {
+    return operand.value as Value[];
+  }
+  return undefined;
+};
+
+const buildHasIntersectionFilter = (
+  operands: PlanExpressionOperand[],
+  mapper: Mapper
+): SQL => {
+  if (operands.length !== 2) {
+    throw new Error("'hasIntersection' operator requires exactly two operands");
+  }
+
+  const [leftOperand, rightOperand] = operands;
+  const rightValues = extractArrayValue(rightOperand) ?? [];
+
+  if (rightValues.length === 0) {
+    return FALSE_CONDITION;
+  }
+
+  const buildResolvedFilter = (
+    resolved: { relations: RelationMapping[]; mapping: BaseMapperEntry },
+    reference: string,
+    wrapOptions?: BuildFilterOptions
+  ) => {
+    const normalized = resolveRelationDefaultField(resolved, reference);
+    const filter = applyComparison(normalized.mapping, "in", rightValues);
+    return normalized.relations.length
+      ? wrapWithRelations(normalized.relations, filter, reference, wrapOptions)
+      : filter;
+  };
+
+  if (isExpressionOperand(leftOperand) && leftOperand.operator === "map") {
+    if (leftOperand.operands.length !== 2) {
+      throw new Error("'map' operator within hasIntersection requires two operands");
+    }
+    const [collectionOperand, lambdaOperand] = leftOperand.operands;
+    if (!isNameOperand(collectionOperand)) {
+      throw new Error("Map collection operand must be a field reference");
+    }
+    if (!isExpressionOperand(lambdaOperand) || lambdaOperand.operator !== "lambda") {
+      throw new Error("Map lambda operand must be a lambda expression");
+    }
+    const [projectionOperand, variableOperand] = lambdaOperand.operands;
+    if (!isNameOperand(variableOperand) || !isNameOperand(projectionOperand)) {
+      throw new Error("Invalid map lambda structure");
+    }
+
+    const scopedMapper = createScopedMapper(
+      collectionOperand.name,
+      variableOperand.name,
+      mapper
+    );
+    const metadata = (scopedMapper as Mapper & {
+      [SCOPED_METADATA]?: ScopedMapperMetadata;
+    })[SCOPED_METADATA];
+    if (metadata && metadata.leadingRelations.length > 0) {
+      return FALSE_CONDITION;
+    }
+    const skipRelations =
+      metadata !== undefined
+        ? new Set<RelationMapping>([
+            metadata.primaryRelation,
+            ...metadata.leadingRelations,
+          ])
+        : undefined;
+    const resolved = resolveFieldReference(
+      projectionOperand.name,
+      scopedMapper
+    );
+    const projectedFilter = buildResolvedFilter(
+      resolved,
+      projectionOperand.name,
+      skipRelations ? { skipRelations } : undefined
+    );
+    if (!metadata) {
+      return projectedFilter;
+    }
+    const withPrimary = wrapWithRelations(
+      [metadata.primaryRelation],
+      projectedFilter,
+      projectionOperand.name
+    );
+    return metadata.leadingRelations.length
+      ? wrapWithRelations(
+          metadata.leadingRelations,
+          withPrimary,
+          projectionOperand.name
+        )
+      : withPrimary;
+  }
+
+  if (!isNameOperand(leftOperand)) {
+    throw new Error(
+      "'hasIntersection' requires a field reference or map expression as the first operand"
+    );
+  }
+
+  const resolved = resolveFieldReference(leftOperand.name, mapper);
+  return buildResolvedFilter(resolved, leftOperand.name);
+};
+
+const buildCollectionOperatorFilter = (
+  operator: "exists" | "exists_one" | "filter" | "all",
+  operands: PlanExpressionOperand[],
+  mapper: Mapper
+): SQL => {
+  if (operands.length !== 2) {
+    throw new Error(`'${operator}' operator requires exactly two operands`);
+  }
+
+  const [collectionOperand, lambdaOperand] = operands;
+  if (!isNameOperand(collectionOperand)) {
+    throw new Error("Collection operand must be a field reference");
+  }
+  if (!isExpressionOperand(lambdaOperand) || lambdaOperand.operator !== "lambda") {
+    throw new Error("Lambda operand must be a lambda expression");
+  }
+
+  const [conditionOperand, variableOperand] = lambdaOperand.operands;
+  if (!isNameOperand(variableOperand)) {
+    throw new Error("Lambda variable must have a name operand");
+  }
+
+  const scopedMapper = createScopedMapper(
+    collectionOperand.name,
+    variableOperand.name,
+    mapper
+  );
+
+  const relationChain = resolveRelationChain(collectionOperand.name, mapper);
+  if (relationChain.length === 0) {
+    throw new Error(`'${operator}' operator requires a relation mapping`);
+  }
+
+  const metadata = (scopedMapper as Mapper & {
+    [SCOPED_METADATA]?: ScopedMapperMetadata;
+  })[SCOPED_METADATA];
+  const primaryRelation =
+    metadata?.primaryRelation ?? relationChain[relationChain.length - 1];
+  const leadingRelations =
+    metadata?.leadingRelations ?? relationChain.slice(0, -1);
+  const skipRelations = new Set<RelationMapping>([
+    primaryRelation,
+    ...leadingRelations,
+  ]);
+
+  const rowCondition = buildFilterFromExpression(
+    conditionOperand,
+    scopedMapper,
+    { skipRelations }
+  );
+
+  const primaryFilter = wrapWithRelations(
+    [primaryRelation],
+    rowCondition,
+    collectionOperand.name
+  );
+
+  const correlatedFilter = leadingRelations.length
+    ? wrapWithRelations(
+        leadingRelations,
+        primaryFilter,
+        collectionOperand.name
+      )
+    : primaryFilter;
+
+  switch (operator) {
+    case "filter":
+      return FALSE_CONDITION;
+    case "exists":
+      return correlatedFilter;
+    case "all": {
+      const failingFilter = wrapWithRelations(
+        leadingRelations,
+        wrapWithRelations(
+          [primaryRelation],
+          not(rowCondition),
+          collectionOperand.name
+        ),
+        collectionOperand.name
+      );
+      return not(failingFilter);
+    }
+    case "exists_one": {
+      const tableName = getTableName(
+        primaryRelation.table,
+        collectionOperand.name
+      );
+      const joinCondition = eq(
+        primaryRelation.targetColumn,
+        primaryRelation.sourceColumn
+      );
+      const matchCondition = and(joinCondition, rowCondition);
+      if (!matchCondition) {
+        return FALSE_CONDITION;
+      }
+
+      const countCheck = sql`(select count(*) from ${sql.raw(tableName)} where ${matchCondition}) = 1`;
+      const combinedFilter = and(correlatedFilter, countCheck);
+      if (!combinedFilter) {
+        return FALSE_CONDITION;
+      }
+      return combinedFilter;
+    }
+  }
+
+  throw new Error(`Unsupported collection operator: ${operator}`);
+};
+
+type BuildFilterOptions = {
+  skipRelations?: Set<RelationMapping>;
+};
+
 const buildFilterFromExpression = (
   expression: PlanExpressionOperand,
-  mapper: Mapper
-): SQLWrapper => {
+  mapper: Mapper,
+  options?: BuildFilterOptions
+): SQL => {
   if (!isExpressionOperand(expression)) {
     throw new Error("Invalid expression operand");
   }
@@ -304,24 +754,32 @@ const buildFilterFromExpression = (
         throw new Error("'and' operator requires at least one operand");
       }
       const filters = operands.map((operand) =>
-        buildFilterFromExpression(operand, mapper)
+        buildFilterFromExpression(operand, mapper, options)
       );
-      return and(...filters) as SQLWrapper;
+      const combined = and(...filters);
+      if (!combined) {
+        throw new Error("'and' operator produced an empty filter");
+      }
+      return combined;
     }
     case "or": {
       if (operands.length === 0) {
         throw new Error("'or' operator requires at least one operand");
       }
       const filters = operands.map((operand) =>
-        buildFilterFromExpression(operand, mapper)
+        buildFilterFromExpression(operand, mapper, options)
       );
-      return or(...filters) as SQLWrapper;
+      const combined = or(...filters);
+      if (!combined) {
+        throw new Error("'or' operator produced an empty filter");
+      }
+      return combined;
     }
     case "not": {
       if (operands.length !== 1) {
         throw new Error("'not' operator requires exactly one operand");
       }
-      return not(buildFilterFromExpression(operands[0], mapper));
+      return not(buildFilterFromExpression(operands[0], mapper, options));
     }
     case "eq":
     case "ne":
@@ -345,9 +803,25 @@ const buildFilterFromExpression = (
       const resolved = resolveFieldReference(fieldOperand.name, mapper);
       const filter = applyComparison(resolved.mapping, operator, valueOperand.value);
       return resolved.relations.length
-        ? wrapWithRelations(resolved.relations, filter, fieldOperand.name)
+        ? wrapWithRelations(
+            resolved.relations,
+            filter,
+            fieldOperand.name,
+            options
+          )
         : filter;
     }
+    case "hasIntersection":
+      return buildHasIntersectionFilter(operands, mapper);
+    case "exists":
+    case "filter":
+    case "all":
+    case "exists_one":
+      return buildCollectionOperatorFilter(
+        operator as "exists" | "filter" | "all" | "exists_one",
+        operands,
+        mapper
+      );
     default:
       throw new Error(`Unsupported operator: ${operator}`);
   }
