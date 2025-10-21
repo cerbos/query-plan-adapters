@@ -39,7 +39,7 @@
   "license": "Apache-2.0",
   "devDependencies": {
     "@prisma/client": "^6.4.1",
-    "@types/jest": "^29.0.3",
+    "@types/jest": "^30.0.0",
     "@types/node": "^22.0.0",
     "expect-type": "^1.1.0",
     "prisma": "^6.4.1",
