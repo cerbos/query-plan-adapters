@@ -2,7 +2,7 @@
 
 **Last Updated:** 2025-11-05
 
-## Current Status: Phase 2.2 - Comparison Operators (In Progress)
+## Current Status: Phase 2.2 - Comparison Operators (COMPLETE ✅)
 
 ### Completed Phases ✅
 
@@ -53,29 +53,44 @@
 - ✅ All tests passing (6 total)
 - ✅ Committed: "Add ne operator"
 
+#### Phase 2.2.3: lt Operator (Complete)
+- ✅ Test: `test_lt_operator` - RED → GREEN
+- ✅ Implementation: Added `"lt": lambda field, value: field < value` to OPERATOR_FNS
+- ✅ All tests passing (7 total)
+- ✅ Committed: "Add lt operator"
+
+#### Phase 2.2.4: gt Operator (Complete)
+- ✅ Test: `test_gt_operator` - RED → GREEN
+- ✅ Implementation: Added `"gt": lambda field, value: field > value` to OPERATOR_FNS
+- ✅ All tests passing (8 total)
+- ✅ Committed: "Add gt operator"
+
+#### Phase 2.2.5: le Operator (Complete)
+- ✅ Test: `test_le_operator` - RED → GREEN
+- ✅ Implementation: Added `"le": lambda field, value: field <= value` to OPERATOR_FNS
+- ✅ All tests passing (9 total)
+- ✅ Committed: "Add le operator"
+
+#### Phase 2.2.6: ge Operator (Complete)
+- ✅ Test: `test_ge_operator` - RED → GREEN
+- ✅ Implementation: Added `"ge": lambda field, value: field >= value` to OPERATOR_FNS
+- ✅ All tests passing (10 total)
+- ✅ Committed: "Add ge operator"
+
+#### Integration Tests (Complete)
+- ✅ Updated `tests/conftest.py` with sqlite3 in-memory database
+- ✅ Populated test data: 2 users, 3 resources
+- ✅ Created `tests/test_integration.py` with 6 integration tests:
+  - `test_integration_simple_filter` - eq operator with aNumber
+  - `test_integration_numeric_range` - gt operator
+  - `test_integration_boolean_filter` - eq operator with boolean
+  - `test_integration_string_comparison` - ne operator with strings
+  - `test_integration_always_allow` - returns all 3 rows
+  - `test_integration_always_deny` - returns 0 rows
+- ✅ All 16 tests passing (10 unit + 6 integration)
+- ✅ Committed: "Add integration tests with database execution"
+
 ### Next Steps 🎯
-
-#### Phase 2.2.3: lt Operator (Next)
-**Following same TDD pattern:**
-1. Write `test_lt_operator` (RED)
-2. Add `"lt": lambda field, value: field < value` to OPERATOR_FNS (GREEN)
-3. Verify all tests pass
-4. Commit: "Add lt operator"
-
-#### Phase 2.2.4: gt Operator
-- Same pattern as lt
-
-#### Phase 2.2.5: le Operator
-- Same pattern as lt
-
-#### Phase 2.2.6: ge Operator
-- Same pattern as lt
-
-#### Phase 2.2.7: Refactor (Optional)
-- Extract `get_operator_fn()` helper function
-- Improve error handling
-- Keep all tests green
-- Commit: "Refactor: extract get_operator_fn"
 
 #### Phase 2.3: Logical Operators (TODO)
 - Phase 2.3.1: `and` operator (requires recursive traversal)
@@ -87,6 +102,11 @@
 ## Git Commit History
 
 ```bash
+87aa3ff Add integration tests with database execution
+5dcd079 Add ge operator
+f52d6ce Add le operator
+89c74a2 Add gt operator
+91414b8 Add lt operator
 5f0b802 Add ne operator
 9a32e85 Implement eq operator with AST traversal
 2717e92 Implement ALWAYS_DENIED handling
@@ -99,14 +119,27 @@ e2b26d3 Add type definitions and constants
 
 ## Test Suite Status
 
-**Current: 6 tests, all passing ✅**
+**Current: 16 tests, all passing ✅**
 
+### Unit Tests (10)
 1. `test_fixtures_work` - Fixture verification
 2. `test_get_query_is_importable` - Import verification
 3. `test_always_allow` - ALWAYS_ALLOWED filter
 4. `test_always_deny` - ALWAYS_DENIED filter
 5. `test_eq_operator` - Equality operator
 6. `test_ne_operator` - Not-equal operator
+7. `test_lt_operator` - Less than operator
+8. `test_gt_operator` - Greater than operator
+9. `test_le_operator` - Less than or equal operator
+10. `test_ge_operator` - Greater than or equal operator
+
+### Integration Tests (6)
+1. `test_integration_simple_filter` - Execute eq query, verify 1 row returned
+2. `test_integration_numeric_range` - Execute gt query, verify 2 rows
+3. `test_integration_boolean_filter` - Execute boolean eq, verify 2 rows
+4. `test_integration_string_comparison` - Execute ne on strings, verify 2 rows
+5. `test_integration_always_allow` - Execute unfiltered query, verify 3 rows
+6. `test_integration_always_deny` - Execute impossible condition, verify 0 rows
 
 ## Environment Setup
 
@@ -125,10 +158,11 @@ pytest tests/test_query.py::test_eq_operator -v
 
 ## Key Files
 
-- `src/cerbos_pypika/query.py` - Main implementation (90 lines)
+- `src/cerbos_pypika/query.py` - Main implementation (94 lines)
 - `src/cerbos_pypika/__init__.py` - Package exports
-- `tests/conftest.py` - Test fixtures
-- `tests/test_query.py` - Test suite (140 lines)
+- `tests/conftest.py` - Test fixtures with sqlite3 database setup (64 lines)
+- `tests/test_query.py` - Unit test suite (288 lines, 10 tests)
+- `tests/test_integration.py` - Integration test suite (199 lines, 6 tests)
 - `README.md` - Documentation and usage examples
 - `pyproject.toml` - Project configuration
 
@@ -137,9 +171,10 @@ pytest tests/test_query.py::test_eq_operator -v
 ### Current Architecture
 
 1. **Type System**: Strong typing with `GenericField`, `GenericCriterion`, `OperatorFnMap`
-2. **Operator Map**: Dictionary of operator name → lambda function
+2. **Operator Map**: Dictionary of 6 comparison operators → lambda functions (eq, ne, lt, gt, le, ge)
 3. **AST Traversal**: Recursive `traverse_and_map_operands()` function
 4. **Query Building**: PyPika's fluent API with `.from_()`, `.select()`, `.where()`
+5. **Testing**: Unit tests for SQL generation + Integration tests for actual query execution
 
 ### Key Decisions
 
@@ -147,6 +182,8 @@ pytest tests/test_query.py::test_eq_operator -v
 - Operator functions stored as lambdas in immutable `MappingProxyType`
 - AST traversal unwraps nested `expression` keys before processing operators
 - Variable/value extraction uses dictionary comprehension flattening
+- Integration tests use stdlib sqlite3 (no SQLAlchemy dependency) - executes PyPika-generated SQL directly
+- Test database populated with 3 resources covering different attribute values for comprehensive testing
 
 ### TDD Discipline Followed
 
@@ -162,5 +199,17 @@ pytest tests/test_query.py::test_eq_operator -v
 1. Review this file
 2. Check current branch: `git status`
 3. Activate venv: `source .venv/bin/activate`
-4. Run tests to verify state: `pytest tests/test_query.py -v`
-5. Continue with Phase 2.2.3 (lt operator) following TDD_EXECUTION_GUIDE.md
+4. Run tests to verify state: `pytest tests/ -v` (should show 16 passing)
+5. Continue with Phase 2.3 (logical operators: and, or, not) following TDD_EXECUTION_GUIDE.md
+
+## Summary
+
+**Phase 2.2 Complete!** ✅
+
+- ✅ All 6 comparison operators implemented (eq, ne, lt, gt, le, ge)
+- ✅ 10 unit tests verifying SQL generation
+- ✅ 6 integration tests verifying actual query execution
+- ✅ 16/16 tests passing
+- ✅ Clean git history with 8 commits following TDD discipline
+
+**Next**: Phase 2.3 - Logical operators (and, or, not) which will require extending AST traversal to handle multiple child expressions
