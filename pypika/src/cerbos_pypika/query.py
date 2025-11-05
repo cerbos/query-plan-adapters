@@ -21,6 +21,7 @@ __operator_fns: OperatorFnMap = {
     "lt": lambda field, value: field < value,
     "gt": lambda field, value: field > value,
     "le": lambda field, value: field <= value,
+    "ge": lambda field, value: field >= value,
 }
 OPERATOR_FNS = MappingProxyType(__operator_fns)
 
