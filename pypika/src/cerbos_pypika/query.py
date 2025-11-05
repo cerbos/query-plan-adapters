@@ -27,3 +27,30 @@ _allow_types = frozenset([
     PlanResourcesFilterKind.ALWAYS_ALLOWED,
     engine_pb2.PlanResourcesFilter.KIND_ALWAYS_ALLOWED,
 ])
+
+
+def get_query(
+    query_plan: Union[PlanResourcesResponse, response_pb2.PlanResourcesResponse],
+    table: Table,
+    attr_map: Dict[str, GenericField],
+    joins: Optional[List[JoinSpec]] = None,
+    operator_override_fns: Optional[OperatorFnMap] = None,
+) -> Query:
+    """
+    Convert a Cerbos query plan into a PyPika query with authorization filters.
+    
+    Args:
+        query_plan: Cerbos PlanResourcesResponse containing the filter AST
+        table: PyPika Table instance representing the primary query table
+        attr_map: Mapping of Cerbos attribute paths to PyPika Field objects
+        joins: Optional list of (table, join_condition) tuples for multi-table queries
+        operator_override_fns: Optional custom operator implementations
+        
+    Returns:
+        PyPika Query instance with authorization filters applied
+        
+    Raises:
+        KeyError: If an attribute in the query plan is not in attr_map
+        ValueError: If an unrecognized operator is encountered
+    """
+    raise NotImplementedError("Not yet implemented")
