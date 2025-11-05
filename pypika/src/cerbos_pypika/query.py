@@ -2,7 +2,7 @@ from types import MappingProxyType
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from pypika import Table, Field, Query
-from pypika.terms import Criterion
+from pypika.terms import Criterion, ValueWrapper
 from cerbos.sdk.model import PlanResourcesFilterKind, PlanResourcesResponse
 from cerbos.engine.v1 import engine_pb2
 from cerbos.response.v1 import response_pb2
@@ -53,7 +53,10 @@ def get_query(
         KeyError: If an attribute in the query plan is not in attr_map
         ValueError: If an unrecognized operator is encountered
     """
+    if query_plan.filter is None or query_plan.filter.kind in _deny_types:
+        return Query.from_(table).select('*').where(ValueWrapper(1) == ValueWrapper(0))
+    
     if query_plan.filter.kind in _allow_types:
         return Query.from_(table).select('*')
     
-    raise NotImplementedError("Not yet implemented")
+    raise NotImplementedError("Conditional filtering not yet implemented")

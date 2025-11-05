@@ -34,3 +34,29 @@ def test_always_allow(resource_table):
     sql = query.get_sql()
     
     assert "WHERE" not in sql
+
+
+def test_always_deny(resource_table):
+    """Test ALWAYS_DENIED returns impossible condition."""
+    from cerbos.sdk.model import (
+        PlanResourcesFilter,
+        PlanResourcesFilterKind,
+        PlanResourcesResponse,
+    )
+    from cerbos_pypika import get_query
+    
+    plan_filter = PlanResourcesFilter.from_dict({
+        "kind": PlanResourcesFilterKind.ALWAYS_DENIED,
+    })
+    plan = PlanResourcesResponse(
+        filter=plan_filter,
+        request_id="1",
+        action="view",
+        resource_kind="resource",
+        policy_version="default",
+    )
+    
+    query = get_query(plan, resource_table, {})
+    sql = query.get_sql()
+    
+    assert "WHERE" in sql
