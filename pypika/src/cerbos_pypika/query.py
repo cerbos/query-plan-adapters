@@ -15,7 +15,9 @@ OperatorFnMap = Dict[str, Callable[[GenericField, Any], GenericCriterion]]
 JoinSpec = Tuple[Table, GenericCriterion]
 
 # Operator function map (will be populated incrementally during TDD)
-__operator_fns: OperatorFnMap = {}
+__operator_fns: OperatorFnMap = {
+    "eq": lambda field, value: field == value,
+}
 OPERATOR_FNS = MappingProxyType(__operator_fns)
 
 # Filter kind constants
@@ -27,6 +29,27 @@ _allow_types = frozenset([
     PlanResourcesFilterKind.ALWAYS_ALLOWED,
     engine_pb2.PlanResourcesFilter.KIND_ALWAYS_ALLOWED,
 ])
+
+
+def traverse_and_map_operands(operand, attr_map):
+    """Recursively traverse Cerbos AST and build PyPika criterion."""
+    if exp := operand.get("expression"):
+        return traverse_and_map_operands(exp, attr_map)
+    
+    operator = operand["operator"]
+    child_operands = operand["operands"]
+    
+    d = {k: v for o in child_operands for k, v in o.items()}
+    variable = d["variable"]
+    value = d["value"]
+    
+    try:
+        field = attr_map[variable]
+    except KeyError:
+        raise KeyError(f"Attribute does not exist in the attribute column map: {variable}")
+    
+    operator_fn = OPERATOR_FNS[operator]
+    return operator_fn(field, value)
 
 
 def get_query(
@@ -59,4 +82,8 @@ def get_query(
     if query_plan.filter.kind in _allow_types:
         return Query.from_(table).select('*')
     
-    raise NotImplementedError("Conditional filtering not yet implemented")
+    cond_dict = query_plan.filter.condition.to_dict()
+    criterion = traverse_and_map_operands(cond_dict, attr_map)
+    
+    query = Query.from_(table).select('*').where(criterion)
+    return query
