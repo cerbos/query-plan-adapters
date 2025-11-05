@@ -556,3 +556,234 @@ def test_not_operator_empty_operands(resource_table):
     
     with pytest.raises(ValueError, match="NOT operator requires exactly one operand"):
         get_query(plan, resource_table, attr_map)
+def test_join_support(resource_table):
+    """Test join support with multi-table queries."""
+    from cerbos.sdk.model import (
+        PlanResourcesFilter,
+        PlanResourcesFilterKind,
+        PlanResourcesResponse,
+    )
+    from cerbos_pypika import get_query
+    from pypika import Table
+    
+    # Create a user table for the join
+    user_table = Table("user")
+    
+    # Query: resource.ownedBy = "1" AND user.role = "admin"
+    plan_filter = PlanResourcesFilter.from_dict({
+        "kind": PlanResourcesFilterKind.CONDITIONAL,
+        "condition": {
+            "expression": {
+                "operator": "and",
+                "operands": [
+                    {
+                        "expression": {
+                            "operator": "eq",
+                            "operands": [
+                                {"variable": "request.resource.attr.ownedBy"},
+                                {"value": "1"},
+                            ],
+                        }
+                    },
+                    {
+                        "expression": {
+                            "operator": "eq",
+                            "operands": [
+                                {"variable": "request.principal.attr.role"},
+                                {"value": "admin"},
+                            ],
+                        }
+                    },
+                ],
+            },
+        },
+    })
+    plan = PlanResourcesResponse(
+        filter=plan_filter,
+        request_id="1",
+        action="view",
+        resource_kind="resource",
+        policy_version="default",
+    )
+    
+    attr_map = {
+        "request.resource.attr.ownedBy": resource_table.ownedBy,
+        "request.principal.attr.role": user_table.role,
+    }
+    
+    # Define join: resource.ownedBy = user.id
+    joins = [(user_table, resource_table.ownedBy == user_table.id)]
+    
+    query = get_query(plan, resource_table, attr_map, joins=joins)
+    sql = query.get_sql()
+    
+    assert "JOIN" in sql
+    assert "user" in sql.lower()
+    assert "resource" in sql.lower()
+    assert "WHERE" in sql
+def test_error_unknown_attribute():
+    """Test error handling for unknown attribute in attr_map."""
+    from cerbos.sdk.model import (
+        PlanResourcesFilter,
+        PlanResourcesFilterKind,
+        PlanResourcesResponse,
+    )
+    from cerbos_pypika import get_query
+    from pypika import Table
+    import pytest
+    
+    resource_table = Table("resource")
+    
+    plan_filter = PlanResourcesFilter.from_dict({
+        "kind": PlanResourcesFilterKind.CONDITIONAL,
+        "condition": {
+            "expression": {
+                "operator": "eq",
+                "operands": [
+                    {"variable": "request.resource.attr.nonexistent"},
+                    {"value": "test"},
+                ],
+            },
+        },
+    })
+    plan = PlanResourcesResponse(
+        filter=plan_filter,
+        request_id="1",
+        action="view",
+        resource_kind="resource",
+        policy_version="default",
+    )
+    
+    attr_map = {}  # Empty attr_map - attribute not found
+    
+    with pytest.raises(KeyError, match="Attribute does not exist in the attribute column map: request.resource.attr.nonexistent"):
+        get_query(plan, resource_table, attr_map)
+
+
+def test_error_unknown_operator():
+    """Test error handling for unknown operator."""
+    from cerbos.sdk.model import (
+        PlanResourcesFilter,
+        PlanResourcesFilterKind,
+        PlanResourcesResponse,
+    )
+    from cerbos_pypika import get_query
+    from pypika import Table
+    import pytest
+    
+    resource_table = Table("resource")
+    
+    plan_filter = PlanResourcesFilter.from_dict({
+        "kind": PlanResourcesFilterKind.CONDITIONAL,
+        "condition": {
+            "expression": {
+                "operator": "unknown_op",
+                "operands": [
+                    {"variable": "request.resource.attr.name"},
+                    {"value": "test"},
+                ],
+            },
+        },
+    })
+    plan = PlanResourcesResponse(
+        filter=plan_filter,
+        request_id="1",
+        action="view",
+        resource_kind="resource",
+        policy_version="default",
+    )
+    
+    attr_map = {"request.resource.attr.name": resource_table.name}
+    
+    with pytest.raises(ValueError, match="Unknown operator: unknown_op"):
+        get_query(plan, resource_table, attr_map)
+def test_operator_override_custom():
+    """Test custom operator with override."""
+    from cerbos.sdk.model import (
+        PlanResourcesFilter,
+        PlanResourcesFilterKind,
+        PlanResourcesResponse,
+    )
+    from cerbos_pypika import get_query
+    from pypika import Table
+    
+    resource_table = Table("resource")
+    
+    plan_filter = PlanResourcesFilter.from_dict({
+        "kind": PlanResourcesFilterKind.CONDITIONAL,
+        "condition": {
+            "expression": {
+                "operator": "custom_contains",
+                "operands": [
+                    {"variable": "request.resource.attr.name"},
+                    {"value": "test"},
+                ],
+            },
+        },
+    })
+    plan = PlanResourcesResponse(
+        filter=plan_filter,
+        request_id="1",
+        action="view",
+        resource_kind="resource",
+        policy_version="default",
+    )
+    
+    attr_map = {"request.resource.attr.name": resource_table.name}
+    
+    # Define custom operator that uses LIKE
+    custom_ops = {
+        "custom_contains": lambda field, value: field.like(f"%{value}%")
+    }
+    
+    query = get_query(plan, resource_table, attr_map, operator_override_fns=custom_ops)
+    sql = query.get_sql()
+    
+    assert "WHERE" in sql
+    assert "LIKE" in sql
+
+
+def test_operator_override_replace_default():
+    """Test overriding default operator behavior."""
+    from cerbos.sdk.model import (
+        PlanResourcesFilter,
+        PlanResourcesFilterKind,
+        PlanResourcesResponse,
+    )
+    from cerbos_pypika import get_query
+    from pypika import Table
+    
+    resource_table = Table("resource")
+    
+    plan_filter = PlanResourcesFilter.from_dict({
+        "kind": PlanResourcesFilterKind.CONDITIONAL,
+        "condition": {
+            "expression": {
+                "operator": "eq",
+                "operands": [
+                    {"variable": "request.resource.attr.name"},
+                    {"value": "test"},
+                ],
+            },
+        },
+    })
+    plan = PlanResourcesResponse(
+        filter=plan_filter,
+        request_id="1",
+        action="view",
+        resource_kind="resource",
+        policy_version="default",
+    )
+    
+    attr_map = {"request.resource.attr.name": resource_table.name}
+    
+    # Override eq to use case-insensitive comparison
+    override_ops = {
+        "eq": lambda field, value: field.ilike(value)
+    }
+    
+    query = get_query(plan, resource_table, attr_map, operator_override_fns=override_ops)
+    sql = query.get_sql()
+    
+    assert "WHERE" in sql
+    assert "ILIKE" in sql
