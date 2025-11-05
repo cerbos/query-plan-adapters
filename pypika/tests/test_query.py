@@ -211,3 +211,40 @@ def test_gt_operator(resource_table):
     
     assert "WHERE" in sql
     assert ">" in sql
+
+
+def test_le_operator(resource_table):
+    """Test le operator."""
+    from cerbos.sdk.model import (
+        PlanResourcesFilter,
+        PlanResourcesFilterKind,
+        PlanResourcesResponse,
+    )
+    from cerbos_pypika import get_query
+    
+    plan_filter = PlanResourcesFilter.from_dict({
+        "kind": PlanResourcesFilterKind.CONDITIONAL,
+        "condition": {
+            "expression": {
+                "operator": "le",
+                "operands": [
+                    {"variable": "request.resource.attr.aNumber"},
+                    {"value": 5},
+                ],
+            },
+        },
+    })
+    plan = PlanResourcesResponse(
+        filter=plan_filter,
+        request_id="1",
+        action="view",
+        resource_kind="resource",
+        policy_version="default",
+    )
+    
+    attr_map = {"request.resource.attr.aNumber": resource_table.aNumber}
+    query = get_query(plan, resource_table, attr_map)
+    sql = query.get_sql()
+    
+    assert "WHERE" in sql
+    assert "<=" in sql
