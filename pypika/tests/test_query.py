@@ -285,3 +285,60 @@ def test_ge_operator(resource_table):
     
     assert "WHERE" in sql
     assert ">=" in sql
+
+
+def test_and_operator(resource_table):
+    """Test AND logical operator."""
+    from cerbos.sdk.model import (
+        PlanResourcesFilter,
+        PlanResourcesFilterKind,
+        PlanResourcesResponse,
+    )
+    from cerbos_pypika import get_query
+    
+    plan_filter = PlanResourcesFilter.from_dict({
+        "kind": PlanResourcesFilterKind.CONDITIONAL,
+        "condition": {
+            "expression": {
+                "operator": "and",
+                "operands": [
+                    {
+                        "expression": {
+                            "operator": "eq",
+                            "operands": [
+                                {"variable": "request.resource.attr.aBool"},
+                                {"value": True},
+                            ],
+                        }
+                    },
+                    {
+                        "expression": {
+                            "operator": "gt",
+                            "operands": [
+                                {"variable": "request.resource.attr.aNumber"},
+                                {"value": 1},
+                            ],
+                        }
+                    },
+                ],
+            },
+        },
+    })
+    plan = PlanResourcesResponse(
+        filter=plan_filter,
+        request_id="1",
+        action="view",
+        resource_kind="resource",
+        policy_version="default",
+    )
+    
+    attr_map = {
+        "request.resource.attr.aBool": resource_table.aBool,
+        "request.resource.attr.aNumber": resource_table.aNumber,
+    }
+    
+    query = get_query(plan, resource_table, attr_map)
+    sql = query.get_sql()
+    
+    assert "WHERE" in sql
+    assert "AND" in sql

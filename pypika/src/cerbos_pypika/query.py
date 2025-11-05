@@ -44,6 +44,18 @@ def traverse_and_map_operands(operand, attr_map):
     operator = operand["operator"]
     child_operands = operand["operands"]
     
+    # Handle AND logical operator
+    if operator == "and":
+        criteria = [
+            traverse_and_map_operands(o, attr_map)
+            for o in child_operands
+        ]
+        result = criteria[0]
+        for c in criteria[1:]:
+            result = result & c
+        return result
+    
+    # Handle comparison operators
     d = {k: v for o in child_operands for k, v in o.items()}
     variable = d["variable"]
     value = d["value"]

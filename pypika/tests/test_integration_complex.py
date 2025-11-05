@@ -21,7 +21,6 @@ from cerbos.sdk.model import (
 from cerbos_pypika import get_query
 
 
-@pytest.mark.skip(reason="Waiting for AND operator implementation")
 def test_integration_and_multiple_conditions(cursor, resource_table):
     """
     Test AND operator with multiple conditions.
@@ -81,7 +80,6 @@ def test_integration_and_multiple_conditions(cursor, resource_table):
     assert rows[0]["aNumber"] == 3
 
 
-@pytest.mark.skip(reason="Waiting for AND operator implementation")
 def test_integration_range_query(cursor, resource_table):
     """
     Test range query using AND with ge and le.
