@@ -56,6 +56,21 @@ def _handle_comparison_operator(operator: str, operands: List[Dict], attr_map: D
     return operator_fn(field, value)
 
 
+def _handle_logical_operator(operator: str, operands: List[Dict], attr_map: Dict[str, GenericField], operator_override_fns: Optional[OperatorFnMap] = None) -> GenericCriterion:
+    """Handle logical operators (and, or, not) by recursively evaluating operands."""
+    if operator == "and":
+        criteria = [
+            traverse_and_map_operands(o, attr_map, operator_override_fns)
+            for o in operands
+        ]
+        result = criteria[0]
+        for c in criteria[1:]:
+            result = result & c
+        return result
+    
+    raise ValueError(f"Unknown logical operator: {operator}")
+
+
 def traverse_and_map_operands(operand, attr_map, operator_override_fns=None):
     """Recursively traverse Cerbos AST and build PyPika criterion."""
     if exp := operand.get("expression"):
@@ -64,16 +79,9 @@ def traverse_and_map_operands(operand, attr_map, operator_override_fns=None):
     operator = operand["operator"]
     child_operands = operand["operands"]
     
-    # Handle AND logical operator
-    if operator == "and":
-        criteria = [
-            traverse_and_map_operands(o, attr_map, operator_override_fns)
-            for o in child_operands
-        ]
-        result = criteria[0]
-        for c in criteria[1:]:
-            result = result & c
-        return result
+    # Handle logical operators
+    if operator in ("and", "or", "not"):
+        return _handle_logical_operator(operator, child_operands, attr_map, operator_override_fns)
     
     # Handle comparison operators
     return _handle_comparison_operator(operator, child_operands, attr_map, operator_override_fns)
