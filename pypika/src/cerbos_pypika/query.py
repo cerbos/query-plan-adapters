@@ -47,7 +47,11 @@ def _handle_comparison_operator(operator: str, operands: List[Dict], attr_map: D
     except KeyError:
         raise KeyError(f"Attribute does not exist in the attribute column map: {variable}")
     
-    operator_fn = OPERATOR_FNS[operator]
+    try:
+        operator_fn = OPERATOR_FNS[operator]
+    except KeyError:
+        raise ValueError(f"Unknown operator: {operator}")
+    
     return operator_fn(field, value)
 
 
