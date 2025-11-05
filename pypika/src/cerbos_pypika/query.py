@@ -22,7 +22,7 @@ __operator_fns: OperatorFnMap = {
     "gt": lambda field, value: field > value,
     "le": lambda field, value: field <= value,
     "ge": lambda field, value: field >= value,
-    "in": lambda field, value: field.isin(value),
+    "in": lambda field, value: field.isin(value if isinstance(value, list) else [value]),
 }
 OPERATOR_FNS = MappingProxyType(__operator_fns)
 
@@ -59,34 +59,27 @@ def _handle_comparison_operator(operator: str, operands: List[Dict], attr_map: D
 
 def _handle_logical_operator(operator: str, operands: List[Dict], attr_map: Dict[str, GenericField], operator_override_fns: Optional[OperatorFnMap] = None) -> GenericCriterion:
     """Handle logical operators (and, or, not) by recursively evaluating operands."""
-    if operator == "and":
+    if operator in ("and", "or"):
         criteria = [
             traverse_and_map_operands(o, attr_map, operator_override_fns)
             for o in operands
         ]
         result = criteria[0]
+        combinator = (lambda a, b: a & b) if operator == "and" else (lambda a, b: a | b)
         for c in criteria[1:]:
-            result = result & c
-        return result
-    
-    if operator == "or":
-        criteria = [
-            traverse_and_map_operands(o, attr_map, operator_override_fns)
-            for o in operands
-        ]
-        result = criteria[0]
-        for c in criteria[1:]:
-            result = result | c
+            result = combinator(result, c)
         return result
     
     if operator == "not":
+        if not operands:
+            raise ValueError("NOT operator requires exactly one operand")
         criterion = traverse_and_map_operands(operands[0], attr_map, operator_override_fns)
         return criterion.negate()
     
     raise ValueError(f"Unknown logical operator: {operator}")
 
 
-def traverse_and_map_operands(operand, attr_map, operator_override_fns=None):
+def traverse_and_map_operands(operand: Dict[str, Any], attr_map: Dict[str, GenericField], operator_override_fns: Optional[OperatorFnMap] = None) -> GenericCriterion:
     """Recursively traverse Cerbos AST and build PyPika criterion."""
     if exp := operand.get("expression"):
         return traverse_and_map_operands(exp, attr_map, operator_override_fns)
@@ -132,8 +125,17 @@ def get_query(
     if query_plan.filter.kind in _allow_types:
         return Query.from_(table).select('*')
     
-    cond_dict = query_plan.filter.condition.to_dict()
+    cond_dict = (
+        MessageToDict(query_plan.filter.condition)
+        if isinstance(query_plan, response_pb2.PlanResourcesResponse)
+        else query_plan.filter.condition.to_dict()
+    )
     criterion = traverse_and_map_operands(cond_dict, attr_map, operator_override_fns)
     
     query = Query.from_(table).select('*').where(criterion)
+    
+    if joins:
+        for join_table, join_condition in joins:
+            query = query.join(join_table).on(join_condition)
+    
     return query

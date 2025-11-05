@@ -485,3 +485,74 @@ def test_in_operator(resource_table):
     
     assert "WHERE" in sql
     assert "IN" in sql
+
+
+def test_in_operator_single_value(resource_table):
+    """Test IN operator handles single non-list value."""
+    from cerbos.sdk.model import (
+        PlanResourcesFilter,
+        PlanResourcesFilterKind,
+        PlanResourcesResponse,
+    )
+    from cerbos_pypika import get_query
+    
+    plan_filter = PlanResourcesFilter.from_dict({
+        "kind": PlanResourcesFilterKind.CONDITIONAL,
+        "condition": {
+            "expression": {
+                "operator": "in",
+                "operands": [
+                    {"variable": "request.resource.attr.aNumber"},
+                    {"value": 1},
+                ],
+            },
+        },
+    })
+    plan = PlanResourcesResponse(
+        filter=plan_filter,
+        request_id="1",
+        action="view",
+        resource_kind="resource",
+        policy_version="default",
+    )
+    
+    attr_map = {
+        "request.resource.attr.aNumber": resource_table.aNumber,
+    }
+    
+    query = get_query(plan, resource_table, attr_map)
+    sql = query.get_sql()
+    
+    assert "WHERE" in sql
+    assert "IN" in sql
+def test_not_operator_empty_operands(resource_table):
+    """Test NOT operator raises error with empty operands."""
+    from cerbos.sdk.model import (
+        PlanResourcesFilter,
+        PlanResourcesFilterKind,
+        PlanResourcesResponse,
+    )
+    from cerbos_pypika import get_query
+    import pytest
+    
+    plan_filter = PlanResourcesFilter.from_dict({
+        "kind": PlanResourcesFilterKind.CONDITIONAL,
+        "condition": {
+            "expression": {
+                "operator": "not",
+                "operands": [],
+            },
+        },
+    })
+    plan = PlanResourcesResponse(
+        filter=plan_filter,
+        request_id="1",
+        action="view",
+        resource_kind="resource",
+        policy_version="default",
+    )
+    
+    attr_map = {}
+    
+    with pytest.raises(ValueError, match="NOT operator requires exactly one operand"):
+        get_query(plan, resource_table, attr_map)
