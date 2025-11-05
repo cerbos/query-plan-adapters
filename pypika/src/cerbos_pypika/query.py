@@ -36,6 +36,21 @@ _allow_types = frozenset([
 ])
 
 
+def _handle_comparison_operator(operator: str, operands: List[Dict], attr_map: Dict[str, GenericField]) -> GenericCriterion:
+    """Extract variable and value from operands and apply comparison operator."""
+    d = {k: v for o in operands for k, v in o.items()}
+    variable = d["variable"]
+    value = d["value"]
+    
+    try:
+        field = attr_map[variable]
+    except KeyError:
+        raise KeyError(f"Attribute does not exist in the attribute column map: {variable}")
+    
+    operator_fn = OPERATOR_FNS[operator]
+    return operator_fn(field, value)
+
+
 def traverse_and_map_operands(operand, attr_map):
     """Recursively traverse Cerbos AST and build PyPika criterion."""
     if exp := operand.get("expression"):
@@ -56,17 +71,7 @@ def traverse_and_map_operands(operand, attr_map):
         return result
     
     # Handle comparison operators
-    d = {k: v for o in child_operands for k, v in o.items()}
-    variable = d["variable"]
-    value = d["value"]
-    
-    try:
-        field = attr_map[variable]
-    except KeyError:
-        raise KeyError(f"Attribute does not exist in the attribute column map: {variable}")
-    
-    operator_fn = OPERATOR_FNS[operator]
-    return operator_fn(field, value)
+    return _handle_comparison_operator(operator, child_operands, attr_map)
 
 
 def get_query(
