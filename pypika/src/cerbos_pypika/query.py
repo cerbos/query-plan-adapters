@@ -38,14 +38,14 @@ _allow_types = frozenset([
 
 def _handle_comparison_operator(operator: str, operands: List[Dict], attr_map: Dict[str, GenericField], operator_override_fns: Optional[OperatorFnMap] = None) -> GenericCriterion:
     """Extract variable and value from operands and apply comparison operator."""
-    d = {k: v for o in operands for k, v in o.items()}
-    variable = d["variable"]
-    value = d["value"]
+    operand_dict = {k: v for o in operands for k, v in o.items()}
+    variable_path = operand_dict["variable"]
+    comparison_value = operand_dict["value"]
     
     try:
-        field = attr_map[variable]
+        field = attr_map[variable_path]
     except KeyError:
-        raise KeyError(f"Attribute does not exist in the attribute column map: {variable}")
+        raise KeyError(f"Attribute does not exist in the attribute column map: {variable_path}")
     
     operator_fns = operator_override_fns or OPERATOR_FNS
     try:
@@ -53,7 +53,7 @@ def _handle_comparison_operator(operator: str, operands: List[Dict], attr_map: D
     except KeyError:
         raise ValueError(f"Unknown operator: {operator}")
     
-    return operator_fn(field, value)
+    return operator_fn(field, comparison_value)
 
 
 def _handle_logical_operator(operator: str, operands: List[Dict], attr_map: Dict[str, GenericField], operator_override_fns: Optional[OperatorFnMap] = None) -> GenericCriterion:
