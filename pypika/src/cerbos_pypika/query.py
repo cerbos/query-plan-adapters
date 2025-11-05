@@ -78,6 +78,10 @@ def _handle_logical_operator(operator: str, operands: List[Dict], attr_map: Dict
             result = result | c
         return result
     
+    if operator == "not":
+        criterion = traverse_and_map_operands(operands[0], attr_map, operator_override_fns)
+        return criterion.negate()
+    
     raise ValueError(f"Unknown logical operator: {operator}")
 
 

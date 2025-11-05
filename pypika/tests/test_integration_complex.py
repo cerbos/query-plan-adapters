@@ -188,7 +188,6 @@ def test_integration_or_condition(cursor, resource_table):
     assert names == ["resource1", "resource3"]
 
 
-@pytest.mark.skip(reason="Waiting for NOT operator implementation")
 def test_integration_not_condition(cursor, resource_table):
     """
     Test NOT operator.
@@ -234,7 +233,6 @@ def test_integration_not_condition(cursor, resource_table):
     assert names == ["resource1", "resource3"]
 
 
-@pytest.mark.skip(reason="Waiting for AND/OR operator implementation")
 def test_integration_complex_nested(cursor, resource_table):
     """
     Test complex nested logic with AND/OR combination.
