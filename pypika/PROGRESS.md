@@ -119,9 +119,9 @@ e2b26d3 Add type definitions and constants
 
 ## Test Suite Status
 
-**Current: 16 tests, all passing ✅**
+**Current: 16 passed, 5 skipped (21 total) ✅**
 
-### Unit Tests (10)
+### Unit Tests (10 passing)
 1. `test_fixtures_work` - Fixture verification
 2. `test_get_query_is_importable` - Import verification
 3. `test_always_allow` - ALWAYS_ALLOWED filter
@@ -133,13 +133,20 @@ e2b26d3 Add type definitions and constants
 9. `test_le_operator` - Less than or equal operator
 10. `test_ge_operator` - Greater than or equal operator
 
-### Integration Tests (6)
+### Integration Tests - Simple (6 passing)
 1. `test_integration_simple_filter` - Execute eq query, verify 1 row returned
 2. `test_integration_numeric_range` - Execute gt query, verify 2 rows
 3. `test_integration_boolean_filter` - Execute boolean eq, verify 2 rows
 4. `test_integration_string_comparison` - Execute ne on strings, verify 2 rows
 5. `test_integration_always_allow` - Execute unfiltered query, verify 3 rows
 6. `test_integration_always_deny` - Execute impossible condition, verify 0 rows
+
+### Integration Tests - Complex (5 skipped, will be implemented with logical operators)
+1. `test_integration_and_multiple_conditions` ⏭️  - AND with aBool and aNumber (→ 1 row)
+2. `test_integration_range_query` ⏭️  - AND range query with ge and le (→ 2 rows)
+3. `test_integration_or_condition` ⏭️  - OR with multiple values (→ 2 rows)
+4. `test_integration_not_condition` ⏭️  - NOT negation (→ 2 rows)
+5. `test_integration_complex_nested` ⏭️  - Nested AND/OR combination (→ 2 rows)
 
 ## Environment Setup
 
@@ -162,7 +169,8 @@ pytest tests/test_query.py::test_eq_operator -v
 - `src/cerbos_pypika/__init__.py` - Package exports
 - `tests/conftest.py` - Test fixtures with sqlite3 database setup (64 lines)
 - `tests/test_query.py` - Unit test suite (288 lines, 10 tests)
-- `tests/test_integration.py` - Integration test suite (199 lines, 6 tests)
+- `tests/test_integration.py` - Simple integration tests (199 lines, 6 tests)
+- `tests/test_integration_complex.py` - Complex integration tests (334 lines, 5 skipped tests)
 - `README.md` - Documentation and usage examples
 - `pyproject.toml` - Project configuration
 
@@ -185,6 +193,40 @@ pytest tests/test_query.py::test_eq_operator -v
 - Integration tests use stdlib sqlite3 (no SQLAlchemy dependency) - executes PyPika-generated SQL directly
 - Test database populated with 3 resources covering different attribute values for comprehensive testing
 
+### Testing Strategy
+
+**Two-Level Testing Approach:**
+
+1. **Unit Tests** (`test_query.py`): Verify SQL generation correctness
+   - Fast, isolated tests
+   - Check SQL syntax and structure
+   - One test per operator
+
+2. **Integration Tests - Simple** (`test_integration.py`): Single-operator execution
+   - Execute PyPika-generated SQL against real SQLite database
+   - Verify result counts and data correctness
+   - Cover all comparison operators individually
+
+3. **Integration Tests - Complex** (`test_integration_complex.py`): Multi-operator combinations
+   - Test logical operators (and, or, not) with database execution
+   - Verify complex nested queries work correctly
+   - Real-world usage scenarios
+   - **Progressive implementation**: Tests start as `@pytest.mark.skip` placeholders, unskipped as operators implemented
+
+**TDD Workflow for New Operators:**
+1. Write unit test (SQL generation) → **RED**
+2. Implement operator → **GREEN**
+3. Unskip corresponding integration test → Implement
+4. Run integration test → **VERIFY** result correctness
+5. Commit all three together (unit test + implementation + integration test)
+
+**Test Data Reference:**
+| Resource | name | aBool | aString | aNumber | ownedBy |
+|----------|------|-------|---------|---------|---------|
+| resource1 | "resource1" | True (1) | "string" | 1 | "1" |
+| resource2 | "resource2" | False (0) | "amIAString?" | 2 | "1" |
+| resource3 | "resource3" | True (1) | "anotherString" | 3 | "2" |
+
 ### TDD Discipline Followed
 
 ✅ One test at a time
@@ -193,6 +235,7 @@ pytest tests/test_query.py::test_eq_operator -v
 ✅ Run specific test, not full suite during development
 ✅ Minimal implementation only
 ✅ All previous tests stay green
+✅ Integration tests verify end-to-end correctness
 
 ## To Resume Work
 
