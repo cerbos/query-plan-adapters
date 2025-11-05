@@ -186,3 +186,37 @@ def test_integration_always_deny(cursor, resource_table):
     rows = cursor.fetchall()
     
     assert len(rows) == 0
+
+
+def test_integration_in_operator(cursor, resource_table):
+    """Test IN operator with list of values."""
+    plan_filter = PlanResourcesFilter.from_dict({
+        "kind": PlanResourcesFilterKind.CONDITIONAL,
+        "condition": {
+            "expression": {
+                "operator": "in",
+                "operands": [
+                    {"variable": "request.resource.attr.aNumber"},
+                    {"value": [1, 3]},
+                ],
+            },
+        },
+    })
+    plan = PlanResourcesResponse(
+        filter=plan_filter,
+        request_id="1",
+        action="view",
+        resource_kind="resource",
+        policy_version="default",
+    )
+    
+    attr_map = {"request.resource.attr.aNumber": resource_table.aNumber}
+    query = get_query(plan, resource_table, attr_map)
+    sql = query.get_sql()
+    
+    cursor.execute(sql)
+    rows = cursor.fetchall()
+    
+    assert len(rows) == 2
+    names = sorted([row["name"] for row in rows])
+    assert names == ["resource1", "resource3"]

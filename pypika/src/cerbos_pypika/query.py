@@ -22,6 +22,7 @@ __operator_fns: OperatorFnMap = {
     "gt": lambda field, value: field > value,
     "le": lambda field, value: field <= value,
     "ge": lambda field, value: field >= value,
+    "in": lambda field, value: field.isin(value),
 }
 OPERATOR_FNS = MappingProxyType(__operator_fns)
 
