@@ -36,7 +36,7 @@ _allow_types = frozenset([
 ])
 
 
-def _handle_comparison_operator(operator: str, operands: List[Dict], attr_map: Dict[str, GenericField]) -> GenericCriterion:
+def _handle_comparison_operator(operator: str, operands: List[Dict], attr_map: Dict[str, GenericField], operator_override_fns: Optional[OperatorFnMap] = None) -> GenericCriterion:
     """Extract variable and value from operands and apply comparison operator."""
     d = {k: v for o in operands for k, v in o.items()}
     variable = d["variable"]
@@ -47,18 +47,19 @@ def _handle_comparison_operator(operator: str, operands: List[Dict], attr_map: D
     except KeyError:
         raise KeyError(f"Attribute does not exist in the attribute column map: {variable}")
     
+    operator_fns = operator_override_fns or OPERATOR_FNS
     try:
-        operator_fn = OPERATOR_FNS[operator]
+        operator_fn = operator_fns[operator]
     except KeyError:
         raise ValueError(f"Unknown operator: {operator}")
     
     return operator_fn(field, value)
 
 
-def traverse_and_map_operands(operand, attr_map):
+def traverse_and_map_operands(operand, attr_map, operator_override_fns=None):
     """Recursively traverse Cerbos AST and build PyPika criterion."""
     if exp := operand.get("expression"):
-        return traverse_and_map_operands(exp, attr_map)
+        return traverse_and_map_operands(exp, attr_map, operator_override_fns)
     
     operator = operand["operator"]
     child_operands = operand["operands"]
@@ -66,7 +67,7 @@ def traverse_and_map_operands(operand, attr_map):
     # Handle AND logical operator
     if operator == "and":
         criteria = [
-            traverse_and_map_operands(o, attr_map)
+            traverse_and_map_operands(o, attr_map, operator_override_fns)
             for o in child_operands
         ]
         result = criteria[0]
@@ -75,7 +76,7 @@ def traverse_and_map_operands(operand, attr_map):
         return result
     
     # Handle comparison operators
-    return _handle_comparison_operator(operator, child_operands, attr_map)
+    return _handle_comparison_operator(operator, child_operands, attr_map, operator_override_fns)
 
 
 def get_query(
@@ -109,7 +110,7 @@ def get_query(
         return Query.from_(table).select('*')
     
     cond_dict = query_plan.filter.condition.to_dict()
-    criterion = traverse_and_map_operands(cond_dict, attr_map)
+    criterion = traverse_and_map_operands(cond_dict, attr_map, operator_override_fns)
     
     query = Query.from_(table).select('*').where(criterion)
     return query
