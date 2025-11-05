@@ -134,7 +134,6 @@ def test_integration_range_query(cursor, resource_table):
     assert names == ["resource1", "resource2"]
 
 
-@pytest.mark.skip(reason="Waiting for OR operator implementation")
 def test_integration_or_condition(cursor, resource_table):
     """
     Test OR operator.

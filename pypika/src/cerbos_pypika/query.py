@@ -68,6 +68,16 @@ def _handle_logical_operator(operator: str, operands: List[Dict], attr_map: Dict
             result = result & c
         return result
     
+    if operator == "or":
+        criteria = [
+            traverse_and_map_operands(o, attr_map, operator_override_fns)
+            for o in operands
+        ]
+        result = criteria[0]
+        for c in criteria[1:]:
+            result = result | c
+        return result
+    
     raise ValueError(f"Unknown logical operator: {operator}")
 
 
