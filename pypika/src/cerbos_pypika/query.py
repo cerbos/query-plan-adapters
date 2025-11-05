@@ -14,7 +14,7 @@ GenericCriterion = Criterion
 OperatorFnMap = Dict[str, Callable[[GenericField, Any], GenericCriterion]]
 JoinSpec = Tuple[Table, GenericCriterion]
 
-# Operator function map (will be populated incrementally during TDD)
+# Operator function map - all core Cerbos operators
 __operator_fns: OperatorFnMap = {
     "eq": lambda field, value: field == value,
     "ne": lambda field, value: field != value,
@@ -38,7 +38,21 @@ _allow_types = frozenset([
 
 
 def _handle_comparison_operator(operator: str, operands: List[Dict], attr_map: Dict[str, GenericField], operator_override_fns: Optional[OperatorFnMap] = None) -> GenericCriterion:
-    """Extract variable and value from operands and apply comparison operator."""
+    """Extract variable and value from operands and apply comparison operator.
+    
+    Args:
+        operator: Comparison operator name (eq, ne, lt, gt, le, ge, in)
+        operands: List of operand dicts containing 'variable' and 'value' keys
+        attr_map: Mapping of Cerbos attribute paths to PyPika Field objects
+        operator_override_fns: Optional custom operator implementations
+        
+    Returns:
+        PyPika Criterion representing the comparison
+        
+    Raises:
+        KeyError: If variable path not found in attr_map
+        ValueError: If operator is not recognized
+    """
     operand_dict = {k: v for o in operands for k, v in o.items()}
     variable_path = operand_dict["variable"]
     comparison_value = operand_dict["value"]
@@ -58,7 +72,20 @@ def _handle_comparison_operator(operator: str, operands: List[Dict], attr_map: D
 
 
 def _handle_logical_operator(operator: str, operands: List[Dict], attr_map: Dict[str, GenericField], operator_override_fns: Optional[OperatorFnMap] = None) -> GenericCriterion:
-    """Handle logical operators (and, or, not) by recursively evaluating operands."""
+    """Handle logical operators (and, or, not) by recursively evaluating operands.
+    
+    Args:
+        operator: Logical operator name (and, or, not)
+        operands: List of operand expressions to combine
+        attr_map: Mapping of Cerbos attribute paths to PyPika Field objects
+        operator_override_fns: Optional custom operator implementations
+        
+    Returns:
+        PyPika Criterion representing the logical combination
+        
+    Raises:
+        ValueError: If operator is unknown or NOT has invalid operand count
+    """
     if operator in ("and", "or"):
         criteria = [
             traverse_and_map_operands(o, attr_map, operator_override_fns)
@@ -80,7 +107,25 @@ def _handle_logical_operator(operator: str, operands: List[Dict], attr_map: Dict
 
 
 def traverse_and_map_operands(operand: Dict[str, Any], attr_map: Dict[str, GenericField], operator_override_fns: Optional[OperatorFnMap] = None) -> GenericCriterion:
-    """Recursively traverse Cerbos AST and build PyPika criterion."""
+    """Recursively traverse Cerbos AST and build PyPika criterion.
+    
+    Handles the Cerbos expression tree structure by:
+    1. Unwrapping nested 'expression' keys
+    2. Dispatching to logical operator handler for and/or/not
+    3. Dispatching to comparison operator handler for eq/ne/lt/gt/le/ge/in
+    
+    Args:
+        operand: Dict containing either 'expression' key or 'operator'/'operands' keys
+        attr_map: Mapping of Cerbos attribute paths to PyPika Field objects
+        operator_override_fns: Optional custom operator implementations
+        
+    Returns:
+        PyPika Criterion representing the expression
+        
+    Raises:
+        KeyError: If attribute path not found in attr_map
+        ValueError: If operator is not recognized
+    """
     if exp := operand.get("expression"):
         return traverse_and_map_operands(exp, attr_map, operator_override_fns)
     
