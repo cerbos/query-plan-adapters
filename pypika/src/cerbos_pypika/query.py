@@ -17,6 +17,7 @@ JoinSpec = Tuple[Table, GenericCriterion]
 # Operator function map (will be populated incrementally during TDD)
 __operator_fns: OperatorFnMap = {
     "eq": lambda field, value: field == value,
+    "ne": lambda field, value: field != value,
 }
 OPERATOR_FNS = MappingProxyType(__operator_fns)
 
