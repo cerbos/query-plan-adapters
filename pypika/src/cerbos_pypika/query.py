@@ -53,4 +53,7 @@ def get_query(
         KeyError: If an attribute in the query plan is not in attr_map
         ValueError: If an unrecognized operator is encountered
     """
+    if query_plan.filter.kind in _allow_types:
+        return Query.from_(table).select('*')
+    
     raise NotImplementedError("Not yet implemented")
