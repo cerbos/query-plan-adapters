@@ -42,7 +42,7 @@ source = "scm"
 [tool.pdm.dev-dependencies]
 test = [
     "pytest>=7.1.2",
-    "sqlalchemy>=1.4",
+    "testcontainers>=3.5.3",
 ]
 lint = [
     "black>=22.6.0",
