@@ -384,14 +384,17 @@ describe("Field Operations", () => {
       });
       const typeQp = queryPlan as PlanResourcesConditionalResponse;
 
+      const condition = typeQp.condition as PlanExpression;
+      const [firstOperand, secondOperand] = condition.operands;
+      if (!firstOperand || !secondOperand) {
+        throw new Error("Expected two operands in the conditional query plan");
+      }
+
       const invertedQueryPlan: PlanResourcesConditionalResponse = {
         ...typeQp,
         condition: {
-          ...typeQp.condition,
-          operands: [
-            (typeQp.condition as PlanExpression).operands[1],
-            (typeQp.condition as PlanExpression).operands[0],
-          ],
+          ...condition,
+          operands: [secondOperand, firstOperand],
         },
       };
 
@@ -994,7 +997,7 @@ describe("Mapper Functions", () => {
 
     const result = queryPlanToMongoose({
       queryPlan,
-      mapper: (key: string) => ({
+      mapper: (_key: string) => ({
         relation: {
           name: "createdBy",
           type: "one",
