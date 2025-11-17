@@ -48,7 +48,7 @@
     "node": ">=20.0.0"
   },
   "devDependencies": {
-    "@types/jest": "^29.0.3",
+    "@types/jest": "^30.0.0",
     "@types/node": "^24.0.0",
     "@tsconfig/node20": "^20.1.7",
     "@tsconfig/strictest": "^2.0.8",
