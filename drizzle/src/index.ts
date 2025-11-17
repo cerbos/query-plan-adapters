@@ -145,31 +145,6 @@ type ScopedMapperMetadata = {
 
 const SCOPED_METADATA = Symbol("ScopedMapperMetadata");
 
-const getRelationMappingOrThrow = (
-  reference: string,
-  mapper: Mapper
-): RelationMapping => {
-  const entry = getMappingEntry(reference, mapper);
-  if (!entry) {
-    const chain = resolveRelationChain(reference, mapper);
-    if (chain.length === 0) {
-      throw new Error(`No relation mapping found for reference: ${reference}`);
-    }
-    return chain[chain.length - 1];
-  }
-  if (isScopedRelationEntry(entry)) {
-    const resolved = entry.resolve();
-    if (resolved.relations.length === 0) {
-      throw new Error(`No relation mapping found for reference: ${reference}`);
-    }
-    return resolved.relations[resolved.relations.length - 1];
-  }
-  if (!isMappingConfig(entry) || !entry.relation) {
-    throw new Error(`No relation mapping found for reference: ${reference}`);
-  }
-  return entry.relation;
-};
-
 const resolveRelationChain = (
   reference: string,
   mapper: Mapper
