@@ -410,7 +410,7 @@ const resolveFieldReference = (
       return direct.resolve();
     }
     if (isMappingConfig(direct) && direct.relation) {
-    return resolveRelationField(direct.relation, [], reference, [], false);
+        return resolveRelationField(direct.relation, [], reference, [], false);
     }
     return { relations: [], mapping: direct };
   }
