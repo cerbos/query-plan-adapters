@@ -3,14 +3,39 @@
   "version": "1.0.0",
   "homepage": "https://cerbos.dev",
   "description": "",
-  "private": false,
-  "main": "./lib/cjs/index.js",
-  "module": "./lib/esm/index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cerbos/cerbos-queryplan-helpers.git",
+    "directory": "packages/mongoose"
+  },
+  "bugs": {
+    "url": "https://github.com/cerbos/cerbos-queryplan-helpers/issues"
+  },
+  "author": "Cerbos <help@cerbos.dev> (https://cerbos.dev)",
+  "license": "Apache-2.0",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    }
+  },
   "files": [
-    "lib/**/*"
+    "lib/**/*.d.ts",
+    "lib/**/*.d.ts.map",
+    "lib/**/*.js",
+    "lib/**/*.js.map",
+    "src/**/*.ts",
+    "README.md",
+    "LICENSE"
   ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "scripts": {
-    "build": "tsc -p tsconfig.json && tsc -p tsconfig-cjs.json",
+    "build": "tsc --build",
     "prepare": "npm run build",
     "version": "git add -A src",
     "postversion": "git push && git push --tags",
@@ -21,18 +46,18 @@
   "engines": {
     "node": ">=20.0.0"
   },
-  "author": "Cerbos",
-  "license": "Apache-2.0",
   "devDependencies": {
-    "@types/jest": "^29.5.14",
-    "@types/node": "^22.0.0",
+    "@types/jest": "^29.0.3",
+    "@types/node": "^24.0.0",
+    "@tsconfig/node20": "^20.1.7",
+    "@tsconfig/strictest": "^2.0.8",
     "mongoose": "^8.0.0",
     "ts-jest": "^29.0.0",
     "ts-node": "^10.4.0",
     "typescript": "^5.0.0"
   },
   "dependencies": {
-    "@cerbos/core": "^0.24.0",
+    "@cerbos/core": "^0.25.0",
     "@cerbos/grpc": "^0.23.0"
   }
 }
