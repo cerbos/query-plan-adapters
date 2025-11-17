@@ -6,7 +6,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/cerbos/cerbos-queryplan-helpers.git",
-    "directory": "packages/prisma"
+    "directory": "packages/mongoose"
   },
   "bugs": {
     "url": "https://github.com/cerbos/cerbos-queryplan-helpers/issues"
