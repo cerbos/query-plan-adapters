@@ -217,7 +217,7 @@ const defaultMapper: Mapper = {
   "request.resource.attr.nested.aString": { field: "nested.aString" },
 };
 
-describe("Adapter Unit Behaviour", () => {
+describe("Adapter Unit Behavior", () => {
   test("maps single-object relations without elemMatch", async () => {
     const queryPlan = {
       kind: PlanKind.CONDITIONAL,
