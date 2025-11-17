@@ -17,8 +17,8 @@ jobs:
     strategy:
       matrix:
         cerbos-version: ["latest"]
-        mongodb-version: ["4.4", "5.0", "6.0", "7.0", "8.0"]
-        node-version: ["20", "22"]
+        mongodb-version: ["7.0", "8.0"]
+        node-version: ["20", "22", "24"]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
