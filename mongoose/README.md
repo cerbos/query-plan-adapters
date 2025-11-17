@@ -1,26 +1,22 @@
 # Cerbos + Mongoose ORM Adapter
 
-An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanResources API](https://docs.cerbos.dev/cerbos/latest/api/index.html#resources-query-plan)) response and converts it into a [Mongoose](https://mongoosejs.com/) filter. This is designed to work alongside a project using the [Cerbos Javascript SDK](https://github.com/cerbos/cerbos-sdk-javascript).
+An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanResources API](https://docs.cerbos.dev/cerbos/latest/api/index.html#resources-query-plan)) response and converts it into a [Mongoose](https://mongoosejs.com/) filter. It is designed to run alongside a project that is already using the [Cerbos JavaScript SDK](https://github.com/cerbos/cerbos-sdk-javascript) to fetch query plans.
 
-The following conditions are supported: `and`, `or`, `eq`, `ne`, `lt`, `gt`, `lte`, `gte` and `in`.
+## Supported conditions
 
-Not Supported:
+The adapter currently understands the following Cerbos plan operators:
 
-- `every`
-- `contains`
-- `search`
-- `mode`
-- `startsWith`
-- `endsWith`
-- `isSet`
-- Scalar filters
-- Atomic number operations
-- Composite keys
+- Logical: `and`, `or`, `not`
+- Comparisons: `eq`, `ne`, `lt`, `le`, `gt`, `ge`, `in`
+- String helpers: `contains`, `startsWith`, `endsWith`
+- Existence helpers: `isSet`, `exists`, `exists_one`
+- Collection helpers: `filter`, `hasIntersection`, `lambda`, `map`, `all`
+
+Any operator not listed above throws `Unsupported operator`. `exists_one` is treated like `exists` (at least one matching element) because Mongoose find queries cannot express “exactly one” matches without switching to aggregation.
 
 ## Requirements
 
-- Cerbos > v0.16
-- `@cerbos/http` or `@cerbos/grpc` client
+- Cerbos > v0.16 plus either the `@cerbos/http` or `@cerbos/grpc` client
 
 ## System Requirements
 
@@ -28,115 +24,168 @@ Not Supported:
 - Mongoose 8.x
 - A MongoDB-compatible server (MongoDB 5.0+ is recommended for compatibility with Mongoose 8)
 
-## Usage
+## Installation
 
-```
+```bash
 npm install @cerbos/orm-mongoose
 ```
 
-This package exports a function:
+## API
 
 ```ts
-import { queryPlanToMongoose, PlanKind } from "@cerbos/orm-mongoose";
+import {
+  queryPlanToMongoose,
+  PlanKind,
+  type Mapper,
+} from "@cerbos/orm-mongoose";
 
-queryPlanToMongoose({ queryPlan, fieldNameMapper }): {
-  kind: PlanKind,
-  filters?: any // a filter to pass to the find() function of a Mongoose model
+const result = queryPlanToMongoose({
+  queryPlan, // PlanResourcesResponse from Cerbos
+  mapper, // optional Mapper - see below
+});
+
+if (result.kind === PlanKind.CONDITIONAL) {
+  await MyModel.find(result.filters);
 }
 ```
 
-where `PlanKind` is:
+`PlanKind` is re-exported from `@cerbos/core`:
 
 ```ts
 export enum PlanKind {
-  /**
-   * The specified action is always allowed for the principal on resources matching the input.
-   */
   ALWAYS_ALLOWED = "KIND_ALWAYS_ALLOWED",
-
-  /**
-   * The specified action is always denied for the principal on resources matching the input.
-   */
   ALWAYS_DENIED = "KIND_ALWAYS_DENIED",
-
-  /**
-   * The specified action is conditionally allowed for the principal on resources matching the input.
-   */
   CONDITIONAL = "KIND_CONDITIONAL",
 }
 ```
 
-The function reqiures the full query plan from Cerbos to be passed in an object along with a `fieldNameMapper`.
+### Mapper configuration
 
-A basic implementation can be as simple as:
+The Cerbos query plan references fields using paths such as `request.resource.attr.title`. Use a mapper to translate those names to the paths in your Mongoose models and to describe relations/collections so the adapter can generate `$elemMatch` filters when needed.
 
-```js
+```ts
+export type MapperConfig = {
+  field?: string;
+  relation?: {
+    name: string;
+    type: "one" | "many";
+    field?: string;
+    fields?: Record<string, MapperConfig>;
+  };
+};
+
+export type Mapper =
+  | Record<string, MapperConfig>
+  | ((key: string) => MapperConfig);
+```
+
+If you omit the mapper the adapter will use the query plan paths verbatim, which only works when your Mongo documents follow the Cerbos naming convention.
+
+#### Direct fields
+
+```ts
+const mapper: Mapper = {
+  "request.resource.attr.aBool": { field: "aBool" },
+  "request.resource.attr.aString": { field: "title" },
+  "request.principal.attr.department": { field: "principalDepartment" },
+};
+```
+
+#### Relations and collections
+
+Use `relation` when mapping nested objects or arrays. `type: "one"` maps to embedded/single relations; `type: "many"` maps to arrays. The optional `fields` map lets you rename nested properties.
+
+```ts
+const mapper: Mapper = {
+  "request.resource.attr.createdBy": {
+    relation: {
+      name: "createdBy",
+      type: "one",
+      field: "id",
+    },
+  },
+  "request.resource.attr.tags": {
+    relation: {
+      name: "tags",
+      type: "many",
+      fields: {
+        id: { field: "id" },
+        name: { field: "name" },
+      },
+    },
+  },
+};
+```
+
+#### Mapper functions
+
+You can also supply a function if your mappings follow a predictable pattern:
+
+```ts
+const mapper: Mapper = (path) => {
+  if (path.startsWith("request.resource.attr.")) {
+    return { field: path.replace("request.resource.attr.", "") };
+  }
+  if (path.startsWith("request.principal.attr.")) {
+    return { field: `principal.${path.replace("request.principal.attr.", "")}` };
+  }
+  return { field: path };
+};
+```
+
+## Usage example
+
+```ts
 import { GRPC as Cerbos } from "@cerbos/grpc";
 import mongoose from "mongoose";
+import {
+  queryPlanToMongoose,
+  PlanKind,
+  type Mapper,
+} from "@cerbos/orm-mongoose";
 
-import { queryPlanToMongoose, PlanKind } from "@cerbos/orm-mongoose";
-
-// connect to mongo
 await mongoose.connect("mongodb://127.0.0.1:27017/test");
-// connect to Cerbos PDP
 const cerbos = new Cerbos("localhost:3592", { tls: false });
+const MyModel = mongoose.model("MyModel", /* ... schema ... */);
 
-// Mongoose models (schema excluded for brevity)
-const MyModel = mongoose.model("MyModel", ....);
+const mapper: Mapper = {
+  "request.resource.attr.title": { field: "title" },
+  "request.resource.attr.owner": {
+    relation: { name: "owner", type: "one", field: "id" },
+  },
+  "request.resource.attr.tags": {
+    relation: {
+      name: "tags",
+      type: "many",
+      fields: { name: { field: "name" } },
+    },
+  },
+};
 
-// Fetch the query plan from Cerbos passing in the principal
-// resource type and action
 const queryPlan = await cerbos.planResources({
-  principal: {....},
-  resource: { kind: "resourceKind" },
-  action: "view"
-})
-
-// Generate the mongoose filter from the query plan
-const result = queryPlanToMongoose({
-  queryPlan,
-  fieldNameMapper: {
-    "request.resource.attr.aFieldName": "mongooseModelFieldName"
-  }
+  principal: { id: "user1", roles: ["USER"] },
+  resource: { kind: "document" },
+  action: "view",
 });
 
-// The query plan says the user would always be denied
-// return empty or throw an error depending on your app.
-if(result.kind == PlanKind.ALWAYS_DENIED) {
-  return console.log([]);
+const result = queryPlanToMongoose({ queryPlan, mapper });
+
+if (result.kind === PlanKind.ALWAYS_DENIED) {
+  return [];
 }
 
-// Pass the filters in as where conditions
-// If you have prexisting where conditions, you can pass them in an $and clause
-const result = await MyModel.find({
-  ...result.filters
-});
-
-console.log(result)
+const filters = result.kind === PlanKind.CONDITIONAL ? result.filters : {};
+const records = await MyModel.find(filters);
 ```
 
-The `fieldNameMapper` is used to convert the field names in the query plan response to names of fields in the Mongoose model - this can be done as a map or a function:
+If you already have application-specific criteria you can combine them using `$and`:
 
-```js
-const filters = queryPlanToMongoose({
-  queryPlan,
-  fieldNameMapper: {
-    "request.resource.attr.aFieldName": "mongooseModelFieldName",
-  },
-});
-
-//or
-
-const filters = queryPlanToMongoose({
-  queryPlan,
-  fieldNameMapper: (fieldName: string): string => {
-    if (fieldName.indexOf("request.resource.") > 0) {
-      return fieldName.replace("request.resource.attr", "");
-    }
-
-    if (fieldName.indexOf("request.principal.") > 0) {
-      return fieldName.replace("request.principal.attr", "");
-    }
-  },
-});
+```ts
+const filters = result.kind === PlanKind.CONDITIONAL ? result.filters : {};
+await MyModel.find({ $and: [filters ?? {}, { archived: false }] });
 ```
+
+## Limitations
+
+- `exists_one` behaves like “at least one element matches” because counting matches requires an aggregation pipeline.
+- Operators not enumerated in the **Supported conditions** section (such as `search`, `mode`, scalar filters, atomic number operations, composite keys, etc.) are not implemented and will throw `Unsupported operator`.
