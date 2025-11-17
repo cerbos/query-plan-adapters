@@ -47,6 +47,9 @@ const isValue = (e: PlanExpressionOperand): e is PlanExpressionValue =>
 const isVariable = (e: PlanExpressionOperand): e is PlanExpressionVariable =>
   "name" in e;
 
+const escapeRegexValue = (value: string): string =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 /**
  * Converts a Cerbos query plan to a Mongoose filter
  */
@@ -377,12 +380,13 @@ const buildMongooseFilterFromCerbosExpression = (
         throw new Error(`${operator} operator requires string value`);
       }
 
+      const escapedValue = escapeRegexValue(right.value);
       const regexStr =
         operator === "contains"
-          ? right.value
+          ? escapedValue
           : operator === "startsWith"
-          ? `^${right.value}`
-          : `${right.value}$`;
+          ? `^${escapedValue}`
+          : `${escapedValue}$`;
 
       const { path, relation } = left;
       if (relation) {
