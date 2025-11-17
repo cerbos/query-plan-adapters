@@ -502,9 +502,6 @@ const buildMongooseFilterFromCerbosExpression = (
       if (relation.type !== "many") {
         throw new Error(`${operator} operator requires a collection relation`);
       }
-      if (relation.type !== "many") {
-        throw new Error(`${operator} operator requires a collection relation`);
-      }
 
       const lambdaCondition = buildMongooseFilterFromCerbosExpression(
         condition,
