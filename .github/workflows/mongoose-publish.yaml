@@ -1,4 +1,4 @@
-name: Publish Package
+name: Publish Mongoose Package
 
 on:
   push:
