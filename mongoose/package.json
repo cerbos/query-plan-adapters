@@ -19,6 +19,9 @@
     "test": "cerbos run --log-level=debug --set=storage.disk.directory=../policies --set=telemetry.disabled=true -- jest src/**.test.ts",
     "cerbos": "cerbos server --config=./cerbos-config.yaml"
   },
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "author": "Cerbos",
   "license": "Apache-2.0",
   "devDependencies": {
