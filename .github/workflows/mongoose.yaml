@@ -34,7 +34,7 @@ jobs:
           mongodb-version: ${{ matrix.mongodb-version }}
 
       - name: Test using Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node-version }}
 
