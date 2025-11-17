@@ -5,11 +5,11 @@
   "description": "",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/cerbos/cerbos-queryplan-helpers.git",
+    "url": "https://github.com/cerbos/query-plan-adapters",
     "directory": "packages/mongoose"
   },
   "bugs": {
-    "url": "https://github.com/cerbos/cerbos-queryplan-helpers/issues"
+    "url": "https://github.com/cerbos/query-plan-adapters/issues"
   },
   "author": "Cerbos <help@cerbos.dev> (https://cerbos.dev)",
   "license": "Apache-2.0",
