@@ -9,6 +9,7 @@ import {
 } from "@jest/globals";
 import {
   PlanExpression,
+  PlanExpressionOperand,
   PlanResourcesConditionalResponse,
   PlanResourcesResponse,
 } from "@cerbos/core";
@@ -17,6 +18,30 @@ import { GRPC as Cerbos } from "@cerbos/grpc";
 
 const prisma = new PrismaClient();
 const cerbos = new Cerbos("127.0.0.1:3593", { tls: false });
+
+function createConditionalPlan(
+  condition: PlanExpressionOperand
+): PlanResourcesConditionalResponse {
+  return {
+    kind: PlanKind.CONDITIONAL,
+    condition,
+    cerbosCallId: "",
+    requestId: "",
+    validationErrors: [],
+    metadata: undefined,
+  };
+}
+
+function getExpressionOperand(
+  expression: PlanExpression,
+  index: number
+): PlanExpressionOperand {
+  const operand = expression.operands[index];
+  if (!operand) {
+    throw new Error(`Missing operand at index ${index}`);
+  }
+  return operand;
+}
 
 const fixtureUsers: Prisma.UserCreateInput[] = [
   {
@@ -396,8 +421,8 @@ describe("Field Operations", () => {
         condition: {
           ...typeQp.condition,
           operands: [
-            (typeQp.condition as PlanExpression).operands[1],
-            (typeQp.condition as PlanExpression).operands[0],
+            getExpressionOperand(typeQp.condition as PlanExpression, 1),
+            getExpressionOperand(typeQp.condition as PlanExpression, 0),
           ],
         },
       };
@@ -943,16 +968,13 @@ describe("Collection Operations", () => {
     });
 
     test("conditional - in - scalar value", async () => {
-      const queryPlan: PlanResourcesConditionalResponse = {
-        kind: PlanKind.CONDITIONAL,
-        condition: {
-          operator: "in",
-          operands: [
-            { name: "request.resource.attr.aString" },
-            { value: "string" },
-          ],
-        },
-      };
+      const queryPlan = createConditionalPlan({
+        operator: "in",
+        operands: [
+          { name: "request.resource.attr.aString" },
+          { value: "string" },
+        ],
+      });
 
       const result = queryPlanToPrisma({
         queryPlan,
@@ -983,16 +1005,13 @@ describe("Collection Operations", () => {
     });
 
     test("conditional - relation in", async () => {
-      const queryPlan: PlanResourcesConditionalResponse = {
-        kind: PlanKind.CONDITIONAL,
-        condition: {
-          operator: "in",
-          operands: [
-            { name: "request.resource.attr.categories.name" },
-            { value: ["business"] },
-          ],
-        },
-      };
+      const queryPlan = createConditionalPlan({
+        operator: "in",
+        operands: [
+          { name: "request.resource.attr.categories.name" },
+          { value: ["business"] },
+        ],
+      });
 
       const result = queryPlanToPrisma({
         queryPlan,
@@ -1047,16 +1066,13 @@ describe("Collection Operations", () => {
     });
 
     test("conditional - relation in multiple values", async () => {
-      const queryPlan: PlanResourcesConditionalResponse = {
-        kind: PlanKind.CONDITIONAL,
-        condition: {
-          operator: "in",
-          operands: [
-            { name: "request.resource.attr.categories.name" },
-            { value: ["business", "development"] },
-          ],
-        },
-      };
+      const queryPlan = createConditionalPlan({
+        operator: "in",
+        operands: [
+          { name: "request.resource.attr.categories.name" },
+          { value: ["business", "development"] },
+        ],
+      });
 
       const result = queryPlanToPrisma({
         queryPlan,
@@ -1111,28 +1127,25 @@ describe("Collection Operations", () => {
     });
 
     test("conditional - except relation subset", async () => {
-      const queryPlan: PlanResourcesConditionalResponse = {
-        kind: PlanKind.CONDITIONAL,
-        condition: {
-          operator: "except",
-          operands: [
-            { name: "request.resource.attr.categories" },
-            {
-              operator: "lambda",
-              operands: [
-                {
-                  operator: "eq",
-                  operands: [
-                    { name: "cat.name" },
-                    { value: "business" },
-                  ],
-                },
-                { name: "cat" },
-              ],
-            },
-          ],
-        },
-      };
+      const queryPlan = createConditionalPlan({
+        operator: "except",
+        operands: [
+          { name: "request.resource.attr.categories" },
+          {
+            operator: "lambda",
+            operands: [
+              {
+                operator: "eq",
+                operands: [
+                  { name: "cat.name" },
+                  { value: "business" },
+                ],
+              },
+              { name: "cat" },
+            ],
+          },
+        ],
+      });
 
       const result = queryPlanToPrisma({
         queryPlan,
@@ -1189,40 +1202,37 @@ describe("Collection Operations", () => {
     });
 
     test("conditional - except nested relation subset", async () => {
-      const queryPlan: PlanResourcesConditionalResponse = {
-        kind: PlanKind.CONDITIONAL,
-        condition: {
-          operator: "except",
-          operands: [
-            { name: "request.resource.attr.categories" },
-            {
-              operator: "lambda",
-              operands: [
-                {
-                  operator: "exists",
-                  operands: [
-                    { name: "cat.subCategories" },
-                    {
-                      operator: "lambda",
-                      operands: [
-                        {
-                          operator: "eq",
-                          operands: [
-                            { name: "sub.name" },
-                            { value: "finance" },
-                          ],
-                        },
-                        { name: "sub" },
-                      ],
-                    },
-                  ],
-                },
-                { name: "cat" },
-              ],
-            },
-          ],
-        },
-      };
+      const queryPlan = createConditionalPlan({
+        operator: "except",
+        operands: [
+          { name: "request.resource.attr.categories" },
+          {
+            operator: "lambda",
+            operands: [
+              {
+                operator: "exists",
+                operands: [
+                  { name: "cat.subCategories" },
+                  {
+                    operator: "lambda",
+                    operands: [
+                      {
+                        operator: "eq",
+                        operands: [
+                          { name: "sub.name" },
+                          { value: "finance" },
+                        ],
+                      },
+                      { name: "sub" },
+                    ],
+                  },
+                ],
+              },
+              { name: "cat" },
+            ],
+          },
+        ],
+      });
 
       const result = queryPlanToPrisma({
         queryPlan,

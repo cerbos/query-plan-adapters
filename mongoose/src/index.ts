@@ -16,17 +16,6 @@ type FieldMapper =
     }
   | ((key: string) => string);
 
-type Relation = {
-  relation: string;
-  field: string;
-};
-
-type RelationMapper =
-  | {
-      [key: string]: Relation;
-    }
-  | ((key: string) => Relation);
-
 interface QueryPlanToPrismaArgs {
   queryPlan: PlanResourcesResponse;
   fieldNameMapper: FieldMapper;
@@ -77,10 +66,6 @@ function isExpression(e: PlanExpressionOperand): e is PlanExpression {
 
 function isValue(e: PlanExpressionOperand): e is PlanExpressionValue {
   return (e as any).value !== undefined;
-}
-
-function isVariable(e: PlanExpressionOperand): e is PlanExpressionVariable {
-  return (e as any).variable !== undefined;
 }
 
 function getOperandVariable(operands: PlanExpressionOperand[]) {
