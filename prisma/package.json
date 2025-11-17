@@ -1,31 +1,42 @@
 {
   "name": "@cerbos/orm-prisma",
-  "version": "2.0.2",
+  "version": "3.0.0",
   "homepage": "https://cerbos.dev",
   "description": "Prisma adapter for Cerbos query plans",
-  "private": false,
-  "main": "./lib/cjs/index.js",
-  "module": "./lib/esm/index.js",
-  "types": "./lib/types/index.d.ts",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cerbos/cerbos-queryplan-helpers.git",
+    "directory": "packages/prisma"
+  },
+  "bugs": {
+    "url": "https://github.com/cerbos/cerbos-queryplan-helpers/issues"
+  },
+  "author": "Cerbos <help@cerbos.dev> (https://cerbos.dev)",
+  "license": "Apache-2.0",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
   "exports": {
     ".": {
-      "require": "./lib/cjs/index.js",
-      "import": "./lib/esm/index.js",
-      "types": "./lib/types/index.d.ts"
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
     }
   },
   "files": [
-    "lib",
+    "lib/**/*.d.ts",
+    "lib/**/*.d.ts.map",
+    "lib/**/*.js",
+    "lib/**/*.js.map",
+    "src/**/*.ts",
     "README.md",
     "LICENSE"
   ],
-  "sideEffects": false,
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "scripts": {
     "clean": "rimraf lib",
-    "build": "npm run clean && npm run build:types && npm run build:cjs && npm run build:esm",
-    "build:types": "tsc -p tsconfig.types.json",
-    "build:cjs": "tsc -p tsconfig.cjs.json",
-    "build:esm": "tsc -p tsconfig.esm.json",
+    "build": "tsc --build",
     "prepare": "npm run build",
     "prepublishOnly": "npm test",
     "version": "git add -A src",
@@ -33,10 +44,8 @@
     "cerbos": "cerbos server --config=./cerbos-config.yaml"
   },
   "engines": {
-    "node": ">=14.0.0"
+    "node": ">=20.0.0"
   },
-  "author": "Cerbos",
-  "license": "Apache-2.0",
   "devDependencies": {
     "@prisma/client": "^6.4.1",
     "@types/jest": "^29.0.3",
@@ -54,10 +63,9 @@
   "dependencies": {
     "@cerbos/core": "^0.24.0",
     "@cerbos/grpc": "^0.23.0",
+    "@tsconfig/node20": "^20.1.7",
+    "@tsconfig/strictest": "^2.0.8",
     "tslib": "^2.8.1"
-  },
-  "publishConfig": {
-    "access": "public"
   },
   "keywords": [
     "cerbos",

@@ -155,15 +155,17 @@ test("conditional - eq - inverted order", async () => {
     action: "equal",
   });
   const typeQp = queryPlan as PlanResourcesConditionalResponse;
+  const expression = typeQp.condition as PlanExpression;
+  const [firstOperand, secondOperand] = expression.operands;
+  if (!firstOperand || !secondOperand) {
+    throw new Error("Expected plan expression to have at least two operands");
+  }
 
   const invertedQueryPlan: PlanResourcesConditionalResponse = {
     ...typeQp,
     condition: {
-      ...typeQp.condition,
-      operands: [
-        (typeQp.condition as PlanExpression).operands[1],
-        (typeQp.condition as PlanExpression).operands[0],
-      ],
+      ...expression,
+      operands: [secondOperand, firstOperand],
     },
   };
 
