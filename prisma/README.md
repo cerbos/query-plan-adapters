@@ -33,6 +33,12 @@ An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanRe
 - `@cerbos/http` or `@cerbos/grpc` client
 - Prisma > v6.0
 
+## System Requirements
+
+- Node.js >= 20.0.
+- Prisma CLI & Client >= 6.0
+- A database supported by Prisma (SQLite/PostgreSQL/MySQL/etc.) so the Prisma client can communicate with stored data
+
 ## Installation
 
 ```bash

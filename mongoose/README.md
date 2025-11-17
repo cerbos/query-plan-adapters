@@ -22,6 +22,12 @@ Not Supported:
 - Cerbos > v0.16
 - `@cerbos/http` or `@cerbos/grpc` client
 
+## System Requirements
+
+- Node.js >= 20.0.0
+- Mongoose 8.x
+- A MongoDB-compatible server (MongoDB 5.0+ is recommended for compatibility with Mongoose 8)
+
 ## Usage
 
 ```
