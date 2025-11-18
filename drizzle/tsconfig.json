@@ -1,9 +1,13 @@
 {
-  "extends": "./tsconfig.types.json",
+  "extends": ["@tsconfig/node20", "@tsconfig/strictest"],
+  "include": ["src"],
   "compilerOptions": {
-    "noEmit": true,
-    "types": ["jest", "node"]
-  },
-  "include": ["src/**/*", "jest.config.js"],
-  "exclude": ["lib"]
+    "checkJs": true,
+    "composite": true,
+    "exactOptionalPropertyTypes": false,
+    "outDir": "lib",
+    "rootDir": "src",
+    "declarationMap": true,
+    "sourceMap": true
+  }
 }
