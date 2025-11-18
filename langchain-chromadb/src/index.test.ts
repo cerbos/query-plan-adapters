@@ -1,10 +1,11 @@
 import { GRPC as Cerbos } from "@cerbos/grpc";
-import { Collection, ChromaClient } from "chromadb";
+import { ChromaClient } from "chromadb";
+import type { Collection, Metadata, Where } from "chromadb";
 import { queryPlanToChromaDB, PlanKind } from ".";
 
 const cerbos = new Cerbos("127.0.0.1:3593", { tls: false });
 const chroma = new ChromaClient({
-  path: process.env.CHROMA_URL || "http://127.0.0.1:8000",
+  path: process.env["CHROMA_URL"] ?? "http://127.0.0.1:8000",
 });
 
 const collectionName = "adapter-tests";
@@ -44,6 +45,8 @@ const fixtureResources: ResourceMetadata[] = [
   },
 ];
 
+const fixtureMetadatas = fixtureResources as unknown as Metadata[];
+
 let collection: Collection;
 
 beforeAll(async () => {
@@ -63,7 +66,7 @@ beforeAll(async () => {
   await collection.add({
     ids: fixtureResources.map((r) => r.key),
     embeddings: fixtureResources.map(() => baseEmbedding),
-    metadatas: fixtureResources,
+    metadatas: fixtureMetadatas,
     documents: fixtureResources.map((r) => r.aString),
   });
 });
@@ -75,9 +78,8 @@ afterAll(async () => {
 async function queryResourceIds(where?: Record<string, unknown>): Promise<string[]> {
   const results = await collection.query({
     queryEmbeddings: [baseEmbedding],
-    where,
+    where: where as Where | undefined,
     nResults: fixtureResources.length,
-    include: ["ids"],
   });
 
   return (results.ids?.[0] ?? []) as string[];

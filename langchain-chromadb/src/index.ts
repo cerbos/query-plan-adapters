@@ -75,7 +75,7 @@ function isVariable(e: PlanExpressionOperand): e is PlanExpressionVariable {
 }
 
 function getOperandVariable(operands: PlanExpressionOperand[]) {
-  const op = operands.find((o) => o.hasOwnProperty("name"));
+  const op = operands.find((o) => isVariable(o));
   if (!op) return;
   return (op as PlanExpressionVariable).name;
 }
@@ -117,8 +117,8 @@ const OPERATORS: {
 function mapOperand(
   operand: PlanExpressionOperand,
   getFieldName: (key: string) => string,
-  output: any = {}
-): any {
+  output: Record<string, unknown> = {}
+): Record<string, unknown> {
   if (!isExpression(operand))
     throw Error(
       `Query plan did not contain an expression for operand ${operand}`
@@ -160,31 +160,39 @@ function mapOperand(
 
   const opValue = getOperandValue(operands);
   const fieldName = getFieldName(opVariable);
+  if (!fieldName) throw Error("Field name is required");
 
-  const fieldPath = fieldName.split(".");
-  if (fieldPath.length > 1) {
-    output[fieldPath[0]] = convertPathToJSON(fieldPath.splice(1), {
+  const [firstSegment, ...rest] = fieldName.split(".");
+  if (!firstSegment) throw Error("Invalid field name");
+
+  if (rest.length > 0) {
+    output[firstSegment] = convertPathToJSON(rest, {
       [operation.fieldCondition]: opValue,
     });
   } else {
-    output[fieldPath[0]] = {
+    output[firstSegment] = {
       [operation.fieldCondition]: opValue,
     };
   }
   return output;
 }
 
-function convertPathToJSON(segments: string[], value: any): Object {
-  const result = {};
+function convertPathToJSON(
+  segments: string[],
+  value: Record<string, unknown>
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
 
-  let current: Record<string, any> = result;
+  let current: Record<string, unknown> = result;
   for (let i = 0; i < segments.length; i++) {
     const segment = segments[i];
+    if (!segment) throw Error("Invalid field path segment");
     if (i === segments.length - 1) {
       current[segment] = value;
     } else {
-      current[segment] = {};
-      current = current[segment];
+      const next: Record<string, unknown> = {};
+      current[segment] = next;
+      current = next;
     }
   }
 

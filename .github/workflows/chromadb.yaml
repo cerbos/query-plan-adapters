@@ -3,22 +3,21 @@ name: ChromaDB Test
 on:
   pull_request:
     paths:
-      - "langchain-js-chromadb/**"
+      - "langchain-chromadb/**"
       - "policies/**"
   push:
     tags:
-      - langchain-js-chromadb/v*
-
+      - langchain-chromadb/v*
 defaults:
   run:
-    working-directory: langchain-js-chromadb
+    working-directory: langchain-chromadb
 
 jobs:
   test:
     strategy:
       matrix:
         cerbos-version: ["latest"]
-        node-version: ["18", "20"]
+        node-version: ["20", "22", "24", "25"]
         chroma-image: ["ghcr.io/chroma-core/chroma:latest"]
     runs-on: ubuntu-latest
     steps:

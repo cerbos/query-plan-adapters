@@ -1,0 +1,64 @@
+{
+  "name": "@cerbos/langchain-chromadb",
+  "version": "0.0.1",
+  "homepage": "https://cerbos.dev",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cerbos/query-plan-adapters",
+    "directory": "packages/langchain-chromadb"
+  },
+  "bugs": {
+    "url": "https://github.com/cerbos/query-plan-adapters/issues"
+  },
+  "author": "Cerbos <help@cerbos.dev> (https://cerbos.dev)",
+  "license": "Apache-2.0",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    }
+  },
+  "files": [
+    "lib/**/*.d.ts",
+    "lib/**/*.d.ts.map",
+    "lib/**/*.js",
+    "lib/**/*.js.map",
+    "src/**/*.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "prepare": "npm run build",
+    "preversion": "npm run lint",
+    "version": "git add -A src",
+    "postversion": "git push && git push --tags",
+    "test": "start-server-and-test chroma http://127.0.0.1:8234 test:cerbos",
+    "test:cerbos": "cross-env CHROMA_URL=http://127.0.0.1:8234 cerbos run --log-level=error --set=storage.disk.directory=../policies --set=telemetry.disabled=true -- jest src/**.test.ts",
+    "cerbos": "cerbos server --config=./cerbos-config.yaml",
+    "chroma": "mkdir -p ./.chromadb && chroma run --path ./.chromadb --host 127.0.0.1 --port 8234"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.0.3",
+    "@types/node": "^20.0.0",
+    "@types/uuid": "^10.0.0",
+    "cross-env": "^7.0.3",
+    "start-server-and-test": "^2.0.3",
+    "ts-jest": "^29.0.0",
+    "ts-node": "^10.4.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "@cerbos/core": "^0.18.0",
+    "@cerbos/grpc": "^0.18.0",
+    "@tsconfig/node20": "^20.1.8",
+    "@tsconfig/strictest": "^2.0.8",
+    "chromadb": "^3.1.5"
+  }
+}
