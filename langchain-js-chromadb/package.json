@@ -29,6 +29,7 @@
   },
   "dependencies": {
     "@cerbos/core": "^0.18.0",
-    "@cerbos/grpc": "^0.18.0"
+    "@cerbos/grpc": "^0.18.0",
+    "chromadb": "^3.1.5"
   }
 }

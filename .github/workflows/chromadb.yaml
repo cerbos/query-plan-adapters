@@ -1,0 +1,52 @@
+name: ChromaDB Test
+
+on:
+  pull_request:
+    paths:
+      - "langchain-js-chromadb/**"
+      - "policies/**"
+  push:
+    tags:
+      - langchain-js-chromadb/v*
+
+defaults:
+  run:
+    working-directory: langchain-js-chromadb
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        cerbos-version: ["latest"]
+        node-version: ["18", "20"]
+        chroma-image: ["ghcr.io/chroma-core/chroma:latest"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Cerbos
+        uses: cerbos/cerbos-setup-action@v1
+        with:
+          version: ${{ matrix.cerbos-version }}
+
+      - name: Start ChromaDB
+        run: |
+          docker run -d --name chromadb -p 8000:8000 ${{ matrix.chroma-image }}
+          for _ in {1..30}; do
+            if curl -sf http://127.0.0.1:8000/api/v2/heartbeat > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "ChromaDB failed to start" >&2
+          exit 1
+
+      - name: Test using Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - run: npm install
+      - run: npm run test
+        env:
+          CHROMA_URL: http://127.0.0.1:8000
