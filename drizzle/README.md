@@ -8,8 +8,19 @@ An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanRe
 - Supports comparison operators: `eq`, `ne`, `lt`, `gt`, `le`, `ge`, `in`
 - Supports string operators: `contains`, `startsWith`, `endsWith`
 - Supports nullability checks via the `isSet` operator
+- Supports set-aware operators such as `hasIntersection`, `exists`, `exists_one`, and `all`
 - Supports relation-aware mappings, including nested relations and many-to-many joins
 - Works with Drizzle SQLite, PostgreSQL, MySQL and PlanetScale drivers
+
+## How it works
+
+Cerbos can respond to a `PlanResources` request with one of three plan kinds. The adapter mirrors that API:
+
+- `PlanKind.ALWAYS_ALLOWED`: The user can access the resource without any extra filtering.
+- `PlanKind.ALWAYS_DENIED`: The user cannot access the resource at all.
+- `PlanKind.CONDITIONAL`: Cerbos returns an expression tree that must be applied when reading data. The adapter converts this expression into a Drizzle SQL filter.
+
+`queryPlanToDrizzle` walks the Cerbos expression, resolves every attribute reference through the mapper, and produces a Drizzle `SQL` fragment. That fragment can then be composed with the rest of your query builder chain (`db.select().from(table).where(result.filter)`).
 
 ## Installation
 
@@ -46,6 +57,29 @@ if (result.kind === PlanKind.CONDITIONAL) {
 }
 ```
 
+### Handling different plan kinds
+
+```ts
+const evaluation = queryPlanToDrizzle({ queryPlan: plan, mapper });
+
+switch (evaluation.kind) {
+  case PlanKind.ALWAYS_ALLOWED:
+    // run the query without extra filters
+    break;
+  case PlanKind.ALWAYS_DENIED:
+    // return an empty result immediately
+    break;
+  case PlanKind.CONDITIONAL:
+    const rows = await db
+      .select()
+      .from(resources)
+      .where(evaluation.filter);
+    break;
+}
+```
+
+Cerbos plans reference both resources (`request.resource.attr.*`) and principals (`request.principal.attr.*`), so include the paths your policies emit in the mapper.
+
 ### Mapper options
 
 The mapper associates Cerbos attribute references with Drizzle columns. It can be:
@@ -68,6 +102,19 @@ const result = queryPlanToDrizzle({
   },
 });
 ```
+
+### Attribute references and functions
+
+- Plain values: map `request.resource.attr.field` to a column (`resources.field`).
+- Nested attributes: map longer paths such as `request.resource.attr.owner.email`.
+- Principal attributes: map `request.principal.attr.role` or similar paths when policies check the caller.
+- Dynamic resolution: pass a mapper function `(reference) => ...` to compute mappings at runtime.
+
+Every mapper entry can be:
+
+- A column or SQL fragment.
+- An object with `column` and/or `transform` to customize how each operator is translated.
+- A relation mapping (described below) for nested resource structures.
 
 ### Mapping relations
 
@@ -114,6 +161,12 @@ const result = queryPlanToDrizzle({
 
 With the above mapper, query plan references such as `request.resource.attr.owner.email` and `request.resource.attr.tags.name`
 are translated into `EXISTS` expressions that join the `owners` and `tags` tables respectively.
+
+### Working with collections
+
+- `hasIntersection`: Use for multi-valued attributes such as tags. When Cerbos emits `hasIntersection(map(resource.tags, lambda t => t.name), ["tag"])`, the mapper looks up the nested field and the adapter converts it into a `column IN (...)` condition.
+- `exists`, `exists_one`, and `all`: When policies reference array attributes (e.g., `request.resource.attr.tags`), mark the mapper entry as a relation. The adapter scopes the lambda variable, generates the `EXISTS` subquery, and correlates it with the parent table automatically.
+- `filter`: Cerbos uses `filter` during plan construction. The adapter discards those lambdas because the entire filter is rerun in Drizzle land.
 
 ## Testing
 
