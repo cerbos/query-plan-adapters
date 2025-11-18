@@ -17,8 +17,8 @@ jobs:
     strategy:
       matrix:
         cerbos-version: ["latest"]
-        mongodb-version: ["4.4", "5.0", "6.0", "7.0", "8.0"]
-        node-version: ["18", "20", "22"]
+        mongodb-version: ["7.0", "8.0"]
+        node-version: ["20", "22", "24", "25"]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -29,12 +29,12 @@ jobs:
           version: ${{ matrix.cerbos-version }}
 
       - name: Start MongoDB
-        uses: supercharge/mongodb-github-action@1.12.0
+        uses: supercharge/mongodb-github-action@1.12.1
         with:
           mongodb-version: ${{ matrix.mongodb-version }}
 
       - name: Test using Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node-version }}
 

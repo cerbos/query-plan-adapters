@@ -9,6 +9,7 @@ import {
 } from "@jest/globals";
 import {
   PlanExpression,
+  PlanExpressionOperand,
   PlanResourcesConditionalResponse,
   PlanResourcesResponse,
 } from "@cerbos/core";
@@ -17,6 +18,30 @@ import { GRPC as Cerbos } from "@cerbos/grpc";
 
 const prisma = new PrismaClient();
 const cerbos = new Cerbos("127.0.0.1:3593", { tls: false });
+
+function createConditionalPlan(
+  condition: PlanExpressionOperand
+): PlanResourcesConditionalResponse {
+  return {
+    kind: PlanKind.CONDITIONAL,
+    condition,
+    cerbosCallId: "",
+    requestId: "",
+    validationErrors: [],
+    metadata: undefined,
+  };
+}
+
+function getExpressionOperand(
+  expression: PlanExpression,
+  index: number
+): PlanExpressionOperand {
+  const operand = expression.operands[index];
+  if (!operand) {
+    throw new Error(`Missing operand at index ${index}`);
+  }
+  return operand;
+}
 
 const fixtureUsers: Prisma.UserCreateInput[] = [
   {
@@ -396,8 +421,8 @@ describe("Field Operations", () => {
         condition: {
           ...typeQp.condition,
           operands: [
-            (typeQp.condition as PlanExpression).operands[1],
-            (typeQp.condition as PlanExpression).operands[0],
+            getExpressionOperand(typeQp.condition as PlanExpression, 1),
+            getExpressionOperand(typeQp.condition as PlanExpression, 0),
           ],
         },
       };
@@ -939,6 +964,350 @@ describe("Collection Operations", () => {
             return ["string", "anotherString"].includes(r.aString);
           })
           .map((r) => r.id)
+      );
+    });
+
+    test("conditional - in - scalar value", async () => {
+      const queryPlan = createConditionalPlan({
+        operator: "in",
+        operands: [
+          { name: "request.resource.attr.aString" },
+          { value: "string" },
+        ],
+      });
+
+      const result = queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.aString": { field: "aString" },
+        },
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: { aString: "string" },
+      });
+
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
+
+      const query = await prisma.resource.findMany({
+        where: { ...result.filters },
+      });
+
+      expect(query.map((r) => r.id).sort()).toEqual(
+        fixtureResources
+          .filter((r) => r.aString === "string")
+          .map((r) => r.id)
+          .sort()
+      );
+    });
+
+    test("conditional - relation in", async () => {
+      const queryPlan = createConditionalPlan({
+        operator: "in",
+        operands: [
+          { name: "request.resource.attr.categories.name" },
+          { value: ["business"] },
+        ],
+      });
+
+      const result = queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.categories": {
+            relation: {
+              name: "categories",
+              type: "many",
+              fields: {
+                name: { field: "name" },
+              },
+            },
+          },
+        },
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          categories: {
+            some: {
+              name: "business",
+            },
+          },
+        },
+      });
+
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
+
+      const query = await prisma.resource.findMany({
+        where: { ...result.filters },
+      });
+
+      expect(query.map((r) => r.id).sort()).toEqual(
+        fixtureResources
+          .filter((resource) => {
+            const categoryRefs =
+              (resource.categories?.connect as Prisma.CategoryWhereUniqueInput[]) ??
+              [];
+            return categoryRefs.some((categoryRef) => {
+              const category = fixtureCategories.find(
+                (fc) => fc.id === categoryRef.id
+              );
+              return category?.name === "business";
+            });
+          })
+          .map((r) => r.id)
+          .sort()
+      );
+    });
+
+    test("conditional - relation in multiple values", async () => {
+      const queryPlan = createConditionalPlan({
+        operator: "in",
+        operands: [
+          { name: "request.resource.attr.categories.name" },
+          { value: ["business", "development"] },
+        ],
+      });
+
+      const result = queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.categories": {
+            relation: {
+              name: "categories",
+              type: "many",
+              fields: {
+                name: { field: "name" },
+              },
+            },
+          },
+        },
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          categories: {
+            some: {
+              name: { in: ["business", "development"] },
+            },
+          },
+        },
+      });
+
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
+
+      const query = await prisma.resource.findMany({
+        where: { ...result.filters },
+      });
+
+      expect(query.map((r) => r.id).sort()).toEqual(
+        fixtureResources
+          .filter((resource) => {
+            const categoryRefs =
+              (resource.categories?.connect as Prisma.CategoryWhereUniqueInput[]) ??
+              [];
+            return categoryRefs.some((categoryRef) => {
+              const category = fixtureCategories.find(
+                (fc) => fc.id === categoryRef.id
+              );
+              return ["business", "development"].includes(category?.name ?? "");
+            });
+          })
+          .map((r) => r.id)
+          .sort()
+      );
+    });
+
+    test("conditional - except relation subset", async () => {
+      const queryPlan = createConditionalPlan({
+        operator: "except",
+        operands: [
+          { name: "request.resource.attr.categories" },
+          {
+            operator: "lambda",
+            operands: [
+              {
+                operator: "eq",
+                operands: [
+                  { name: "cat.name" },
+                  { value: "business" },
+                ],
+              },
+              { name: "cat" },
+            ],
+          },
+        ],
+      });
+
+      const result = queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.categories": {
+            relation: {
+              name: "categories",
+              type: "many",
+              fields: {
+                name: { field: "name" },
+              },
+            },
+          },
+        },
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          categories: {
+            some: {
+              NOT: {
+                name: { equals: "business" },
+              },
+            },
+          },
+        },
+      });
+
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
+
+      const query = await prisma.resource.findMany({
+        where: { ...result.filters },
+      });
+
+      expect(query.map((r) => r.id).sort()).toEqual(
+        fixtureResources
+          .filter((resource) => {
+            const categoryRefs =
+              (resource.categories?.connect as Prisma.CategoryWhereUniqueInput[]) ??
+              [];
+            return categoryRefs.some((categoryRef) => {
+              const category = fixtureCategories.find(
+                (fc) => fc.id === categoryRef.id
+              );
+              return category?.name !== "business";
+            });
+          })
+          .map((r) => r.id)
+          .sort()
+      );
+    });
+
+    test("conditional - except nested relation subset", async () => {
+      const queryPlan = createConditionalPlan({
+        operator: "except",
+        operands: [
+          { name: "request.resource.attr.categories" },
+          {
+            operator: "lambda",
+            operands: [
+              {
+                operator: "exists",
+                operands: [
+                  { name: "cat.subCategories" },
+                  {
+                    operator: "lambda",
+                    operands: [
+                      {
+                        operator: "eq",
+                        operands: [
+                          { name: "sub.name" },
+                          { value: "finance" },
+                        ],
+                      },
+                      { name: "sub" },
+                    ],
+                  },
+                ],
+              },
+              { name: "cat" },
+            ],
+          },
+        ],
+      });
+
+      const result = queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.categories": {
+            relation: {
+              name: "categories",
+              type: "many",
+              fields: {
+                subCategories: {
+                  relation: {
+                    name: "subCategories",
+                    type: "many",
+                    fields: {
+                      name: { field: "name" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          categories: {
+            some: {
+              NOT: {
+                subCategories: {
+                  some: {
+                    name: { equals: "finance" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
+
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
+
+      const query = await prisma.resource.findMany({
+        where: { ...result.filters },
+      });
+
+      expect(query.map((r) => r.id).sort()).toEqual(
+        fixtureResources
+          .filter((resource) => {
+            const categoryRefs =
+              (resource.categories?.connect as Prisma.CategoryWhereUniqueInput[]) ??
+              [];
+            return categoryRefs.some((categoryRef) => {
+              const category = fixtureCategories.find(
+                (fc) => fc.id === categoryRef.id
+              );
+              if (!category) {
+                return false;
+              }
+              const subCategoryRefs =
+                (category.subCategories?.connect as Prisma.SubCategoryWhereUniqueInput[]) ??
+                [];
+              return !subCategoryRefs.some((subCategoryRef) => {
+                const subCategory = fixtureSubCategories.find(
+                  (fsc) => fsc.id === subCategoryRef.id
+                );
+                return subCategory?.name === "finance";
+              });
+            });
+          })
+          .map((r) => r.id)
+          .sort()
       );
     });
 
@@ -1880,7 +2249,19 @@ describe("Relations", () => {
           include: { tags: true },
         });
 
-        expect(query.map((r) => r.id)).toEqual(["resource1", "resource3"]);
+        const expectedIds = fixtureResources
+          .filter((resource) => {
+            const tagRefs =
+              (resource.tags?.connect as Prisma.TagWhereUniqueInput[]) ?? [];
+            return tagRefs.some((tagRef) => {
+              const tag = fixtureTags.find((ft) => ft.id === tagRef.id);
+              return tag?.name === "public";
+            });
+          })
+          .map((r) => r.id)
+          .sort();
+
+        expect(query.map((r) => r.id).sort()).toEqual(expectedIds);
       });
 
       test("conditional - has-no-tag", async () => {
@@ -1941,7 +2322,19 @@ describe("Relations", () => {
           include: { tags: true },
         });
 
-        expect(query.map((r) => r.id)).toEqual(["resource1", "resource3"]);
+        const expectedIds = fixtureResources
+          .filter((resource) => {
+            const tagRefs =
+              (resource.tags?.connect as Prisma.TagWhereUniqueInput[]) ?? [];
+            return tagRefs.every((tagRef) => {
+              const tag = fixtureTags.find((ft) => ft.id === tagRef.id);
+              return tag?.name !== "private";
+            });
+          })
+          .map((r) => r.id)
+          .sort();
+
+        expect(query.map((r) => r.id).sort()).toEqual(expectedIds);
       });
 
       test("conditional - has-intersection", async () => {
@@ -1995,8 +2388,19 @@ describe("Relations", () => {
           where: { ...result.filters },
         });
 
-        // Should return resources that have either "public" or "draft" tags
-        expect(query.map((r) => r.id)).toEqual(["resource1", "resource3"]);
+        const expectedIds = fixtureResources
+          .filter((resource) => {
+            const tagRefs =
+              (resource.tags?.connect as Prisma.TagWhereUniqueInput[]) ?? [];
+            return tagRefs.some((tagRef) => {
+              const tag = fixtureTags.find((ft) => ft.id === tagRef.id);
+              return ["public", "draft"].includes(tag?.name ?? "");
+            });
+          })
+          .map((r) => r.id)
+          .sort();
+
+        expect(query.map((r) => r.id).sort()).toEqual(expectedIds);
       });
 
       test("conditional - hasIntersection with direct value", async () => {
