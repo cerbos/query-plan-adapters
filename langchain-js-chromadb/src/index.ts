@@ -1,11 +1,66 @@
 import {
-  PlanResourcesResponse,
-  PlanExpressionOperand,
   PlanExpression,
+  PlanExpressionOperand,
   PlanExpressionValue,
   PlanExpressionVariable,
-  PlanKind,
+  PlanKind as PK,
+  PlanResourcesResponse,
 } from "@cerbos/core";
+
+export type PlanKind = PK;
+export const PlanKind = PK;
+
+type FieldMapper =
+  | {
+      [key: string]: string;
+    }
+  | ((key: string) => string);
+
+interface QueryPlanToChromaDBArgs {
+  queryPlan: PlanResourcesResponse;
+  fieldNameMapper: FieldMapper;
+}
+
+interface QueryPlanToChromaDBResult {
+  kind: PlanKind;
+  filters?: Record<string, unknown>;
+}
+
+export function queryPlanToChromaDB({
+  queryPlan,
+  fieldNameMapper,
+}: QueryPlanToChromaDBArgs): QueryPlanToChromaDBResult {
+  const toFieldName = (key: string) => {
+    if (typeof fieldNameMapper === "function") {
+      return fieldNameMapper(key);
+    }
+
+    if (fieldNameMapper[key]) {
+      return fieldNameMapper[key];
+    }
+
+    return key;
+  };
+
+  switch (queryPlan.kind) {
+    case PlanKind.ALWAYS_ALLOWED:
+      return {
+        kind: PlanKind.ALWAYS_ALLOWED,
+        filters: {},
+      };
+    case PlanKind.ALWAYS_DENIED:
+      return {
+        kind: PlanKind.ALWAYS_DENIED,
+      };
+    case PlanKind.CONDITIONAL:
+      return {
+        kind: PlanKind.CONDITIONAL,
+        filters: mapOperand(queryPlan.condition, toFieldName),
+      };
+    default:
+      throw Error(`Invalid query plan.`);
+  }
+}
 
 function isExpression(e: PlanExpressionOperand): e is PlanExpression {
   return (e as any).operator !== undefined;
@@ -59,7 +114,7 @@ const OPERATORS: {
   },
 };
 
-export function mapOperand(
+function mapOperand(
   operand: PlanExpressionOperand,
   getFieldName: (key: string) => string,
   output: any = {}
@@ -81,6 +136,18 @@ export function mapOperand(
   if (operator == "or") {
     if (operands.length < 2) throw Error("Expected atleast 2 operands");
     output["$or"] = operands.map((o) => mapOperand(o, getFieldName, {}));
+    return output;
+  }
+
+  if (operator == "not") {
+    if (operands.length > 1) throw Error("Expected only one operand");
+    if (Object.keys(output).length === 0) {
+      output["$nor"] = [
+        operands.map((o) => mapOperand(o, getFieldName, {}))[0],
+      ];
+    } else {
+      output["$not"] = operands.map((o) => mapOperand(o, getFieldName, {}))[0];
+    }
     return output;
   }
 
