@@ -287,6 +287,55 @@ const isExpressionOperand = (
 ): operand is { operator: string; operands: PlanExpressionOperand[] } =>
   "operator" in operand && Array.isArray((operand as any).operands);
 
+type NamedOperand = { name: string };
+
+const looksLikeLambdaVariable = (operand: NamedOperand): boolean =>
+  !operand.name.includes(".");
+
+const extractLambdaComponents = (
+  lambdaOperand: PlanExpressionOperand,
+  context: string
+): { variable: NamedOperand; expression: PlanExpressionOperand } => {
+  if (!isExpressionOperand(lambdaOperand) || lambdaOperand.operator !== "lambda") {
+    throw new Error(`${context} must be a lambda expression`);
+  }
+  if (lambdaOperand.operands.length !== 2) {
+    throw new Error("Lambda operand requires exactly two operands");
+  }
+  const [first, second] = lambdaOperand.operands;
+  if (!first || !second) {
+    throw new Error("Lambda operand is missing operands");
+  }
+
+  const firstIsName = isNameOperand(first);
+  const secondIsName = isNameOperand(second);
+  const firstNameOperand = firstIsName ? first : undefined;
+  const secondNameOperand = secondIsName ? second : undefined;
+
+  if (!firstNameOperand && !secondNameOperand) {
+    throw new Error("Lambda operand requires a variable operand");
+  }
+
+  if (firstNameOperand && !secondNameOperand) {
+    return { variable: firstNameOperand, expression: second };
+  }
+  if (!firstNameOperand && secondNameOperand) {
+    return { variable: secondNameOperand, expression: first };
+  }
+
+  const firstLooksLikeVariable = looksLikeLambdaVariable(firstNameOperand!);
+  const secondLooksLikeVariable = looksLikeLambdaVariable(secondNameOperand!);
+
+  if (firstLooksLikeVariable && !secondLooksLikeVariable) {
+    return { variable: firstNameOperand!, expression: second };
+  }
+  if (!firstLooksLikeVariable && secondLooksLikeVariable) {
+    return { variable: secondNameOperand!, expression: first };
+  }
+
+  return { variable: secondNameOperand!, expression: first };
+};
+
 const getMappingEntry = (reference: string, mapper: Mapper): MapperEntry | undefined =>
   typeof mapper === "function" ? mapper(reference) : mapper[reference];
 
@@ -556,20 +605,9 @@ const buildHasIntersectionFilter = (
     if (!isNameOperand(collectionOperand)) {
       throw new Error("Map collection operand must be a field reference");
     }
-    if (!isExpressionOperand(lambdaOperand) || lambdaOperand.operator !== "lambda") {
-      throw new Error("Map lambda operand must be a lambda expression");
-    }
-    if (lambdaOperand.operands.length !== 2) {
-      throw new Error("Lambda operand requires projection and variable");
-    }
-    const projectionOperand = lambdaOperand.operands[0];
-    const variableOperand = lambdaOperand.operands[1];
-    if (
-      !projectionOperand ||
-      !variableOperand ||
-      !isNameOperand(variableOperand) ||
-      !isNameOperand(projectionOperand)
-    ) {
+    const { variable: variableOperand, expression: projectionOperand } =
+      extractLambdaComponents(lambdaOperand, "Map lambda operand");
+    if (!isNameOperand(variableOperand) || !isNameOperand(projectionOperand)) {
       throw new Error("Invalid map lambda structure");
     }
 
@@ -644,21 +682,8 @@ const buildCollectionOperatorFilter = (
   if (!isNameOperand(collectionOperand)) {
     throw new Error("Collection operand must be a field reference");
   }
-  if (!isExpressionOperand(lambdaOperand) || lambdaOperand.operator !== "lambda") {
-    throw new Error("Lambda operand must be a lambda expression");
-  }
-
-  if (lambdaOperand.operands.length !== 2) {
-    throw new Error("Lambda operand requires a condition and variable");
-  }
-  const conditionOperand = lambdaOperand.operands[0];
-  const variableOperand = lambdaOperand.operands[1];
-  if (!conditionOperand) {
-    throw new Error("Lambda operand requires a condition");
-  }
-  if (!variableOperand) {
-    throw new Error("Lambda operand requires a variable");
-  }
+  const { variable: variableOperand, expression: conditionOperand } =
+    extractLambdaComponents(lambdaOperand, `'${operator}' lambda operand`);
   if (!isNameOperand(variableOperand)) {
     throw new Error("Lambda variable must have a name operand");
   }
