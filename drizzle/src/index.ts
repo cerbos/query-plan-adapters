@@ -209,6 +209,11 @@ const createScopedMapper = (
     );
   }
   const primaryRelation = relationChain[relationChain.length - 1];
+  if (!primaryRelation) {
+    throw new Error(
+      `Unable to resolve primary relation for reference: ${collectionReference}`
+    );
+  }
   const leadingRelations = relationChain.slice(0, -1);
 
   const scopedMapper: Mapper = (reference: string) => {
@@ -337,6 +342,11 @@ const resolveRelationField = (
   }
 
   const [segment, ...rest] = path;
+  if (segment === undefined) {
+    throw new Error(
+      `Invalid relation path for reference '${reference}': missing segment`
+    );
+  }
   const fields = relation.fields ?? {};
   const fieldEntry = fields[segment];
 
@@ -477,7 +487,7 @@ const applyComparison = (
 };
 
 function applyRelationComparison(
-  relationValue: RelationValue,
+  _relationValue: RelationValue,
   operator: ComparisonOperator
 ): SQL {
   switch (operator) {
@@ -511,7 +521,11 @@ const buildHasIntersectionFilter = (
     throw new Error("'hasIntersection' operator requires exactly two operands");
   }
 
-  const [leftOperand, rightOperand] = operands;
+  const leftOperand = operands[0];
+  const rightOperand = operands[1];
+  if (!leftOperand || !rightOperand) {
+    throw new Error("'hasIntersection' requires exactly two operands");
+  }
   const rightValues = extractArrayValue(rightOperand) ?? [];
 
   if (rightValues.length === 0) {
@@ -534,15 +548,28 @@ const buildHasIntersectionFilter = (
     if (leftOperand.operands.length !== 2) {
       throw new Error("'map' operator within hasIntersection requires two operands");
     }
-    const [collectionOperand, lambdaOperand] = leftOperand.operands;
+    const collectionOperand = leftOperand.operands[0];
+    const lambdaOperand = leftOperand.operands[1];
+    if (!collectionOperand || !lambdaOperand) {
+      throw new Error("Map expression is missing operands");
+    }
     if (!isNameOperand(collectionOperand)) {
       throw new Error("Map collection operand must be a field reference");
     }
     if (!isExpressionOperand(lambdaOperand) || lambdaOperand.operator !== "lambda") {
       throw new Error("Map lambda operand must be a lambda expression");
     }
-    const [projectionOperand, variableOperand] = lambdaOperand.operands;
-    if (!isNameOperand(variableOperand) || !isNameOperand(projectionOperand)) {
+    if (lambdaOperand.operands.length !== 2) {
+      throw new Error("Lambda operand requires projection and variable");
+    }
+    const projectionOperand = lambdaOperand.operands[0];
+    const variableOperand = lambdaOperand.operands[1];
+    if (
+      !projectionOperand ||
+      !variableOperand ||
+      !isNameOperand(variableOperand) ||
+      !isNameOperand(projectionOperand)
+    ) {
       throw new Error("Invalid map lambda structure");
     }
 
@@ -609,7 +636,11 @@ const buildCollectionOperatorFilter = (
     throw new Error(`'${operator}' operator requires exactly two operands`);
   }
 
-  const [collectionOperand, lambdaOperand] = operands;
+  const collectionOperand = operands[0];
+  const lambdaOperand = operands[1];
+  if (!collectionOperand || !lambdaOperand) {
+    throw new Error(`'${operator}' operator requires collection and lambda operands`);
+  }
   if (!isNameOperand(collectionOperand)) {
     throw new Error("Collection operand must be a field reference");
   }
@@ -617,7 +648,17 @@ const buildCollectionOperatorFilter = (
     throw new Error("Lambda operand must be a lambda expression");
   }
 
-  const [conditionOperand, variableOperand] = lambdaOperand.operands;
+  if (lambdaOperand.operands.length !== 2) {
+    throw new Error("Lambda operand requires a condition and variable");
+  }
+  const conditionOperand = lambdaOperand.operands[0];
+  const variableOperand = lambdaOperand.operands[1];
+  if (!conditionOperand) {
+    throw new Error("Lambda operand requires a condition");
+  }
+  if (!variableOperand) {
+    throw new Error("Lambda operand requires a variable");
+  }
   if (!isNameOperand(variableOperand)) {
     throw new Error("Lambda variable must have a name operand");
   }
@@ -632,13 +673,17 @@ const buildCollectionOperatorFilter = (
   if (relationChain.length === 0) {
     throw new Error(`'${operator}' operator requires a relation mapping`);
   }
+  const fallbackPrimaryRelation = relationChain[relationChain.length - 1];
+  if (!fallbackPrimaryRelation) {
+    throw new Error(`Unable to resolve primary relation for '${collectionOperand.name}'`);
+  }
 
   const metadata = (scopedMapper as Mapper & {
     [SCOPED_METADATA]?: ScopedMapperMetadata;
   })[SCOPED_METADATA];
-  const primaryRelation =
-    metadata?.primaryRelation ?? relationChain[relationChain.length - 1];
-  const leadingRelations =
+  const primaryRelation: RelationMapping =
+    metadata?.primaryRelation ?? fallbackPrimaryRelation;
+  const leadingRelations: RelationMapping[] =
     metadata?.leadingRelations ?? relationChain.slice(0, -1);
   const skipRelations = new Set<RelationMapping>([
     primaryRelation,
@@ -667,7 +712,7 @@ const buildCollectionOperatorFilter = (
 
   switch (operator) {
     case "filter":
-      return correlatedFilter;
+      return FALSE_CONDITION;
     case "exists":
       return correlatedFilter;
     case "all": {
@@ -703,9 +748,9 @@ const buildCollectionOperatorFilter = (
       }
       return combinedFilter;
     }
+    default:
+      throw new Error(`Unsupported collection operator: ${operator}`);
   }
-
-  throw new Error(`Unsupported collection operator: ${operator}`);
 };
 
 type BuildFilterOptions = {
@@ -754,7 +799,11 @@ const buildFilterFromExpression = (
       if (operands.length !== 1) {
         throw new Error("'not' operator requires exactly one operand");
       }
-      return not(buildFilterFromExpression(operands[0], mapper, options));
+      const operand = operands[0];
+      if (!operand) {
+        throw new Error("'not' operator is missing operand");
+      }
+      return not(buildFilterFromExpression(operand, mapper, options));
     }
     case "eq":
     case "ne":
