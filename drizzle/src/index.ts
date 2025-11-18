@@ -385,7 +385,7 @@ const resolveFieldReference = (
       return direct.resolve();
     }
     if (isMappingConfig(direct) && direct.relation) {
-        return resolveRelationField(direct.relation, [], reference, [], false);
+      return resolveRelationField(direct.relation, [], reference, [], false);
     }
     return { relations: [], mapping: direct };
   }
@@ -667,7 +667,7 @@ const buildCollectionOperatorFilter = (
 
   switch (operator) {
     case "filter":
-      return FALSE_CONDITION;
+      return correlatedFilter;
     case "exists":
       return correlatedFilter;
     case "all": {

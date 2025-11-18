@@ -1,5 +1,5 @@
 module.exports = {
-  preset: "ts-jest/presets/js-with-ts-esm",
+  preset: "ts-jest/presets/default-esm",
   testEnvironment: "node",
   testMatch: ["**/src/**/*.test.ts"],
   collectCoverage: true,
@@ -10,12 +10,12 @@ module.exports = {
     "^(\\.{1,2}/.*)\\.js$": "$1",
   },
   transform: {
-    "^.+\\.ts$": [
+    "^.+\\.[tj]sx?$": [
       "ts-jest",
       {
         useESM: true,
         tsconfig: "./tsconfig.json",
-      }
-    ]
+      },
+    ],
   },
 };
