@@ -37,7 +37,6 @@
   "scripts": {
     "build": "tsc --build",
     "prepare": "npm run build",
-    "preversion": "npm run lint",
     "version": "git add -A src",
     "postversion": "git push && git push --tags",
     "mongo": "docker run --rm -p 27017:27017 --name test-mongo -v ./data:/data/db mongo:latest",
