@@ -1,17 +1,13 @@
 {
-  "compilerOptions": {
-    "target": "ES2015",
-    "module": "ES2020",
-    "strict": true,
-    "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true,
-    "outDir": "./lib",
-    "declaration": true,
-    "moduleResolution": "node",
-    "types": [
-      "@types/jest"
-    ]
-  },
+  "extends": ["@tsconfig/node20", "@tsconfig/strictest"],
   "include": ["src"],
-  "exclude": ["**/*.test.ts"]
+  "compilerOptions": {
+    "checkJs": true,
+    "composite": true,
+    "exactOptionalPropertyTypes": false,
+    "outDir": "lib",
+    "rootDir": "src",
+    "declarationMap": true,
+    "sourceMap": true
+  }
 }

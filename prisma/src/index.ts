@@ -1,232 +1,954 @@
 import {
   PlanResourcesResponse,
   PlanExpressionOperand,
-  PlanExpression,
-  PlanExpressionValue,
-  PlanExpressionVariable,
-  PlanKind as PK,
+  PlanKind,
+  Value,
 } from "@cerbos/core";
 
-export type PlanKind = PK;
-export const PlanKind = PK;
+export { PlanKind };
 
-type FieldMapper =
-  | {
-      [key: string]: string;
-    }
-  | ((key: string) => string);
+// Type Definitions
+export type PrismaFilter = Record<string, any>;
 
-type Relation = {
-  relation: string;
-  field: string;
+export type MapperConfig = {
+  field?: string;
+  relation?: {
+    name: string;
+    type: "one" | "many";
+    field?: string;
+    fields?: Record<string, MapperConfig>;
+  };
 };
 
-type RelationMapper =
-  | {
-      [key: string]: Relation;
-    }
-  | ((key: string) => Relation);
+export type Mapper =
+  | Record<string, MapperConfig>
+  | ((key: string) => MapperConfig);
 
-interface QueryPlanToPrismaArgs {
+export interface QueryPlanToPrismaArgs {
   queryPlan: PlanResourcesResponse;
-  fieldNameMapper: FieldMapper;
-  relationMapper?: RelationMapper;
+  mapper?: Mapper;
 }
 
-interface QueryPlanToPrismaResult {
-  kind: PlanKind;
-  filters?: any;
+export type QueryPlanToPrismaResult =
+  | {
+      kind: PlanKind.ALWAYS_ALLOWED | PlanKind.ALWAYS_DENIED;
+    }
+  | {
+      kind: PlanKind.CONDITIONAL;
+      filters: PrismaFilter;
+    };
+
+// Type guards for operands
+interface NamedOperand {
+  name: string;
 }
 
+interface ValueOperand {
+  value: Value;
+}
+
+interface OperatorOperand {
+  operator: string;
+  operands: PlanExpressionOperand[];
+}
+
+function isNamedOperand(
+  operand: PlanExpressionOperand
+): operand is NamedOperand {
+  return "name" in operand && typeof operand.name === "string";
+}
+
+function isValueOperand(
+  operand: PlanExpressionOperand
+): operand is ValueOperand {
+  return "value" in operand && operand.value !== undefined;
+}
+
+function isOperatorOperand(
+  operand: PlanExpressionOperand
+): operand is OperatorOperand {
+  return (
+    "operator" in operand &&
+    typeof operand.operator === "string" &&
+    "operands" in operand &&
+    Array.isArray(operand.operands)
+  );
+}
+
+function assertDefined<T>(value: T | undefined, message: string): T {
+  if (value === undefined) {
+    throw new Error(message);
+  }
+  return value;
+}
+
+function getLeafField(path: string[]): string {
+  const fieldName = path[path.length - 1];
+  if (!fieldName) {
+    throw new Error("Field path cannot be empty");
+  }
+  return fieldName;
+}
+
+function getFilterEntry(filter: Record<string, unknown>): [string, unknown] {
+  const entry = Object.entries(filter)[0];
+  if (!entry) {
+    throw new Error("Filter must contain at least one entry");
+  }
+  return entry;
+}
+
+// Field reference resolution types
+type RelationConfig = {
+  name: string;
+  type: "one" | "many";
+  field?: string;
+  nestedMapper?: Record<string, MapperConfig>;
+};
+
+type ResolvedFieldReference = {
+  path: string[];
+  relations?: RelationConfig[];
+};
+
+type ResolvedValue = {
+  value: any;
+};
+
+type ResolvedOperand = ResolvedFieldReference | ResolvedValue;
+
+function isResolvedFieldReference(
+  operand: ResolvedOperand
+): operand is ResolvedFieldReference {
+  return "path" in operand;
+}
+
+function isResolvedValue(operand: ResolvedOperand): operand is ResolvedValue {
+  return "value" in operand;
+}
+
+/**
+ * Converts a Cerbos query plan to a Prisma filter.
+ */
 export function queryPlanToPrisma({
   queryPlan,
-  fieldNameMapper,
-  relationMapper = {},
+  mapper = {},
 }: QueryPlanToPrismaArgs): QueryPlanToPrismaResult {
-  const toFieldName = (key: string) => {
-    if (typeof fieldNameMapper === "function") {
-      return fieldNameMapper(key);
-    } else if (fieldNameMapper[key]) {
-      return fieldNameMapper[key];
-    } else {
-      return key;
-    }
-  };
-
-  const toRelationName = (key: string) => {
-    if (typeof relationMapper === "function") {
-      return relationMapper(key);
-    } else if (relationMapper[key]) {
-      return relationMapper[key];
-    }
-    return null;
-  };
-
   switch (queryPlan.kind) {
     case PlanKind.ALWAYS_ALLOWED:
-      return {
-        kind: PlanKind.ALWAYS_ALLOWED,
-        filters: {},
-      };
+      return { kind: PlanKind.ALWAYS_ALLOWED };
     case PlanKind.ALWAYS_DENIED:
-      return {
-        kind: PlanKind.ALWAYS_DENIED,
-      };
+      return { kind: PlanKind.ALWAYS_DENIED };
     case PlanKind.CONDITIONAL:
       return {
         kind: PlanKind.CONDITIONAL,
-        filters: mapOperand(queryPlan.condition, toFieldName, toRelationName),
+        filters: buildPrismaFilterFromCerbosExpression(
+          queryPlan.condition,
+          mapper
+        ),
       };
     default:
       throw Error(`Invalid query plan.`);
   }
 }
 
-function isExpression(e: PlanExpressionOperand): e is PlanExpression {
-  return (e as any).operator !== undefined;
-}
+/**
+ * Resolves a field reference considering relations and nested fields.
+ */
+function resolveFieldReference(
+  reference: string,
+  mapper: Mapper
+): ResolvedFieldReference {
+  const parts = reference.split(".");
+  const config =
+    typeof mapper === "function" ? mapper(reference) : mapper[reference];
 
-function isValue(e: PlanExpressionOperand): e is PlanExpressionValue {
-  return (e as any).value !== undefined;
-}
+  let matchedPrefix = "";
+  let matchedConfig: MapperConfig | undefined;
 
-function isVariable(e: PlanExpressionOperand): e is PlanExpressionVariable {
-  return (e as any).variable !== undefined;
-}
+  // If no direct match, look for partial matches
+  if (!config) {
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const prefix = parts.slice(0, i + 1).join(".");
+      const prefixConfig =
+        typeof mapper === "function" ? mapper(prefix) : mapper[prefix];
 
-function getOperandVariable(operands: PlanExpressionOperand[]) {
-  const op = operands.find((o) => o.hasOwnProperty("name"));
-  if (!op) return;
-  return (op as PlanExpressionVariable).name;
-}
-
-function getOperandValue(operands: PlanExpressionOperand[]) {
-  const op = operands.find((o) => isValue(o));
-  if (!op) return;
-  return (op as PlanExpressionValue).value;
-}
-
-const OPERATORS: {
-  [key: string]: {
-    relationalCondition?: string;
-    fieldCondition: string;
-  };
-} = {
-  eq: {
-    relationalCondition: "is",
-    fieldCondition: "equals",
-  },
-  ne: {
-    relationalCondition: "isNot",
-    fieldCondition: "not",
-  },
-  in: {
-    relationalCondition: "some",
-    fieldCondition: "in",
-  },
-  lt: {
-    fieldCondition: "lt",
-  },
-  gt: {
-    fieldCondition: "gt",
-  },
-  le: {
-    fieldCondition: "lte",
-  },
-  ge: {
-    fieldCondition: "gte",
-  },
-};
-
-function mapOperand(
-  operand: PlanExpressionOperand,
-  getFieldName: (key: string) => string,
-  getRelationName: (key: string) => Relation | null,
-  output: any = {}
-): any {
-  if (!isExpression(operand))
-    throw Error(
-      `Query plan did not contain an expression for operand ${operand}`
-    );
-
-  const { operator, operands } = operand;
-
-  // HANDLE NESTING OPERATIONS: AND/OR/NOT
-  if (operator == "and") {
-    if (operands.length < 2) throw Error("Expected atleast 2 operands");
-    output.AND = operands.map((o) =>
-      mapOperand(o, getFieldName, getRelationName, {})
-    );
-    return output;
+      if (prefixConfig) {
+        matchedPrefix = prefix;
+        matchedConfig = prefixConfig;
+        break;
+      }
+    }
   }
 
-  if (operator == "or") {
-    if (operands.length < 2) throw Error("Expected atleast 2 operands");
-    output.OR = operands.map((o) =>
-      mapOperand(o, getFieldName, getRelationName, {})
-    );
-    return output;
-  }
+  const activeConfig = config ?? matchedConfig;
 
-  if (operator == "not") {
-    if (operands.length > 1) throw Error("Expected only one operand");
-    output.NOT = operands.map((o) =>
-      mapOperand(o, getFieldName, getRelationName, {})
-    )[0];
-    return output;
-  }
+  // Handle relation mapping
+  if (activeConfig?.relation) {
+    const { name, type, fields } = activeConfig.relation;
+    const matchedParts = matchedPrefix ? matchedPrefix.split(".") : [];
+    const remainingParts = matchedPrefix
+      ? parts.slice(matchedParts.length)
+      : parts.slice(1);
 
-  // get the operation parameters
-  const operation = OPERATORS[operator];
-  if (!operation) throw Error(`Unsupported operator ${operator}`);
-
-  const opVariable = getOperandVariable(operands);
-  if (!opVariable) throw Error(`Unexpected variable ${operands}`);
-
-  const opValue = getOperandValue(operands);
-  const relation = getRelationName(opVariable);
-  const fieldName = getFieldName(opVariable);
-
-  // There is a relational mapper for this variable
-  if (relation && operation.relationalCondition) {
-    output[relation.relation] = {
-      [operation.relationalCondition]: {
-        [relation.field]: opValue,
+    let field: string | undefined;
+    const relations: RelationConfig[] = [
+      {
+        name,
+        type,
+        field: activeConfig.relation.field,
+        nestedMapper: fields,
       },
-    };
-    return output;
-  } else if (fieldName && operation.fieldCondition) {
-    // There is a field mapper for this variable
+    ];
 
-    const fieldPath = fieldName.split(".");
-    if (fieldPath.length > 1) {
-      output[fieldPath[0]] = convertPathToJSON(fieldPath.splice(1), {
-        [operation.fieldCondition]: opValue,
-      });
-    } else {
-      output[fieldPath[0]] = {
-        [operation.fieldCondition]: opValue,
+    // Process nested relations
+    if (fields && remainingParts.length > 0) {
+      let currentMapper: Record<string, MapperConfig> | undefined = fields;
+      let currentParts = remainingParts;
+
+      while (currentParts.length > 0) {
+        if (!currentMapper) {
+          break;
+        }
+
+        const currentPart = currentParts[0];
+        if (!currentPart) {
+          break;
+        }
+
+        const nextConfig: MapperConfig | undefined = currentMapper[currentPart];
+        if (nextConfig?.relation) {
+          relations.push({
+            name: nextConfig.relation.name,
+            type: nextConfig.relation.type,
+            field: nextConfig.relation.field,
+            nestedMapper: nextConfig.relation.fields,
+          });
+          currentMapper = nextConfig.relation.fields || {};
+          currentParts = currentParts.slice(1);
+        } else {
+          const lastPart = currentParts[currentParts.length - 1];
+          if (!lastPart) {
+            break;
+          }
+          field = nextConfig?.field || lastPart;
+          break;
+        }
+      }
+    }
+
+    return { path: field ? [field] : remainingParts, relations };
+  }
+
+  // Simple field mapping
+  return { path: [activeConfig?.field || reference] };
+}
+
+/**
+ * Determines the appropriate Prisma operator based on relation type.
+ */
+function getPrismaRelationOperator(relation: {
+  name: string;
+  type: "one" | "many";
+  field?: string;
+}): string {
+  return relation.type === "one" ? "is" : "some";
+}
+
+/**
+ * Builds a nested relation filter for Prisma queries.
+ */
+function buildNestedRelationFilter(
+  relations: RelationConfig[],
+  fieldFilter: any
+): any {
+  if (relations.length === 0) return fieldFilter;
+
+  let currentFilter = fieldFilter;
+
+  // Build nested structure from inside out
+  for (let i = relations.length - 1; i >= 0; i--) {
+    const relation = relations[i];
+    if (!relation) {
+      throw new Error("Relation mapping is missing");
+    }
+    const relationOperator = getPrismaRelationOperator(relation);
+
+    // Handle special case for the deepest relation
+    if (relation.field && i === relations.length - 1) {
+      const [key, filterValue] = getFilterEntry(currentFilter);
+      if (key === "NOT") {
+        currentFilter = { NOT: { [relation.field]: filterValue } };
+      } else {
+        currentFilter = { [relation.field]: filterValue };
+      }
+    }
+
+    currentFilter = { [relation.name]: { [relationOperator]: currentFilter } };
+  }
+
+  return currentFilter;
+}
+
+/**
+ * Resolves a PlanExpressionOperand into a ResolvedOperand.
+ */
+function resolveOperand(
+  operand: PlanExpressionOperand,
+  mapper: Mapper
+): ResolvedOperand {
+  if (isNamedOperand(operand)) {
+    return resolveFieldReference(operand.name, mapper);
+  } else if (isValueOperand(operand)) {
+    return { value: operand.value };
+  } else if (isOperatorOperand(operand)) {
+    const nestedResult = buildPrismaFilterFromCerbosExpression(operand, mapper);
+    return { value: nestedResult };
+  }
+  throw new Error("Operand must have name, value, or be an expression");
+}
+
+/**
+ * Creates a scoped mapper for collection operations
+ */
+function createScopedMapper(
+  collectionPath: string,
+  variableName: string,
+  fullMapper: Mapper
+): Mapper {
+  return (key: string) => {
+    // If the key starts with the variable name, it's accessing the collection item
+    if (key.startsWith(variableName + ".")) {
+      const strippedKey = key.replace(variableName + ".", "");
+      const parts = strippedKey.split(".");
+
+      // Get the collection's relation config
+      const collectionConfig =
+        typeof fullMapper === "function"
+          ? fullMapper(collectionPath)
+          : fullMapper[collectionPath];
+
+      if (collectionConfig?.relation?.fields) {
+        // For nested paths, traverse the fields configuration
+        const baseConfig = collectionConfig.relation.fields;
+        if (!baseConfig) {
+          return { field: strippedKey };
+        }
+
+        let currentConfig = baseConfig;
+        let field = parts[0] || strippedKey;
+
+        for (let i = 0; i < parts.length - 1; i++) {
+          const part = parts[i];
+          const nextPart = parts[i + 1];
+          if (!part || !nextPart) {
+            break;
+          }
+
+          const nextConfig = currentConfig[part];
+          if (nextConfig?.relation?.fields) {
+            currentConfig = nextConfig.relation.fields;
+            field = nextPart;
+          } else {
+            break;
+          }
+        }
+
+        if (!field) {
+          field = strippedKey;
+        }
+
+        // Return the field config if it exists, otherwise create a default one
+        return currentConfig[field] || { field };
+      }
+      return { field: strippedKey };
+    }
+
+    // For keys not referencing the collection item, use the full mapper
+    if (typeof fullMapper === "function") {
+      return fullMapper(key);
+    }
+    return fullMapper[key] || { field: key };
+  };
+}
+
+/**
+ * Builds a Prisma filter from a Cerbos expression.
+ */
+function buildPrismaFilterFromCerbosExpression(
+  expression: PlanExpressionOperand,
+  mapper: Mapper
+): PrismaFilter {
+  // Validate expression structure
+  if (!isOperatorOperand(expression)) {
+    throw new Error("Invalid Cerbos expression structure");
+  }
+
+  const { operator, operands } = expression;
+
+  // Process different operator types
+  switch (operator) {
+    case "and":
+      return {
+        AND: operands.map((operand) =>
+          buildPrismaFilterFromCerbosExpression(operand, mapper)
+        ),
+      };
+
+    case "or":
+      return {
+        OR: operands.map((operand) =>
+          buildPrismaFilterFromCerbosExpression(operand, mapper)
+        ),
+      };
+
+    case "not": {
+      const operand = operands[0];
+      if (!operand) {
+        throw new Error("not operator requires an operand");
+      }
+      return {
+        NOT: buildPrismaFilterFromCerbosExpression(operand, mapper),
       };
     }
-    return output;
-  } else {
-    throw Error("Failed to map");
+
+    case "eq":
+    case "ne":
+    case "lt":
+    case "le":
+    case "gt":
+    case "ge": {
+      return handleRelationalOperator(operator, operands, mapper);
+    }
+
+    case "in": {
+      return handleInOperator(operands, mapper);
+    }
+
+    case "contains":
+    case "startsWith":
+    case "endsWith": {
+      return handleStringOperator(operator, operands, mapper);
+    }
+
+    case "isSet": {
+      return handleIsSetOperator(operands, mapper);
+    }
+
+    case "hasIntersection": {
+      return handleHasIntersectionOperator(operands, mapper);
+    }
+
+    case "lambda": {
+      return handleLambdaOperator(operands);
+    }
+
+    case "exists":
+    case "exists_one":
+    case "all":
+    case "except":
+    case "filter": {
+      return handleCollectionOperator(operator, operands, mapper);
+    }
+
+    case "map": {
+      return handleMapOperator(operands, mapper);
+    }
+
+    default:
+      throw new Error(`Unsupported operator: ${operator}`);
   }
 }
 
-function convertPathToJSON(segments: string[], value: any): Object {
-  const result = {};
+/**
+ * Helper function to process relational operators (eq, ne, lt, etc.)
+ */
+function handleRelationalOperator(
+  operator: string,
+  operands: PlanExpressionOperand[],
+  mapper: Mapper
+): PrismaFilter {
+  const prismaOperator = {
+    eq: "equals",
+    ne: "not",
+    lt: "lt",
+    le: "lte",
+    gt: "gt",
+    ge: "gte",
+  }[operator];
 
-  let current: Record<string, any> = result;
-  for (let i = 0; i < segments.length; i++) {
-    const segment = segments[i];
-    if (i === segments.length - 1) {
-      current[segment] = value;
-    } else {
-      current[segment] = {};
-      current = current[segment];
-    }
+  if (!prismaOperator) {
+    throw new Error(`Unsupported operator: ${operator}`);
   }
 
-  return result;
+  const leftOperand = operands.find(
+    (o) => isNamedOperand(o) || isOperatorOperand(o)
+  );
+  if (!leftOperand) throw new Error("No valid left operand found");
+
+  const rightOperand = operands.find((o) => o !== leftOperand);
+  if (!rightOperand) throw new Error("No valid right operand found");
+
+  const left = resolveOperand(leftOperand, mapper);
+  const right = resolveOperand(rightOperand, mapper);
+
+  if (isResolvedFieldReference(left)) {
+    const { path, relations } = left;
+
+    if (!isResolvedValue(right)) {
+      throw new Error("Right operand must be a value");
+    }
+
+    const filterValue = { [prismaOperator]: right.value };
+    const fieldName = getLeafField(path);
+    const fieldFilter = { [fieldName]: filterValue };
+
+    if (relations && relations.length > 0) {
+      return buildNestedRelationFilter(relations, fieldFilter);
+    }
+
+    return fieldFilter;
+  }
+
+  if (!isResolvedValue(right)) {
+    throw new Error("Right operand must be a value");
+  }
+
+  return { [prismaOperator]: right.value };
+}
+
+/**
+ * Helper function to handle "in" operator
+ */
+function handleInOperator(
+  operands: PlanExpressionOperand[],
+  mapper: Mapper
+): PrismaFilter {
+  const nameOperand = operands.find(isNamedOperand);
+  if (!nameOperand) throw new Error("Name operand is undefined");
+
+  const valueOperand = operands.find(isValueOperand);
+  if (!valueOperand) throw new Error("Value operand is undefined");
+
+  const resolved = resolveOperand(nameOperand, mapper);
+  if (!isResolvedFieldReference(resolved)) {
+    throw new Error("Name operand must resolve to a field reference");
+  }
+
+  const { path, relations } = resolved;
+  const resolvedValue = resolveOperand(valueOperand, mapper);
+
+  if (!isResolvedValue(resolvedValue)) {
+    throw new Error("Value operand must resolve to a value");
+  }
+
+  const { value } = resolvedValue;
+  const values = Array.isArray(value) ? value : [value];
+  const fieldName = getLeafField(path);
+
+  if (relations && relations.length > 0) {
+    const fieldFilter =
+      values.length === 1
+        ? { [fieldName]: values[0] }
+        : { [fieldName]: { in: values } };
+    return buildNestedRelationFilter(relations, fieldFilter);
+  }
+
+  return values.length === 1
+    ? { [fieldName]: values[0] }
+    : { [fieldName]: { in: values } };
+}
+
+/**
+ * Helper function to handle string operators (contains, startsWith, endsWith)
+ */
+function handleStringOperator(
+  operator: string,
+  operands: PlanExpressionOperand[],
+  mapper: Mapper
+): PrismaFilter {
+  const nameOperand = operands.find(isNamedOperand);
+  if (!nameOperand) throw new Error("Name operand is undefined");
+
+  const resolved = resolveOperand(nameOperand, mapper);
+  if (!isResolvedFieldReference(resolved)) {
+    throw new Error("Name operand must resolve to a field reference");
+  }
+
+  const { path, relations } = resolved;
+
+  const valueOperand = operands.find(isValueOperand);
+  if (!valueOperand) throw new Error("Value operand is undefined");
+
+  const resolvedValue = resolveOperand(valueOperand, mapper);
+  if (!isResolvedValue(resolvedValue)) {
+    throw new Error("Value operand must resolve to a value");
+  }
+
+  const { value } = resolvedValue;
+  if (typeof value !== "string") {
+    throw new Error(`${operator} operator requires string value`);
+  }
+
+  const fieldName = getLeafField(path);
+  const fieldFilter = { [fieldName]: { [operator]: value } };
+
+  if (relations && relations.length > 0) {
+    return buildNestedRelationFilter(relations, fieldFilter);
+  }
+
+  return fieldFilter;
+}
+
+/**
+ * Helper function to handle "isSet" operator
+ */
+function handleIsSetOperator(
+  operands: PlanExpressionOperand[],
+  mapper: Mapper
+): PrismaFilter {
+  const nameOperand = operands.find(isNamedOperand);
+  if (!nameOperand) throw new Error("Name operand is undefined");
+
+  const resolved = resolveOperand(nameOperand, mapper);
+  if (!isResolvedFieldReference(resolved)) {
+    throw new Error("Name operand must resolve to a field reference");
+  }
+
+  const { path, relations } = resolved;
+
+  const valueOperand = operands.find(isValueOperand);
+  if (!valueOperand) throw new Error("Value operand is undefined");
+
+  const resolvedValue = resolveOperand(valueOperand, mapper);
+  if (!isResolvedValue(resolvedValue)) {
+    throw new Error("Value operand must resolve to a value");
+  }
+
+  const fieldName = getLeafField(path);
+  const fieldFilter = {
+    [fieldName]: resolvedValue.value ? { not: null } : { equals: null },
+  };
+
+  if (relations && relations.length > 0) {
+    return buildNestedRelationFilter(relations, fieldFilter);
+  }
+
+  return fieldFilter;
+}
+
+/**
+ * Helper function to handle "hasIntersection" operator
+ */
+function handleHasIntersectionOperator(
+  operands: PlanExpressionOperand[],
+  mapper: Mapper
+): PrismaFilter {
+  if (operands.length !== 2) {
+    throw new Error("hasIntersection requires exactly two operands");
+  }
+
+  const leftOperand = assertDefined(
+    operands[0],
+    "hasIntersection requires a left operand"
+  );
+  const rightOperand = assertDefined(
+    operands[1],
+    "hasIntersection requires a right operand"
+  );
+
+  // Check if left operand is a map operation
+  if (isOperatorOperand(leftOperand) && leftOperand.operator === "map") {
+    if (!isValueOperand(rightOperand)) {
+      throw new Error("Second operand of hasIntersection must be a value");
+    }
+
+    const collection = assertDefined(
+      leftOperand.operands[0],
+      "Map expression must include a collection reference"
+    );
+    const lambda = assertDefined(
+      leftOperand.operands[1],
+      "Map expression must include a lambda expression"
+    );
+
+    if (!isNamedOperand(collection)) {
+      throw new Error("First operand of map must be a collection reference");
+    }
+
+    // Get variable name from lambda
+    if (!isOperatorOperand(lambda)) {
+      throw new Error("Lambda expression must have operands");
+    }
+
+    const variable = assertDefined(
+      lambda.operands[1],
+      "Lambda variable must have a name"
+    );
+    if (!isNamedOperand(variable)) {
+      throw new Error("Lambda variable must have a name");
+    }
+
+    // Create scoped mapper for the collection
+    const scopedMapper = createScopedMapper(
+      collection.name,
+      variable.name,
+      mapper
+    );
+
+    const { relations } = resolveFieldReference(collection.name, mapper);
+    if (!relations || relations.length === 0) {
+      throw new Error("Map operation requires relations");
+    }
+
+    const projection = assertDefined(
+      lambda.operands[0],
+      "Invalid map lambda expression structure"
+    );
+    if (!isNamedOperand(projection)) {
+      throw new Error("Invalid map lambda expression structure");
+    }
+
+    // Use scoped mapper for resolving the projection
+    const resolved = resolveFieldReference(projection.name, scopedMapper);
+    const fieldName = getLeafField(resolved.path);
+
+    return buildNestedRelationFilter(relations, {
+      [fieldName]: { in: rightOperand.value },
+    });
+  }
+
+  // Handle regular field reference
+  if (!isNamedOperand(leftOperand)) {
+    throw new Error(
+      "First operand of hasIntersection must be a field reference or map expression"
+    );
+  }
+
+  if (!isValueOperand(rightOperand)) {
+    throw new Error("Second operand of hasIntersection must be a value");
+  }
+
+  const { path, relations } = resolveFieldReference(leftOperand.name, mapper);
+
+  if (!Array.isArray(rightOperand.value)) {
+    throw new Error("hasIntersection requires an array value");
+  }
+
+  if (relations && relations.length > 0) {
+    const fieldName = getLeafField(path);
+    const fieldFilter = {
+      [fieldName]: { in: rightOperand.value },
+    };
+    return buildNestedRelationFilter(relations, fieldFilter);
+  }
+
+  const fieldName = getLeafField(path);
+  return { [fieldName]: { some: rightOperand.value } };
+}
+
+/**
+ * Helper function to handle "lambda" operator
+ */
+function handleLambdaOperator(operands: PlanExpressionOperand[]): PrismaFilter {
+  const condition = assertDefined(
+    operands[0],
+    "Lambda requires a condition operand"
+  );
+  const variable = assertDefined(
+    operands[1],
+    "Lambda requires a variable operand"
+  );
+
+  if (!isNamedOperand(variable)) {
+    throw new Error("Lambda variable must have a name");
+  }
+
+  return buildPrismaFilterFromCerbosExpression(condition, (key: string) => ({
+    field: key.replace(`${variable.name}.`, ""),
+  }));
+}
+
+/**
+ * Helper function to handle collection operators (exists, all, except, filter)
+ */
+function handleCollectionOperator(
+  operator: string,
+  operands: PlanExpressionOperand[],
+  mapper: Mapper
+): PrismaFilter {
+  if (operands.length !== 2) {
+    throw new Error(`${operator} requires exactly two operands`);
+  }
+
+  const collection = assertDefined(
+    operands[0],
+    `${operator} requires a collection operand`
+  );
+  const lambda = assertDefined(
+    operands[1],
+    `${operator} requires a lambda operand`
+  );
+
+  if (!isNamedOperand(collection)) {
+    throw new Error(
+      `First operand of ${operator} must be a collection reference`
+    );
+  }
+
+  if (!isOperatorOperand(lambda)) {
+    throw new Error(
+      `Second operand of ${operator} must be a lambda expression`
+    );
+  }
+
+  // Get variable name from lambda
+  const variable = assertDefined(
+    lambda.operands[1],
+    "Lambda variable must have a name"
+  );
+  if (!isNamedOperand(variable)) {
+    throw new Error("Lambda variable must have a name");
+  }
+
+  // Create scoped mapper for the collection
+  const scopedMapper = createScopedMapper(
+    collection.name,
+    variable.name,
+    mapper
+  );
+
+  const { relations } = resolveFieldReference(collection.name, mapper);
+  if (!relations || relations.length === 0) {
+    throw new Error(`${operator} operator requires a relation mapping`);
+  }
+
+  const lambdaConditionOperand = assertDefined(
+    lambda.operands[0],
+    "Lambda expression must provide a condition"
+  );
+  const lambdaCondition = buildPrismaFilterFromCerbosExpression(
+    lambdaConditionOperand, // Use the condition part of the lambda
+    scopedMapper
+  );
+
+  const relation = assertDefined(
+    relations[0],
+    `${operator} operator requires a relation mapping`
+  );
+  let filterValue = lambdaCondition;
+
+  // If the lambda condition already has a relation structure, merge it
+  if (lambdaCondition["AND"] || lambdaCondition["OR"]) {
+    filterValue = lambdaCondition;
+  } else {
+    const lambdaKeys = Object.keys(lambdaCondition);
+    const defaultKey = lambdaKeys[0];
+    if (!defaultKey) {
+      throw new Error("Lambda condition must have at least one field");
+    }
+    const lambdaFieldValue = lambdaCondition[defaultKey];
+    if (lambdaFieldValue === undefined) {
+      throw new Error("Lambda condition field value cannot be undefined");
+    }
+    const filterField = relation.field || defaultKey;
+    filterValue = {
+      [filterField]: lambdaFieldValue,
+    };
+  }
+
+  switch (operator) {
+    case "exists":
+    case "filter":
+      return { [relation.name]: { some: filterValue } };
+    case "except":
+      return { [relation.name]: { some: { NOT: filterValue } } };
+    case "exists_one":
+      return {
+        [relation.name]: {
+          some: filterValue,
+        },
+        AND: [
+          {
+            [relation.name]: {
+              every: {
+                OR: [filterValue, { NOT: filterValue }],
+              },
+            },
+          },
+        ],
+      };
+    case "all":
+      return { [relation.name]: { every: filterValue } };
+    default:
+      throw new Error(`Unexpected operator: ${operator}`);
+  }
+}
+
+/**
+ * Helper function to handle "map" operator
+ */
+function handleMapOperator(
+  operands: PlanExpressionOperand[],
+  mapper: Mapper
+): PrismaFilter {
+  if (operands.length !== 2) {
+    throw new Error("map requires exactly two operands");
+  }
+
+  const collection = assertDefined(
+    operands[0],
+    "map requires a collection operand"
+  );
+  const lambda = assertDefined(
+    operands[1],
+    "map requires a lambda operand"
+  );
+
+  if (!isNamedOperand(collection)) {
+    throw new Error("First operand of map must be a collection reference");
+  }
+
+  if (!isOperatorOperand(lambda) || lambda.operator !== "lambda") {
+    throw new Error("Second operand of map must be a lambda expression");
+  }
+
+  // Get variable name from lambda
+  const projection = assertDefined(
+    lambda.operands[0],
+    "Map lambda expression must provide a projection"
+  );
+  const variable = assertDefined(
+    lambda.operands[1],
+    "Map lambda expression must provide a variable"
+  );
+  if (!isNamedOperand(projection) || !isNamedOperand(variable)) {
+    throw new Error("Invalid map lambda expression structure");
+  }
+
+  // Create scoped mapper for the collection
+  const scopedMapper = createScopedMapper(
+    collection.name,
+    variable.name,
+    mapper
+  );
+
+  const { relations } = resolveFieldReference(collection.name, mapper);
+  if (!relations || relations.length === 0) {
+    throw new Error("map operator requires a relation mapping");
+  }
+
+  // Use scoped mapper for resolving the projection
+  const resolved = resolveFieldReference(projection.name, scopedMapper);
+  const fieldName = getLeafField(resolved.path);
+  const lastRelation = assertDefined(
+    relations[relations.length - 1],
+    "Relation mapping must contain at least one relation"
+  );
+
+  return buildNestedRelationFilter(relations, {
+    [getPrismaRelationOperator(lastRelation)]: {
+      select: { [fieldName]: true },
+    },
+  });
 }

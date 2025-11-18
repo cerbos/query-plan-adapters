@@ -1,136 +1,247 @@
 # Cerbos + Mongoose ORM Adapter
 
-An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanResources API](https://docs.cerbos.dev/cerbos/latest/api/index.html#resources-query-plan)) response and converts it into a [Mongoose](https://mongoosejs.com/) filter. This is designed to work alongside a project using the [Cerbos Javascript SDK](https://github.com/cerbos/cerbos-sdk-javascript).
+An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanResources API](https://docs.cerbos.dev/cerbos/latest/api/index.html#resources-query-plan)) response and converts it into a [Mongoose](https://mongoosejs.com/) filter. It is designed to run alongside a project that is already using the [Cerbos JavaScript SDK](https://github.com/cerbos/cerbos-sdk-javascript) to fetch query plans so that authorization logic can be pushed down to MongoDB.
 
-The following conditions are supported: `and`, `or`, `eq`, `ne`, `lt`, `gt`, `lte`, `gte` and `in`.
+## How it works
 
-Not Supported:
+1. Use a Cerbos client (`@cerbos/http` or `@cerbos/grpc`) to call `planResources` and obtain a `PlanResourcesResponse`.
+2. Provide `queryPlanToMongoose` with that plan and an optional mapper that describes how Cerbos attribute paths relate to your document schema.
+3. The adapter walks the Cerbos expression tree, translates supported operators to MongoDB syntax, and returns `{ kind, filters? }`.
+4. Inspect `result.kind`:
+   - `ALWAYS_ALLOWED`: the caller can query without any additional filters.
+   - `ALWAYS_DENIED`: short-circuit and return an empty result set.
+   - `CONDITIONAL`: execute the query with `result.filters`.
 
-- `every`
-- `contains`
-- `search`
-- `mode`
-- `startsWith`
-- `endsWith`
-- `isSet`
-- Scalar filters
-- Atomic number operations
-- Composite keys
+You can merge the adapter output with existing application filters (for example, via `$and`) before issuing the Mongoose query.
+
+## Supported operators
+
+| Category | Operators | Behavior |
+| --- | --- | --- |
+| Logical | `and`, `or`, `not` | Builds `$and`, `$or`, and `$nor` groups. |
+| Comparisons | `eq`, `ne`, `lt`, `le`, `gt`, `ge` | Emits `$eq`, `$ne`, `$lt`, `$lte`, `$gt`, `$gte` checks against the mapped field. |
+| Membership | `in`, `hasIntersection` | `$in` on simple lists, or `$elemMatch` when targeting array relations; `hasIntersection` supports either a direct array field or a `map` projection inside the plan. |
+| String helpers | `contains`, `startsWith`, `endsWith` | Generates escaped regular expressions that target substrings, prefixes, or suffixes. |
+| Existence helpers | `isSet`, `exists`, `exists_one` | Uses `$exists`/`$ne: null` for scalars and `$elemMatch` for collections. |
+| Collection helpers | `filter`, `lambda`, `map`, `all` | Translates Cerbos collection expressions into scoped `$elemMatch` filters and maps lambda variables to the correct nested paths. |
+
+Any operator not listed above causes `queryPlanToMongoose` to throw `Unsupported operator: <name>`.
+
+> **Note:** `exists_one` currently behaves like “at least one element matches”. Enforcing “exactly one” requires an aggregation pipeline, which is outside the scope of this adapter.
 
 ## Requirements
 
-- Cerbos > v0.16
-- `@cerbos/http` or `@cerbos/grpc` client
+- Cerbos > v0.16 plus either the `@cerbos/http` or `@cerbos/grpc` client
 
-## Usage
+## System Requirements
 
-```
+- Node.js >= 20.0.0
+- Mongoose 8.x
+- A MongoDB-compatible server (MongoDB 5.0+ is recommended for compatibility with Mongoose 8)
+
+## Installation
+
+```bash
 npm install @cerbos/orm-mongoose
 ```
 
-This package exports a function:
+## API
 
 ```ts
-import { queryPlanToMongoose, PlanKind } from "@cerbos/orm-mongoose";
+import {
+  queryPlanToMongoose,
+  PlanKind,
+  type Mapper,
+} from "@cerbos/orm-mongoose";
 
-queryPlanToMongoose({ queryPlan, fieldNameMapper }): {
-  kind: PlanKind,
-  filters?: any // a filter to pass to the find() function of a Mongoose model
+const result = queryPlanToMongoose({
+  queryPlan, // PlanResourcesResponse from Cerbos
+  mapper, // optional Mapper - see below
+});
+
+if (result.kind === PlanKind.CONDITIONAL) {
+  await MyModel.find(result.filters);
 }
 ```
 
-where `PlanKind` is:
+`PlanKind` is re-exported from `@cerbos/core`:
 
 ```ts
 export enum PlanKind {
-  /**
-   * The specified action is always allowed for the principal on resources matching the input.
-   */
   ALWAYS_ALLOWED = "KIND_ALWAYS_ALLOWED",
-
-  /**
-   * The specified action is always denied for the principal on resources matching the input.
-   */
   ALWAYS_DENIED = "KIND_ALWAYS_DENIED",
-
-  /**
-   * The specified action is conditionally allowed for the principal on resources matching the input.
-   */
   CONDITIONAL = "KIND_CONDITIONAL",
 }
 ```
 
-The function reqiures the full query plan from Cerbos to be passed in an object along with a `fieldNameMapper`.
+### Mapper configuration
 
-A basic implementation can be as simple as:
+The Cerbos query plan references fields using paths such as `request.resource.attr.title`. Use a mapper to translate those names to the paths in your Mongoose models and to describe relations/collections so the adapter can generate `$elemMatch` filters when needed.
 
-```js
+```ts
+export type MapperConfig = {
+  field?: string;
+  relation?: {
+    name: string;
+    type: "one" | "many";
+    field?: string;
+    fields?: Record<string, MapperConfig>;
+  };
+};
+
+export type Mapper =
+  | Record<string, MapperConfig>
+  | ((key: string) => MapperConfig);
+```
+
+- `field` rewrites a single Cerbos path to a different field in MongoDB.
+- `relation` describes embedded documents (`type: "one"`) or arrays (`type: "many"`). When `field` is provided on a relation it identifies the property inside that relation that should be used for comparisons (for example, matching `createdBy.id` without an `$elemMatch`).
+- `fields` supplies nested overrides so lambda expressions such as `tag.name` can be mapped to the correct property.
+
+If you omit the mapper the adapter will use the query plan paths verbatim, which only works when your Mongo documents follow the Cerbos naming convention.
+
+#### Direct fields
+
+```ts
+const mapper: Mapper = {
+  "request.resource.attr.aBool": { field: "aBool" },
+  "request.resource.attr.aString": { field: "title" },
+  "request.principal.attr.department": { field: "principalDepartment" },
+};
+```
+
+#### Relations and collections
+
+Use `relation` when mapping nested objects or arrays. `type: "one"` maps to embedded/single relations and results in dotted field paths, while `type: "many"` maps to arrays and lets the adapter emit `$elemMatch` conditions. The optional `fields` map lets you rename nested properties referenced in lambda expressions.
+
+```ts
+const mapper: Mapper = {
+  "request.resource.attr.createdBy": {
+    relation: {
+      name: "createdBy",
+      type: "one",
+      field: "id",
+    },
+  },
+  "request.resource.attr.tags": {
+    relation: {
+      name: "tags",
+      type: "many",
+      fields: {
+        id: { field: "id" },
+        name: { field: "name" },
+      },
+    },
+  },
+};
+```
+
+#### Collection operators in practice
+
+Collection-aware operators (`filter`, `exists`, `exists_one`, `hasIntersection`, `map`, and `all`) require the mapper to declare the relation with `type: "many"`. The adapter automatically scopes lambda variables and uses the `fields` map when translating expressions such as `tag.name`:
+
+```ts
+const mapper: Mapper = {
+  "request.resource.attr.tags": {
+    relation: {
+      name: "tags",
+      type: "many",
+      fields: {
+        name: { field: "name" },
+      },
+    },
+  },
+};
+```
+
+- `exists`, `exists_one`, and `filter` wrap the translated condition in `$elemMatch`.
+- `hasIntersection` works for both scalar arrays and arrays of objects; when the plan uses `map(lambda(tag.name))` the adapter projects `tag.name` to `tags.$elemMatch.name`.
+- `all` converts the lambda condition into a negated `$elemMatch` so that all elements must satisfy the predicate.
+- A bare `map` expression verifies that the referenced nested path exists inside each element.
+
+#### Mapper functions
+
+You can also supply a function if your mappings follow a predictable pattern:
+
+```ts
+const mapper: Mapper = (path) => {
+  if (path.startsWith("request.resource.attr.")) {
+    return { field: path.replace("request.resource.attr.", "") };
+  }
+  if (path.startsWith("request.principal.attr.")) {
+    return { field: `principal.${path.replace("request.principal.attr.", "")}` };
+  }
+  return { field: path };
+};
+```
+
+## Usage example
+
+```ts
 import { GRPC as Cerbos } from "@cerbos/grpc";
 import mongoose from "mongoose";
+import {
+  queryPlanToMongoose,
+  PlanKind,
+  type Mapper,
+} from "@cerbos/orm-mongoose";
 
-import { queryPlanToMongoose, PlanKind } from "@cerbos/orm-mongoose";
-
-// connect to mongo
 await mongoose.connect("mongodb://127.0.0.1:27017/test");
-// connect to Cerbos PDP
 const cerbos = new Cerbos("localhost:3592", { tls: false });
+const MyModel = mongoose.model("MyModel", /* ... schema ... */);
 
-// Mongoose models (schema excluded for brevity)
-const MyModel = mongoose.model("MyModel", ....);
+const mapper: Mapper = {
+  "request.resource.attr.title": { field: "title" },
+  "request.resource.attr.owner": {
+    relation: { name: "owner", type: "one", field: "id" },
+  },
+  "request.resource.attr.tags": {
+    relation: {
+      name: "tags",
+      type: "many",
+      fields: { name: { field: "name" } },
+    },
+  },
+};
 
-// Fetch the query plan from Cerbos passing in the principal
-// resource type and action
 const queryPlan = await cerbos.planResources({
-  principal: {....},
-  resource: { kind: "resourceKind" },
-  action: "view"
-})
-
-// Generate the mongoose filter from the query plan
-const result = queryPlanToMongoose({
-  queryPlan,
-  fieldNameMapper: {
-    "request.resource.attr.aFieldName": "mongooseModelFieldName"
-  }
+  principal: { id: "user1", roles: ["USER"] },
+  resource: { kind: "document" },
+  action: "view",
 });
 
-// The query plan says the user would always be denied
-// return empty or throw an error depending on your app.
-if(result.kind == PlanKind.ALWAYS_DENIED) {
-  return console.log([]);
+const result = queryPlanToMongoose({ queryPlan, mapper });
+
+if (result.kind === PlanKind.ALWAYS_DENIED) {
+  return [];
 }
 
-// Pass the filters in as where conditions
-// If you have prexisting where conditions, you can pass them in an $and clause
-const result = await MyModel.find({
-  ...result.filters
-});
-
-console.log(result)
+const filters = result.kind === PlanKind.CONDITIONAL ? result.filters : {};
+const records = await MyModel.find(filters);
 ```
 
-The `fieldNameMapper` is used to convert the field names in the query plan response to names of fields in the Mongoose model - this can be done as a map or a function:
+If you already have application-specific criteria you can combine them using `$and`:
 
-```js
-const filters = queryPlanToMongoose({
-  queryPlan,
-  fieldNameMapper: {
-    "request.resource.attr.aFieldName": "mongooseModelFieldName",
-  },
-});
-
-//or
-
-const filters = queryPlanToMongoose({
-  queryPlan,
-  fieldNameMapper: (fieldName: string): string => {
-    if (fieldName.indexOf("request.resource.") > 0) {
-      return fieldName.replace("request.resource.attr", "");
-    }
-
-    if (fieldName.indexOf("request.principal.") > 0) {
-      return fieldName.replace("request.principal.attr", "");
-    }
-  },
-});
+```ts
+const filters = result.kind === PlanKind.CONDITIONAL ? result.filters : {};
+await MyModel.find({ $and: [filters ?? {}, { archived: false }] });
 ```
+
+## Error handling
+
+`queryPlanToMongoose` throws descriptive errors in the following scenarios:
+
+- The plan kind is not one of the Cerbos `PlanKind` values (`Invalid query plan.`).
+- A conditional plan omits the `operator`/`operands` structure (`Invalid Cerbos expression structure`).
+- An operator listed in the plan is not implemented (`Unsupported operator: <name>`).
+- Collection-oriented operators (`map`, `filter`, `exists`, `all`, etc.) are used without a `relation` mapper, or with a mapper that declares `type: "one"` where `type: "many"` is required (errors such as `map operator requires a relation mapping`).
+- Lambda expressions in the plan are malformed (for example, missing a variable operand results in `Lambda variable must have a name`).
+- Value operands do not match the expected type, e.g., `hasIntersection` supplies a non-array value.
+
+Surfacing these errors early helps keep the adapter and your Cerbos policies in sync.
+
+## Limitations
+
+- `exists_one` behaves like “at least one element matches” because counting matches requires an aggregation pipeline.
+- Operators not enumerated in **Supported operators** (such as search, mode, scalar math helpers, atomic number operations, composite keys, etc.) are not implemented and will throw `Unsupported operator`.
+- All translations target standard MongoDB find filters; anything that would require `$expr` or a multi-stage aggregation pipeline is currently out of scope.
