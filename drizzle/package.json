@@ -3,6 +3,16 @@
   "version": "0.1.0",
   "homepage": "https://cerbos.dev",
   "description": "Drizzle ORM adapter for Cerbos query plans",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cerbos/query-plan-adapters.git",
+    "directory": "packages/drizzle"
+  },
+  "bugs": {
+    "url": "https://github.com/cerbos/query-plan-adapters/issues"
+  },
+  "author": "Cerbos <help@cerbos.dev> (https://cerbos.dev)",
+  "license": "Apache-2.0",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
   "exports": {
@@ -36,8 +46,6 @@
   "engines": {
     "node": ">=20.0.0"
   },
-  "author": "Cerbos",
-  "license": "Apache-2.0",
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.8",
     "@types/jest": "^29.5.12",
