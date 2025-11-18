@@ -1,6 +1,6 @@
 {
   "name": "@cerbos/orm-mongoose",
-  "version": "1.0.0",
+  "version": "2.0.2",
   "homepage": "https://cerbos.dev",
   "description": "",
   "repository": {
@@ -37,7 +37,6 @@
   "scripts": {
     "build": "tsc --build",
     "prepare": "npm run build",
-    "preversion": "npm run lint",
     "version": "git add -A src",
     "postversion": "git push && git push --tags",
     "mongo": "docker run --rm -p 27017:27017 --name test-mongo -v ./data:/data/db mongo:latest",
