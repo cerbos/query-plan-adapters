@@ -20,7 +20,7 @@ jobs:
         node-version: ["20", "22", "24", "25"]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Setup Cerbos
         uses: cerbos/cerbos-setup-action@v1
