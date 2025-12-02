@@ -1,22 +1,17 @@
 [project]
 name = "cerbos-sqlalchemy"
 description = "SQLAlchemy adapter for generating queries with Cerbos: an open core, language-agnostic, scalable authorization solution"
-authors = [
-    {name = "Cerbos Developers", email = "sdk+sqlalchemy@cerbos.dev"},
-]
-dependencies = [
-    "sqlalchemy>=1.4",
-    "cerbos>=0.10.4",
-]
-requires-python = ">=3.8"
-classifiers = [
-    "Development Status :: 4 - Beta",
-    "Intended Audience :: Developers",
-    "Topic :: Security",
-    "Topic :: Software Development :: Libraries",
-]
 readme = "README.md"
-license = {text = "Apache-2.0"}
+requires-python = ">=3.8"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Cerbos Developers", email = "sdk+sqlalchemy@cerbos.dev" }]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Topic :: Security",
+  "Topic :: Software Development :: Libraries",
+]
+dependencies = ["sqlalchemy>=1.4", "cerbos>=0.10.4"]
 dynamic = ["version"]
 
 [project.urls]
@@ -24,38 +19,30 @@ Homepage = "https://cerbos.dev"
 Repository = "https://github.com/cerbos/query-plan-adapters/tree/main/sqlalchemy"
 
 [project.optional-dependencies]
-testcontainers = [
-    "testcontainers>=3.5.3",
-]
+testcontainers = ["testcontainers>=3.5.3"]
 
 [build-system]
-requires = ["pdm-pep517>=1.0.0"]
-build-backend = "pdm.pep517.api"
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
 
-[tool]
+[tool.hatch.version]
+source = "vcs"
 
-[tool.pdm]
+[tool.hatch.version.raw-options]
+root = ".."
+tag_regex = "^sqla/v(?P<version>\\d+\\.\\d+\\.\\d+.*)$"
 
-[tool.pdm.version]
-source = "scm"
-
-[tool.pdm.dev-dependencies]
-test = [
+[dependency-groups]
+dev = [
     "pytest>=7.1.2",
-]
-lint = [
     "black>=22.6.0",
     "isort>=5.10.1",
-]
-tools = [
     "ptpython>=3.0.25",
+    "mypy>=1.14.1",
+    "ruff>=0.14.6",
+    "pyright>=1.1.407",
+    "testcontainers>=3.7.1",
 ]
-
-[tool.pdm.scripts]
-test = "pytest"
-isort = {cmd = "isort ."}
-black = {cmd = "black ."}
-format = {composite = ["isort", "black"]}
 
 [tool.isort]
-profile = 'black'
+profile = "black"

@@ -75,6 +75,12 @@ resourcePolicy:
               - expr: request.resource.attr.aString != "string"
 
     - actions:
+        - nand
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+
+    - actions:
         - "nand"
       effect: EFFECT_DENY
       roles:
@@ -85,6 +91,12 @@ resourcePolicy:
             of:
               - expr: request.resource.attr.aBool == true
               - expr: request.resource.attr.aString != "string"
+
+    - actions:
+        - nor
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
 
     - actions:
         - "nor"
@@ -189,3 +201,18 @@ resourcePolicy:
       condition:
         match:
           expr: request.resource.attr.nested.aBool == true
+
+    - actions:
+        - "intersection-all"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.principal.attr.logic.flag == false
+              - expr: >
+                  request.principal.attr.logic.groups.all(
+                    w, hasIntersection(w.tags, request.resource.attr.tags)
+                  )

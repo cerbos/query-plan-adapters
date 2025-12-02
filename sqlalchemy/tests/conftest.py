@@ -1,7 +1,7 @@
 import os
 from contextlib import contextmanager
 from importlib.metadata import version
-from typing import Generator
+from typing import Any, Generator
 
 import pytest
 from cerbos.engine.v1 import engine_pb2
@@ -15,6 +15,7 @@ from sqlalchemy import (
     Column,
     ForeignKey,
     Integer,
+    JSON,
     String,
     create_engine,
     insert,
@@ -23,7 +24,7 @@ from sqlalchemy.orm import declarative_base, relationship
 
 USER_ROLE = "USER"
 
-Base = declarative_base()
+Base: Any = declarative_base()
 
 _IS_SQLA_14 = None
 
@@ -52,6 +53,7 @@ class Resource(Base):
     aBool = Column(Boolean)
     aString = Column(String)
     aNumber = Column(Integer)
+    tags = Column(JSON)
 
     ownedBy = Column(String, ForeignKey("user.id"))
     createdBy = Column(String, ForeignKey("user.id"))
@@ -86,6 +88,7 @@ def engine():
                     "aNumber": 1,
                     "ownedBy": "1",
                     "createdBy": "1",
+                    "tags": ["A", "B"],
                 },
                 {
                     "name": "resource2",
@@ -94,6 +97,7 @@ def engine():
                     "aNumber": 2,
                     "ownedBy": "1",
                     "createdBy": "2",
+                    "tags": ["B", "C"],
                 },
                 {
                     "name": "resource3",
@@ -102,6 +106,7 @@ def engine():
                     "aNumber": 3,
                     "ownedBy": "2",
                     "createdBy": "2",
+                    "tags": ["A"],
                 },
             ],
         )

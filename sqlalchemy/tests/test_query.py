@@ -1,8 +1,14 @@
+from typing import Any
 import pytest
+from google.protobuf import json_format
+
+from cerbos.engine.v1 import engine_pb2
+from cerbos.sdk.grpc.client import CerbosClient as GrpcCerbosClient
 from cerbos.sdk.model import (
     PlanResourcesFilter,
     PlanResourcesFilterKind,
     PlanResourcesResponse,
+    Principal,
 )
 
 from cerbos_sqlalchemy import get_query
@@ -205,6 +211,37 @@ class TestGetQuery:
         res = conn.execute(query).fetchall()
         assert len(res) == 2
         assert all(map(lambda x: x.name in {"resource2", "resource3"}, res))
+
+    def test_intersection_all(self, cerbos_client, resource_desc, resource_table, conn):
+        p_attr = {
+            "logic": {
+                "flag": False,
+                "groups": [
+                    {"tags": ["A"]},
+                    {"tags": ["B"]},
+                ],
+            }
+        }
+
+        principal: Any = None
+        if isinstance(cerbos_client, GrpcCerbosClient):
+            principal = engine_pb2.Principal(id="1", roles={"USER"})
+            json_format.ParseDict({"attr": p_attr}, principal)
+        else:
+            principal = Principal("1", roles={"USER"}, attr=p_attr)
+
+        plan = cerbos_client.plan_resources(
+            "intersection-all", principal, resource_desc
+        )
+
+        attr = {
+            "request.resource.attr.tags": resource_table.tags,
+        }
+        query = get_query(plan, resource_table, attr)
+        res = conn.execute(query).fetchall()
+
+        assert len(res) == 1
+        assert res[0].name == "resource1"
 
 
 class TestGetQueryOverrides:
