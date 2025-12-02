@@ -93,12 +93,6 @@ resourcePolicy:
               - expr: request.resource.attr.aString != "string"
 
     - actions:
-        - nor
-      effect: EFFECT_ALLOW
-      roles:
-        - USER
-
-    - actions:
         - "nor"
       effect: EFFECT_DENY
       roles:
