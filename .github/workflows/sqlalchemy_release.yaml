@@ -14,15 +14,15 @@ jobs:
     name: SQLA publish
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ./__pypackages__
           key: ${{ runner.os }}-python-${{ hashFiles('**/pdm.lock') }}
 
-      - uses: pdm-project/setup-pdm@main
+      - uses: pdm-project/setup-pdm@94a8231deba8dd0281d79c0d6e8f24f547b6f7c7 # v4.4
         name: Setup PDM
         with:
           python-version: "3.10"  # Version range or exact version of a Python version to use, the same as actions/setup-python
@@ -45,7 +45,7 @@ jobs:
           #packages_dir: sqlalchemy/dist/
 
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # v1.13.0
         with:
           user: __token__
           password: ${{ secrets.PYPI_API_TOKEN }}
