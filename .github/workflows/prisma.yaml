@@ -20,15 +20,15 @@ jobs:
         node-version: ["20", "22", "24", "25"]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
 
       - name: Setup Cerbos
-        uses: cerbos/cerbos-setup-action@v1
+        uses: cerbos/cerbos-setup-action@ee5f1c4104e29f54c106d9abdd47569c138d9f9d # v1
         with:
           version: ${{ matrix.cerbos-version }}
 
       - name: Test using Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
         with:
           node-version: ${{ matrix.node-version }}
 
