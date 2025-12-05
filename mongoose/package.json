@@ -51,7 +51,7 @@
     "@types/node": "^24.0.0",
     "@tsconfig/node20": "^20.1.7",
     "@tsconfig/strictest": "^2.0.8",
-    "mongoose": "^8.0.0",
+    "mongoose": "^9.0.0",
     "ts-jest": "^29.0.0",
     "ts-node": "^10.4.0",
     "typescript": "^5.0.0"
