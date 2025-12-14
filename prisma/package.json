@@ -61,7 +61,7 @@
     "@prisma/client": "^5.0.0 || ^6.0.0"
   },
   "dependencies": {
-    "@cerbos/core": "^0.25.0",
+    "@cerbos/core": "^0.26.0",
     "@cerbos/grpc": "^0.23.0",
     "@tsconfig/node20": "^20.1.7",
     "@tsconfig/strictest": "^2.0.8",
