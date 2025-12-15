@@ -24,7 +24,7 @@ jobs:
             ./__pypackages__
           key: ${{ runner.os }}-python-${{ hashFiles('**/pdm.lock') }}
 
-      - uses: pdm-project/setup-pdm@94a8231deba8dd0281d79c0d6e8f24f547b6f7c7 # v4.4
+      - uses: pdm-project/setup-pdm@94a823180e06fcde4ad29308721954a521c96ed0 # v4.4
         name: Setup PDM
         with:
           python-version: "3.10"  # Version range or exact version of a Python version to use, the same as actions/setup-python
