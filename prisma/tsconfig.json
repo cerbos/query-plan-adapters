@@ -1,6 +1,7 @@
 {
-  "extends": ["@tsconfig/node20", "@tsconfig/strictest"],
+  "extends": ["@tsconfig/node24", "@tsconfig/strictest"],
   "include": ["src"],
+  "exclude": ["src/generated", "src/index.test.ts"],
   "compilerOptions": {
     "checkJs": true,
     "composite": true,
