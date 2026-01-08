@@ -13,6 +13,7 @@ export type MongooseFilter = Record<string, any>;
 
 export type MapperConfig = {
   field?: string;
+  valueParser?: (value: any) => any;
   relation?: {
     name: string;
     type: "one" | "many";
@@ -156,6 +157,25 @@ const resolveFieldReference = (
   }
 
   return { path: [reference] };
+};
+
+/**
+ * Applies valueParser from field config to a value if available
+ */
+const applyValueParser = (
+  fieldReference: string,
+  value: any,
+  mapper: Mapper
+): any => {
+  const config = typeof mapper === "function" ? mapper(fieldReference) : mapper[fieldReference];
+  if (config?.valueParser) {
+    try {
+      return config.valueParser(value);
+    } catch (error) {
+      throw new Error(`valueParser failed for field ${fieldReference}: ${error}`);
+    }
+  }
+  return value;
 };
 
 const buildNestedObject = (path: string[], value: any) =>
@@ -312,7 +332,14 @@ const buildMongooseFilterFromCerbosExpression = (
 
       if ("path" in left) {
         const { path, relation } = left;
-        const comparison = { [mongoOperator]: right.value };
+        
+        // Apply valueParser if we can determine the field reference
+        let parsedValue = right.value;
+        if (isVariable(leftOperand)) {
+          parsedValue = applyValueParser(leftOperand.name, right.value, mapper);
+        }
+        
+        const comparison = { [mongoOperator]: parsedValue };
 
         if (relation) {
           if (relation.type === "many") {
@@ -332,19 +359,26 @@ const buildMongooseFilterFromCerbosExpression = (
     }
 
     case "in": {
-      const resolvedField = resolveOperand(
-        requireOperandMatching(
-          (o) => isVariable(o),
-          "in operator requires a field operand"
-        )
+      const fieldOperand = requireOperandMatching(
+        (o) => isVariable(o),
+        "in operator requires a field operand"
       );
-      const { path, relation } = resolvedField;
+      const { path, relation } = resolveOperand(fieldOperand);
+      
       const valueOperand = requireOperandMatching(
         (o) => isValue(o),
         "in operator requires a value operand"
       );
       const { value } = resolveOperand(valueOperand);
-      const comparison = { $in: value };
+
+      let parsedValue = value;
+      if (isVariable(fieldOperand) && Array.isArray(value)) {
+        parsedValue = value.map(v => applyValueParser(fieldOperand.name, v, mapper));
+      } else if (isVariable(fieldOperand)) {
+        parsedValue = applyValueParser(fieldOperand.name, value, mapper);
+      }
+
+      const comparison = { $in: parsedValue };
 
       if (relation) {
         if (relation.type === "many") {
