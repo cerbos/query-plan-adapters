@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "mongoose/**"
+      - "policies/**"
   push:
     tags:
       - mongoose/v*
