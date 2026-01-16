@@ -1,6 +1,6 @@
 {
   "name": "@cerbos/orm-prisma",
-  "version": "3.0.1",
+  "version": "3.1.0",
   "homepage": "https://cerbos.dev",
   "description": "Prisma adapter for Cerbos query plans",
   "repository": {
@@ -40,32 +40,38 @@
     "prepare": "npm run build",
     "prepublishOnly": "npm test",
     "version": "git add -A src",
-    "test": "npx prisma db push --force-reset && cerbos run --log-level=error --set=storage.disk.directory=../policies --set=telemetry.disabled=true -- jest src/**.test.ts",
+    "prisma:generate": "bash scripts/generate-clients.sh",
+    "test": "npm run test:v7",
+    "test:v6": "node node_modules/prisma-v6/build/index.js db push --force-reset --schema=prisma/schema.v6.prisma && PRISMA_VERSION=6 cerbos run --log-level=error --set=storage.disk.directory=../policies --set=telemetry.disabled=true -- jest src/**.test.ts",
+    "test:v7": "node node_modules/prisma/build/index.js db push --force-reset && PRISMA_VERSION=7 cerbos run --log-level=error --set=storage.disk.directory=../policies --set=telemetry.disabled=true -- jest src/**.test.ts",
     "cerbos": "cerbos server --config=./cerbos-config.yaml"
   },
   "engines": {
     "node": ">=20.0.0"
   },
   "devDependencies": {
-    "@prisma/client": "^6.4.1",
+    "@jest/globals": "^30.2.0",
+    "@prisma/adapter-better-sqlite3": "^7.2.0",
+    "@prisma/client": "^7.2.0",
+    "@prisma/client-v6": "npm:@prisma/client@^6.0.0",
+    "@tsconfig/node24": "^24.0.3",
+    "@tsconfig/strictest": "^2.0.8",
     "@types/jest": "^30.0.0",
     "@types/node": "^24.0.0",
     "expect-type": "^1.1.0",
-    "prisma": "^6.4.1",
+    "prisma": "^7.2.0",
+    "prisma-v6": "npm:prisma@^6.0.0",
     "rimraf": "^6.0.0",
-    "ts-jest": "^29.0.0",
+    "ts-jest": "^29.4.6",
     "ts-node": "^10.4.0",
     "typescript": "^5.0.0"
   },
   "peerDependencies": {
-    "@prisma/client": "^5.0.0 || ^6.0.0"
+    "@prisma/client": "^5.0.0 || ^6.0.0 || ^7.0.0"
   },
   "dependencies": {
     "@cerbos/core": "^0.26.0",
-    "@cerbos/grpc": "^0.23.0",
-    "@tsconfig/node20": "^20.1.7",
-    "@tsconfig/strictest": "^2.0.8",
-    "tslib": "^2.8.1"
+    "@cerbos/grpc": "^0.23.0"
   },
   "keywords": [
     "cerbos",

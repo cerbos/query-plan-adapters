@@ -13,10 +13,9 @@ import {
   PlanResourcesConditionalResponse,
   PlanResourcesResponse,
 } from "@cerbos/core";
-import { Prisma, PrismaClient } from "@prisma/client";
 import { GRPC as Cerbos } from "@cerbos/grpc";
+import { prisma, Prisma } from "./test-setup";
 
-const prisma = new PrismaClient();
 const cerbos = new Cerbos("127.0.0.1:3593", { tls: false });
 
 function createConditionalPlan(
