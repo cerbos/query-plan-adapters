@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
 
       - name: Setup Cerbos
-        uses: cerbos/cerbos-setup-action@ee5f1c4104e29f54c106d9abdd47569c138d9f9d # v1
+        uses: cerbos/cerbos-setup-action@feb2173363a24d30544b990965892bc391909213 # v1
         with:
           version: ${{ matrix.cerbos-version }}
 
