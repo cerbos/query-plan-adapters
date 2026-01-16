@@ -14,12 +14,8 @@ import {
   PlanResourcesResponse,
 } from "@cerbos/core";
 import { GRPC as Cerbos } from "@cerbos/grpc";
-import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3';
-import { Prisma, PrismaClient } from "./generated/prisma/client";
+import { prisma, Prisma } from "./test-setup";
 
-
-const adapter = new PrismaBetterSqlite3({ url: "./prisma/dev.db" })
-const prisma = new PrismaClient({ adapter });
 const cerbos = new Cerbos("127.0.0.1:3593", { tls: false });
 
 function createConditionalPlan(

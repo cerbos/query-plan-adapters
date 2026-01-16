@@ -1,4 +1,4 @@
-const esModules = ["uuid"].join("|");
+const prismaVersion = process.env.PRISMA_VERSION || "7";
 
 /** @type {import("ts-jest").JestConfigWithTsJest} */
 module.exports = {
@@ -14,8 +14,9 @@ module.exports = {
       },
     ],
   },
-  transformIgnorePatterns: [`node_modules/(?!(${esModules})/)`],
+  transformIgnorePatterns: ["node_modules/(?!(uuid)/)"],
   moduleNameMapper: {
     "^(\\.{1,2}/.*)\\.js$": "$1",
+    "^(.*)/test-setup$": `$1/test-setup.v${prismaVersion}`,
   },
 };

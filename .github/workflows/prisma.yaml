@@ -18,6 +18,7 @@ jobs:
       matrix:
         cerbos-version: ["latest"]
         node-version: ["20", "22", "24", "25"]
+        prisma-version: ["6", "7"]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
@@ -33,4 +34,9 @@ jobs:
           node-version: ${{ matrix.node-version }}
 
       - run: npm install
-      - run: npm run test
+
+      - name: Generate Prisma clients
+        run: npm run prisma:generate
+
+      - name: Run tests
+        run: npm run test:v${{ matrix.prisma-version }}

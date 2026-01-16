@@ -1,7 +1,7 @@
 {
   "extends": ["@tsconfig/node24", "@tsconfig/strictest"],
   "include": ["src"],
-  "exclude": ["src/generated", "src/index.test.ts"],
+  "exclude": ["src/generated", "src/index.test.ts", "src/test-setup.*.ts"],
   "compilerOptions": {
     "checkJs": true,
     "composite": true,
