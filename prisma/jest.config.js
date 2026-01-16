@@ -14,7 +14,7 @@ module.exports = {
       },
     ],
   },
-  transformIgnorePatterns: ["node_modules/(?!(uuid)/)"],
+  transformIgnorePatterns: ["node_modules/(?!(uuid|@cerbos)/)"],
   moduleNameMapper: {
     "^(\\.{1,2}/.*)\\.js$": "$1",
     "^(.*)/test-setup$": `$1/test-setup.v${prismaVersion}`,
