@@ -38,7 +38,6 @@
     "clean": "rimraf lib",
     "build": "tsc --build",
     "prepare": "npm run build",
-    "prepublishOnly": "npm test",
     "version": "git add -A src",
     "prisma:generate": "bash scripts/generate-clients.sh",
     "test": "npm run test:v7",
