@@ -8,7 +8,7 @@ import {
   PlanResourcesResponse,
 } from "@cerbos/core";
 import { GRPC as Cerbos } from "@cerbos/grpc";
-import mongoose, { Schema, model } from "mongoose";
+import mongoose, { Schema, model, Types } from "mongoose";
 
 const cerbos = new Cerbos("127.0.0.1:3593", { tls: false });
 
@@ -1069,3 +1069,88 @@ describe("Error Handling", () => {
     ).toThrow("Unsupported operator: unsupported");
   });
 });
+
+describe("valueParser functionality", () => {
+    test("applies valueParser to 'equal' operator", async () => {
+      const queryPlan = await cerbos.planResources({
+        principal: { id: "user1", roles: ["USER"] },
+        resource: { kind: "resource" },
+        action: "equal",
+      });
+
+      const mapper: Mapper = {
+        "request.resource.attr.aBool": {
+          field: "aBool",
+          valueParser: (value) => !value,
+        },
+      };
+
+      const result = queryPlanToMongoose({
+        queryPlan,
+        mapper,
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          aBool: { $eq: false },
+        },
+      });
+    });
+
+    test("applies valueParser to 'in' operator", async () => {
+      const queryPlan = await cerbos.planResources({
+          principal: { id: "user1", roles: ["USER"] },
+          resource: { kind: "resource" },
+          action: "in",
+      });
+  
+      const mapper: Mapper = {
+        "request.resource.attr.aString": {
+          field: "aString",
+          valueParser: (value) => String(value).toUpperCase(),
+        },
+      };
+  
+      const result = queryPlanToMongoose({
+        queryPlan,
+        mapper,
+      });
+      
+      const expectedValues = ["string", "anotherString"].map(v => v.toUpperCase());
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          aString: { $in: expectedValues },
+        },
+      });
+    });
+
+    test("applies valueParser for ObjectId conversion on 'eq'", async () => {
+        const queryPlan = await cerbos.planResources({
+            principal: { id: "user1", roles: ["USER"] },
+            resource: { kind: "resource" },
+            action: "equal-oid",
+        });
+
+        const mapper: Mapper = {
+            "request.resource.attr.id": {
+                field: "_id",
+                valueParser: (value: string) => new Types.ObjectId(value),
+            },
+        };
+
+        const result = queryPlanToMongoose({
+            queryPlan,
+            mapper,
+        });
+
+        expect(result).toStrictEqual({
+            kind: PlanKind.CONDITIONAL,
+            filters: {
+                _id: { $eq: new Types.ObjectId("507f1f77bcf86cd799439011") },
+            },
+        });
+    });
+});
+
