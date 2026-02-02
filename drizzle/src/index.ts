@@ -790,7 +790,14 @@ const buildCollectionOperatorFilter = (
       }
 
       const countCheck = sql`(select count(*) from ${sql.identifier(tableName)} where ${matchCondition}) = 1`;
-      const combinedFilter = and(correlatedFilter, countCheck);
+      const wrappedCountCheck = leadingRelations.length
+        ? wrapWithRelations(
+            leadingRelations,
+            countCheck,
+            collectionOperand.name
+          )
+        : countCheck;
+      const combinedFilter = and(correlatedFilter, wrappedCountCheck);
       if (!combinedFilter) {
         return FALSE_CONDITION;
       }

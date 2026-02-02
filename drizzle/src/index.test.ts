@@ -1071,6 +1071,43 @@ describe("queryPlanToDrizzle", () => {
     expect(ids).toEqual(expected);
   });
 
+  test("produces matching results for exists_one on nested relation", () => {
+    // #given — exists_one on ownedBy with nested user field
+    const queryPlan = buildPlan({
+      operator: "exists_one",
+      operands: [
+        { name: "request.resource.attr.ownedBy" },
+        {
+          operator: "lambda",
+          operands: [
+            {
+              operator: "eq",
+              operands: [
+                { name: "owner.aBool" },
+                { value: true },
+              ],
+            },
+            { name: "owner" },
+          ],
+        },
+      ],
+    });
+
+    // #when
+    const result = queryPlanToDrizzle({ queryPlan, mapper });
+
+    // #then — resources where exactly one owner has aBool=true
+    const ids = selectIds(ensureFilter(result));
+    const expected = resourceFixtures
+      .filter((r) => {
+        const owners = r.ownedByIds.map((id) => userFixtures.find((u) => u.id === id)!);
+        return owners.filter((o) => o.aBool).length === 1;
+      })
+      .map((r) => r.id)
+      .sort();
+    expect(ids).toEqual(expected);
+  });
+
   test("throws when mapping is missing", () => {
     const queryPlan = buildPlan({
       operator: "eq",
