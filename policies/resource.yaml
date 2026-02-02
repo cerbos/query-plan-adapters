@@ -595,6 +595,30 @@ resourcePolicy:
               - expr: request.resource.attr.categories.exists(cat, cat.name == "business")
 
     - actions:
+        - "relation-has-members"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(request.resource.attr.ownedBy) > 0
+
+    - actions:
+        - "relation-has-no-members"
+      effect: EFFECT_DENY
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(request.resource.attr.ownedBy) > 0
+
+    - actions:
+        - "relation-has-no-members"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+
+    - actions:
         - "combined-not"
       effect: EFFECT_ALLOW
       roles:
