@@ -140,6 +140,10 @@ function negateOperand(
   if (!opVariable) throw Error(`Unexpected variable ${String(operands)}`);
 
   const opValue = getOperandValue(operands);
+  if (opValue === undefined)
+    throw Error(
+      `Variable-to-variable comparisons are not supported by ChromaDB filters`,
+    );
   const fieldName = getFieldName(opVariable);
   if (!fieldName) throw Error("Field name is required");
 
@@ -184,6 +188,10 @@ function mapOperand(
   if (!opVariable) throw Error(`Unexpected variable ${String(operands)}`);
 
   const opValue = getOperandValue(operands);
+  if (opValue === undefined)
+    throw Error(
+      `Variable-to-variable comparisons are not supported by ChromaDB filters`,
+    );
   const fieldName = getFieldName(opVariable);
   if (!fieldName) throw Error("Field name is required");
 
