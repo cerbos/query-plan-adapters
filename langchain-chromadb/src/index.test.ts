@@ -1,6 +1,6 @@
-import { beforeAll, afterAll, test, expect } from "@jest/globals";
+import { beforeAll, afterAll, test, expect, jest } from "@jest/globals";
 import { GRPC as Cerbos } from "@cerbos/grpc";
-import { ChromaClient } from "chromadb";
+import { ChromaClient, ChromaNotFoundError } from "chromadb";
 import type { Collection, Metadata, Where } from "chromadb";
 import { queryPlanToChromaDB, PlanKind } from ".";
 
@@ -23,7 +23,9 @@ interface ResourceMetadata {
   aBool: boolean;
   aNumber: number;
   aString: string;
-  nested: { aBool: boolean; aNumber: number; aString: string };
+  "nested.aBool": boolean;
+  "nested.aNumber": number;
+  "nested.aString": string;
 }
 
 const fixtureResources: ResourceMetadata[] = [
@@ -32,21 +34,27 @@ const fixtureResources: ResourceMetadata[] = [
     aBool: true,
     aNumber: 1,
     aString: "string",
-    nested: { aBool: true, aNumber: 1, aString: "string" },
+    "nested.aBool": true,
+    "nested.aNumber": 1,
+    "nested.aString": "string",
   },
   {
     key: "b",
     aBool: false,
     aNumber: 2,
     aString: "string2",
-    nested: { aBool: true, aNumber: 1, aString: "string" },
+    "nested.aBool": true,
+    "nested.aNumber": 1,
+    "nested.aString": "string",
   },
   {
     key: "c",
     aBool: false,
     aNumber: 3,
     aString: "string3",
-    nested: { aBool: true, aNumber: 1, aString: "string" },
+    "nested.aBool": true,
+    "nested.aNumber": 1,
+    "nested.aString": "string",
   },
 ];
 
@@ -60,9 +68,7 @@ beforeAll(async () => {
   try {
     await chroma.deleteCollection({ name: collectionName });
   } catch (err: unknown) {
-    const message =
-      err instanceof Error ? err.message : String(err);
-    if (!message.includes("not found")) {
+    if (!(err instanceof ChromaNotFoundError)) {
       throw err;
     }
   }
@@ -109,7 +115,7 @@ test("always allowed", async () => {
     filters: {},
   });
 
-  const matches = await queryResourceIds(result.filters);
+  const matches = await queryResourceIds();
   expect(matches.sort()).toEqual(fixtureResources.map((r) => r.key).sort());
 });
 
@@ -367,7 +373,109 @@ test("conditional - lte", async () => {
   );
 });
 
-test("conditional - eq nested", async () => {
+test("conditional - explicit-deny (not eq)", async () => {
+  // #given - policy: DENY when aBool==true, ALLOW otherwise
+  // Cerbos produces not(eq(aBool, true))
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "explicit-deny",
+  });
+
+  // #when
+  const result = queryPlanToChromaDB({
+    queryPlan,
+    fieldNameMapper: {
+      "request.resource.attr.aBool": "aBool",
+    },
+  });
+
+  // #then - not(eq) negates to $ne
+  expect(result).toStrictEqual({
+    kind: PlanKind.CONDITIONAL,
+    filters: { aBool: { $ne: true } },
+  });
+
+  const matches = await queryResourceIds(result.filters);
+  expect(matches.sort()).toEqual(
+    fixtureResources
+      .filter((r) => !r.aBool)
+      .map((r) => r.key)
+      .sort(),
+  );
+});
+
+test("conditional - nand (not and)", async () => {
+  // #given - policy: DENY when (aBool==true AND aString!="string"), ALLOW otherwise
+  // Cerbos produces not(and(eq(aBool, true), ne(aString, "string")))
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "nand",
+  });
+
+  // #when
+  const result = queryPlanToChromaDB({
+    queryPlan,
+    fieldNameMapper: {
+      "request.resource.attr.aBool": "aBool",
+      "request.resource.attr.aString": "aString",
+    },
+  });
+
+  // #then - De Morgan's: not(and(A, B)) → or(not(A), not(B))
+  expect(result).toStrictEqual({
+    kind: PlanKind.CONDITIONAL,
+    filters: {
+      $or: [{ aBool: { $ne: true } }, { aString: { $eq: "string" } }],
+    },
+  });
+
+  const matches = await queryResourceIds(result.filters);
+  expect(matches.sort()).toEqual(
+    fixtureResources
+      .filter((r) => !(r.aBool && r.aString !== "string"))
+      .map((r) => r.key)
+      .sort(),
+  );
+});
+
+test("conditional - nor (not or)", async () => {
+  // #given - policy: DENY when (aBool==true OR aString!="string"), ALLOW otherwise
+  // Cerbos produces not(or(eq(aBool, true), ne(aString, "string")))
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "nor",
+  });
+
+  // #when
+  const result = queryPlanToChromaDB({
+    queryPlan,
+    fieldNameMapper: {
+      "request.resource.attr.aBool": "aBool",
+      "request.resource.attr.aString": "aString",
+    },
+  });
+
+  // #then - De Morgan's: not(or(A, B)) → and(not(A), not(B))
+  expect(result).toStrictEqual({
+    kind: PlanKind.CONDITIONAL,
+    filters: {
+      $and: [{ aBool: { $ne: true } }, { aString: { $eq: "string" } }],
+    },
+  });
+
+  const matches = await queryResourceIds(result.filters);
+  expect(matches.sort()).toEqual(
+    fixtureResources
+      .filter((r) => !(r.aBool || r.aString !== "string"))
+      .map((r) => r.key)
+      .sort(),
+  );
+});
+
+test("conditional - eq with dot-notation field", async () => {
   const queryPlan = await cerbos.planResources({
     principal: { id: "user1", roles: ["USER"] },
     resource: { kind: "resource" },
@@ -383,11 +491,13 @@ test("conditional - eq nested", async () => {
 
   expect(result).toStrictEqual({
     kind: PlanKind.CONDITIONAL,
-    filters: { nested: { aBool: { $eq: true } } },
+    filters: { "nested.aBool": { $eq: true } },
   });
 
   const matches = await queryResourceIds(result.filters);
   expect(matches).toEqual(
-    fixtureResources.filter((r) => r.nested.aBool).map((r) => r.key),
+    fixtureResources
+      .filter((r) => r["nested.aBool"])
+      .map((r) => r.key),
   );
 });

@@ -132,6 +132,12 @@ resourcePolicy:
               - expr: request.resource.attr.aString != "string"
 
     - actions:
+        - "nand"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+
+    - actions:
         - "nor"
       effect: EFFECT_DENY
       roles:
@@ -142,6 +148,12 @@ resourcePolicy:
             of:
               - expr: request.resource.attr.aBool == true
               - expr: request.resource.attr.aString != "string"
+
+    - actions:
+        - "nor"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
 
     - actions:
         - "in"

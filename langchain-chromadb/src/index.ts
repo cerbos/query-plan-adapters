@@ -78,38 +78,30 @@ function getOperandValue(
   return (op as PlanExpressionValue).value;
 }
 
-const OPERATORS: {
-  [key: string]: {
-    fieldCondition: string;
-  };
-} = {
-  eq: {
-    fieldCondition: "$eq",
-  },
-  ne: {
-    fieldCondition: "$ne",
-  },
-  in: {
-    fieldCondition: "$in",
-  },
-  lt: {
-    fieldCondition: "$lt",
-  },
-  gt: {
-    fieldCondition: "$gt",
-  },
-  le: {
-    fieldCondition: "$lte",
-  },
-  ge: {
-    fieldCondition: "$gte",
-  },
+const NEGATED_OPERATOR: Record<string, string> = {
+  eq: "ne",
+  ne: "eq",
+  lt: "ge",
+  gt: "le",
+  le: "gt",
+  ge: "lt",
+  in: "nin",
 };
 
-function mapOperand(
+const OPERATORS: Record<string, string> = {
+  eq: "$eq",
+  ne: "$ne",
+  in: "$in",
+  nin: "$nin",
+  lt: "$lt",
+  gt: "$gt",
+  le: "$lte",
+  ge: "$gte",
+};
+
+function negateOperand(
   operand: PlanExpressionOperand,
   getFieldName: (key: string) => string,
-  output: Record<string, unknown> = {},
 ): Record<string, unknown> {
   if (!(operand instanceof PlanExpression))
     throw Error(
@@ -118,34 +110,31 @@ function mapOperand(
 
   const { operator, operands } = operand;
 
-  if (operator == "and") {
-    if (operands.length < 2) throw Error("Expected atleast 2 operands");
-    output["$and"] = operands.map((o) => mapOperand(o, getFieldName, {}));
-    return output;
+  if (operator === "and") {
+    if (operands.length < 2) throw Error("Expected at least 2 operands");
+    return {
+      $or: operands.map((o) => negateOperand(o, getFieldName)),
+    };
   }
 
-  if (operator == "or") {
-    if (operands.length < 2) throw Error("Expected atleast 2 operands");
-    output["$or"] = operands.map((o) => mapOperand(o, getFieldName, {}));
-    return output;
+  if (operator === "or") {
+    if (operands.length < 2) throw Error("Expected at least 2 operands");
+    return {
+      $and: operands.map((o) => negateOperand(o, getFieldName)),
+    };
   }
 
-  if (operator == "not") {
-    if (operands.length > 1) throw Error("Expected only one operand");
-    if (Object.keys(output).length === 0) {
-      output["$nor"] = [
-        operands.map((o) => mapOperand(o, getFieldName, {}))[0],
-      ];
-    } else {
-      output["$not"] = operands.map((o) =>
-        mapOperand(o, getFieldName, {}),
-      )[0];
-    }
-    return output;
+  if (operator === "not") {
+    if (operands.length !== 1 || !operands[0])
+      throw Error("Expected exactly one operand");
+    return mapOperand(operands[0], getFieldName);
   }
 
-  const operation = OPERATORS[operator];
-  if (!operation) throw Error(`Unsupported operator ${operator}`);
+  const negated = NEGATED_OPERATOR[operator];
+  if (!negated) throw Error(`Cannot negate operator ${operator}`);
+
+  const chromaOp = OPERATORS[negated];
+  if (!chromaOp) throw Error(`Unsupported negated operator ${negated}`);
 
   const opVariable = getOperandVariable(operands);
   if (!opVariable) throw Error(`Unexpected variable ${String(operands)}`);
@@ -154,39 +143,49 @@ function mapOperand(
   const fieldName = getFieldName(opVariable);
   if (!fieldName) throw Error("Field name is required");
 
-  const [firstSegment, ...rest] = fieldName.split(".");
-  if (!firstSegment) throw Error("Invalid field name");
-
-  if (rest.length > 0) {
-    output[firstSegment] = convertPathToJSON(rest, {
-      [operation.fieldCondition]: opValue,
-    });
-  } else {
-    output[firstSegment] = {
-      [operation.fieldCondition]: opValue,
-    };
-  }
-  return output;
+  return { [fieldName]: { [chromaOp]: opValue } };
 }
 
-function convertPathToJSON(
-  segments: string[],
-  value: Record<string, unknown>,
+function mapOperand(
+  operand: PlanExpressionOperand,
+  getFieldName: (key: string) => string,
 ): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
+  if (!(operand instanceof PlanExpression))
+    throw Error(
+      `Query plan did not contain an expression for operand ${String(operand)}`,
+    );
 
-  let current: Record<string, unknown> = result;
-  for (let i = 0; i < segments.length; i++) {
-    const segment = segments[i];
-    if (!segment) throw Error("Invalid field path segment");
-    if (i === segments.length - 1) {
-      current[segment] = value;
-    } else {
-      const next: Record<string, unknown> = {};
-      current[segment] = next;
-      current = next;
-    }
+  const { operator, operands } = operand;
+
+  if (operator === "and") {
+    if (operands.length < 2) throw Error("Expected at least 2 operands");
+    return {
+      $and: operands.map((o) => mapOperand(o, getFieldName)),
+    };
   }
 
-  return result;
+  if (operator === "or") {
+    if (operands.length < 2) throw Error("Expected at least 2 operands");
+    return {
+      $or: operands.map((o) => mapOperand(o, getFieldName)),
+    };
+  }
+
+  if (operator === "not") {
+    if (operands.length !== 1 || !operands[0])
+      throw Error("Expected exactly one operand");
+    return negateOperand(operands[0], getFieldName);
+  }
+
+  const chromaOp = OPERATORS[operator];
+  if (!chromaOp) throw Error(`Unsupported operator ${operator}`);
+
+  const opVariable = getOperandVariable(operands);
+  if (!opVariable) throw Error(`Unexpected variable ${String(operands)}`);
+
+  const opValue = getOperandValue(operands);
+  const fieldName = getFieldName(opVariable);
+  if (!fieldName) throw Error("Field name is required");
+
+  return { [fieldName]: { [chromaOp]: opValue } };
 }
