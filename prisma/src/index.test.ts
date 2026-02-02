@@ -2142,7 +2142,8 @@ describe("Collection Operations", () => {
       );
     });
 
-    test("conditional - filter", async () => {
+    test("conditional - filter throws because filter() returns a list not a boolean", async () => {
+      // #given
       const queryPlan = await cerbos.planResources({
         principal: { id: "user1", roles: ["USER"] },
         resource: { kind: "resource" },
@@ -2180,49 +2181,21 @@ describe("Collection Operations", () => {
         }
       );
 
-      const result = queryPlanToPrisma({
-        queryPlan,
-        mapper: {
-          "request.resource.attr.tags": {
-            relation: {
-              name: "tags",
-              type: "many",
+      // #when / #then
+      expect(() =>
+        queryPlanToPrisma({
+          queryPlan,
+          mapper: {
+            "request.resource.attr.tags": {
+              relation: {
+                name: "tags",
+                type: "many",
+              },
             },
           },
-        },
-      });
-
-      expect(result).toStrictEqual({
-        kind: PlanKind.CONDITIONAL,
-        filters: {
-          tags: {
-            some: {
-              name: { equals: "public" },
-            },
-          },
-        },
-      });
-
-      if (result.kind !== PlanKind.CONDITIONAL) {
-        throw new Error("Expected CONDITIONAL result");
-      }
-
-      const query = await prisma.resource.findMany({
-        where: { ...result.filters },
-      });
-
-      expect(query.map((r) => r.id)).toEqual(
-        fixtureResources
-          .filter(
-            (a) =>
-              Array.isArray(a.tags?.connect) &&
-              a.tags?.connect
-                .map((t) => {
-                  return fixtureTags.find((f) => f.id === t.id);
-                })
-                .filter((t) => t?.name === "public").length > 0
-          )
-          .map((r) => r.id)
+        })
+      ).toThrow(
+        "The filter() collection operator returns a list, not a boolean."
       );
     });
 
@@ -4862,71 +4835,43 @@ describe("Integration", () => {
     //   ],
     // });
 
-    const result = queryPlanToPrisma({
-      queryPlan,
-      mapper: {
-        "request.resource.attr.aOptionalString": { field: "aOptionalString" },
-        "request.resource.attr.aBool": { field: "aBool" },
-        "request.resource.attr.aString": { field: "aString" },
-        "request.resource.attr.tags": {
-          relation: {
-            name: "tags",
-            type: "many",
+    expect(() =>
+      queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.aOptionalString": {
+            field: "aOptionalString",
           },
-        },
-        "request.resource.attr.nested": {
-          relation: {
-            name: "nested",
-            type: "one",
-            fields: {
-              nextlevel: {
-                relation: {
-                  name: "nextlevel",
-                  type: "one",
-                  fields: {
-                    aBool: { field: "aBool" },
+          "request.resource.attr.aBool": { field: "aBool" },
+          "request.resource.attr.aString": { field: "aString" },
+          "request.resource.attr.tags": {
+            relation: {
+              name: "tags",
+              type: "many",
+            },
+          },
+          "request.resource.attr.nested": {
+            relation: {
+              name: "nested",
+              type: "one",
+              fields: {
+                nextlevel: {
+                  relation: {
+                    name: "nextlevel",
+                    type: "one",
+                    fields: {
+                      aBool: { field: "aBool" },
+                    },
                   },
                 },
               },
             },
           },
         },
-      },
-    });
-
-    // expect(result).toStrictEqual({
-    //   kind: PlanKind.CONDITIONAL,
-    //   filters: {
-    //     tags: {
-    //       some: {
-    //         name: { equals: "public" },
-    //       },
-    //     },
-    //   },
-    // });
-
-    if (result.kind !== PlanKind.CONDITIONAL) {
-      throw new Error("Expected CONDITIONAL result");
-    }
-
-    // console.log(JSON.stringify(result, null, 2));
-    await prisma.resource.findMany({
-      where: { ...result.filters },
-    });
-
-    // expect(query.map((r) => r.id)).toEqual(
-    //   fixtureResources
-    //     .filter(
-    //       (a) =>
-    //         Array.isArray(a.tags?.connect) &&
-    //         a.tags?.connect
-    //           .map((t) => {
-    //             return fixtureTags.find((f) => f.id === t.id);
-    //           })
-    //           .filter((t) => t?.name === "public").length > 0
-    //     )
-    //     .map((r) => r.id)
-    // );
+      })
+    ).toThrow(
+      "The filter() collection operator returns a list, not a boolean."
+    );
   });
 
   test("conditional - relation-has-members (size > 0)", async () => {

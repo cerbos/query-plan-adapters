@@ -937,8 +937,13 @@ function handleCollectionOperator(
 
   switch (operator) {
     case "exists":
-    case "filter":
       return { [relation.name]: { some: filterValue } };
+    case "filter":
+      throw new Error(
+        "The filter() collection operator returns a list, not a boolean. " +
+          "It cannot be used as a standalone condition. " +
+          "Use exists() or combine filter() with size() instead."
+      );
     case "except":
       return { [relation.name]: { some: { NOT: filterValue } } };
     case "exists_one":
