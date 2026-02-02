@@ -1,0 +1,8 @@
+node_modules
+dist
+lib
+.DS_Store
+data
+tsconfig.tsbuildinfo
+.env.local
+convex/_generated/

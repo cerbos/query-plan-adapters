@@ -1,0 +1,14 @@
+{
+  "extends": ["@tsconfig/node20", "@tsconfig/strictest"],
+  "include": ["src"],
+  "exclude": ["src/integration.test.ts"],
+  "compilerOptions": {
+    "checkJs": true,
+    "composite": true,
+    "exactOptionalPropertyTypes": false,
+    "outDir": "lib",
+    "rootDir": "src",
+    "declarationMap": true,
+    "sourceMap": true
+  }
+}

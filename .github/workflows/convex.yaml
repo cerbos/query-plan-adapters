@@ -1,0 +1,99 @@
+name: Convex Test
+
+on:
+  pull_request:
+    paths:
+      - "convex/**"
+      - "policies/**"
+  push:
+    tags:
+      - convex/v*
+
+defaults:
+  run:
+    working-directory: convex
+
+jobs:
+  unit-test:
+    strategy:
+      matrix:
+        cerbos-version: ["latest"]
+        node-version: ["20", "22", "24"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Cerbos
+        uses: cerbos/cerbos-setup-action@feb2173363a24d30544b990965892bc391909213 # v1
+        with:
+          version: ${{ matrix.cerbos-version }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - run: npm install
+      - run: npm run test
+
+  integration-test:
+    strategy:
+      matrix:
+        cerbos-version: ["latest"]
+        node-version: ["22"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Cerbos
+        uses: cerbos/cerbos-setup-action@feb2173363a24d30544b990965892bc391909213 # v1
+        with:
+          version: ${{ matrix.cerbos-version }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - run: npm install
+
+      - name: Start Convex backend
+        run: docker compose up -d
+
+      - name: Wait for Convex backend
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:3210/version > /dev/null 2>&1; then
+              echo "Convex backend is ready"
+              break
+            fi
+            echo "Waiting for Convex backend... ($i/30)"
+            sleep 2
+          done
+
+      - name: Generate Convex admin key
+        id: convex-key
+        run: |
+          ADMIN_KEY=$(docker compose exec -T backend ./generate_admin_key.sh 2>/dev/null | tail -1)
+          echo "key=$ADMIN_KEY" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy Convex functions
+        env:
+          CONVEX_SELF_HOSTED_URL: http://127.0.0.1:3210
+          CONVEX_SELF_HOSTED_ADMIN_KEY: ${{ steps.convex-key.outputs.key }}
+        run: npx convex deploy --typecheck disable -y
+
+      - name: Generate Convex types
+        env:
+          CONVEX_SELF_HOSTED_URL: http://127.0.0.1:3210
+          CONVEX_SELF_HOSTED_ADMIN_KEY: ${{ steps.convex-key.outputs.key }}
+        run: npx convex codegen
+
+      - name: Run integration tests
+        env:
+          CONVEX_URL: http://127.0.0.1:3210
+        run: npm run test:integration
+
+      - name: Stop Convex backend
+        if: always()
+        run: docker compose down -v
