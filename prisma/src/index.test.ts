@@ -13,10 +13,9 @@ import {
   PlanResourcesConditionalResponse,
   PlanResourcesResponse,
 } from "@cerbos/core";
-import { Prisma, PrismaClient } from "@prisma/client";
 import { GRPC as Cerbos } from "@cerbos/grpc";
+import { prisma, Prisma } from "./test-setup";
 
-const prisma = new PrismaClient();
 const cerbos = new Cerbos("127.0.0.1:3593", { tls: false });
 
 function createConditionalPlan(
@@ -538,6 +537,457 @@ describe("Field Operations", () => {
       expect(query.map((r) => r.id)).toEqual(
         fixtureResources.filter((a) => !a.aBool).map((r) => r.id)
       );
+    });
+  });
+
+  describe("Bare Boolean Tests", () => {
+    test("conditional - bare boolean true (no value operand)", () => {
+      // #given
+      const queryPlan = createConditionalPlan({
+        name: "request.resource.attr.aBool",
+      });
+
+      // #when
+      const result = queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.aBool": { field: "aBool" },
+        },
+      });
+
+      // #then
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: { aBool: { equals: true } },
+      });
+    });
+
+    test("conditional - bare boolean negated (not with single named operand)", () => {
+      // #given
+      const queryPlan = createConditionalPlan({
+        operator: "not",
+        operands: [{ name: "request.resource.attr.aBool" }],
+      });
+
+      // #when
+      const result = queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.aBool": { field: "aBool" },
+        },
+      });
+
+      // #then
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: { aBool: { equals: false } },
+      });
+    });
+
+    test("conditional - bare boolean without mapper", () => {
+      // #given
+      const queryPlan = createConditionalPlan({
+        name: "request.resource.attr.aBool",
+      });
+
+      // #when
+      const result = queryPlanToPrisma({ queryPlan });
+
+      // #then
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: { "request.resource.attr.aBool": { equals: true } },
+      });
+    });
+
+    test("conditional - negated bare boolean without mapper", () => {
+      // #given
+      const queryPlan = createConditionalPlan({
+        operator: "not",
+        operands: [{ name: "request.resource.attr.aBool" }],
+      });
+
+      // #when
+      const result = queryPlanToPrisma({ queryPlan });
+
+      // #then
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: { "request.resource.attr.aBool": { equals: false } },
+      });
+    });
+
+    test("conditional - bare boolean inside AND", () => {
+      // #given
+      const queryPlan = createConditionalPlan({
+        operator: "and",
+        operands: [
+          { name: "request.resource.attr.aBool" },
+          {
+            operator: "eq",
+            operands: [
+              { name: "request.resource.attr.aString" },
+              { value: "string" },
+            ],
+          },
+        ],
+      });
+
+      // #when
+      const result = queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.aBool": { field: "aBool" },
+          "request.resource.attr.aString": { field: "aString" },
+        },
+      });
+
+      // #then
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          AND: [
+            { aBool: { equals: true } },
+            { aString: { equals: "string" } },
+          ],
+        },
+      });
+    });
+
+    test("conditional - bare boolean inside OR", () => {
+      // #given
+      const queryPlan = createConditionalPlan({
+        operator: "or",
+        operands: [
+          { name: "request.resource.attr.aBool" },
+          {
+            operator: "eq",
+            operands: [
+              { name: "request.resource.attr.aNumber" },
+              { value: 1 },
+            ],
+          },
+        ],
+      });
+
+      // #when
+      const result = queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.aBool": { field: "aBool" },
+          "request.resource.attr.aNumber": { field: "aNumber" },
+        },
+      });
+
+      // #then
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          OR: [
+            { aBool: { equals: true } },
+            { aNumber: { equals: 1 } },
+          ],
+        },
+      });
+    });
+
+    test("conditional - double negation bare boolean", () => {
+      // #given
+      const queryPlan = createConditionalPlan({
+        operator: "not",
+        operands: [
+          {
+            operator: "not",
+            operands: [{ name: "request.resource.attr.aBool" }],
+          },
+        ],
+      });
+
+      // #when
+      const result = queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.aBool": { field: "aBool" },
+        },
+      });
+
+      // #then
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: { NOT: { aBool: { equals: false } } },
+      });
+    });
+
+    test("conditional - bare boolean with relation", () => {
+      // #given
+      const queryPlan = createConditionalPlan({
+        name: "request.resource.attr.nested.aBool",
+      });
+
+      // #when
+      const result = queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.nested": {
+            relation: {
+              name: "nestedResource",
+              type: "one",
+            },
+          },
+          "request.resource.attr.nested.aBool": {
+            relation: {
+              name: "nestedResource",
+              type: "one",
+            },
+            field: "aBool",
+          },
+        },
+      });
+
+      // #then
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          nestedResource: { is: { aBool: { equals: true } } },
+        },
+      });
+    });
+
+    test("conditional - negated bare boolean with relation", () => {
+      // #given
+      const queryPlan = createConditionalPlan({
+        operator: "not",
+        operands: [{ name: "request.resource.attr.nested.aBool" }],
+      });
+
+      // #when
+      const result = queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.nested": {
+            relation: {
+              name: "nestedResource",
+              type: "one",
+            },
+          },
+          "request.resource.attr.nested.aBool": {
+            relation: {
+              name: "nestedResource",
+              type: "one",
+            },
+            field: "aBool",
+          },
+        },
+      });
+
+      // #then
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          NOT: { nestedResource: { is: { aBool: { equals: true } } } },
+        },
+      });
+    });
+
+    test("conditional - negated bare boolean with many relation", () => {
+      // #given
+      const queryPlan = createConditionalPlan({
+        operator: "not",
+        operands: [{ name: "request.resource.attr.tags.active" }],
+      });
+
+      // #when
+      const result = queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.tags.active": {
+            relation: {
+              name: "tags",
+              type: "many",
+            },
+            field: "active",
+          },
+        },
+      });
+
+      // #then — must be NOT { some { equals: true } }, not some { equals: false }
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          NOT: { tags: { some: { active: { equals: true } } } },
+        },
+      });
+    });
+
+    test("conditional - bare boolean via cerbos policy", async () => {
+      const queryPlan = await cerbos.planResources({
+        principal: { id: "user1", roles: ["USER"] },
+        resource: { kind: "resource" },
+        action: "bare-bool",
+      });
+
+      expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+      expect(
+        (queryPlan as PlanResourcesConditionalResponse).condition
+      ).toEqual({ name: "request.resource.attr.aBool" });
+
+      const result = queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.aBool": { field: "aBool" },
+        },
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: { aBool: { equals: true } },
+      });
+
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
+
+      const query = await prisma.resource.findMany({
+        where: { ...result.filters },
+      });
+      expect(query.map((r) => r.id)).toEqual(
+        fixtureResources.filter((a) => a.aBool).map((r) => r.id)
+      );
+    });
+
+    test("conditional - negated bare boolean via cerbos policy", async () => {
+      const queryPlan = await cerbos.planResources({
+        principal: { id: "user1", roles: ["USER"] },
+        resource: { kind: "resource" },
+        action: "bare-bool-negated",
+      });
+
+      expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+      expect(
+        (queryPlan as PlanResourcesConditionalResponse).condition
+      ).toEqual({
+        operator: "not",
+        operands: [{ name: "request.resource.attr.aBool" }],
+      });
+
+      const result = queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.aBool": { field: "aBool" },
+        },
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: { aBool: { equals: false } },
+      });
+
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
+
+      const query = await prisma.resource.findMany({
+        where: { ...result.filters },
+      });
+      expect(query.map((r) => r.id)).toEqual(
+        fixtureResources.filter((a) => !a.aBool).map((r) => r.id)
+      );
+    });
+
+    test("conditional - bare boolean nested via cerbos policy", async () => {
+      const queryPlan = await cerbos.planResources({
+        principal: { id: "user1", roles: ["USER"] },
+        resource: { kind: "resource" },
+        action: "bare-bool-nested",
+      });
+
+      expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+      expect(
+        (queryPlan as PlanResourcesConditionalResponse).condition
+      ).toEqual({ name: "request.resource.attr.nested.aBool" });
+
+      const result = queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.nested": {
+            relation: {
+              name: "nested",
+              type: "one",
+              fields: {
+                aBool: { field: "aBool" },
+              },
+            },
+          },
+        },
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: { nested: { is: { aBool: { equals: true } } } },
+      });
+
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
+
+      const query = await prisma.resource.findMany({
+        where: { ...result.filters },
+        include: { nested: true },
+      });
+      expect(query.length).toBeGreaterThan(0);
+      for (const resource of query) {
+        expect(resource.nested.aBool).toBe(true);
+      }
+    });
+
+    test("conditional - negated bare boolean nested via cerbos policy", async () => {
+      const queryPlan = await cerbos.planResources({
+        principal: { id: "user1", roles: ["USER"] },
+        resource: { kind: "resource" },
+        action: "bare-bool-nested-negated",
+      });
+
+      expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+      expect(
+        (queryPlan as PlanResourcesConditionalResponse).condition
+      ).toEqual({
+        operator: "not",
+        operands: [{ name: "request.resource.attr.nested.aBool" }],
+      });
+
+      const result = queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.nested": {
+            relation: {
+              name: "nested",
+              type: "one",
+              fields: {
+                aBool: { field: "aBool" },
+              },
+            },
+          },
+        },
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          NOT: { nested: { is: { aBool: { equals: true } } } },
+        },
+      });
+
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
+
+      const query = await prisma.resource.findMany({
+        where: { ...result.filters },
+        include: { nested: true },
+      });
+      for (const resource of query) {
+        expect(resource.nested.aBool).not.toBe(true);
+      }
     });
   });
 
@@ -2464,6 +2914,174 @@ describe("Relations", () => {
             .map((r) => r.id)
         );
       });
+
+      test("conditional - size(field) > 0 produces some", () => {
+        const result = queryPlanToPrisma({
+          queryPlan: createConditionalPlan({
+            operator: "gt",
+            operands: [
+              {
+                operator: "size",
+                operands: [{ name: "request.resource.attr.ownedBy" }],
+              },
+              { value: 0 },
+            ],
+          }),
+          mapper: {
+            "request.resource.attr.ownedBy": {
+              relation: { name: "ownedBy", type: "many", field: "id" },
+            },
+          },
+        });
+
+        expect(result).toStrictEqual({
+          kind: PlanKind.CONDITIONAL,
+          filters: { ownedBy: { some: {} } },
+        });
+      });
+
+      test("conditional - size(field) == 0 produces none", () => {
+        const result = queryPlanToPrisma({
+          queryPlan: createConditionalPlan({
+            operator: "eq",
+            operands: [
+              {
+                operator: "size",
+                operands: [{ name: "request.resource.attr.ownedBy" }],
+              },
+              { value: 0 },
+            ],
+          }),
+          mapper: {
+            "request.resource.attr.ownedBy": {
+              relation: { name: "ownedBy", type: "many", field: "id" },
+            },
+          },
+        });
+
+        expect(result).toStrictEqual({
+          kind: PlanKind.CONDITIONAL,
+          filters: { ownedBy: { none: {} } },
+        });
+      });
+
+      test("conditional - not(size(field) > 0) produces NOT some", () => {
+        const result = queryPlanToPrisma({
+          queryPlan: createConditionalPlan({
+            operator: "not",
+            operands: [
+              {
+                operator: "gt",
+                operands: [
+                  {
+                    operator: "size",
+                    operands: [{ name: "request.resource.attr.ownedBy" }],
+                  },
+                  { value: 0 },
+                ],
+              },
+            ],
+          }),
+          mapper: {
+            "request.resource.attr.ownedBy": {
+              relation: { name: "ownedBy", type: "many", field: "id" },
+            },
+          },
+        });
+
+        expect(result).toStrictEqual({
+          kind: PlanKind.CONDITIONAL,
+          filters: { NOT: { ownedBy: { some: {} } } },
+        });
+      });
+
+      test("conditional - size(field) >= 1 produces some", () => {
+        const result = queryPlanToPrisma({
+          queryPlan: createConditionalPlan({
+            operator: "ge",
+            operands: [
+              {
+                operator: "size",
+                operands: [{ name: "request.resource.attr.ownedBy" }],
+              },
+              { value: 1 },
+            ],
+          }),
+          mapper: {
+            "request.resource.attr.ownedBy": {
+              relation: { name: "ownedBy", type: "many", field: "id" },
+            },
+          },
+        });
+
+        expect(result).toStrictEqual({
+          kind: PlanKind.CONDITIONAL,
+          filters: { ownedBy: { some: {} } },
+        });
+      });
+
+      test("conditional - size on nested relation walks full chain", () => {
+        const result = queryPlanToPrisma({
+          queryPlan: createConditionalPlan({
+            operator: "gt",
+            operands: [
+              {
+                operator: "size",
+                operands: [
+                  { name: "request.resource.attr.team.members" },
+                ],
+              },
+              { value: 0 },
+            ],
+          }),
+          mapper: {
+            "request.resource.attr.team": {
+              relation: {
+                name: "team",
+                type: "one",
+                fields: {
+                  members: {
+                    relation: { name: "members", type: "many" },
+                  },
+                },
+              },
+            },
+          },
+        });
+
+        expect(result).toStrictEqual({
+          kind: PlanKind.CONDITIONAL,
+          filters: {
+            team: {
+              is: {
+                members: { some: {} },
+              },
+            },
+          },
+        });
+      });
+
+      test("conditional - unsupported size comparison throws", () => {
+        expect(() =>
+          queryPlanToPrisma({
+            queryPlan: createConditionalPlan({
+              operator: "gt",
+              operands: [
+                {
+                  operator: "size",
+                  operands: [{ name: "request.resource.attr.ownedBy" }],
+                },
+                { value: 5 },
+              ],
+            }),
+            mapper: {
+              "request.resource.attr.ownedBy": {
+                relation: { name: "ownedBy", type: "many", field: "id" },
+              },
+            },
+          })
+        ).toThrow("Unsupported size comparison: size(...) gt 5");
+      });
     });
   });
 
@@ -4309,6 +4927,88 @@ describe("Integration", () => {
     //     )
     //     .map((r) => r.id)
     // );
+  });
+
+  test("conditional - relation-has-members (size > 0)", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "relation-has-members",
+    });
+
+    expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+
+    const result = queryPlanToPrisma({
+      queryPlan,
+      mapper: {
+        "request.resource.attr.ownedBy": {
+          relation: { name: "ownedBy", type: "many", field: "id" },
+        },
+      },
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { ownedBy: { some: {} } },
+    });
+
+    if (result.kind !== PlanKind.CONDITIONAL) {
+      throw new Error("Expected CONDITIONAL result");
+    }
+
+    const query = await prisma.resource.findMany({
+      where: { ...result.filters },
+    });
+
+    expect(query.map((r) => r.id)).toEqual(
+      fixtureResources
+        .filter((r) => {
+          if (!r.ownedBy?.connect) return false;
+          return (r.ownedBy.connect as { id: string }[]).length > 0;
+        })
+        .map((r) => r.id)
+    );
+  });
+
+  test("conditional - relation-has-no-members (negated size > 0)", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "relation-has-no-members",
+    });
+
+    expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+
+    const result = queryPlanToPrisma({
+      queryPlan,
+      mapper: {
+        "request.resource.attr.ownedBy": {
+          relation: { name: "ownedBy", type: "many", field: "id" },
+        },
+      },
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { NOT: { ownedBy: { some: {} } } },
+    });
+
+    if (result.kind !== PlanKind.CONDITIONAL) {
+      throw new Error("Expected CONDITIONAL result");
+    }
+
+    const query = await prisma.resource.findMany({
+      where: { ...result.filters },
+    });
+
+    expect(query.map((r) => r.id)).toEqual(
+      fixtureResources
+        .filter((r) => {
+          if (!r.ownedBy?.connect) return true;
+          return (r.ownedBy.connect as { id: string }[]).length === 0;
+        })
+        .map((r) => r.id)
+    );
   });
 });
 

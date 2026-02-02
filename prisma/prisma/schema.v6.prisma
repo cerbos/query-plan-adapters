@@ -2,14 +2,13 @@
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
-  provider     = "prisma-client" // or `prisma-client-js`
-  output       = "../src/generated/prisma"
-  engineType   = "client" // enable Prisma ORM without Rust
-  moduleFormat = "cjs"
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma-v6"
 }
 
 datasource db {
   provider = "sqlite"
+  url      = "file:./dev.db"
 }
 
 model Resource {

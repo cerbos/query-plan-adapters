@@ -379,7 +379,17 @@ function buildPrismaFilterFromCerbosExpression(
   expression: PlanExpressionOperand,
   mapper: Mapper
 ): PrismaFilter {
-  // Validate expression structure
+  // A bare named operand represents a boolean field reference (e.g. `R.attr.booleanAttr`)
+  if (isNamedOperand(expression)) {
+    const { path, relations } = resolveFieldReference(expression.name, mapper);
+    const fieldName = getLeafField(path);
+    const fieldFilter = { [fieldName]: { equals: true } };
+    if (relations && relations.length > 0) {
+      return buildNestedRelationFilter(relations, fieldFilter);
+    }
+    return fieldFilter;
+  }
+
   if (!isOperatorOperand(expression)) {
     throw new Error("Invalid Cerbos expression structure");
   }
@@ -406,6 +416,16 @@ function buildPrismaFilterFromCerbosExpression(
       const operand = operands[0];
       if (!operand) {
         throw new Error("not operator requires an operand");
+      }
+      if (isNamedOperand(operand)) {
+        const { path, relations } = resolveFieldReference(
+          operand.name,
+          mapper
+        );
+        if (!relations || relations.length === 0) {
+          const fieldName = getLeafField(path);
+          return { [fieldName]: { equals: false } };
+        }
       }
       return {
         NOT: buildPrismaFilterFromCerbosExpression(operand, mapper),
@@ -460,6 +480,60 @@ function buildPrismaFilterFromCerbosExpression(
   }
 }
 
+function handleSizeComparison(
+  operator: string,
+  sizeOperand: OperatorOperand,
+  valueOperand: PlanExpressionOperand,
+  mapper: Mapper
+): PrismaFilter {
+  const collectionOperand = sizeOperand.operands[0];
+  if (!collectionOperand || !isNamedOperand(collectionOperand)) {
+    throw new Error("size operator requires a named collection operand");
+  }
+
+  if (!isValueOperand(valueOperand)) {
+    throw new Error("size comparison requires a numeric value operand");
+  }
+
+  const count = valueOperand.value;
+  if (typeof count !== "number") {
+    throw new Error("size comparison requires a numeric value");
+  }
+
+  const isNonEmpty =
+    (operator === "gt" && count === 0) || (operator === "ge" && count === 1);
+
+  const isEmpty =
+    (operator === "eq" && count === 0) ||
+    (operator === "lt" && count === 1) ||
+    (operator === "le" && count === 0);
+
+  if (!isNonEmpty && !isEmpty) {
+    throw new Error(
+      `Unsupported size comparison: size(...) ${operator} ${count}`
+    );
+  }
+
+  const { relations } = resolveFieldReference(collectionOperand.name, mapper);
+  if (!relations || relations.length === 0) {
+    throw new Error("size operator requires a relation mapping");
+  }
+
+  const deepest = relations[relations.length - 1];
+  if (!deepest) {
+    throw new Error("size operator requires a relation mapping");
+  }
+
+  const prismaOp = isNonEmpty ? "some" : "none";
+  const leafFilter = { [deepest.name]: { [prismaOp]: {} } };
+
+  if (relations.length === 1) {
+    return leafFilter;
+  }
+
+  return buildNestedRelationFilter(relations.slice(0, -1), leafFilter);
+}
+
 /**
  * Helper function to process relational operators (eq, ne, lt, etc.)
  */
@@ -488,6 +562,10 @@ function handleRelationalOperator(
 
   const rightOperand = operands.find((o) => o !== leftOperand);
   if (!rightOperand) throw new Error("No valid right operand found");
+
+  if (isOperatorOperand(leftOperand) && leftOperand.operator === "size") {
+    return handleSizeComparison(operator, leftOperand, rightOperand, mapper);
+  }
 
   const left = resolveOperand(leftOperand, mapper);
   const right = resolveOperand(rightOperand, mapper);
