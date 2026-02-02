@@ -9,23 +9,17 @@ import {
   or,
   not,
   eq,
-  ne,
-  lt,
-  lte,
-  gt,
-  gte,
-  inArray,
+  like,
   isNull,
   sql,
   exists,
+  getTableName,
 } from "drizzle-orm";
-import type { AnyColumn, SQL } from "drizzle-orm";
+import type { AnyColumn, SQL, Table } from "drizzle-orm";
+import { Param } from "drizzle-orm/sql";
 
-const TABLE_NAME = Symbol.for("drizzle:Name");
 const FALSE_CONDITION = sql`0 = 1`;
 const TRUE_CONDITION = sql`1 = 1`;
-
-type RelationTable = unknown;
 
 export { PlanKind };
 
@@ -105,19 +99,29 @@ export type QueryPlanToDrizzleResult =
 
 export interface RelationMapping {
   type: "one" | "many";
-  table: RelationTable;
+  table: Table;
   sourceColumn: AnyColumn;
   targetColumn: AnyColumn;
   field?: MapperEntry;
   fields?: { [key: string]: MapperEntry };
 }
 
+type ScopedMapperMetadata = {
+  leadingRelations: RelationMapping[];
+  primaryRelation: RelationMapping;
+};
+
+const scopedMapperMetadata = new WeakMap<
+  (reference: string) => MapperEntry | undefined,
+  ScopedMapperMetadata
+>();
+
 const isScopedRelationEntry = (
   entry: MapperEntry
 ): entry is ScopedRelationEntry =>
   typeof entry === "object" &&
   entry !== null &&
-  (entry as ScopedRelationEntry)[SCOPED_RELATION] === true;
+  SCOPED_RELATION in entry;
 
 const isMappingConfig = (entry: MapperEntry): entry is MappingConfig =>
   typeof entry === "object" &&
@@ -128,7 +132,15 @@ const isMappingConfig = (entry: MapperEntry): entry is MappingConfig =>
 const isRelationValue = (entry: BaseMapperEntry): entry is RelationValue =>
   typeof entry === "object" &&
   entry !== null &&
-  (entry as RelationValue).kind === "relation";
+  "kind" in entry &&
+  entry.kind === "relation";
+
+const isColumn = (entry: BaseMapperEntry): entry is AnyColumn =>
+  typeof entry === "object" &&
+  entry !== null &&
+  !isRelationValue(entry) &&
+  !isMappingConfig(entry) &&
+  typeof entry !== "function";
 
 const toBaseMapperEntry = (entry: MapperEntry): BaseMapperEntry =>
   isScopedRelationEntry(entry) ? entry.resolve().mapping : entry;
@@ -137,13 +149,6 @@ const makeScopedRelationEntry = (resolution: ResolvedMapping): ScopedRelationEnt
   [SCOPED_RELATION]: true,
   resolve: () => resolution,
 });
-
-type ScopedMapperMetadata = {
-  leadingRelations: RelationMapping[];
-  primaryRelation: RelationMapping;
-};
-
-const SCOPED_METADATA = Symbol("ScopedMapperMetadata");
 
 const resolveRelationChain = (
   reference: string,
@@ -216,7 +221,7 @@ const createScopedMapper = (
   }
   const leadingRelations = relationChain.slice(0, -1);
 
-  const scopedMapper: Mapper = (reference: string) => {
+  const scopedFn = (reference: string): MapperEntry | undefined => {
     if (reference === variableName) {
       const resolved = resolveRelationField(
         primaryRelation,
@@ -242,16 +247,19 @@ const createScopedMapper = (
     return getMappingEntry(reference, mapper);
   };
 
-  if (typeof scopedMapper === "function") {
-    (scopedMapper as Mapper & { [SCOPED_METADATA]?: ScopedMapperMetadata })[
-      SCOPED_METADATA
-    ] = {
-      leadingRelations,
-      primaryRelation,
-    };
-  }
+  scopedMapperMetadata.set(scopedFn, {
+    leadingRelations,
+    primaryRelation,
+  });
 
-  return scopedMapper;
+  return scopedFn;
+};
+
+const getScopedMetadata = (mapper: Mapper): ScopedMapperMetadata | undefined => {
+  if (typeof mapper !== "function") {
+    return undefined;
+  }
+  return scopedMapperMetadata.get(mapper);
 };
 
 const resolveRelationDefaultField = (
@@ -285,7 +293,7 @@ const isValueOperand = (
 const isExpressionOperand = (
   operand: PlanExpressionOperand
 ): operand is { operator: string; operands: PlanExpressionOperand[] } =>
-  "operator" in operand && Array.isArray((operand as any).operands);
+  "operator" in operand && "operands" in operand && Array.isArray(operand.operands);
 
 type NamedOperand = { name: string };
 
@@ -339,12 +347,12 @@ const extractLambdaComponents = (
 const getMappingEntry = (reference: string, mapper: Mapper): MapperEntry | undefined =>
   typeof mapper === "function" ? mapper(reference) : mapper[reference];
 
-const getTableName = (table: RelationTable, reference: string): string => {
-  const name = (table as { [key: symbol]: string | undefined })[TABLE_NAME];
-  if (!name) {
+const resolveTableName = (table: Table, reference: string): string => {
+  try {
+    return getTableName(table);
+  } catch {
     throw new Error(`Unable to resolve table name for relation: ${reference}`);
   }
-  return name;
 };
 
 const wrapWithRelations = (
@@ -362,9 +370,9 @@ const wrapWithRelations = (
       }
       const joinCondition = eq(relation.targetColumn, relation.sourceColumn);
       const condition = and(joinCondition, currentFilter);
-      const tableName = getTableName(relation.table, reference);
+      const tableName = resolveTableName(relation.table, reference);
       return exists(
-        sql`(select 1 from ${sql.raw(tableName)} where ${condition})`
+        sql`(select 1 from ${sql.identifier(tableName)} where ${condition})`
       );
     }, filter);
 };
@@ -416,9 +424,9 @@ const resolveRelationField = (
     return { relations, mapping: toBaseMapperEntry(fieldEntry) };
   }
 
-  const inferredColumn = (relation.table as Record<string, MapperEntry>)[
-    segment
-  ];
+  const inferredColumn = (segment in relation.table)
+    ? (relation.table as never)[segment]
+    : undefined;
 
   if (inferredColumn !== undefined) {
     if (rest.length > 0) {
@@ -488,43 +496,46 @@ const applyComparison = (
     return applyComparison(mapping.column, operator, value);
   }
 
-  const column = mapping as AnyColumn;
+  if (!isColumn(mapping)) {
+    throw new Error("Expected a column mapping");
+  }
+  const column: AnyColumn = mapping;
+  const bound = new Param(value, column);
 
   switch (operator) {
     case "eq":
-      return value === null ? isNull(column) : eq(column, value as any);
+      return value === null ? isNull(column) : sql`${column} = ${bound}`;
     case "ne":
       return value === null
         ? not(isNull(column))
-        : ne(column, value as any);
+        : sql`${column} <> ${bound}`;
     case "lt":
-      return lt(column, value as any);
+      return sql`${column} < ${bound}`;
     case "le":
-      return lte(column, value as any);
+      return sql`${column} <= ${bound}`;
     case "gt":
-      return gt(column, value as any);
+      return sql`${column} > ${bound}`;
     case "ge":
-      return gte(column, value as any);
-    case "in":
-      if (!Array.isArray(value)) {
-        return inArray(column, [value as any]);
-      }
-      return inArray(column, value as any[]);
+      return sql`${column} >= ${bound}`;
+    case "in": {
+      const values = Array.isArray(value) ? value : [value];
+      return sql`${column} in ${values.map(v => new Param(v, column))}`;
+    }
     case "contains":
       if (typeof value !== "string") {
         throw new Error("The 'contains' operator requires a string value");
       }
-      return sql`${column} LIKE ${`%${value}%`}`;
+      return like(column, `%${value}%`);
     case "startsWith":
       if (typeof value !== "string") {
         throw new Error("The 'startsWith' operator requires a string value");
       }
-      return sql`${column} LIKE ${`${value}%`}`;
+      return like(column, `${value}%`);
     case "endsWith":
       if (typeof value !== "string") {
         throw new Error("The 'endsWith' operator requires a string value");
       }
-      return sql`${column} LIKE ${`%${value}`}`;
+      return like(column, `%${value}`);
     case "isSet":
       if (typeof value !== "boolean") {
         throw new Error("The 'isSet' operator requires a boolean value");
@@ -557,7 +568,7 @@ const extractArrayValue = (
   operand: PlanExpressionOperand
 ): Value[] | undefined => {
   if ("value" in operand && Array.isArray(operand.value)) {
-    return operand.value as Value[];
+    return operand.value;
   }
   return undefined;
 };
@@ -616,9 +627,7 @@ const buildHasIntersectionFilter = (
       variableOperand.name,
       mapper
     );
-    const metadata = (scopedMapper as Mapper & {
-      [SCOPED_METADATA]?: ScopedMapperMetadata;
-    })[SCOPED_METADATA];
+    const metadata = getScopedMetadata(scopedMapper);
     if (metadata && metadata.leadingRelations.length > 0) {
       return FALSE_CONDITION;
     }
@@ -665,8 +674,10 @@ const buildHasIntersectionFilter = (
   return buildResolvedFilter(resolved, leftOperand.name);
 };
 
+type CollectionOperator = "exists" | "exists_one" | "filter" | "all" | "except";
+
 const buildCollectionOperatorFilter = (
-  operator: "exists" | "exists_one" | "filter" | "all" | "except",
+  operator: CollectionOperator,
   operands: PlanExpressionOperand[],
   mapper: Mapper
 ): SQL => {
@@ -703,9 +714,7 @@ const buildCollectionOperatorFilter = (
     throw new Error(`Unable to resolve primary relation for '${collectionOperand.name}'`);
   }
 
-  const metadata = (scopedMapper as Mapper & {
-    [SCOPED_METADATA]?: ScopedMapperMetadata;
-  })[SCOPED_METADATA];
+  const metadata = getScopedMetadata(scopedMapper);
   const primaryRelation: RelationMapping =
     metadata?.primaryRelation ?? fallbackPrimaryRelation;
   const leadingRelations: RelationMapping[] =
@@ -767,7 +776,7 @@ const buildCollectionOperatorFilter = (
       return not(failingFilter);
     }
     case "exists_one": {
-      const tableName = getTableName(
+      const tableName = resolveTableName(
         primaryRelation.table,
         collectionOperand.name
       );
@@ -780,7 +789,7 @@ const buildCollectionOperatorFilter = (
         return FALSE_CONDITION;
       }
 
-      const countCheck = sql`(select count(*) from ${sql.raw(tableName)} where ${matchCondition}) = 1`;
+      const countCheck = sql`(select count(*) from ${sql.identifier(tableName)} where ${matchCondition}) = 1`;
       const combinedFilter = and(correlatedFilter, countCheck);
       if (!combinedFilter) {
         return FALSE_CONDITION;
@@ -794,6 +803,14 @@ const buildCollectionOperatorFilter = (
 
 type BuildFilterOptions = {
   skipRelations?: Set<RelationMapping>;
+};
+
+const COLLECTION_OPERATORS: Record<string, CollectionOperator> = {
+  exists: "exists",
+  filter: "filter",
+  all: "all",
+  except: "except",
+  exists_one: "exists_one",
 };
 
 const buildFilterFromExpression = (
@@ -876,18 +893,13 @@ const buildFilterFromExpression = (
     }
     case "hasIntersection":
       return buildHasIntersectionFilter(operands, mapper);
-    case "exists":
-    case "filter":
-    case "all":
-    case "except":
-    case "exists_one":
-      return buildCollectionOperatorFilter(
-        operator as "exists" | "filter" | "all" | "except" | "exists_one",
-        operands,
-        mapper
-      );
-    default:
+    default: {
+      const collectionOp = COLLECTION_OPERATORS[operator];
+      if (collectionOp) {
+        return buildCollectionOperatorFilter(collectionOp, operands, mapper);
+      }
       throw new Error(`Unsupported operator: ${operator}`);
+    }
   }
 };
 
