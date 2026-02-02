@@ -1,4 +1,4 @@
-const esModules = ["uuid"].join("|");
+const esModules = ["uuid", "@cerbos"].join("|");
 
 /** @type {import('ts-jest').JestConfigWithTsJest} */
 module.exports = {

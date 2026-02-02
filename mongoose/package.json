@@ -1,6 +1,6 @@
 {
   "name": "@cerbos/orm-mongoose",
-  "version": "2.0.2",
+  "version": "2.1.0",
   "homepage": "https://cerbos.dev",
   "description": "",
   "repository": {
@@ -49,15 +49,15 @@
   "devDependencies": {
     "@types/jest": "^30.0.0",
     "@types/node": "^24.0.0",
-    "@tsconfig/node20": "^20.1.7",
+    "@tsconfig/node22": "^22.0.0",
     "@tsconfig/strictest": "^2.0.8",
-    "mongoose": "^8.0.0",
+    "mongoose": "^9.0.0",
     "ts-jest": "^29.0.0",
     "ts-node": "^10.4.0",
     "typescript": "^5.0.0"
   },
   "dependencies": {
-    "@cerbos/core": "^0.25.0",
-    "@cerbos/grpc": "^0.23.0"
+    "@cerbos/core": "^0.27.0",
+    "@cerbos/grpc": "^0.24.0"
   }
 }

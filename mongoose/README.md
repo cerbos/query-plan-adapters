@@ -81,6 +81,7 @@ The Cerbos query plan references fields using paths such as `request.resource.at
 ```ts
 export type MapperConfig = {
   field?: string;
+  valueParser?: (value: any) => any;
   relation?: {
     name: string;
     type: "one" | "many";
@@ -95,6 +96,7 @@ export type Mapper =
 ```
 
 - `field` rewrites a single Cerbos path to a different field in MongoDB.
+- `valueParser` transforms leaf values during filter construction. This is useful when the Cerbos plan contains string representations that need to be converted to MongoDB-specific types (for example, converting a string to an `ObjectId`). The parser is applied to each value in `eq`, `ne`, `lt`, `le`, `gt`, `ge`, and `in` operators. It also works on nested relation fields via the `fields` map.
 - `relation` describes embedded documents (`type: "one"`) or arrays (`type: "many"`). When `field` is provided on a relation it identifies the property inside that relation that should be used for comparisons (for example, matching `createdBy.id` without an `$elemMatch`).
 - `fields` supplies nested overrides so lambda expressions such as `tag.name` can be mapped to the correct property.
 
@@ -172,6 +174,41 @@ const mapper: Mapper = (path) => {
     return { field: `principal.${path.replace("request.principal.attr.", "")}` };
   }
   return { field: path };
+};
+```
+
+#### Value parsing
+
+Use `valueParser` to convert values from the Cerbos plan into types that MongoDB expects. A common use case is converting string IDs to `ObjectId`:
+
+```ts
+import { Types } from "mongoose";
+
+const mapper: Mapper = {
+  "request.resource.attr.id": {
+    field: "_id",
+    valueParser: (value) => new Types.ObjectId(value),
+  },
+};
+```
+
+`valueParser` also works on nested relation fields via the `fields` map:
+
+```ts
+const mapper: Mapper = {
+  "request.resource.attr.createdBy": {
+    relation: {
+      name: "createdBy",
+      type: "one",
+      field: "id",
+      fields: {
+        id: {
+          field: "id",
+          valueParser: (value) => new Types.ObjectId(value),
+        },
+      },
+    },
+  },
 };
 ```
 

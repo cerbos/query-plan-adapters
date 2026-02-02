@@ -27,6 +27,15 @@ resourcePolicy:
           expr: request.resource.attr.aBool == true
 
     - actions:
+        - "equal-oid"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.id == "507f1f77bcf86cd799439011"
+
+    - actions:
         - "explicit-deny"
       effect: EFFECT_DENY
       roles:
@@ -40,6 +49,42 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       roles:
         - USER
+
+    - actions:
+        - "bare-bool"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.aBool
+
+    - actions:
+        - "bare-bool-negated"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: "!request.resource.attr.aBool"
+
+    - actions:
+        - "bare-bool-nested"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.nested.aBool
+
+    - actions:
+        - "bare-bool-nested-negated"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: "!request.resource.attr.nested.aBool"
 
     - actions:
         - "ne"
@@ -548,6 +593,30 @@ resourcePolicy:
             of:
               - expr: request.resource.attr.nested.nextlevel.aBool == true
               - expr: request.resource.attr.categories.exists(cat, cat.name == "business")
+
+    - actions:
+        - "relation-has-members"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(request.resource.attr.ownedBy) > 0
+
+    - actions:
+        - "relation-has-no-members"
+      effect: EFFECT_DENY
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(request.resource.attr.ownedBy) > 0
+
+    - actions:
+        - "relation-has-no-members"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
 
     - actions:
         - "combined-not"

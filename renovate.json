@@ -6,7 +6,8 @@
     "docker:disable",
     "group:allNonMajor",
     ":separateMultipleMajorReleases",
-    ":gitSignOff"
+    ":gitSignOff",
+    "helpers:pinGitHubActionDigests"
   ],
   "automerge": true,
   "automergeSchedule": [
