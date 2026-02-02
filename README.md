@@ -4,7 +4,9 @@ These are reference implementations of adapters that take a [Cerbos](https://cer
 
 Current supported adapters:
 
+- [Convex](https://github.com/cerbos/query-plan-adapters/tree/main/convex)
 - [Drizzle ORM](https://github.com/cerbos/query-plan-adapters/tree/main/drizzle)
+- [LangChain / ChromaDB](https://github.com/cerbos/query-plan-adapters/tree/main/langchain-chromadb)
+- [Mongoose](https://github.com/cerbos/query-plan-adapters/tree/main/mongoose)
 - [Prisma](https://github.com/cerbos/query-plan-adapters/tree/main/prisma)
 - [SQLAlchemy](https://github.com/cerbos/query-plan-adapters/tree/main/sqlalchemy)
-- [Mongoose](https://github.com/cerbos/query-plan-adapters/tree/main/mongoose)
