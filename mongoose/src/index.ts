@@ -159,23 +159,39 @@ const resolveFieldReference = (
   return { path: [reference] };
 };
 
-/**
- * Applies valueParser from field config to a value if available
- */
+const resolveValueParser = (
+  fieldReference: string,
+  mapper: Mapper
+): ((value: any) => any) | undefined => {
+  const config =
+    typeof mapper === "function" ? mapper(fieldReference) : mapper[fieldReference];
+
+  if (config?.valueParser) {
+    return config.valueParser;
+  }
+
+  const parts = fieldReference.split(".");
+  if (parts.length > 1) {
+    const parentPath = parts.slice(0, -1).join(".");
+    const lastPart = parts[parts.length - 1] as string;
+    const parentConfig =
+      typeof mapper === "function" ? mapper(parentPath) : mapper[parentPath];
+
+    if (parentConfig?.relation?.fields?.[lastPart]?.valueParser) {
+      return parentConfig.relation.fields[lastPart]!.valueParser;
+    }
+  }
+
+  return undefined;
+};
+
 const applyValueParser = (
   fieldReference: string,
   value: any,
   mapper: Mapper
 ): any => {
-  const config = typeof mapper === "function" ? mapper(fieldReference) : mapper[fieldReference];
-  if (config?.valueParser) {
-    try {
-      return config.valueParser(value);
-    } catch (error) {
-      throw new Error(`valueParser failed for field ${fieldReference}: ${error}`);
-    }
-  }
-  return value;
+  const parser = resolveValueParser(fieldReference, mapper);
+  return parser ? parser(value) : value;
 };
 
 const buildNestedObject = (path: string[], value: any) =>
@@ -332,13 +348,12 @@ const buildMongooseFilterFromCerbosExpression = (
 
       if ("path" in left) {
         const { path, relation } = left;
-        
-        // Apply valueParser if we can determine the field reference
+
         let parsedValue = right.value;
         if (isVariable(leftOperand)) {
           parsedValue = applyValueParser(leftOperand.name, right.value, mapper);
         }
-        
+
         const comparison = { [mongoOperator]: parsedValue };
 
         if (relation) {
