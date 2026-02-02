@@ -1,11 +1,16 @@
+import { beforeAll, afterAll, test, expect } from "@jest/globals";
 import { GRPC as Cerbos } from "@cerbos/grpc";
 import { ChromaClient } from "chromadb";
 import type { Collection, Metadata, Where } from "chromadb";
 import { queryPlanToChromaDB, PlanKind } from ".";
 
 const cerbos = new Cerbos("127.0.0.1:3593", { tls: false });
+const chromaUrl = new URL(
+  process.env["CHROMA_URL"] ?? "http://127.0.0.1:8000",
+);
 const chroma = new ChromaClient({
-  path: process.env["CHROMA_URL"] ?? "http://127.0.0.1:8000",
+  host: chromaUrl.hostname,
+  port: Number(chromaUrl.port) || 8000,
 });
 
 const collectionName = "adapter-tests";
@@ -54,10 +59,10 @@ beforeAll(async () => {
 
   try {
     await chroma.deleteCollection({ name: collectionName });
-  } catch (err: any) {
-    if (err?.message?.includes("not found")) {
-      // ignore when the collection is not present
-    } else {
+  } catch (err: unknown) {
+    const message =
+      err instanceof Error ? err.message : String(err);
+    if (!message.includes("not found")) {
       throw err;
     }
   }
@@ -75,7 +80,9 @@ afterAll(async () => {
   await chroma.deleteCollection({ name: collectionName });
 });
 
-async function queryResourceIds(where?: Record<string, unknown>): Promise<string[]> {
+async function queryResourceIds(
+  where?: Record<string, unknown>,
+): Promise<string[]> {
   const results = await collection.query({
     queryEmbeddings: [baseEmbedding],
     where: where as Where | undefined,
@@ -143,7 +150,9 @@ test("conditional - eq", async () => {
   });
 
   const matches = await queryResourceIds(result.filters);
-  expect(matches).toEqual(fixtureResources.filter((r) => r.aBool).map((r) => r.key));
+  expect(matches).toEqual(
+    fixtureResources.filter((r) => r.aBool).map((r) => r.key),
+  );
 });
 
 test("conditional - ne", async () => {
@@ -170,7 +179,7 @@ test("conditional - ne", async () => {
     fixtureResources
       .filter((r) => r.aString !== "string")
       .map((r) => r.key)
-      .sort()
+      .sort(),
   );
 });
 
@@ -192,10 +201,7 @@ test("conditional - and", async () => {
   expect(result).toStrictEqual({
     kind: PlanKind.CONDITIONAL,
     filters: {
-      $and: [
-        { aBool: { $eq: true } },
-        { aString: { $ne: "string" } },
-      ],
+      $and: [{ aBool: { $eq: true } }, { aString: { $ne: "string" } }],
     },
   });
 
@@ -221,10 +227,7 @@ test("conditional - or", async () => {
   expect(result).toStrictEqual({
     kind: PlanKind.CONDITIONAL,
     filters: {
-      $or: [
-        { aBool: { $eq: true } },
-        { aString: { $ne: "string" } },
-      ],
+      $or: [{ aBool: { $eq: true } }, { aString: { $ne: "string" } }],
     },
   });
 
@@ -256,7 +259,7 @@ test("conditional - in", async () => {
     fixtureResources
       .filter((r) => ["string", "anotherString"].includes(r.aString))
       .map((r) => r.key)
-      .sort()
+      .sort(),
   );
 });
 
@@ -284,7 +287,7 @@ test("conditional - gt", async () => {
     fixtureResources
       .filter((r) => r.aNumber > 1)
       .map((r) => r.key)
-      .sort()
+      .sort(),
   );
 });
 
@@ -309,9 +312,7 @@ test("conditional - lt", async () => {
 
   const matches = await queryResourceIds(result.filters);
   expect(matches).toEqual(
-    fixtureResources
-      .filter((r) => r.aNumber < 2)
-      .map((r) => r.key)
+    fixtureResources.filter((r) => r.aNumber < 2).map((r) => r.key),
   );
 });
 
@@ -362,7 +363,7 @@ test("conditional - lte", async () => {
     fixtureResources
       .filter((r) => r.aNumber <= 2)
       .map((r) => r.key)
-      .sort()
+      .sort(),
   );
 });
 
@@ -387,6 +388,6 @@ test("conditional - eq nested", async () => {
 
   const matches = await queryResourceIds(result.filters);
   expect(matches).toEqual(
-    fixtureResources.filter((r) => r.nested.aBool).map((r) => r.key)
+    fixtureResources.filter((r) => r.nested.aBool).map((r) => r.key),
   );
 });

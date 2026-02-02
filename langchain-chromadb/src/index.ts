@@ -62,26 +62,18 @@ export function queryPlanToChromaDB({
   }
 }
 
-function isExpression(e: PlanExpressionOperand): e is PlanExpression {
-  return (e as any).operator !== undefined;
-}
-
-function isValue(e: PlanExpressionOperand): e is PlanExpressionValue {
-  return (e as any).value !== undefined;
-}
-
-function isVariable(e: PlanExpressionOperand): e is PlanExpressionVariable {
-  return (e as any).variable !== undefined;
-}
-
-function getOperandVariable(operands: PlanExpressionOperand[]) {
-  const op = operands.find((o) => isVariable(o));
+function getOperandVariable(
+  operands: PlanExpressionOperand[],
+): string | undefined {
+  const op = operands.find((o) => o instanceof PlanExpressionVariable);
   if (!op) return;
   return (op as PlanExpressionVariable).name;
 }
 
-function getOperandValue(operands: PlanExpressionOperand[]) {
-  const op = operands.find((o) => isValue(o));
+function getOperandValue(
+  operands: PlanExpressionOperand[],
+): unknown | undefined {
+  const op = operands.find((o) => o instanceof PlanExpressionValue);
   if (!op) return;
   return (op as PlanExpressionValue).value;
 }
@@ -117,16 +109,15 @@ const OPERATORS: {
 function mapOperand(
   operand: PlanExpressionOperand,
   getFieldName: (key: string) => string,
-  output: Record<string, unknown> = {}
+  output: Record<string, unknown> = {},
 ): Record<string, unknown> {
-  if (!isExpression(operand))
+  if (!(operand instanceof PlanExpression))
     throw Error(
-      `Query plan did not contain an expression for operand ${operand}`
+      `Query plan did not contain an expression for operand ${String(operand)}`,
     );
 
   const { operator, operands } = operand;
 
-  // HANDLE NESTING OPERATIONS: AND/OR/NOT
   if (operator == "and") {
     if (operands.length < 2) throw Error("Expected atleast 2 operands");
     output["$and"] = operands.map((o) => mapOperand(o, getFieldName, {}));
@@ -146,17 +137,18 @@ function mapOperand(
         operands.map((o) => mapOperand(o, getFieldName, {}))[0],
       ];
     } else {
-      output["$not"] = operands.map((o) => mapOperand(o, getFieldName, {}))[0];
+      output["$not"] = operands.map((o) =>
+        mapOperand(o, getFieldName, {}),
+      )[0];
     }
     return output;
   }
 
-  // get the operation parameters
   const operation = OPERATORS[operator];
   if (!operation) throw Error(`Unsupported operator ${operator}`);
 
   const opVariable = getOperandVariable(operands);
-  if (!opVariable) throw Error(`Unexpected variable ${operands}`);
+  if (!opVariable) throw Error(`Unexpected variable ${String(operands)}`);
 
   const opValue = getOperandValue(operands);
   const fieldName = getFieldName(opVariable);
@@ -179,7 +171,7 @@ function mapOperand(
 
 function convertPathToJSON(
   segments: string[],
-  value: Record<string, unknown>
+  value: Record<string, unknown>,
 ): Record<string, unknown> {
   const result: Record<string, unknown> = {};
 
