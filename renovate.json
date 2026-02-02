@@ -2,7 +2,7 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "schedule:earlyMondays",
-    "config:base",
+    "config:recommended",
     "docker:disable",
     "group:allNonMajor",
     ":separateMultipleMajorReleases",
@@ -16,8 +16,8 @@
   "major": {
     "automerge": false
   },
-  "masterIssue": true,
-  "baseBranches": [
+  "dependencyDashboard": true,
+  "baseBranchPatterns": [
     "main"
   ],
   "additionalReviewers": [
