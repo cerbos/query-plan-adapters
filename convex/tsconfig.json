@@ -1,0 +1,13 @@
+{
+  "extends": ["@tsconfig/node20", "@tsconfig/strictest"],
+  "include": ["src"],
+  "compilerOptions": {
+    "checkJs": true,
+    "composite": true,
+    "exactOptionalPropertyTypes": false,
+    "outDir": "lib",
+    "rootDir": "src",
+    "declarationMap": true,
+    "sourceMap": true
+  }
+}
