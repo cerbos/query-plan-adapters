@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "sqlalchemy/**"
+      - "policies/**"
     branches:
       - main
 
@@ -27,9 +28,9 @@ jobs:
       - uses: pdm-project/setup-pdm@94a823180e06fcde4ad29308721954a521c96ed0 # v4.4
         name: Setup PDM
         with:
-          python-version: "3.10"  # Version range or exact version of a Python version to use, the same as actions/setup-python
-          prerelease: true     # Allow prerelease versions to be installed
-          enable-pep582: true  # Enable PEP 582 package loading globally
+          python-version: "3.10" # Version range or exact version of a Python version to use, the same as actions/setup-python
+          prerelease: true # Allow prerelease versions to be installed
+          enable-pep582: true # Enable PEP 582 package loading globally
 
       - run: pdm install -G testcontainers
 

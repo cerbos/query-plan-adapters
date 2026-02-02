@@ -1,0 +1,67 @@
+{
+  "name": "@cerbos/langchain-chromadb",
+  "version": "0.0.1",
+  "homepage": "https://cerbos.dev",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cerbos/query-plan-adapters",
+    "directory": "packages/langchain-chromadb"
+  },
+  "bugs": {
+    "url": "https://github.com/cerbos/query-plan-adapters/issues"
+  },
+  "author": "Cerbos <help@cerbos.dev> (https://cerbos.dev)",
+  "license": "Apache-2.0",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    }
+  },
+  "files": [
+    "lib/**/*.d.ts",
+    "lib/**/*.d.ts.map",
+    "lib/**/*.js",
+    "lib/**/*.js.map",
+    "src/**/*.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "prepare": "npm run build",
+    "preversion": "npm run lint",
+    "version": "git add -A src",
+    "postversion": "git push && git push --tags",
+    "test": "cross-env CHROMA_URL=http://127.0.0.1:8234 start-server-and-test chroma http://127.0.0.1:8234/api/v2/heartbeat test:cerbos",
+    "test:cerbos": "cerbos run --log-level=error --set=storage.disk.directory=../policies --set=telemetry.disabled=true -- jest src/**.test.ts",
+    "cerbos": "cerbos server --config=./cerbos-config.yaml",
+    "chroma": "docker run --rm -p 8234:8000 chromadb/chroma:latest"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "devDependencies": {
+    "@jest/globals": "^30.2.0",
+    "@tsconfig/node22": "^22.0.5",
+    "@tsconfig/strictest": "^2.0.8",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^22.0.0",
+    "cross-env": "^7.0.3",
+    "start-server-and-test": "^2.0.3",
+    "ts-jest": "^29.4.6",
+    "ts-node": "^10.4.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "@cerbos/core": "^0.27.0",
+    "@cerbos/grpc": "^0.24.0",
+    "chromadb": "^3.2.2"
+  }
+}

@@ -1,17 +1,17 @@
-name: Prisma Test
+name: ChromaDB Test
 
 on:
   pull_request:
     paths:
-      - "prisma/**"
+      - "langchain-chromadb/**"
       - "policies/**"
   push:
     tags:
-      - prisma/v*
+      - langchain-chromadb/v*
 
 defaults:
   run:
-    working-directory: prisma
+    working-directory: langchain-chromadb
 
 jobs:
   test:
@@ -19,7 +19,7 @@ jobs:
       matrix:
         cerbos-version: ["latest"]
         node-version: ["20", "22", "24", "25"]
-        prisma-version: ["6", "7"]
+        chroma-image: ["ghcr.io/chroma-core/chroma:latest"]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -29,15 +29,24 @@ jobs:
         with:
           version: ${{ matrix.cerbos-version }}
 
+      - name: Start ChromaDB
+        run: |
+          docker run -d --name chromadb -p 8000:8000 ${{ matrix.chroma-image }}
+          for _ in {1..30}; do
+            if curl -sf http://127.0.0.1:8000/api/v2/heartbeat > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "ChromaDB failed to start" >&2
+          exit 1
+
       - name: Test using Node.js
         uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
         with:
           node-version: ${{ matrix.node-version }}
 
       - run: npm install
-
-      - name: Generate Prisma clients
-        run: npm run prisma:generate
-
-      - name: Run tests
-        run: npm run test:v${{ matrix.prisma-version }}
+      - run: npm run test:cerbos
+        env:
+          CHROMA_URL: http://127.0.0.1:8000
