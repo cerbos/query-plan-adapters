@@ -379,7 +379,17 @@ function buildPrismaFilterFromCerbosExpression(
   expression: PlanExpressionOperand,
   mapper: Mapper
 ): PrismaFilter {
-  // Validate expression structure
+  // A bare named operand represents a boolean field reference (e.g. `R.attr.booleanAttr`)
+  if (isNamedOperand(expression)) {
+    const { path, relations } = resolveFieldReference(expression.name, mapper);
+    const fieldName = getLeafField(path);
+    const fieldFilter = { [fieldName]: { equals: true } };
+    if (relations && relations.length > 0) {
+      return buildNestedRelationFilter(relations, fieldFilter);
+    }
+    return fieldFilter;
+  }
+
   if (!isOperatorOperand(expression)) {
     throw new Error("Invalid Cerbos expression structure");
   }
@@ -406,6 +416,16 @@ function buildPrismaFilterFromCerbosExpression(
       const operand = operands[0];
       if (!operand) {
         throw new Error("not operator requires an operand");
+      }
+      if (isNamedOperand(operand)) {
+        const { path, relations } = resolveFieldReference(
+          operand.name,
+          mapper
+        );
+        if (!relations || relations.length === 0) {
+          const fieldName = getLeafField(path);
+          return { [fieldName]: { equals: false } };
+        }
       }
       return {
         NOT: buildPrismaFilterFromCerbosExpression(operand, mapper),
