@@ -784,7 +784,37 @@ describe("Field Operations", () => {
       expect(result).toStrictEqual({
         kind: PlanKind.CONDITIONAL,
         filters: {
-          nestedResource: { is: { aBool: { equals: false } } },
+          NOT: { nestedResource: { is: { aBool: { equals: true } } } },
+        },
+      });
+    });
+
+    test("conditional - negated bare boolean with many relation", () => {
+      // #given
+      const queryPlan = createConditionalPlan({
+        operator: "not",
+        operands: [{ name: "request.resource.attr.tags.active" }],
+      });
+
+      // #when
+      const result = queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.tags.active": {
+            relation: {
+              name: "tags",
+              type: "many",
+            },
+            field: "active",
+          },
+        },
+      });
+
+      // #then — must be NOT { some { equals: true } }, not some { equals: false }
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          NOT: { tags: { some: { active: { equals: true } } } },
         },
       });
     });
@@ -862,6 +892,102 @@ describe("Field Operations", () => {
       expect(query.map((r) => r.id)).toEqual(
         fixtureResources.filter((a) => !a.aBool).map((r) => r.id)
       );
+    });
+
+    test("conditional - bare boolean nested via cerbos policy", async () => {
+      const queryPlan = await cerbos.planResources({
+        principal: { id: "user1", roles: ["USER"] },
+        resource: { kind: "resource" },
+        action: "bare-bool-nested",
+      });
+
+      expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+      expect(
+        (queryPlan as PlanResourcesConditionalResponse).condition
+      ).toEqual({ name: "request.resource.attr.nested.aBool" });
+
+      const result = queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.nested": {
+            relation: {
+              name: "nested",
+              type: "one",
+              fields: {
+                aBool: { field: "aBool" },
+              },
+            },
+          },
+        },
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: { nested: { is: { aBool: { equals: true } } } },
+      });
+
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
+
+      const query = await prisma.resource.findMany({
+        where: { ...result.filters },
+        include: { nested: true },
+      });
+      expect(query.length).toBeGreaterThan(0);
+      for (const resource of query) {
+        expect(resource.nested.aBool).toBe(true);
+      }
+    });
+
+    test("conditional - negated bare boolean nested via cerbos policy", async () => {
+      const queryPlan = await cerbos.planResources({
+        principal: { id: "user1", roles: ["USER"] },
+        resource: { kind: "resource" },
+        action: "bare-bool-nested-negated",
+      });
+
+      expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+      expect(
+        (queryPlan as PlanResourcesConditionalResponse).condition
+      ).toEqual({
+        operator: "not",
+        operands: [{ name: "request.resource.attr.nested.aBool" }],
+      });
+
+      const result = queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.nested": {
+            relation: {
+              name: "nested",
+              type: "one",
+              fields: {
+                aBool: { field: "aBool" },
+              },
+            },
+          },
+        },
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          NOT: { nested: { is: { aBool: { equals: true } } } },
+        },
+      });
+
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
+
+      const query = await prisma.resource.findMany({
+        where: { ...result.filters },
+        include: { nested: true },
+      });
+      for (const resource of query) {
+        expect(resource.nested.aBool).not.toBe(true);
+      }
     });
   });
 

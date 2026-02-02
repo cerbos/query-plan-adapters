@@ -422,12 +422,10 @@ function buildPrismaFilterFromCerbosExpression(
           operand.name,
           mapper
         );
-        const fieldName = getLeafField(path);
-        const fieldFilter = { [fieldName]: { equals: false } };
-        if (relations && relations.length > 0) {
-          return buildNestedRelationFilter(relations, fieldFilter);
+        if (!relations || relations.length === 0) {
+          const fieldName = getLeafField(path);
+          return { [fieldName]: { equals: false } };
         }
-        return fieldFilter;
       }
       return {
         NOT: buildPrismaFilterFromCerbosExpression(operand, mapper),

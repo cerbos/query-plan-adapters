@@ -60,6 +60,24 @@ resourcePolicy:
           expr: "!request.resource.attr.aBool"
 
     - actions:
+        - "bare-bool-nested"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.nested.aBool
+
+    - actions:
+        - "bare-bool-nested-negated"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: "!request.resource.attr.nested.aBool"
+
+    - actions:
         - "ne"
       effect: EFFECT_ALLOW
       roles:
