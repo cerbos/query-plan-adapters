@@ -2914,6 +2914,174 @@ describe("Relations", () => {
             .map((r) => r.id)
         );
       });
+
+      test("conditional - size(field) > 0 produces some", () => {
+        const result = queryPlanToPrisma({
+          queryPlan: createConditionalPlan({
+            operator: "gt",
+            operands: [
+              {
+                operator: "size",
+                operands: [{ name: "request.resource.attr.ownedBy" }],
+              },
+              { value: 0 },
+            ],
+          }),
+          mapper: {
+            "request.resource.attr.ownedBy": {
+              relation: { name: "ownedBy", type: "many", field: "id" },
+            },
+          },
+        });
+
+        expect(result).toStrictEqual({
+          kind: PlanKind.CONDITIONAL,
+          filters: { ownedBy: { some: {} } },
+        });
+      });
+
+      test("conditional - size(field) == 0 produces none", () => {
+        const result = queryPlanToPrisma({
+          queryPlan: createConditionalPlan({
+            operator: "eq",
+            operands: [
+              {
+                operator: "size",
+                operands: [{ name: "request.resource.attr.ownedBy" }],
+              },
+              { value: 0 },
+            ],
+          }),
+          mapper: {
+            "request.resource.attr.ownedBy": {
+              relation: { name: "ownedBy", type: "many", field: "id" },
+            },
+          },
+        });
+
+        expect(result).toStrictEqual({
+          kind: PlanKind.CONDITIONAL,
+          filters: { ownedBy: { none: {} } },
+        });
+      });
+
+      test("conditional - not(size(field) > 0) produces NOT some", () => {
+        const result = queryPlanToPrisma({
+          queryPlan: createConditionalPlan({
+            operator: "not",
+            operands: [
+              {
+                operator: "gt",
+                operands: [
+                  {
+                    operator: "size",
+                    operands: [{ name: "request.resource.attr.ownedBy" }],
+                  },
+                  { value: 0 },
+                ],
+              },
+            ],
+          }),
+          mapper: {
+            "request.resource.attr.ownedBy": {
+              relation: { name: "ownedBy", type: "many", field: "id" },
+            },
+          },
+        });
+
+        expect(result).toStrictEqual({
+          kind: PlanKind.CONDITIONAL,
+          filters: { NOT: { ownedBy: { some: {} } } },
+        });
+      });
+
+      test("conditional - size(field) >= 1 produces some", () => {
+        const result = queryPlanToPrisma({
+          queryPlan: createConditionalPlan({
+            operator: "ge",
+            operands: [
+              {
+                operator: "size",
+                operands: [{ name: "request.resource.attr.ownedBy" }],
+              },
+              { value: 1 },
+            ],
+          }),
+          mapper: {
+            "request.resource.attr.ownedBy": {
+              relation: { name: "ownedBy", type: "many", field: "id" },
+            },
+          },
+        });
+
+        expect(result).toStrictEqual({
+          kind: PlanKind.CONDITIONAL,
+          filters: { ownedBy: { some: {} } },
+        });
+      });
+
+      test("conditional - size on nested relation walks full chain", () => {
+        const result = queryPlanToPrisma({
+          queryPlan: createConditionalPlan({
+            operator: "gt",
+            operands: [
+              {
+                operator: "size",
+                operands: [
+                  { name: "request.resource.attr.team.members" },
+                ],
+              },
+              { value: 0 },
+            ],
+          }),
+          mapper: {
+            "request.resource.attr.team": {
+              relation: {
+                name: "team",
+                type: "one",
+                fields: {
+                  members: {
+                    relation: { name: "members", type: "many" },
+                  },
+                },
+              },
+            },
+          },
+        });
+
+        expect(result).toStrictEqual({
+          kind: PlanKind.CONDITIONAL,
+          filters: {
+            team: {
+              is: {
+                members: { some: {} },
+              },
+            },
+          },
+        });
+      });
+
+      test("conditional - unsupported size comparison throws", () => {
+        expect(() =>
+          queryPlanToPrisma({
+            queryPlan: createConditionalPlan({
+              operator: "gt",
+              operands: [
+                {
+                  operator: "size",
+                  operands: [{ name: "request.resource.attr.ownedBy" }],
+                },
+                { value: 5 },
+              ],
+            }),
+            mapper: {
+              "request.resource.attr.ownedBy": {
+                relation: { name: "ownedBy", type: "many", field: "id" },
+              },
+            },
+          })
+        ).toThrow("Unsupported size comparison: size(...) gt 5");
+      });
     });
   });
 
@@ -4759,6 +4927,88 @@ describe("Integration", () => {
     //     )
     //     .map((r) => r.id)
     // );
+  });
+
+  test("conditional - relation-has-members (size > 0)", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "relation-has-members",
+    });
+
+    expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+
+    const result = queryPlanToPrisma({
+      queryPlan,
+      mapper: {
+        "request.resource.attr.ownedBy": {
+          relation: { name: "ownedBy", type: "many", field: "id" },
+        },
+      },
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { ownedBy: { some: {} } },
+    });
+
+    if (result.kind !== PlanKind.CONDITIONAL) {
+      throw new Error("Expected CONDITIONAL result");
+    }
+
+    const query = await prisma.resource.findMany({
+      where: { ...result.filters },
+    });
+
+    expect(query.map((r) => r.id)).toEqual(
+      fixtureResources
+        .filter((r) => {
+          if (!r.ownedBy?.connect) return false;
+          return (r.ownedBy.connect as { id: string }[]).length > 0;
+        })
+        .map((r) => r.id)
+    );
+  });
+
+  test("conditional - relation-has-no-members (negated size > 0)", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "relation-has-no-members",
+    });
+
+    expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+
+    const result = queryPlanToPrisma({
+      queryPlan,
+      mapper: {
+        "request.resource.attr.ownedBy": {
+          relation: { name: "ownedBy", type: "many", field: "id" },
+        },
+      },
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { NOT: { ownedBy: { some: {} } } },
+    });
+
+    if (result.kind !== PlanKind.CONDITIONAL) {
+      throw new Error("Expected CONDITIONAL result");
+    }
+
+    const query = await prisma.resource.findMany({
+      where: { ...result.filters },
+    });
+
+    expect(query.map((r) => r.id)).toEqual(
+      fixtureResources
+        .filter((r) => {
+          if (!r.ownedBy?.connect) return true;
+          return (r.ownedBy.connect as { id: string }[]).length === 0;
+        })
+        .map((r) => r.id)
+    );
   });
 });
 
