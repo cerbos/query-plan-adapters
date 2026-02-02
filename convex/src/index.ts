@@ -92,11 +92,30 @@ interface FilterQ {
   field: (name: string) => unknown;
 }
 
+const hasFieldAndValue = (operands: PlanExpressionOperand[]): boolean => {
+  const hasVariable = operands.some(isVariable);
+  const hasValue = operands.some(isValue);
+  return hasVariable && hasValue;
+};
+
 const canPushToDb = (expression: PlanExpressionOperand): boolean => {
   if (isValue(expression) || isVariable(expression)) return true;
   if (!isExpression(expression)) return false;
   if (!DB_PUSHABLE_OPERATORS.has(expression.operator)) return false;
-  return expression.operands.every(canPushToDb);
+
+  switch (expression.operator) {
+    case "eq":
+    case "ne":
+    case "lt":
+    case "le":
+    case "gt":
+    case "ge":
+    case "in":
+    case "isSet":
+      return hasFieldAndValue(expression.operands);
+    default:
+      return expression.operands.every(canPushToDb);
+  }
 };
 
 const validateStructure = (expression: PlanExpressionOperand): void => {

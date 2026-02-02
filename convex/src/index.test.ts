@@ -1057,6 +1057,110 @@ describe("Mapper Functions", () => {
   });
 });
 
+describe("Variable-vs-Variable Expressions", () => {
+  test("eq with two variables falls back to postFilter", () => {
+    // #given - CEL: request.resource.attr.owner == request.resource.attr.manager
+    const queryPlan = {
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "eq",
+        operands: [
+          { name: "request.resource.attr.aString" },
+          { name: "request.resource.attr.aOptionalString" },
+        ],
+      },
+    } as unknown as PlanResourcesResponse;
+
+    // #when
+    const result = queryPlanToConvex({ queryPlan, mapper: defaultMapper, allowPostFilter: true });
+
+    // #then
+    expect(result.filter).toBeUndefined();
+    expect(result.postFilter).toBeDefined();
+    expect(result.postFilter!({ aString: "hello", aOptionalString: "hello" })).toBe(true);
+    expect(result.postFilter!({ aString: "hello", aOptionalString: "world" })).toBe(false);
+  });
+
+  test("eq with two variables throws without allowPostFilter", () => {
+    // #given
+    const queryPlan = {
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "eq",
+        operands: [
+          { name: "request.resource.attr.aString" },
+          { name: "request.resource.attr.aOptionalString" },
+        ],
+      },
+    } as unknown as PlanResourcesResponse;
+
+    // #when / #then
+    expect(() =>
+      queryPlanToConvex({ queryPlan, mapper: defaultMapper }),
+    ).toThrow("allowPostFilter");
+  });
+
+  test("in with variable array falls back to postFilter", () => {
+    // #given - CEL: request.resource.attr.aString in request.resource.attr.tags
+    const queryPlan = {
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "in",
+        operands: [
+          { name: "request.resource.attr.aString" },
+          { name: "request.resource.attr.tags" },
+        ],
+      },
+    } as unknown as PlanResourcesResponse;
+    const mapper: Mapper = {
+      ...defaultMapper,
+      "request.resource.attr.tags": { field: "tags" },
+    };
+
+    // #when
+    const result = queryPlanToConvex({ queryPlan, mapper, allowPostFilter: true });
+
+    // #then
+    expect(result.filter).toBeUndefined();
+    expect(result.postFilter).toBeDefined();
+    expect(result.postFilter!({ aString: "a", tags: ["a", "b"] })).toBe(true);
+    expect(result.postFilter!({ aString: "c", tags: ["a", "b"] })).toBe(false);
+  });
+
+  test("and with mixed pushable and variable-vs-variable splits correctly", () => {
+    // #given - and(eq(aBool, true), eq(aString, aOptionalString))
+    const queryPlan = {
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "and",
+        operands: [
+          {
+            operator: "eq",
+            operands: [
+              { name: "request.resource.attr.aBool" },
+              { value: true },
+            ],
+          },
+          {
+            operator: "eq",
+            operands: [
+              { name: "request.resource.attr.aString" },
+              { name: "request.resource.attr.aOptionalString" },
+            ],
+          },
+        ],
+      },
+    } as unknown as PlanResourcesResponse;
+
+    // #when
+    const result = queryPlanToConvex({ queryPlan, mapper: defaultMapper, allowPostFilter: true });
+
+    // #then
+    expect(result.filter).toBeDefined();
+    expect(result.postFilter).toBeDefined();
+  });
+});
+
 describe("Error Handling", () => {
   test("throws error for invalid query plan", () => {
     const invalidQueryPlan = { kind: "INVALID_KIND" as PlanKind };
