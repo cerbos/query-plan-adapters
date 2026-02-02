@@ -666,7 +666,7 @@ const buildHasIntersectionFilter = (
 };
 
 const buildCollectionOperatorFilter = (
-  operator: "exists" | "exists_one" | "filter" | "all",
+  operator: "exists" | "exists_one" | "filter" | "all" | "except",
   operands: PlanExpressionOperand[],
   mapper: Mapper
 ): SQL => {
@@ -740,6 +740,20 @@ const buildCollectionOperatorFilter = (
       return FALSE_CONDITION;
     case "exists":
       return correlatedFilter;
+    case "except": {
+      const exceptFilter = wrapWithRelations(
+        [primaryRelation],
+        not(rowCondition),
+        collectionOperand.name
+      );
+      return leadingRelations.length
+        ? wrapWithRelations(
+            leadingRelations,
+            exceptFilter,
+            collectionOperand.name
+          )
+        : exceptFilter;
+    }
     case "all": {
       const failingFilter = wrapWithRelations(
         leadingRelations,
@@ -865,9 +879,10 @@ const buildFilterFromExpression = (
     case "exists":
     case "filter":
     case "all":
+    case "except":
     case "exists_one":
       return buildCollectionOperatorFilter(
-        operator as "exists" | "filter" | "all" | "exists_one",
+        operator as "exists" | "filter" | "all" | "except" | "exists_one",
         operands,
         mapper
       );

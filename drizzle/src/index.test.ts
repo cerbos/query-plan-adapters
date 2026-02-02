@@ -1032,6 +1032,45 @@ describe("queryPlanToDrizzle", () => {
     expect(ids).toEqual(["resource2"]);
   });
 
+  test("produces matching results for except", () => {
+    // #given
+    const queryPlan = buildPlan({
+      operator: "except",
+      operands: [
+        { name: "request.resource.attr.tags" },
+        {
+          operator: "lambda",
+          operands: [
+            {
+              operator: "eq",
+              operands: [
+                { name: "tag.name" },
+                { value: "public" },
+              ],
+            },
+            { name: "tag" },
+          ],
+        },
+      ],
+    });
+
+    // #when
+    const result = queryPlanToDrizzle({ queryPlan, mapper });
+
+    // #then — resources with any tag whose name != "public"
+    const ids = selectIds(ensureFilter(result));
+    const expected = resourceFixtures
+      .filter((r) =>
+        r.tagIds.some((tagId) => {
+          const tag = tagFixtures.find((t) => t.id === tagId);
+          return tag?.name !== "public";
+        })
+      )
+      .map((r) => r.id)
+      .sort();
+    expect(ids).toEqual(expected);
+  });
+
   test("throws when mapping is missing", () => {
     const queryPlan = buildPlan({
       operator: "eq",
