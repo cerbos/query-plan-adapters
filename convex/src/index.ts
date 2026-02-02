@@ -22,6 +22,7 @@ export type Mapper =
 export interface QueryPlanToConvexArgs {
   queryPlan: PlanResourcesResponse;
   mapper?: Mapper;
+  allowPostFilter?: boolean;
 }
 
 export interface QueryPlanToConvexResult<Q = unknown> {
@@ -523,6 +524,7 @@ const buildFilters = (
 export function queryPlanToConvex<Q = unknown>({
   queryPlan,
   mapper = {},
+  allowPostFilter = false,
 }: QueryPlanToConvexArgs): QueryPlanToConvexResult<Q> {
   switch (queryPlan.kind) {
     case PlanKind.ALWAYS_ALLOWED:
@@ -531,6 +533,16 @@ export function queryPlanToConvex<Q = unknown>({
       return { kind: PlanKind.ALWAYS_DENIED };
     case PlanKind.CONDITIONAL: {
       const { filter, postFilter } = buildFilters(queryPlan.condition, mapper);
+
+      if (postFilter && !allowPostFilter) {
+        throw new Error(
+          "The query plan contains conditions that cannot be evaluated by Convex's " +
+          "query engine and require client-side filtering (postFilter). This means " +
+          "data will be fetched from the database before authorization filtering is " +
+          "applied. Set { allowPostFilter: true } to opt in to this behavior.",
+        );
+      }
+
       const result: QueryPlanToConvexResult<Q> = { kind: PlanKind.CONDITIONAL };
       if (filter) result.filter = filter as ConvexFilter<Q>;
       if (postFilter) result.postFilter = postFilter;

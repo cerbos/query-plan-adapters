@@ -608,7 +608,7 @@ describe("Post-filter String Operators", () => {
     } as unknown as PlanResourcesResponse;
 
     // #when
-    const result = queryPlanToConvex({ queryPlan, mapper: defaultMapper });
+    const result = queryPlanToConvex({ queryPlan, mapper: defaultMapper, allowPostFilter: true });
 
     // #then
     expect(result.kind).toBe(PlanKind.CONDITIONAL);
@@ -632,7 +632,7 @@ describe("Post-filter String Operators", () => {
     } as unknown as PlanResourcesResponse;
 
     // #when
-    const result = queryPlanToConvex({ queryPlan, mapper: defaultMapper });
+    const result = queryPlanToConvex({ queryPlan, mapper: defaultMapper, allowPostFilter: true });
 
     // #then
     expect(result.filter).toBeUndefined();
@@ -655,7 +655,7 @@ describe("Post-filter String Operators", () => {
     } as unknown as PlanResourcesResponse;
 
     // #when
-    const result = queryPlanToConvex({ queryPlan, mapper: defaultMapper });
+    const result = queryPlanToConvex({ queryPlan, mapper: defaultMapper, allowPostFilter: true });
 
     // #then
     expect(result.filter).toBeUndefined();
@@ -683,7 +683,7 @@ describe("Post-filter Collection Operators", () => {
     };
 
     // #when
-    const result = queryPlanToConvex({ queryPlan, mapper });
+    const result = queryPlanToConvex({ queryPlan, mapper, allowPostFilter: true });
 
     // #then
     expect(result.filter).toBeUndefined();
@@ -722,7 +722,7 @@ describe("Post-filter Collection Operators", () => {
     };
 
     // #when
-    const result = queryPlanToConvex({ queryPlan, mapper });
+    const result = queryPlanToConvex({ queryPlan, mapper, allowPostFilter: true });
 
     // #then
     expect(result.filter).toBeUndefined();
@@ -761,7 +761,7 @@ describe("Post-filter Collection Operators", () => {
     };
 
     // #when
-    const result = queryPlanToConvex({ queryPlan, mapper });
+    const result = queryPlanToConvex({ queryPlan, mapper, allowPostFilter: true });
 
     // #then
     expect(result.postFilter).toBeDefined();
@@ -799,7 +799,7 @@ describe("Post-filter Collection Operators", () => {
     };
 
     // #when
-    const result = queryPlanToConvex({ queryPlan, mapper });
+    const result = queryPlanToConvex({ queryPlan, mapper, allowPostFilter: true });
 
     // #then
     expect(result.postFilter).toBeDefined();
@@ -835,7 +835,7 @@ describe("Mixed Expression Splitting", () => {
     } as unknown as PlanResourcesResponse;
 
     // #when
-    const result = queryPlanToConvex({ queryPlan, mapper: defaultMapper });
+    const result = queryPlanToConvex({ queryPlan, mapper: defaultMapper, allowPostFilter: true });
 
     // #then
     expect(result.filter).toBeDefined();
@@ -876,7 +876,7 @@ describe("Mixed Expression Splitting", () => {
     } as unknown as PlanResourcesResponse;
 
     // #when
-    const result = queryPlanToConvex({ queryPlan, mapper: defaultMapper });
+    const result = queryPlanToConvex({ queryPlan, mapper: defaultMapper, allowPostFilter: true });
 
     // #then
     expect(result.filter).toBeUndefined();
@@ -907,7 +907,7 @@ describe("Mixed Expression Splitting", () => {
     } as unknown as PlanResourcesResponse;
 
     // #when
-    const result = queryPlanToConvex({ queryPlan, mapper: defaultMapper });
+    const result = queryPlanToConvex({ queryPlan, mapper: defaultMapper, allowPostFilter: true });
 
     // #then
     expect(result.filter).toBeUndefined();
@@ -953,11 +953,84 @@ describe("Backward Compatibility", () => {
     } as unknown as PlanResourcesResponse;
 
     // #when
-    const result = queryPlanToConvex({ queryPlan, mapper: defaultMapper });
+    const result = queryPlanToConvex({ queryPlan, mapper: defaultMapper, allowPostFilter: true });
 
     // #then
     expect(result.filter).toBeUndefined();
     expect(result.postFilter).toBeDefined();
+  });
+});
+
+describe("allowPostFilter Gate", () => {
+  test("throws when postFilter is required and allowPostFilter is not set", () => {
+    // #given
+    const queryPlan = {
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "contains",
+        operands: [
+          { name: "request.resource.attr.aString" },
+          { value: "str" },
+        ],
+      },
+    } as unknown as PlanResourcesResponse;
+
+    // #when / #then
+    expect(() =>
+      queryPlanToConvex({ queryPlan, mapper: defaultMapper }),
+    ).toThrow("allowPostFilter");
+  });
+
+  test("throws when mixed expression produces postFilter and allowPostFilter is not set", () => {
+    // #given
+    const queryPlan = {
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "and",
+        operands: [
+          {
+            operator: "eq",
+            operands: [
+              { name: "request.resource.attr.aBool" },
+              { value: true },
+            ],
+          },
+          {
+            operator: "contains",
+            operands: [
+              { name: "request.resource.attr.aString" },
+              { value: "str" },
+            ],
+          },
+        ],
+      },
+    } as unknown as PlanResourcesResponse;
+
+    // #when / #then
+    expect(() =>
+      queryPlanToConvex({ queryPlan, mapper: defaultMapper }),
+    ).toThrow("allowPostFilter");
+  });
+
+  test("does not throw for fully pushable expressions without allowPostFilter", () => {
+    // #given
+    const queryPlan = {
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "eq",
+        operands: [
+          { name: "request.resource.attr.aBool" },
+          { value: true },
+        ],
+      },
+    } as unknown as PlanResourcesResponse;
+
+    // #when
+    const result = queryPlanToConvex({ queryPlan, mapper: defaultMapper });
+
+    // #then
+    expect(result.filter).toBeDefined();
+    expect(result.postFilter).toBeUndefined();
   });
 });
 
