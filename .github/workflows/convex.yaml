@@ -83,6 +83,12 @@ jobs:
           CONVEX_SELF_HOSTED_ADMIN_KEY: ${{ steps.convex-key.outputs.key }}
         run: npx convex deploy --typecheck disable -y
 
+      - name: Generate Convex types
+        env:
+          CONVEX_SELF_HOSTED_URL: http://127.0.0.1:3210
+          CONVEX_SELF_HOSTED_ADMIN_KEY: ${{ steps.convex-key.outputs.key }}
+        run: npx convex codegen
+
       - name: Run integration tests
         env:
           CONVEX_URL: http://127.0.0.1:3210
