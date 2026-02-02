@@ -440,22 +440,156 @@ describe("Bare Boolean Operands", () => {
 });
 
 describe("isSet", () => {
-  test("conditional - is-set", async () => {
+  test("conditional - is-set produces ne(field, null)", async () => {
+    // #given - Cerbos translates `!= null` to ne(field, null)
     const queryPlan = await cerbos.planResources({
       principal: { id: "user1", roles: ["USER"] },
       resource: { kind: "resource" },
       action: "is-set",
     });
 
+    // #when
     const result = queryPlanToConvex({ queryPlan, mapper: defaultMapper });
 
+    // #then - ne(field, null) excludes null but passes undefined (missing)
     expect(result.kind).toBe(PlanKind.CONDITIONAL);
-    const filtered = applyFilter(fixtureResources, result.filter!);
-    expect(filtered.map((r) => r.key)).toEqual(
-      fixtureResources
-        .filter((a) => a.aOptionalString !== undefined)
-        .map((r) => r.key),
-    );
+
+    const docWithValue = { aOptionalString: "hello" } as Record<string, unknown>;
+    const docWithNull = { aOptionalString: null } as Record<string, unknown>;
+    const docMissing = {} as Record<string, unknown>;
+
+    const qValue = createMockFilterBuilder(docWithValue);
+    const qNull = createMockFilterBuilder(docWithNull);
+    const qMissing = createMockFilterBuilder(docMissing);
+
+    expect(result.filter!(qValue)).toBe(true);
+    expect(result.filter!(qNull)).toBe(false);
+    expect(result.filter!(qMissing)).toBe(true);
+  });
+
+  test("isSet operator compares against undefined", () => {
+    // #given - isSet operator checks for field existence (undefined in Convex)
+    const queryPlan = {
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "isSet",
+        operands: [
+          { name: "request.resource.attr.aOptionalString" },
+          { value: true },
+        ],
+      },
+    } as unknown as PlanResourcesResponse;
+
+    // #when
+    const result = queryPlanToConvex({ queryPlan, mapper: defaultMapper });
+
+    // #then - isSet checks undefined (missing), not null
+    const docWithValue = { aOptionalString: "hello" } as Record<string, unknown>;
+    const docWithNull = { aOptionalString: null } as Record<string, unknown>;
+    const docMissing = {} as Record<string, unknown>;
+
+    const qValue = createMockFilterBuilder(docWithValue);
+    const qNull = createMockFilterBuilder(docWithNull);
+    const qMissing = createMockFilterBuilder(docMissing);
+
+    expect(result.filter!(qValue)).toBe(true);
+    expect(result.filter!(qNull)).toBe(true);
+    expect(result.filter!(qMissing)).toBe(false);
+  });
+});
+
+describe("Null Semantics", () => {
+  test("ne null preserves null, does not convert to undefined", () => {
+    // #given
+    const queryPlan = {
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "ne",
+        operands: [
+          { name: "request.resource.attr.aOptionalString" },
+          { value: null },
+        ],
+      },
+    } as unknown as PlanResourcesResponse;
+
+    // #when
+    const result = queryPlanToConvex({ queryPlan, mapper: defaultMapper });
+
+    // #then - null and undefined are distinct in Convex
+    const docWithNull = { aOptionalString: null };
+    const docWithUndefined = {};
+    const docWithValue = { aOptionalString: "hello" };
+
+    const qNull = createMockFilterBuilder(docWithNull as Record<string, unknown>);
+    const qUndefined = createMockFilterBuilder(docWithUndefined as Record<string, unknown>);
+    const qValue = createMockFilterBuilder(docWithValue as Record<string, unknown>);
+
+    expect(result.filter!(qNull)).toBe(false);
+    expect(result.filter!(qUndefined)).toBe(true);
+    expect(result.filter!(qValue)).toBe(true);
+  });
+
+  test("eq null matches only null, not undefined", () => {
+    // #given
+    const queryPlan = {
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "eq",
+        operands: [
+          { name: "request.resource.attr.aOptionalString" },
+          { value: null },
+        ],
+      },
+    } as unknown as PlanResourcesResponse;
+
+    // #when
+    const result = queryPlanToConvex({ queryPlan, mapper: defaultMapper });
+
+    // #then
+    const docWithNull = { aOptionalString: null };
+    const docWithUndefined = {};
+    const docWithValue = { aOptionalString: "hello" };
+
+    const qNull = createMockFilterBuilder(docWithNull as Record<string, unknown>);
+    const qUndefined = createMockFilterBuilder(docWithUndefined as Record<string, unknown>);
+    const qValue = createMockFilterBuilder(docWithValue as Record<string, unknown>);
+
+    expect(result.filter!(qNull)).toBe(true);
+    expect(result.filter!(qUndefined)).toBe(false);
+    expect(result.filter!(qValue)).toBe(false);
+  });
+
+  test("in with null preserves null in values", () => {
+    // #given
+    const queryPlan = {
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "in",
+        operands: [
+          { name: "request.resource.attr.aOptionalString" },
+          { value: [null, "hello"] },
+        ],
+      },
+    } as unknown as PlanResourcesResponse;
+
+    // #when
+    const result = queryPlanToConvex({ queryPlan, mapper: defaultMapper });
+
+    // #then
+    const docWithNull = { aOptionalString: null };
+    const docWithUndefined = {};
+    const docWithHello = { aOptionalString: "hello" };
+    const docWithOther = { aOptionalString: "other" };
+
+    const qNull = createMockFilterBuilder(docWithNull as Record<string, unknown>);
+    const qUndefined = createMockFilterBuilder(docWithUndefined as Record<string, unknown>);
+    const qHello = createMockFilterBuilder(docWithHello as Record<string, unknown>);
+    const qOther = createMockFilterBuilder(docWithOther as Record<string, unknown>);
+
+    expect(result.filter!(qNull)).toBe(true);
+    expect(result.filter!(qUndefined)).toBe(false);
+    expect(result.filter!(qHello)).toBe(true);
+    expect(result.filter!(qOther)).toBe(false);
   });
 });
 

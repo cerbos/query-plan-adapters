@@ -92,8 +92,6 @@ interface FilterQ {
   field: (name: string) => unknown;
 }
 
-const convexValue = (v: unknown): unknown => (v === null ? undefined : v);
-
 const validateExpression = (
   expression: PlanExpressionOperand,
   mapper: Mapper,
@@ -216,12 +214,12 @@ const translateExpression = (
 
       if (isVariable(leftOperand) && isValue(rightOperand)) {
         const field = resolveField(leftOperand.name, mapper);
-        return q[convexOp](q.field(field), convexValue(rightOperand.value));
+        return q[convexOp](q.field(field), rightOperand.value);
       }
 
       if (isValue(leftOperand) && isVariable(rightOperand)) {
         const field = resolveField(rightOperand.name, mapper);
-        return q[convexOp](q.field(field), convexValue(leftOperand.value));
+        return q[convexOp](q.field(field), leftOperand.value);
       }
 
       throw new Error(
@@ -255,11 +253,11 @@ const translateExpression = (
       }
 
       if (values.length === 1) {
-        return q.eq(q.field(field), convexValue(values[0]));
+        return q.eq(q.field(field), values[0]);
       }
 
       return q.or(
-        ...values.map((v: unknown) => q.eq(q.field(field), convexValue(v))),
+        ...values.map((v: unknown) => q.eq(q.field(field), v)),
       );
     }
 
