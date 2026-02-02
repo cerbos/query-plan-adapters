@@ -1152,5 +1152,126 @@ describe("valueParser functionality", () => {
             },
         });
     });
+
+    test("applies valueParser from nested relation fields on 'eq'", () => {
+      // #given
+      const queryPlan = {
+        kind: PlanKind.CONDITIONAL,
+        condition: new PlanExpression("eq", [
+          new PlanExpressionVariable("request.resource.attr.createdBy.id"),
+          new PlanExpressionValue("507f1f77bcf86cd799439011"),
+        ]),
+      } as PlanResourcesResponse;
+
+      const mapper: Mapper = {
+        "request.resource.attr.createdBy": {
+          relation: {
+            name: "createdBy",
+            type: "one",
+            field: "id",
+            fields: {
+              id: {
+                field: "id",
+                valueParser: (value: string) => new Types.ObjectId(value),
+              },
+            },
+          },
+        },
+      };
+
+      // #when
+      const result = queryPlanToMongoose({ queryPlan, mapper });
+
+      // #then
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          "createdBy.id": {
+            $eq: new Types.ObjectId("507f1f77bcf86cd799439011"),
+          },
+        },
+      });
+    });
+
+    test("applies valueParser from nested relation fields on 'in'", () => {
+      // #given
+      const queryPlan = {
+        kind: PlanKind.CONDITIONAL,
+        condition: new PlanExpression("in", [
+          new PlanExpressionVariable("request.resource.attr.createdBy.id"),
+          new PlanExpressionValue([
+            "507f1f77bcf86cd799439011",
+            "507f1f77bcf86cd799439012",
+          ]),
+        ]),
+      } as PlanResourcesResponse;
+
+      const mapper: Mapper = {
+        "request.resource.attr.createdBy": {
+          relation: {
+            name: "createdBy",
+            type: "one",
+            field: "id",
+            fields: {
+              id: {
+                field: "id",
+                valueParser: (value: string) => new Types.ObjectId(value),
+              },
+            },
+          },
+        },
+      };
+
+      // #when
+      const result = queryPlanToMongoose({ queryPlan, mapper });
+
+      // #then
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          "createdBy.id": {
+            $in: [
+              new Types.ObjectId("507f1f77bcf86cd799439011"),
+              new Types.ObjectId("507f1f77bcf86cd799439012"),
+            ],
+          },
+        },
+      });
+    });
+
+    test("skips valueParser when nested relation field has none", () => {
+      // #given
+      const queryPlan = {
+        kind: PlanKind.CONDITIONAL,
+        condition: new PlanExpression("eq", [
+          new PlanExpressionVariable("request.resource.attr.createdBy.id"),
+          new PlanExpressionValue("user1"),
+        ]),
+      } as PlanResourcesResponse;
+
+      const mapper: Mapper = {
+        "request.resource.attr.createdBy": {
+          relation: {
+            name: "createdBy",
+            type: "one",
+            field: "id",
+            fields: {
+              id: { field: "id" },
+            },
+          },
+        },
+      };
+
+      // #when
+      const result = queryPlanToMongoose({ queryPlan, mapper });
+
+      // #then
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          "createdBy.id": { $eq: "user1" },
+        },
+      });
+    });
 });
 
