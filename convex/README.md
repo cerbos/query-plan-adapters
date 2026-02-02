@@ -8,7 +8,7 @@ An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanRe
 2. Provide `queryPlanToConvex` with that plan and an optional mapper that describes how Cerbos attribute paths relate to your Convex document fields.
 3. The adapter walks the Cerbos expression tree and returns `{ kind, filter?, postFilter? }`:
    - `filter` is a Convex-native filter function `(q) => Expression<boolean>` pushed to the DB.
-   - `postFilter` is a JS predicate `(doc) => boolean` for operators Convex can't express natively (string ops, collection ops).
+   - `postFilter` is a JS predicate `(doc) => boolean` for operators Convex can't express natively (string ops, collection ops). **Requires `allowPostFilter: true`** — see below.
 4. Inspect `result.kind`:
    - `ALWAYS_ALLOWED`: the caller can query without any additional filters.
    - `ALWAYS_DENIED`: short-circuit and return an empty result set.
@@ -35,6 +35,22 @@ The following operators cannot be expressed as Convex DB filters. When the adapt
 | Higher-order | `filter`, `map`, `lambda` | Used internally by quantifier operators |
 
 For mixed expressions (e.g. `and(eq(...), contains(...))`), the adapter splits the tree: DB-pushable children go to `filter`, the rest go to `postFilter`. For `or(...)` with any unsupported child, the entire expression goes to `postFilter` (partial OR push-down would miss results).
+
+### `allowPostFilter` opt-in
+
+By default, `queryPlanToConvex` throws an error when the query plan requires a `postFilter`. This is because post-filter operators cause data to be fetched from the database before authorization filtering is applied — the DB-level filter alone may not fully enforce the authorization policy.
+
+To enable post-filtering, pass `allowPostFilter: true`:
+
+```ts
+const { kind, filter, postFilter } = queryPlanToConvex({
+  queryPlan,
+  mapper,
+  allowPostFilter: true,
+});
+```
+
+If your Cerbos policies only use operators that Convex supports natively (comparisons, `in`, `isSet`, logical combinators), you don't need this flag — `filter` alone will enforce the full policy at the DB level.
 
 ## Requirements
 
@@ -63,6 +79,7 @@ import {
 const { kind, filter, postFilter } = queryPlanToConvex({
   queryPlan, // PlanResourcesResponse from Cerbos
   mapper, // optional Mapper - see below
+  allowPostFilter: true, // opt in to client-side filtering (see note below)
 });
 
 if (kind === PlanKind.ALWAYS_DENIED) return [];
@@ -149,7 +166,11 @@ const queryPlan = await cerbos.planResources({
   action: "view",
 });
 
-const { kind, filter, postFilter } = queryPlanToConvex({ queryPlan, mapper });
+const { kind, filter, postFilter } = queryPlanToConvex({
+  queryPlan,
+  mapper,
+  allowPostFilter: true,
+});
 
 if (kind === PlanKind.ALWAYS_DENIED) {
   return [];
@@ -174,6 +195,7 @@ return results;
 - A conditional plan omits the `operator`/`operands` structure (`Invalid Cerbos expression structure`).
 - An operator listed in the plan is not implemented by this adapter (`Unsupported operator for Convex: <name>` or `Unsupported operator: <name>`).
 - The `in` operator is given a non-array value.
+- The query plan requires client-side filtering and `allowPostFilter` is not set to `true`.
 
 ## Limitations
 
