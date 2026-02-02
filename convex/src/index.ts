@@ -27,19 +27,18 @@ export interface QueryPlanToConvexArgs {
 export interface QueryPlanToConvexResult<Q = unknown> {
   kind: PlanKind;
   filter?: ConvexFilter<Q>;
+  postFilter?: (doc: Record<string, unknown>) => boolean;
 }
 
-const UNSUPPORTED_OPERATORS = new Set([
-  "contains",
-  "startsWith",
-  "endsWith",
-  "hasIntersection",
-  "exists",
-  "exists_one",
-  "all",
-  "filter",
-  "map",
-  "lambda",
+const DB_PUSHABLE_OPERATORS = new Set([
+  "and", "or", "not", "eq", "ne", "lt", "le", "gt", "ge", "in", "isSet",
+]);
+
+const ALL_KNOWN_OPERATORS = new Set([
+  ...DB_PUSHABLE_OPERATORS,
+  "contains", "startsWith", "endsWith",
+  "hasIntersection", "exists", "exists_one", "all",
+  "filter", "map", "lambda",
 ]);
 
 const isExpression = (e: PlanExpressionOperand): e is PlanExpression =>
@@ -92,42 +91,24 @@ interface FilterQ {
   field: (name: string) => unknown;
 }
 
-const validateExpression = (
-  expression: PlanExpressionOperand,
-  mapper: Mapper,
-): void => {
-  if (isValue(expression)) return;
-  if (isVariable(expression)) return;
+const canPushToDb = (expression: PlanExpressionOperand): boolean => {
+  if (isValue(expression) || isVariable(expression)) return true;
+  if (!isExpression(expression)) return false;
+  if (!DB_PUSHABLE_OPERATORS.has(expression.operator)) return false;
+  return expression.operands.every(canPushToDb);
+};
 
+const validateStructure = (expression: PlanExpressionOperand): void => {
+  if (isValue(expression) || isVariable(expression)) return;
   if (!isExpression(expression)) {
     throw new Error("Invalid Cerbos expression structure");
   }
-
-  const { operator, operands } = expression;
-
-  if (UNSUPPORTED_OPERATORS.has(operator)) {
-    throw new Error(`Unsupported operator for Convex: ${operator}`);
+  if (!ALL_KNOWN_OPERATORS.has(expression.operator)) {
+    throw new Error(`Unsupported operator: ${expression.operator}`);
   }
-
-  const supported = new Set([
-    "and", "or", "not", "eq", "ne", "lt", "le", "gt", "ge", "in", "isSet",
-  ]);
-
-  if (!supported.has(operator)) {
-    throw new Error(`Unsupported operator: ${operator}`);
+  for (const op of expression.operands) {
+    validateStructure(op);
   }
-
-  for (const op of operands) {
-    validateExpression(op, mapper);
-  }
-};
-
-const buildConvexFilter = (
-  expression: PlanExpressionOperand,
-  mapper: Mapper,
-): ConvexFilter<FilterQ> => {
-  validateExpression(expression, mapper);
-  return (q: FilterQ) => translateExpression(expression, q, mapper);
 };
 
 const translateExpression = (
@@ -288,6 +269,257 @@ const translateExpression = (
   }
 };
 
+type Bindings = Record<string, unknown>;
+
+const getNestedValue = (obj: unknown, path: string): unknown => {
+  const parts = path.split(".");
+  let current: unknown = obj;
+  for (const part of parts) {
+    if (current === null || current === undefined) return undefined;
+    current = (current as Record<string, unknown>)[part];
+  }
+  return current;
+};
+
+const resolveOperandValue = (
+  operand: PlanExpressionOperand,
+  doc: Record<string, unknown>,
+  mapper: Mapper,
+  bindings: Bindings,
+): unknown => {
+  if (isValue(operand)) return operand.value;
+
+  if (isVariable(operand)) {
+    const name = operand.name;
+    const dotIdx = name.indexOf(".");
+    if (dotIdx !== -1) {
+      const root = name.substring(0, dotIdx);
+      if (root in bindings) {
+        const rest = name.substring(dotIdx + 1);
+        return getNestedValue(bindings[root], rest);
+      }
+    }
+    if (name in bindings) return bindings[name];
+    const field = resolveField(name, mapper);
+    return getNestedValue(doc, field);
+  }
+
+  return evaluateExpression(operand, doc, mapper, bindings);
+};
+
+const evaluateExpression = (
+  expression: PlanExpressionOperand,
+  doc: Record<string, unknown>,
+  mapper: Mapper,
+  bindings: Bindings,
+): unknown => {
+  if (isValue(expression)) return expression.value;
+
+  if (isVariable(expression)) {
+    return resolveOperandValue(expression, doc, mapper, bindings);
+  }
+
+  if (!isExpression(expression)) {
+    throw new Error("Invalid Cerbos expression structure");
+  }
+
+  const { operator, operands } = expression;
+
+  const resolve = (op: PlanExpressionOperand) =>
+    resolveOperandValue(op, doc, mapper, bindings);
+
+  switch (operator) {
+    case "and":
+      return operands.every((op) => evaluateExpression(op, doc, mapper, bindings));
+
+    case "or":
+      return operands.some((op) => evaluateExpression(op, doc, mapper, bindings));
+
+    case "not":
+      return !evaluateExpression(operands[0]!, doc, mapper, bindings);
+
+    case "eq":
+      return resolve(operands[0]!) === resolve(operands[1]!);
+
+    case "ne":
+      return resolve(operands[0]!) !== resolve(operands[1]!);
+
+    case "lt":
+      return (resolve(operands[0]!) as number) < (resolve(operands[1]!) as number);
+
+    case "le":
+      return (resolve(operands[0]!) as number) <= (resolve(operands[1]!) as number);
+
+    case "gt":
+      return (resolve(operands[0]!) as number) > (resolve(operands[1]!) as number);
+
+    case "ge":
+      return (resolve(operands[0]!) as number) >= (resolve(operands[1]!) as number);
+
+    case "in": {
+      const needle = resolve(operands[0]!);
+      const haystack = resolve(operands[1]!) as unknown[];
+      return Array.isArray(haystack) && haystack.includes(needle);
+    }
+
+    case "isSet": {
+      const fieldVal = resolve(operands[0]!);
+      const expected = resolve(operands[1]!);
+      return expected ? fieldVal !== undefined : fieldVal === undefined;
+    }
+
+    case "contains": {
+      const str = resolve(operands[0]!) as string;
+      const substr = resolve(operands[1]!) as string;
+      return typeof str === "string" && str.includes(substr);
+    }
+
+    case "startsWith": {
+      const str = resolve(operands[0]!) as string;
+      const prefix = resolve(operands[1]!) as string;
+      return typeof str === "string" && str.startsWith(prefix);
+    }
+
+    case "endsWith": {
+      const str = resolve(operands[0]!) as string;
+      const suffix = resolve(operands[1]!) as string;
+      return typeof str === "string" && str.endsWith(suffix);
+    }
+
+    case "hasIntersection": {
+      const a = resolve(operands[0]!) as unknown[];
+      const b = resolve(operands[1]!) as unknown[];
+      if (!Array.isArray(a) || !Array.isArray(b)) return false;
+      return a.some((v) => b.includes(v));
+    }
+
+    case "exists":
+    case "exists_one":
+    case "all": {
+      const collection = resolve(operands[0]!) as unknown[];
+      if (!Array.isArray(collection)) return false;
+      const lambdaExpr = operands[1]!;
+      if (!isExpression(lambdaExpr) || lambdaExpr.operator !== "lambda") {
+        throw new Error(`${operator} requires a lambda operand`);
+      }
+      const lambdaVar = lambdaExpr.operands[0]!;
+      const lambdaBody = lambdaExpr.operands[1]!;
+      if (!isVariable(lambdaVar)) {
+        throw new Error("lambda first operand must be a variable");
+      }
+      const varName = lambdaVar.name;
+
+      if (operator === "exists") {
+        return collection.some((item) =>
+          evaluateExpression(lambdaBody, doc, mapper, { ...bindings, [varName]: item }),
+        );
+      }
+      if (operator === "exists_one") {
+        return collection.filter((item) =>
+          evaluateExpression(lambdaBody, doc, mapper, { ...bindings, [varName]: item }),
+        ).length === 1;
+      }
+      return collection.every((item) =>
+        evaluateExpression(lambdaBody, doc, mapper, { ...bindings, [varName]: item }),
+      );
+    }
+
+    case "filter": {
+      const collection = resolve(operands[0]!) as unknown[];
+      if (!Array.isArray(collection)) return [];
+      const lambdaExpr = operands[1]!;
+      if (!isExpression(lambdaExpr) || lambdaExpr.operator !== "lambda") {
+        throw new Error("filter requires a lambda operand");
+      }
+      const lambdaVar = lambdaExpr.operands[0]!;
+      const lambdaBody = lambdaExpr.operands[1]!;
+      if (!isVariable(lambdaVar)) {
+        throw new Error("lambda first operand must be a variable");
+      }
+      const varName = lambdaVar.name;
+      return collection.filter((item) =>
+        evaluateExpression(lambdaBody, doc, mapper, { ...bindings, [varName]: item }),
+      );
+    }
+
+    case "map": {
+      const collection = resolve(operands[0]!) as unknown[];
+      if (!Array.isArray(collection)) return [];
+      const lambdaExpr = operands[1]!;
+      if (!isExpression(lambdaExpr) || lambdaExpr.operator !== "lambda") {
+        throw new Error("map requires a lambda operand");
+      }
+      const lambdaVar = lambdaExpr.operands[0]!;
+      const lambdaBody = lambdaExpr.operands[1]!;
+      if (!isVariable(lambdaVar)) {
+        throw new Error("lambda first operand must be a variable");
+      }
+      const varName = lambdaVar.name;
+      return collection.map((item) =>
+        evaluateExpression(lambdaBody, doc, mapper, { ...bindings, [varName]: item }),
+      );
+    }
+
+    case "lambda":
+      throw new Error("lambda should not be evaluated directly");
+
+    default:
+      throw new Error(`Unsupported operator: ${operator}`);
+  }
+};
+
+interface SplitResult {
+  filter?: ConvexFilter<FilterQ>;
+  postFilter?: (doc: Record<string, unknown>) => boolean;
+}
+
+const buildFilters = (
+  expression: PlanExpressionOperand,
+  mapper: Mapper,
+): SplitResult => {
+  validateStructure(expression);
+
+  if (canPushToDb(expression)) {
+    return {
+      filter: (q: FilterQ) => translateExpression(expression, q, mapper),
+    };
+  }
+
+  if (isExpression(expression) && expression.operator === "and" && expression.operands.length > 1) {
+    const pushable: PlanExpressionOperand[] = [];
+    const nonPushable: PlanExpressionOperand[] = [];
+
+    for (const op of expression.operands) {
+      if (canPushToDb(op)) {
+        pushable.push(op);
+      } else {
+        nonPushable.push(op);
+      }
+    }
+
+    if (pushable.length > 0 && nonPushable.length > 0) {
+      const dbExpr: PlanExpressionOperand = pushable.length === 1
+        ? pushable[0]!
+        : { operator: "and", operands: pushable } as PlanExpression;
+
+      const jsExpr: PlanExpressionOperand = nonPushable.length === 1
+        ? nonPushable[0]!
+        : { operator: "and", operands: nonPushable } as PlanExpression;
+
+      return {
+        filter: (q: FilterQ) => translateExpression(dbExpr, q, mapper),
+        postFilter: (doc: Record<string, unknown>) =>
+          Boolean(evaluateExpression(jsExpr, doc, mapper, {})),
+      };
+    }
+  }
+
+  return {
+    postFilter: (doc: Record<string, unknown>) =>
+      Boolean(evaluateExpression(expression, doc, mapper, {})),
+  };
+};
+
 export function queryPlanToConvex<Q = unknown>({
   queryPlan,
   mapper = {},
@@ -297,14 +529,13 @@ export function queryPlanToConvex<Q = unknown>({
       return { kind: PlanKind.ALWAYS_ALLOWED };
     case PlanKind.ALWAYS_DENIED:
       return { kind: PlanKind.ALWAYS_DENIED };
-    case PlanKind.CONDITIONAL:
-      return {
-        kind: PlanKind.CONDITIONAL,
-        filter: buildConvexFilter(
-          queryPlan.condition,
-          mapper,
-        ) as ConvexFilter<Q>,
-      };
+    case PlanKind.CONDITIONAL: {
+      const { filter, postFilter } = buildFilters(queryPlan.condition, mapper);
+      const result: QueryPlanToConvexResult<Q> = { kind: PlanKind.CONDITIONAL };
+      if (filter) result.filter = filter as ConvexFilter<Q>;
+      if (postFilter) result.postFilter = postFilter;
+      return result;
+    }
     default:
       throw Error("Invalid query plan.");
   }

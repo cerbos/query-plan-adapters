@@ -6,11 +6,13 @@ An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanRe
 
 1. Use a Cerbos client (`@cerbos/http` or `@cerbos/grpc`) to call `planResources` and obtain a `PlanResourcesResponse`.
 2. Provide `queryPlanToConvex` with that plan and an optional mapper that describes how Cerbos attribute paths relate to your Convex document fields.
-3. The adapter walks the Cerbos expression tree, translates supported operators into a Convex filter function `(q) => Expression<boolean>`, and returns `{ kind, filter? }`.
+3. The adapter walks the Cerbos expression tree and returns `{ kind, filter?, postFilter? }`:
+   - `filter` is a Convex-native filter function `(q) => Expression<boolean>` pushed to the DB.
+   - `postFilter` is a JS predicate `(doc) => boolean` for operators Convex can't express natively (string ops, collection ops).
 4. Inspect `result.kind`:
    - `ALWAYS_ALLOWED`: the caller can query without any additional filters.
    - `ALWAYS_DENIED`: short-circuit and return an empty result set.
-   - `CONDITIONAL`: pass `result.filter` to `ctx.db.query("table").filter(result.filter)`.
+   - `CONDITIONAL`: apply `result.filter` server-side and `result.postFilter` client-side (see usage example below).
 
 ## Supported operators
 
@@ -21,14 +23,18 @@ An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanRe
 | Membership | `in` | Composed as `q.or(q.eq(field, v1), q.eq(field, v2), ...)`. |
 | Existence | `isSet` | Uses `q.neq(field, undefined)` for set, `q.eq(field, undefined)` for unset. |
 
-### Unsupported operators
+### Post-filter operators
 
-The following Cerbos operators are not supported by the Convex filter API and will throw an error:
+The following operators cannot be expressed as Convex DB filters. When the adapter encounters them, it returns a `postFilter` function that evaluates them in JavaScript against each document:
 
-- **String helpers:** `contains`, `startsWith`, `endsWith`
-- **Collection helpers:** `hasIntersection`, `exists`, `exists_one`, `all`, `filter`, `map`, `lambda`
+| Category | Operators | JS Behavior |
+| --- | --- | --- |
+| String | `contains`, `startsWith`, `endsWith` | `String.prototype.includes` / `startsWith` / `endsWith` |
+| Collection | `hasIntersection` | `a.some(v => b.includes(v))` |
+| Quantifiers | `exists`, `exists_one`, `all` | `Array.prototype.some` / filter-count / `every` with lambda |
+| Higher-order | `filter`, `map`, `lambda` | Used internally by quantifier operators |
 
-If your Cerbos policies use these operators, consider restructuring the policy conditions to use only supported operators, or filtering results in application code after the Convex query.
+For mixed expressions (e.g. `and(eq(...), contains(...))`), the adapter splits the tree: DB-pushable children go to `filter`, the rest go to `postFilter`. For `or(...)` with any unsupported child, the entire expression goes to `postFilter` (partial OR push-down would miss results).
 
 ## Requirements
 
@@ -54,17 +60,20 @@ import {
   type Mapper,
 } from "@cerbos/orm-convex";
 
-const result = queryPlanToConvex({
+const { kind, filter, postFilter } = queryPlanToConvex({
   queryPlan, // PlanResourcesResponse from Cerbos
   mapper, // optional Mapper - see below
 });
 
-if (result.kind === PlanKind.CONDITIONAL) {
-  const documents = await ctx.db
-    .query("myTable")
-    .filter(result.filter)
-    .collect();
+if (kind === PlanKind.ALWAYS_DENIED) return [];
+if (kind === PlanKind.ALWAYS_ALLOWED && !postFilter) {
+  return await ctx.db.query("myTable").collect();
 }
+
+let query = ctx.db.query("myTable");
+if (filter) query = query.filter(filter);
+let results = await query.collect();
+if (postFilter) results = results.filter(postFilter);
 ```
 
 `PlanKind` is re-exported from `@cerbos/core`:
@@ -140,20 +149,21 @@ const queryPlan = await cerbos.planResources({
   action: "view",
 });
 
-const result = queryPlanToConvex({ queryPlan, mapper });
+const { kind, filter, postFilter } = queryPlanToConvex({ queryPlan, mapper });
 
-if (result.kind === PlanKind.ALWAYS_DENIED) {
+if (kind === PlanKind.ALWAYS_DENIED) {
   return [];
 }
 
-if (result.kind === PlanKind.CONDITIONAL) {
-  return await ctx.db
-    .query("documents")
-    .filter(result.filter)
-    .collect();
+if (kind === PlanKind.ALWAYS_ALLOWED && !postFilter) {
+  return await ctx.db.query("documents").collect();
 }
 
-return await ctx.db.query("documents").collect();
+let query = ctx.db.query("documents");
+if (filter) query = query.filter(filter);
+let results = await query.collect();
+if (postFilter) results = results.filter(postFilter);
+return results;
 ```
 
 ## Error handling
@@ -167,6 +177,6 @@ return await ctx.db.query("documents").collect();
 
 ## Limitations
 
-- Convex filter expressions do not support string operations (`contains`, `startsWith`, `endsWith`), so policies using those operators cannot be translated.
-- Collection operators (`exists`, `all`, `filter`, `map`, `lambda`, `hasIntersection`) are not supported because Convex is document-oriented and does not support joins or array sub-queries in its filter API.
+- String and collection operators (`contains`, `startsWith`, `endsWith`, `hasIntersection`, `exists`, `all`, etc.) are evaluated as a JavaScript `postFilter` after the DB query returns. This means these conditions do not reduce the number of documents read from the database.
+- For `or(...)` expressions where any child uses an unsupported operator, the entire OR is evaluated client-side via `postFilter`. Only `and(...)` expressions can be split between DB filter and post-filter.
 - The `in` operator is composed as multiple `eq` comparisons joined with `or`, which may be less efficient for large value lists.

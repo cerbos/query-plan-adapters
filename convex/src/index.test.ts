@@ -593,56 +593,371 @@ describe("Null Semantics", () => {
   });
 });
 
-describe("Unsupported Operators", () => {
-  test("throws for contains", async () => {
-    const queryPlan = await cerbos.planResources({
-      principal: { id: "user1", roles: ["USER"] },
-      resource: { kind: "resource" },
-      action: "contains",
-    });
+describe("Post-filter String Operators", () => {
+  test("contains returns postFilter that filters correctly", () => {
+    // #given
+    const queryPlan = {
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "contains",
+        operands: [
+          { name: "request.resource.attr.aString" },
+          { value: "ring" },
+        ],
+      },
+    } as unknown as PlanResourcesResponse;
 
-    expect(() =>
-      queryPlanToConvex({ queryPlan, mapper: defaultMapper }),
-    ).toThrow("Unsupported operator for Convex: contains");
+    // #when
+    const result = queryPlanToConvex({ queryPlan, mapper: defaultMapper });
+
+    // #then
+    expect(result.kind).toBe(PlanKind.CONDITIONAL);
+    expect(result.filter).toBeUndefined();
+    expect(result.postFilter).toBeDefined();
+    expect(result.postFilter!({ aString: "string" })).toBe(true);
+    expect(result.postFilter!({ aString: "other" })).toBe(false);
   });
 
-  test("throws for startsWith", async () => {
-    const queryPlan = await cerbos.planResources({
-      principal: { id: "user1", roles: ["USER"] },
-      resource: { kind: "resource" },
-      action: "starts-with",
-    });
+  test("startsWith returns postFilter that filters correctly", () => {
+    // #given
+    const queryPlan = {
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "startsWith",
+        operands: [
+          { name: "request.resource.attr.aString" },
+          { value: "str" },
+        ],
+      },
+    } as unknown as PlanResourcesResponse;
 
-    expect(() =>
-      queryPlanToConvex({ queryPlan, mapper: defaultMapper }),
-    ).toThrow("Unsupported operator for Convex: startsWith");
+    // #when
+    const result = queryPlanToConvex({ queryPlan, mapper: defaultMapper });
+
+    // #then
+    expect(result.filter).toBeUndefined();
+    expect(result.postFilter).toBeDefined();
+    expect(result.postFilter!({ aString: "string" })).toBe(true);
+    expect(result.postFilter!({ aString: "other" })).toBe(false);
   });
 
-  test("throws for endsWith", async () => {
-    const queryPlan = await cerbos.planResources({
-      principal: { id: "user1", roles: ["USER"] },
-      resource: { kind: "resource" },
-      action: "ends-with",
-    });
+  test("endsWith returns postFilter that filters correctly", () => {
+    // #given
+    const queryPlan = {
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "endsWith",
+        operands: [
+          { name: "request.resource.attr.aString" },
+          { value: "ing" },
+        ],
+      },
+    } as unknown as PlanResourcesResponse;
 
-    expect(() =>
-      queryPlanToConvex({ queryPlan, mapper: defaultMapper }),
-    ).toThrow("Unsupported operator for Convex: endsWith");
+    // #when
+    const result = queryPlanToConvex({ queryPlan, mapper: defaultMapper });
+
+    // #then
+    expect(result.filter).toBeUndefined();
+    expect(result.postFilter).toBeDefined();
+    expect(result.postFilter!({ aString: "string" })).toBe(true);
+    expect(result.postFilter!({ aString: "other" })).toBe(false);
+  });
+});
+
+describe("Post-filter Collection Operators", () => {
+  test("hasIntersection returns postFilter", () => {
+    // #given
+    const queryPlan = {
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "hasIntersection",
+        operands: [
+          { name: "request.resource.attr.tags" },
+          { value: ["a", "b"] },
+        ],
+      },
+    } as unknown as PlanResourcesResponse;
+    const mapper: Mapper = {
+      "request.resource.attr.tags": { field: "tags" },
+    };
+
+    // #when
+    const result = queryPlanToConvex({ queryPlan, mapper });
+
+    // #then
+    expect(result.filter).toBeUndefined();
+    expect(result.postFilter).toBeDefined();
+    expect(result.postFilter!({ tags: ["a", "c"] })).toBe(true);
+    expect(result.postFilter!({ tags: ["c", "d"] })).toBe(false);
+    expect(result.postFilter!({ tags: [] })).toBe(false);
   });
 
-  test("throws for exists (collection)", async () => {
-    const queryPlan = await cerbos.planResources({
-      principal: { id: "user1", roles: ["USER"] },
-      resource: { kind: "resource" },
-      action: "exists",
-    });
+  test("exists with lambda returns postFilter", () => {
+    // #given - exists(tags, lambda(tag, eq(tag.id, "tag1")))
+    const queryPlan = {
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "exists",
+        operands: [
+          { name: "request.resource.attr.tags" },
+          {
+            operator: "lambda",
+            operands: [
+              { name: "tag" },
+              {
+                operator: "eq",
+                operands: [
+                  { name: "tag.id" },
+                  { value: "tag1" },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    } as unknown as PlanResourcesResponse;
+    const mapper: Mapper = {
+      "request.resource.attr.tags": { field: "tags" },
+    };
 
-    expect(() =>
-      queryPlanToConvex({
-        queryPlan,
-        mapper: defaultMapper,
-      }),
-    ).toThrow(/Unsupported operator for Convex/);
+    // #when
+    const result = queryPlanToConvex({ queryPlan, mapper });
+
+    // #then
+    expect(result.filter).toBeUndefined();
+    expect(result.postFilter).toBeDefined();
+    expect(result.postFilter!({ tags: [{ id: "tag1" }, { id: "tag2" }] })).toBe(true);
+    expect(result.postFilter!({ tags: [{ id: "tag2" }, { id: "tag3" }] })).toBe(false);
+    expect(result.postFilter!({ tags: [] })).toBe(false);
+  });
+
+  test("exists_one with lambda returns postFilter", () => {
+    // #given
+    const queryPlan = {
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "exists_one",
+        operands: [
+          { name: "request.resource.attr.tags" },
+          {
+            operator: "lambda",
+            operands: [
+              { name: "t" },
+              {
+                operator: "eq",
+                operands: [
+                  { name: "t" },
+                  { value: "a" },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    } as unknown as PlanResourcesResponse;
+    const mapper: Mapper = {
+      "request.resource.attr.tags": { field: "tags" },
+    };
+
+    // #when
+    const result = queryPlanToConvex({ queryPlan, mapper });
+
+    // #then
+    expect(result.postFilter).toBeDefined();
+    expect(result.postFilter!({ tags: ["a", "b"] })).toBe(true);
+    expect(result.postFilter!({ tags: ["a", "a"] })).toBe(false);
+    expect(result.postFilter!({ tags: ["b", "c"] })).toBe(false);
+  });
+
+  test("all with lambda returns postFilter", () => {
+    // #given
+    const queryPlan = {
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "all",
+        operands: [
+          { name: "request.resource.attr.scores" },
+          {
+            operator: "lambda",
+            operands: [
+              { name: "s" },
+              {
+                operator: "gt",
+                operands: [
+                  { name: "s" },
+                  { value: 0 },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    } as unknown as PlanResourcesResponse;
+    const mapper: Mapper = {
+      "request.resource.attr.scores": { field: "scores" },
+    };
+
+    // #when
+    const result = queryPlanToConvex({ queryPlan, mapper });
+
+    // #then
+    expect(result.postFilter).toBeDefined();
+    expect(result.postFilter!({ scores: [1, 2, 3] })).toBe(true);
+    expect(result.postFilter!({ scores: [0, 1, 2] })).toBe(false);
+  });
+});
+
+describe("Mixed Expression Splitting", () => {
+  test("and(supported, unsupported) returns both filter and postFilter", () => {
+    // #given - and(eq(aBool, true), contains(aString, "str"))
+    const queryPlan = {
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "and",
+        operands: [
+          {
+            operator: "eq",
+            operands: [
+              { name: "request.resource.attr.aBool" },
+              { value: true },
+            ],
+          },
+          {
+            operator: "contains",
+            operands: [
+              { name: "request.resource.attr.aString" },
+              { value: "str" },
+            ],
+          },
+        ],
+      },
+    } as unknown as PlanResourcesResponse;
+
+    // #when
+    const result = queryPlanToConvex({ queryPlan, mapper: defaultMapper });
+
+    // #then
+    expect(result.filter).toBeDefined();
+    expect(result.postFilter).toBeDefined();
+
+    const filtered = applyFilter(fixtureResources, result.filter!);
+    expect(filtered.map((r) => r.key)).toEqual(["a"]);
+
+    const postFiltered = filtered.filter((r) =>
+      result.postFilter!(r as unknown as Record<string, unknown>),
+    );
+    expect(postFiltered.map((r) => r.key)).toEqual(["a"]);
+  });
+
+  test("or(supported, unsupported) returns only postFilter", () => {
+    // #given - or(eq(aBool, true), contains(aString, "3"))
+    const queryPlan = {
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "or",
+        operands: [
+          {
+            operator: "eq",
+            operands: [
+              { name: "request.resource.attr.aBool" },
+              { value: true },
+            ],
+          },
+          {
+            operator: "contains",
+            operands: [
+              { name: "request.resource.attr.aString" },
+              { value: "3" },
+            ],
+          },
+        ],
+      },
+    } as unknown as PlanResourcesResponse;
+
+    // #when
+    const result = queryPlanToConvex({ queryPlan, mapper: defaultMapper });
+
+    // #then
+    expect(result.filter).toBeUndefined();
+    expect(result.postFilter).toBeDefined();
+
+    const postFiltered = fixtureResources.filter((r) =>
+      result.postFilter!(r as unknown as Record<string, unknown>),
+    );
+    expect(postFiltered.map((r) => r.key)).toEqual(["a", "c"]);
+  });
+
+  test("not(unsupported) returns only postFilter", () => {
+    // #given
+    const queryPlan = {
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "not",
+        operands: [
+          {
+            operator: "contains",
+            operands: [
+              { name: "request.resource.attr.aString" },
+              { value: "ring" },
+            ],
+          },
+        ],
+      },
+    } as unknown as PlanResourcesResponse;
+
+    // #when
+    const result = queryPlanToConvex({ queryPlan, mapper: defaultMapper });
+
+    // #then
+    expect(result.filter).toBeUndefined();
+    expect(result.postFilter).toBeDefined();
+    expect(result.postFilter!({ aString: "other" })).toBe(true);
+    expect(result.postFilter!({ aString: "string" })).toBe(false);
+  });
+});
+
+describe("Backward Compatibility", () => {
+  test("fully supported expression returns only filter, no postFilter", () => {
+    // #given
+    const queryPlan = {
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "eq",
+        operands: [
+          { name: "request.resource.attr.aBool" },
+          { value: true },
+        ],
+      },
+    } as unknown as PlanResourcesResponse;
+
+    // #when
+    const result = queryPlanToConvex({ queryPlan, mapper: defaultMapper });
+
+    // #then
+    expect(result.filter).toBeDefined();
+    expect(result.postFilter).toBeUndefined();
+  });
+
+  test("fully unsupported expression returns only postFilter, no filter", () => {
+    // #given
+    const queryPlan = {
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "contains",
+        operands: [
+          { name: "request.resource.attr.aString" },
+          { value: "str" },
+        ],
+      },
+    } as unknown as PlanResourcesResponse;
+
+    // #when
+    const result = queryPlanToConvex({ queryPlan, mapper: defaultMapper });
+
+    // #then
+    expect(result.filter).toBeUndefined();
+    expect(result.postFilter).toBeDefined();
   });
 });
 
