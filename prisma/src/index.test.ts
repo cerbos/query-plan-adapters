@@ -788,6 +788,81 @@ describe("Field Operations", () => {
         },
       });
     });
+
+    test("conditional - bare boolean via cerbos policy", async () => {
+      const queryPlan = await cerbos.planResources({
+        principal: { id: "user1", roles: ["USER"] },
+        resource: { kind: "resource" },
+        action: "bare-bool",
+      });
+
+      expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+      expect(
+        (queryPlan as PlanResourcesConditionalResponse).condition
+      ).toEqual({ name: "request.resource.attr.aBool" });
+
+      const result = queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.aBool": { field: "aBool" },
+        },
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: { aBool: { equals: true } },
+      });
+
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
+
+      const query = await prisma.resource.findMany({
+        where: { ...result.filters },
+      });
+      expect(query.map((r) => r.id)).toEqual(
+        fixtureResources.filter((a) => a.aBool).map((r) => r.id)
+      );
+    });
+
+    test("conditional - negated bare boolean via cerbos policy", async () => {
+      const queryPlan = await cerbos.planResources({
+        principal: { id: "user1", roles: ["USER"] },
+        resource: { kind: "resource" },
+        action: "bare-bool-negated",
+      });
+
+      expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+      expect(
+        (queryPlan as PlanResourcesConditionalResponse).condition
+      ).toEqual({
+        operator: "not",
+        operands: [{ name: "request.resource.attr.aBool" }],
+      });
+
+      const result = queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.aBool": { field: "aBool" },
+        },
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: { aBool: { equals: false } },
+      });
+
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
+
+      const query = await prisma.resource.findMany({
+        where: { ...result.filters },
+      });
+      expect(query.map((r) => r.id)).toEqual(
+        fixtureResources.filter((a) => !a.aBool).map((r) => r.id)
+      );
+    });
   });
 
   describe("Comparison Tests", () => {

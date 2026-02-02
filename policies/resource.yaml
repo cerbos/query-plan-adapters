@@ -42,6 +42,24 @@ resourcePolicy:
         - USER
 
     - actions:
+        - "bare-bool"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.aBool
+
+    - actions:
+        - "bare-bool-negated"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: "!request.resource.attr.aBool"
+
+    - actions:
         - "ne"
       effect: EFFECT_ALLOW
       roles:
