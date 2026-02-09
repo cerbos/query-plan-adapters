@@ -41,7 +41,9 @@ public class ElasticsearchQueryPlanAdapter {
             Map.entry("startsWith", (field, value) ->
                     Map.of("prefix", Map.of(field, Map.of("value", value)))),
             Map.entry("endsWith", (field, value) ->
-                    Map.of("wildcard", Map.of(field, Map.of("value", "*" + escapeWildcard(value)))))
+                    Map.of("wildcard", Map.of(field, Map.of("value", "*" + escapeWildcard(value))))),
+            Map.entry("hasIntersection", (field, value) ->
+                    Map.of("terms", Map.of(field, value instanceof List<?> l ? l : List.of(value))))
     );
 
     private ElasticsearchQueryPlanAdapter() {}
@@ -139,8 +141,72 @@ public class ElasticsearchQueryPlanAdapter {
                         .toList();
                 yield Map.of("bool", Map.of("must_not", clauses));
             }
-            default -> applyLeafOperator(operator, operands, fieldMap, overrides);
+            default -> {
+                Map<String, Object> sizeResult = trySizeComparison(operator, operands, fieldMap);
+                if (sizeResult != null) {
+                    yield sizeResult;
+                }
+                yield applyLeafOperator(operator, operands, fieldMap, overrides);
+            }
         };
+    }
+
+    private static Map<String, Object> trySizeComparison(
+            String operator,
+            List<Operand> operands,
+            Map<String, String> fieldMap) {
+        Expression sizeExpr = null;
+        long numValue = -1;
+
+        for (Operand op : operands) {
+            switch (op.getNodeCase()) {
+                case EXPRESSION -> {
+                    if ("size".equals(op.getExpression().getOperator())) {
+                        sizeExpr = op.getExpression();
+                    }
+                }
+                case VALUE -> {
+                    Object v = protoValueToJava(op.getValue());
+                    if (v instanceof Number n) {
+                        numValue = n.longValue();
+                    }
+                }
+                default -> {}
+            }
+        }
+
+        if (sizeExpr == null) {
+            return null;
+        }
+
+        List<Operand> sizeOperands = sizeExpr.getOperandsList();
+        if (sizeOperands.size() != 1 || sizeOperands.get(0).getNodeCase() != Operand.NodeCase.VARIABLE) {
+            throw new IllegalArgumentException("Unsupported size() expression");
+        }
+
+        String variable = sizeOperands.get(0).getVariable();
+        String field = fieldMap.get(variable);
+        if (field == null) {
+            throw new IllegalArgumentException("Unknown attribute: " + variable);
+        }
+
+        boolean nonEmpty = (operator.equals("gt") && numValue == 0)
+                || (operator.equals("ge") && numValue == 1);
+        boolean empty = (operator.equals("eq") && numValue == 0)
+                || (operator.equals("le") && numValue == 0)
+                || (operator.equals("lt") && numValue == 1);
+
+        if (nonEmpty) {
+            return Map.of("exists", Map.of("field", field));
+        }
+        if (empty) {
+            return Map.of("bool", Map.of("must_not", List.of(
+                    Map.of("exists", Map.of("field", field)))));
+        }
+
+        throw new IllegalArgumentException(
+                "Unsupported size comparison: size(" + variable + ") " + operator + " " + numValue
+                        + ". Only emptiness checks (size > 0, size == 0) are supported.");
     }
 
     private static Map<String, Object> applyLeafOperator(

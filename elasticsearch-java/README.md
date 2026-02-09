@@ -7,6 +7,9 @@ An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanRe
 - Supports logical operators: `and`, `or`, `not`
 - Supports comparison operators: `eq`, `ne`, `lt`, `gt`, `le`, `ge`, `in`
 - Supports string operators: `contains`, `startsWith`, `endsWith`
+- Supports `hasIntersection` for array overlap checks
+- Supports `size` comparisons for array emptiness checks
+- Handles null values (`eq`/`ne` with null maps to `exists` queries)
 - Handles bare boolean variables (e.g. `request.resource.attr.isPublic`)
 - Custom operator overrides for full control over query generation
 - Works with both `PlanResourcesResult` (SDK) and `PlanResourcesResponse` (protobuf) inputs
@@ -217,6 +220,8 @@ The `OperatorFunction` interface takes a field name and value, and returns a `Ma
 | `contains` | `wildcard` (`*value*`) |
 | `startsWith` | `prefix` |
 | `endsWith` | `wildcard` (`*value`) |
+| `hasIntersection` | `terms` (array overlap) |
+| `size` (via comparison) | `exists` / `bool.must_not` + `exists` |
 
 ### Elasticsearch field type considerations
 

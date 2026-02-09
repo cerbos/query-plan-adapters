@@ -17,14 +17,16 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class ElasticsearchQueryPlanAdapterTest {
 
-    private static final Map<String, String> FIELD_MAP = Map.of(
-            "request.resource.attr.department", "department",
-            "request.resource.attr.status", "status",
-            "request.resource.attr.priority", "priority",
-            "request.resource.attr.aBool", "aBool",
-            "request.resource.attr.aString", "aString",
-            "request.resource.attr.aNumber", "aNumber",
-            "request.resource.attr.title", "title"
+    private static final Map<String, String> FIELD_MAP = Map.ofEntries(
+            Map.entry("request.resource.attr.department", "department"),
+            Map.entry("request.resource.attr.status", "status"),
+            Map.entry("request.resource.attr.priority", "priority"),
+            Map.entry("request.resource.attr.aBool", "aBool"),
+            Map.entry("request.resource.attr.aString", "aString"),
+            Map.entry("request.resource.attr.aNumber", "aNumber"),
+            Map.entry("request.resource.attr.title", "title"),
+            Map.entry("request.resource.attr.tags", "tags"),
+            Map.entry("request.resource.attr.ownedBy", "ownedBy")
     );
 
     private static PlanResourcesResponse buildResponse(PlanResourcesFilter.Kind kind) {
@@ -505,6 +507,77 @@ class ElasticsearchQueryPlanAdapterTest {
                 Map.of("bool", Map.of("must_not", List.of(
                         Map.of("exists", Map.of("field", "department"))))),
                 query);
+    }
+
+    @Test
+    void hasIntersectionProducesTermsQuery() {
+        Operand condition = expressionOperand("hasIntersection",
+                variableOperand("request.resource.attr.tags"),
+                listValueOperand("public", "draft"));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
+
+        Map<String, Object> query = ((Result.Conditional) result).query();
+        assertEquals(Map.of("terms", Map.of("tags", List.of("public", "draft"))), query);
+    }
+
+    @Test
+    void sizeGtZeroProducesExists() {
+        Operand condition = expressionOperand("gt",
+                expressionOperand("size",
+                        variableOperand("request.resource.attr.ownedBy")),
+                numberValueOperand(0));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
+
+        Map<String, Object> query = ((Result.Conditional) result).query();
+        assertEquals(Map.of("exists", Map.of("field", "ownedBy")), query);
+    }
+
+    @Test
+    void sizeGeOneProducesExists() {
+        Operand condition = expressionOperand("ge",
+                expressionOperand("size",
+                        variableOperand("request.resource.attr.ownedBy")),
+                numberValueOperand(1));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
+
+        Map<String, Object> query = ((Result.Conditional) result).query();
+        assertEquals(Map.of("exists", Map.of("field", "ownedBy")), query);
+    }
+
+    @Test
+    void sizeEqZeroProducesNotExists() {
+        Operand condition = expressionOperand("eq",
+                expressionOperand("size",
+                        variableOperand("request.resource.attr.ownedBy")),
+                numberValueOperand(0));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
+
+        Map<String, Object> query = ((Result.Conditional) result).query();
+        assertEquals(
+                Map.of("bool", Map.of("must_not", List.of(
+                        Map.of("exists", Map.of("field", "ownedBy"))))),
+                query);
+    }
+
+    @Test
+    void unsupportedSizeComparisonThrows() {
+        Operand condition = expressionOperand("gt",
+                expressionOperand("size",
+                        variableOperand("request.resource.attr.ownedBy")),
+                numberValueOperand(5));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP));
+        assertTrue(ex.getMessage().contains("Unsupported size comparison"));
     }
 
     @Test

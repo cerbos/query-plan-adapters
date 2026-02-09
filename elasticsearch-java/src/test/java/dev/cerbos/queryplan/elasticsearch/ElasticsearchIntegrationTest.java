@@ -541,6 +541,28 @@ class ElasticsearchIntegrationTest {
         assertEquals(List.of("2"), executeQuery("relation-multiple-none"));
     }
 
+    // --- Array intersection ---
+
+    @Test
+    void hasIntersectionDirect() throws Exception {
+        // hasIntersection(tags, ["public", "draft"]) → docs 1 (["public","featured"]), 3 (["public"])
+        assertEquals(List.of("1", "3"), executeQuery("has-intersection-direct"));
+    }
+
+    // --- Size comparisons ---
+
+    @Test
+    void relationHasMembers() throws Exception {
+        // size(ownedBy) > 0 → all docs have non-empty ownedBy
+        assertEquals(List.of("1", "2", "3"), executeQuery("relation-has-members"));
+    }
+
+    @Test
+    void relationHasNoMembers() throws Exception {
+        // DENY if size(ownedBy) > 0, ALLOW otherwise → not(exists) → no docs
+        assertEquals(List.of(), executeQuery("relation-has-no-members"));
+    }
+
     // --- Cross-level combined ---
 
     @Test
