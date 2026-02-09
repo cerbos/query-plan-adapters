@@ -37,11 +37,11 @@ public class ElasticsearchQueryPlanAdapter {
             Map.entry("in", (field, value) ->
                     Map.of("terms", Map.of(field, value instanceof List<?> l ? l : List.of(value)))),
             Map.entry("contains", (field, value) ->
-                    Map.of("wildcard", Map.of(field, Map.of("value", "*" + value + "*")))),
+                    Map.of("wildcard", Map.of(field, Map.of("value", "*" + escapeWildcard(value) + "*")))),
             Map.entry("startsWith", (field, value) ->
                     Map.of("prefix", Map.of(field, Map.of("value", value)))),
             Map.entry("endsWith", (field, value) ->
-                    Map.of("wildcard", Map.of(field, Map.of("value", "*" + value))))
+                    Map.of("wildcard", Map.of(field, Map.of("value", "*" + escapeWildcard(value)))))
     );
 
     private ElasticsearchQueryPlanAdapter() {}
@@ -178,6 +178,13 @@ public class ElasticsearchQueryPlanAdapter {
         }
 
         return fn.apply(field, value);
+    }
+
+    private static String escapeWildcard(Object value) {
+        return value.toString()
+                .replace("\\", "\\\\")
+                .replace("*", "\\*")
+                .replace("?", "\\?");
     }
 
     static Object protoValueToJava(Value value) {

@@ -327,6 +327,32 @@ class ElasticsearchQueryPlanAdapterTest {
     }
 
     @Test
+    void containsEscapesWildcardMetacharacters() {
+        Operand condition = expressionOperand("contains",
+                variableOperand("request.resource.attr.title"),
+                stringValueOperand("foo*bar?baz\\qux"));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
+
+        Map<String, Object> query = ((Result.Conditional) result).query();
+        assertEquals(Map.of("wildcard", Map.of("title", Map.of("value", "*foo\\*bar\\?baz\\\\qux*"))), query);
+    }
+
+    @Test
+    void endsWithEscapesWildcardMetacharacters() {
+        Operand condition = expressionOperand("endsWith",
+                variableOperand("request.resource.attr.title"),
+                stringValueOperand("a*b"));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
+
+        Map<String, Object> query = ((Result.Conditional) result).query();
+        assertEquals(Map.of("wildcard", Map.of("title", Map.of("value", "*a\\*b"))), query);
+    }
+
+    @Test
     void unknownAttributeThrows() {
         Operand condition = expressionOperand("eq",
                 variableOperand("request.resource.attr.nonexistent"),
