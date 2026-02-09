@@ -19,11 +19,16 @@ An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanRe
 
 ## Installation
 
+This adapter is not published to Maven Central. Copy the source files directly into your project:
+
+1. Copy `ElasticsearchQueryPlanAdapter.java` and `OperatorFunction.java` from [`src/main/java/dev/cerbos/queryplan/elasticsearch/`](src/main/java/dev/cerbos/queryplan/elasticsearch/) into your project.
+2. Adjust the `package` declaration to match your project structure.
+3. Add the required dependencies:
+
 ### Gradle
 
 ```kotlin
 dependencies {
-    implementation("dev.cerbos:cerbos-elasticsearch:0.1.0")
     implementation("dev.cerbos:cerbos-sdk-java:0.13.0")
     implementation("com.google.protobuf:protobuf-java:4.27.1")
 }
@@ -33,11 +38,6 @@ dependencies {
 
 ```xml
 <dependencies>
-    <dependency>
-        <groupId>dev.cerbos</groupId>
-        <artifactId>cerbos-elasticsearch</artifactId>
-        <version>0.1.0</version>
-    </dependency>
     <dependency>
         <groupId>dev.cerbos</groupId>
         <artifactId>cerbos-sdk-java</artifactId>
@@ -210,8 +210,8 @@ The `OperatorFunction` interface takes a field name and value, and returns a `Ma
 
 | Cerbos operator | Elasticsearch query |
 |---|---|
-| `eq` | `term` |
-| `ne` | `bool.must_not` + `term` |
+| `eq` | `term` (or `bool.must_not` + `exists` when value is `null`) |
+| `ne` | `bool.must_not` + `term` (or `exists` when value is `null`) |
 | `lt`, `gt`, `le`, `ge` | `range` |
 | `in` | `terms` |
 | `contains` | `wildcard` (`*value*`) |
