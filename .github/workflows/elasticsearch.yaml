@@ -1,0 +1,35 @@
+name: Elasticsearch Test
+
+on:
+  pull_request:
+    paths:
+      - "elasticsearch/**"
+      - "policies/**"
+  push:
+    tags:
+      - elasticsearch/v*
+
+defaults:
+  run:
+    working-directory: elasticsearch
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        java-version: ["17", "21"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup JDK
+        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java-version }}
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@ac638b010cf58a27ee6c972d7336334ccaf61c96 # v4.4.1
+
+      - name: Build and test
+        run: gradle build --no-daemon
