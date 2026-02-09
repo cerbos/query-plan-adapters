@@ -109,7 +109,9 @@ switch (result) {
 
 ### Sending the query to Elasticsearch
 
-The adapter produces a `Map<String, Object>` representing an Elasticsearch Query DSL clause. Serialize it to JSON and pass it to the [Elasticsearch Java Client](https://www.elastic.co/guide/en/elasticsearch/client/java-api-client/current/index.html) using `withJson()`:
+The adapter produces a `Map<String, Object>` representing an Elasticsearch Query DSL clause. Serialize it to JSON and pass it to the [Elasticsearch Java Client](https://www.elastic.co/guide/en/elasticsearch/client/java-api-client/current/index.html) using `withJson()`.
+
+Authorization conditions are access control filters, not relevance signals. Always place them in a **filter context** (`bool.filter` or `constant_score`) so Elasticsearch skips scoring and can cache the result.
 
 ```java
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
@@ -134,7 +136,9 @@ List<Document> documents = switch (result) {
     case Result.AlwaysDenied ignored -> Collections.emptyList();
     case Result.Conditional conditional -> {
         String queryJson = objectMapper.writeValueAsString(
-            Map.of("query", conditional.query())
+            Map.of("query", Map.of(
+                "bool", Map.of("filter", List.of(conditional.query()))
+            ))
         );
         SearchResponse<Document> resp = esClient.search(
             s -> s.index("my-index").withJson(new StringReader(queryJson)),
@@ -147,7 +151,7 @@ List<Document> documents = switch (result) {
 
 #### Combining with your own queries
 
-Wrap the Cerbos condition inside a `bool.filter` clause to combine it with your application query without affecting relevance scoring:
+Place the Cerbos condition in `bool.filter` alongside your application's relevance query in `bool.must`. This keeps authorization out of scoring while still ranking results by relevance:
 
 ```java
 case Result.Conditional conditional -> {
@@ -171,7 +175,7 @@ The adapter returns a sealed `Result` type with three variants:
 |---|---|---|
 | `Result.AlwaysAllowed` | Principal has unconditional access | Execute search without authorization filter |
 | `Result.AlwaysDenied` | Principal has no access | Return empty results, skip the search |
-| `Result.Conditional` | Access depends on resource attributes | Use `query()` as the Elasticsearch query |
+| `Result.Conditional` | Access depends on resource attributes | Use `query()` in a `bool.filter` clause |
 
 ### Field mapping
 
