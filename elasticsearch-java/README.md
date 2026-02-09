@@ -109,11 +109,7 @@ switch (result) {
 
 ### Sending the query to Elasticsearch
 
-The adapter produces a `Map<String, Object>` that represents an Elasticsearch Query DSL clause. How you send it depends on your client.
-
-#### Elasticsearch Java Client (`co.elastic.clients`)
-
-Use `withJson()` to pass the serialized query directly into a `SearchRequest`:
+The adapter produces a `Map<String, Object>` representing an Elasticsearch Query DSL clause. Serialize it to JSON and pass it to the [Elasticsearch Java Client](https://www.elastic.co/guide/en/elasticsearch/client/java-api-client/current/index.html) using `withJson()`:
 
 ```java
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
@@ -147,38 +143,6 @@ List<Document> documents = switch (result) {
         yield resp.hits().hits().stream().map(h -> h.source()).toList();
     }
 };
-```
-
-#### Low-level REST client
-
-Build the JSON body and send it with `performRequest`:
-
-```java
-import org.elasticsearch.client.Request;
-import org.elasticsearch.client.Response;
-import org.elasticsearch.client.RestClient;
-import com.fasterxml.jackson.databind.ObjectMapper;
-
-ObjectMapper objectMapper = new ObjectMapper();
-Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(plan, fieldMap);
-
-switch (result) {
-    case Result.AlwaysAllowed ignored -> {
-        Request req = new Request("GET", "/my-index/_search");
-        Response resp = restClient.performRequest(req);
-    }
-    case Result.AlwaysDenied ignored -> {
-        // return empty results
-    }
-    case Result.Conditional conditional -> {
-        String body = objectMapper.writeValueAsString(
-            Map.of("query", conditional.query())
-        );
-        Request req = new Request("POST", "/my-index/_search");
-        req.setJsonEntity(body);
-        Response resp = restClient.performRequest(req);
-    }
-}
 ```
 
 #### Combining with your own queries
