@@ -25,6 +25,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -54,6 +55,10 @@ class ElasticsearchIntegrationTest {
             Map.entry("request.resource.attr.aString", "aString"),
             Map.entry("request.resource.attr.aNumber", "aNumber"),
             Map.entry("request.resource.attr.id", "id"),
+            Map.entry("request.resource.attr.tags", "tags"),
+            Map.entry("request.resource.attr.ownedBy", "ownedBy"),
+            Map.entry("request.resource.attr.createdBy", "createdBy"),
+            Map.entry("request.resource.attr.aOptionalString", "aOptionalString"),
             Map.entry("request.resource.attr.nested.aBool", "nested.aBool"),
             Map.entry("request.resource.attr.nested.aString", "nested.aString"),
             Map.entry("request.resource.attr.nested.aNumber", "nested.aNumber"),
@@ -107,39 +112,56 @@ class ElasticsearchIntegrationTest {
                 Map.entry("aString", Map.of("type", "keyword")),
                 Map.entry("aNumber", Map.of("type", "integer")),
                 Map.entry("id", Map.of("type", "keyword")),
+                Map.entry("tags", Map.of("type", "keyword")),
+                Map.entry("ownedBy", Map.of("type", "keyword")),
+                Map.entry("createdBy", Map.of("type", "keyword")),
+                Map.entry("aOptionalString", Map.of("type", "keyword")),
                 Map.entry("nested", Map.of("type", "object", "properties", nestedProps)));
 
         String body = MAPPER.writeValueAsString(Map.of("mappings", Map.of("properties", topProps)));
         esRequest("PUT", "/" + INDEX, body);
     }
 
-    // Doc 1: aBool=true, aString="string", aNumber=1
-    //   nested: aBool=true, aString="substring", aNumber=2, nextlevel: aBool=true, aString="strDeep"
-    // Doc 2: aBool=false, aString="amIAString?", aNumber=2
-    //   nested: aBool=false, aString="noMatch", aNumber=1, nextlevel: aBool=false, aString="deepValue"
-    // Doc 3: aBool=true, aString="anotherString", aNumber=3
-    //   nested: aBool=true, aString="testString", aNumber=3, nextlevel: aBool=false, aString="strValue"
     private static void seedData() throws Exception {
-        indexDoc("1", Map.of(
+        indexDoc("1", mapOf(
                 "aBool", true, "aString", "string", "aNumber", 1,
                 "id", "507f1f77bcf86cd799439011",
+                "tags", List.of("public", "featured"),
+                "ownedBy", List.of("user1", "user2"),
+                "createdBy", "user1",
+                "aOptionalString", "hello",
                 "nested", Map.of(
                         "aBool", true, "aString", "substring", "aNumber", 2,
                         "nextlevel", Map.of("aBool", true, "aString", "strDeep"))));
 
-        indexDoc("2", Map.of(
+        indexDoc("2", mapOf(
                 "aBool", false, "aString", "amIAString?", "aNumber", 2,
                 "id", "507f1f77bcf86cd799439012",
+                "tags", List.of("private"),
+                "ownedBy", List.of("user2"),
+                "createdBy", "user2",
                 "nested", Map.of(
                         "aBool", false, "aString", "noMatch", "aNumber", 1,
                         "nextlevel", Map.of("aBool", false, "aString", "deepValue"))));
 
-        indexDoc("3", Map.of(
+        indexDoc("3", mapOf(
                 "aBool", true, "aString", "anotherString", "aNumber", 3,
                 "id", "507f1f77bcf86cd799439013",
+                "tags", List.of("public"),
+                "ownedBy", List.of("user1"),
+                "createdBy", "user3",
+                "aOptionalString", "world",
                 "nested", Map.of(
                         "aBool", true, "aString", "testString", "aNumber", 3,
                         "nextlevel", Map.of("aBool", false, "aString", "strValue"))));
+    }
+
+    private static Map<String, Object> mapOf(Object... keyValues) {
+        Map<String, Object> map = new HashMap<>();
+        for (int i = 0; i < keyValues.length; i += 2) {
+            map.put((String) keyValues[i], keyValues[i + 1]);
+        }
+        return map;
     }
 
     private static void indexDoc(String id, Map<String, Object> doc) throws Exception {
@@ -457,6 +479,66 @@ class ElasticsearchIntegrationTest {
     void deeplyNestedStartsWith() throws Exception {
         // nested.nextlevel.aString.startsWith("str") → docs 1 ("strDeep"), 3 ("strValue")
         assertEquals(List.of("1", "3"), executeQuery("deeply-nested-starts-with"));
+    }
+
+    // --- Null checks (field existence) ---
+
+    @Test
+    void isSet() throws Exception {
+        // aOptionalString != null → docs 1, 3 (field present)
+        assertEquals(List.of("1", "3"), executeQuery("is-set"));
+    }
+
+    // --- Array membership ---
+
+    @Test
+    void hasTag() throws Exception {
+        // "public" in tags → docs 1, 3
+        assertEquals(List.of("1", "3"), executeQuery("has-tag"));
+    }
+
+    @Test
+    void hasNoTag() throws Exception {
+        // !("private" in tags) → docs 1, 3
+        assertEquals(List.of("1", "3"), executeQuery("has-no-tag"));
+    }
+
+    // --- Principal references ---
+
+    @Test
+    void relationIs() throws Exception {
+        // createdBy == P.id ("user1") → doc 1
+        assertEquals(List.of("1"), executeQuery("relation-is"));
+    }
+
+    @Test
+    void relationIsNot() throws Exception {
+        // !(createdBy == P.id) → docs 2, 3
+        assertEquals(List.of("2", "3"), executeQuery("relation-is-not"));
+    }
+
+    @Test
+    void relationSome() throws Exception {
+        // P.id in ownedBy → docs 1, 3
+        assertEquals(List.of("1", "3"), executeQuery("relation-some"));
+    }
+
+    @Test
+    void relationNone() throws Exception {
+        // !(P.id in ownedBy) → doc 2
+        assertEquals(List.of("2"), executeQuery("relation-none"));
+    }
+
+    @Test
+    void relationMultipleOr() throws Exception {
+        // createdBy == P.id OR P.id in ownedBy → docs 1, 3
+        assertEquals(List.of("1", "3"), executeQuery("relation-multiple-or"));
+    }
+
+    @Test
+    void relationMultipleNone() throws Exception {
+        // not(createdBy == P.id) AND not("public" in tags) → doc 2
+        assertEquals(List.of("2"), executeQuery("relation-multiple-none"));
     }
 
     // --- Cross-level combined ---

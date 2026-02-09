@@ -1,6 +1,7 @@
 package dev.cerbos.queryplan.elasticsearch;
 
 import com.google.protobuf.ListValue;
+import com.google.protobuf.NullValue;
 import com.google.protobuf.Value;
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter;
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression;
@@ -67,6 +68,12 @@ class ElasticsearchQueryPlanAdapterTest {
     private static Operand boolValueOperand(boolean val) {
         return Operand.newBuilder()
                 .setValue(Value.newBuilder().setBoolValue(val))
+                .build();
+    }
+
+    private static Operand nullValueOperand() {
+        return Operand.newBuilder()
+                .setValue(Value.newBuilder().setNullValue(NullValue.NULL_VALUE))
                 .build();
     }
 
@@ -482,6 +489,35 @@ class ElasticsearchQueryPlanAdapterTest {
         Map<String, Object> boolClause = (Map<String, Object>) ((Map<String, Object>) searchBody.get("query")).get("bool");
         assertEquals(List.of(expectedFilter), boolClause.get("filter"));
         assertEquals(List.of(userQuery), boolClause.get("must"));
+    }
+
+    @Test
+    void eqNullProducesNotExists() {
+        Operand condition = expressionOperand("eq",
+                variableOperand("request.resource.attr.department"),
+                nullValueOperand());
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
+
+        Map<String, Object> query = ((Result.Conditional) result).query();
+        assertEquals(
+                Map.of("bool", Map.of("must_not", List.of(
+                        Map.of("exists", Map.of("field", "department"))))),
+                query);
+    }
+
+    @Test
+    void neNullProducesExists() {
+        Operand condition = expressionOperand("ne",
+                variableOperand("request.resource.attr.department"),
+                nullValueOperand());
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
+
+        Map<String, Object> query = ((Result.Conditional) result).query();
+        assertEquals(Map.of("exists", Map.of("field", "department")), query);
     }
 
     @Test

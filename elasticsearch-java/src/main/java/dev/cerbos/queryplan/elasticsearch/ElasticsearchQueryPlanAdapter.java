@@ -169,6 +169,16 @@ public class ElasticsearchQueryPlanAdapter {
             throw new IllegalArgumentException("Unknown attribute: " + variable);
         }
 
+        if (value == null) {
+            return switch (operator) {
+                case "eq" -> Map.of("bool", Map.of("must_not", List.of(
+                        Map.of("exists", Map.of("field", field)))));
+                case "ne" -> Map.of("exists", Map.of("field", field));
+                default -> throw new IllegalArgumentException(
+                        "Null values are only supported with eq and ne operators");
+            };
+        }
+
         OperatorFunction fn = overrides.get(operator);
         if (fn == null) {
             fn = DEFAULT_OPERATORS.get(operator);
