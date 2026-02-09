@@ -24,6 +24,7 @@ dependencies {
     testImplementation("org.testcontainers:junit-jupiter:1.20.4")
     testImplementation("org.testcontainers:elasticsearch:1.20.4")
     testImplementation("com.fasterxml.jackson.core:jackson-databind:2.18.2")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     testRuntimeOnly("org.slf4j:slf4j-simple:2.0.16")
 }
 
