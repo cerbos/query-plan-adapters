@@ -107,6 +107,98 @@ switch (result) {
 }
 ```
 
+### Sending the query to Elasticsearch
+
+The adapter produces a `Map<String, Object>` that represents an Elasticsearch Query DSL clause. How you send it depends on your client.
+
+#### Elasticsearch Java Client (`co.elastic.clients`)
+
+Use `withJson()` to pass the serialized query directly into a `SearchRequest`:
+
+```java
+import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch.core.SearchResponse;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import java.io.StringReader;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+
+ObjectMapper objectMapper = new ObjectMapper();
+Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(plan, fieldMap);
+
+List<Document> documents = switch (result) {
+    case Result.AlwaysAllowed ignored -> {
+        SearchResponse<Document> resp = esClient.search(
+            s -> s.index("my-index"), Document.class
+        );
+        yield resp.hits().hits().stream().map(h -> h.source()).toList();
+    }
+    case Result.AlwaysDenied ignored -> Collections.emptyList();
+    case Result.Conditional conditional -> {
+        String queryJson = objectMapper.writeValueAsString(
+            Map.of("query", conditional.query())
+        );
+        SearchResponse<Document> resp = esClient.search(
+            s -> s.index("my-index").withJson(new StringReader(queryJson)),
+            Document.class
+        );
+        yield resp.hits().hits().stream().map(h -> h.source()).toList();
+    }
+};
+```
+
+#### Low-level REST client
+
+Build the JSON body and send it with `performRequest`:
+
+```java
+import org.elasticsearch.client.Request;
+import org.elasticsearch.client.Response;
+import org.elasticsearch.client.RestClient;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+ObjectMapper objectMapper = new ObjectMapper();
+Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(plan, fieldMap);
+
+switch (result) {
+    case Result.AlwaysAllowed ignored -> {
+        Request req = new Request("GET", "/my-index/_search");
+        Response resp = restClient.performRequest(req);
+    }
+    case Result.AlwaysDenied ignored -> {
+        // return empty results
+    }
+    case Result.Conditional conditional -> {
+        String body = objectMapper.writeValueAsString(
+            Map.of("query", conditional.query())
+        );
+        Request req = new Request("POST", "/my-index/_search");
+        req.setJsonEntity(body);
+        Response resp = restClient.performRequest(req);
+    }
+}
+```
+
+#### Combining with your own queries
+
+Wrap the Cerbos condition inside a `bool.filter` clause to combine it with your application query without affecting relevance scoring:
+
+```java
+case Result.Conditional conditional -> {
+    Map<String, Object> combined = Map.of("query", Map.of(
+        "bool", Map.of(
+            "must", List.of(
+                Map.of("match", Map.of("title", userSearchTerm))
+            ),
+            "filter", List.of(conditional.query())
+        )
+    ));
+    String body = objectMapper.writeValueAsString(combined);
+}
+```
+
 ### Handling different result types
 
 The adapter returns a sealed `Result` type with three variants:
