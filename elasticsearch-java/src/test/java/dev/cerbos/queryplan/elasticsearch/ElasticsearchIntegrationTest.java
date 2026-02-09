@@ -9,6 +9,7 @@ import dev.cerbos.sdk.builders.Principal;
 import dev.cerbos.sdk.builders.Resource;
 import dev.cerbos.queryplan.elasticsearch.ElasticsearchQueryPlanAdapter.Result;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
@@ -28,6 +29,7 @@ import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -63,8 +65,11 @@ class ElasticsearchIntegrationTest {
             Map.entry("request.resource.attr.nested.aString", "nested.aString"),
             Map.entry("request.resource.attr.nested.aNumber", "nested.aNumber"),
             Map.entry("request.resource.attr.nested.nextlevel.aBool", "nested.nextlevel.aBool"),
-            Map.entry("request.resource.attr.nested.nextlevel.aString", "nested.nextlevel.aString")
+            Map.entry("request.resource.attr.nested.nextlevel.aString", "nested.nextlevel.aString"),
+            Map.entry("request.resource.attr.tagObjects", "tagObjects")
     );
+
+    private static final Set<String> NESTED_PATHS = Set.of("tagObjects");
 
     private static GenericContainer<?> createCerbosContainer() {
         GenericContainer<?> container = new GenericContainer<>("ghcr.io/cerbos/cerbos:dev")
@@ -107,6 +112,10 @@ class ElasticsearchIntegrationTest {
                 "aNumber", Map.of("type", "integer"),
                 "nextlevel", Map.of("type", "object", "properties", nestedNextlevelProps));
 
+        var tagObjectProps = Map.of(
+                "id", Map.of("type", "keyword"),
+                "name", Map.of("type", "keyword"));
+
         var topProps = Map.ofEntries(
                 Map.entry("aBool", Map.of("type", "boolean")),
                 Map.entry("aString", Map.of("type", "keyword")),
@@ -116,7 +125,8 @@ class ElasticsearchIntegrationTest {
                 Map.entry("ownedBy", Map.of("type", "keyword")),
                 Map.entry("createdBy", Map.of("type", "keyword")),
                 Map.entry("aOptionalString", Map.of("type", "keyword")),
-                Map.entry("nested", Map.of("type", "object", "properties", nestedProps)));
+                Map.entry("nested", Map.of("type", "object", "properties", nestedProps)),
+                Map.entry("tagObjects", Map.of("type", "nested", "properties", tagObjectProps)));
 
         String body = MAPPER.writeValueAsString(Map.of("mappings", Map.of("properties", topProps)));
         esRequest("PUT", "/" + INDEX, body);
@@ -132,7 +142,10 @@ class ElasticsearchIntegrationTest {
                 "aOptionalString", "hello",
                 "nested", Map.of(
                         "aBool", true, "aString", "substring", "aNumber", 2,
-                        "nextlevel", Map.of("aBool", true, "aString", "strDeep"))));
+                        "nextlevel", Map.of("aBool", true, "aString", "strDeep")),
+                "tagObjects", List.of(
+                        Map.of("id", "tag1", "name", "public"),
+                        Map.of("id", "tag2", "name", "private"))));
 
         indexDoc("2", mapOf(
                 "aBool", false, "aString", "amIAString?", "aNumber", 2,
@@ -142,7 +155,9 @@ class ElasticsearchIntegrationTest {
                 "createdBy", "user2",
                 "nested", Map.of(
                         "aBool", false, "aString", "noMatch", "aNumber", 1,
-                        "nextlevel", Map.of("aBool", false, "aString", "deepValue"))));
+                        "nextlevel", Map.of("aBool", false, "aString", "deepValue")),
+                "tagObjects", List.of(
+                        Map.of("id", "tag3", "name", "private"))));
 
         indexDoc("3", mapOf(
                 "aBool", true, "aString", "anotherString", "aNumber", 3,
@@ -153,7 +168,9 @@ class ElasticsearchIntegrationTest {
                 "aOptionalString", "world",
                 "nested", Map.of(
                         "aBool", true, "aString", "testString", "aNumber", 3,
-                        "nextlevel", Map.of("aBool", false, "aString", "strValue"))));
+                        "nextlevel", Map.of("aBool", false, "aString", "strValue")),
+                "tagObjects", List.of(
+                        Map.of("id", "tag1", "name", "public"))));
     }
 
     private static Map<String, Object> mapOf(Object... keyValues) {
@@ -569,5 +586,77 @@ class ElasticsearchIntegrationTest {
     void combinedAnd() throws Exception {
         // aBool == true AND nested.aString.contains("test") → doc 3 ("testString" has "test")
         assertEquals(List.of("3"), executeQuery("combined-and"));
+    }
+
+    // --- Nested object (collection operator) integration tests ---
+    // These go through the real Cerbos PDP using policy actions that reference
+    // R.attr.tags as objects with {id, name}. In ES, that data lives in the
+    // "tagObjects" nested field, so we use a field map that routes tags -> tagObjects.
+
+    private static final Map<String, String> NESTED_FIELD_MAP = Map.ofEntries(
+            Map.entry("request.resource.attr.aBool", "aBool"),
+            Map.entry("request.resource.attr.aString", "aString"),
+            Map.entry("request.resource.attr.aNumber", "aNumber"),
+            Map.entry("request.resource.attr.id", "id"),
+            Map.entry("request.resource.attr.tags", "tagObjects"),
+            Map.entry("request.resource.attr.ownedBy", "ownedBy"),
+            Map.entry("request.resource.attr.createdBy", "createdBy"),
+            Map.entry("request.resource.attr.aOptionalString", "aOptionalString"),
+            Map.entry("request.resource.attr.nested.aBool", "nested.aBool"),
+            Map.entry("request.resource.attr.nested.aString", "nested.aString"),
+            Map.entry("request.resource.attr.nested.aNumber", "nested.aNumber"),
+            Map.entry("request.resource.attr.nested.nextlevel.aBool", "nested.nextlevel.aBool"),
+            Map.entry("request.resource.attr.nested.nextlevel.aString", "nested.nextlevel.aString"),
+            Map.entry("request.resource.attr.tagObjects", "tagObjects")
+    );
+
+    private static List<String> executeNestedQuery(String action) throws Exception {
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
+                plan(action), NESTED_FIELD_MAP, NESTED_PATHS);
+        if (result instanceof Result.AlwaysAllowed) {
+            return searchAll();
+        } else if (result instanceof Result.AlwaysDenied) {
+            return List.of();
+        } else {
+            return search(((Result.Conditional) result).query());
+        }
+    }
+
+    @Nested
+    class NestedCollectionOperators {
+
+        @Test
+        void existsSingleCondition() throws Exception {
+            // R.attr.tags.exists(tag, tag.id == "tag1")
+            // Doc 1: [{id:"tag1",name:"public"},{id:"tag2",name:"private"}] → has tag1
+            // Doc 3: [{id:"tag1",name:"public"}] → has tag1
+            assertEquals(List.of("1", "3"), executeNestedQuery("exists-single"));
+        }
+
+        @Test
+        void existsMultiCondition() throws Exception {
+            // R.attr.tags.exists(tag, tag.id == "tag1" && tag.name == "public")
+            assertEquals(List.of("1", "3"), executeNestedQuery("exists-multiple"));
+        }
+
+        @Test
+        void existsByName() throws Exception {
+            // R.attr.tags.exists(tag, tag.name == "public")
+            assertEquals(List.of("1", "3"), executeNestedQuery("exists"));
+        }
+
+        @Test
+        void allMatchingCondition() throws Exception {
+            // R.attr.tags.all(tag, tag.name == "public")
+            // Only doc 3 has all tagObjects with name=="public"
+            assertEquals(List.of("3"), executeNestedQuery("all"));
+        }
+
+        @Test
+        void hasIntersectionWithMap() throws Exception {
+            // hasIntersection(request.resource.attr.tags.map(tag, tag.name), ["public", "private"])
+            // All docs have tagObjects with name in ["public","private"]
+            assertEquals(List.of("1", "2", "3"), executeNestedQuery("map-collection"));
+        }
     }
 }

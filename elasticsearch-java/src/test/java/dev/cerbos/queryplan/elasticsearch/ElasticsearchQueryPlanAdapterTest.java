@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -26,8 +27,11 @@ class ElasticsearchQueryPlanAdapterTest {
             Map.entry("request.resource.attr.aNumber", "aNumber"),
             Map.entry("request.resource.attr.title", "title"),
             Map.entry("request.resource.attr.tags", "tags"),
-            Map.entry("request.resource.attr.ownedBy", "ownedBy")
+            Map.entry("request.resource.attr.ownedBy", "ownedBy"),
+            Map.entry("request.resource.attr.tagObjects", "tagObjects")
     );
+
+    private static final Set<String> NESTED_PATHS = Set.of("tagObjects");
 
     private static PlanResourcesResponse buildResponse(PlanResourcesFilter.Kind kind) {
         return buildResponse(kind, null);
@@ -594,6 +598,35 @@ class ElasticsearchQueryPlanAdapterTest {
     }
 
     @Test
+    void isSetTrueProducesExists() {
+        Operand condition = expressionOperand("isSet",
+                variableOperand("request.resource.attr.department"),
+                boolValueOperand(true));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
+
+        Map<String, Object> query = ((Result.Conditional) result).query();
+        assertEquals(Map.of("exists", Map.of("field", "department")), query);
+    }
+
+    @Test
+    void isSetFalseProducesNotExists() {
+        Operand condition = expressionOperand("isSet",
+                variableOperand("request.resource.attr.department"),
+                boolValueOperand(false));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
+
+        Map<String, Object> query = ((Result.Conditional) result).query();
+        assertEquals(
+                Map.of("bool", Map.of("must_not", List.of(
+                        Map.of("exists", Map.of("field", "department"))))),
+                query);
+    }
+
+    @Test
     void notBareBoolProducesMustNot() {
         Operand condition = expressionOperand("not",
                 variableOperand("request.resource.attr.aBool"));
@@ -607,5 +640,180 @@ class ElasticsearchQueryPlanAdapterTest {
                 Map.of("bool", Map.of("must_not", List.of(
                         Map.of("term", Map.of("aBool", Map.of("value", true)))))),
                 query);
+    }
+
+    // --- Collection operator helpers ---
+
+    private static Operand lambdaOperand(String lambdaVar, Operand body) {
+        return expressionOperand("lambda", body, variableOperand(lambdaVar));
+    }
+
+    // --- exists ---
+
+    @Test
+    void existsSingleConditionProducesNestedTerm() {
+        // exists(tagObjects, t, t.name == "public")
+        Operand condition = expressionOperand("exists",
+                variableOperand("request.resource.attr.tagObjects"),
+                lambdaOperand("t",
+                        expressionOperand("eq",
+                                variableOperand("t.name"),
+                                stringValueOperand("public"))));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP, NESTED_PATHS);
+
+        Map<String, Object> query = ((Result.Conditional) result).query();
+        assertEquals(
+                Map.of("nested", Map.of(
+                        "path", "tagObjects",
+                        "query", Map.of("term", Map.of("tagObjects.name", Map.of("value", "public"))))),
+                query);
+    }
+
+    @Test
+    void existsMultiConditionProducesNestedBoolMust() {
+        // exists(tagObjects, t, t.id == "tag1" AND t.name == "public")
+        Operand condition = expressionOperand("exists",
+                variableOperand("request.resource.attr.tagObjects"),
+                lambdaOperand("t",
+                        expressionOperand("and",
+                                expressionOperand("eq",
+                                        variableOperand("t.id"),
+                                        stringValueOperand("tag1")),
+                                expressionOperand("eq",
+                                        variableOperand("t.name"),
+                                        stringValueOperand("public")))));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP, NESTED_PATHS);
+
+        Map<String, Object> query = ((Result.Conditional) result).query();
+        assertEquals(
+                Map.of("nested", Map.of(
+                        "path", "tagObjects",
+                        "query", Map.of("bool", Map.of("must", List.of(
+                                Map.of("term", Map.of("tagObjects.id", Map.of("value", "tag1"))),
+                                Map.of("term", Map.of("tagObjects.name", Map.of("value", "public")))))))),
+                query);
+    }
+
+    // --- all ---
+
+    @Test
+    void allProducesDoubleNegation() {
+        // all(tagObjects, t, t.name == "public")
+        Operand condition = expressionOperand("all",
+                variableOperand("request.resource.attr.tagObjects"),
+                lambdaOperand("t",
+                        expressionOperand("eq",
+                                variableOperand("t.name"),
+                                stringValueOperand("public"))));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP, NESTED_PATHS);
+
+        Map<String, Object> query = ((Result.Conditional) result).query();
+        assertEquals(
+                Map.of("bool", Map.of("must_not", List.of(
+                        Map.of("nested", Map.of(
+                                "path", "tagObjects",
+                                "query", Map.of("bool", Map.of("must_not", List.of(
+                                        Map.of("term", Map.of("tagObjects.name", Map.of("value", "public"))))))))))),
+                query);
+    }
+
+    // --- except ---
+
+    @Test
+    void exceptProducesNestedMustNot() {
+        // except(tagObjects, t, t.name == "public")
+        Operand condition = expressionOperand("except",
+                variableOperand("request.resource.attr.tagObjects"),
+                lambdaOperand("t",
+                        expressionOperand("eq",
+                                variableOperand("t.name"),
+                                stringValueOperand("public"))));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP, NESTED_PATHS);
+
+        Map<String, Object> query = ((Result.Conditional) result).query();
+        assertEquals(
+                Map.of("nested", Map.of(
+                        "path", "tagObjects",
+                        "query", Map.of("bool", Map.of("must_not", List.of(
+                                Map.of("term", Map.of("tagObjects.name", Map.of("value", "public")))))))),
+                query);
+    }
+
+    // --- hasIntersection + map ---
+
+    @Test
+    void hasIntersectionWithMapProducesNestedTerms() {
+        // hasIntersection(map(tagObjects, t, t.name), ["public", "private"])
+        Operand mapExpr = expressionOperand("map",
+                variableOperand("request.resource.attr.tagObjects"),
+                lambdaOperand("t", variableOperand("t.name")));
+        Operand condition = expressionOperand("hasIntersection",
+                mapExpr,
+                listValueOperand("public", "private"));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP, NESTED_PATHS);
+
+        Map<String, Object> query = ((Result.Conditional) result).query();
+        assertEquals(
+                Map.of("nested", Map.of(
+                        "path", "tagObjects",
+                        "query", Map.of("terms", Map.of("tagObjects.name", List.of("public", "private"))))),
+                query);
+    }
+
+    // --- flat hasIntersection unchanged ---
+
+    @Test
+    void flatHasIntersectionUnchangedWithNestedPaths() {
+        Operand condition = expressionOperand("hasIntersection",
+                variableOperand("request.resource.attr.tags"),
+                listValueOperand("public", "draft"));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP, NESTED_PATHS);
+
+        Map<String, Object> query = ((Result.Conditional) result).query();
+        assertEquals(Map.of("terms", Map.of("tags", List.of("public", "draft"))), query);
+    }
+
+    // --- error cases ---
+
+    @Test
+    void collectionOperatorWithoutNestedPathsThrows() {
+        Operand condition = expressionOperand("exists",
+                variableOperand("request.resource.attr.tagObjects"),
+                lambdaOperand("t",
+                        expressionOperand("eq",
+                                variableOperand("t.name"),
+                                stringValueOperand("public"))));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP));
+        assertTrue(ex.getMessage().contains("not declared in nestedPaths"));
+    }
+
+    @Test
+    void lambdaVariableMismatchThrows() {
+        Operand condition = expressionOperand("exists",
+                variableOperand("request.resource.attr.tagObjects"),
+                lambdaOperand("t",
+                        expressionOperand("eq",
+                                variableOperand("x.name"),
+                                stringValueOperand("public"))));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP, NESTED_PATHS));
+        assertTrue(ex.getMessage().contains("does not start with lambda variable"));
     }
 }

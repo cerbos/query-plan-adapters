@@ -8,7 +8,10 @@ An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanRe
 - Supports comparison operators: `eq`, `ne`, `lt`, `gt`, `le`, `ge`, `in`
 - Supports string operators: `contains`, `startsWith`, `endsWith`
 - Supports `hasIntersection` for array overlap checks
+- Supports `isSet` for field existence checks
 - Supports `size` comparisons for array emptiness checks
+- Supports collection operators (`exists`, `all`, `except`) for nested object arrays
+- Supports `hasIntersection` + `map` for projecting and matching nested object fields
 - Handles null values (`eq`/`ne` with null maps to `exists` queries)
 - Handles bare boolean variables (e.g. `request.resource.attr.isPublic`)
 - Custom operator overrides for full control over query generation
@@ -109,6 +112,54 @@ switch (result) {
     }
 }
 ```
+
+### Example: Cerbos plan to Elasticsearch DSL
+
+Given a Cerbos policy condition like:
+
+```
+(request.resource.attr.aBool == true AND request.resource.attr.aString != "string")
+OR request.resource.attr.tags.exists(tag, tag.name == "public")
+```
+
+With this field map and nested paths:
+
+```java
+Map<String, String> fieldMap = Map.of(
+    "request.resource.attr.aBool", "aBool",
+    "request.resource.attr.aString", "aString",
+    "request.resource.attr.tags", "tags"
+);
+Set<String> nestedPaths = Set.of("tags");
+```
+
+The adapter produces:
+
+```json
+{
+  "bool": {
+    "should": [
+      {
+        "bool": {
+          "must": [
+            { "term": { "aBool": { "value": true } } },
+            { "bool": { "must_not": [{ "term": { "aString": { "value": "string" } } }] } }
+          ]
+        }
+      },
+      {
+        "nested": {
+          "path": "tags",
+          "query": { "term": { "tags.name": { "value": "public" } } }
+        }
+      }
+    ],
+    "minimum_should_match": 1
+  }
+}
+```
+
+Flat field conditions (`eq`, `ne`, range, string operators) map directly to their Elasticsearch equivalents. Collection operators on nested objects are wrapped in `nested` queries with lambda variables resolved to the nested path (e.g., `tag.name` becomes `tags.name`).
 
 ### Sending the query to Elasticsearch
 
@@ -221,7 +272,56 @@ The `OperatorFunction` interface takes a field name and value, and returns a `Ma
 | `startsWith` | `prefix` |
 | `endsWith` | `wildcard` (`*value`) |
 | `hasIntersection` | `terms` (array overlap) |
+| `isSet` | `exists` (true) / `bool.must_not` + `exists` (false) |
 | `size` (via comparison) | `exists` / `bool.must_not` + `exists` |
+| `exists` (collection) | `nested` + inner query |
+| `all` (collection) | `bool.must_not` + `nested` + `bool.must_not` |
+| `except` (collection) | `nested` + `bool.must_not` |
+| `hasIntersection` + `map` | `nested` + `terms` |
+
+### Nested object queries (collection operators)
+
+When your Cerbos policies use collection operators (`exists`, `all`, `except`) or `hasIntersection` with `map` on arrays of nested objects, pass a `Set<String>` of Elasticsearch field names that use `nested` mappings:
+
+```java
+Map<String, String> fieldMap = Map.of(
+    "request.resource.attr.tags", "tags",           // flat keyword array
+    "request.resource.attr.tagObjects", "tagObjects" // nested object array
+);
+
+Set<String> nestedPaths = Set.of("tagObjects");
+
+Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(plan, fieldMap, nestedPaths);
+```
+
+The corresponding Elasticsearch mapping must declare these fields as `nested`:
+
+```json
+{
+  "mappings": {
+    "properties": {
+      "tagObjects": {
+        "type": "nested",
+        "properties": {
+          "id": { "type": "keyword" },
+          "name": { "type": "keyword" }
+        }
+      }
+    }
+  }
+}
+```
+
+Collection operators map to Elasticsearch `nested` queries:
+
+| Cerbos expression | Elasticsearch query |
+|---|---|
+| `tagObjects.exists(t, t.name == "public")` | `nested` + inner condition |
+| `tagObjects.all(t, t.name == "public")` | `must_not` + `nested` + `must_not` (double negation) |
+| `tagObjects.except(t, t.name == "public")` | `nested` + `must_not` |
+| `hasIntersection(tagObjects.map(t, t.name), ["a","b"])` | `nested` + `terms` |
+
+If a collection operator references a field not declared in `nestedPaths`, the adapter throws `IllegalArgumentException`. Flat `hasIntersection` (without `map`) continues to work without `nestedPaths`.
 
 ### Elasticsearch field type considerations
 
