@@ -435,6 +435,56 @@ class ElasticsearchQueryPlanAdapterTest {
     }
 
     @Test
+    void queryWrappedInBoolFilter() {
+        Operand condition = expressionOperand("and",
+                expressionOperand("eq",
+                        variableOperand("request.resource.attr.department"),
+                        stringValueOperand("engineering")),
+                expressionOperand("gt",
+                        variableOperand("request.resource.attr.aNumber"),
+                        numberValueOperand(5)));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
+        assertInstanceOf(Result.Conditional.class, result);
+
+        Map<String, Object> filterClause = ((Result.Conditional) result).query();
+        Map<String, Object> searchBody = Map.of("query", Map.of(
+                "bool", Map.of("filter", List.of(filterClause))));
+
+        assertEquals(Map.of("query", Map.of(
+                "bool", Map.of("filter", List.of(
+                        Map.of("bool", Map.of("must", List.of(
+                                Map.of("term", Map.of("department", Map.of("value", "engineering"))),
+                                Map.of("range", Map.of("aNumber", Map.of("gt", 5L)))))))))),
+                searchBody);
+    }
+
+    @Test
+    void queryWrappedInBoolFilterWithUserQuery() {
+        Operand condition = expressionOperand("eq",
+                variableOperand("request.resource.attr.status"),
+                stringValueOperand("active"));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
+        assertInstanceOf(Result.Conditional.class, result);
+
+        Map<String, Object> filterClause = ((Result.Conditional) result).query();
+        Map<String, Object> userQuery = Map.of("match", Map.of("title", "search term"));
+        Map<String, Object> searchBody = Map.of("query", Map.of(
+                "bool", Map.of(
+                        "must", List.of(userQuery),
+                        "filter", List.of(filterClause))));
+
+        Map<String, Object> expectedFilter = Map.of("term", Map.of("status", Map.of("value", "active")));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> boolClause = (Map<String, Object>) ((Map<String, Object>) searchBody.get("query")).get("bool");
+        assertEquals(List.of(expectedFilter), boolClause.get("filter"));
+        assertEquals(List.of(userQuery), boolClause.get("must"));
+    }
+
+    @Test
     void notBareBoolProducesMustNot() {
         Operand condition = expressionOperand("not",
                 variableOperand("request.resource.attr.aBool"));

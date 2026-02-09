@@ -167,20 +167,27 @@ class ElasticsearchIntegrationTest {
     }
 
     @SuppressWarnings("unchecked")
-    private static List<String> search(Map<String, Object> query) throws Exception {
-        String body = MAPPER.writeValueAsString(Map.of("query", query));
-        String responseBody = esRequest("POST", "/" + INDEX + "/_search", body);
+    private static List<Map<String, Object>> searchRaw(Map<String, Object> body) throws Exception {
+        String responseBody = esRequest("POST", "/" + INDEX + "/_search", MAPPER.writeValueAsString(body));
         Map<String, Object> result = MAPPER.readValue(responseBody, new TypeReference<>() {});
         Map<String, Object> hits = (Map<String, Object>) result.get("hits");
-        List<Map<String, Object>> hitList = (List<Map<String, Object>>) hits.get("hits");
-        return hitList.stream()
+        return (List<Map<String, Object>>) hits.get("hits");
+    }
+
+    private static List<String> search(Map<String, Object> filterClause) throws Exception {
+        Map<String, Object> body = Map.of("query", Map.of(
+                "bool", Map.of("filter", List.of(filterClause))));
+        return searchRaw(body).stream()
                 .map(h -> (String) h.get("_id"))
                 .sorted()
                 .collect(Collectors.toList());
     }
 
     private static List<String> searchAll() throws Exception {
-        return search(Map.of("match_all", Map.of()));
+        return searchRaw(Map.of("query", Map.of("match_all", Map.of()))).stream()
+                .map(h -> (String) h.get("_id"))
+                .sorted()
+                .collect(Collectors.toList());
     }
 
     private static PlanResourcesResult plan(String action) throws Exception {
@@ -200,6 +207,44 @@ class ElasticsearchIntegrationTest {
         } else {
             return search(((Result.Conditional) result).query());
         }
+    }
+
+    // --- Filter context best practice ---
+
+    @Test
+    void filterContextProducesZeroScores() throws Exception {
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(plan("equal"), FIELD_MAP);
+        assertInstanceOf(Result.Conditional.class, result);
+        Map<String, Object> filterClause = ((Result.Conditional) result).query();
+
+        Map<String, Object> body = Map.of("query", Map.of(
+                "bool", Map.of("filter", List.of(filterClause))));
+        List<Map<String, Object>> hits = searchRaw(body);
+
+        assertFalse(hits.isEmpty());
+        for (Map<String, Object> hit : hits) {
+            double score = ((Number) hit.get("_score")).doubleValue();
+            assertEquals(0.0, score, "filter context should produce zero scores");
+        }
+    }
+
+    @Test
+    void combinedWithUserQueryInBoolMust() throws Exception {
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(plan("equal"), FIELD_MAP);
+        assertInstanceOf(Result.Conditional.class, result);
+        Map<String, Object> filterClause = ((Result.Conditional) result).query();
+
+        Map<String, Object> body = Map.of("query", Map.of(
+                "bool", Map.of(
+                        "must", List.of(Map.of("match_all", Map.of())),
+                        "filter", List.of(filterClause))));
+        List<Map<String, Object>> hits = searchRaw(body);
+
+        List<String> ids = hits.stream()
+                .map(h -> (String) h.get("_id"))
+                .sorted()
+                .toList();
+        assertEquals(List.of("1", "3"), ids);
     }
 
     // --- Always allow / deny ---
