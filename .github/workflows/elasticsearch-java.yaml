@@ -1,17 +1,17 @@
-name: Elasticsearch Test
+name: Elasticsearch Java Test
 
 on:
   pull_request:
     paths:
-      - "elasticsearch/**"
+      - "elasticsearch-java/**"
       - "policies/**"
   push:
     tags:
-      - elasticsearch/v*
+      - elasticsearch-java/v*
 
 defaults:
   run:
-    working-directory: elasticsearch
+    working-directory: elasticsearch-java
 
 jobs:
   test:

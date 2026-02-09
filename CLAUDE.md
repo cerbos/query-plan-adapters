@@ -12,7 +12,7 @@ Multi-language ORM adapters that translate Cerbos query plan responses into data
 | convex | TypeScript | `@cerbos/orm-convex` | Convex |
 | langchain-chromadb | TypeScript | `@cerbos/langchain-chromadb` | ChromaDB |
 | sqlalchemy | Python | `cerbos-sqlalchemy` | SQLAlchemy |
-| elasticsearch | Java | `cerbos-elasticsearch` | Elasticsearch |
+| elasticsearch-java | Java | `cerbos-elasticsearch` | Elasticsearch |
 
 ## Commands
 
@@ -68,7 +68,7 @@ Conventional Commits: `feat(prisma):`, `fix(mongoose):`, `chore(deps):`. Scope i
 
 Each adapter has its own GitHub Actions workflow triggered by changes in its directory or `/policies/`. Matrix tests across Node versions (20, 22, 24, 25) and relevant service versions.
 
-Tag-based publishing: `prisma/v*` -> npm, `sqla/v*` -> PyPI, `elasticsearch/v*` -> Maven Central.
+Tag-based publishing: `prisma/v*` -> npm, `sqla/v*` -> PyPI, `elasticsearch-java/v*` -> Maven Central.
 
 ## Working with Adapters
 
