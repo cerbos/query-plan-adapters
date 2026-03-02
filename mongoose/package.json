@@ -57,7 +57,7 @@
     "typescript": "^5.0.0"
   },
   "dependencies": {
-    "@cerbos/core": "^0.27.0",
-    "@cerbos/grpc": "^0.24.0"
+    "@cerbos/core": "^0.28.0",
+    "@cerbos/grpc": "^0.25.0"
   }
 }

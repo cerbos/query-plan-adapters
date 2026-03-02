@@ -15,17 +15,17 @@ repositories {
 }
 
 dependencies {
-    implementation("dev.cerbos:cerbos-sdk-java:0.13.0")
-    implementation("com.google.protobuf:protobuf-java:4.27.1")
+    implementation("dev.cerbos:cerbos-sdk-java:0.18.0")
+    implementation("com.google.protobuf:protobuf-java:4.34.0")
 
-    testImplementation(platform("org.junit:junit-bom:5.11.4"))
+    testImplementation(platform("org.junit:junit-bom:5.14.3"))
     testImplementation("org.junit.jupiter:junit-jupiter")
-    testImplementation("org.testcontainers:testcontainers:1.20.4")
-    testImplementation("org.testcontainers:junit-jupiter:1.20.4")
-    testImplementation("org.testcontainers:elasticsearch:1.20.4")
-    testImplementation("com.fasterxml.jackson.core:jackson-databind:2.18.2")
+    testImplementation("org.testcontainers:testcontainers:1.21.4")
+    testImplementation("org.testcontainers:junit-jupiter:1.21.4")
+    testImplementation("org.testcontainers:elasticsearch:1.21.4")
+    testImplementation("com.fasterxml.jackson.core:jackson-databind:2.21.1")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
-    testRuntimeOnly("org.slf4j:slf4j-simple:2.0.16")
+    testRuntimeOnly("org.slf4j:slf4j-simple:2.0.17")
 }
 
 tasks.test {
