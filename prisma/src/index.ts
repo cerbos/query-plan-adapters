@@ -1084,12 +1084,23 @@ function handleMapOperator(
 }
 
 function buildImpossibleFilter(fieldRef: ResolvedFieldReference): PrismaFilter {
-  return {
+  const fieldName = getLeafField(fieldRef.path);
+  const contradiction: PrismaFilter = {
     AND: [
-      buildFieldFilter(fieldRef, "equals", null),
-      buildFieldFilter(fieldRef, "not", null),
+      { [fieldName]: { equals: null } },
+      { [fieldName]: { not: null } },
     ],
   };
+  if (!fieldRef.relations || fieldRef.relations.length === 0) {
+    return contradiction;
+  }
+  let filter: PrismaFilter = contradiction;
+  for (let i = fieldRef.relations.length - 1; i >= 0; i--) {
+    const relation = fieldRef.relations[i]!;
+    const op = relation.type === "one" ? "is" : "some";
+    filter = { [relation.name]: { [op]: filter } };
+  }
+  return filter;
 }
 
 function handleAddComparison(
@@ -1463,7 +1474,8 @@ function handleAncestorDescendantOperator(
   }
 
   if (ancestor.type === "field" && descendant.type === "constant") {
-    const prefixes = getStrictPrefixes(descendant.segments, descendant.delimiter);
+    const delimiter = ancestor.delimiter;
+    const prefixes = getStrictPrefixes(descendant.segments, delimiter);
     if (prefixes.length === 0) {
       return buildImpossibleFilter(ancestor.fieldRef);
     }
