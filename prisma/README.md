@@ -19,6 +19,17 @@ An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanRe
 - Collection operators: `exists`, `exists_one`, `all`, `filter`, `except`
 - Set operations: `hasIntersection`
 
+#### String Concatenation
+
+- `add` operator for string/numeric concatenation in conditions
+- Algebraic solving: `P.attr.context == "projects:" + R.attr.id` → `{ id: { equals: "123" } }`
+
+#### Hierarchy Operators
+
+- `hierarchy(string)`, `hierarchy(string, delimiter)`, `hierarchy([segments])`
+- `overlaps`: segment-wise prefix comparison between two hierarchies
+- `ancestorOf` / `descendentOf`: strict prefix relationship between hierarchies
+
 #### Advanced Features
 
 - Deep nested relations support

@@ -639,3 +639,57 @@ resourcePolicy:
         match:
           expr: >
             !(request.resource.attr.categories.exists(cat, cat.subCategories.exists(sub, sub.name == "finance")))
+
+    - actions:
+        - "string-concat"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: >
+            request.resource.attr.aString == "prefix:" + request.resource.attr.id
+
+    - actions:
+        - "string-concat-principal"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          any:
+            of:
+              - expr: P.attr.context == "projects"
+              - expr: P.attr.context == "projects:" + request.resource.attr.id
+
+    - actions:
+        - "hierarchy-overlaps"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: >
+            hierarchy(P.attr.context, ":").overlaps(hierarchy(["projects", R.id]))
+
+    - actions:
+        - "hierarchy-ancestor-of"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: >
+            hierarchy(P.attr.scope).ancestorOf(hierarchy(R.attr.scope))
+
+    - actions:
+        - "hierarchy-descendent-of"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: >
+            hierarchy(R.attr.scope).descendentOf(hierarchy(P.attr.scope))
+
+
