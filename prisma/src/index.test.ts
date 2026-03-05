@@ -5513,3 +5513,810 @@ describe("Return Types", () => {
     expect(conditional.kind).toBe(PlanKind.CONDITIONAL);
   });
 });
+
+// Issue #156: add operator (string concatenation)
+describe("Add Operator", () => {
+  test("add with two values (constant folding)", () => {
+    // #given eq(field, add("prefix:", "suffix"))
+    const plan = createConditionalPlan({
+      operator: "eq",
+      operands: [
+        { name: "request.resource.attr.aString" },
+        {
+          operator: "add",
+          operands: [{ value: "prefix:" }, { value: "suffix" }],
+        },
+      ],
+    });
+
+    // #when
+    const result = queryPlanToPrisma({
+      queryPlan: plan,
+      mapper: {
+        "request.resource.attr.aString": { field: "aString" },
+      },
+    });
+
+    // #then constant fold: "prefix:" + "suffix" = "prefix:suffix"
+    expect(result).toEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { aString: { equals: "prefix:suffix" } },
+    });
+  });
+
+  test("add with value prefix and field reference in eq", () => {
+    // #given eq("projects:123", add("projects:", R.attr.id))
+    // This is the exact plan Cerbos produces for:
+    //   P.attr.context == "projects:" + request.resource.attr.id
+    const plan = createConditionalPlan({
+      operator: "eq",
+      operands: [
+        { value: "projects:123" },
+        {
+          operator: "add",
+          operands: [
+            { value: "projects:" },
+            { name: "request.resource.attr.id" },
+          ],
+        },
+      ],
+    });
+
+    // #when
+    const result = queryPlanToPrisma({
+      queryPlan: plan,
+      mapper: {
+        "request.resource.attr.id": { field: "id" },
+      },
+    });
+
+    // #then solve: "projects:123" == "projects:" + id → id == "123"
+    expect(result).toEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { id: { equals: "123" } },
+    });
+  });
+
+  test("add with field reference and value suffix in eq", () => {
+    // #given eq("hello_world", add(R.attr.aString, "_world"))
+    const plan = createConditionalPlan({
+      operator: "eq",
+      operands: [
+        { value: "hello_world" },
+        {
+          operator: "add",
+          operands: [
+            { name: "request.resource.attr.aString" },
+            { value: "_world" },
+          ],
+        },
+      ],
+    });
+
+    // #when
+    const result = queryPlanToPrisma({
+      queryPlan: plan,
+      mapper: {
+        "request.resource.attr.aString": { field: "aString" },
+      },
+    });
+
+    // #then solve: "hello_world" == aString + "_world" → aString == "hello"
+    expect(result).toEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { aString: { equals: "hello" } },
+    });
+  });
+
+  test("add with value prefix and field reference in ne", () => {
+    // #given ne("projects:123", add("projects:", R.attr.id))
+    const plan = createConditionalPlan({
+      operator: "ne",
+      operands: [
+        { value: "projects:123" },
+        {
+          operator: "add",
+          operands: [
+            { value: "projects:" },
+            { name: "request.resource.attr.id" },
+          ],
+        },
+      ],
+    });
+
+    // #when
+    const result = queryPlanToPrisma({
+      queryPlan: plan,
+      mapper: {
+        "request.resource.attr.id": { field: "id" },
+      },
+    });
+
+    // #then solve: "projects:123" != "projects:" + id → id != "123"
+    expect(result).toEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { id: { not: "123" } },
+    });
+  });
+
+  test("add with prefix mismatch yields impossible filter", () => {
+    // #given eq("other:123", add("projects:", R.attr.id))
+    // "other:123" doesn't start with "projects:", so no value of id can match
+    const plan = createConditionalPlan({
+      operator: "eq",
+      operands: [
+        { value: "other:123" },
+        {
+          operator: "add",
+          operands: [
+            { value: "projects:" },
+            { name: "request.resource.attr.id" },
+          ],
+        },
+      ],
+    });
+
+    // #when
+    const result = queryPlanToPrisma({
+      queryPlan: plan,
+      mapper: {
+        "request.resource.attr.id": { field: "id" },
+      },
+    });
+
+    // #then impossible: produces a filter that matches nothing
+    // Use an impossible equality that Prisma won't match
+    expect(result).toEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        id: { in: [] },
+      },
+    });
+  });
+
+  test("add with relation mapping", () => {
+    // #given eq("projects:123", add("projects:", R.attr.nested.id))
+    const plan = createConditionalPlan({
+      operator: "eq",
+      operands: [
+        { value: "projects:123" },
+        {
+          operator: "add",
+          operands: [
+            { value: "projects:" },
+            { name: "request.resource.attr.nested.id" },
+          ],
+        },
+      ],
+    });
+
+    // #when
+    const result = queryPlanToPrisma({
+      queryPlan: plan,
+      mapper: {
+        "request.resource.attr.nested": {
+          relation: {
+            name: "nested",
+            type: "one",
+            field: "id",
+          },
+        },
+      },
+    });
+
+    // #then
+    expect(result).toEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { nested: { is: { id: { equals: "123" } } } },
+    });
+  });
+
+  test("add via cerbos integration", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: {
+        id: "user1",
+        roles: ["USER"],
+        attr: { context: "projects:123" },
+      },
+      resource: { kind: "resource" },
+      action: "string-concat-principal",
+    });
+
+    expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+
+    const result = queryPlanToPrisma({
+      queryPlan,
+      mapper: {
+        "request.resource.attr.id": { field: "id" },
+      },
+    });
+
+    expect(result).toEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { id: { equals: "123" } },
+    });
+  });
+
+  test("add with numeric values", () => {
+    // #given add with numbers: eq(10, add(3, R.attr.aNumber))
+    const plan = createConditionalPlan({
+      operator: "eq",
+      operands: [
+        { value: 10 },
+        {
+          operator: "add",
+          operands: [
+            { value: 3 },
+            { name: "request.resource.attr.aNumber" },
+          ],
+        },
+      ],
+    });
+
+    // #when
+    const result = queryPlanToPrisma({
+      queryPlan: plan,
+      mapper: {
+        "request.resource.attr.aNumber": { field: "aNumber" },
+      },
+    });
+
+    // #then solve: 10 == 3 + aNumber → aNumber == 7
+    expect(result).toEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { aNumber: { equals: 7 } },
+    });
+  });
+});
+
+// Issue #155: hierarchy overlaps operator
+// overlaps = one hierarchy is a prefix of the other (segment-wise comparison)
+describe("Hierarchy Overlaps", () => {
+  test("overlaps - equal length hierarchies, field must match", () => {
+    // #given hierarchy("projects:123", ":").overlaps(hierarchy(["projects", R.id]))
+    // Left segments: ["projects", "123"], Right segments: ["projects", R.id]
+    // Same length: prefix check both directions requires all segments match
+    // segments[0]: "projects" == "projects" ✓
+    // segments[1]: "123" == R.id → R.id == "123"
+    const plan = createConditionalPlan({
+      operator: "overlaps",
+      operands: [
+        {
+          operator: "hierarchy",
+          operands: [{ value: "projects:123" }, { value: ":" }],
+        },
+        {
+          operator: "hierarchy",
+          operands: [
+            {
+              operator: "list",
+              operands: [
+                { value: "projects" },
+                { name: "request.resource.id" },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    // #when
+    const result = queryPlanToPrisma({
+      queryPlan: plan,
+      mapper: {
+        "request.resource.id": { field: "id" },
+      },
+    });
+
+    // #then
+    expect(result).toEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { id: { equals: "123" } },
+    });
+  });
+
+  test("overlaps - left shorter than right, left is always prefix", () => {
+    // #given hierarchy("admin", ":").overlaps(hierarchy(["admin", R.attr.scope]))
+    // Left segments: ["admin"] (length 1), Right segments: ["admin", R.attr.scope] (length 2)
+    // Left prefix of right: "admin" == "admin" ✓ → always true
+    const plan = createConditionalPlan({
+      operator: "overlaps",
+      operands: [
+        {
+          operator: "hierarchy",
+          operands: [{ value: "admin" }, { value: ":" }],
+        },
+        {
+          operator: "hierarchy",
+          operands: [
+            {
+              operator: "list",
+              operands: [
+                { value: "admin" },
+                { name: "request.resource.attr.scope" },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    // #when
+    const result = queryPlanToPrisma({
+      queryPlan: plan,
+      mapper: {
+        "request.resource.attr.scope": { field: "scope" },
+      },
+    });
+
+    // #then always true
+    expect(result).toEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {},
+    });
+  });
+
+  test("overlaps - left longer, right is prefix when field matches", () => {
+    // #given hierarchy("dept:engineering:frontend", ":").overlaps(hierarchy(["dept", R.attr.department]))
+    // Left segments: ["dept", "engineering", "frontend"] (3)
+    // Right segments: ["dept", R.attr.department] (2)
+    // Left prefix of right: len 3 > len 2 → impossible
+    // Right prefix of left: "dept" == "dept" ✓, R.attr.department == "engineering"
+    const plan = createConditionalPlan({
+      operator: "overlaps",
+      operands: [
+        {
+          operator: "hierarchy",
+          operands: [
+            { value: "dept:engineering:frontend" },
+            { value: ":" },
+          ],
+        },
+        {
+          operator: "hierarchy",
+          operands: [
+            {
+              operator: "list",
+              operands: [
+                { value: "dept" },
+                { name: "request.resource.attr.department" },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    // #when
+    const result = queryPlanToPrisma({
+      queryPlan: plan,
+      mapper: {
+        "request.resource.attr.department": { field: "department" },
+      },
+    });
+
+    // #then
+    expect(result).toEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { department: { equals: "engineering" } },
+    });
+  });
+
+  test("overlaps - different roots, impossible", () => {
+    // #given hierarchy("org:acme:team1", ":").overlaps(hierarchy(["company", R.attr.team]))
+    // Left: ["org", "acme", "team1"], Right: ["company", R.attr.team]
+    // Both directions fail at segment[0]: "org" ≠ "company"
+    const plan = createConditionalPlan({
+      operator: "overlaps",
+      operands: [
+        {
+          operator: "hierarchy",
+          operands: [{ value: "org:acme:team1" }, { value: ":" }],
+        },
+        {
+          operator: "hierarchy",
+          operands: [
+            {
+              operator: "list",
+              operands: [
+                { value: "company" },
+                { name: "request.resource.attr.team" },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    // #when
+    const result = queryPlanToPrisma({
+      queryPlan: plan,
+      mapper: {
+        "request.resource.attr.team": { field: "team" },
+      },
+    });
+
+    // #then impossible
+    expect(result).toEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        team: { in: [] },
+      },
+    });
+  });
+
+  test("overlaps - equal length with field in middle, field must match", () => {
+    // #given hierarchy("region:us:west", ":").overlaps(hierarchy(["region", "us", R.attr.zone]))
+    // Left: ["region", "us", "west"], Right: ["region", "us", R.attr.zone]
+    // Same length, prefix check: "region"=="region" ✓, "us"=="us" ✓, "west"==R.attr.zone
+    const plan = createConditionalPlan({
+      operator: "overlaps",
+      operands: [
+        {
+          operator: "hierarchy",
+          operands: [{ value: "region:us:west" }, { value: ":" }],
+        },
+        {
+          operator: "hierarchy",
+          operands: [
+            {
+              operator: "list",
+              operands: [
+                { value: "region" },
+                { value: "us" },
+                { name: "request.resource.attr.zone" },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    // #when
+    const result = queryPlanToPrisma({
+      queryPlan: plan,
+      mapper: {
+        "request.resource.attr.zone": { field: "zone" },
+      },
+    });
+
+    // #then
+    expect(result).toEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { zone: { equals: "west" } },
+    });
+  });
+
+  test("overlaps - single-field right hierarchy as prefix of left", () => {
+    // #given hierarchy("team:alpha", ":").overlaps(hierarchy([R.attr.group]))
+    // Left: ["team", "alpha"] (2), Right: [R.attr.group] (1)
+    // Left prefix of right: len 2 > len 1 → impossible
+    // Right prefix of left: R.attr.group == "team" (first segment)
+    const plan = createConditionalPlan({
+      operator: "overlaps",
+      operands: [
+        {
+          operator: "hierarchy",
+          operands: [{ value: "team:alpha" }, { value: ":" }],
+        },
+        {
+          operator: "hierarchy",
+          operands: [
+            {
+              operator: "list",
+              operands: [{ name: "request.resource.attr.group" }],
+            },
+          ],
+        },
+      ],
+    });
+
+    // #when
+    const result = queryPlanToPrisma({
+      queryPlan: plan,
+      mapper: {
+        "request.resource.attr.group": { field: "group" },
+      },
+    });
+
+    // #then
+    expect(result).toEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { group: { equals: "team" } },
+    });
+  });
+
+  test("overlaps - hierarchy(dotted string) without delimiter", () => {
+    // #given hierarchy("a.b.c").overlaps(hierarchy(["a", "b", R.attr.zone]))
+    // hierarchy("a.b.c") uses default "." delimiter → ["a", "b", "c"]
+    const plan = createConditionalPlan({
+      operator: "overlaps",
+      operands: [
+        {
+          operator: "hierarchy",
+          operands: [{ value: "a.b.c" }],
+        },
+        {
+          operator: "hierarchy",
+          operands: [
+            {
+              operator: "list",
+              operands: [
+                { value: "a" },
+                { value: "b" },
+                { name: "request.resource.attr.zone" },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    // #when
+    const result = queryPlanToPrisma({
+      queryPlan: plan,
+      mapper: { "request.resource.attr.zone": { field: "zone" } },
+    });
+
+    // #then
+    expect(result).toEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { zone: { equals: "c" } },
+    });
+  });
+
+  test("overlaps via cerbos integration", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: {
+        id: "user1",
+        roles: ["USER"],
+        attr: { context: "projects:123" },
+      },
+      resource: { kind: "resource" },
+      action: "hierarchy-overlaps",
+    });
+
+    expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+
+    const result = queryPlanToPrisma({
+      queryPlan,
+      mapper: {
+        "request.resource.id": { field: "id" },
+      },
+    });
+
+    // hierarchy("projects:123", ":") segments = ["projects", "123"]
+    // hierarchy(["projects", R.id]) segments = ["projects", R.id]
+    // Same length, segments[1]: "123" == R.id → R.id == "123"
+    expect(result).toEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { id: { equals: "123" } },
+    });
+  });
+});
+
+const hierarchyMapper = {
+  "request.resource.attr.scope": { field: "scope" },
+  "request.resource.attr.path": { field: "path" },
+};
+
+// ancestorOf = first hierarchy is a strict prefix of second
+// hierarchy("a.b").ancestorOf(hierarchy("a.b.c.d")) == true
+describe("Hierarchy ancestorOf", () => {
+  test("ancestorOf - constant is ancestor, field is descendant", () => {
+    // #given hierarchy("a.b.c").ancestorOf(hierarchy(R.attr.scope))
+    const plan = createConditionalPlan({
+      operator: "ancestorOf",
+      operands: [
+        {
+          operator: "hierarchy",
+          operands: [{ value: "a.b.c" }],
+        },
+        {
+          operator: "hierarchy",
+          operands: [{ name: "request.resource.attr.scope" }],
+        },
+      ],
+    });
+
+    // #when
+    const result = queryPlanToPrisma({ queryPlan: plan, mapper: hierarchyMapper });
+
+    // #then - R.attr.scope must start with "a.b.c." (ancestor means strict prefix)
+    expect(result).toEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { scope: { startsWith: "a.b.c." } },
+    });
+  });
+
+  test("ancestorOf - field is ancestor of constant", () => {
+    // #given hierarchy(R.attr.scope).ancestorOf(hierarchy("a.b.c.d"))
+    // R.attr.scope must be a prefix of "a.b.c.d"
+    // Possible prefixes: "a", "a.b", "a.b.c"
+    const plan = createConditionalPlan({
+      operator: "ancestorOf",
+      operands: [
+        {
+          operator: "hierarchy",
+          operands: [{ name: "request.resource.attr.scope" }],
+        },
+        {
+          operator: "hierarchy",
+          operands: [{ value: "a.b.c.d" }],
+        },
+      ],
+    });
+
+    // #when
+    const result = queryPlanToPrisma({ queryPlan: plan, mapper: hierarchyMapper });
+
+    // #then - scope must be one of the strict prefixes of "a.b.c.d"
+    expect(result).toEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { scope: { in: ["a", "a.b", "a.b.c"] } },
+    });
+  });
+
+  test("ancestorOf - single segment constant ancestor", () => {
+    // #given hierarchy("root").ancestorOf(hierarchy(R.attr.scope))
+    const plan = createConditionalPlan({
+      operator: "ancestorOf",
+      operands: [
+        {
+          operator: "hierarchy",
+          operands: [{ value: "root" }],
+        },
+        {
+          operator: "hierarchy",
+          operands: [{ name: "request.resource.attr.scope" }],
+        },
+      ],
+    });
+
+    // #when
+    const result = queryPlanToPrisma({ queryPlan: plan, mapper: hierarchyMapper });
+
+    // #then
+    expect(result).toEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { scope: { startsWith: "root." } },
+    });
+  });
+
+  test("ancestorOf - with custom delimiter", () => {
+    // #given hierarchy(P.attr.scope, ":").ancestorOf(hierarchy(R.attr.path, ":"))
+    // P.attr.scope is resolved at plan time → constant "org:team"
+    const plan = createConditionalPlan({
+      operator: "ancestorOf",
+      operands: [
+        {
+          operator: "hierarchy",
+          operands: [{ value: "org:team" }, { value: ":" }],
+        },
+        {
+          operator: "hierarchy",
+          operands: [{ name: "request.resource.attr.path" }, { value: ":" }],
+        },
+      ],
+    });
+
+    // #when
+    const result = queryPlanToPrisma({ queryPlan: plan, mapper: hierarchyMapper });
+
+    // #then - R.attr.path must start with "org:team:" (using the ":" delimiter)
+    expect(result).toEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { path: { startsWith: "org:team:" } },
+    });
+  });
+
+  test("ancestorOf via cerbos integration", async () => {
+    const plan = await cerbos.planResources({
+      principal: {
+        id: "user1",
+        roles: ["USER"],
+        attr: { scope: "a.b.c" },
+      },
+      resource: { kind: "resource" },
+      action: "hierarchy-ancestor-of",
+    });
+
+    const result = queryPlanToPrisma({
+      queryPlan: plan,
+      mapper: {
+        "request.resource.attr.scope": { field: "scope" },
+      },
+    });
+
+    // hierarchy("a.b.c").ancestorOf(hierarchy(R.attr.scope))
+    // "a.b.c" is ancestor of R.attr.scope → R.attr.scope starts with "a.b.c."
+    expect(result).toEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { scope: { startsWith: "a.b.c." } },
+    });
+  });
+});
+
+// descendentOf = mirror of ancestorOf
+// hierarchy("a.b.c.d").descendentOf(hierarchy("a.b")) == true
+describe("Hierarchy descendentOf", () => {
+  test("descendentOf - field is descendant of constant", () => {
+    // #given hierarchy(R.attr.scope).descendentOf(hierarchy("a.b"))
+    // R.attr.scope must be a descendant of "a.b" → "a.b" is a prefix of R.attr.scope
+    const plan = createConditionalPlan({
+      operator: "descendentOf",
+      operands: [
+        {
+          operator: "hierarchy",
+          operands: [{ name: "request.resource.attr.scope" }],
+        },
+        {
+          operator: "hierarchy",
+          operands: [{ value: "a.b" }],
+        },
+      ],
+    });
+
+    // #when
+    const result = queryPlanToPrisma({ queryPlan: plan, mapper: hierarchyMapper });
+
+    // #then - scope must start with "a.b." (descendant = strict, must be longer)
+    expect(result).toEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { scope: { startsWith: "a.b." } },
+    });
+  });
+
+  test("descendentOf - constant is descendant of field", () => {
+    // #given hierarchy("a.b.c.d").descendentOf(hierarchy(R.attr.scope))
+    // "a.b.c.d" descends from R.attr.scope → R.attr.scope is a prefix of "a.b.c.d"
+    const plan = createConditionalPlan({
+      operator: "descendentOf",
+      operands: [
+        {
+          operator: "hierarchy",
+          operands: [{ value: "a.b.c.d" }],
+        },
+        {
+          operator: "hierarchy",
+          operands: [{ name: "request.resource.attr.scope" }],
+        },
+      ],
+    });
+
+    // #when
+    const result = queryPlanToPrisma({ queryPlan: plan, mapper: hierarchyMapper });
+
+    // #then - scope must be one of the strict prefixes of "a.b.c.d"
+    expect(result).toEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { scope: { in: ["a", "a.b", "a.b.c"] } },
+    });
+  });
+
+  test("descendentOf via cerbos integration", async () => {
+    const plan = await cerbos.planResources({
+      principal: {
+        id: "user1",
+        roles: ["USER"],
+        attr: { scope: "a.b.c" },
+      },
+      resource: { kind: "resource" },
+      action: "hierarchy-descendent-of",
+    });
+
+    const result = queryPlanToPrisma({
+      queryPlan: plan,
+      mapper: {
+        "request.resource.attr.scope": { field: "scope" },
+      },
+    });
+
+    // hierarchy(R.attr.scope).descendentOf(hierarchy("a.b.c"))
+    // R.attr.scope descends from "a.b.c" → R.attr.scope starts with "a.b.c."
+    expect(result).toEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { scope: { startsWith: "a.b.c." } },
+    });
+  });
+});
