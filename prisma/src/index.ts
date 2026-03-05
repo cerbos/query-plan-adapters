@@ -1084,17 +1084,12 @@ function handleMapOperator(
 }
 
 function buildImpossibleFilter(fieldRef: ResolvedFieldReference): PrismaFilter {
-  const fieldName = getLeafField(fieldRef.path);
-  const contradiction = {
+  return {
     AND: [
-      { [fieldName]: { equals: null } },
-      { [fieldName]: { not: null } },
+      buildFieldFilter(fieldRef, "equals", null),
+      buildFieldFilter(fieldRef, "not", null),
     ],
   };
-  if (fieldRef.relations && fieldRef.relations.length > 0) {
-    return buildNestedRelationFilter(fieldRef.relations, contradiction);
-  }
-  return contradiction;
 }
 
 function handleAddComparison(
@@ -1300,6 +1295,24 @@ function toSegments(resolved: ResolvedHierarchy): HierarchySegment[] {
   }
 }
 
+function normalizeHierarchy(
+  h: ResolvedHierarchy,
+  defaultDelimiter = "."
+): ResolvedHierarchy {
+  if (h.type !== "segmented") return h;
+  const allConstant = h.segments.every(
+    (s): s is ConstantSegment => s.type === "constant"
+  );
+  if (!allConstant) return h;
+  const segments = (h.segments as ConstantSegment[]).map((s) => s.value);
+  return {
+    type: "constant",
+    segments,
+    raw: segments.join(defaultDelimiter),
+    delimiter: defaultDelimiter,
+  };
+}
+
 function checkPrefixConditions(
   shorter: HierarchySegment[],
   longer: HierarchySegment[]
@@ -1334,7 +1347,13 @@ function handleOverlapsOperator(
   operands: PlanExpressionOperand[],
   mapper: Mapper
 ): PrismaFilter {
-  const [left, right] = extractHierarchyOperands("overlaps", operands, mapper);
+  const [rawLeft, rawRight] = extractHierarchyOperands("overlaps", operands, mapper);
+  const left = normalizeHierarchy(rawLeft);
+  const right = normalizeHierarchy(rawRight);
+
+  if (left.type === "field" || right.type === "field") {
+    return handleFieldOverlaps(left, right);
+  }
 
   const leftSegs = toSegments(left);
   const rightSegs = toSegments(right);
@@ -1360,6 +1379,40 @@ function handleOverlapsOperator(
   // When both directions are valid (equal-length hierarchies), they produce
   // identical conditions since the same segment pairs are compared in both.
   return validConditions[0]!;
+}
+
+function handleFieldOverlaps(
+  left: ResolvedHierarchy,
+  right: ResolvedHierarchy
+): PrismaFilter {
+  const [field, other] = left.type === "field" ? [left, right] : [right as FieldHierarchy, left];
+
+  if (other.type === "field") {
+    throw new Error("overlaps: cannot compare two field-reference hierarchies");
+  }
+
+  const delimiter = field.delimiter;
+  const otherSegments = other.type === "constant" ? other.segments : undefined;
+  if (!otherSegments) {
+    throw new Error("overlaps: segmented hierarchies with field hierarchies are not supported");
+  }
+
+  const otherRaw = otherSegments.join(delimiter);
+  const allPrefixes = [otherSegments[0]!];
+  for (let i = 1; i < otherSegments.length; i++) {
+    allPrefixes.push(allPrefixes[allPrefixes.length - 1]! + delimiter + otherSegments[i]!);
+  }
+
+  // field is ancestor of other OR field equals other OR other is ancestor of field
+  const conditions: PrismaFilter[] = [];
+  if (allPrefixes.length > 1) {
+    conditions.push(buildFieldFilter(field.fieldRef, "in", allPrefixes.slice(0, -1)));
+  }
+  conditions.push(buildFieldFilter(field.fieldRef, "equals", otherRaw));
+  conditions.push(buildFieldFilter(field.fieldRef, "startsWith", otherRaw + delimiter));
+
+  if (conditions.length === 1) return conditions[0]!;
+  return { OR: conditions };
 }
 
 function extractHierarchyOperands(
@@ -1408,8 +1461,8 @@ function handleAncestorDescendantOperator(
 
   // ancestorOf(A, B) = A is strict prefix of B
   // descendentOf(A, B) = B is strict prefix of A
-  const ancestor = direction === "ancestor" ? left : right;
-  const descendant = direction === "ancestor" ? right : left;
+  const ancestor = normalizeHierarchy(direction === "ancestor" ? left : right);
+  const descendant = normalizeHierarchy(direction === "ancestor" ? right : left);
 
   if (ancestor.type === "constant" && descendant.type === "field") {
     const prefix = ancestor.segments.join(descendant.delimiter) + descendant.delimiter;
