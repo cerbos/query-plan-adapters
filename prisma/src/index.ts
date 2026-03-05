@@ -1085,12 +1085,16 @@ function handleMapOperator(
 
 function buildImpossibleFilter(fieldRef: ResolvedFieldReference): PrismaFilter {
   const fieldName = getLeafField(fieldRef.path);
-  return {
+  const contradiction = {
     AND: [
       { [fieldName]: { equals: null } },
       { [fieldName]: { not: null } },
     ],
   };
+  if (fieldRef.relations && fieldRef.relations.length > 0) {
+    return buildNestedRelationFilter(fieldRef.relations, contradiction);
+  }
+  return contradiction;
 }
 
 function handleAddComparison(
@@ -1408,7 +1412,7 @@ function handleAncestorDescendantOperator(
   const descendant = direction === "ancestor" ? right : left;
 
   if (ancestor.type === "constant" && descendant.type === "field") {
-    const prefix = ancestor.raw + descendant.delimiter;
+    const prefix = ancestor.segments.join(descendant.delimiter) + descendant.delimiter;
     return buildFieldFilter(descendant.fieldRef, "startsWith", prefix);
   }
 
@@ -1424,8 +1428,14 @@ function handleAncestorDescendantOperator(
   }
 
   if (ancestor.type === "constant" && descendant.type === "constant") {
-    const ancestorStr = ancestor.raw + ancestor.delimiter;
-    if (descendant.raw.startsWith(ancestorStr)) return {};
+    const ancestorSegs = ancestor.segments;
+    const descendantSegs = descendant.segments;
+    if (
+      descendantSegs.length > ancestorSegs.length &&
+      ancestorSegs.every((seg, i) => seg === descendantSegs[i])
+    ) {
+      return {};
+    }
     return buildImpossibleFilterFromHierarchies(ancestor, descendant);
   }
 
