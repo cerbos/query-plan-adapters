@@ -329,9 +329,9 @@ function tryFoldValueExpression(
   if (!leftOp || !rightOp) return null;
 
   const left = resolveOperand(leftOp, mapper);
+  if (!isResolvedValue(left)) return null;
   const right = resolveOperand(rightOp, mapper);
-
-  if (!isResolvedValue(left) || !isResolvedValue(right)) return null;
+  if (!isResolvedValue(right)) return null;
 
   try {
     return foldAdd(left.value, right.value);
@@ -1158,8 +1158,7 @@ function handleAddComparison(
     return {};
   }
 
-  const prismaOp = operator === "eq" ? "equals" : "not";
-  return buildFieldFilter(fieldRef, prismaOp, solvedValue);
+  return buildFieldFilter(fieldRef, CERBOS_TO_PRISMA_OPERATOR[operator]!, solvedValue);
 }
 
 function foldAdd(left: Value, right: Value): Value {
@@ -1347,9 +1346,7 @@ function handleOverlapsOperator(
   operands: PlanExpressionOperand[],
   mapper: Mapper
 ): PrismaFilter {
-  const [rawLeft, rawRight] = extractHierarchyOperands("overlaps", operands, mapper);
-  const left = normalizeHierarchy(rawLeft);
-  const right = normalizeHierarchy(rawRight);
+  const [left, right] = extractHierarchyOperands("overlaps", operands, mapper);
 
   if (left.type === "field" || right.type === "field") {
     return handleFieldOverlaps(left, right);
@@ -1385,28 +1382,24 @@ function handleFieldOverlaps(
   left: ResolvedHierarchy,
   right: ResolvedHierarchy
 ): PrismaFilter {
-  const [field, other] = left.type === "field" ? [left, right] : [right as FieldHierarchy, left];
-
-  if (other.type === "field") {
+  if (left.type === "field" && right.type === "field") {
     throw new Error("overlaps: cannot compare two field-reference hierarchies");
   }
 
-  const delimiter = field.delimiter;
-  const otherSegments = other.type === "constant" ? other.segments : undefined;
-  if (!otherSegments) {
+  const field = (left.type === "field" ? left : right) as FieldHierarchy;
+  const other = left.type === "field" ? right : left;
+
+  if (other.type !== "constant") {
     throw new Error("overlaps: segmented hierarchies with field hierarchies are not supported");
   }
 
-  const otherRaw = otherSegments.join(delimiter);
-  const allPrefixes = [otherSegments[0]!];
-  for (let i = 1; i < otherSegments.length; i++) {
-    allPrefixes.push(allPrefixes[allPrefixes.length - 1]! + delimiter + otherSegments[i]!);
-  }
+  const delimiter = field.delimiter;
+  const otherRaw = other.segments.join(delimiter);
+  const strictPrefixes = getStrictPrefixes(other.segments, delimiter);
 
-  // field is ancestor of other OR field equals other OR other is ancestor of field
   const conditions: PrismaFilter[] = [];
-  if (allPrefixes.length > 1) {
-    conditions.push(buildFieldFilter(field.fieldRef, "in", allPrefixes.slice(0, -1)));
+  if (strictPrefixes.length > 0) {
+    conditions.push(buildFieldFilter(field.fieldRef, "in", strictPrefixes));
   }
   conditions.push(buildFieldFilter(field.fieldRef, "equals", otherRaw));
   conditions.push(buildFieldFilter(field.fieldRef, "startsWith", otherRaw + delimiter));
@@ -1433,7 +1426,10 @@ function extractHierarchyOperands(
     throw new Error(`${operatorName} requires two hierarchy operands`);
   }
 
-  return [resolveHierarchy(leftOp, mapper), resolveHierarchy(rightOp, mapper)];
+  return [
+    normalizeHierarchy(resolveHierarchy(leftOp, mapper)),
+    normalizeHierarchy(resolveHierarchy(rightOp, mapper)),
+  ];
 }
 
 function getStrictPrefixes(segments: string[], delimiter: string): string[] {
@@ -1453,16 +1449,13 @@ function handleAncestorDescendantOperator(
   mapper: Mapper,
   direction: "ancestor" | "descendant"
 ): PrismaFilter {
-  const [left, right] = extractHierarchyOperands(
-    direction === "ancestor" ? "ancestorOf" : "descendentOf",
-    operands,
-    mapper
-  );
+  const operatorName = direction === "ancestor" ? "ancestorOf" : "descendentOf";
+  const [left, right] = extractHierarchyOperands(operatorName, operands, mapper);
 
   // ancestorOf(A, B) = A is strict prefix of B
   // descendentOf(A, B) = B is strict prefix of A
-  const ancestor = normalizeHierarchy(direction === "ancestor" ? left : right);
-  const descendant = normalizeHierarchy(direction === "ancestor" ? right : left);
+  const ancestor = direction === "ancestor" ? left : right;
+  const descendant = direction === "ancestor" ? right : left;
 
   if (ancestor.type === "constant" && descendant.type === "field") {
     const prefix = ancestor.segments.join(descendant.delimiter) + descendant.delimiter;
@@ -1489,21 +1482,10 @@ function handleAncestorDescendantOperator(
     ) {
       return {};
     }
-    return buildImpossibleFilterFromHierarchies(ancestor, descendant);
+    throw new Error(`${operatorName}: constants do not satisfy ${direction} relationship`);
   }
 
-  throw new Error(
-    `${direction === "ancestor" ? "ancestorOf" : "descendentOf"}: unsupported hierarchy type combination`
-  );
-}
-
-function buildImpossibleFilterFromHierarchies(
-  a: ResolvedHierarchy,
-  b: ResolvedHierarchy
-): PrismaFilter {
-  if (a.type === "field") return buildImpossibleFilter(a.fieldRef);
-  if (b.type === "field") return buildImpossibleFilter(b.fieldRef);
-  throw new Error("Cannot build impossible filter: no field references found");
+  throw new Error(`${operatorName}: unsupported hierarchy type combination`);
 }
 
 function buildFieldFilter(
