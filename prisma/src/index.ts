@@ -1084,29 +1084,7 @@ function handleMapOperator(
 }
 
 function buildImpossibleFilter(fieldRef: ResolvedFieldReference): PrismaFilter {
-  let fieldName = getLeafField(fieldRef.path);
-  if (fieldRef.relations && fieldRef.relations.length > 0) {
-    const deepest = fieldRef.relations[fieldRef.relations.length - 1]!;
-    if (deepest.field) {
-      fieldName = deepest.field;
-    }
-  }
-  const contradiction: PrismaFilter = {
-    AND: [
-      { [fieldName]: { equals: null } },
-      { [fieldName]: { not: null } },
-    ],
-  };
-  if (!fieldRef.relations || fieldRef.relations.length === 0) {
-    return contradiction;
-  }
-  let filter: PrismaFilter = contradiction;
-  for (let i = fieldRef.relations.length - 1; i >= 0; i--) {
-    const relation = fieldRef.relations[i]!;
-    const op = relation.type === "one" ? "is" : "some";
-    filter = { [relation.name]: { [op]: filter } };
-  }
-  return filter;
+  return buildFieldFilter(fieldRef, "in", []);
 }
 
 function handleAddComparison(

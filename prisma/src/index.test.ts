@@ -5669,7 +5669,7 @@ describe("Add Operator", () => {
     expect(result).toEqual({
       kind: PlanKind.CONDITIONAL,
       filters: {
-        AND: [{ id: { equals: null } }, { id: { not: null } }],
+        id: { in: [] },
       },
     });
   });
@@ -5940,10 +5940,7 @@ describe("Hierarchy Overlaps", () => {
     expect(result).toEqual({
       kind: PlanKind.CONDITIONAL,
       filters: {
-        AND: [
-          { team: { equals: null } },
-          { team: { not: null } },
-        ],
+        team: { in: [] },
       },
     });
   });
