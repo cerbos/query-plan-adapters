@@ -1084,7 +1084,13 @@ function handleMapOperator(
 }
 
 function buildImpossibleFilter(fieldRef: ResolvedFieldReference): PrismaFilter {
-  const fieldName = getLeafField(fieldRef.path);
+  let fieldName = getLeafField(fieldRef.path);
+  if (fieldRef.relations && fieldRef.relations.length > 0) {
+    const deepest = fieldRef.relations[fieldRef.relations.length - 1]!;
+    if (deepest.field) {
+      fieldName = deepest.field;
+    }
+  }
   const contradiction: PrismaFilter = {
     AND: [
       { [fieldName]: { equals: null } },
