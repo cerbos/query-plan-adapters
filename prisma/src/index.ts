@@ -136,6 +136,78 @@ function isResolvedValue(operand: ResolvedOperand): operand is ResolvedValue {
   return "value" in operand;
 }
 
+function getNamedOperand(
+  operands: PlanExpressionOperand[],
+  message: string
+): NamedOperand {
+  const operand = operands.find(isNamedOperand);
+  if (!operand) {
+    throw new Error(message);
+  }
+  return operand;
+}
+
+function getValueOperand(
+  operands: PlanExpressionOperand[],
+  message: string
+): ValueOperand {
+  const operand = operands.find(isValueOperand);
+  if (!operand) {
+    throw new Error(message);
+  }
+  return operand;
+}
+
+function requireResolvedFieldReference(
+  operand: ResolvedOperand,
+  message: string
+): ResolvedFieldReference {
+  if (!isResolvedFieldReference(operand)) {
+    throw new Error(message);
+  }
+  return operand;
+}
+
+function requireResolvedValue(
+  operand: ResolvedOperand,
+  message: string
+): ResolvedValue {
+  if (!isResolvedValue(operand)) {
+    throw new Error(message);
+  }
+  return operand;
+}
+
+function wrapRelations(
+  relations: RelationConfig[] | undefined,
+  filter: PrismaFilter
+): PrismaFilter {
+  if (!relations || relations.length === 0) {
+    return filter;
+  }
+  return buildNestedRelationFilter(relations, filter);
+}
+
+function buildFieldEqualsFilter(
+  fieldRef: ResolvedFieldReference,
+  value: Value
+): PrismaFilter {
+  const fieldName = getLeafField(fieldRef.path);
+  return wrapRelations(fieldRef.relations, { [fieldName]: { equals: value } });
+}
+
+function buildFieldDirectOrInFilter(
+  fieldRef: ResolvedFieldReference,
+  values: Value[]
+): PrismaFilter {
+  const fieldName = getLeafField(fieldRef.path);
+  const baseFilter =
+    values.length === 1
+      ? { [fieldName]: values[0] }
+      : { [fieldName]: { in: values } };
+  return wrapRelations(fieldRef.relations, baseFilter);
+}
+
 /**
  * Converts a Cerbos query plan to a Prisma filter.
  */
@@ -413,13 +485,8 @@ function buildPrismaFilterFromCerbosExpression(
 ): PrismaFilter {
   // A bare named operand represents a boolean field reference (e.g. `R.attr.booleanAttr`)
   if (isNamedOperand(expression)) {
-    const { path, relations } = resolveFieldReference(expression.name, mapper);
-    const fieldName = getLeafField(path);
-    const fieldFilter = { [fieldName]: { equals: true } };
-    if (relations && relations.length > 0) {
-      return buildNestedRelationFilter(relations, fieldFilter);
-    }
-    return fieldFilter;
+    const fieldRef = resolveFieldReference(expression.name, mapper);
+    return buildFieldEqualsFilter(fieldRef, true);
   }
 
   if (!isOperatorOperand(expression)) {
@@ -450,13 +517,12 @@ function buildPrismaFilterFromCerbosExpression(
         throw new Error("not operator requires an operand");
       }
       if (isNamedOperand(operand)) {
-        const { path, relations } = resolveFieldReference(
+        const { relations, ...fieldRef } = resolveFieldReference(
           operand.name,
           mapper
         );
         if (!relations || relations.length === 0) {
-          const fieldName = getLeafField(path);
-          return { [fieldName]: { equals: false } };
+          return buildFieldEqualsFilter(fieldRef, false);
         }
       }
       return {
@@ -615,28 +681,13 @@ function handleRelationalOperator(
   }
 
   const left = resolveOperand(leftOperand, mapper);
-  const right = resolveOperand(rightOperand, mapper);
+  const right = requireResolvedValue(
+    resolveOperand(rightOperand, mapper),
+    "Right operand must be a value"
+  );
 
   if (isResolvedFieldReference(left)) {
-    const { path, relations } = left;
-
-    if (!isResolvedValue(right)) {
-      throw new Error("Right operand must be a value");
-    }
-
-    const filterValue = { [prismaOperator]: right.value };
-    const fieldName = getLeafField(path);
-    const fieldFilter = { [fieldName]: filterValue };
-
-    if (relations && relations.length > 0) {
-      return buildNestedRelationFilter(relations, fieldFilter);
-    }
-
-    return fieldFilter;
-  }
-
-  if (!isResolvedValue(right)) {
-    throw new Error("Right operand must be a value");
+    return buildFieldFilter(left, prismaOperator, right.value);
   }
 
   return { [prismaOperator]: right.value };
@@ -649,39 +700,18 @@ function handleInOperator(
   operands: PlanExpressionOperand[],
   mapper: Mapper
 ): PrismaFilter {
-  const nameOperand = operands.find(isNamedOperand);
-  if (!nameOperand) throw new Error("Name operand is undefined");
-
-  const valueOperand = operands.find(isValueOperand);
-  if (!valueOperand) throw new Error("Value operand is undefined");
-
-  const resolved = resolveOperand(nameOperand, mapper);
-  if (!isResolvedFieldReference(resolved)) {
-    throw new Error("Name operand must resolve to a field reference");
-  }
-
-  const { path, relations } = resolved;
-  const resolvedValue = resolveOperand(valueOperand, mapper);
-
-  if (!isResolvedValue(resolvedValue)) {
-    throw new Error("Value operand must resolve to a value");
-  }
-
-  const { value } = resolvedValue;
+  const nameOperand = getNamedOperand(operands, "Name operand is undefined");
+  const valueOperand = getValueOperand(operands, "Value operand is undefined");
+  const fieldRef = requireResolvedFieldReference(
+    resolveOperand(nameOperand, mapper),
+    "Name operand must resolve to a field reference"
+  );
+  const { value } = requireResolvedValue(
+    resolveOperand(valueOperand, mapper),
+    "Value operand must resolve to a value"
+  );
   const values = Array.isArray(value) ? value : [value];
-  const fieldName = getLeafField(path);
-
-  if (relations && relations.length > 0) {
-    const fieldFilter =
-      values.length === 1
-        ? { [fieldName]: values[0] }
-        : { [fieldName]: { in: values } };
-    return buildNestedRelationFilter(relations, fieldFilter);
-  }
-
-  return values.length === 1
-    ? { [fieldName]: values[0] }
-    : { [fieldName]: { in: values } };
+  return buildFieldDirectOrInFilter(fieldRef, values);
 }
 
 /**
@@ -692,37 +722,24 @@ function handleStringOperator(
   operands: PlanExpressionOperand[],
   mapper: Mapper
 ): PrismaFilter {
-  const nameOperand = operands.find(isNamedOperand);
-  if (!nameOperand) throw new Error("Name operand is undefined");
-
-  const resolved = resolveOperand(nameOperand, mapper);
-  if (!isResolvedFieldReference(resolved)) {
-    throw new Error("Name operand must resolve to a field reference");
-  }
-
-  const { path, relations } = resolved;
-
-  const valueOperand = operands.find(isValueOperand);
-  if (!valueOperand) throw new Error("Value operand is undefined");
-
-  const resolvedValue = resolveOperand(valueOperand, mapper);
-  if (!isResolvedValue(resolvedValue)) {
-    throw new Error("Value operand must resolve to a value");
-  }
-
-  const { value } = resolvedValue;
+  const nameOperand = getNamedOperand(operands, "Name operand is undefined");
+  const valueOperand = getValueOperand(operands, "Value operand is undefined");
+  const fieldRef = requireResolvedFieldReference(
+    resolveOperand(nameOperand, mapper),
+    "Name operand must resolve to a field reference"
+  );
+  const { value } = requireResolvedValue(
+    resolveOperand(valueOperand, mapper),
+    "Value operand must resolve to a value"
+  );
   if (typeof value !== "string") {
     throw new Error(`${operator} operator requires string value`);
   }
 
-  const fieldName = getLeafField(path);
-  const fieldFilter = { [fieldName]: { [operator]: value } };
-
-  if (relations && relations.length > 0) {
-    return buildNestedRelationFilter(relations, fieldFilter);
-  }
-
-  return fieldFilter;
+  const fieldName = getLeafField(fieldRef.path);
+  return wrapRelations(fieldRef.relations, {
+    [fieldName]: { [operator]: value },
+  });
 }
 
 /**
@@ -732,34 +749,21 @@ function handleIsSetOperator(
   operands: PlanExpressionOperand[],
   mapper: Mapper
 ): PrismaFilter {
-  const nameOperand = operands.find(isNamedOperand);
-  if (!nameOperand) throw new Error("Name operand is undefined");
+  const nameOperand = getNamedOperand(operands, "Name operand is undefined");
+  const valueOperand = getValueOperand(operands, "Value operand is undefined");
+  const fieldRef = requireResolvedFieldReference(
+    resolveOperand(nameOperand, mapper),
+    "Name operand must resolve to a field reference"
+  );
+  const resolvedValue = requireResolvedValue(
+    resolveOperand(valueOperand, mapper),
+    "Value operand must resolve to a value"
+  );
 
-  const resolved = resolveOperand(nameOperand, mapper);
-  if (!isResolvedFieldReference(resolved)) {
-    throw new Error("Name operand must resolve to a field reference");
-  }
-
-  const { path, relations } = resolved;
-
-  const valueOperand = operands.find(isValueOperand);
-  if (!valueOperand) throw new Error("Value operand is undefined");
-
-  const resolvedValue = resolveOperand(valueOperand, mapper);
-  if (!isResolvedValue(resolvedValue)) {
-    throw new Error("Value operand must resolve to a value");
-  }
-
-  const fieldName = getLeafField(path);
-  const fieldFilter = {
+  const fieldName = getLeafField(fieldRef.path);
+  return wrapRelations(fieldRef.relations, {
     [fieldName]: resolvedValue.value ? { not: null } : { equals: null },
-  };
-
-  if (relations && relations.length > 0) {
-    return buildNestedRelationFilter(relations, fieldFilter);
-  }
-
-  return fieldFilter;
+  });
 }
 
 /**
@@ -1490,9 +1494,7 @@ function buildFieldFilter(
   value: Value
 ): PrismaFilter {
   const fieldName = getLeafField(fieldRef.path);
-  const fieldFilter = { [fieldName]: { [prismaOp]: value } };
-  if (fieldRef.relations && fieldRef.relations.length > 0) {
-    return buildNestedRelationFilter(fieldRef.relations, fieldFilter);
-  }
-  return fieldFilter;
+  return wrapRelations(fieldRef.relations, {
+    [fieldName]: { [prismaOp]: value },
+  });
 }
