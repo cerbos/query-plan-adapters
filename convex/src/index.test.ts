@@ -339,7 +339,7 @@ describe("Logical Operations", () => {
     );
   });
 
-  test("nand - always denied (no allow rule)", async () => {
+  test("nand - conditional (deny rule with allow fallback)", async () => {
     const queryPlan = await cerbos.planResources({
       principal: { id: "user1", roles: ["USER"] },
       resource: { kind: "resource" },
@@ -348,10 +348,16 @@ describe("Logical Operations", () => {
 
     const result = queryPlanToConvex({ queryPlan, mapper: defaultMapper });
 
-    expect(result.kind).toBe(PlanKind.ALWAYS_DENIED);
+    expect(result.kind).toBe(PlanKind.CONDITIONAL);
+    const filtered = applyFilter(fixtureResources, result.filter!);
+    expect(filtered.map((r) => r.key)).toEqual(
+      fixtureResources
+        .filter((r) => !(r.aBool === true && r.aString !== "string"))
+        .map((r) => r.key),
+    );
   });
 
-  test("nor - always denied (no allow rule)", async () => {
+  test("nor - conditional (deny rule with allow fallback)", async () => {
     const queryPlan = await cerbos.planResources({
       principal: { id: "user1", roles: ["USER"] },
       resource: { kind: "resource" },
@@ -360,7 +366,13 @@ describe("Logical Operations", () => {
 
     const result = queryPlanToConvex({ queryPlan, mapper: defaultMapper });
 
-    expect(result.kind).toBe(PlanKind.ALWAYS_DENIED);
+    expect(result.kind).toBe(PlanKind.CONDITIONAL);
+    const filtered = applyFilter(fixtureResources, result.filter!);
+    expect(filtered.map((r) => r.key)).toEqual(
+      fixtureResources
+        .filter((r) => !(r.aBool === true || r.aString !== "string"))
+        .map((r) => r.key),
+    );
   });
 });
 
