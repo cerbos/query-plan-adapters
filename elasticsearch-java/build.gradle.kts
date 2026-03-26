@@ -16,14 +16,14 @@ repositories {
 
 dependencies {
     implementation("dev.cerbos:cerbos-sdk-java:0.18.0")
-    implementation("com.google.protobuf:protobuf-java:4.34.0")
+    implementation("com.google.protobuf:protobuf-java:4.34.1")
 
     testImplementation(platform("org.junit:junit-bom:5.14.3"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testImplementation("org.testcontainers:testcontainers:1.21.4")
     testImplementation("org.testcontainers:junit-jupiter:1.21.4")
     testImplementation("org.testcontainers:elasticsearch:1.21.4")
-    testImplementation("com.fasterxml.jackson.core:jackson-databind:2.21.1")
+    testImplementation("com.fasterxml.jackson.core:jackson-databind:2.21.2")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     testRuntimeOnly("org.slf4j:slf4j-simple:2.0.17")
 }
