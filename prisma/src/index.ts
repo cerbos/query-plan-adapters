@@ -7,6 +7,15 @@ import {
 
 export { PlanKind };
 
+const CERBOS_TO_PRISMA_OPERATOR: Record<string, string> = {
+  eq: "equals",
+  ne: "not",
+  lt: "lt",
+  le: "lte",
+  gt: "gt",
+  ge: "gte",
+};
+
 // Type Definitions
 export type PrismaFilter = Record<string, any>;
 
@@ -125,6 +134,78 @@ function isResolvedFieldReference(
 
 function isResolvedValue(operand: ResolvedOperand): operand is ResolvedValue {
   return "value" in operand;
+}
+
+function getNamedOperand(
+  operands: PlanExpressionOperand[],
+  message: string
+): NamedOperand {
+  const operand = operands.find(isNamedOperand);
+  if (!operand) {
+    throw new Error(message);
+  }
+  return operand;
+}
+
+function getValueOperand(
+  operands: PlanExpressionOperand[],
+  message: string
+): ValueOperand {
+  const operand = operands.find(isValueOperand);
+  if (!operand) {
+    throw new Error(message);
+  }
+  return operand;
+}
+
+function requireResolvedFieldReference(
+  operand: ResolvedOperand,
+  message: string
+): ResolvedFieldReference {
+  if (!isResolvedFieldReference(operand)) {
+    throw new Error(message);
+  }
+  return operand;
+}
+
+function requireResolvedValue(
+  operand: ResolvedOperand,
+  message: string
+): ResolvedValue {
+  if (!isResolvedValue(operand)) {
+    throw new Error(message);
+  }
+  return operand;
+}
+
+function wrapRelations(
+  relations: RelationConfig[] | undefined,
+  filter: PrismaFilter
+): PrismaFilter {
+  if (!relations || relations.length === 0) {
+    return filter;
+  }
+  return buildNestedRelationFilter(relations, filter);
+}
+
+function buildFieldEqualsFilter(
+  fieldRef: ResolvedFieldReference,
+  value: Value
+): PrismaFilter {
+  const fieldName = getLeafField(fieldRef.path);
+  return wrapRelations(fieldRef.relations, { [fieldName]: { equals: value } });
+}
+
+function buildFieldDirectOrInFilter(
+  fieldRef: ResolvedFieldReference,
+  values: Value[]
+): PrismaFilter {
+  const fieldName = getLeafField(fieldRef.path);
+  const baseFilter =
+    values.length === 1
+      ? { [fieldName]: values[0] }
+      : { [fieldName]: { in: values } };
+  return wrapRelations(fieldRef.relations, baseFilter);
 }
 
 /**
@@ -302,10 +383,33 @@ function resolveOperand(
   } else if (isValueOperand(operand)) {
     return { value: operand.value };
   } else if (isOperatorOperand(operand)) {
+    const folded = tryFoldValueExpression(operand, mapper);
+    if (folded !== null) return { value: folded };
     const nestedResult = buildPrismaFilterFromCerbosExpression(operand, mapper);
     return { value: nestedResult };
   }
   throw new Error("Operand must have name, value, or be an expression");
+}
+
+function tryFoldValueExpression(
+  expr: OperatorOperand,
+  mapper: Mapper
+): Value | null {
+  if (expr.operator !== "add") return null;
+  const leftOp = expr.operands[0];
+  const rightOp = expr.operands[1];
+  if (!leftOp || !rightOp) return null;
+
+  const left = resolveOperand(leftOp, mapper);
+  if (!isResolvedValue(left)) return null;
+  const right = resolveOperand(rightOp, mapper);
+  if (!isResolvedValue(right)) return null;
+
+  try {
+    return foldAdd(left.value, right.value);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -381,13 +485,8 @@ function buildPrismaFilterFromCerbosExpression(
 ): PrismaFilter {
   // A bare named operand represents a boolean field reference (e.g. `R.attr.booleanAttr`)
   if (isNamedOperand(expression)) {
-    const { path, relations } = resolveFieldReference(expression.name, mapper);
-    const fieldName = getLeafField(path);
-    const fieldFilter = { [fieldName]: { equals: true } };
-    if (relations && relations.length > 0) {
-      return buildNestedRelationFilter(relations, fieldFilter);
-    }
-    return fieldFilter;
+    const fieldRef = resolveFieldReference(expression.name, mapper);
+    return buildFieldEqualsFilter(fieldRef, true);
   }
 
   if (!isOperatorOperand(expression)) {
@@ -418,13 +517,12 @@ function buildPrismaFilterFromCerbosExpression(
         throw new Error("not operator requires an operand");
       }
       if (isNamedOperand(operand)) {
-        const { path, relations } = resolveFieldReference(
+        const { relations, ...fieldRef } = resolveFieldReference(
           operand.name,
           mapper
         );
         if (!relations || relations.length === 0) {
-          const fieldName = getLeafField(path);
-          return { [fieldName]: { equals: false } };
+          return buildFieldEqualsFilter(fieldRef, false);
         }
       }
       return {
@@ -473,6 +571,18 @@ function buildPrismaFilterFromCerbosExpression(
 
     case "map": {
       return handleMapOperator(operands, mapper);
+    }
+
+    case "overlaps": {
+      return handleOverlapsOperator(operands, mapper);
+    }
+
+    case "ancestorOf": {
+      return handleAncestorDescendantOperator(operands, mapper, "ancestor");
+    }
+
+    case "descendentOf": {
+      return handleAncestorDescendantOperator(operands, mapper, "descendant");
     }
 
     default:
@@ -542,14 +652,7 @@ function handleRelationalOperator(
   operands: PlanExpressionOperand[],
   mapper: Mapper
 ): PrismaFilter {
-  const prismaOperator = {
-    eq: "equals",
-    ne: "not",
-    lt: "lt",
-    le: "lte",
-    gt: "gt",
-    ge: "gte",
-  }[operator];
+  const prismaOperator = CERBOS_TO_PRISMA_OPERATOR[operator];
 
   if (!prismaOperator) {
     throw new Error(`Unsupported operator: ${operator}`);
@@ -567,29 +670,24 @@ function handleRelationalOperator(
     return handleSizeComparison(operator, leftOperand, rightOperand, mapper);
   }
 
-  const left = resolveOperand(leftOperand, mapper);
-  const right = resolveOperand(rightOperand, mapper);
-
-  if (isResolvedFieldReference(left)) {
-    const { path, relations } = left;
-
-    if (!isResolvedValue(right)) {
-      throw new Error("Right operand must be a value");
-    }
-
-    const filterValue = { [prismaOperator]: right.value };
-    const fieldName = getLeafField(path);
-    const fieldFilter = { [fieldName]: filterValue };
-
-    if (relations && relations.length > 0) {
-      return buildNestedRelationFilter(relations, fieldFilter);
-    }
-
-    return fieldFilter;
+  const addOperand = [leftOperand, rightOperand].find(
+    (o): o is OperatorOperand =>
+      isOperatorOperand(o) && o.operator === "add"
+  );
+  if (addOperand) {
+    const otherOperand =
+      addOperand === leftOperand ? rightOperand : leftOperand;
+    return handleAddComparison(operator, addOperand, otherOperand, mapper);
   }
 
-  if (!isResolvedValue(right)) {
-    throw new Error("Right operand must be a value");
+  const left = resolveOperand(leftOperand, mapper);
+  const right = requireResolvedValue(
+    resolveOperand(rightOperand, mapper),
+    "Right operand must be a value"
+  );
+
+  if (isResolvedFieldReference(left)) {
+    return buildFieldFilter(left, prismaOperator, right.value);
   }
 
   return { [prismaOperator]: right.value };
@@ -602,39 +700,18 @@ function handleInOperator(
   operands: PlanExpressionOperand[],
   mapper: Mapper
 ): PrismaFilter {
-  const nameOperand = operands.find(isNamedOperand);
-  if (!nameOperand) throw new Error("Name operand is undefined");
-
-  const valueOperand = operands.find(isValueOperand);
-  if (!valueOperand) throw new Error("Value operand is undefined");
-
-  const resolved = resolveOperand(nameOperand, mapper);
-  if (!isResolvedFieldReference(resolved)) {
-    throw new Error("Name operand must resolve to a field reference");
-  }
-
-  const { path, relations } = resolved;
-  const resolvedValue = resolveOperand(valueOperand, mapper);
-
-  if (!isResolvedValue(resolvedValue)) {
-    throw new Error("Value operand must resolve to a value");
-  }
-
-  const { value } = resolvedValue;
+  const nameOperand = getNamedOperand(operands, "Name operand is undefined");
+  const valueOperand = getValueOperand(operands, "Value operand is undefined");
+  const fieldRef = requireResolvedFieldReference(
+    resolveOperand(nameOperand, mapper),
+    "Name operand must resolve to a field reference"
+  );
+  const { value } = requireResolvedValue(
+    resolveOperand(valueOperand, mapper),
+    "Value operand must resolve to a value"
+  );
   const values = Array.isArray(value) ? value : [value];
-  const fieldName = getLeafField(path);
-
-  if (relations && relations.length > 0) {
-    const fieldFilter =
-      values.length === 1
-        ? { [fieldName]: values[0] }
-        : { [fieldName]: { in: values } };
-    return buildNestedRelationFilter(relations, fieldFilter);
-  }
-
-  return values.length === 1
-    ? { [fieldName]: values[0] }
-    : { [fieldName]: { in: values } };
+  return buildFieldDirectOrInFilter(fieldRef, values);
 }
 
 /**
@@ -645,37 +722,24 @@ function handleStringOperator(
   operands: PlanExpressionOperand[],
   mapper: Mapper
 ): PrismaFilter {
-  const nameOperand = operands.find(isNamedOperand);
-  if (!nameOperand) throw new Error("Name operand is undefined");
-
-  const resolved = resolveOperand(nameOperand, mapper);
-  if (!isResolvedFieldReference(resolved)) {
-    throw new Error("Name operand must resolve to a field reference");
-  }
-
-  const { path, relations } = resolved;
-
-  const valueOperand = operands.find(isValueOperand);
-  if (!valueOperand) throw new Error("Value operand is undefined");
-
-  const resolvedValue = resolveOperand(valueOperand, mapper);
-  if (!isResolvedValue(resolvedValue)) {
-    throw new Error("Value operand must resolve to a value");
-  }
-
-  const { value } = resolvedValue;
+  const nameOperand = getNamedOperand(operands, "Name operand is undefined");
+  const valueOperand = getValueOperand(operands, "Value operand is undefined");
+  const fieldRef = requireResolvedFieldReference(
+    resolveOperand(nameOperand, mapper),
+    "Name operand must resolve to a field reference"
+  );
+  const { value } = requireResolvedValue(
+    resolveOperand(valueOperand, mapper),
+    "Value operand must resolve to a value"
+  );
   if (typeof value !== "string") {
     throw new Error(`${operator} operator requires string value`);
   }
 
-  const fieldName = getLeafField(path);
-  const fieldFilter = { [fieldName]: { [operator]: value } };
-
-  if (relations && relations.length > 0) {
-    return buildNestedRelationFilter(relations, fieldFilter);
-  }
-
-  return fieldFilter;
+  const fieldName = getLeafField(fieldRef.path);
+  return wrapRelations(fieldRef.relations, {
+    [fieldName]: { [operator]: value },
+  });
 }
 
 /**
@@ -685,34 +749,21 @@ function handleIsSetOperator(
   operands: PlanExpressionOperand[],
   mapper: Mapper
 ): PrismaFilter {
-  const nameOperand = operands.find(isNamedOperand);
-  if (!nameOperand) throw new Error("Name operand is undefined");
+  const nameOperand = getNamedOperand(operands, "Name operand is undefined");
+  const valueOperand = getValueOperand(operands, "Value operand is undefined");
+  const fieldRef = requireResolvedFieldReference(
+    resolveOperand(nameOperand, mapper),
+    "Name operand must resolve to a field reference"
+  );
+  const resolvedValue = requireResolvedValue(
+    resolveOperand(valueOperand, mapper),
+    "Value operand must resolve to a value"
+  );
 
-  const resolved = resolveOperand(nameOperand, mapper);
-  if (!isResolvedFieldReference(resolved)) {
-    throw new Error("Name operand must resolve to a field reference");
-  }
-
-  const { path, relations } = resolved;
-
-  const valueOperand = operands.find(isValueOperand);
-  if (!valueOperand) throw new Error("Value operand is undefined");
-
-  const resolvedValue = resolveOperand(valueOperand, mapper);
-  if (!isResolvedValue(resolvedValue)) {
-    throw new Error("Value operand must resolve to a value");
-  }
-
-  const fieldName = getLeafField(path);
-  const fieldFilter = {
+  const fieldName = getLeafField(fieldRef.path);
+  return wrapRelations(fieldRef.relations, {
     [fieldName]: resolvedValue.value ? { not: null } : { equals: null },
-  };
-
-  if (relations && relations.length > 0) {
-    return buildNestedRelationFilter(relations, fieldFilter);
-  }
-
-  return fieldFilter;
+  });
 }
 
 /**
@@ -1033,5 +1084,417 @@ function handleMapOperator(
     [getPrismaRelationOperator(lastRelation)]: {
       select: { [fieldName]: true },
     },
+  });
+}
+
+function buildImpossibleFilter(fieldRef: ResolvedFieldReference): PrismaFilter {
+  return buildFieldFilter(fieldRef, "in", []);
+}
+
+function handleAddComparison(
+  operator: string,
+  addExpr: OperatorOperand,
+  otherOperand: PlanExpressionOperand,
+  mapper: Mapper
+): PrismaFilter {
+  const addLeftOp = assertDefined(
+    addExpr.operands[0],
+    "add operator requires a left operand"
+  );
+  const addRightOp = assertDefined(
+    addExpr.operands[1],
+    "add operator requires a right operand"
+  );
+
+  const addLeft = resolveOperand(addLeftOp, mapper);
+  const addRight = resolveOperand(addRightOp, mapper);
+  const other = resolveOperand(otherOperand, mapper);
+
+  if (isResolvedValue(addLeft) && isResolvedValue(addRight)) {
+    const folded = foldAdd(addLeft.value, addRight.value);
+    const prismaOp = CERBOS_TO_PRISMA_OPERATOR[operator];
+    if (!prismaOp) throw new Error(`Unsupported operator: ${operator}`);
+
+    if (isResolvedFieldReference(other)) {
+      return buildFieldFilter(other, prismaOp, folded);
+    }
+    throw new Error("add with two values requires a field reference on the other side");
+  }
+
+  if (!isResolvedValue(other)) {
+    throw new Error(
+      "add operator with field references requires a value on the other side of the comparison"
+    );
+  }
+
+  let fieldRef: ResolvedFieldReference;
+  let addValue: Value;
+  let fieldIsLeft: boolean;
+
+  if (isResolvedFieldReference(addLeft) && isResolvedValue(addRight)) {
+    fieldRef = addLeft;
+    addValue = addRight.value;
+    fieldIsLeft = true;
+  } else if (isResolvedValue(addLeft) && isResolvedFieldReference(addRight)) {
+    fieldRef = addRight;
+    addValue = addLeft.value;
+    fieldIsLeft = false;
+  } else {
+    throw new Error(
+      "add operator requires exactly one field reference and one value, or two values"
+    );
+  }
+
+  if (operator !== "eq" && operator !== "ne") {
+    throw new Error(
+      `Operator ${operator} is not supported with add and field references`
+    );
+  }
+
+  const solvedValue = solveAdd(other.value, addValue, fieldIsLeft);
+  if (solvedValue === null) {
+    if (operator === "eq") return buildImpossibleFilter(fieldRef);
+    return {};
+  }
+
+  return buildFieldFilter(fieldRef, CERBOS_TO_PRISMA_OPERATOR[operator]!, solvedValue);
+}
+
+function foldAdd(left: Value, right: Value): Value {
+  if (typeof left === "string" || typeof right === "string") {
+    return String(left) + String(right);
+  }
+  if (typeof left === "number" && typeof right === "number") {
+    return left + right;
+  }
+  throw new Error("add operator requires string or number operands");
+}
+
+function solveAdd(
+  comparisonValue: Value,
+  addConstant: Value,
+  fieldIsLeft: boolean
+): Value | null {
+  if (typeof comparisonValue === "string" && typeof addConstant === "string") {
+    if (fieldIsLeft) {
+      if (!comparisonValue.endsWith(addConstant)) return null;
+      return comparisonValue.slice(
+        0,
+        comparisonValue.length - addConstant.length
+      );
+    }
+    if (!comparisonValue.startsWith(addConstant)) return null;
+    return comparisonValue.slice(addConstant.length);
+  }
+  if (typeof comparisonValue === "number" && typeof addConstant === "number") {
+    return comparisonValue - addConstant;
+  }
+  throw new Error("Type mismatch in add comparison");
+}
+
+type ConstantSegment = { type: "constant"; value: string };
+type FieldSegment = { type: "field"; fieldRef: ResolvedFieldReference };
+type HierarchySegment = ConstantSegment | FieldSegment;
+
+type ConstantHierarchy = {
+  type: "constant";
+  segments: string[];
+  raw: string;
+  delimiter: string;
+};
+
+type FieldHierarchy = {
+  type: "field";
+  fieldRef: ResolvedFieldReference;
+  delimiter: string;
+};
+
+type SegmentedHierarchy = {
+  type: "segmented";
+  segments: HierarchySegment[];
+};
+
+type ResolvedHierarchy = ConstantHierarchy | FieldHierarchy | SegmentedHierarchy;
+
+function resolveHierarchy(
+  expr: OperatorOperand,
+  mapper: Mapper
+): ResolvedHierarchy {
+  const operands = expr.operands;
+
+  if (operands.length === 2) {
+    const strOperand = assertDefined(operands[0], "hierarchy requires operands");
+    const delimOperand = assertDefined(
+      operands[1],
+      "hierarchy requires a delimiter"
+    );
+    if (!isValueOperand(delimOperand)) {
+      throw new Error("hierarchy delimiter must be a value");
+    }
+    const delimiter = String(delimOperand.value);
+
+    if (isValueOperand(strOperand)) {
+      const raw = String(strOperand.value);
+      return { type: "constant", segments: raw.split(delimiter), raw, delimiter };
+    }
+    if (isNamedOperand(strOperand)) {
+      return {
+        type: "field",
+        fieldRef: resolveFieldReference(strOperand.name, mapper),
+        delimiter,
+      };
+    }
+    throw new Error("hierarchy(string, delimiter) requires a value or field operand");
+  }
+
+  if (operands.length === 1) {
+    const inner = assertDefined(operands[0], "hierarchy requires an operand");
+
+    if (isValueOperand(inner)) {
+      const raw = String(inner.value);
+      return { type: "constant", segments: raw.split("."), raw, delimiter: "." };
+    }
+
+    if (isNamedOperand(inner)) {
+      return {
+        type: "field",
+        fieldRef: resolveFieldReference(inner.name, mapper),
+        delimiter: ".",
+      };
+    }
+
+    if (isOperatorOperand(inner) && inner.operator === "list") {
+      const segments = inner.operands.map((op): HierarchySegment => {
+        const resolved = resolveOperand(op, mapper);
+        if (isResolvedValue(resolved)) {
+          return { type: "constant", value: String(resolved.value) };
+        }
+        return { type: "field", fieldRef: resolved };
+      });
+      return { type: "segmented", segments };
+    }
+
+    throw new Error("hierarchy requires a value, field, or list operand");
+  }
+
+  throw new Error("hierarchy requires 1 or 2 operands");
+}
+
+function toSegments(resolved: ResolvedHierarchy): HierarchySegment[] {
+  switch (resolved.type) {
+    case "constant":
+      return resolved.segments.map((s) => ({ type: "constant" as const, value: s }));
+    case "segmented":
+      return resolved.segments;
+    case "field":
+      throw new Error(
+        "Cannot get segments from a field-reference hierarchy"
+      );
+  }
+}
+
+function normalizeHierarchy(
+  h: ResolvedHierarchy,
+  defaultDelimiter = "."
+): ResolvedHierarchy {
+  if (h.type !== "segmented") return h;
+  const allConstant = h.segments.every(
+    (s): s is ConstantSegment => s.type === "constant"
+  );
+  if (!allConstant) return h;
+  const segments = (h.segments as ConstantSegment[]).map((s) => s.value);
+  return {
+    type: "constant",
+    segments,
+    raw: segments.join(defaultDelimiter),
+    delimiter: defaultDelimiter,
+  };
+}
+
+function checkPrefixConditions(
+  shorter: HierarchySegment[],
+  longer: HierarchySegment[]
+): PrismaFilter | null {
+  if (shorter.length > longer.length) return null;
+
+  const conditions: PrismaFilter[] = [];
+
+  for (let i = 0; i < shorter.length; i++) {
+    const s = shorter[i]!;
+    const l = longer[i]!;
+
+    if (s.type === "constant" && l.type === "constant") {
+      if (s.value !== l.value) return null;
+    } else if (s.type === "field" && l.type === "constant") {
+      conditions.push(buildFieldFilter(s.fieldRef, "equals", l.value));
+    } else if (s.type === "constant" && l.type === "field") {
+      conditions.push(buildFieldFilter(l.fieldRef, "equals", s.value));
+    } else {
+      throw new Error(
+        "Cannot compare two field references in hierarchy overlap"
+      );
+    }
+  }
+
+  if (conditions.length === 0) return {};
+  if (conditions.length === 1) return conditions[0]!;
+  return { AND: conditions };
+}
+
+function handleOverlapsOperator(
+  operands: PlanExpressionOperand[],
+  mapper: Mapper
+): PrismaFilter {
+  const [left, right] = extractHierarchyOperands("overlaps", operands, mapper);
+
+  if (left.type === "field" || right.type === "field") {
+    return handleFieldOverlaps(left, right);
+  }
+
+  const leftSegs = toSegments(left);
+  const rightSegs = toSegments(right);
+
+  const leftPrefixOfRight = checkPrefixConditions(leftSegs, rightSegs);
+  const rightPrefixOfLeft = checkPrefixConditions(rightSegs, leftSegs);
+
+  const validConditions = [leftPrefixOfRight, rightPrefixOfLeft].filter(
+    (c): c is PrismaFilter => c !== null
+  );
+
+  if (validConditions.length === 0) {
+    const allSegs = [...leftSegs, ...rightSegs];
+    const fieldSeg = allSegs.find(
+      (s): s is FieldSegment => s.type === "field"
+    );
+    if (fieldSeg) return buildImpossibleFilter(fieldSeg.fieldRef);
+    throw new Error("Cannot determine overlap: no field references found");
+  }
+
+  if (validConditions.some((c) => Object.keys(c).length === 0)) return {};
+
+  // When both directions are valid (equal-length hierarchies), they produce
+  // identical conditions since the same segment pairs are compared in both.
+  return validConditions[0]!;
+}
+
+function handleFieldOverlaps(
+  left: ResolvedHierarchy,
+  right: ResolvedHierarchy
+): PrismaFilter {
+  if (left.type === "field" && right.type === "field") {
+    throw new Error("overlaps: cannot compare two field-reference hierarchies");
+  }
+
+  const field = (left.type === "field" ? left : right) as FieldHierarchy;
+  const other = left.type === "field" ? right : left;
+
+  if (other.type !== "constant") {
+    throw new Error("overlaps: segmented hierarchies with field hierarchies are not supported");
+  }
+
+  const delimiter = field.delimiter;
+  const otherRaw = other.segments.join(delimiter);
+  const strictPrefixes = getStrictPrefixes(other.segments, delimiter);
+
+  const conditions: PrismaFilter[] = [];
+  if (strictPrefixes.length > 0) {
+    conditions.push(buildFieldFilter(field.fieldRef, "in", strictPrefixes));
+  }
+  conditions.push(buildFieldFilter(field.fieldRef, "equals", otherRaw));
+  conditions.push(buildFieldFilter(field.fieldRef, "startsWith", otherRaw + delimiter));
+
+  if (conditions.length === 1) return conditions[0]!;
+  return { OR: conditions };
+}
+
+function extractHierarchyOperands(
+  operatorName: string,
+  operands: PlanExpressionOperand[],
+  mapper: Mapper
+): [ResolvedHierarchy, ResolvedHierarchy] {
+  if (operands.length !== 2) {
+    throw new Error(`${operatorName} requires exactly two operands`);
+  }
+  const leftOp = assertDefined(operands[0], `${operatorName} requires a left operand`);
+  const rightOp = assertDefined(operands[1], `${operatorName} requires a right operand`);
+
+  if (
+    !isOperatorOperand(leftOp) || leftOp.operator !== "hierarchy" ||
+    !isOperatorOperand(rightOp) || rightOp.operator !== "hierarchy"
+  ) {
+    throw new Error(`${operatorName} requires two hierarchy operands`);
+  }
+
+  return [
+    normalizeHierarchy(resolveHierarchy(leftOp, mapper)),
+    normalizeHierarchy(resolveHierarchy(rightOp, mapper)),
+  ];
+}
+
+function getStrictPrefixes(segments: string[], delimiter: string): string[] {
+  if (segments.length <= 1) return [];
+  const prefixes: string[] = [];
+  let current = segments[0]!;
+  prefixes.push(current);
+  for (let i = 1; i < segments.length - 1; i++) {
+    current = current + delimiter + segments[i]!;
+    prefixes.push(current);
+  }
+  return prefixes;
+}
+
+function handleAncestorDescendantOperator(
+  operands: PlanExpressionOperand[],
+  mapper: Mapper,
+  direction: "ancestor" | "descendant"
+): PrismaFilter {
+  const operatorName = direction === "ancestor" ? "ancestorOf" : "descendentOf";
+  const [left, right] = extractHierarchyOperands(operatorName, operands, mapper);
+
+  // ancestorOf(A, B) = A is strict prefix of B
+  // descendentOf(A, B) = B is strict prefix of A
+  const ancestor = direction === "ancestor" ? left : right;
+  const descendant = direction === "ancestor" ? right : left;
+
+  if (ancestor.type === "constant" && descendant.type === "field") {
+    const prefix = ancestor.segments.join(descendant.delimiter) + descendant.delimiter;
+    return buildFieldFilter(descendant.fieldRef, "startsWith", prefix);
+  }
+
+  if (ancestor.type === "field" && descendant.type === "constant") {
+    const delimiter = ancestor.delimiter;
+    const prefixes = getStrictPrefixes(descendant.segments, delimiter);
+    if (prefixes.length === 0) {
+      return buildImpossibleFilter(ancestor.fieldRef);
+    }
+    if (prefixes.length === 1) {
+      return buildFieldFilter(ancestor.fieldRef, "equals", prefixes[0]!);
+    }
+    return buildFieldFilter(ancestor.fieldRef, "in", prefixes);
+  }
+
+  if (ancestor.type === "constant" && descendant.type === "constant") {
+    const ancestorSegs = ancestor.segments;
+    const descendantSegs = descendant.segments;
+    if (
+      descendantSegs.length > ancestorSegs.length &&
+      ancestorSegs.every((seg, i) => seg === descendantSegs[i])
+    ) {
+      return {};
+    }
+    throw new Error(`${operatorName}: constants do not satisfy ${direction} relationship`);
+  }
+
+  throw new Error(`${operatorName}: unsupported hierarchy type combination`);
+}
+
+function buildFieldFilter(
+  fieldRef: ResolvedFieldReference,
+  prismaOp: string,
+  value: Value
+): PrismaFilter {
+  const fieldName = getLeafField(fieldRef.path);
+  return wrapRelations(fieldRef.relations, {
+    [fieldName]: { [prismaOp]: value },
   });
 }
