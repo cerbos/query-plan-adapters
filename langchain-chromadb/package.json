@@ -57,7 +57,7 @@
     "start-server-and-test": "^3.0.0",
     "ts-jest": "^29.4.6",
     "ts-node": "^10.4.0",
-    "typescript": "^5.0.0"
+    "typescript": "^6.0.0"
   },
   "dependencies": {
     "@cerbos/core": "^0.28.0",
