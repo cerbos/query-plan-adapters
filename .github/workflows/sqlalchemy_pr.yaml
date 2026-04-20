@@ -5,6 +5,8 @@ on:
     paths:
       - "sqlalchemy/**"
       - "policies/**"
+      - ".github/workflows/sqlalchemy_pr.yaml"
+      - ".github/workflows/sqlalchemy_release.yaml"
     branches:
       - main
 

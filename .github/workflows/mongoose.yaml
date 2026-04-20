@@ -5,6 +5,8 @@ on:
     paths:
       - "mongoose/**"
       - "policies/**"
+      - ".github/workflows/mongoose.yaml"
+      - ".github/workflows/mongoose-publish.yaml"
   push:
     tags:
       - mongoose/v*

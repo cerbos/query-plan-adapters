@@ -4,6 +4,9 @@ on:
   pull_request:
     paths:
       - "drizzle/**"
+      - "policies/**"
+      - ".github/workflows/drizzle.yaml"
+      - ".github/workflows/drizzle-publish.yaml"
   push:
     tags:
       - drizzle/v*

@@ -5,6 +5,8 @@ on:
     paths:
       - "convex/**"
       - "policies/**"
+      - ".github/workflows/convex.yaml"
+      - ".github/workflows/convex-publish.yaml"
   push:
     tags:
       - convex/v*
