@@ -5,6 +5,7 @@ on:
     paths:
       - "elasticsearch-java/**"
       - "policies/**"
+      - ".github/workflows/elasticsearch-java.yaml"
   push:
     tags:
       - elasticsearch-java/v*

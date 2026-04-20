@@ -5,6 +5,8 @@ on:
     paths:
       - "langchain-chromadb/**"
       - "policies/**"
+      - ".github/workflows/chromadb.yaml"
+      - ".github/workflows/chromadb-publish.yaml"
   push:
     tags:
       - langchain-chromadb/v*

@@ -5,6 +5,8 @@ on:
     paths:
       - "prisma/**"
       - "policies/**"
+      - ".github/workflows/prisma.yaml"
+      - ".github/workflows/prisma-publish.yaml"
   push:
     tags:
       - prisma/v*
