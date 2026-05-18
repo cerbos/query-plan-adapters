@@ -282,9 +282,7 @@ class TestGetQuery:
     def test_not_starts_with(
         self, cerbos_client, principal, resource_desc, resource_table, conn
     ):
-        plan = cerbos_client.plan_resources(
-            "not-starts-with", principal, resource_desc
-        )
+        plan = cerbos_client.plan_resources("not-starts-with", principal, resource_desc)
         attr = {
             "request.resource.attr.aString": resource_table.aString,
         }
@@ -465,6 +463,105 @@ class TestGetQuery:
         )
         res = conn.execute(query).fetchall()
         assert len(res) == 3
+
+    def test_is_not_set(
+        self, cerbos_client, principal, resource_desc, resource_table, conn
+    ):
+        # `aOptionalString == null` -> Cerbos emits `eq(var, null)`. The
+        # adapter resolves this to `col == None`, which SQLAlchemy lowers to
+        # `IS NULL`. The test schema has no nullable optional column, so we
+        # map onto `aString` (always populated): the predicate emits valid
+        # SQL but matches no rows.
+        plan = cerbos_client.plan_resources("is-not-set", principal, resource_desc)
+        attr = {
+            "request.resource.attr.aOptionalString": resource_table.aString,
+        }
+        query = get_query(plan, resource_table, attr)
+        assert "IS NULL" in str(query.compile(compile_kwargs={"literal_binds": True}))
+        res = conn.execute(query).fetchall()
+        assert len(res) == 0
+
+    def test_equal_field_to_field(
+        self, cerbos_client, principal, resource_desc, resource_table, conn
+    ):
+        # `aString == id` -> both operands are `variable`. The adapter's
+        # boolean-leaf path expects exactly one `variable` and one `value`
+        # operand and currently raises `KeyError: 'value'` when both sides
+        # are variables.
+        # TODO: extend the SQLAlchemy adapter to resolve variable-vs-variable
+        # comparisons (both sides via `resolve_variable`).
+        plan = cerbos_client.plan_resources(
+            "equal-field-to-field", principal, resource_desc
+        )
+        attr = {
+            "request.resource.attr.aString": resource_table.aString,
+            "request.resource.attr.id": resource_table.id,
+        }
+        with pytest.raises(KeyError):
+            get_query(plan, resource_table, attr)
+
+    def test_equal_bool_false(
+        self, cerbos_client, principal, resource_desc, resource_table, conn
+    ):
+        plan = cerbos_client.plan_resources(
+            "equal-bool-false", principal, resource_desc
+        )
+        attr = {
+            "request.resource.attr.aBool": resource_table.aBool,
+        }
+        query = get_query(plan, resource_table, attr)
+        res = conn.execute(query).fetchall()
+        assert len(res) == 1
+        assert res[0].name == "resource2"
+
+    def test_in_number(
+        self, cerbos_client, principal, resource_desc, resource_table, conn
+    ):
+        plan = cerbos_client.plan_resources("in-number", principal, resource_desc)
+        attr = {
+            "request.resource.attr.aNumber": resource_table.aNumber,
+        }
+        query = get_query(plan, resource_table, attr)
+        res = conn.execute(query).fetchall()
+        assert len(res) == 3
+
+    def test_or_leaf_exists(
+        self, cerbos_client, principal, resource_desc, resource_table, conn
+    ):
+        # `aBool == true || tags.exists(t, t.name == "public")`. `tags` is
+        # not a real column on the test schema; the caller supplies an
+        # `exists` override that reports membership against whatever shape
+        # they store. The adapter resolves operands eagerly before calling
+        # an override, so the comprehension variable (`t.name`) must also
+        # be present in the attr map. Here we pretend no row has a matching
+        # tag so the `or` collapses to `aBool == true` and matches
+        # resource1+resource3.
+        plan = cerbos_client.plan_resources("or-leaf-exists", principal, resource_desc)
+        attr = {
+            "request.resource.attr.aBool": resource_table.aBool,
+            "request.resource.attr.tags": resource_table.name,
+            # Cerbos emits the comprehension iterator as a bare `t`
+            # variable and a `t.name` field reference. We dummy both onto
+            # an existing column; the `exists` override never reads them.
+            "t": resource_table.name,
+            "t.name": resource_table.name,
+        }
+        operator_override_fns = {
+            # The `lambda` carries the predicate body for `exists`; we
+            # discard it and let the outer `exists` override decide the
+            # result.
+            "lambda": lambda *_: literal(False),
+            "exists": lambda *_: literal(False),
+        }
+        query = get_query(
+            plan,
+            resource_table,
+            attr,
+            operator_override_fns=operator_override_fns,
+        )
+        res = conn.execute(query).fetchall()
+        assert len(res) == 2
+        assert all(map(lambda x: x.name in {"resource1", "resource3"}, res))
 
 
 class TestGetQueryOverrides:

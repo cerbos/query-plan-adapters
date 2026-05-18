@@ -450,6 +450,77 @@ describe("Field Operations", () => {
       );
     });
 
+    test("conditional - eq - bool false", async () => {
+      const queryPlan = await cerbos.planResources({
+        principal: { id: "user1", roles: ["USER"] },
+        resource: { kind: "resource" },
+        action: "equal-bool-false",
+      });
+
+      expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+      expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual(
+        {
+          operator: "eq",
+          operands: [{ name: "request.resource.attr.aBool" }, { value: false }],
+        }
+      );
+
+      const result = queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.aBool": { field: "aBool" },
+        },
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: { aBool: { equals: false } },
+      });
+
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
+
+      const query = await prisma.resource.findMany({
+        where: { ...result.filters },
+      });
+      expect(query.map((r) => r.id)).toEqual(
+        fixtureResources.filter((a) => a.aBool === false).map((r) => r.id)
+      );
+    });
+
+    test("conditional - eq - field to field", async () => {
+      // TODO: field-to-field comparison support is a follow-up — Prisma adapter
+      // currently only handles field-to-value. This test pins the plan shape and
+      // asserts the adapter throws so behaviour is locked in.
+      const queryPlan = await cerbos.planResources({
+        principal: { id: "user1", roles: ["USER"] },
+        resource: { kind: "resource" },
+        action: "equal-field-to-field",
+      });
+
+      expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+      expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual(
+        {
+          operator: "eq",
+          operands: [
+            { name: "request.resource.attr.aString" },
+            { name: "request.resource.attr.id" },
+          ],
+        }
+      );
+
+      expect(() =>
+        queryPlanToPrisma({
+          queryPlan,
+          mapper: {
+            "request.resource.attr.aString": { field: "aString" },
+            "request.resource.attr.id": { field: "id" },
+          },
+        })
+      ).toThrow(/Right operand must be a value/);
+    });
+
     test("conditional - ne", async () => {
       const queryPlan = await cerbos.planResources({
         principal: { id: "user1", roles: ["USER"] },
@@ -1363,6 +1434,51 @@ describe("Field Operations", () => {
         fixtureResources.filter((a) => a.aOptionalString).map((r) => r.id)
       );
     });
+
+    test("conditional - isNotSet", async () => {
+      const queryPlan = await cerbos.planResources({
+        principal: { id: "user1", roles: ["USER"] },
+        resource: { kind: "resource" },
+        action: "is-not-set",
+      });
+
+      expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+      expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual(
+        {
+          operator: "eq",
+          operands: [
+            { name: "request.resource.attr.aOptionalString" },
+            { value: null },
+          ],
+        }
+      );
+
+      const result = queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.aOptionalString": { field: "aOptionalString" },
+        },
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: { aOptionalString: { equals: null } },
+      });
+
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
+
+      const query = await prisma.resource.findMany({
+        where: { ...result.filters },
+      });
+      expect(query.map((r) => r.id).sort()).toEqual(
+        fixtureResources
+          .filter((a) => a.aOptionalString == null)
+          .map((r) => r.id)
+          .sort()
+      );
+    });
   });
 });
 
@@ -1414,6 +1530,53 @@ describe("Collection Operations", () => {
             return ["string", "anotherString"].includes(r.aString);
           })
           .map((r) => r.id)
+      );
+    });
+
+    test("conditional - in - number list", async () => {
+      const queryPlan = await cerbos.planResources({
+        principal: { id: "user1", roles: ["USER"] },
+        resource: { kind: "resource" },
+        action: "in-number",
+      });
+
+      expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+      expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual(
+        {
+          operator: "in",
+          operands: [
+            { name: "request.resource.attr.aNumber" },
+            { value: [1, 2, 3] },
+          ],
+        }
+      );
+
+      const result = queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.aNumber": { field: "aNumber" },
+        },
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          aNumber: { in: [1, 2, 3] },
+        },
+      });
+
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
+
+      const query = await prisma.resource.findMany({
+        where: { ...result.filters },
+      });
+      expect(query.map((r) => r.id).sort()).toEqual(
+        fixtureResources
+          .filter((r) => [1, 2, 3].includes(r.aNumber as number))
+          .map((r) => r.id)
+          .sort()
       );
     });
 
@@ -4097,6 +4260,95 @@ describe("Complex Operations", () => {
             return r.aBool || r.aString != "string";
           })
           .map((r) => r.id)
+      );
+    });
+
+    test("conditional - or - leaf and exists", async () => {
+      const queryPlan = await cerbos.planResources({
+        principal: { id: "user1", roles: ["USER"] },
+        resource: { kind: "resource" },
+        action: "or-leaf-exists",
+      });
+
+      expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+      expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual(
+        {
+          operator: "or",
+          operands: [
+            {
+              operator: "eq",
+              operands: [
+                { name: "request.resource.attr.aBool" },
+                { value: true },
+              ],
+            },
+            {
+              operator: "exists",
+              operands: [
+                { name: "request.resource.attr.tags" },
+                {
+                  operator: "lambda",
+                  operands: [
+                    {
+                      operator: "eq",
+                      operands: [
+                        { name: "t.name" },
+                        { value: "public" },
+                      ],
+                    },
+                    { name: "t" },
+                  ],
+                },
+              ],
+            },
+          ],
+        }
+      );
+
+      const result = queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.aBool": { field: "aBool" },
+          "request.resource.attr.tags": {
+            relation: {
+              name: "tags",
+              type: "many",
+            },
+          },
+        },
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          OR: [
+            { aBool: { equals: true } },
+            { tags: { some: { name: { equals: "public" } } } },
+          ],
+        },
+      });
+
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
+
+      const query = await prisma.resource.findMany({
+        where: { ...result.filters },
+      });
+      expect(query.map((r) => r.id).sort()).toEqual(
+        fixtureResources
+          .filter((r) => {
+            if (r.aBool) return true;
+            const tagRefs = Array.isArray(r.tags?.connect)
+              ? r.tags.connect
+              : [];
+            return tagRefs.some((tagRef) => {
+              const tag = fixtureTags.find((t) => t.id === tagRef.id);
+              return tag?.name === "public";
+            });
+          })
+          .map((r) => r.id)
+          .sort()
       );
     });
 
