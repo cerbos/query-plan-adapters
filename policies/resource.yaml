@@ -663,6 +663,64 @@ resourcePolicy:
               - expr: P.attr.context == "projects:" + request.resource.attr.id
 
     - actions:
+        - "not-and"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: >
+            !(request.resource.attr.aBool == true && request.resource.attr.aString != "string")
+
+    - actions:
+        - "not-or"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: >
+            !(request.resource.attr.aBool == true || request.resource.attr.aString != "string")
+
+    - actions:
+        - "not-gt"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: >
+            !(request.resource.attr.aNumber > 1)
+
+    - actions:
+        - "not-lt"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: >
+            !(request.resource.attr.aNumber < 2)
+
+    - actions:
+        - "not-contains"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: "!request.resource.attr.aString.contains(\"str\")"
+
+    - actions:
+        - "not-starts-with"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: "!request.resource.attr.aString.startsWith(\"str\")"
+
+    - actions:
         - "hierarchy-overlaps"
       effect: EFFECT_ALLOW
       roles:

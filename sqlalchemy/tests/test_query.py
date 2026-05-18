@@ -6,7 +6,7 @@ from cerbos.sdk.model import (
 )
 
 from cerbos_sqlalchemy import get_query
-from sqlalchemy import any_
+from sqlalchemy import any_, func
 
 
 def _default_resp_params():
@@ -202,6 +202,103 @@ class TestGetQuery:
         }
         table_mapping = [(user_table, resource_table.ownedBy == user_table.id)]
         query = get_query(plan, resource_table, attr, table_mapping)
+        res = conn.execute(query).fetchall()
+        assert len(res) == 2
+        assert all(map(lambda x: x.name in {"resource2", "resource3"}, res))
+
+    def test_not_and_demorgan(
+        self, cerbos_client, principal, resource_desc, resource_table, conn
+    ):
+        plan = cerbos_client.plan_resources("not-and", principal, resource_desc)
+        attr = {
+            "request.resource.attr.aBool": resource_table.aBool,
+            "request.resource.attr.aString": resource_table.aString,
+        }
+        query = get_query(plan, resource_table, attr)
+        res = conn.execute(query).fetchall()
+        assert len(res) == 2
+        assert all(map(lambda x: x.name in {"resource1", "resource2"}, res))
+
+    def test_not_or_demorgan(
+        self, cerbos_client, principal, resource_desc, resource_table, conn
+    ):
+        plan = cerbos_client.plan_resources("not-or", principal, resource_desc)
+        attr = {
+            "request.resource.attr.aBool": resource_table.aBool,
+            "request.resource.attr.aString": resource_table.aString,
+        }
+        query = get_query(plan, resource_table, attr)
+        res = conn.execute(query).fetchall()
+        assert len(res) == 0
+
+    def test_not_gt(
+        self, cerbos_client, principal, resource_desc, resource_table, conn
+    ):
+        plan = cerbos_client.plan_resources("not-gt", principal, resource_desc)
+        attr = {
+            "request.resource.attr.aNumber": resource_table.aNumber,
+        }
+        query = get_query(plan, resource_table, attr)
+        res = conn.execute(query).fetchall()
+        assert len(res) == 1
+        assert res[0].name == "resource1"
+
+    def test_not_lt(
+        self, cerbos_client, principal, resource_desc, resource_table, conn
+    ):
+        plan = cerbos_client.plan_resources("not-lt", principal, resource_desc)
+        attr = {
+            "request.resource.attr.aNumber": resource_table.aNumber,
+        }
+        query = get_query(plan, resource_table, attr)
+        res = conn.execute(query).fetchall()
+        assert len(res) == 2
+        assert all(map(lambda x: x.name in {"resource2", "resource3"}, res))
+
+    def test_not_contains(
+        self, cerbos_client, principal, resource_desc, resource_table, conn
+    ):
+        plan = cerbos_client.plan_resources("not-contains", principal, resource_desc)
+        attr = {
+            "request.resource.attr.aString": resource_table.aString,
+        }
+        # `contains` is not a default operator in the SQLAlchemy adapter; supply
+        # an override. We use `instr` rather than `LIKE` because SQLite's `LIKE`
+        # is case-insensitive by default whereas CEL `String.contains` is
+        # case-sensitive (matching e.g. Postgres `LIKE`).
+        operator_override_fns = {
+            "contains": lambda c, v: func.instr(c, v) > 0,
+        }
+        query = get_query(
+            plan,
+            resource_table,
+            attr,
+            operator_override_fns=operator_override_fns,
+        )
+        res = conn.execute(query).fetchall()
+        assert len(res) == 2
+        assert all(map(lambda x: x.name in {"resource2", "resource3"}, res))
+
+    def test_not_starts_with(
+        self, cerbos_client, principal, resource_desc, resource_table, conn
+    ):
+        plan = cerbos_client.plan_resources(
+            "not-starts-with", principal, resource_desc
+        )
+        attr = {
+            "request.resource.attr.aString": resource_table.aString,
+        }
+        # `startsWith` is not a default operator in the SQLAlchemy adapter;
+        # supply a case-sensitive override (CEL `String.startsWith` semantics).
+        operator_override_fns = {
+            "startsWith": lambda c, v: func.substr(c, 1, func.length(v)) == v,
+        }
+        query = get_query(
+            plan,
+            resource_table,
+            attr,
+            operator_override_fns=operator_override_fns,
+        )
         res = conn.execute(query).fetchall()
         assert len(res) == 2
         assert all(map(lambda x: x.name in {"resource2", "resource3"}, res))

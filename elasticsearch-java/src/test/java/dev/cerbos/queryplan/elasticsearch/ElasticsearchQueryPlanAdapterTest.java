@@ -301,6 +301,130 @@ class ElasticsearchQueryPlanAdapterTest {
     }
 
     @Test
+    void notAndProducesMustNotWrappingAnd() {
+        // !(aBool==true && aString!="string")
+        Operand condition = expressionOperand("not",
+                expressionOperand("and",
+                        expressionOperand("eq",
+                                variableOperand("request.resource.attr.aBool"),
+                                boolValueOperand(true)),
+                        expressionOperand("ne",
+                                variableOperand("request.resource.attr.aString"),
+                                stringValueOperand("string"))));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
+
+        Map<String, Object> query = ((Result.Conditional) result).query();
+        assertEquals(
+                Map.of("bool", Map.of("must_not", List.of(
+                        Map.of("bool", Map.of("must", List.of(
+                                Map.of("term", Map.of("aBool", Map.of("value", true))),
+                                Map.of("bool", Map.of("must_not", List.of(
+                                        Map.of("term", Map.of("aString", Map.of("value", "string"))))))))))) ),
+                query);
+    }
+
+    @Test
+    void notOrProducesMustNotWrappingOr() {
+        // !(aBool==true || aString!="string")
+        Operand condition = expressionOperand("not",
+                expressionOperand("or",
+                        expressionOperand("eq",
+                                variableOperand("request.resource.attr.aBool"),
+                                boolValueOperand(true)),
+                        expressionOperand("ne",
+                                variableOperand("request.resource.attr.aString"),
+                                stringValueOperand("string"))));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
+
+        Map<String, Object> query = ((Result.Conditional) result).query();
+        assertEquals(
+                Map.of("bool", Map.of("must_not", List.of(
+                        Map.of("bool", Map.of(
+                                "should", List.of(
+                                        Map.of("term", Map.of("aBool", Map.of("value", true))),
+                                        Map.of("bool", Map.of("must_not", List.of(
+                                                Map.of("term", Map.of("aString", Map.of("value", "string"))))))),
+                                "minimum_should_match", 1))))),
+                query);
+    }
+
+    @Test
+    void notGtProducesMustNotWrappingRange() {
+        // !(aNumber > 1)
+        Operand condition = expressionOperand("not",
+                expressionOperand("gt",
+                        variableOperand("request.resource.attr.aNumber"),
+                        numberValueOperand(1)));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
+
+        Map<String, Object> query = ((Result.Conditional) result).query();
+        assertEquals(
+                Map.of("bool", Map.of("must_not", List.of(
+                        Map.of("range", Map.of("aNumber", Map.of("gt", 1L)))))),
+                query);
+    }
+
+    @Test
+    void notLtProducesMustNotWrappingRange() {
+        // !(aNumber < 2)
+        Operand condition = expressionOperand("not",
+                expressionOperand("lt",
+                        variableOperand("request.resource.attr.aNumber"),
+                        numberValueOperand(2)));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
+
+        Map<String, Object> query = ((Result.Conditional) result).query();
+        assertEquals(
+                Map.of("bool", Map.of("must_not", List.of(
+                        Map.of("range", Map.of("aNumber", Map.of("lt", 2L)))))),
+                query);
+    }
+
+    @Test
+    void notContainsProducesMustNotWrappingWildcard() {
+        // !aString.contains("str")
+        Operand condition = expressionOperand("not",
+                expressionOperand("contains",
+                        variableOperand("request.resource.attr.aString"),
+                        stringValueOperand("str")));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
+
+        Map<String, Object> query = ((Result.Conditional) result).query();
+        assertEquals(
+                Map.of("bool", Map.of("must_not", List.of(
+                        Map.of("wildcard", Map.of("aString", Map.of("value", "*str*")))))),
+                query);
+    }
+
+    @Test
+    void notStartsWithProducesMustNotWrappingPrefix() {
+        // !aString.startsWith("str")
+        Operand condition = expressionOperand("not",
+                expressionOperand("startsWith",
+                        variableOperand("request.resource.attr.aString"),
+                        stringValueOperand("str")));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
+
+        Map<String, Object> query = ((Result.Conditional) result).query();
+        assertEquals(
+                Map.of("bool", Map.of("must_not", List.of(
+                        Map.of("prefix", Map.of("aString", Map.of("value", "str")))))),
+                query);
+    }
+
+    @Test
     void containsProducesWildcardQuery() {
         Operand condition = expressionOperand("contains",
                 variableOperand("request.resource.attr.title"),

@@ -376,6 +376,212 @@ describe("Logical Operations", () => {
   });
 });
 
+describe("Negation Operations", () => {
+  test("conditional - not-and (DeMorgan over AND)", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "not-and",
+    });
+
+    const typeQp = queryPlan as PlanResourcesConditionalResponse;
+    const condition = typeQp.condition as PlanExpression;
+    expect(condition.operator).toBe("not");
+    const inner = condition.operands[0] as PlanExpression;
+    expect(inner.operator).toBe("and");
+    expect((inner.operands[0] as PlanExpression).operator).toBe("eq");
+    expect((inner.operands[1] as PlanExpression).operator).toBe("ne");
+
+    const result = queryPlanToConvex({ queryPlan, mapper: defaultMapper });
+
+    expect(result.kind).toBe(PlanKind.CONDITIONAL);
+    expect(result.filter).toBeDefined();
+    expect(result.postFilter).toBeUndefined();
+
+    const filtered = applyFilter(fixtureResources, result.filter!);
+    expect(filtered.map((r) => r.key)).toEqual(
+      fixtureResources
+        .filter((r) => !(r.aBool === true && r.aString !== "string"))
+        .map((r) => r.key),
+    );
+  });
+
+  test("conditional - not-or (DeMorgan over OR)", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "not-or",
+    });
+
+    const typeQp = queryPlan as PlanResourcesConditionalResponse;
+    const condition = typeQp.condition as PlanExpression;
+    expect(condition.operator).toBe("not");
+    const inner = condition.operands[0] as PlanExpression;
+    expect(inner.operator).toBe("or");
+    expect((inner.operands[0] as PlanExpression).operator).toBe("eq");
+    expect((inner.operands[1] as PlanExpression).operator).toBe("ne");
+
+    const result = queryPlanToConvex({ queryPlan, mapper: defaultMapper });
+
+    expect(result.kind).toBe(PlanKind.CONDITIONAL);
+    expect(result.filter).toBeDefined();
+    expect(result.postFilter).toBeUndefined();
+
+    const filtered = applyFilter(fixtureResources, result.filter!);
+    expect(filtered.map((r) => r.key)).toEqual(
+      fixtureResources
+        .filter((r) => !(r.aBool === true || r.aString !== "string"))
+        .map((r) => r.key),
+    );
+  });
+
+  test("conditional - not-gt", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "not-gt",
+    });
+
+    const typeQp = queryPlan as PlanResourcesConditionalResponse;
+    const condition = typeQp.condition as PlanExpression;
+    expect(condition.operator).toBe("not");
+    const inner = condition.operands[0] as PlanExpression;
+    expect(inner.operator).toBe("gt");
+
+    const result = queryPlanToConvex({ queryPlan, mapper: defaultMapper });
+
+    expect(result.kind).toBe(PlanKind.CONDITIONAL);
+    expect(result.filter).toBeDefined();
+    expect(result.postFilter).toBeUndefined();
+
+    const filtered = applyFilter(fixtureResources, result.filter!);
+    expect(filtered.map((r) => r.key)).toEqual(
+      fixtureResources
+        .filter((r) => !(r.aNumber > 1))
+        .map((r) => r.key),
+    );
+  });
+
+  test("conditional - not-lt", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "not-lt",
+    });
+
+    const typeQp = queryPlan as PlanResourcesConditionalResponse;
+    const condition = typeQp.condition as PlanExpression;
+    expect(condition.operator).toBe("not");
+    const inner = condition.operands[0] as PlanExpression;
+    expect(inner.operator).toBe("lt");
+
+    const result = queryPlanToConvex({ queryPlan, mapper: defaultMapper });
+
+    expect(result.kind).toBe(PlanKind.CONDITIONAL);
+    expect(result.filter).toBeDefined();
+    expect(result.postFilter).toBeUndefined();
+
+    const filtered = applyFilter(fixtureResources, result.filter!);
+    expect(filtered.map((r) => r.key)).toEqual(
+      fixtureResources
+        .filter((r) => !(r.aNumber < 2))
+        .map((r) => r.key),
+    );
+  });
+
+  test("conditional - not-contains (postFilter)", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "not-contains",
+    });
+
+    const typeQp = queryPlan as PlanResourcesConditionalResponse;
+    const condition = typeQp.condition as PlanExpression;
+    expect(condition.operator).toBe("not");
+    const inner = condition.operands[0] as PlanExpression;
+    expect(inner.operator).toBe("contains");
+
+    // contains is not DB-pushable, so this falls back to postFilter
+    const result = queryPlanToConvex({
+      queryPlan,
+      mapper: defaultMapper,
+      allowPostFilter: true,
+    });
+
+    expect(result.kind).toBe(PlanKind.CONDITIONAL);
+    expect(result.filter).toBeUndefined();
+    expect(result.postFilter).toBeDefined();
+
+    const filtered = fixtureResources.filter((r) =>
+      result.postFilter!(r as unknown as Record<string, unknown>),
+    );
+    expect(filtered.map((r) => r.key)).toEqual(
+      fixtureResources
+        .filter((r) => !r.aString.includes("str"))
+        .map((r) => r.key),
+    );
+  });
+
+  test("conditional - not-contains throws without allowPostFilter", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "not-contains",
+    });
+
+    expect(() =>
+      queryPlanToConvex({ queryPlan, mapper: defaultMapper }),
+    ).toThrow("allowPostFilter");
+  });
+
+  test("conditional - not-starts-with (postFilter)", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "not-starts-with",
+    });
+
+    const typeQp = queryPlan as PlanResourcesConditionalResponse;
+    const condition = typeQp.condition as PlanExpression;
+    expect(condition.operator).toBe("not");
+    const inner = condition.operands[0] as PlanExpression;
+    expect(inner.operator).toBe("startsWith");
+
+    // startsWith is not DB-pushable, so this falls back to postFilter
+    const result = queryPlanToConvex({
+      queryPlan,
+      mapper: defaultMapper,
+      allowPostFilter: true,
+    });
+
+    expect(result.kind).toBe(PlanKind.CONDITIONAL);
+    expect(result.filter).toBeUndefined();
+    expect(result.postFilter).toBeDefined();
+
+    const filtered = fixtureResources.filter((r) =>
+      result.postFilter!(r as unknown as Record<string, unknown>),
+    );
+    expect(filtered.map((r) => r.key)).toEqual(
+      fixtureResources
+        .filter((r) => !r.aString.startsWith("str"))
+        .map((r) => r.key),
+    );
+  });
+
+  test("conditional - not-starts-with throws without allowPostFilter", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "not-starts-with",
+    });
+
+    expect(() =>
+      queryPlanToConvex({ queryPlan, mapper: defaultMapper }),
+    ).toThrow("allowPostFilter");
+  });
+});
+
 describe("Collection Operations", () => {
   test("conditional - in", async () => {
     const queryPlan = await cerbos.planResources({
