@@ -902,6 +902,184 @@ describe("Collection Operations", () => {
         .map((r) => r.key)
     );
   });
+
+  test("conditional - all-nested (multi-clause lambda body)", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "all-nested",
+    });
+
+    expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+    expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+      operator: "all",
+      operands: [
+        { name: "request.resource.attr.tags" },
+        {
+          operator: "lambda",
+          operands: [
+            {
+              operator: "and",
+              operands: [
+                {
+                  operator: "eq",
+                  operands: [{ name: "tag.name" }, { value: "public" }],
+                },
+                {
+                  operator: "ne",
+                  operands: [{ name: "tag.id" }, { value: "tag1" }],
+                },
+              ],
+            },
+            { name: "tag" },
+          ],
+        },
+      ],
+    });
+
+    const result = queryPlanToMongoose({
+      queryPlan,
+      mapper: {
+        ...defaultMapper,
+        "request.resource.attr.tags": {
+          relation: {
+            name: "tags",
+            type: "many",
+          },
+        },
+      },
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        tags: {
+          $not: {
+            $elemMatch: {
+              $nor: [
+                {
+                  $and: [
+                    { name: { $eq: "public" } },
+                    { id: { $ne: "tag1" } },
+                  ],
+                },
+              ],
+            },
+          },
+        },
+      },
+    });
+
+    const query = await Resource.find(result.filters || {});
+    expect(query.map((r) => r.key).sort()).toEqual(
+      fixtureResources
+        .filter((r) =>
+          r.tags.every((t) => t.name === "public" && t.id !== "tag1")
+        )
+        .map((r) => r.key)
+        .sort()
+    );
+  });
+
+  test("conditional - map-compared (map(...) == literal list)", async () => {
+    // TODO(#232): mongoose adapter does not yet support `map(...) == [..]` —
+    // the comparison falls through to the `$expr` aggregation path, which
+    // does not implement `map`/`filter` operators. Locks in current behavior.
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "map-compared",
+    });
+
+    expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+    expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+      operator: "eq",
+      operands: [
+        {
+          operator: "map",
+          operands: [
+            { name: "request.resource.attr.tags" },
+            {
+              operator: "lambda",
+              operands: [{ name: "t.id" }, { name: "t" }],
+            },
+          ],
+        },
+        { value: ["tag1", "tag2"] },
+      ],
+    });
+
+    expect(() =>
+      queryPlanToMongoose({
+        queryPlan,
+        mapper: {
+          ...defaultMapper,
+          "request.resource.attr.tags": {
+            relation: {
+              name: "tags",
+              type: "many",
+            },
+          },
+        },
+      })
+    ).toThrow();
+  });
+
+  test("conditional - filter-count-gt (size(filter(...)) > 0)", async () => {
+    // TODO(#232): mongoose adapter does not yet unwrap
+    // `size(filter(collection, lambda)) > N`. The outer `gt` routes to the
+    // `$expr` aggregation builder, which does not implement `filter`.
+    // Locks in current behavior.
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "filter-count-gt",
+    });
+
+    expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+    expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+      operator: "gt",
+      operands: [
+        {
+          operator: "size",
+          operands: [
+            {
+              operator: "filter",
+              operands: [
+                { name: "request.resource.attr.tags" },
+                {
+                  operator: "lambda",
+                  operands: [
+                    {
+                      operator: "eq",
+                      operands: [{ name: "t.name" }, { value: "public" }],
+                    },
+                    { name: "t" },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        { value: 0 },
+      ],
+    });
+
+    expect(() =>
+      queryPlanToMongoose({
+        queryPlan,
+        mapper: {
+          ...defaultMapper,
+          "request.resource.attr.tags": {
+            relation: {
+              name: "tags",
+              type: "many",
+            },
+          },
+        },
+      })
+    ).toThrow();
+  });
 });
 
 describe("Logical Operations", () => {

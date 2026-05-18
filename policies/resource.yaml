@@ -886,6 +886,33 @@ resourcePolicy:
               - expr: R.attr.tags.exists(t, t.name == "public")
 
     - actions:
+        - "all-nested"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.tags.all(tag, tag.name == "public" && tag.id != "tag1")
+
+    - actions:
+        - "map-compared"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.tags.map(t, t.id) == ["tag1", "tag2"]
+
+    - actions:
+        - "filter-count-gt"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(R.attr.tags.filter(t, t.name == "public")) > 0
+
+    - actions:
         - "hierarchy-overlaps"
       effect: EFFECT_ALLOW
       roles:

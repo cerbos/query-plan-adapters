@@ -1075,3 +1075,63 @@ test("conditional - or-leaf-exists (unsupported)", async () => {
     }),
   ).toThrow();
 });
+
+// TODO(#232): ChromaDB cannot express relation-style nested matches —
+// all three collection-macro composition shapes throw. Locked in here so a
+// deliberate update is required if ChromaDB ever supports nested metadata.
+test("conditional - all-nested (unsupported)", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "all-nested",
+  });
+
+  expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+
+  expect(() =>
+    queryPlanToChromaDB({
+      queryPlan,
+      fieldNameMapper: {
+        "request.resource.attr.tags": "tags",
+      },
+    }),
+  ).toThrow();
+});
+
+test("conditional - map-compared (unsupported)", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "map-compared",
+  });
+
+  expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+
+  expect(() =>
+    queryPlanToChromaDB({
+      queryPlan,
+      fieldNameMapper: {
+        "request.resource.attr.tags": "tags",
+      },
+    }),
+  ).toThrow();
+});
+
+test("conditional - filter-count-gt (unsupported)", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "filter-count-gt",
+  });
+
+  expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+
+  expect(() =>
+    queryPlanToChromaDB({
+      queryPlan,
+      fieldNameMapper: {
+        "request.resource.attr.tags": "tags",
+      },
+    }),
+  ).toThrow();
+});

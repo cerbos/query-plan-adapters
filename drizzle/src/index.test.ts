@@ -753,6 +753,8 @@ const conditionalActions = [
   "equal-bool-false",
   "in-number",
   "or-leaf-exists",
+  // Issue #232: collection macro composition.
+  "all-nested",
 ];
 
 beforeAll(() => {
@@ -1174,6 +1176,32 @@ describe("queryPlanToDrizzle", () => {
     expect(() =>
       queryPlanToDrizzle({ queryPlan, mapper })
     ).toThrow(/index/i);
+  });
+
+  // TODO(#232): drizzle adapter does not support map(...) == [...] — the
+  // map() expression resolves to a column projection, not a list comparable
+  // to a literal array. Lock in current behaviour.
+  test("throws for map-compared (map(t, t.id) == [..])", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "map-compared",
+    });
+
+    expect(() => queryPlanToDrizzle({ queryPlan, mapper })).toThrow();
+  });
+
+  // TODO(#232): drizzle adapter handles size(R.attr.collection) > N via a
+  // correlated COUNT subquery but does not unwrap size(filter(coll, lambda))
+  // — the inner filter() lambda is not pushed into the count predicate.
+  test("throws for filter-count-gt (size(filter(...)) > 0)", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "filter-count-gt",
+    });
+
+    expect(() => queryPlanToDrizzle({ queryPlan, mapper })).toThrow();
   });
 
   test("throws when mapping is missing", () => {
