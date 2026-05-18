@@ -2,6 +2,7 @@ import { test, expect, describe } from "@jest/globals";
 import { queryPlanToConvex, PlanKind, Mapper } from ".";
 import {
   PlanExpression,
+  PlanExpressionVariable,
   PlanResourcesConditionalResponse,
   PlanResourcesResponse,
 } from "@cerbos/core";
@@ -2213,5 +2214,191 @@ describe("Size Operator (postFilter)", () => {
     expect(() =>
       queryPlanToConvex({ queryPlan, mapper: defaultMapper }),
     ).toThrow("allowPostFilter");
+  });
+});
+
+describe("Collection Macro Composition (#232)", () => {
+  test("conditional - all-nested falls back to postFilter", async () => {
+    // all(R.attr.tags, lambda(and(eq(tag.name, "public"), ne(tag.id, "tag1")), tag))
+    // The `all` macro is not DB-pushable in Convex, so this falls back to postFilter.
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "all-nested",
+    });
+
+    expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+    const condition = (queryPlan as PlanResourcesConditionalResponse)
+      .condition as PlanExpression;
+    expect(condition.operator).toBe("all");
+    expect((condition.operands[0] as PlanExpressionVariable).name).toBe(
+      "request.resource.attr.tags",
+    );
+    const lambda = condition.operands[1] as PlanExpression;
+    expect(lambda.operator).toBe("lambda");
+    // Cerbos emits lambda operands as [body, var]
+    expect((lambda.operands[0] as PlanExpression).operator).toBe("and");
+    expect((lambda.operands[1] as PlanExpressionVariable).name).toBe("tag");
+
+    const mapper: Mapper = {
+      ...defaultMapper,
+      "request.resource.attr.tags": { field: "tags" },
+    };
+
+    const result = queryPlanToConvex({
+      queryPlan,
+      mapper,
+      allowPostFilter: true,
+    });
+
+    expect(result.kind).toBe(PlanKind.CONDITIONAL);
+    expect(result.filter).toBeUndefined();
+    expect(result.postFilter).toBeDefined();
+    // TODO(#232): the convex evaluator assumes lambda operands as [var, body]
+    // but Cerbos emits [body, var], so invoking the postFilter on real Cerbos
+    // plans throws (tracked alongside #229). For now we only assert the split
+    // (filter undefined, postFilter present).
+  });
+
+  test("conditional - all-nested throws without allowPostFilter", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "all-nested",
+    });
+
+    const mapper: Mapper = {
+      ...defaultMapper,
+      "request.resource.attr.tags": { field: "tags" },
+    };
+
+    expect(() => queryPlanToConvex({ queryPlan, mapper })).toThrow(
+      "allowPostFilter",
+    );
+  });
+
+  test("conditional - map-compared falls back to postFilter", async () => {
+    // eq(map(R.attr.tags, lambda(t.id, t)), ["tag1", "tag2"])
+    // The `map` macro is not DB-pushable; eq with a non-variable LHS forces postFilter.
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "map-compared",
+    });
+
+    expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+    const condition = (queryPlan as PlanResourcesConditionalResponse)
+      .condition as PlanExpression;
+    expect(condition.operator).toBe("eq");
+    const mapExpr = condition.operands[0] as PlanExpression;
+    expect(mapExpr.operator).toBe("map");
+    expect((mapExpr.operands[0] as PlanExpressionVariable).name).toBe(
+      "request.resource.attr.tags",
+    );
+    const lambda = mapExpr.operands[1] as PlanExpression;
+    expect(lambda.operator).toBe("lambda");
+    // Lambda body projects t.id; var is t. Cerbos emits [body, var].
+    expect((lambda.operands[0] as PlanExpressionVariable).name).toBe("t.id");
+    expect((lambda.operands[1] as PlanExpressionVariable).name).toBe("t");
+
+    const mapper: Mapper = {
+      ...defaultMapper,
+      "request.resource.attr.tags": { field: "tags" },
+    };
+
+    const result = queryPlanToConvex({
+      queryPlan,
+      mapper,
+      allowPostFilter: true,
+    });
+
+    expect(result.kind).toBe(PlanKind.CONDITIONAL);
+    expect(result.filter).toBeUndefined();
+    expect(result.postFilter).toBeDefined();
+    // TODO(#232): the convex evaluator assumes lambda operands as [var, body]
+    // but Cerbos emits [body, var]. For map-compared the lambda body is a
+    // variable (`t.id`) so the evaluator does not throw, but the resulting
+    // projection binds the wrong variable name and produces incorrect output.
+    // For now we only assert the split (filter undefined, postFilter present).
+  });
+
+  test("conditional - map-compared throws without allowPostFilter", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "map-compared",
+    });
+
+    const mapper: Mapper = {
+      ...defaultMapper,
+      "request.resource.attr.tags": { field: "tags" },
+    };
+
+    expect(() => queryPlanToConvex({ queryPlan, mapper })).toThrow(
+      "allowPostFilter",
+    );
+  });
+
+  test("conditional - filter-count-gt falls back to postFilter", async () => {
+    // gt(size(filter(R.attr.tags, lambda(eq(t.name, "public"), t))), 0)
+    // The `filter` and `size` operators are not DB-pushable, so this falls back to postFilter.
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "filter-count-gt",
+    });
+
+    expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+    const condition = (queryPlan as PlanResourcesConditionalResponse)
+      .condition as PlanExpression;
+    expect(condition.operator).toBe("gt");
+    const sizeExpr = condition.operands[0] as PlanExpression;
+    expect(sizeExpr.operator).toBe("size");
+    const filterExpr = sizeExpr.operands[0] as PlanExpression;
+    expect(filterExpr.operator).toBe("filter");
+    expect((filterExpr.operands[0] as PlanExpressionVariable).name).toBe(
+      "request.resource.attr.tags",
+    );
+    const lambda = filterExpr.operands[1] as PlanExpression;
+    expect(lambda.operator).toBe("lambda");
+    // Cerbos emits lambda operands as [body, var]
+    expect((lambda.operands[0] as PlanExpression).operator).toBe("eq");
+    expect((lambda.operands[1] as PlanExpressionVariable).name).toBe("t");
+
+    const mapper: Mapper = {
+      ...defaultMapper,
+      "request.resource.attr.tags": { field: "tags" },
+    };
+
+    const result = queryPlanToConvex({
+      queryPlan,
+      mapper,
+      allowPostFilter: true,
+    });
+
+    expect(result.kind).toBe(PlanKind.CONDITIONAL);
+    expect(result.filter).toBeUndefined();
+    expect(result.postFilter).toBeDefined();
+    // TODO(#232): invoking the postFilter on real Cerbos plans throws because
+    // the evaluator assumes lambda operands as [var, body] but Cerbos emits
+    // [body, var]. Tracked alongside #229. For now we only assert the split
+    // (filter undefined, postFilter present).
+  });
+
+  test("conditional - filter-count-gt throws without allowPostFilter", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "filter-count-gt",
+    });
+
+    const mapper: Mapper = {
+      ...defaultMapper,
+      "request.resource.attr.tags": { field: "tags" },
+    };
+
+    expect(() => queryPlanToConvex({ queryPlan, mapper })).toThrow(
+      "allowPostFilter",
+    );
   });
 });

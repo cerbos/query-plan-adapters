@@ -2439,6 +2439,214 @@ describe("Collection Operations", () => {
           .map((r) => r.id)
       );
     });
+
+    test("conditional - all with multi-clause lambda body (all-nested)", async () => {
+      const queryPlan = await cerbos.planResources({
+        principal: { id: "user1", roles: ["USER"] },
+        resource: { kind: "resource" },
+        action: "all-nested",
+      });
+
+      expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+      expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual(
+        {
+          operator: "all",
+          operands: [
+            { name: "request.resource.attr.tags" },
+            {
+              operator: "lambda",
+              operands: [
+                {
+                  operator: "and",
+                  operands: [
+                    {
+                      operator: "eq",
+                      operands: [
+                        { name: "tag.name" },
+                        { value: "public" },
+                      ],
+                    },
+                    {
+                      operator: "ne",
+                      operands: [
+                        { name: "tag.id" },
+                        { value: "tag1" },
+                      ],
+                    },
+                  ],
+                },
+                { name: "tag" },
+              ],
+            },
+          ],
+        }
+      );
+
+      const result = queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.tags": {
+            relation: {
+              name: "tags",
+              type: "many",
+            },
+          },
+        },
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          tags: {
+            every: {
+              AND: [
+                { name: { equals: "public" } },
+                { id: { not: "tag1" } },
+              ],
+            },
+          },
+        },
+      });
+
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
+
+      const query = await prisma.resource.findMany({
+        where: { ...result.filters },
+      });
+
+      expect(query.map((r) => r.id).sort()).toEqual(
+        fixtureResources
+          .filter((r) => {
+            const connected = Array.isArray(r.tags?.connect)
+              ? r.tags!.connect.map((c) =>
+                  fixtureTags.find((ft) => ft.id === c.id)
+                )
+              : [];
+            return connected.every(
+              (t) => t?.name === "public" && t?.id !== "tag1"
+            );
+          })
+          .map((r) => r.id)
+          .sort()
+      );
+    });
+
+    test("conditional - map() compared to literal list throws (map-compared)", async () => {
+      // TODO(#232): prisma adapter does not yet support `map(...) == [..]` —
+      // the map operator returns a relation projection that cannot be compared
+      // directly to a list literal. Locks in current behavior.
+      const queryPlan = await cerbos.planResources({
+        principal: { id: "user1", roles: ["USER"] },
+        resource: { kind: "resource" },
+        action: "map-compared",
+      });
+
+      expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+      expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual(
+        {
+          operator: "eq",
+          operands: [
+            {
+              operator: "map",
+              operands: [
+                { name: "request.resource.attr.tags" },
+                {
+                  operator: "lambda",
+                  operands: [{ name: "t.id" }, { name: "t" }],
+                },
+              ],
+            },
+            { value: ["tag1", "tag2"] },
+          ],
+        }
+      );
+
+      // TODO(#232): prisma silently emits an invalid filter for `map(...) ==
+      // [...]`. The map(...) is recursed into via the relational handler and
+      // resolves to a nested filter object that's discarded, leaving a bare
+      // `equals: [...]` at the top level with no field reference. Captured
+      // here so adapter support lands as a deliberate fix.
+      const result = queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.tags": {
+            relation: {
+              name: "tags",
+              type: "many",
+              fields: {
+                id: { field: "id" },
+              },
+            },
+          },
+        },
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: { equals: ["tag1", "tag2"] },
+      });
+    });
+
+    test("conditional - size(filter(...)) > 0 throws (filter-count-gt)", async () => {
+      // TODO(#232): prisma adapter supports size(R.attr.collection) > N but
+      // does not yet unwrap size(filter(R.attr.collection, lambda)) > N.
+      // Locks in current behavior.
+      const queryPlan = await cerbos.planResources({
+        principal: { id: "user1", roles: ["USER"] },
+        resource: { kind: "resource" },
+        action: "filter-count-gt",
+      });
+
+      expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+      expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual(
+        {
+          operator: "gt",
+          operands: [
+            {
+              operator: "size",
+              operands: [
+                {
+                  operator: "filter",
+                  operands: [
+                    { name: "request.resource.attr.tags" },
+                    {
+                      operator: "lambda",
+                      operands: [
+                        {
+                          operator: "eq",
+                          operands: [
+                            { name: "t.name" },
+                            { value: "public" },
+                          ],
+                        },
+                        { name: "t" },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+            { value: 0 },
+          ],
+        }
+      );
+
+      expect(() =>
+        queryPlanToPrisma({
+          queryPlan,
+          mapper: {
+            "request.resource.attr.tags": {
+              relation: {
+                name: "tags",
+                type: "many",
+              },
+            },
+          },
+        })
+      ).toThrow();
+    });
   });
 });
 

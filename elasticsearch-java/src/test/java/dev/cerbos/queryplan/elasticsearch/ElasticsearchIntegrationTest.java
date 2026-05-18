@@ -798,6 +798,35 @@ class ElasticsearchIntegrationTest {
             // All docs have tagObjects with name in ["public","private"]
             assertEquals(List.of("1", "2", "3"), executeNestedQuery("map-collection"));
         }
+
+        // --- Issue #232: collection macro composition ---
+
+        @Test
+        void allWithNestedLambdaBody() throws Exception {
+            // R.attr.tags.all(tag, tag.name == "public" && tag.id != "tag1")
+            // Doc 1: tag2/private fails name → not all
+            // Doc 2: tag3/private fails name → not all
+            // Doc 3: tag1/public fails id != tag1 → not all
+            assertEquals(List.of(), executeNestedQuery("all-nested"));
+        }
+
+        // TODO(#232): map(...) compared directly to a list literal is
+        // unsupported by the ES adapter — the relational handler treats the
+        // map expression as an unexpected operand type.
+        @Test
+        void mapComparedToLiteralListThrows() {
+            assertThrows(IllegalArgumentException.class,
+                    () -> executeNestedQuery("map-compared"));
+        }
+
+        // TODO(#232): size(filter(...)) > 0 is unsupported — the size handler
+        // requires its operand to be a direct collection variable, not a
+        // filter() expression.
+        @Test
+        void sizeOfFilterThrows() {
+            assertThrows(IllegalArgumentException.class,
+                    () -> executeNestedQuery("filter-count-gt"));
+        }
     }
 
     // --- Issue #229: locked-in operator/comparison shapes ---

@@ -1,9 +1,11 @@
 import pytest
+from cerbos.response.v1 import response_pb2
 from cerbos.sdk.model import (
     PlanResourcesFilter,
     PlanResourcesFilterKind,
     PlanResourcesResponse,
 )
+from google.protobuf.json_format import MessageToDict
 
 from cerbos_sqlalchemy import get_query
 from sqlalchemy import any_, func, literal
@@ -16,6 +18,15 @@ def _default_resp_params():
         "resource_kind": "resource",
         "policy_version": "default",
     }
+
+
+def _condition_to_dict(plan):
+    # The HTTP client surfaces `to_dict()`; the gRPC client surfaces a raw
+    # protobuf which needs `MessageToDict`. Mirrors the adapter's own
+    # dual-mode handling so AST probes work under either transport.
+    if isinstance(plan, response_pb2.PlanResourcesResponse):
+        return MessageToDict(plan.filter.condition)
+    return plan.filter.condition.to_dict()
 
 
 class TestGetQuery:
@@ -562,6 +573,103 @@ class TestGetQuery:
         res = conn.execute(query).fetchall()
         assert len(res) == 2
         assert all(map(lambda x: x.name in {"resource1", "resource3"}, res))
+
+    def test_all_nested(
+        self, cerbos_client, principal, resource_desc, resource_table, conn
+    ):
+        # `R.attr.tags.all(tag, tag.name == "public" && tag.id != "tag1")`.
+        # AST: all(var:tags, lambda(and(eq(tag.name, "public"),
+        #                               ne(tag.id, "tag1")), var:tag)).
+        # TODO(#232): the SQLAlchemy adapter has no built-in handler for the
+        # CEL `all` collection macro (nor for `lambda`); without an override
+        # the default path emits `ValueError: Unrecognised operator: and`
+        # — the adapter recurses into the lambda body before it can be
+        # short-circuited. Locks in current behavior.
+        plan = cerbos_client.plan_resources("all-nested", principal, resource_desc)
+        cond = _condition_to_dict(plan)
+        assert cond["expression"]["operator"] == "all"
+        all_operands = cond["expression"]["operands"]
+        assert all_operands[0] == {"variable": "request.resource.attr.tags"}
+        lambda_expr = all_operands[1]["expression"]
+        assert lambda_expr["operator"] == "lambda"
+        body_expr = lambda_expr["operands"][0]["expression"]
+        assert body_expr["operator"] == "and"
+        assert lambda_expr["operands"][1] == {"variable": "tag"}
+
+        attr = {
+            "request.resource.attr.tags": resource_table.name,
+            "tag": resource_table.name,
+            "tag.id": resource_table.id,
+            "tag.name": resource_table.name,
+        }
+        with pytest.raises(ValueError, match="Unrecognised operator: and"):
+            get_query(plan, resource_table, attr)
+
+    def test_map_compared(
+        self, cerbos_client, principal, resource_desc, resource_table, conn
+    ):
+        # `R.attr.tags.map(t, t.id) == ["tag1", "tag2"]`.
+        # AST: eq(map(var:tags, lambda(var:t.id, var:t)),
+        #        value:["tag1","tag2"]).
+        # TODO(#232): the SQLAlchemy adapter has no built-in handler for
+        # `map` or `lambda`. The outer `eq` resolves its operands eagerly,
+        # which descends into the `map` expression and trips on the
+        # `lambda` child first. Locks in current behavior.
+        plan = cerbos_client.plan_resources("map-compared", principal, resource_desc)
+        cond = _condition_to_dict(plan)
+        assert cond["expression"]["operator"] == "eq"
+        eq_operands = cond["expression"]["operands"]
+        map_expr = eq_operands[0]["expression"]
+        assert map_expr["operator"] == "map"
+        assert map_expr["operands"][0] == {"variable": "request.resource.attr.tags"}
+        lambda_expr = map_expr["operands"][1]["expression"]
+        assert lambda_expr["operator"] == "lambda"
+        assert lambda_expr["operands"][0] == {"variable": "t.id"}
+        assert lambda_expr["operands"][1] == {"variable": "t"}
+        assert eq_operands[1] == {"value": ["tag1", "tag2"]}
+
+        attr = {
+            "request.resource.attr.tags": resource_table.name,
+            "t": resource_table.name,
+            "t.id": resource_table.id,
+        }
+        with pytest.raises(ValueError, match="Unrecognised operator: lambda"):
+            get_query(plan, resource_table, attr)
+
+    def test_filter_count_gt(
+        self, cerbos_client, principal, resource_desc, resource_table, conn
+    ):
+        # `size(R.attr.tags.filter(t, t.name == "public")) > 0`.
+        # AST: gt(size(filter(var:tags, lambda(eq(t.name,"public"), var:t))),
+        #        value:0).
+        # TODO(#232): the SQLAlchemy adapter ships a `size` default that
+        # calls `func.length`, but it has no built-in handler for `filter`
+        # or `lambda`. The default path descends into the nested `filter`
+        # expression and raises on the unsupported `lambda` operator
+        # before any composition can occur. Locks in current behavior.
+        plan = cerbos_client.plan_resources("filter-count-gt", principal, resource_desc)
+        cond = _condition_to_dict(plan)
+        assert cond["expression"]["operator"] == "gt"
+        gt_operands = cond["expression"]["operands"]
+        size_expr = gt_operands[0]["expression"]
+        assert size_expr["operator"] == "size"
+        filter_expr = size_expr["operands"][0]["expression"]
+        assert filter_expr["operator"] == "filter"
+        assert filter_expr["operands"][0] == {"variable": "request.resource.attr.tags"}
+        lambda_expr = filter_expr["operands"][1]["expression"]
+        assert lambda_expr["operator"] == "lambda"
+        body_expr = lambda_expr["operands"][0]["expression"]
+        assert body_expr["operator"] == "eq"
+        assert lambda_expr["operands"][1] == {"variable": "t"}
+        assert gt_operands[1] == {"value": 0}
+
+        attr = {
+            "request.resource.attr.tags": resource_table.name,
+            "t": resource_table.name,
+            "t.name": resource_table.name,
+        }
+        with pytest.raises(ValueError, match="Unrecognised operator: lambda"):
+            get_query(plan, resource_table, attr)
 
 
 class TestGetQueryOverrides:

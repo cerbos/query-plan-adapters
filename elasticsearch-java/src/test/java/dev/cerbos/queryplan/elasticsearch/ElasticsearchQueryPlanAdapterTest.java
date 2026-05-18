@@ -1119,6 +1119,82 @@ class ElasticsearchQueryPlanAdapterTest {
         assertEquals(Map.of("terms", Map.of("aNumber", List.of(1L, 2L, 3L))), query);
     }
 
+    // --- Issue #232: collection macro composition ---
+
+    @Test
+    void allWithMultiClauseLambdaBodyProducesNestedBoolMust() {
+        // all(tagObjects, t, t.name == "public" && t.id != "tag1")
+        Operand condition = expressionOperand("all",
+                variableOperand("request.resource.attr.tagObjects"),
+                lambdaOperand("t",
+                        expressionOperand("and",
+                                expressionOperand("eq",
+                                        variableOperand("t.name"),
+                                        stringValueOperand("public")),
+                                expressionOperand("ne",
+                                        variableOperand("t.id"),
+                                        stringValueOperand("tag1")))));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP, NESTED_PATHS);
+
+        // all is double-negated:  must_not(nested(must_not(<body>))).
+        // The lambda body `and(eq(name, "public"), ne(id, "tag1"))` becomes
+        // bool.must of [term(name=public), must_not(term(id=tag1))].
+        Map<String, Object> termName = Map.of("term",
+                Map.of("tagObjects.name", Map.of("value", "public")));
+        Map<String, Object> termId = Map.of("term",
+                Map.of("tagObjects.id", Map.of("value", "tag1")));
+        Map<String, Object> notTermId = Map.of("bool",
+                Map.of("must_not", List.of(termId)));
+        Map<String, Object> lambdaBody = Map.of("bool",
+                Map.of("must", List.of(termName, notTermId)));
+        Map<String, Object> negatedLambdaBody = Map.of("bool",
+                Map.of("must_not", List.of(lambdaBody)));
+        Map<String, Object> nestedClause = Map.of("nested",
+                Map.of("path", "tagObjects", "query", negatedLambdaBody));
+        Map<String, Object> expected = Map.of("bool",
+                Map.of("must_not", List.of(nestedClause)));
+
+        Map<String, Object> query = ((Result.Conditional) result).query();
+        assertEquals(expected, query);
+    }
+
+    @Test
+    void mapComparedToLiteralListThrows() {
+        // TODO(#232): map(...) compared directly to a list literal is unsupported.
+        // Only hasIntersection(map(...), [...]) is recognised today.
+        Operand condition = expressionOperand("eq",
+                expressionOperand("map",
+                        variableOperand("request.resource.attr.tagObjects"),
+                        lambdaOperand("t", variableOperand("t.id"))),
+                listValueOperand("tag1", "tag2"));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        assertThrows(IllegalArgumentException.class,
+                () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP, NESTED_PATHS));
+    }
+
+    @Test
+    void sizeOfFilterThrows() {
+        // TODO(#232): size(filter(...)) > 0 is unsupported. The size handler
+        // requires its single operand to be a variable (a direct collection
+        // reference), not a filter() expression.
+        Operand condition = expressionOperand("gt",
+                expressionOperand("size",
+                        expressionOperand("filter",
+                                variableOperand("request.resource.attr.tagObjects"),
+                                lambdaOperand("t",
+                                        expressionOperand("eq",
+                                                variableOperand("t.name"),
+                                                stringValueOperand("public"))))),
+                numberValueOperand(0));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        assertThrows(IllegalArgumentException.class,
+                () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP, NESTED_PATHS));
+    }
+
     @Test
     void orLeafExistsProducesBoolShouldWithNested() {
         // aBool == true OR exists(tagObjects, t, t.name == "public")
