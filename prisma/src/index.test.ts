@@ -2534,9 +2534,8 @@ describe("Collection Operations", () => {
     });
 
     test("conditional - map() compared to literal list throws (map-compared)", async () => {
-      // TODO(#232): prisma adapter does not yet support `map(...) == [..]` —
-      // the map operator returns a relation projection that cannot be compared
-      // directly to a list literal. Locks in current behavior.
+      // prisma does not support comparing `map(...)` directly to a list
+      // literal — `hasIntersection(map(...), [...])` is the supported form.
       const queryPlan = await cerbos.planResources({
         principal: { id: "user1", roles: ["USER"] },
         resource: { kind: "resource" },
@@ -2563,30 +2562,22 @@ describe("Collection Operations", () => {
         }
       );
 
-      // TODO(#232): prisma silently emits an invalid filter for `map(...) ==
-      // [...]`. The map(...) is recursed into via the relational handler and
-      // resolves to a nested filter object that's discarded, leaving a bare
-      // `equals: [...]` at the top level with no field reference. Captured
-      // here so adapter support lands as a deliberate fix.
-      const result = queryPlanToPrisma({
-        queryPlan,
-        mapper: {
-          "request.resource.attr.tags": {
-            relation: {
-              name: "tags",
-              type: "many",
-              fields: {
-                id: { field: "id" },
+      expect(() =>
+        queryPlanToPrisma({
+          queryPlan,
+          mapper: {
+            "request.resource.attr.tags": {
+              relation: {
+                name: "tags",
+                type: "many",
+                fields: {
+                  id: { field: "id" },
+                },
               },
             },
           },
-        },
-      });
-
-      expect(result).toStrictEqual({
-        kind: PlanKind.CONDITIONAL,
-        filters: { equals: ["tag1", "tag2"] },
-      });
+        })
+      ).toThrow(/map\(\.\.\.\) to a value is not supported/);
     });
 
     test("conditional - size(filter(...)) > 0 throws (filter-count-gt)", async () => {

@@ -680,6 +680,17 @@ function handleRelationalOperator(
     return handleAddComparison(operator, addOperand, otherOperand, mapper);
   }
 
+  const mapOperand = [leftOperand, rightOperand].find(
+    (o): o is OperatorOperand =>
+      isOperatorOperand(o) && o.operator === "map"
+  );
+  if (mapOperand) {
+    throw new Error(
+      `Direct comparison of map(...) to a value is not supported (operator: ${operator}). ` +
+        `Wrap the map() expression in hasIntersection(map(...), [...]) instead.`
+    );
+  }
+
   const left = resolveOperand(leftOperand, mapper);
   const right = requireResolvedValue(
     resolveOperand(rightOperand, mapper),
