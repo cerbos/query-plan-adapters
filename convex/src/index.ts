@@ -40,6 +40,10 @@ const ALL_KNOWN_OPERATORS = new Set([
   "contains", "startsWith", "endsWith",
   "hasIntersection", "exists", "exists_one", "all",
   "filter", "map", "lambda",
+  "add", "sub", "mult", "div", "mod",
+  "matches", "index", "size",
+  "string", "double", "int",
+  "if",
 ]);
 
 const isExpression = (e: PlanExpressionOperand): e is PlanExpression =>
@@ -482,6 +486,65 @@ const evaluateExpression = (
 
     case "lambda":
       throw new Error("lambda should not be evaluated directly");
+
+    case "add":
+      return (resolve(operands[0]!) as number) + (resolve(operands[1]!) as number);
+
+    case "sub":
+      return (resolve(operands[0]!) as number) - (resolve(operands[1]!) as number);
+
+    case "mult":
+      return (resolve(operands[0]!) as number) * (resolve(operands[1]!) as number);
+
+    case "div":
+      return (resolve(operands[0]!) as number) / (resolve(operands[1]!) as number);
+
+    case "mod":
+      return (resolve(operands[0]!) as number) % (resolve(operands[1]!) as number);
+
+    case "matches": {
+      const str = resolve(operands[0]!) as string;
+      const pattern = resolve(operands[1]!) as string;
+      if (typeof str !== "string" || typeof pattern !== "string") return false;
+      return new RegExp(pattern).test(str);
+    }
+
+    case "index": {
+      const collection = resolve(operands[0]!) as unknown[];
+      const idx = resolve(operands[1]!) as number;
+      if (!Array.isArray(collection)) return undefined;
+      return collection[idx];
+    }
+
+    case "size": {
+      const v = resolve(operands[0]!);
+      if (typeof v === "string") return v.length;
+      if (Array.isArray(v)) return v.length;
+      if (v && typeof v === "object") return Object.keys(v).length;
+      return 0;
+    }
+
+    case "string": {
+      const v = resolve(operands[0]!);
+      if (v === null || v === undefined) return v;
+      return String(v);
+    }
+
+    case "double": {
+      const v = resolve(operands[0]!);
+      return Number(v);
+    }
+
+    case "int": {
+      const v = resolve(operands[0]!);
+      const n = typeof v === "string" ? parseInt(v, 10) : Math.trunc(Number(v));
+      return n;
+    }
+
+    case "if": {
+      const cond = resolve(operands[0]!);
+      return cond ? resolve(operands[1]!) : resolve(operands[2]!);
+    }
 
     default:
       throw new Error(`Unsupported operator: ${operator}`);

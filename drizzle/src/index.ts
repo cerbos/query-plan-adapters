@@ -471,6 +471,204 @@ const resolveFieldReference = (
   throw new Error(`No mapping found for reference: ${reference}`);
 };
 
+const ARITHMETIC_OPERATORS: Record<string, string> = {
+  add: "+",
+  sub: "-",
+  mult: "*",
+  div: "/",
+  mod: "%",
+};
+
+const CONVERSION_TARGETS: Record<string, string> = {
+  string: "TEXT",
+  double: "REAL",
+  int: "INTEGER",
+};
+
+const buildValueExpressionFromValue = (value: Value): SQL => sql`${value}`;
+
+const buildColumnExpression = (
+  mapping: BaseMapperEntry,
+  reference: string
+): SQL => {
+  if (isRelationValue(mapping)) {
+    throw new Error(
+      `Cannot use relation '${reference}' as a scalar value expression`
+    );
+  }
+  if (typeof mapping === "function") {
+    throw new Error(
+      `Cannot use transform mapping for '${reference}' as a value expression`
+    );
+  }
+  if (isMappingConfig(mapping)) {
+    if (mapping.relation) {
+      throw new Error(
+        `Cannot use relation mapping for '${reference}' as a scalar value expression`
+      );
+    }
+    if (!mapping.column) {
+      throw new Error(
+        `Mapping for '${reference}' requires a column to be used as a value expression`
+      );
+    }
+    return sql`${mapping.column}`;
+  }
+  if (!isColumn(mapping)) {
+    throw new Error(`Expected column mapping for '${reference}'`);
+  }
+  return sql`${mapping}`;
+};
+
+const buildSizeExpression = (
+  operand: PlanExpressionOperand,
+  mapper: Mapper
+): SQL => {
+  if (!isNameOperand(operand)) {
+    throw new Error("'size' operator requires a name operand");
+  }
+  // Determine whether the operand is a relation or a scalar column.
+  let resolved: { relations: RelationMapping[]; mapping: BaseMapperEntry };
+  try {
+    resolved = resolveFieldReference(operand.name, mapper);
+  } catch (err) {
+    throw err;
+  }
+  // Relation: produce a correlated COUNT subquery walking the relation chain.
+  if (resolved.relations.length > 0) {
+    const relations = resolved.relations;
+    const primary = relations[relations.length - 1]!;
+    const tableName = resolveTableName(primary.table, operand.name);
+    const joinCondition = eq(primary.targetColumn, primary.sourceColumn);
+    const inner = sql`(select count(*) from ${sql.identifier(tableName)} where ${joinCondition})`;
+    if (relations.length === 1) {
+      return inner;
+    }
+    // Wrap with leading relation EXISTS contexts — uncommon, but support it.
+    const leading = relations.slice(0, -1);
+    return wrapWithRelations(leading, inner, operand.name);
+  }
+  // Scalar column: LENGTH(col).
+  const colExpr = buildColumnExpression(resolved.mapping, operand.name);
+  return sql`length(${colExpr})`;
+};
+
+const buildValueExpression = (
+  operand: PlanExpressionOperand,
+  mapper: Mapper
+): SQL => {
+  if (isValueOperand(operand)) {
+    return buildValueExpressionFromValue(operand.value);
+  }
+  if (isNameOperand(operand)) {
+    const resolved = resolveFieldReference(operand.name, mapper);
+    if (resolved.relations.length > 0) {
+      throw new Error(
+        `Cannot use relation '${operand.name}' as a scalar value expression`
+      );
+    }
+    return buildColumnExpression(resolved.mapping, operand.name);
+  }
+  if (!isExpressionOperand(operand)) {
+    throw new Error("Invalid value-expression operand");
+  }
+
+  const { operator, operands } = operand;
+
+  if (operator in ARITHMETIC_OPERATORS) {
+    if (operands.length !== 2) {
+      throw new Error(`Arithmetic operator '${operator}' requires two operands`);
+    }
+    const left = buildValueExpression(operands[0]!, mapper);
+    const right = buildValueExpression(operands[1]!, mapper);
+    const op = ARITHMETIC_OPERATORS[operator]!;
+    return sql`(${left} ${sql.raw(op)} ${right})`;
+  }
+
+  if (operator in CONVERSION_TARGETS) {
+    if (operands.length !== 1) {
+      throw new Error(
+        `Conversion operator '${operator}' requires exactly one operand`
+      );
+    }
+    const inner = buildValueExpression(operands[0]!, mapper);
+    const target = CONVERSION_TARGETS[operator]!;
+    return sql`cast(${inner} as ${sql.raw(target)})`;
+  }
+
+  if (operator === "if") {
+    if (operands.length !== 3) {
+      throw new Error("'if' operator requires exactly three operands");
+    }
+    const cond = buildConditionFromOperand(operands[0]!, mapper);
+    const thenExpr = buildValueExpression(operands[1]!, mapper);
+    const elseExpr = buildValueExpression(operands[2]!, mapper);
+    return sql`(case when ${cond} then ${thenExpr} else ${elseExpr} end)`;
+  }
+
+  if (operator === "size") {
+    if (operands.length !== 1) {
+      throw new Error("'size' operator requires exactly one operand");
+    }
+    return buildSizeExpression(operands[0]!, mapper);
+  }
+
+  if (operator === "index") {
+    throw new Error(
+      "'index' operator (array indexing) is not supported by the Drizzle adapter"
+    );
+  }
+
+  throw new Error(`Unsupported value-expression operator: ${operator}`);
+};
+
+// Build a boolean SQL condition from an operand. Used for ternary `if` test branch.
+// Falls back to coercing scalar/name operands to a truthiness check.
+const buildConditionFromOperand = (
+  operand: PlanExpressionOperand,
+  mapper: Mapper
+): SQL => {
+  if (isExpressionOperand(operand)) {
+    return buildFilterFromExpression(operand, mapper);
+  }
+  if (isNameOperand(operand)) {
+    const resolved = resolveFieldReference(operand.name, mapper);
+    const colExpr = buildColumnExpression(resolved.mapping, operand.name);
+    return sql`${colExpr} = 1`;
+  }
+  if (isValueOperand(operand)) {
+    return operand.value
+      ? TRUE_CONDITION
+      : FALSE_CONDITION;
+  }
+  throw new Error("Invalid condition operand");
+};
+
+const applyComparisonWithExpression = (
+  operator: ComparisonOperator,
+  fieldExpr: SQL,
+  valueExpr: SQL
+): SQL => {
+  switch (operator) {
+    case "eq":
+      return sql`${fieldExpr} = ${valueExpr}`;
+    case "ne":
+      return sql`${fieldExpr} <> ${valueExpr}`;
+    case "lt":
+      return sql`${fieldExpr} < ${valueExpr}`;
+    case "le":
+      return sql`${fieldExpr} <= ${valueExpr}`;
+    case "gt":
+      return sql`${fieldExpr} > ${valueExpr}`;
+    case "ge":
+      return sql`${fieldExpr} >= ${valueExpr}`;
+    default:
+      throw new Error(
+        `Operator '${operator}' is not supported for expression-valued operands`
+      );
+  }
+};
+
 const applyComparison = (
   mapping: BaseMapperEntry,
   operator: ComparisonOperator,
@@ -879,6 +1077,26 @@ const buildFilterFromExpression = (
     case "startsWith":
     case "endsWith":
     case "isSet": {
+      // Detect an expression-valued operand on either side (e.g. arithmetic,
+      // type-conversion, `if`, or `size`). When present, evaluate both sides
+      // as SQL value expressions and emit a raw comparison.
+      if (
+        operator !== "in" &&
+        operator !== "contains" &&
+        operator !== "startsWith" &&
+        operator !== "endsWith" &&
+        operator !== "isSet" &&
+        operands.length === 2 &&
+        operands.some(isExpressionOperand)
+      ) {
+        const [leftOperand, rightOperand] = operands;
+        if (!leftOperand || !rightOperand) {
+          throw new Error("Comparison operator requires two operands");
+        }
+        const leftExpr = buildValueExpression(leftOperand, mapper);
+        const rightExpr = buildValueExpression(rightOperand, mapper);
+        return applyComparisonWithExpression(operator, leftExpr, rightExpr);
+      }
       const fieldOperand = operands.find(isNameOperand);
       if (!fieldOperand) {
         throw new Error("Comparison operator missing field operand");
@@ -897,6 +1115,31 @@ const buildFilterFromExpression = (
             options
           )
         : filter;
+    }
+    case "matches": {
+      if (operands.length !== 2) {
+        throw new Error("'matches' operator requires exactly two operands");
+      }
+      const fieldOperand = operands[0];
+      const patternOperand = operands[1];
+      if (!fieldOperand || !isNameOperand(fieldOperand)) {
+        throw new Error("'matches' first operand must be a field reference");
+      }
+      if (!patternOperand || !isValueOperand(patternOperand)) {
+        throw new Error("'matches' second operand must be a regex value");
+      }
+      if (typeof patternOperand.value !== "string") {
+        throw new Error("'matches' regex pattern must be a string");
+      }
+      const resolved = resolveFieldReference(fieldOperand.name, mapper);
+      if (resolved.relations.length > 0) {
+        throw new Error(
+          "'matches' on a relation-valued field is not supported"
+        );
+      }
+      const colExpr = buildColumnExpression(resolved.mapping, fieldOperand.name);
+      const filter = sql`${colExpr} regexp ${patternOperand.value}`;
+      return filter;
     }
     case "hasIntersection":
       return buildHasIntersectionFilter(operands, mapper);

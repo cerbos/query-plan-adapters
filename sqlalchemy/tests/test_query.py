@@ -6,7 +6,7 @@ from cerbos.sdk.model import (
 )
 
 from cerbos_sqlalchemy import get_query
-from sqlalchemy import any_, func
+from sqlalchemy import any_, func, literal
 
 
 def _default_resp_params():
@@ -302,6 +302,169 @@ class TestGetQuery:
         res = conn.execute(query).fetchall()
         assert len(res) == 2
         assert all(map(lambda x: x.name in {"resource2", "resource3"}, res))
+
+    def test_arith_add(
+        self, cerbos_client, principal, resource_desc, resource_table, conn
+    ):
+        plan = cerbos_client.plan_resources("arith-add", principal, resource_desc)
+        attr = {"request.resource.attr.aNumber": resource_table.aNumber}
+        query = get_query(plan, resource_table, attr)
+        res = conn.execute(query).fetchall()
+        assert len(res) == 2
+        assert all(map(lambda x: x.name in {"resource2", "resource3"}, res))
+
+    def test_arith_sub(
+        self, cerbos_client, principal, resource_desc, resource_table, conn
+    ):
+        plan = cerbos_client.plan_resources("arith-sub", principal, resource_desc)
+        attr = {"request.resource.attr.aNumber": resource_table.aNumber}
+        query = get_query(plan, resource_table, attr)
+        res = conn.execute(query).fetchall()
+        assert len(res) == 2
+        assert all(map(lambda x: x.name in {"resource1", "resource2"}, res))
+
+    def test_arith_mult(
+        self, cerbos_client, principal, resource_desc, resource_table, conn
+    ):
+        plan = cerbos_client.plan_resources("arith-mult", principal, resource_desc)
+        attr = {"request.resource.attr.aNumber": resource_table.aNumber}
+        query = get_query(plan, resource_table, attr)
+        res = conn.execute(query).fetchall()
+        assert len(res) == 2
+        assert all(map(lambda x: x.name in {"resource2", "resource3"}, res))
+
+    def test_arith_div(
+        self, cerbos_client, principal, resource_desc, resource_table, conn
+    ):
+        # Cerbos transports numeric literals as protobuf doubles, so SQLite
+        # performs float division here. `aNumber / 2.0 > 0` matches every row.
+        plan = cerbos_client.plan_resources("arith-div", principal, resource_desc)
+        attr = {"request.resource.attr.aNumber": resource_table.aNumber}
+        query = get_query(plan, resource_table, attr)
+        res = conn.execute(query).fetchall()
+        assert len(res) == 3
+
+    def test_arith_mod(
+        self, cerbos_client, principal, resource_desc, resource_table, conn
+    ):
+        plan = cerbos_client.plan_resources("arith-mod", principal, resource_desc)
+        attr = {"request.resource.attr.aNumber": resource_table.aNumber}
+        query = get_query(plan, resource_table, attr)
+        res = conn.execute(query).fetchall()
+        assert len(res) == 1
+        assert res[0].name == "resource2"
+
+    def test_matches_regex(
+        self, cerbos_client, principal, resource_desc, resource_table, conn
+    ):
+        plan = cerbos_client.plan_resources("matches-regex", principal, resource_desc)
+        attr = {"request.resource.attr.aString": resource_table.aString}
+        query = get_query(plan, resource_table, attr)
+        res = conn.execute(query).fetchall()
+        assert len(res) == 1
+        assert res[0].name == "resource1"
+
+    def test_index_list(
+        self, cerbos_client, principal, resource_desc, resource_table, conn
+    ):
+        # `ownedBy` is modelled as a scalar foreign-key string here, but the
+        # policy uses `ownedBy[0]`, so callers must supply an `index`
+        # override that knows how to translate indexed access for their
+        # storage shape. We treat the scalar as a single-element list and
+        # match against the user id "1" (stored value for "user1").
+        plan = cerbos_client.plan_resources("index-list", principal, resource_desc)
+        attr = {"request.resource.attr.ownedBy": resource_table.ownedBy}
+        operator_override_fns = {
+            # Treat the scalar column as the indexed-into element directly.
+            "index": lambda c, _: c,
+            # Map the policy literal "user1" to the FK value "1".
+            "eq": lambda c, v: c == ("1" if v == "user1" else v),
+        }
+        query = get_query(
+            plan,
+            resource_table,
+            attr,
+            operator_override_fns=operator_override_fns,
+        )
+        res = conn.execute(query).fetchall()
+        assert len(res) == 2
+        assert all(map(lambda x: x.name in {"resource1", "resource2"}, res))
+
+    def test_convert_string(
+        self, cerbos_client, principal, resource_desc, resource_table, conn
+    ):
+        plan = cerbos_client.plan_resources("convert-string", principal, resource_desc)
+        attr = {"request.resource.attr.aNumber": resource_table.aNumber}
+        query = get_query(plan, resource_table, attr)
+        res = conn.execute(query).fetchall()
+        assert len(res) == 1
+        assert res[0].name == "resource1"
+
+    def test_convert_double(
+        self, cerbos_client, principal, resource_desc, resource_table, conn
+    ):
+        plan = cerbos_client.plan_resources("convert-double", principal, resource_desc)
+        attr = {"request.resource.attr.aNumber": resource_table.aNumber}
+        query = get_query(plan, resource_table, attr)
+        res = conn.execute(query).fetchall()
+        assert len(res) == 2
+        assert all(map(lambda x: x.name in {"resource2", "resource3"}, res))
+
+    def test_convert_int(
+        self, cerbos_client, principal, resource_desc, resource_table, conn
+    ):
+        # All `aString` values are non-numeric, so SQLite casts them to 0 and
+        # the predicate `int(aString) > 0` matches no rows.
+        plan = cerbos_client.plan_resources("convert-int", principal, resource_desc)
+        attr = {"request.resource.attr.aString": resource_table.aString}
+        query = get_query(plan, resource_table, attr)
+        res = conn.execute(query).fetchall()
+        assert len(res) == 0
+
+    def test_ternary(
+        self, cerbos_client, principal, resource_desc, resource_table, conn
+    ):
+        plan = cerbos_client.plan_resources("ternary", principal, resource_desc)
+        attr = {
+            "request.resource.attr.aBool": resource_table.aBool,
+            "request.resource.attr.aNumber": resource_table.aNumber,
+        }
+        query = get_query(plan, resource_table, attr)
+        res = conn.execute(query).fetchall()
+        assert len(res) == 2
+        assert all(map(lambda x: x.name in {"resource1", "resource3"}, res))
+
+    def test_string_size(
+        self, cerbos_client, principal, resource_desc, resource_table, conn
+    ):
+        plan = cerbos_client.plan_resources("string-size", principal, resource_desc)
+        attr = {"request.resource.attr.aString": resource_table.aString}
+        query = get_query(plan, resource_table, attr)
+        res = conn.execute(query).fetchall()
+        assert len(res) == 3
+
+    def test_empty_collection(
+        self, cerbos_client, principal, resource_desc, resource_table, conn
+    ):
+        # `tags` is not a real column on the test schema. The caller supplies
+        # a `size` override that reports the collection's length given
+        # whatever storage representation it uses. Here we pretend every row
+        # has zero tags so the predicate `size(tags) == 0` matches all rows.
+        plan = cerbos_client.plan_resources(
+            "empty-collection", principal, resource_desc
+        )
+        attr = {"request.resource.attr.tags": resource_table.name}
+        operator_override_fns = {
+            "size": lambda c, _: literal(0),
+        }
+        query = get_query(
+            plan,
+            resource_table,
+            attr,
+            operator_override_fns=operator_override_fns,
+        )
+        res = conn.execute(query).fetchall()
+        assert len(res) == 3
 
 
 class TestGetQueryOverrides:

@@ -306,6 +306,47 @@ describe("Adapter Unit Behavior", () => {
         .map((resource) => resource.key)
     );
   });
+
+  test("comparison with value-expression on the right side uses $expr", async () => {
+    // CEL doesn't normalise operand order, so the value-producing expression
+    // may appear as the *right* operand of a comparison (e.g. resource attr
+    // compared to `int(other_attr)` or `(a + 1)`). The adapter must emit a
+    // `$expr` in either orientation, otherwise it would fall through and try
+    // to treat operators like `int`/`add` as leaf comparators.
+    const queryPlan = {
+      kind: PlanKind.CONDITIONAL,
+      condition: new PlanExpression("eq", [
+        new PlanExpressionValue(3),
+        new PlanExpression("add", [
+          new PlanExpressionVariable("request.resource.attr.aNumber"),
+          new PlanExpressionValue(1),
+        ]),
+      ]),
+    } as PlanResourcesResponse;
+
+    const result = queryPlanToMongoose({
+      queryPlan,
+      mapper: defaultMapper,
+    });
+
+    // The adapter normalises the operand order, putting the value-producing
+    // expression first. Mongo's `$eq` is commutative so this is semantically
+    // identical to `3 == aNumber + 1`.
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        $expr: { $eq: [{ $add: ["$aNumber", 1] }, 3] },
+      },
+    });
+
+    const query = await Resource.find(result.filters || {});
+    expect(query.map((r) => r.key).sort()).toEqual(
+      fixtureResources
+        .filter((r) => 3 === (r.aNumber as number) + 1)
+        .map((r) => r.key)
+        .sort()
+    );
+  });
 });
 
 describe("Core Functionality", () => {
@@ -1451,5 +1492,629 @@ describe("valueParser functionality", () => {
         },
       });
     });
+});
+
+describe("Arithmetic Operations", () => {
+  const arithMapper: Mapper = {
+    ...defaultMapper,
+  };
+
+  test("arith-add: (aNumber + 1) > 2", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "arith-add",
+    });
+
+    expect(queryPlan).toMatchObject({
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "gt",
+        operands: [
+          {
+            operator: "add",
+            operands: [
+              { name: "request.resource.attr.aNumber" },
+              { value: 1 },
+            ],
+          },
+          { value: 2 },
+        ],
+      },
+    });
+
+    const result = queryPlanToMongoose({
+      queryPlan,
+      mapper: arithMapper,
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        $expr: { $gt: [{ $add: ["$aNumber", 1] }, 2] },
+      },
+    });
+
+    const query = await Resource.find(result.filters || {});
+    expect(query.map((r) => r.key).sort()).toEqual(
+      fixtureResources
+        .filter((r) => (r.aNumber as number) + 1 > 2)
+        .map((r) => r.key)
+        .sort()
+    );
+  });
+
+  test("arith-sub: (aNumber - 1) < 2", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "arith-sub",
+    });
+
+    expect(queryPlan).toMatchObject({
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "lt",
+        operands: [
+          {
+            operator: "sub",
+            operands: [
+              { name: "request.resource.attr.aNumber" },
+              { value: 1 },
+            ],
+          },
+          { value: 2 },
+        ],
+      },
+    });
+
+    const result = queryPlanToMongoose({
+      queryPlan,
+      mapper: arithMapper,
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        $expr: { $lt: [{ $subtract: ["$aNumber", 1] }, 2] },
+      },
+    });
+
+    const query = await Resource.find(result.filters || {});
+    expect(query.map((r) => r.key).sort()).toEqual(
+      fixtureResources
+        .filter((r) => (r.aNumber as number) - 1 < 2)
+        .map((r) => r.key)
+        .sort()
+    );
+  });
+
+  test("arith-mult: (aNumber * 2) > 2", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "arith-mult",
+    });
+
+    expect(queryPlan).toMatchObject({
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "gt",
+        operands: [
+          {
+            operator: "mult",
+            operands: [
+              { name: "request.resource.attr.aNumber" },
+              { value: 2 },
+            ],
+          },
+          { value: 2 },
+        ],
+      },
+    });
+
+    const result = queryPlanToMongoose({
+      queryPlan,
+      mapper: arithMapper,
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        $expr: { $gt: [{ $multiply: ["$aNumber", 2] }, 2] },
+      },
+    });
+
+    const query = await Resource.find(result.filters || {});
+    expect(query.map((r) => r.key).sort()).toEqual(
+      fixtureResources
+        .filter((r) => (r.aNumber as number) * 2 > 2)
+        .map((r) => r.key)
+        .sort()
+    );
+  });
+
+  test("arith-div: (aNumber / 2) > 0", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "arith-div",
+    });
+
+    expect(queryPlan).toMatchObject({
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "gt",
+        operands: [
+          {
+            operator: "div",
+            operands: [
+              { name: "request.resource.attr.aNumber" },
+              { value: 2 },
+            ],
+          },
+          { value: 0 },
+        ],
+      },
+    });
+
+    const result = queryPlanToMongoose({
+      queryPlan,
+      mapper: arithMapper,
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        $expr: { $gt: [{ $divide: ["$aNumber", 2] }, 0] },
+      },
+    });
+
+    const query = await Resource.find(result.filters || {});
+    expect(query.map((r) => r.key).sort()).toEqual(
+      fixtureResources
+        .filter((r) => (r.aNumber as number) / 2 > 0)
+        .map((r) => r.key)
+        .sort()
+    );
+  });
+
+  test("arith-mod: (aNumber % 2) == 0", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "arith-mod",
+    });
+
+    expect(queryPlan).toMatchObject({
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "eq",
+        operands: [
+          {
+            operator: "mod",
+            operands: [
+              {
+                operator: "int",
+                operands: [{ name: "request.resource.attr.aNumber" }],
+              },
+              { value: 2 },
+            ],
+          },
+          { value: 0 },
+        ],
+      },
+    });
+
+    const result = queryPlanToMongoose({
+      queryPlan,
+      mapper: arithMapper,
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        $expr: { $eq: [{ $mod: [{ $toInt: "$aNumber" }, 2] }, 0] },
+      },
+    });
+
+    const query = await Resource.find(result.filters || {});
+    expect(query.map((r) => r.key).sort()).toEqual(
+      fixtureResources
+        .filter((r) => (r.aNumber as number) % 2 === 0)
+        .map((r) => r.key)
+        .sort()
+    );
+  });
+});
+
+describe("Regex Match", () => {
+  test("matches-regex: aString.matches('str.*')", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "matches-regex",
+    });
+
+    expect(queryPlan).toMatchObject({
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "matches",
+        operands: [
+          { name: "request.resource.attr.aString" },
+          { value: "^str.*" },
+        ],
+      },
+    });
+
+    const result = queryPlanToMongoose({
+      queryPlan,
+      mapper: defaultMapper,
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        aString: { $regex: "^str.*" },
+      },
+    });
+
+    const query = await Resource.find(result.filters || {});
+    expect(query.map((r) => r.key).sort()).toEqual(
+      fixtureResources
+        .filter((r) => /str.*/.test(r.aString as string))
+        .map((r) => r.key)
+        .sort()
+    );
+  });
+});
+
+describe("Index Access", () => {
+  test("index-list: ownedBy[0] == 'user1'", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "index-list",
+    });
+
+    expect(queryPlan).toMatchObject({
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "eq",
+        operands: [
+          {
+            operator: "index",
+            operands: [
+              { name: "request.resource.attr.ownedBy" },
+              { value: 0 },
+            ],
+          },
+          { value: "user1" },
+        ],
+      },
+    });
+
+    const result = queryPlanToMongoose({
+      queryPlan,
+      mapper: {
+        ...defaultMapper,
+        "request.resource.attr.ownedBy": { field: "ownedBy" },
+      },
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        $expr: { $eq: [{ $arrayElemAt: ["$ownedBy", 0] }, "user1"] },
+      },
+    });
+
+    // ownedBy is an array of objects in the fixture, so comparing element to a
+    // string returns no matches in both Mongo and JS — the filter shape is
+    // still correct.
+    const query = await Resource.find(result.filters || {});
+    expect(query.map((r) => r.key).sort()).toEqual(
+      fixtureResources
+        .filter((r) => (r.ownedBy as any[])[0] === "user1")
+        .map((r) => r.key)
+        .sort()
+    );
+  });
+});
+
+describe("Type Conversion", () => {
+  test("convert-string: string(aNumber) == '1'", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "convert-string",
+    });
+
+    expect(queryPlan).toMatchObject({
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "eq",
+        operands: [
+          {
+            operator: "string",
+            operands: [{ name: "request.resource.attr.aNumber" }],
+          },
+          { value: "1" },
+        ],
+      },
+    });
+
+    const result = queryPlanToMongoose({
+      queryPlan,
+      mapper: defaultMapper,
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        $expr: { $eq: [{ $toString: "$aNumber" }, "1"] },
+      },
+    });
+
+    const query = await Resource.find(result.filters || {});
+    expect(query.map((r) => r.key).sort()).toEqual(
+      fixtureResources
+        .filter((r) => String(r.aNumber) === "1")
+        .map((r) => r.key)
+        .sort()
+    );
+  });
+
+  test("convert-double: double(aNumber) > 1.5", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "convert-double",
+    });
+
+    expect(queryPlan).toMatchObject({
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "gt",
+        operands: [
+          {
+            operator: "double",
+            operands: [{ name: "request.resource.attr.aNumber" }],
+          },
+          { value: 1.5 },
+        ],
+      },
+    });
+
+    const result = queryPlanToMongoose({
+      queryPlan,
+      mapper: defaultMapper,
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        $expr: { $gt: [{ $toDouble: "$aNumber" }, 1.5] },
+      },
+    });
+
+    const query = await Resource.find(result.filters || {});
+    expect(query.map((r) => r.key).sort()).toEqual(
+      fixtureResources
+        .filter((r) => Number(r.aNumber) > 1.5)
+        .map((r) => r.key)
+        .sort()
+    );
+  });
+
+  test("convert-int: int(aString) > 0 — filter built, runtime $toInt throws", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "convert-int",
+    });
+
+    expect(queryPlan).toMatchObject({
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "gt",
+        operands: [
+          {
+            operator: "int",
+            operands: [{ name: "request.resource.attr.aString" }],
+          },
+          { value: 0 },
+        ],
+      },
+    });
+
+    const result = queryPlanToMongoose({
+      queryPlan,
+      mapper: defaultMapper,
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        $expr: { $gt: [{ $toInt: "$aString" }, 0] },
+      },
+    });
+
+    // aString values like "string" are not parseable as ints — Mongo errors
+    // out during query evaluation. We assert the runtime failure here so the
+    // adapter contract is documented: the adapter produces the right shape,
+    // but the underlying data must be numeric for the query to succeed.
+    await expect(Resource.find(result.filters || {})).rejects.toThrow();
+  });
+});
+
+describe("Ternary", () => {
+  test("ternary: (aBool ? aNumber : 0) > 0", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "ternary",
+    });
+
+    expect(queryPlan).toMatchObject({
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "gt",
+        operands: [
+          {
+            operator: "if",
+            operands: [
+              { name: "request.resource.attr.aBool" },
+              { name: "request.resource.attr.aNumber" },
+              { value: 0 },
+            ],
+          },
+          { value: 0 },
+        ],
+      },
+    });
+
+    const result = queryPlanToMongoose({
+      queryPlan,
+      mapper: defaultMapper,
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        $expr: {
+          $gt: [
+            {
+              $cond: {
+                if: "$aBool",
+                then: "$aNumber",
+                else: 0,
+              },
+            },
+            0,
+          ],
+        },
+      },
+    });
+
+    const query = await Resource.find(result.filters || {});
+    expect(query.map((r) => r.key).sort()).toEqual(
+      fixtureResources
+        .filter((r) => (r.aBool ? (r.aNumber as number) : 0) > 0)
+        .map((r) => r.key)
+        .sort()
+    );
+  });
+});
+
+describe("Size", () => {
+  test("string-size: size(aString) > 0", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "string-size",
+    });
+
+    expect(queryPlan).toMatchObject({
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "gt",
+        operands: [
+          {
+            operator: "size",
+            operands: [{ name: "request.resource.attr.aString" }],
+          },
+          { value: 0 },
+        ],
+      },
+    });
+
+    const result = queryPlanToMongoose({
+      queryPlan,
+      mapper: defaultMapper,
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        $expr: {
+          $gt: [
+            {
+              $cond: [
+                { $isArray: "$aString" },
+                { $size: "$aString" },
+                { $strLenCP: "$aString" },
+              ],
+            },
+            0,
+          ],
+        },
+      },
+    });
+
+    const query = await Resource.find(result.filters || {});
+    expect(query.map((r) => r.key).sort()).toEqual(
+      fixtureResources
+        .filter((r) => (r.aString as string).length > 0)
+        .map((r) => r.key)
+        .sort()
+    );
+  });
+
+  test("empty-collection: size(tags) == 0", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "empty-collection",
+    });
+
+    expect(queryPlan).toMatchObject({
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "eq",
+        operands: [
+          {
+            operator: "size",
+            operands: [{ name: "request.resource.attr.tags" }],
+          },
+          { value: 0 },
+        ],
+      },
+    });
+
+    const result = queryPlanToMongoose({
+      queryPlan,
+      mapper: {
+        ...defaultMapper,
+        "request.resource.attr.tags": { field: "tags" },
+      },
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        $expr: {
+          $eq: [
+            {
+              $cond: [
+                { $isArray: "$tags" },
+                { $size: "$tags" },
+                { $strLenCP: "$tags" },
+              ],
+            },
+            0,
+          ],
+        },
+      },
+    });
+
+    const query = await Resource.find(result.filters || {});
+    expect(query.map((r) => r.key).sort()).toEqual(
+      fixtureResources
+        .filter((r) => r.tags.length === 0)
+        .map((r) => r.key)
+        .sort()
+    );
+  });
 });
 

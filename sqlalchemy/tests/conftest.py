@@ -1,4 +1,5 @@
 import os
+import re
 from contextlib import contextmanager
 from importlib.metadata import version
 from typing import Generator
@@ -17,6 +18,7 @@ from sqlalchemy import (
     Integer,
     String,
     create_engine,
+    event,
     insert,
 )
 from sqlalchemy.orm import declarative_base, relationship
@@ -63,6 +65,14 @@ class Resource(Base):
 def engine():
     # in-memory database
     engine = create_engine("sqlite://")
+
+    # SQLite has no built-in REGEXP function; register one so that the
+    # adapter's `regexp_match` lowers to a working SQL operator under tests.
+    @event.listens_for(engine, "connect")
+    def _register_regexp(dbapi_conn, _):
+        dbapi_conn.create_function(
+            "regexp", 2, lambda pat, s: 1 if re.search(pat, s or "") else 0
+        )
 
     # generate tables from sqla metadata
     Base.metadata.create_all(engine)
