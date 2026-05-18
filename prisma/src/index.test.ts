@@ -4394,6 +4394,350 @@ describe("Complex Operations", () => {
     });
   });
 
+  describe("Negation Operations (DeMorgan)", () => {
+    test("conditional - not-and", async () => {
+      const queryPlan = await cerbos.planResources({
+        principal: { id: "user1", roles: ["USER"] },
+        resource: { kind: "resource" },
+        action: "not-and",
+      });
+
+      expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+      expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual(
+        {
+          operator: "not",
+          operands: [
+            {
+              operator: "and",
+              operands: [
+                {
+                  operator: "eq",
+                  operands: [
+                    { name: "request.resource.attr.aBool" },
+                    { value: true },
+                  ],
+                },
+                {
+                  operator: "ne",
+                  operands: [
+                    { name: "request.resource.attr.aString" },
+                    { value: "string" },
+                  ],
+                },
+              ],
+            },
+          ],
+        }
+      );
+
+      const result = queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.aBool": { field: "aBool" },
+          "request.resource.attr.aString": { field: "aString" },
+        },
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          NOT: {
+            AND: [
+              { aBool: { equals: true } },
+              { aString: { not: "string" } },
+            ],
+          },
+        },
+      });
+
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
+
+      const query = await prisma.resource.findMany({
+        where: { ...result.filters },
+      });
+      expect(query.map((r) => r.id)).toEqual(
+        fixtureResources
+          .filter((r) => !(r.aBool && r.aString != "string"))
+          .map((r) => r.id)
+      );
+    });
+
+    test("conditional - not-or", async () => {
+      const queryPlan = await cerbos.planResources({
+        principal: { id: "user1", roles: ["USER"] },
+        resource: { kind: "resource" },
+        action: "not-or",
+      });
+
+      expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+      expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual(
+        {
+          operator: "not",
+          operands: [
+            {
+              operator: "or",
+              operands: [
+                {
+                  operator: "eq",
+                  operands: [
+                    { name: "request.resource.attr.aBool" },
+                    { value: true },
+                  ],
+                },
+                {
+                  operator: "ne",
+                  operands: [
+                    { name: "request.resource.attr.aString" },
+                    { value: "string" },
+                  ],
+                },
+              ],
+            },
+          ],
+        }
+      );
+
+      const result = queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.aBool": { field: "aBool" },
+          "request.resource.attr.aString": { field: "aString" },
+        },
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          NOT: {
+            OR: [
+              { aBool: { equals: true } },
+              { aString: { not: "string" } },
+            ],
+          },
+        },
+      });
+
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
+
+      const query = await prisma.resource.findMany({
+        where: { ...result.filters },
+      });
+      expect(query.map((r) => r.id)).toEqual(
+        fixtureResources
+          .filter((r) => !(r.aBool || r.aString != "string"))
+          .map((r) => r.id)
+      );
+    });
+
+    test("conditional - not-gt", async () => {
+      const queryPlan = await cerbos.planResources({
+        principal: { id: "user1", roles: ["USER"] },
+        resource: { kind: "resource" },
+        action: "not-gt",
+      });
+
+      expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+      expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual(
+        {
+          operator: "not",
+          operands: [
+            {
+              operator: "gt",
+              operands: [
+                { name: "request.resource.attr.aNumber" },
+                { value: 1 },
+              ],
+            },
+          ],
+        }
+      );
+
+      const result = queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.aNumber": { field: "aNumber" },
+        },
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          NOT: { aNumber: { gt: 1 } },
+        },
+      });
+
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
+
+      const query = await prisma.resource.findMany({
+        where: { ...result.filters },
+      });
+      expect(query.map((r) => r.id)).toEqual(
+        fixtureResources
+          .filter((r) => !(r.aNumber > 1))
+          .map((r) => r.id)
+      );
+    });
+
+    test("conditional - not-lt", async () => {
+      const queryPlan = await cerbos.planResources({
+        principal: { id: "user1", roles: ["USER"] },
+        resource: { kind: "resource" },
+        action: "not-lt",
+      });
+
+      expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+      expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual(
+        {
+          operator: "not",
+          operands: [
+            {
+              operator: "lt",
+              operands: [
+                { name: "request.resource.attr.aNumber" },
+                { value: 2 },
+              ],
+            },
+          ],
+        }
+      );
+
+      const result = queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.aNumber": { field: "aNumber" },
+        },
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          NOT: { aNumber: { lt: 2 } },
+        },
+      });
+
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
+
+      const query = await prisma.resource.findMany({
+        where: { ...result.filters },
+      });
+      expect(query.map((r) => r.id)).toEqual(
+        fixtureResources
+          .filter((r) => !(r.aNumber < 2))
+          .map((r) => r.id)
+      );
+    });
+
+    test("conditional - not-contains", async () => {
+      const queryPlan = await cerbos.planResources({
+        principal: { id: "user1", roles: ["USER"] },
+        resource: { kind: "resource" },
+        action: "not-contains",
+      });
+
+      expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+      expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual(
+        {
+          operator: "not",
+          operands: [
+            {
+              operator: "contains",
+              operands: [
+                { name: "request.resource.attr.aString" },
+                { value: "str" },
+              ],
+            },
+          ],
+        }
+      );
+
+      const result = queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.aString": { field: "aString" },
+        },
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          NOT: { aString: { contains: "str" } },
+        },
+      });
+
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
+
+      const query = await prisma.resource.findMany({
+        where: { ...result.filters },
+      });
+      expect(query.map((r) => r.id)).toEqual(
+        fixtureResources
+          .filter((r) => !r.aString.includes("str"))
+          .map((r) => r.id)
+      );
+    });
+
+    test("conditional - not-starts-with", async () => {
+      const queryPlan = await cerbos.planResources({
+        principal: { id: "user1", roles: ["USER"] },
+        resource: { kind: "resource" },
+        action: "not-starts-with",
+      });
+
+      expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+      expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual(
+        {
+          operator: "not",
+          operands: [
+            {
+              operator: "startsWith",
+              operands: [
+                { name: "request.resource.attr.aString" },
+                { value: "str" },
+              ],
+            },
+          ],
+        }
+      );
+
+      const result = queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.aString": { field: "aString" },
+        },
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          NOT: { aString: { startsWith: "str" } },
+        },
+      });
+
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
+
+      const query = await prisma.resource.findMany({
+        where: { ...result.filters },
+      });
+      expect(query.map((r) => r.id)).toEqual(
+        fixtureResources
+          .filter((r) => !r.aString.startsWith("str"))
+          .map((r) => r.id)
+      );
+    });
+  });
+
   describe("Collection Operations", () => {
     test("conditional - exists on nested collection", async () => {
       const queryPlan = await cerbos.planResources({

@@ -376,6 +376,54 @@ class ElasticsearchIntegrationTest {
         assertEquals(List.of(), executeQuery("nor"));
     }
 
+    // --- DeMorgan / negated operator wrappers ---
+
+    @Test
+    void notAnd() throws Exception {
+        // !(aBool==true AND aString!="string") → aBool!=true OR aString=="string"
+        // doc 1: aString=="string" → match
+        // doc 2: aBool=false → match
+        // doc 3: aBool=true AND aString!="string" → excluded
+        assertEquals(List.of("1", "2"), executeQuery("not-and"));
+    }
+
+    @Test
+    void notOr() throws Exception {
+        // !(aBool==true OR aString!="string") → aBool!=true AND aString=="string"
+        // No doc satisfies both (only doc 1 has aString=="string" but its aBool is true)
+        assertEquals(List.of(), executeQuery("not-or"));
+    }
+
+    @Test
+    void notGt() throws Exception {
+        // !(aNumber > 1) → aNumber <= 1 → doc 1 (aNumber=1)
+        assertEquals(List.of("1"), executeQuery("not-gt"));
+    }
+
+    @Test
+    void notLt() throws Exception {
+        // !(aNumber < 2) → aNumber >= 2 → docs 2 (aNumber=2), 3 (aNumber=3)
+        assertEquals(List.of("2", "3"), executeQuery("not-lt"));
+    }
+
+    @Test
+    void notContains() throws Exception {
+        // !aString.contains("str") → keyword wildcard *str* negated
+        // doc 1: "string" matches "str" → excluded
+        // doc 2: "amIAString?" (case-sensitive, no lowercase "str") → match
+        // doc 3: "anotherString" (case-sensitive, no lowercase "str") → match
+        assertEquals(List.of("2", "3"), executeQuery("not-contains"));
+    }
+
+    @Test
+    void notStartsWith() throws Exception {
+        // !aString.startsWith("str") → keyword prefix "str" negated
+        // doc 1: "string" → starts with "str" → excluded
+        // doc 2: "amIAString?" → does not start with "str" → match
+        // doc 3: "anotherString" → does not start with "str" → match
+        assertEquals(List.of("2", "3"), executeQuery("not-starts-with"));
+    }
+
     // --- Set membership ---
 
     @Test

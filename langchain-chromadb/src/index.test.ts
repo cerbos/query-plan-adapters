@@ -475,6 +475,182 @@ test("conditional - nor (not or)", async () => {
   );
 });
 
+test("conditional - not-and", async () => {
+  // #given - policy: ALLOW when !(aBool==true && aString!="string")
+  // Cerbos produces not(and(eq(aBool, true), ne(aString, "string")))
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "not-and",
+  });
+
+  // #when
+  const result = queryPlanToChromaDB({
+    queryPlan,
+    fieldNameMapper: {
+      "request.resource.attr.aBool": "aBool",
+      "request.resource.attr.aString": "aString",
+    },
+  });
+
+  // #then - De Morgan's: not(and(A, B)) → or(not(A), not(B))
+  expect(result).toStrictEqual({
+    kind: PlanKind.CONDITIONAL,
+    filters: {
+      $or: [{ aBool: { $ne: true } }, { aString: { $eq: "string" } }],
+    },
+  });
+
+  const matches = await queryResourceIds(result.filters);
+  expect(matches.sort()).toEqual(
+    fixtureResources
+      .filter((r) => !(r.aBool && r.aString !== "string"))
+      .map((r) => r.key)
+      .sort(),
+  );
+});
+
+test("conditional - not-or", async () => {
+  // #given - policy: ALLOW when !(aBool==true || aString!="string")
+  // Cerbos produces not(or(eq(aBool, true), ne(aString, "string")))
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "not-or",
+  });
+
+  // #when
+  const result = queryPlanToChromaDB({
+    queryPlan,
+    fieldNameMapper: {
+      "request.resource.attr.aBool": "aBool",
+      "request.resource.attr.aString": "aString",
+    },
+  });
+
+  // #then - De Morgan's: not(or(A, B)) → and(not(A), not(B))
+  expect(result).toStrictEqual({
+    kind: PlanKind.CONDITIONAL,
+    filters: {
+      $and: [{ aBool: { $ne: true } }, { aString: { $eq: "string" } }],
+    },
+  });
+
+  const matches = await queryResourceIds(result.filters);
+  expect(matches.sort()).toEqual(
+    fixtureResources
+      .filter((r) => !(r.aBool || r.aString !== "string"))
+      .map((r) => r.key)
+      .sort(),
+  );
+});
+
+test("conditional - not-gt", async () => {
+  // #given - policy: ALLOW when !(aNumber > 1)
+  // Cerbos produces not(gt(aNumber, 1))
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "not-gt",
+  });
+
+  // #when
+  const result = queryPlanToChromaDB({
+    queryPlan,
+    fieldNameMapper: {
+      "request.resource.attr.aNumber": "aNumber",
+    },
+  });
+
+  // #then - not(gt) negates to $lte
+  expect(result).toStrictEqual({
+    kind: PlanKind.CONDITIONAL,
+    filters: { aNumber: { $lte: 1 } },
+  });
+
+  const matches = await queryResourceIds(result.filters);
+  expect(matches.sort()).toEqual(
+    fixtureResources
+      .filter((r) => !(r.aNumber > 1))
+      .map((r) => r.key)
+      .sort(),
+  );
+});
+
+test("conditional - not-lt", async () => {
+  // #given - policy: ALLOW when !(aNumber < 2)
+  // Cerbos produces not(lt(aNumber, 2))
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "not-lt",
+  });
+
+  // #when
+  const result = queryPlanToChromaDB({
+    queryPlan,
+    fieldNameMapper: {
+      "request.resource.attr.aNumber": "aNumber",
+    },
+  });
+
+  // #then - not(lt) negates to $gte
+  expect(result).toStrictEqual({
+    kind: PlanKind.CONDITIONAL,
+    filters: { aNumber: { $gte: 2 } },
+  });
+
+  const matches = await queryResourceIds(result.filters);
+  expect(matches.sort()).toEqual(
+    fixtureResources
+      .filter((r) => !(r.aNumber < 2))
+      .map((r) => r.key)
+      .sort(),
+  );
+});
+
+test("conditional - not-contains (unsupported)", async () => {
+  // #given - policy: ALLOW when !aString.contains("str")
+  // ChromaDB metadata filters do not support substring matching, so neither
+  // `contains` nor its negation can be translated.
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "not-contains",
+  });
+
+  // #then - adapter throws on the unsupported operator
+  expect(() =>
+    queryPlanToChromaDB({
+      queryPlan,
+      fieldNameMapper: {
+        "request.resource.attr.aString": "aString",
+      },
+    }),
+  ).toThrow();
+});
+
+test("conditional - not-starts-with (unsupported)", async () => {
+  // #given - policy: ALLOW when !aString.startsWith("str")
+  // ChromaDB metadata filters do not support prefix matching, so neither
+  // `startsWith` nor its negation can be translated.
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "not-starts-with",
+  });
+
+  // #then - adapter throws on the unsupported operator
+  expect(() =>
+    queryPlanToChromaDB({
+      queryPlan,
+      fieldNameMapper: {
+        "request.resource.attr.aString": "aString",
+      },
+    }),
+  ).toThrow();
+});
+
 test("conditional - eq with dot-notation field", async () => {
   const queryPlan = await cerbos.planResources({
     principal: { id: "user1", roles: ["USER"] },
