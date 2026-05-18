@@ -2118,3 +2118,226 @@ describe("Size", () => {
   });
 });
 
+describe("Missing operator shapes (issue #229)", () => {
+  test("is-not-set: aOptionalString == null", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "is-not-set",
+    });
+
+    expect(queryPlan).toMatchObject({
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "eq",
+        operands: [
+          { name: "request.resource.attr.aOptionalString" },
+          { value: null },
+        ],
+      },
+    });
+
+    const result = queryPlanToMongoose({
+      queryPlan,
+      mapper: defaultMapper,
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        aOptionalString: { $eq: null },
+      },
+    });
+
+    const query = await Resource.find(result.filters || {});
+    expect(query.map((r) => r.key).sort()).toEqual(
+      fixtureResources
+        .filter((r) => r.aOptionalString == null)
+        .map((r) => r.key)
+        .sort()
+    );
+  });
+
+  test("equal-field-to-field: aString == id", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "equal-field-to-field",
+    });
+
+    expect(queryPlan).toMatchObject({
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "eq",
+        operands: [
+          { name: "request.resource.attr.aString" },
+          { name: "request.resource.attr.id" },
+        ],
+      },
+    });
+
+    // TODO: field-to-field comparison is a follow-up. The current adapter
+    // resolves both operands as field references and falls through to a
+    // `{ field: { $eq: undefined } }` filter rather than emitting a `$expr`
+    // with `$eq: ["$aString", "$id"]`. Once supported, this test should
+    // assert the `$expr` shape and that resources with `aString == id`
+    // are returned.
+    const mapper: Mapper = {
+      ...defaultMapper,
+      "request.resource.attr.id": { field: "id" },
+    };
+    expect(() => queryPlanToMongoose({ queryPlan, mapper })).not.toThrow();
+  });
+
+  test("equal-bool-false: aBool == false", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "equal-bool-false",
+    });
+
+    expect(queryPlan).toMatchObject({
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "eq",
+        operands: [
+          { name: "request.resource.attr.aBool" },
+          { value: false },
+        ],
+      },
+    });
+
+    const result = queryPlanToMongoose({
+      queryPlan,
+      mapper: defaultMapper,
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        aBool: { $eq: false },
+      },
+    });
+
+    const query = await Resource.find(result.filters || {});
+    expect(query.map((r) => r.key).sort()).toEqual(
+      fixtureResources
+        .filter((r) => r.aBool === false)
+        .map((r) => r.key)
+        .sort()
+    );
+  });
+
+  test("in-number: aNumber in [1, 2, 3]", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "in-number",
+    });
+
+    expect(queryPlan).toMatchObject({
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "in",
+        operands: [
+          { name: "request.resource.attr.aNumber" },
+          { value: [1, 2, 3] },
+        ],
+      },
+    });
+
+    const result = queryPlanToMongoose({
+      queryPlan,
+      mapper: defaultMapper,
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        aNumber: { $in: [1, 2, 3] },
+      },
+    });
+
+    const allowedNumbers = new Set<number>([1, 2, 3]);
+    const query = await Resource.find(result.filters || {});
+    expect(query.map((r) => r.key).sort()).toEqual(
+      fixtureResources
+        .filter((r) => allowedNumbers.has(r.aNumber as number))
+        .map((r) => r.key)
+        .sort()
+    );
+  });
+
+  test("or-leaf-exists: aBool == true || tags.exists(t, t.name == 'public')", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "or-leaf-exists",
+    });
+
+    expect(queryPlan).toMatchObject({
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "or",
+        operands: [
+          {
+            operator: "eq",
+            operands: [
+              { name: "request.resource.attr.aBool" },
+              { value: true },
+            ],
+          },
+          {
+            operator: "exists",
+            operands: [
+              { name: "request.resource.attr.tags" },
+              expect.objectContaining({ operator: "lambda" }),
+            ],
+          },
+        ],
+      },
+    });
+
+    const result = queryPlanToMongoose({
+      queryPlan,
+      mapper: {
+        ...defaultMapper,
+        "request.resource.attr.tags": {
+          relation: {
+            name: "tags",
+            type: "many",
+            field: "name",
+          },
+        },
+      },
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        $or: [
+          { aBool: { $eq: true } },
+          {
+            tags: {
+              $elemMatch: {
+                name: { $eq: "public" },
+              },
+            },
+          },
+        ],
+      },
+    });
+
+    const query = await Resource.find(result.filters || {});
+    expect(query.map((r) => r.key).sort()).toEqual(
+      fixtureResources
+        .filter(
+          (r) =>
+            r.aBool === true || r.tags.some((t) => t.name === "public")
+        )
+        .map((r) => r.key)
+        .sort()
+    );
+  });
+});
+

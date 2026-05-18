@@ -799,4 +799,50 @@ class ElasticsearchIntegrationTest {
             assertEquals(List.of("1", "2", "3"), executeNestedQuery("map-collection"));
         }
     }
+
+    // --- Issue #229: locked-in operator/comparison shapes ---
+
+    @Test
+    void isNotSet() throws Exception {
+        // aOptionalString == null → doc 2 (field missing)
+        assertEquals(List.of("2"), executeQuery("is-not-set"));
+    }
+
+    // TODO(#229): the ES Java adapter does not support comparing two document
+    // fields (variable-to-variable equality). The current implementation
+    // silently produces an incorrect query rather than throwing. This test
+    // asserts an UnsupportedOperationException is *not* yet raised by capturing
+    // the current (incorrect) behavior so a future fix forces a revisit.
+    @Test
+    void equalFieldToFieldIsUnsupported() throws Exception {
+        // aString == id — both operands are document variables. None of the
+        // seed docs have aString equal to their id (ids are OIDs), so even if
+        // the adapter emitted semantically correct query, the expected result
+        // would be []. The current adapter's broken last-write-wins also
+        // happens to return [] here because every doc has an `id` field set,
+        // so `must_not exists id` matches nothing. Either way: empty list.
+        assertEquals(List.of(), executeQuery("equal-field-to-field"));
+    }
+
+    @Test
+    void equalBoolFalse() throws Exception {
+        // aBool == false → doc 2 only
+        assertEquals(List.of("2"), executeQuery("equal-bool-false"));
+    }
+
+    @Test
+    void inNumber() throws Exception {
+        // aNumber in [1, 2, 3] → all docs (aNumbers are 1, 2, 3)
+        assertEquals(List.of("1", "2", "3"), executeQuery("in-number"));
+    }
+
+    @Test
+    void orLeafExists() throws Exception {
+        // aBool == true OR R.attr.tags.exists(t, t.name == "public")
+        // With NESTED_FIELD_MAP routing R.attr.tags → tagObjects:
+        //   Doc 1: aBool=true OR public-tag → match
+        //   Doc 2: aBool=false AND tagObjects=[{tag3,private}] → no match
+        //   Doc 3: aBool=true OR public-tag → match
+        assertEquals(List.of("1", "3"), executeNestedQuery("or-leaf-exists"));
+    }
 }

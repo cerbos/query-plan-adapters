@@ -1035,4 +1035,117 @@ class ElasticsearchQueryPlanAdapterTest {
                 () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP, NESTED_PATHS));
         assertTrue(ex.getMessage().contains("does not start with lambda variable"));
     }
+
+    // --- Issue #229: locked-in operator/comparison shapes ---
+
+    @Test
+    void isNotSetProducesMustNotExists() {
+        // request.resource.attr.<field> == null → bool must_not exists field.
+        // Mirrors the policy `is-not-set` action (aOptionalString == null) — for
+        // unit-test purposes we use any string field in FIELD_MAP since the
+        // adapter shape is identical regardless of which field the null check
+        // is applied to.
+        Operand condition = expressionOperand("eq",
+                variableOperand("request.resource.attr.aString"),
+                nullValueOperand());
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
+
+        Map<String, Object> query = ((Result.Conditional) result).query();
+        assertEquals(
+                Map.of("bool", Map.of("must_not", List.of(
+                        Map.of("exists", Map.of("field", "aString"))))),
+                query);
+    }
+
+    // TODO(#229): the ES Java adapter does not support comparing two document
+    // fields. The current implementation silently overwrites `variable` when
+    // two VARIABLE operands are present (last-write-wins), then treats the
+    // missing value as null and emits a must_not/exists query — which is
+    // semantically wrong. Until field-to-field comparisons are explicitly
+    // rejected or supported, this test documents the current shape so a
+    // future change forces a revisit.
+    @Test
+    void equalFieldToFieldIsUnsupported() {
+        // aString == id → both operands are VARIABLE.
+        Operand condition = expressionOperand("eq",
+                variableOperand("request.resource.attr.aString"),
+                variableOperand("request.resource.attr.department"));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        // Current behavior: does not throw; produces a "field == null" style query
+        // for whichever variable was last seen. Captured here so it's noisy on change.
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
+        assertInstanceOf(Result.Conditional.class, result);
+        Map<String, Object> query = ((Result.Conditional) result).query();
+        assertEquals(
+                Map.of("bool", Map.of("must_not", List.of(
+                        Map.of("exists", Map.of("field", "department"))))),
+                query);
+    }
+
+    @Test
+    void equalBoolFalseProducesTermQuery() {
+        // aBool == false → term aBool=false.
+        Operand condition = expressionOperand("eq",
+                variableOperand("request.resource.attr.aBool"),
+                boolValueOperand(false));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
+
+        Map<String, Object> query = ((Result.Conditional) result).query();
+        assertEquals(Map.of("term", Map.of("aBool", Map.of("value", false))), query);
+    }
+
+    @Test
+    void inNumberProducesTermsQuery() {
+        // aNumber in [1, 2, 3] → terms.
+        Operand listValues = Operand.newBuilder()
+                .setValue(Value.newBuilder().setListValue(ListValue.newBuilder()
+                        .addValues(Value.newBuilder().setNumberValue(1))
+                        .addValues(Value.newBuilder().setNumberValue(2))
+                        .addValues(Value.newBuilder().setNumberValue(3))))
+                .build();
+        Operand condition = expressionOperand("in",
+                variableOperand("request.resource.attr.aNumber"),
+                listValues);
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
+
+        Map<String, Object> query = ((Result.Conditional) result).query();
+        assertEquals(Map.of("terms", Map.of("aNumber", List.of(1L, 2L, 3L))), query);
+    }
+
+    @Test
+    void orLeafExistsProducesBoolShouldWithNested() {
+        // aBool == true OR exists(tagObjects, t, t.name == "public")
+        // Heterogeneous operands: a leaf term + a nested-exists subquery.
+        Operand condition = expressionOperand("or",
+                expressionOperand("eq",
+                        variableOperand("request.resource.attr.aBool"),
+                        boolValueOperand(true)),
+                expressionOperand("exists",
+                        variableOperand("request.resource.attr.tagObjects"),
+                        lambdaOperand("t",
+                                expressionOperand("eq",
+                                        variableOperand("t.name"),
+                                        stringValueOperand("public")))));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP, NESTED_PATHS);
+
+        Map<String, Object> query = ((Result.Conditional) result).query();
+        assertEquals(
+                Map.of("bool", Map.of(
+                        "should", List.of(
+                                Map.of("term", Map.of("aBool", Map.of("value", true))),
+                                Map.of("nested", Map.of(
+                                        "path", "tagObjects",
+                                        "query", Map.of("term", Map.of("tagObjects.name", Map.of("value", "public")))))),
+                        "minimum_should_match", 1)),
+                query);
+    }
 }

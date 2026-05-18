@@ -748,6 +748,11 @@ const conditionalActions = [
   // size() on scalar (LENGTH) and on relation (correlated COUNT subquery).
   "string-size",
   "empty-collection",
+  // Issue #229: lock in additional operator/comparison shapes.
+  "is-not-set",
+  "equal-bool-false",
+  "in-number",
+  "or-leaf-exists",
 ];
 
 beforeAll(() => {
@@ -1138,6 +1143,23 @@ describe("queryPlanToDrizzle", () => {
       .map((r) => r.id)
       .sort();
     expect(ids).toEqual(expected);
+  });
+
+  // TODO(#229): Drizzle adapter does not support field-to-field equality
+  // (both operands are name operands). Cerbos emits this as eq(name, name)
+  // and the dispatch in buildFilterFromExpression requires one value operand.
+  // If/when the adapter learns to compare two columns, replace this with a
+  // data-driven assertion against the conditionalActions loop.
+  test("throws for equal-field-to-field (field-to-field equality)", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "equal-field-to-field",
+    });
+
+    expect(() =>
+      queryPlanToDrizzle({ queryPlan, mapper })
+    ).toThrow(/value operand/i);
   });
 
   test("throws for index-list (array indexing on a relation)", async () => {

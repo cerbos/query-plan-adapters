@@ -838,6 +838,54 @@ resourcePolicy:
           expr: size(request.resource.attr.tags) == 0
 
     - actions:
+        - "is-not-set"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.aOptionalString == null
+
+    - actions:
+        - "equal-field-to-field"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.aString == request.resource.attr.id
+
+    - actions:
+        - "equal-bool-false"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.aBool == false
+
+    - actions:
+        - "in-number"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.aNumber in [1, 2, 3]
+
+    - actions:
+        - "or-leaf-exists"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          any:
+            of:
+              - expr: request.resource.attr.aBool == true
+              - expr: R.attr.tags.exists(t, t.name == "public")
+
+    - actions:
         - "hierarchy-overlaps"
       effect: EFFECT_ALLOW
       roles:

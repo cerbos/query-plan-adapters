@@ -582,6 +582,203 @@ describe("Negation Operations", () => {
   });
 });
 
+describe("Additional Operator Shapes", () => {
+  test("conditional - is-not-set produces eq(field, null)", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "is-not-set",
+    });
+
+    expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+    expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+      operator: "eq",
+      operands: [
+        { name: "request.resource.attr.aOptionalString" },
+        { value: null },
+      ],
+    });
+
+    const result = queryPlanToConvex({ queryPlan, mapper: defaultMapper });
+
+    expect(result.kind).toBe(PlanKind.CONDITIONAL);
+    expect(result.filter).toBeDefined();
+
+    // eq(field, null) matches null, NOT undefined (distinct in Convex)
+    const docWithNull = { aOptionalString: null } as Record<string, unknown>;
+    const docMissing = {} as Record<string, unknown>;
+    const docWithValue = { aOptionalString: "hello" } as Record<string, unknown>;
+
+    expect(result.filter!(createMockFilterBuilder(docWithNull))).toBe(true);
+    expect(result.filter!(createMockFilterBuilder(docMissing))).toBe(false);
+    expect(result.filter!(createMockFilterBuilder(docWithValue))).toBe(false);
+  });
+
+  test("conditional - equal-bool-false produces eq(field, false)", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "equal-bool-false",
+    });
+
+    expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+    expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+      operator: "eq",
+      operands: [
+        { name: "request.resource.attr.aBool" },
+        { value: false },
+      ],
+    });
+
+    const result = queryPlanToConvex({ queryPlan, mapper: defaultMapper });
+
+    expect(result.kind).toBe(PlanKind.CONDITIONAL);
+    expect(result.filter).toBeDefined();
+
+    const filtered = applyFilter(fixtureResources, result.filter!);
+    expect(filtered.map((r) => r.key)).toEqual(
+      fixtureResources.filter((r) => r.aBool === false).map((r) => r.key),
+    );
+  });
+
+  test("conditional - in-number produces or of eq across numeric values", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "in-number",
+    });
+
+    expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+    expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+      operator: "in",
+      operands: [
+        { name: "request.resource.attr.aNumber" },
+        { value: [1, 2, 3] },
+      ],
+    });
+
+    const result = queryPlanToConvex({ queryPlan, mapper: defaultMapper });
+
+    expect(result.kind).toBe(PlanKind.CONDITIONAL);
+    expect(result.filter).toBeDefined();
+
+    const filtered = applyFilter(fixtureResources, result.filter!);
+    expect(filtered.map((r) => r.key)).toEqual(
+      fixtureResources
+        .filter((r) => [1, 2, 3].includes(r.aNumber))
+        .map((r) => r.key),
+    );
+  });
+
+  test("conditional - equal-field-to-field falls back to postFilter", async () => {
+    // TODO: field-to-field is a follow-up — the Convex adapter currently only
+    // pushes field-to-value comparisons. Variable-vs-variable eq drops to
+    // postFilter when allowed, and throws otherwise. This pins the plan shape.
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "equal-field-to-field",
+    });
+
+    expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+    expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+      operator: "eq",
+      operands: [
+        { name: "request.resource.attr.aString" },
+        { name: "request.resource.attr.id" },
+      ],
+    });
+
+    const mapper: Mapper = {
+      ...defaultMapper,
+      "request.resource.attr.id": { field: "id" },
+    };
+
+    const result = queryPlanToConvex({
+      queryPlan,
+      mapper,
+      allowPostFilter: true,
+    });
+
+    expect(result.kind).toBe(PlanKind.CONDITIONAL);
+    expect(result.filter).toBeUndefined();
+    expect(result.postFilter).toBeDefined();
+
+    expect(result.postFilter!({ aString: "abc", id: "abc" })).toBe(true);
+    expect(result.postFilter!({ aString: "abc", id: "xyz" })).toBe(false);
+  });
+
+  test("conditional - equal-field-to-field throws without allowPostFilter", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "equal-field-to-field",
+    });
+
+    const mapper: Mapper = {
+      ...defaultMapper,
+      "request.resource.attr.id": { field: "id" },
+    };
+
+    expect(() => queryPlanToConvex({ queryPlan, mapper })).toThrow(
+      "allowPostFilter",
+    );
+  });
+
+  test("conditional - or-leaf-exists falls back to postFilter", async () => {
+    // exists() is not DB-pushable in the Convex adapter, so or(pushable, exists)
+    // returns only a postFilter when allowed.
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "or-leaf-exists",
+    });
+
+    expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+    const condition = (queryPlan as PlanResourcesConditionalResponse)
+      .condition as PlanExpression;
+    expect(condition.operator).toBe("or");
+    expect((condition.operands[0] as PlanExpression).operator).toBe("eq");
+    expect((condition.operands[1] as PlanExpression).operator).toBe("exists");
+
+    const mapper: Mapper = {
+      ...defaultMapper,
+      "request.resource.attr.tags": { field: "tags" },
+    };
+
+    const result = queryPlanToConvex({
+      queryPlan,
+      mapper,
+      allowPostFilter: true,
+    });
+
+    expect(result.kind).toBe(PlanKind.CONDITIONAL);
+    expect(result.filter).toBeUndefined();
+    expect(result.postFilter).toBeDefined();
+    // TODO(#229): invoking the postFilter on real Cerbos plans throws because
+    // the evaluator assumes lambda operands as [var, body] but Cerbos emits
+    // [body, var]. Tracked as a separate follow-up; for now we only assert
+    // the split (filter undefined, postFilter present).
+  });
+
+  test("conditional - or-leaf-exists throws without allowPostFilter", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "or-leaf-exists",
+    });
+
+    const mapper: Mapper = {
+      ...defaultMapper,
+      "request.resource.attr.tags": { field: "tags" },
+    };
+
+    expect(() => queryPlanToConvex({ queryPlan, mapper })).toThrow(
+      "allowPostFilter",
+    );
+  });
+});
+
 describe("Collection Operations", () => {
   test("conditional - in", async () => {
     const queryPlan = await cerbos.planResources({

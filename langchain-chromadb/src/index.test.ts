@@ -930,3 +930,148 @@ test("conditional - empty-collection (unsupported)", async () => {
     }),
   ).toThrow();
 });
+
+// --- Issue #229: lock in missing operator/comparison shapes ---
+
+test("conditional - is-not-set", async () => {
+  // #given - policy: ALLOW when aOptionalString == null
+  // Cerbos produces eq(aOptionalString, null)
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "is-not-set",
+  });
+
+  // #when
+  const result = queryPlanToChromaDB({
+    queryPlan,
+    fieldNameMapper: {
+      "request.resource.attr.aOptionalString": "aOptionalString",
+    },
+  });
+
+  // #then - eq null translates to $eq: null.
+  // NOTE: ChromaDB metadata filters do not natively match null/missing
+  // values via $eq: null. The adapter passes the literal through; the
+  // downstream query is expected to return no rows. The shape is what
+  // we're locking in here.
+  expect(result).toStrictEqual({
+    kind: PlanKind.CONDITIONAL,
+    filters: { aOptionalString: { $eq: null } },
+  });
+});
+
+test("conditional - equal-field-to-field (unsupported)", async () => {
+  // #given - policy: ALLOW when aString == id
+  // Cerbos produces eq(aString, id) — both operands are variables.
+  // ChromaDB metadata filters only support variable-to-value comparisons,
+  // so the adapter must throw.
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "equal-field-to-field",
+  });
+
+  expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+
+  // TODO(#229): support variable-to-variable comparisons if/when ChromaDB
+  // exposes a way to express them.
+  expect(() =>
+    queryPlanToChromaDB({
+      queryPlan,
+      fieldNameMapper: {
+        "request.resource.attr.aString": "aString",
+        "request.resource.attr.id": "id",
+      },
+    }),
+  ).toThrow(/Variable-to-variable comparisons are not supported/);
+});
+
+test("conditional - equal-bool-false", async () => {
+  // #given - policy: ALLOW when aBool == false
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "equal-bool-false",
+  });
+
+  // #when
+  const result = queryPlanToChromaDB({
+    queryPlan,
+    fieldNameMapper: {
+      "request.resource.attr.aBool": "aBool",
+    },
+  });
+
+  // #then
+  expect(result).toStrictEqual({
+    kind: PlanKind.CONDITIONAL,
+    filters: { aBool: { $eq: false } },
+  });
+
+  const matches = await queryResourceIds(result.filters);
+  expect(matches.sort()).toEqual(
+    fixtureResources
+      .filter((r) => !r.aBool)
+      .map((r) => r.key)
+      .sort(),
+  );
+});
+
+test("conditional - in-number", async () => {
+  // #given - policy: ALLOW when aNumber in [1, 2, 3]
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "in-number",
+  });
+
+  // #when
+  const result = queryPlanToChromaDB({
+    queryPlan,
+    fieldNameMapper: {
+      "request.resource.attr.aNumber": "aNumber",
+    },
+  });
+
+  // #then
+  expect(result).toStrictEqual({
+    kind: PlanKind.CONDITIONAL,
+    filters: { aNumber: { $in: [1, 2, 3] } },
+  });
+
+  const matches = await queryResourceIds(result.filters);
+  expect(matches.sort()).toEqual(
+    fixtureResources
+      .filter((r) => [1, 2, 3].includes(r.aNumber))
+      .map((r) => r.key)
+      .sort(),
+  );
+});
+
+test("conditional - or-leaf-exists (unsupported)", async () => {
+  // #given - policy: ALLOW when aBool==true OR tags.exists(t, t.name == "public")
+  // The exists leg compiles to an operator (e.g. `exists`/lambda) that
+  // is not in the ChromaDB OPERATORS map. ChromaDB metadata filters
+  // cannot express relation-style nested matches, so the adapter must
+  // throw on the unsupported branch of the OR.
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "or-leaf-exists",
+  });
+
+  expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+
+  // TODO(#229): if ChromaDB ever supports nested/relational metadata
+  // filters, revisit this and translate the exists branch.
+  expect(() =>
+    queryPlanToChromaDB({
+      queryPlan,
+      fieldNameMapper: {
+        "request.resource.attr.aBool": "aBool",
+        "request.resource.attr.tags": "tags",
+      },
+    }),
+  ).toThrow();
+});
