@@ -19,6 +19,7 @@ import jakarta.persistence.criteria.Root;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.jpa.domain.Specification;
 
@@ -98,6 +99,12 @@ class SpringDataQueryPlanAdapterTest {
     private static Operand listOp(String... values) {
         ListValue.Builder list = ListValue.newBuilder();
         for (String v : values) list.addValues(Value.newBuilder().setStringValue(v));
+        return Operand.newBuilder().setValue(Value.newBuilder().setListValue(list)).build();
+    }
+
+    private static Operand listOpNumbers(double... values) {
+        ListValue.Builder list = ListValue.newBuilder();
+        for (double v : values) list.addValues(Value.newBuilder().setNumberValue(v));
         return Operand.newBuilder().setValue(Value.newBuilder().setListValue(list)).build();
     }
 
@@ -385,6 +392,251 @@ class SpringDataQueryPlanAdapterTest {
                 exprOp("add", sval("projects:"), var("request.resource.attr.aString")));
         // 1=0 filter → 0 results expected (table is empty anyway, this just confirms no exception)
         assertEquals(0, runCount(cond));
+    }
+
+    // -- DeMorgan / negated operator wrappers (PR #222) --
+
+    @Nested
+    class DeMorganNegation {
+
+        @Test
+        void notAnd() {
+            // !(aBool == true && aString != "string")
+            assertEquals(0, runCount(exprOp("not",
+                    exprOp("and",
+                            exprOp("eq", var("request.resource.attr.aBool"), bval(true)),
+                            exprOp("ne", var("request.resource.attr.aString"), sval("string"))))));
+        }
+
+        @Test
+        void notOr() {
+            assertEquals(0, runCount(exprOp("not",
+                    exprOp("or",
+                            exprOp("eq", var("request.resource.attr.aBool"), bval(true)),
+                            exprOp("ne", var("request.resource.attr.aString"), sval("string"))))));
+        }
+
+        @Test
+        void notGt() {
+            assertEquals(0, runCount(exprOp("not",
+                    exprOp("gt", var("request.resource.attr.aNumber"), nval(1)))));
+        }
+
+        @Test
+        void notLt() {
+            assertEquals(0, runCount(exprOp("not",
+                    exprOp("lt", var("request.resource.attr.aNumber"), nval(2)))));
+        }
+
+        @Test
+        void notContains() {
+            assertEquals(0, runCount(exprOp("not",
+                    exprOp("contains", var("request.resource.attr.aString"), sval("str")))));
+        }
+
+        @Test
+        void notStartsWith() {
+            assertEquals(0, runCount(exprOp("not",
+                    exprOp("startsWith", var("request.resource.attr.aString"), sval("str")))));
+        }
+    }
+
+    // -- CEL primitives (PR #223): only empty-collection is natively supported; the rest throw --
+
+    @Nested
+    class CelPrimitives {
+
+        @Test
+        void emptyCollectionBuildsNotExists() {
+            // size(R.attr.tags) == 0 — tags mapped as Relation → not-exists subquery.
+            assertEquals(0, runCount(exprOp("eq",
+                    exprOp("size", var("request.resource.attr.tags")),
+                    nval(0))));
+        }
+
+        @Test
+        void arithAddInComparisonThrows() {
+            // gt(add(field, 1.0), 2.0) — adapter only folds add() for eq/ne with field refs.
+            Operand cond = exprOp("gt",
+                    exprOp("add", var("request.resource.attr.aNumber"), nval(1)),
+                    nval(2));
+            assertThrows(IllegalArgumentException.class, () -> runCount(cond));
+        }
+
+        @Test
+        void arithSubThrows() {
+            Operand cond = exprOp("lt",
+                    exprOp("sub", var("request.resource.attr.aNumber"), nval(1)),
+                    nval(2));
+            assertThrows(IllegalArgumentException.class, () -> runCount(cond));
+        }
+
+        @Test
+        void arithMultThrows() {
+            Operand cond = exprOp("gt",
+                    exprOp("mult", var("request.resource.attr.aNumber"), nval(2)),
+                    nval(2));
+            assertThrows(IllegalArgumentException.class, () -> runCount(cond));
+        }
+
+        @Test
+        void arithDivThrows() {
+            Operand cond = exprOp("gt",
+                    exprOp("div", var("request.resource.attr.aNumber"), nval(2)),
+                    nval(0));
+            assertThrows(IllegalArgumentException.class, () -> runCount(cond));
+        }
+
+        @Test
+        void arithModThrows() {
+            Operand cond = exprOp("eq",
+                    exprOp("mod", var("request.resource.attr.aNumber"), nval(2)),
+                    nval(0));
+            assertThrows(IllegalArgumentException.class, () -> runCount(cond));
+        }
+
+        @Test
+        void matchesRegexThrows() {
+            Operand cond = exprOp("matches",
+                    var("request.resource.attr.aString"), sval("^str.*"));
+            assertThrows(IllegalArgumentException.class, () -> runCount(cond));
+        }
+
+        @Test
+        void indexListThrows() {
+            // ownedBy[0] == "user1" — array indexing not supported.
+            Operand cond = exprOp("eq",
+                    exprOp("index", var("request.resource.attr.ownedBy"), nval(0)),
+                    sval("user1"));
+            assertThrows(IllegalArgumentException.class, () -> runCount(cond));
+        }
+
+        @Test
+        void convertStringThrows() {
+            Operand cond = exprOp("eq",
+                    exprOp("string", var("request.resource.attr.aNumber")),
+                    sval("1"));
+            assertThrows(IllegalArgumentException.class, () -> runCount(cond));
+        }
+
+        @Test
+        void convertDoubleThrows() {
+            Operand cond = exprOp("gt",
+                    exprOp("double", var("request.resource.attr.aNumber")),
+                    nval(1.5));
+            assertThrows(IllegalArgumentException.class, () -> runCount(cond));
+        }
+
+        @Test
+        void convertIntThrows() {
+            Operand cond = exprOp("gt",
+                    exprOp("int", var("request.resource.attr.aString")),
+                    nval(0));
+            assertThrows(IllegalArgumentException.class, () -> runCount(cond));
+        }
+
+        @Test
+        void ternaryThrows() {
+            Operand ternary = exprOp("conditional",
+                    var("request.resource.attr.aBool"),
+                    var("request.resource.attr.aNumber"),
+                    nval(0));
+            Operand cond = exprOp("gt", ternary, nval(0));
+            assertThrows(IllegalArgumentException.class, () -> runCount(cond));
+        }
+
+        @Test
+        void stringSizeThrows() {
+            // size(aString) > 0 — size() requires a Relation mapping; aString is a Field.
+            Operand cond = exprOp("gt",
+                    exprOp("size", var("request.resource.attr.aString")),
+                    nval(0));
+            assertThrows(IllegalArgumentException.class, () -> runCount(cond));
+        }
+    }
+
+    // -- Minor operator/comparison shapes (PR #234) --
+
+    @Nested
+    class MinorOperators {
+
+        @Test
+        void isNotSetBuildsIsNull() {
+            // aOptionalString == null — adapter routes eq(field, null) to cb.isNull.
+            assertEquals(0, runCount(exprOp("eq",
+                    var("request.resource.attr.aOptionalString"), nullVal())));
+        }
+
+        @Test
+        void equalFieldToFieldThrows() {
+            // eq(var, var) — adapter requires exactly one value operand.
+            Operand cond = exprOp("eq",
+                    var("request.resource.attr.aString"),
+                    var("request.resource.attr.createdBy"));
+            assertThrows(IllegalArgumentException.class, () -> runCount(cond));
+        }
+
+        @Test
+        void equalBoolFalse() {
+            assertEquals(0, runCount(exprOp("eq",
+                    var("request.resource.attr.aBool"), bval(false))));
+        }
+
+        @Test
+        void inNumberList() {
+            assertEquals(0, runCount(exprOp("in",
+                    var("request.resource.attr.aNumber"),
+                    listOpNumbers(1, 2, 3))));
+        }
+
+        @Test
+        void orLeafExists() {
+            // aBool == true OR tags.exists(t, t.name == "public")
+            Operand cond = exprOp("or",
+                    exprOp("eq", var("request.resource.attr.aBool"), bval(true)),
+                    exprOp("exists", var("request.resource.attr.tags"),
+                            lambda("t", exprOp("eq", var("t.name"), sval("public")))));
+            assertEquals(0, runCount(cond));
+        }
+    }
+
+    // -- Collection macro composition (PR #235) --
+
+    @Nested
+    class CollectionMacroComposition {
+
+        @Test
+        void allWithNestedAnd() {
+            // tags.all(t, t.name == "public" && t.id != "tag1")
+            Operand cond = exprOp("all",
+                    var("request.resource.attr.tags"),
+                    lambda("t", exprOp("and",
+                            exprOp("eq", var("t.name"), sval("public")),
+                            exprOp("ne", var("t.id"), sval("tag1")))));
+            assertEquals(0, runCount(cond));
+        }
+
+        @Test
+        void mapComparedToLiteralListThrows() {
+            // tags.map(t, t.id) == ["tag1", "tag2"] — adapter only handles map() inside hasIntersection.
+            Operand mapExpr = exprOp("map",
+                    var("request.resource.attr.tags"),
+                    lambda("t", var("t.id")));
+            Operand cond = exprOp("eq", mapExpr, listOp("tag1", "tag2"));
+            assertThrows(IllegalArgumentException.class, () -> runCount(cond));
+        }
+
+        @Test
+        void sizeOfFilterThrows() {
+            // size(tags.filter(t, t.name == "public")) > 0 — size() operand must be a variable.
+            Operand filterExpr = exprOp("filter",
+                    var("request.resource.attr.tags"),
+                    lambda("t", exprOp("eq", var("t.name"), sval("public"))));
+            Operand cond = exprOp("gt",
+                    exprOp("size", filterExpr),
+                    nval(0));
+            assertThrows(IllegalArgumentException.class, () -> runCount(cond));
+        }
     }
 
     @Test

@@ -43,6 +43,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * End-to-end test against a real Cerbos PDP.
@@ -881,6 +882,206 @@ class SpringDataIntegrationTest {
 
             assertEquals(List.of("1"), runWithPrincipalAndMapping(
                     principal, "kitchensink", COMBINED_MAP));
+        }
+    }
+
+    // -- DeMorgan / negated operator wrappers (PR #222) --
+    // The adapter handles `not` by wrapping `cb.not(...)` around the inner predicate;
+    // every supported inner operator composes without source changes.
+
+    @Nested
+    class DeMorganNegation {
+
+        @Test
+        void notAnd() {
+            // !(aBool == true && aString != "string")
+            //   r1: !(true && false)  → true  ✓
+            //   r2: !(false && _)     → true  ✓
+            //   r3: !(true && true)   → false ✗
+            assertEquals(List.of("1", "2"), run("not-and"));
+        }
+
+        @Test
+        void notOr() {
+            // !(aBool == true || aString != "string")
+            //   r1: !(true || false)  → false ✗
+            //   r2: !(false || true)  → false ✗
+            //   r3: !(true || true)   → false ✗
+            assertEquals(List.of(), run("not-or"));
+        }
+
+        @Test
+        void notGt() {
+            // !(aNumber > 1) → aNumber <= 1; only r1 (aNumber=1)
+            assertEquals(List.of("1"), run("not-gt"));
+        }
+
+        @Test
+        void notLt() {
+            // !(aNumber < 2) → aNumber >= 2; r2 (2), r3 (3)
+            assertEquals(List.of("2", "3"), run("not-lt"));
+        }
+
+        @Test
+        void notContains() {
+            // !aString.contains("str") — H2 LIKE is case-sensitive by default.
+            //   r1: "string" contains "str"   → excluded
+            //   r2: "amIAString?"             → match (capital 'S')
+            //   r3: "anotherString"           → match (capital 'S')
+            assertEquals(List.of("2", "3"), run("not-contains"));
+        }
+
+        @Test
+        void notStartsWith() {
+            //   r1: "string" → excluded
+            //   r2: "amIAString?" → match
+            //   r3: "anotherString" → match
+            assertEquals(List.of("2", "3"), run("not-starts-with"));
+        }
+    }
+
+    // -- CEL primitives (PR #223) --
+    // Only `empty-collection` (size(coll) == 0) is natively supported via the existing emptiness
+    // path in trySizeComparison. Arithmetic, regex, casts, ternary, list indexing, and
+    // size() over a scalar string all throw — the Spring Data adapter has no shape for them in
+    // its Criteria-based predicate builder.
+
+    @Nested
+    class CelPrimitives {
+
+        @Test
+        void emptyCollection() {
+            // size(R.attr.tags) == 0 — every resource has non-empty tagNames.
+            assertEquals(List.of(), run("empty-collection"));
+        }
+
+        @Test
+        void arithAddThrows() {
+            assertThrows(IllegalArgumentException.class, () -> run("arith-add"));
+        }
+
+        @Test
+        void arithSubThrows() {
+            assertThrows(IllegalArgumentException.class, () -> run("arith-sub"));
+        }
+
+        @Test
+        void arithMultThrows() {
+            assertThrows(IllegalArgumentException.class, () -> run("arith-mult"));
+        }
+
+        @Test
+        void arithDivThrows() {
+            assertThrows(IllegalArgumentException.class, () -> run("arith-div"));
+        }
+
+        @Test
+        void arithModThrows() {
+            assertThrows(IllegalArgumentException.class, () -> run("arith-mod"));
+        }
+
+        @Test
+        void matchesRegexThrows() {
+            assertThrows(IllegalArgumentException.class, () -> run("matches-regex"));
+        }
+
+        @Test
+        void indexListThrows() {
+            assertThrows(IllegalArgumentException.class, () -> run("index-list"));
+        }
+
+        @Test
+        void convertStringThrows() {
+            assertThrows(IllegalArgumentException.class, () -> run("convert-string"));
+        }
+
+        @Test
+        void convertDoubleThrows() {
+            assertThrows(IllegalArgumentException.class, () -> run("convert-double"));
+        }
+
+        @Test
+        void convertIntThrows() {
+            assertThrows(IllegalArgumentException.class, () -> run("convert-int"));
+        }
+
+        @Test
+        void ternaryThrows() {
+            assertThrows(IllegalArgumentException.class, () -> run("ternary"));
+        }
+
+        @Test
+        void stringSizeThrows() {
+            // size(R.attr.aString) > 0 — adapter only handles size() on Relation mappings.
+            assertThrows(IllegalArgumentException.class, () -> run("string-size"));
+        }
+    }
+
+    // -- Minor operator/comparison shapes (PR #234) --
+
+    @Nested
+    class MinorOperators {
+
+        @Test
+        void isNotSet() {
+            // aOptionalString == null → only r2 (others have "hello"/"world")
+            assertEquals(List.of("2"), run("is-not-set"));
+        }
+
+        @Test
+        void equalFieldToFieldThrows() {
+            // aString == id — adapter requires exactly one value operand for eq.
+            assertThrows(IllegalArgumentException.class, () -> run("equal-field-to-field"));
+        }
+
+        @Test
+        void equalBoolFalse() {
+            // aBool == false → only r2
+            assertEquals(List.of("2"), run("equal-bool-false"));
+        }
+
+        @Test
+        void inNumber() {
+            // aNumber in [1, 2, 3] → all three rows have aNumber ∈ {1, 2, 3}.
+            assertEquals(List.of("1", "2", "3"), run("in-number"));
+        }
+
+        @Test
+        void orLeafExists() {
+            // aBool == true OR tags.exists(t, t.name == "public") — needs tags mapped as
+            // a Relation with id/name fields, so route through NESTED_FIELD_MAP.
+            //   r1: aBool=true OR tag1:public → ✓
+            //   r2: aBool=false OR tags=[tag3:private] → ✗
+            //   r3: aBool=true OR tag1:public → ✓
+            assertEquals(List.of("1", "3"), runNested("or-leaf-exists"));
+        }
+    }
+
+    // -- Collection macro composition (PR #235) --
+
+    @Nested
+    class CollectionMacroComposition {
+
+        @Test
+        void allWithNestedAnd() {
+            // tags.all(t, t.name == "public" && t.id != "tag1") — every resource has at least one
+            // tag that fails the inner predicate (r1 has tag1, r2 has tag3 (name=private), r3 has tag1),
+            // so the ALL clause is false for all three.
+            assertEquals(List.of(), runNested("all-nested"));
+        }
+
+        // TODO(#232): the adapter's handleHasIntersection is the only path that accepts a map()
+        // expression. A bare `eq(map(...), [...])` is rejected by the leaf operator handler.
+        @Test
+        void mapComparedToLiteralListThrows() {
+            assertThrows(IllegalArgumentException.class, () -> runNested("map-compared"));
+        }
+
+        // TODO(#232): trySizeComparison only accepts a Variable as size()'s operand, so
+        // `size(filter(...)) > 0` falls through and throws.
+        @Test
+        void sizeOfFilterThrows() {
+            assertThrows(IllegalArgumentException.class, () -> runNested("filter-count-gt"));
         }
     }
 }
