@@ -27,6 +27,8 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -113,6 +115,21 @@ class SpringDataQueryPlanAdapterTest {
     }
 
     /**
+     * Assert that {@link #runCount} for {@code condition} throws {@link IllegalArgumentException}
+     * whose message contains every {@code messageFragments} entry. Pins error contracts so a
+     * future refactor can't silently regress to a less-helpful message or different exception
+     * type.
+     */
+    private static void assertConditionThrows(Operand condition, String... messageFragments) {
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> runCount(condition));
+        for (String fragment : messageFragments) {
+            assertTrue(ex.getMessage().contains(fragment),
+                    "expected message to contain '" + fragment + "' but was: " + ex.getMessage());
+        }
+    }
+
+    /**
      * Build a Specification, translate to a predicate, and run the query — returns the row count.
      * Exercises the full path so any IllegalArgumentException during predicate building surfaces.
      */
@@ -147,11 +164,44 @@ class SpringDataQueryPlanAdapterTest {
     }
 
     @Test
+    void alwaysAllowedSpecificationReturnsNullPredicate() {
+        // Contract: AlwaysAllowed.toSpecification() must produce a Specification whose
+        // toPredicate returns null — Spring Data's SimpleJpaRepository skips the WHERE
+        // clause entirely in that case. Pins B2 against regression to cb.conjunction().
+        Specification<ResourceEntity> spec = new Result.AlwaysAllowed<ResourceEntity>().toSpecification();
+        EntityManager em = emf.createEntityManager();
+        try {
+            CriteriaBuilder cb = em.getCriteriaBuilder();
+            CriteriaQuery<ResourceEntity> cq = cb.createQuery(ResourceEntity.class);
+            Root<ResourceEntity> root = cq.from(ResourceEntity.class);
+            assertNull(spec.toPredicate(root, cq, cb));
+        } finally {
+            em.close();
+        }
+    }
+
+    @Test
     void alwaysDeniedResult() {
         PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_ALWAYS_DENIED, null);
         Result<ResourceEntity> result =
                 SpringDataQueryPlanAdapter.toSpecification(resp, MAPPER);
         assertInstanceOf(Result.AlwaysDenied.class, result);
+    }
+
+    @Test
+    void alwaysDeniedSpecificationReturnsDisjunction() {
+        // Symmetric pin: AlwaysDenied.toSpecification() must produce a non-null predicate.
+        Specification<ResourceEntity> spec = new Result.AlwaysDenied<ResourceEntity>().toSpecification();
+        EntityManager em = emf.createEntityManager();
+        try {
+            CriteriaBuilder cb = em.getCriteriaBuilder();
+            CriteriaQuery<ResourceEntity> cq = cb.createQuery(ResourceEntity.class);
+            Root<ResourceEntity> root = cq.from(ResourceEntity.class);
+            assertNotNull(spec.toPredicate(root, cq, cb),
+                    "AlwaysDenied must emit an explicit predicate, not null");
+        } finally {
+            em.close();
+        }
     }
 
     @Test
@@ -276,10 +326,12 @@ class SpringDataQueryPlanAdapterTest {
 
     @Test
     void unsupportedSizeComparisonThrows() {
-        Operand cond = exprOp("gt",
-                exprOp("size", var("request.resource.attr.ownedBy")),
-                nval(5));
-        assertThrows(IllegalArgumentException.class, () -> runCount(cond));
+        // Only emptiness checks (size > 0, size == 0) are supported; size > 5 must throw.
+        assertConditionThrows(
+                exprOp("gt",
+                        exprOp("size", var("request.resource.attr.ownedBy")),
+                        nval(5)),
+                "size", "Unsupported size comparison");
     }
 
     @Test
@@ -338,7 +390,7 @@ class SpringDataQueryPlanAdapterTest {
                 var("request.resource.attr.aString"), sval("v"));
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
                 () -> runCount(cond));
-        assertTrue(ex.getMessage().contains("Unknown operator"));
+        assertTrue(ex.getMessage().contains("Unsupported operator"));
     }
 
     // -- add operator --
@@ -456,102 +508,113 @@ class SpringDataQueryPlanAdapterTest {
 
         @Test
         void arithAddInComparisonThrows() {
-            // gt(add(field, 1.0), 2.0) — adapter only folds add() for eq/ne with field refs.
-            Operand cond = exprOp("gt",
-                    exprOp("add", var("request.resource.attr.aNumber"), nval(1)),
-                    nval(2));
-            assertThrows(IllegalArgumentException.class, () -> runCount(cond));
+            // gt(add(field, 1.0), 2.0) — handleAddComparison rejects non-eq/ne ops.
+            assertConditionThrows(
+                    exprOp("gt",
+                            exprOp("add", var("request.resource.attr.aNumber"), nval(1)),
+                            nval(2)),
+                    "add", "gt");
         }
 
         @Test
         void arithSubThrows() {
-            Operand cond = exprOp("lt",
-                    exprOp("sub", var("request.resource.attr.aNumber"), nval(1)),
-                    nval(2));
-            assertThrows(IllegalArgumentException.class, () -> runCount(cond));
+            assertConditionThrows(
+                    exprOp("lt",
+                            exprOp("sub", var("request.resource.attr.aNumber"), nval(1)),
+                            nval(2)),
+                    "sub");
         }
 
         @Test
         void arithMultThrows() {
-            Operand cond = exprOp("gt",
-                    exprOp("mult", var("request.resource.attr.aNumber"), nval(2)),
-                    nval(2));
-            assertThrows(IllegalArgumentException.class, () -> runCount(cond));
+            assertConditionThrows(
+                    exprOp("gt",
+                            exprOp("mult", var("request.resource.attr.aNumber"), nval(2)),
+                            nval(2)),
+                    "mult");
         }
 
         @Test
         void arithDivThrows() {
-            Operand cond = exprOp("gt",
-                    exprOp("div", var("request.resource.attr.aNumber"), nval(2)),
-                    nval(0));
-            assertThrows(IllegalArgumentException.class, () -> runCount(cond));
+            assertConditionThrows(
+                    exprOp("gt",
+                            exprOp("div", var("request.resource.attr.aNumber"), nval(2)),
+                            nval(0)),
+                    "div");
         }
 
         @Test
         void arithModThrows() {
-            Operand cond = exprOp("eq",
-                    exprOp("mod", var("request.resource.attr.aNumber"), nval(2)),
-                    nval(0));
-            assertThrows(IllegalArgumentException.class, () -> runCount(cond));
+            assertConditionThrows(
+                    exprOp("eq",
+                            exprOp("mod", var("request.resource.attr.aNumber"), nval(2)),
+                            nval(0)),
+                    "mod");
         }
 
         @Test
         void matchesRegexThrows() {
-            Operand cond = exprOp("matches",
-                    var("request.resource.attr.aString"), sval("^str.*"));
-            assertThrows(IllegalArgumentException.class, () -> runCount(cond));
+            assertConditionThrows(
+                    exprOp("matches",
+                            var("request.resource.attr.aString"), sval("^str.*")),
+                    "Unsupported operator", "matches");
         }
 
         @Test
         void indexListThrows() {
             // ownedBy[0] == "user1" — array indexing not supported.
-            Operand cond = exprOp("eq",
-                    exprOp("index", var("request.resource.attr.ownedBy"), nval(0)),
-                    sval("user1"));
-            assertThrows(IllegalArgumentException.class, () -> runCount(cond));
+            assertConditionThrows(
+                    exprOp("eq",
+                            exprOp("index", var("request.resource.attr.ownedBy"), nval(0)),
+                            sval("user1")),
+                    "index");
         }
 
         @Test
         void convertStringThrows() {
-            Operand cond = exprOp("eq",
-                    exprOp("string", var("request.resource.attr.aNumber")),
-                    sval("1"));
-            assertThrows(IllegalArgumentException.class, () -> runCount(cond));
+            assertConditionThrows(
+                    exprOp("eq",
+                            exprOp("string", var("request.resource.attr.aNumber")),
+                            sval("1")),
+                    "string");
         }
 
         @Test
         void convertDoubleThrows() {
-            Operand cond = exprOp("gt",
-                    exprOp("double", var("request.resource.attr.aNumber")),
-                    nval(1.5));
-            assertThrows(IllegalArgumentException.class, () -> runCount(cond));
+            assertConditionThrows(
+                    exprOp("gt",
+                            exprOp("double", var("request.resource.attr.aNumber")),
+                            nval(1.5)),
+                    "double");
         }
 
         @Test
         void convertIntThrows() {
-            Operand cond = exprOp("gt",
-                    exprOp("int", var("request.resource.attr.aString")),
-                    nval(0));
-            assertThrows(IllegalArgumentException.class, () -> runCount(cond));
+            assertConditionThrows(
+                    exprOp("gt",
+                            exprOp("int", var("request.resource.attr.aString")),
+                            nval(0)),
+                    "int");
         }
 
         @Test
         void ternaryThrows() {
-            Operand ternary = exprOp("conditional",
+            // The CEL planner emits ternary as `if(cond, then, else)` in the AST.
+            Operand ternary = exprOp("if",
                     var("request.resource.attr.aBool"),
                     var("request.resource.attr.aNumber"),
                     nval(0));
-            Operand cond = exprOp("gt", ternary, nval(0));
-            assertThrows(IllegalArgumentException.class, () -> runCount(cond));
+            assertConditionThrows(exprOp("gt", ternary, nval(0)), "if()");
         }
 
         @Test
         void stringSizeThrows() {
             // size(aString) > 0 — size() requires a Relation mapping; aString is a Field.
-            Operand cond = exprOp("gt",
-                    exprOp("size", var("request.resource.attr.aString")),
-                    nval(0));
-            assertThrows(IllegalArgumentException.class, () -> runCount(cond));
+            assertConditionThrows(
+                    exprOp("gt",
+                            exprOp("size", var("request.resource.attr.aString")),
+                            nval(0)),
+                    "size()", "Relation");
         }
     }
 
@@ -569,11 +632,12 @@ class SpringDataQueryPlanAdapterTest {
 
         @Test
         void equalFieldToFieldThrows() {
-            // eq(var, var) — adapter requires exactly one value operand.
-            Operand cond = exprOp("eq",
-                    var("request.resource.attr.aString"),
-                    var("request.resource.attr.createdBy"));
-            assertThrows(IllegalArgumentException.class, () -> runCount(cond));
+            // eq(var, var) — adapter rejects two-variable comparisons with a specific message.
+            assertConditionThrows(
+                    exprOp("eq",
+                            var("request.resource.attr.aString"),
+                            var("request.resource.attr.createdBy")),
+                    "Field-to-field", "eq");
         }
 
         @Test
@@ -622,8 +686,9 @@ class SpringDataQueryPlanAdapterTest {
             Operand mapExpr = exprOp("map",
                     var("request.resource.attr.tags"),
                     lambda("t", var("t.id")));
-            Operand cond = exprOp("eq", mapExpr, listOp("tag1", "tag2"));
-            assertThrows(IllegalArgumentException.class, () -> runCount(cond));
+            assertConditionThrows(
+                    exprOp("eq", mapExpr, listOp("tag1", "tag2")),
+                    "map(...)", "hasIntersection");
         }
 
         @Test
@@ -632,10 +697,9 @@ class SpringDataQueryPlanAdapterTest {
             Operand filterExpr = exprOp("filter",
                     var("request.resource.attr.tags"),
                     lambda("t", exprOp("eq", var("t.name"), sval("public"))));
-            Operand cond = exprOp("gt",
-                    exprOp("size", filterExpr),
-                    nval(0));
-            assertThrows(IllegalArgumentException.class, () -> runCount(cond));
+            assertConditionThrows(
+                    exprOp("gt", exprOp("size", filterExpr), nval(0)),
+                    "size()");
         }
     }
 

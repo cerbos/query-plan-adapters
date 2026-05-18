@@ -17,9 +17,16 @@ repositories {
 dependencies {
     implementation("dev.cerbos:cerbos-sdk-java:0.18.0")
     implementation("com.google.protobuf:protobuf-java:4.31.1")
-    implementation("org.springframework.data:spring-data-jpa:3.5.1")
-    implementation("jakarta.persistence:jakarta.persistence-api:3.2.0")
+    // Spring Data JPA + Jakarta Persistence are provided by the consuming application's
+    // Spring Boot BOM (or equivalent). Declaring them as `compileOnly` keeps them out of
+    // the published POM as transitive dependencies so they don't pin a specific version on
+    // downstream consumers — matching how Spring Data JPA itself marks `hibernate-core`
+    // as `<optional>true</optional>`.
+    compileOnly("org.springframework.data:spring-data-jpa:3.5.1")
+    compileOnly("jakarta.persistence:jakarta.persistence-api:3.2.0")
 
+    testImplementation("org.springframework.data:spring-data-jpa:3.5.1")
+    testImplementation("jakarta.persistence:jakarta.persistence-api:3.2.0")
     testImplementation(platform("org.junit:junit-bom:5.12.2"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testImplementation("org.testcontainers:testcontainers:1.21.3")

@@ -44,6 +44,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * End-to-end test against a real Cerbos PDP.
@@ -371,6 +372,22 @@ class SpringDataIntegrationTest {
 
     private static List<String> runNested(String action) {
         return runWithMapping(action, NESTED_FIELD_MAP);
+    }
+
+    /**
+     * Assert that translating {@code action} throws an {@link IllegalArgumentException} whose
+     * message contains every one of {@code messageFragments}. Pins the error contract so a future
+     * refactor can't silently regress to a less-helpful message (or to a different exception type).
+     */
+    private static void assertActionThrows(String action,
+                                           Map<String, AttributeMapping> mapping,
+                                           String... messageFragments) {
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> runWithMapping(action, mapping));
+        for (String fragment : messageFragments) {
+            assertTrue(ex.getMessage().contains(fragment),
+                    "expected message to contain '" + fragment + "' but was: " + ex.getMessage());
+        }
     }
 
     // -- always allow/deny --
@@ -957,63 +974,65 @@ class SpringDataIntegrationTest {
 
         @Test
         void arithAddThrows() {
-            assertThrows(IllegalArgumentException.class, () -> run("arith-add"));
+            // The planner emits gt(add(field, 1.0), 2.0); handleAddComparison rejects non-eq/ne.
+            assertActionThrows("arith-add", FIELD_MAP, "add", "gt");
         }
 
         @Test
         void arithSubThrows() {
-            assertThrows(IllegalArgumentException.class, () -> run("arith-sub"));
+            assertActionThrows("arith-sub", FIELD_MAP, "sub");
         }
 
         @Test
         void arithMultThrows() {
-            assertThrows(IllegalArgumentException.class, () -> run("arith-mult"));
+            assertActionThrows("arith-mult", FIELD_MAP, "mult");
         }
 
         @Test
         void arithDivThrows() {
-            assertThrows(IllegalArgumentException.class, () -> run("arith-div"));
+            assertActionThrows("arith-div", FIELD_MAP, "div");
         }
 
         @Test
         void arithModThrows() {
-            assertThrows(IllegalArgumentException.class, () -> run("arith-mod"));
+            assertActionThrows("arith-mod", FIELD_MAP, "mod");
         }
 
         @Test
         void matchesRegexThrows() {
-            assertThrows(IllegalArgumentException.class, () -> run("matches-regex"));
+            assertActionThrows("matches-regex", FIELD_MAP, "Unsupported operator", "matches");
         }
 
         @Test
         void indexListThrows() {
-            assertThrows(IllegalArgumentException.class, () -> run("index-list"));
+            assertActionThrows("index-list", FIELD_MAP, "index");
         }
 
         @Test
         void convertStringThrows() {
-            assertThrows(IllegalArgumentException.class, () -> run("convert-string"));
+            assertActionThrows("convert-string", FIELD_MAP, "string");
         }
 
         @Test
         void convertDoubleThrows() {
-            assertThrows(IllegalArgumentException.class, () -> run("convert-double"));
+            assertActionThrows("convert-double", FIELD_MAP, "double");
         }
 
         @Test
         void convertIntThrows() {
-            assertThrows(IllegalArgumentException.class, () -> run("convert-int"));
+            assertActionThrows("convert-int", FIELD_MAP, "int");
         }
 
         @Test
         void ternaryThrows() {
-            assertThrows(IllegalArgumentException.class, () -> run("ternary"));
+            // The CEL planner emits ternary as `if(cond, then, else)` — not `conditional`.
+            assertActionThrows("ternary", FIELD_MAP, "if()");
         }
 
         @Test
         void stringSizeThrows() {
             // size(R.attr.aString) > 0 — adapter only handles size() on Relation mappings.
-            assertThrows(IllegalArgumentException.class, () -> run("string-size"));
+            assertActionThrows("string-size", FIELD_MAP, "size()", "Relation");
         }
     }
 
@@ -1030,8 +1049,8 @@ class SpringDataIntegrationTest {
 
         @Test
         void equalFieldToFieldThrows() {
-            // aString == id — adapter requires exactly one value operand for eq.
-            assertThrows(IllegalArgumentException.class, () -> run("equal-field-to-field"));
+            // aString == id — adapter rejects two-variable comparisons with a specific message.
+            assertActionThrows("equal-field-to-field", FIELD_MAP, "Field-to-field", "eq");
         }
 
         @Test
@@ -1071,17 +1090,18 @@ class SpringDataIntegrationTest {
         }
 
         // TODO(#232): the adapter's handleHasIntersection is the only path that accepts a map()
-        // expression. A bare `eq(map(...), [...])` is rejected by the leaf operator handler.
+        // expression. A bare `eq(map(...), [...])` is rejected with a hint at the supported shape.
         @Test
         void mapComparedToLiteralListThrows() {
-            assertThrows(IllegalArgumentException.class, () -> runNested("map-compared"));
+            assertActionThrows("map-compared", NESTED_FIELD_MAP,
+                    "map(...)", "hasIntersection");
         }
 
         // TODO(#232): trySizeComparison only accepts a Variable as size()'s operand, so
         // `size(filter(...)) > 0` falls through and throws.
         @Test
         void sizeOfFilterThrows() {
-            assertThrows(IllegalArgumentException.class, () -> runNested("filter-count-gt"));
+            assertActionThrows("filter-count-gt", NESTED_FIELD_MAP, "size()");
         }
     }
 }

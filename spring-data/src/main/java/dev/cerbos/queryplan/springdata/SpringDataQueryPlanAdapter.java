@@ -174,10 +174,34 @@ public final class SpringDataQueryPlanAdapter {
             boolean valueSeen = false;
             for (Operand o : operands) {
                 switch (o.getNodeCase()) {
-                    case VARIABLE -> variable = o.getVariable();
+                    case VARIABLE -> {
+                        if (variable != null) {
+                            // H1: field-to-field comparison is not expressible in JPA Criteria as a
+                            // value-bound predicate. Surface this explicitly rather than the generic
+                            // "Missing value operand" message the loop would otherwise produce.
+                            throw new IllegalArgumentException(
+                                    "Field-to-field comparison is not supported for operator '"
+                                            + op + "': " + variable + " vs " + o.getVariable());
+                        }
+                        variable = o.getVariable();
+                    }
                     case VALUE -> {
                         value = protoValueToJava(o.getValue());
                         valueSeen = true;
+                    }
+                    case EXPRESSION -> {
+                        // H3: map() compositions are only accepted inside hasIntersection.
+                        // A direct comparison like eq(map(...), [...]) reaches here; point users
+                        // at the supported shape rather than throwing a generic operand error.
+                        String innerOp = o.getExpression().getOperator();
+                        if ("map".equals(innerOp)) {
+                            throw new IllegalArgumentException(
+                                    "Direct comparison of map(...) to a value is not supported "
+                                            + "(operator: " + op + "). Wrap the map() expression in "
+                                            + "hasIntersection(map(...), [...]) instead.");
+                        }
+                        throw new IllegalArgumentException(
+                                "Unexpected " + innerOp + "() expression in leaf operand of " + op);
                     }
                     default -> throw new IllegalArgumentException(
                             "Unexpected operand type in leaf expression: " + o.getNodeCase());
@@ -222,7 +246,7 @@ public final class SpringDataQueryPlanAdapter {
                 case "contains" -> cb.like(path.as(String.class), "%" + escapeLike(String.valueOf(value)) + "%", '\\');
                 case "startsWith" -> cb.like(path.as(String.class), escapeLike(String.valueOf(value)) + "%", '\\');
                 case "endsWith" -> cb.like(path.as(String.class), "%" + escapeLike(String.valueOf(value)), '\\');
-                default -> throw new IllegalArgumentException("Unknown operator: " + op);
+                default -> throw new IllegalArgumentException("Unsupported operator: " + op);
             };
         }
 
