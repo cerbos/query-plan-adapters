@@ -1,0 +1,36 @@
+name: Spring Data Test
+
+on:
+  pull_request:
+    paths:
+      - "spring-data/**"
+      - "policies/**"
+      - ".github/workflows/spring-data.yaml"
+  push:
+    tags:
+      - spring-data/v*
+
+defaults:
+  run:
+    working-directory: spring-data
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        java-version: ["17", "21"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup JDK
+        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java-version }}
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@50e97c2cd7a37755bbfafc9c5b7cafaece252f6e # v6.1.0
+
+      - name: Build and test
+        run: gradle build --no-daemon

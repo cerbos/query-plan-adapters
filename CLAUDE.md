@@ -13,6 +13,7 @@ Multi-language ORM adapters that translate Cerbos query plan responses into data
 | langchain-chromadb | TypeScript | `@cerbos/langchain-chromadb` | ChromaDB |
 | sqlalchemy | Python | `cerbos-sqlalchemy` | SQLAlchemy |
 | elasticsearch-java | Java | `cerbos-elasticsearch` | Elasticsearch |
+| spring-data | Java | `cerbos-spring-data` | Spring Data JPA |
 
 ## Commands
 
@@ -34,9 +35,12 @@ pdm run test     # pytest
 pdm run format   # isort + black
 ```
 
-### Java (Elasticsearch)
+### Java (Elasticsearch, Spring Data)
 ```bash
-docker run --rm -v "$(pwd)":/app -w /app gradle:8.12-jdk17 gradle build --no-daemon
+# For tests that use testcontainers (cerbos PDP + DBs), mount the docker socket:
+docker run --rm -v "$(pwd)":/app -v /var/run/docker.sock:/var/run/docker.sock \
+  -e TESTCONTAINERS_RYUK_DISABLED=true --network host \
+  -w /app gradle:8.12-jdk17 gradle build --no-daemon
 ```
 
 ## Testing
@@ -68,7 +72,7 @@ Conventional Commits: `feat(prisma):`, `fix(mongoose):`, `chore(deps):`. Scope i
 
 Each adapter has its own GitHub Actions workflow triggered by changes in its directory or `/policies/`. Matrix tests across Node versions (20, 22, 24, 25) and relevant service versions.
 
-Tag-based publishing: `prisma/v*` -> npm, `sqla/v*` -> PyPI, `elasticsearch-java/v*` -> Maven Central.
+Tag-based publishing: `prisma/v*` -> npm, `sqla/v*` -> PyPI, `elasticsearch-java/v*` and `spring-data/v*` -> Maven Central.
 
 ## Working with Adapters
 
