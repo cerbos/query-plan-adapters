@@ -926,6 +926,101 @@ class ElasticsearchQueryPlanAdapterTest {
         assertTrue(ex.getMessage().contains("not declared in nestedPaths"));
     }
 
+    // --- matches (regex) ---
+
+    @Test
+    void matchesProducesRegexpQuery() {
+        // aString.matches("^str.*") → regexp on keyword field.
+        Operand condition = expressionOperand("matches",
+                variableOperand("request.resource.attr.aString"),
+                stringValueOperand("^str.*"));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
+
+        Map<String, Object> query = ((Result.Conditional) result).query();
+        // CEL `^str.*` -> Lucene whole-field anchored `str.*`
+        assertEquals(Map.of("regexp", Map.of("aString", Map.of("value", "str.*"))), query);
+    }
+
+    // --- empty-collection (size(tags) == 0) ---
+
+    @Test
+    void sizeEqZeroOnTagsProducesNotExists() {
+        // size(tags) == 0 → bool must_not exists tags.
+        Operand condition = expressionOperand("eq",
+                expressionOperand("size",
+                        variableOperand("request.resource.attr.tags")),
+                numberValueOperand(0));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
+
+        Map<String, Object> query = ((Result.Conditional) result).query();
+        assertEquals(
+                Map.of("bool", Map.of("must_not", List.of(
+                        Map.of("exists", Map.of("field", "tags"))))),
+                query);
+    }
+
+    // --- Unsupported: arithmetic / cast / ternary / index throw on expression operand ---
+
+    @Test
+    void arithAddOnFieldThrows() {
+        // gt(add(aNumber, 1), 2)
+        Operand condition = expressionOperand("gt",
+                expressionOperand("add",
+                        variableOperand("request.resource.attr.aNumber"),
+                        numberValueOperand(1)),
+                numberValueOperand(2));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        assertThrows(IllegalArgumentException.class,
+                () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP));
+    }
+
+    @Test
+    void convertStringCastThrows() {
+        // eq(string(aNumber), "1")
+        Operand condition = expressionOperand("eq",
+                expressionOperand("string",
+                        variableOperand("request.resource.attr.aNumber")),
+                stringValueOperand("1"));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        assertThrows(IllegalArgumentException.class,
+                () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP));
+    }
+
+    @Test
+    void indexListThrows() {
+        // eq(index(ownedBy, 0), "user1")
+        Operand condition = expressionOperand("eq",
+                expressionOperand("index",
+                        variableOperand("request.resource.attr.ownedBy"),
+                        numberValueOperand(0)),
+                stringValueOperand("user1"));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        assertThrows(IllegalArgumentException.class,
+                () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP));
+    }
+
+    @Test
+    void ternaryThrows() {
+        // gt(if(aBool, aNumber, 0), 0)
+        Operand condition = expressionOperand("gt",
+                expressionOperand("if",
+                        variableOperand("request.resource.attr.aBool"),
+                        variableOperand("request.resource.attr.aNumber"),
+                        numberValueOperand(0)),
+                numberValueOperand(0));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        assertThrows(IllegalArgumentException.class,
+                () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP));
+    }
+
     @Test
     void lambdaVariableMismatchThrows() {
         Operand condition = expressionOperand("exists",

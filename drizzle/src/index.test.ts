@@ -18,6 +18,15 @@ import type { MapperEntry, QueryPlanToDrizzleResult } from ".";
 
 const cerbos = new Cerbos("127.0.0.1:3593", { tls: false });
 const sqlite = new Database(":memory:");
+// Register a REGEXP function so SQLite can evaluate the matches() CEL operator.
+sqlite.function("regexp", (pattern: unknown, value: unknown) => {
+  if (value === null || value === undefined) return 0;
+  try {
+    return new RegExp(String(pattern)).test(String(value)) ? 1 : 0;
+  } catch {
+    return 0;
+  }
+});
 const db = drizzle(sqlite);
 
 const users = sqliteTable("users", {
@@ -722,6 +731,23 @@ const conditionalActions = [
   "relation-none",
   "relation-some",
   "starts-with",
+  // New scenarios — arithmetic on a column inside a comparison.
+  "arith-add",
+  "arith-sub",
+  "arith-mult",
+  "arith-div",
+  "arith-mod",
+  // Regex match via CEL string.matches() — relies on SQLite REGEXP UDF.
+  "matches-regex",
+  // CEL type conversions: string(), double(), int() — compiled to CAST.
+  "convert-string",
+  "convert-double",
+  "convert-int",
+  // Ternary expression — compiled to CASE WHEN.
+  "ternary",
+  // size() on scalar (LENGTH) and on relation (correlated COUNT subquery).
+  "string-size",
+  "empty-collection",
 ];
 
 beforeAll(() => {
@@ -1112,6 +1138,20 @@ describe("queryPlanToDrizzle", () => {
       .map((r) => r.id)
       .sort();
     expect(ids).toEqual(expected);
+  });
+
+  test("throws for index-list (array indexing on a relation)", async () => {
+    // ownedBy is modelled as a join table — there is no scalar index column,
+    // so R.attr.ownedBy[0] cannot be translated into a deterministic SQL fragment.
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "index-list",
+    });
+
+    expect(() =>
+      queryPlanToDrizzle({ queryPlan, mapper })
+    ).toThrow(/index/i);
   });
 
   test("throws when mapping is missing", () => {

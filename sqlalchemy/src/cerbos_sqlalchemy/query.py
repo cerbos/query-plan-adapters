@@ -6,7 +6,7 @@ from cerbos.response.v1 import response_pb2
 from cerbos.sdk.model import PlanResourcesFilterKind, PlanResourcesResponse
 from google.protobuf.json_format import MessageToDict
 
-from sqlalchemy import Column, Table, and_, not_, or_, select
+from sqlalchemy import Column, Float, Integer, String, Table, and_, case, cast, func, not_, or_, select
 from sqlalchemy.orm import DeclarativeMeta, InstrumentedAttribute
 from sqlalchemy.sql import Select
 from sqlalchemy.sql.expression import BinaryExpression, ColumnOperators
@@ -29,8 +29,26 @@ __operator_fns: OperatorFnMap = {
     "le": lambda c, v: c <= v,
     "ge": lambda c, v: c >= v,
     "in": lambda c, v: c.in_([v]) if not isinstance(v, list) else c.in_(v),
+    # Arithmetic operators — return value expressions (not boolean), composed
+    # inside parent comparisons like gt(add(col, 1), 2).
+    "add": lambda c, v: c + v,
+    "sub": lambda c, v: c - v,
+    "mult": lambda c, v: c * v,
+    "div": lambda c, v: c / v,
+    "mod": lambda c, v: c % v,
+    # String matching — portable across most SQLAlchemy dialects.
+    "matches": lambda c, v: c.regexp_match(v),
+    # Type conversions — value-returning expressions.
+    "string": lambda c, _: cast(c, String),
+    "double": lambda c, _: cast(c, Float),
+    "int": lambda c, _: cast(c, Integer),
+    # size() over a string column — collection-typed columns require an override.
+    "size": lambda c, _: func.length(c),
 }
 OPERATOR_FNS = MappingProxyType(__operator_fns)
+
+# Unary value-returning operators take a single non-value input.
+_UNARY_VALUE_OPERATORS = frozenset({"string", "double", "int", "size"})
 
 # We support both the legacy HTTP and gRPC clients, so therefore we need to accept both input types
 _deny_types = frozenset(
@@ -90,7 +108,7 @@ def get_query(
                 )
             )
 
-    def get_operator_fn(op: str, c: GenericColumn, v: Any) -> GenericExpression:
+    def get_operator_fn(op: str, c: Any, v: Any) -> GenericExpression:
         # Check to see if the client has overridden the function
         if (
             operator_override_fns
@@ -103,6 +121,57 @@ def get_query(
             return default_fn(c, v)
 
         raise ValueError(f"Unrecognised operator: {op}")
+
+    def resolve_variable(variable: str) -> GenericColumn:
+        try:
+            return attr_map[variable]
+        except KeyError:
+            raise KeyError(
+                f"Attribute does not exist in the attribute column map: {variable}"
+            )
+
+    def resolve_operand(operand: dict) -> Any:
+        """Resolve an operand to a SQL value/expression, descending into nested
+        `expression` operands so that value-returning operators (arithmetic,
+        casts, ternary, etc.) compose inside outer comparisons.
+        """
+        if "value" in operand:
+            return operand["value"]
+        if "variable" in operand:
+            return resolve_variable(operand["variable"])
+        if (exp := operand.get("expression")) is not None:
+            return evaluate_expression(exp)
+        raise ValueError(f"Unrecognised operand shape: {operand}")
+
+    def evaluate_expression(expression: dict) -> Any:
+        """Evaluate a value-producing expression node (an `{operator, operands}`
+        dict) to a SQL expression. Used for nested non-boolean operators.
+        """
+        operator = expression["operator"]
+        child_operands = expression["operands"]
+
+        if operator == "if":
+            # Ternary: if(cond, then, else). The condition may be either a
+            # boolean expression or a bare boolean variable/value.
+            first = child_operands[0]
+            if "expression" in first:
+                cond = traverse_and_map_operands(first["expression"])
+            else:
+                cond = resolve_operand(first)
+            then_value = resolve_operand(child_operands[1])
+            else_value = resolve_operand(child_operands[2])
+            return case((cond, then_value), else_=else_value)
+
+        if operator in _UNARY_VALUE_OPERATORS:
+            target = resolve_operand(child_operands[0])
+            return get_operator_fn(operator, target, None)
+
+        # Binary value operators (add/sub/mult/div/mod, plus any user override).
+        # Determine the "column-like" side and the "value-like" side; if both
+        # sides are variables/expressions, pass them through as-is.
+        left = resolve_operand(child_operands[0])
+        right = resolve_operand(child_operands[1])
+        return get_operator_fn(operator, left, right)
 
     def traverse_and_map_operands(operand: dict):
         if exp := operand.get("expression"):
@@ -120,18 +189,40 @@ def get_query(
         if operator == "not":
             return not_(*[traverse_and_map_operands(o) for o in child_operands])
 
+        has_nested_expression = any("expression" in o for o in child_operands)
+
+        # If the user has supplied an override for this operator and the
+        # operands include a nested expression (e.g. size(tags) where tags is
+        # a collection), or the operator isn't simple variable+value, resolve
+        # operands and hand them to the override directly.
+        if (
+            operator_override_fns
+            and operator in operator_override_fns
+            and (has_nested_expression or len(child_operands) != 2 or not all(
+                "variable" in o or "value" in o for o in child_operands
+            ))
+        ):
+            resolved = [resolve_operand(o) for o in child_operands]
+            if len(resolved) == 1:
+                return operator_override_fns[operator](resolved[0], None)
+            if len(resolved) == 2:
+                return operator_override_fns[operator](resolved[0], resolved[1])
+            return operator_override_fns[operator](*resolved)
+
+        # Boolean leaf operators take exactly two operands. Either side may be
+        # a nested value-producing expression (arithmetic, cast, ternary, ...).
+        if len(child_operands) == 2 and has_nested_expression:
+            left = resolve_operand(child_operands[0])
+            right = resolve_operand(child_operands[1])
+            return get_operator_fn(operator, left, right)
+
         # otherwise, they are a list[dict] (len==2), in the form: `[{'variable': 'foo'}, {'value': 'bar'}]`
         # The order of the keys `variable` and `value` is not guaranteed.
         d = {k: v for o in child_operands for k, v in o.items()}
         variable = d["variable"]
         value = d["value"]
 
-        try:
-            column = attr_map[variable]
-        except KeyError:
-            raise KeyError(
-                f"Attribute does not exist in the attribute column map: {variable}"
-            )
+        column = resolve_variable(variable)
 
         # the operator handlers here are the leaf nodes of the recursion
         return get_operator_fn(operator, column, value)

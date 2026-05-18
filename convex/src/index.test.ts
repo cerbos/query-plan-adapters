@@ -1419,3 +1419,602 @@ describe("Error Handling", () => {
     ).toThrow("Unsupported operator: unsupported");
   });
 });
+
+describe("Arithmetic Operators (postFilter)", () => {
+  test("arith-add - gt(add(aNumber, 1), 2)", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "arith-add",
+    });
+
+    expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+    expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+      operator: "gt",
+      operands: [
+        {
+          operator: "add",
+          operands: [
+            { name: "request.resource.attr.aNumber" },
+            { value: 1 },
+          ],
+        },
+        { value: 2 },
+      ],
+    });
+
+    const result = queryPlanToConvex({
+      queryPlan,
+      mapper: defaultMapper,
+      allowPostFilter: true,
+    });
+
+    expect(result.kind).toBe(PlanKind.CONDITIONAL);
+    expect(result.filter).toBeUndefined();
+    expect(result.postFilter).toBeDefined();
+
+    const postFiltered = fixtureResources.filter((r) =>
+      result.postFilter!(r as unknown as Record<string, unknown>),
+    );
+    expect(postFiltered.map((r) => r.key)).toEqual(
+      fixtureResources.filter((r) => r.aNumber + 1 > 2).map((r) => r.key),
+    );
+  });
+
+  test("arith-add throws without allowPostFilter", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "arith-add",
+    });
+
+    expect(() =>
+      queryPlanToConvex({ queryPlan, mapper: defaultMapper }),
+    ).toThrow("allowPostFilter");
+  });
+
+  test("arith-sub - lt(sub(aNumber, 1), 2)", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "arith-sub",
+    });
+
+    expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+    expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+      operator: "lt",
+      operands: [
+        {
+          operator: "sub",
+          operands: [
+            { name: "request.resource.attr.aNumber" },
+            { value: 1 },
+          ],
+        },
+        { value: 2 },
+      ],
+    });
+
+    const result = queryPlanToConvex({
+      queryPlan,
+      mapper: defaultMapper,
+      allowPostFilter: true,
+    });
+
+    expect(result.filter).toBeUndefined();
+    expect(result.postFilter).toBeDefined();
+
+    const postFiltered = fixtureResources.filter((r) =>
+      result.postFilter!(r as unknown as Record<string, unknown>),
+    );
+    expect(postFiltered.map((r) => r.key)).toEqual(
+      fixtureResources.filter((r) => r.aNumber - 1 < 2).map((r) => r.key),
+    );
+  });
+
+  test("arith-mult - gt(mult(aNumber, 2), 2)", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "arith-mult",
+    });
+
+    expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+    expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+      operator: "gt",
+      operands: [
+        {
+          operator: "mult",
+          operands: [
+            { name: "request.resource.attr.aNumber" },
+            { value: 2 },
+          ],
+        },
+        { value: 2 },
+      ],
+    });
+
+    const result = queryPlanToConvex({
+      queryPlan,
+      mapper: defaultMapper,
+      allowPostFilter: true,
+    });
+
+    expect(result.filter).toBeUndefined();
+    expect(result.postFilter).toBeDefined();
+
+    const postFiltered = fixtureResources.filter((r) =>
+      result.postFilter!(r as unknown as Record<string, unknown>),
+    );
+    expect(postFiltered.map((r) => r.key)).toEqual(
+      fixtureResources.filter((r) => r.aNumber * 2 > 2).map((r) => r.key),
+    );
+  });
+
+  test("arith-div - gt(div(aNumber, 2), 0)", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "arith-div",
+    });
+
+    expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+    expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+      operator: "gt",
+      operands: [
+        {
+          operator: "div",
+          operands: [
+            { name: "request.resource.attr.aNumber" },
+            { value: 2 },
+          ],
+        },
+        { value: 0 },
+      ],
+    });
+
+    const result = queryPlanToConvex({
+      queryPlan,
+      mapper: defaultMapper,
+      allowPostFilter: true,
+    });
+
+    expect(result.filter).toBeUndefined();
+    expect(result.postFilter).toBeDefined();
+
+    const postFiltered = fixtureResources.filter((r) =>
+      result.postFilter!(r as unknown as Record<string, unknown>),
+    );
+    expect(postFiltered.map((r) => r.key)).toEqual(
+      fixtureResources.filter((r) => r.aNumber / 2 > 0).map((r) => r.key),
+    );
+  });
+
+  test("arith-mod - eq(mod(aNumber, 2), 0)", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "arith-mod",
+    });
+
+    expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+    expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+      operator: "eq",
+      operands: [
+        {
+          operator: "mod",
+          operands: [
+            {
+              operator: "int",
+              operands: [{ name: "request.resource.attr.aNumber" }],
+            },
+            { value: 2 },
+          ],
+        },
+        { value: 0 },
+      ],
+    });
+
+    const result = queryPlanToConvex({
+      queryPlan,
+      mapper: defaultMapper,
+      allowPostFilter: true,
+    });
+
+    expect(result.filter).toBeUndefined();
+    expect(result.postFilter).toBeDefined();
+
+    const postFiltered = fixtureResources.filter((r) =>
+      result.postFilter!(r as unknown as Record<string, unknown>),
+    );
+    expect(postFiltered.map((r) => r.key)).toEqual(
+      fixtureResources.filter((r) => r.aNumber % 2 === 0).map((r) => r.key),
+    );
+  });
+});
+
+describe("Regex Operator (postFilter)", () => {
+  test("matches-regex - matches(aString, 'str.*')", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "matches-regex",
+    });
+
+    expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+    expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+      operator: "matches",
+      operands: [
+        { name: "request.resource.attr.aString" },
+        { value: "^str.*" },
+      ],
+    });
+
+    const result = queryPlanToConvex({
+      queryPlan,
+      mapper: defaultMapper,
+      allowPostFilter: true,
+    });
+
+    expect(result.filter).toBeUndefined();
+    expect(result.postFilter).toBeDefined();
+
+    const postFiltered = fixtureResources.filter((r) =>
+      result.postFilter!(r as unknown as Record<string, unknown>),
+    );
+    expect(postFiltered.map((r) => r.key)).toEqual(
+      fixtureResources.filter((r) => /str.*/.test(r.aString)).map((r) => r.key),
+    );
+  });
+
+  test("matches-regex throws without allowPostFilter", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "matches-regex",
+    });
+
+    expect(() =>
+      queryPlanToConvex({ queryPlan, mapper: defaultMapper }),
+    ).toThrow("allowPostFilter");
+  });
+});
+
+describe("List Index Operator (postFilter)", () => {
+  test("index-list - eq(index(ownedBy, 0), 'user1')", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "index-list",
+    });
+
+    expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+    expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+      operator: "eq",
+      operands: [
+        {
+          operator: "index",
+          operands: [
+            { name: "request.resource.attr.ownedBy" },
+            { value: 0 },
+          ],
+        },
+        { value: "user1" },
+      ],
+    });
+
+    const mapper: Mapper = {
+      ...defaultMapper,
+      "request.resource.attr.ownedBy": { field: "ownedBy" },
+    };
+
+    const result = queryPlanToConvex({
+      queryPlan,
+      mapper,
+      allowPostFilter: true,
+    });
+
+    expect(result.filter).toBeUndefined();
+    expect(result.postFilter).toBeDefined();
+
+    const docs = [
+      { key: "a", ownedBy: ["user1", "user2"] },
+      { key: "b", ownedBy: ["user2", "user1"] },
+      { key: "c", ownedBy: [] },
+    ];
+    const postFiltered = docs.filter((d) =>
+      result.postFilter!(d as unknown as Record<string, unknown>),
+    );
+    expect(postFiltered.map((d) => d.key)).toEqual(["a"]);
+  });
+
+  test("index-list throws without allowPostFilter", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "index-list",
+    });
+
+    expect(() =>
+      queryPlanToConvex({ queryPlan, mapper: defaultMapper }),
+    ).toThrow("allowPostFilter");
+  });
+});
+
+describe("Type Conversion Operators (postFilter)", () => {
+  test("convert-string - eq(string(aNumber), '1')", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "convert-string",
+    });
+
+    expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+    expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+      operator: "eq",
+      operands: [
+        {
+          operator: "string",
+          operands: [{ name: "request.resource.attr.aNumber" }],
+        },
+        { value: "1" },
+      ],
+    });
+
+    const result = queryPlanToConvex({
+      queryPlan,
+      mapper: defaultMapper,
+      allowPostFilter: true,
+    });
+
+    expect(result.filter).toBeUndefined();
+    expect(result.postFilter).toBeDefined();
+
+    const postFiltered = fixtureResources.filter((r) =>
+      result.postFilter!(r as unknown as Record<string, unknown>),
+    );
+    expect(postFiltered.map((r) => r.key)).toEqual(
+      fixtureResources.filter((r) => String(r.aNumber) === "1").map((r) => r.key),
+    );
+  });
+
+  test("convert-string throws without allowPostFilter", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "convert-string",
+    });
+
+    expect(() =>
+      queryPlanToConvex({ queryPlan, mapper: defaultMapper }),
+    ).toThrow("allowPostFilter");
+  });
+
+  test("convert-double - gt(double(aNumber), 1.5)", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "convert-double",
+    });
+
+    expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+    expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+      operator: "gt",
+      operands: [
+        {
+          operator: "double",
+          operands: [{ name: "request.resource.attr.aNumber" }],
+        },
+        { value: 1.5 },
+      ],
+    });
+
+    const result = queryPlanToConvex({
+      queryPlan,
+      mapper: defaultMapper,
+      allowPostFilter: true,
+    });
+
+    expect(result.filter).toBeUndefined();
+    expect(result.postFilter).toBeDefined();
+
+    const postFiltered = fixtureResources.filter((r) =>
+      result.postFilter!(r as unknown as Record<string, unknown>),
+    );
+    expect(postFiltered.map((r) => r.key)).toEqual(
+      fixtureResources.filter((r) => Number(r.aNumber) > 1.5).map((r) => r.key),
+    );
+  });
+
+  test("convert-int - gt(int(aString), 0)", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "convert-int",
+    });
+
+    expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+    expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+      operator: "gt",
+      operands: [
+        {
+          operator: "int",
+          operands: [{ name: "request.resource.attr.aString" }],
+        },
+        { value: 0 },
+      ],
+    });
+
+    const result = queryPlanToConvex({
+      queryPlan,
+      mapper: defaultMapper,
+      allowPostFilter: true,
+    });
+
+    expect(result.filter).toBeUndefined();
+    expect(result.postFilter).toBeDefined();
+
+    // parseInt on existing fixtures yields NaN -> no matches.
+    // Use ad-hoc docs to exercise the operator behaviour.
+    const docs = [
+      { key: "x", aString: "42" },
+      { key: "y", aString: "0" },
+      { key: "z", aString: "string" },
+      { key: "w", aString: "-3" },
+    ];
+    const postFiltered = docs.filter((d) =>
+      result.postFilter!(d as unknown as Record<string, unknown>),
+    );
+    expect(postFiltered.map((d) => d.key)).toEqual(["x"]);
+  });
+});
+
+describe("Ternary Operator (postFilter)", () => {
+  test("ternary - gt(if(aBool, aNumber, 0), 0)", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "ternary",
+    });
+
+    expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+    expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+      operator: "gt",
+      operands: [
+        {
+          operator: "if",
+          operands: [
+            { name: "request.resource.attr.aBool" },
+            { name: "request.resource.attr.aNumber" },
+            { value: 0 },
+          ],
+        },
+        { value: 0 },
+      ],
+    });
+
+    const result = queryPlanToConvex({
+      queryPlan,
+      mapper: defaultMapper,
+      allowPostFilter: true,
+    });
+
+    expect(result.filter).toBeUndefined();
+    expect(result.postFilter).toBeDefined();
+
+    const postFiltered = fixtureResources.filter((r) =>
+      result.postFilter!(r as unknown as Record<string, unknown>),
+    );
+    expect(postFiltered.map((r) => r.key)).toEqual(
+      fixtureResources
+        .filter((r) => (r.aBool ? r.aNumber : 0) > 0)
+        .map((r) => r.key),
+    );
+  });
+
+  test("ternary throws without allowPostFilter", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "ternary",
+    });
+
+    expect(() =>
+      queryPlanToConvex({ queryPlan, mapper: defaultMapper }),
+    ).toThrow("allowPostFilter");
+  });
+});
+
+describe("Size Operator (postFilter)", () => {
+  test("string-size - gt(size(aString), 0)", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "string-size",
+    });
+
+    expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+    expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+      operator: "gt",
+      operands: [
+        {
+          operator: "size",
+          operands: [{ name: "request.resource.attr.aString" }],
+        },
+        { value: 0 },
+      ],
+    });
+
+    const result = queryPlanToConvex({
+      queryPlan,
+      mapper: defaultMapper,
+      allowPostFilter: true,
+    });
+
+    expect(result.filter).toBeUndefined();
+    expect(result.postFilter).toBeDefined();
+
+    const postFiltered = fixtureResources.filter((r) =>
+      result.postFilter!(r as unknown as Record<string, unknown>),
+    );
+    expect(postFiltered.map((r) => r.key)).toEqual(
+      fixtureResources.filter((r) => r.aString.length > 0).map((r) => r.key),
+    );
+  });
+
+  test("empty-collection - eq(size(tags), 0)", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "empty-collection",
+    });
+
+    expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+    expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+      operator: "eq",
+      operands: [
+        {
+          operator: "size",
+          operands: [{ name: "request.resource.attr.tags" }],
+        },
+        { value: 0 },
+      ],
+    });
+
+    const mapper: Mapper = {
+      ...defaultMapper,
+      "request.resource.attr.tags": { field: "tags" },
+    };
+
+    const result = queryPlanToConvex({
+      queryPlan,
+      mapper,
+      allowPostFilter: true,
+    });
+
+    expect(result.filter).toBeUndefined();
+    expect(result.postFilter).toBeDefined();
+
+    const docs = [
+      { key: "a", tags: [] },
+      { key: "b", tags: ["x"] },
+      { key: "c", tags: ["x", "y"] },
+    ];
+    const postFiltered = docs.filter((d) =>
+      result.postFilter!(d as unknown as Record<string, unknown>),
+    );
+    expect(postFiltered.map((d) => d.key)).toEqual(["a"]);
+  });
+
+  test("empty-collection throws without allowPostFilter", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "empty-collection",
+    });
+
+    expect(() =>
+      queryPlanToConvex({ queryPlan, mapper: defaultMapper }),
+    ).toThrow("allowPostFilter");
+  });
+});

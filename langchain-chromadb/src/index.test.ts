@@ -677,3 +677,256 @@ test("conditional - eq with dot-notation field", async () => {
       .map((r) => r.key),
   );
 });
+
+// --- Unsupported operators ---
+// ChromaDB metadata filters do not support arithmetic, regex, list indexing,
+// type coercion, ternary expressions, or size(). The adapter must throw a
+// clear error for these scenarios.
+
+test("conditional - arith-add (unsupported)", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "arith-add",
+  });
+
+  expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+
+  expect(() =>
+    queryPlanToChromaDB({
+      queryPlan,
+      fieldNameMapper: {
+        "request.resource.attr.aNumber": "aNumber",
+      },
+    }),
+  ).toThrow();
+});
+
+test("conditional - arith-sub (unsupported)", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "arith-sub",
+  });
+
+  expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+
+  expect(() =>
+    queryPlanToChromaDB({
+      queryPlan,
+      fieldNameMapper: {
+        "request.resource.attr.aNumber": "aNumber",
+      },
+    }),
+  ).toThrow();
+});
+
+test("conditional - arith-mult (unsupported)", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "arith-mult",
+  });
+
+  expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+
+  expect(() =>
+    queryPlanToChromaDB({
+      queryPlan,
+      fieldNameMapper: {
+        "request.resource.attr.aNumber": "aNumber",
+      },
+    }),
+  ).toThrow();
+});
+
+test("conditional - arith-div (unsupported)", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "arith-div",
+  });
+
+  expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+
+  expect(() =>
+    queryPlanToChromaDB({
+      queryPlan,
+      fieldNameMapper: {
+        "request.resource.attr.aNumber": "aNumber",
+      },
+    }),
+  ).toThrow();
+});
+
+test("conditional - arith-mod (unsupported)", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "arith-mod",
+  });
+
+  expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+
+  expect(() =>
+    queryPlanToChromaDB({
+      queryPlan,
+      fieldNameMapper: {
+        "request.resource.attr.aNumber": "aNumber",
+      },
+    }),
+  ).toThrow();
+});
+
+test("conditional - matches-regex (unsupported)", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "matches-regex",
+  });
+
+  expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+
+  expect(() =>
+    queryPlanToChromaDB({
+      queryPlan,
+      fieldNameMapper: {
+        "request.resource.attr.aString": "aString",
+      },
+    }),
+  ).toThrow();
+});
+
+test("conditional - index-list (unsupported)", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "index-list",
+  });
+
+  expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+
+  expect(() =>
+    queryPlanToChromaDB({
+      queryPlan,
+      fieldNameMapper: {
+        "request.resource.attr.ownedBy": "ownedBy",
+      },
+    }),
+  ).toThrow();
+});
+
+test("conditional - convert-string (unsupported)", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "convert-string",
+  });
+
+  expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+
+  expect(() =>
+    queryPlanToChromaDB({
+      queryPlan,
+      fieldNameMapper: {
+        "request.resource.attr.aNumber": "aNumber",
+      },
+    }),
+  ).toThrow();
+});
+
+test("conditional - convert-double (unsupported)", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "convert-double",
+  });
+
+  expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+
+  expect(() =>
+    queryPlanToChromaDB({
+      queryPlan,
+      fieldNameMapper: {
+        "request.resource.attr.aNumber": "aNumber",
+      },
+    }),
+  ).toThrow();
+});
+
+test("conditional - convert-int (unsupported)", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "convert-int",
+  });
+
+  expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+
+  expect(() =>
+    queryPlanToChromaDB({
+      queryPlan,
+      fieldNameMapper: {
+        "request.resource.attr.aString": "aString",
+      },
+    }),
+  ).toThrow();
+});
+
+test("conditional - ternary (unsupported)", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "ternary",
+  });
+
+  expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+
+  expect(() =>
+    queryPlanToChromaDB({
+      queryPlan,
+      fieldNameMapper: {
+        "request.resource.attr.aBool": "aBool",
+        "request.resource.attr.aNumber": "aNumber",
+      },
+    }),
+  ).toThrow();
+});
+
+test("conditional - string-size (unsupported)", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "string-size",
+  });
+
+  expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+
+  expect(() =>
+    queryPlanToChromaDB({
+      queryPlan,
+      fieldNameMapper: {
+        "request.resource.attr.aString": "aString",
+      },
+    }),
+  ).toThrow();
+});
+
+test("conditional - empty-collection (unsupported)", async () => {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "empty-collection",
+  });
+
+  expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+
+  expect(() =>
+    queryPlanToChromaDB({
+      queryPlan,
+      fieldNameMapper: {
+        "request.resource.attr.tags": "tags",
+      },
+    }),
+  ).toThrow();
+});

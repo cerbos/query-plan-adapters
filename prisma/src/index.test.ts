@@ -6113,6 +6113,454 @@ describe("Add Operator", () => {
   });
 });
 
+// Coverage for additional CEL operators emitted by the planner.
+// Most of these are unsupported in Prisma's type-safe filter API because they
+// require expressing computed columns / CASTs / regex / list indexing — none of
+// which Prisma's where shape exposes. They throw the adapter's existing
+// "Unsupported operator: <op>" error so callers can detect them.
+describe("Arithmetic Operators", () => {
+  test("arith-add (gt with field+value add) is unsupported", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "arith-add",
+    });
+
+    expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+    expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+      operator: "gt",
+      operands: [
+        {
+          operator: "add",
+          operands: [
+            { name: "request.resource.attr.aNumber" },
+            { value: 1 },
+          ],
+        },
+        { value: 2 },
+      ],
+    });
+
+    expect(() =>
+      queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.aNumber": { field: "aNumber" },
+        },
+      })
+    ).toThrow(
+      "Operator gt is not supported with add and field references"
+    );
+  });
+
+  test("arith-sub is unsupported", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "arith-sub",
+    });
+
+    expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+    expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+      operator: "lt",
+      operands: [
+        {
+          operator: "sub",
+          operands: [
+            { name: "request.resource.attr.aNumber" },
+            { value: 1 },
+          ],
+        },
+        { value: 2 },
+      ],
+    });
+
+    expect(() =>
+      queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.aNumber": { field: "aNumber" },
+        },
+      })
+    ).toThrow("Unsupported operator: sub");
+  });
+
+  test("arith-mult is unsupported", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "arith-mult",
+    });
+
+    expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+    expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+      operator: "gt",
+      operands: [
+        {
+          operator: "mult",
+          operands: [
+            { name: "request.resource.attr.aNumber" },
+            { value: 2 },
+          ],
+        },
+        { value: 2 },
+      ],
+    });
+
+    expect(() =>
+      queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.aNumber": { field: "aNumber" },
+        },
+      })
+    ).toThrow("Unsupported operator: mult");
+  });
+
+  test("arith-div is unsupported", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "arith-div",
+    });
+
+    expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+    expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+      operator: "gt",
+      operands: [
+        {
+          operator: "div",
+          operands: [
+            { name: "request.resource.attr.aNumber" },
+            { value: 2 },
+          ],
+        },
+        { value: 0 },
+      ],
+    });
+
+    expect(() =>
+      queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.aNumber": { field: "aNumber" },
+        },
+      })
+    ).toThrow("Unsupported operator: div");
+  });
+
+  test("arith-mod is unsupported", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "arith-mod",
+    });
+
+    expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+    expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+      operator: "eq",
+      operands: [
+        {
+          operator: "mod",
+          operands: [
+            {
+              operator: "int",
+              operands: [{ name: "request.resource.attr.aNumber" }],
+            },
+            { value: 2 },
+          ],
+        },
+        { value: 0 },
+      ],
+    });
+
+    expect(() =>
+      queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.aNumber": { field: "aNumber" },
+        },
+      })
+    ).toThrow("Unsupported operator: mod");
+  });
+});
+
+describe("Regex Operator", () => {
+  test("matches-regex is unsupported", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "matches-regex",
+    });
+
+    expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+    expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+      operator: "matches",
+      operands: [
+        { name: "request.resource.attr.aString" },
+        { value: "^str.*" },
+      ],
+    });
+
+    expect(() =>
+      queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.aString": { field: "aString" },
+        },
+      })
+    ).toThrow("Unsupported operator: matches");
+  });
+});
+
+describe("List Index Operator", () => {
+  test("index-list is unsupported", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "index-list",
+    });
+
+    expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+    expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+      operator: "eq",
+      operands: [
+        {
+          operator: "index",
+          operands: [
+            { name: "request.resource.attr.ownedBy" },
+            { value: 0 },
+          ],
+        },
+        { value: "user1" },
+      ],
+    });
+
+    expect(() =>
+      queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.ownedBy": {
+            relation: { name: "ownedBy", type: "many", field: "id" },
+          },
+        },
+      })
+    ).toThrow("Unsupported operator: index");
+  });
+});
+
+describe("Type Conversion Operators", () => {
+  test("convert-string is unsupported", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "convert-string",
+    });
+
+    expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+    expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+      operator: "eq",
+      operands: [
+        {
+          operator: "string",
+          operands: [{ name: "request.resource.attr.aNumber" }],
+        },
+        { value: "1" },
+      ],
+    });
+
+    expect(() =>
+      queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.aNumber": { field: "aNumber" },
+        },
+      })
+    ).toThrow("Unsupported operator: string");
+  });
+
+  test("convert-double is unsupported", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "convert-double",
+    });
+
+    expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+    expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+      operator: "gt",
+      operands: [
+        {
+          operator: "double",
+          operands: [{ name: "request.resource.attr.aNumber" }],
+        },
+        { value: 1.5 },
+      ],
+    });
+
+    expect(() =>
+      queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.aNumber": { field: "aNumber" },
+        },
+      })
+    ).toThrow("Unsupported operator: double");
+  });
+
+  test("convert-int is unsupported", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "convert-int",
+    });
+
+    expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+    expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+      operator: "gt",
+      operands: [
+        {
+          operator: "int",
+          operands: [{ name: "request.resource.attr.aString" }],
+        },
+        { value: 0 },
+      ],
+    });
+
+    expect(() =>
+      queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.aString": { field: "aString" },
+        },
+      })
+    ).toThrow("Unsupported operator: int");
+  });
+});
+
+describe("Ternary Operator", () => {
+  test("ternary (if) is unsupported", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "ternary",
+    });
+
+    expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+    expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+      operator: "gt",
+      operands: [
+        {
+          operator: "if",
+          operands: [
+            { name: "request.resource.attr.aBool" },
+            { name: "request.resource.attr.aNumber" },
+            { value: 0 },
+          ],
+        },
+        { value: 0 },
+      ],
+    });
+
+    expect(() =>
+      queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.aBool": { field: "aBool" },
+          "request.resource.attr.aNumber": { field: "aNumber" },
+        },
+      })
+    ).toThrow("Unsupported operator: if");
+  });
+});
+
+describe("Size on String", () => {
+  test("string-size is unsupported (size() on a scalar string has no relation mapping)", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "string-size",
+    });
+
+    expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+    expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+      operator: "gt",
+      operands: [
+        {
+          operator: "size",
+          operands: [{ name: "request.resource.attr.aString" }],
+        },
+        { value: 0 },
+      ],
+    });
+
+    // size(scalar_string) cannot be expressed in Prisma's where shape and the
+    // adapter's size handler requires a relation mapping. A scalar string
+    // field is not a relation, so this throws.
+    expect(() =>
+      queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.aString": { field: "aString" },
+        },
+      })
+    ).toThrow("size operator requires a relation mapping");
+  });
+});
+
+describe("Empty Collection", () => {
+  test("empty-collection (size(relation) == 0) maps to relation.none filter", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "empty-collection",
+    });
+
+    expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+    expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+      operator: "eq",
+      operands: [
+        {
+          operator: "size",
+          operands: [{ name: "request.resource.attr.tags" }],
+        },
+        { value: 0 },
+      ],
+    });
+
+    const result = queryPlanToPrisma({
+      queryPlan,
+      mapper: {
+        "request.resource.attr.tags": {
+          relation: { name: "tags", type: "many" },
+        },
+      },
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { tags: { none: {} } },
+    });
+
+    if (result.kind !== PlanKind.CONDITIONAL) {
+      throw new Error("Expected CONDITIONAL result");
+    }
+
+    const query = await prisma.resource.findMany({
+      where: { ...result.filters },
+    });
+
+    expect(query.map((r) => r.id)).toEqual(
+      fixtureResources
+        .filter((r) => {
+          if (!r.tags?.connect) return true;
+          return (r.tags.connect as { id: string }[]).length === 0;
+        })
+        .map((r) => r.id)
+    );
+  });
+});
+
 // Issue #155: hierarchy overlaps operator
 // overlaps = one hierarchy is a prefix of the other (segment-wise comparison)
 describe("Hierarchy Overlaps", () => {

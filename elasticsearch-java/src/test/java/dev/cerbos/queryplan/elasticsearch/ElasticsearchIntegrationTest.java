@@ -636,6 +636,98 @@ class ElasticsearchIntegrationTest {
         assertEquals(List.of("3"), executeQuery("combined-and"));
     }
 
+    // --- Arithmetic (unsupported in ES query DSL without painless scripts) ---
+
+    @Test
+    void arithAddThrows() {
+        // aNumber + 1 > 2 — arithmetic on document fields not natively supported.
+        assertThrows(IllegalArgumentException.class, () -> executeQuery("arith-add"));
+    }
+
+    @Test
+    void arithSubThrows() {
+        assertThrows(IllegalArgumentException.class, () -> executeQuery("arith-sub"));
+    }
+
+    @Test
+    void arithMultThrows() {
+        assertThrows(IllegalArgumentException.class, () -> executeQuery("arith-mult"));
+    }
+
+    @Test
+    void arithDivThrows() {
+        assertThrows(IllegalArgumentException.class, () -> executeQuery("arith-div"));
+    }
+
+    @Test
+    void arithModThrows() {
+        assertThrows(IllegalArgumentException.class, () -> executeQuery("arith-mod"));
+    }
+
+    // --- Regex (supported via ES regexp query on keyword fields) ---
+
+    @Test
+    void matchesRegex() throws Exception {
+        // aString matches "str.*" → keyword field, case-sensitive.
+        // Doc 1: "string" matches. Doc 2: "amIAString?" no. Doc 3: "anotherString" no.
+        assertEquals(List.of("1"), executeQuery("matches-regex"));
+    }
+
+    // --- List indexing (unsupported: ES treats arrays as multivalued, no ordered access) ---
+
+    @Test
+    void indexListThrows() {
+        // ownedBy[0] == "user1" — array indexing not expressible in ES query DSL.
+        assertThrows(IllegalArgumentException.class, () -> executeQuery("index-list"));
+    }
+
+    // --- Type conversions (unsupported: CAST not natively in ES query DSL) ---
+
+    @Test
+    void convertStringThrows() {
+        // string(aNumber) == "1"
+        assertThrows(IllegalArgumentException.class, () -> executeQuery("convert-string"));
+    }
+
+    @Test
+    void convertDoubleThrows() {
+        // double(aNumber) > 1.5
+        assertThrows(IllegalArgumentException.class, () -> executeQuery("convert-double"));
+    }
+
+    @Test
+    void convertIntThrows() {
+        // int(aString) > 0
+        assertThrows(IllegalArgumentException.class, () -> executeQuery("convert-int"));
+    }
+
+    // --- Ternary (unsupported: conditional expressions not in ES query DSL) ---
+
+    @Test
+    void ternaryThrows() {
+        // (aBool ? aNumber : 0) > 0
+        assertThrows(IllegalArgumentException.class, () -> executeQuery("ternary"));
+    }
+
+    // --- size() over strings ---
+    // Adapter cannot distinguish string vs array fields, so size(str) > 0 is
+    // translated as "exists str" — semantically equivalent for "non-empty"
+    // emptiness checks. Other comparisons (e.g. size(str) > 5) throw.
+
+    @Test
+    void stringSizeGtZeroMatchesAllWithField() throws Exception {
+        // size(aString) > 0 — all docs have aString set.
+        assertEquals(List.of("1", "2", "3"), executeQuery("string-size"));
+    }
+
+    // --- Empty collection (size(arr) == 0 → must_not exists) ---
+
+    @Test
+    void emptyCollection() throws Exception {
+        // size(tags) == 0 — no doc has an empty/missing tags list.
+        assertEquals(List.of(), executeQuery("empty-collection"));
+    }
+
     // --- Nested object (collection operator) integration tests ---
     // These go through the real Cerbos PDP using policy actions that reference
     // R.attr.tags as objects with {id, name}. In ES, that data lives in the

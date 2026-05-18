@@ -204,6 +204,155 @@ const buildNestedObject = (path: string[], value: any) =>
 const buildFieldFilter = (path: string[], value: any) =>
   path.length === 0 ? value : buildNestedObject(path, value);
 
+/**
+ * Builds an aggregation-pipeline expression value for use inside `$expr`.
+ * - Variables become field paths prefixed with `$` (e.g. `"$aNumber"`).
+ * - Values become themselves.
+ * - Nested expressions recurse.
+ */
+const buildAggregationExpression = (
+  operand: PlanExpressionOperand,
+  mapper: Mapper
+): any => {
+  if (isVariable(operand)) {
+    const { path } = resolveFieldReference(operand.name, mapper);
+    return "$" + path.join(".");
+  }
+  if (isValue(operand)) {
+    return operand.value;
+  }
+  if (isExpression(operand)) {
+    return buildAggregationExpressionFromExpression(operand, mapper);
+  }
+  throw new Error("Invalid operand structure");
+};
+
+const aggregationOperatorMap: Record<string, string> = {
+  add: "$add",
+  sub: "$subtract",
+  mult: "$multiply",
+  div: "$divide",
+  mod: "$mod",
+  eq: "$eq",
+  ne: "$ne",
+  lt: "$lt",
+  le: "$lte",
+  gt: "$gt",
+  ge: "$gte",
+  and: "$and",
+  or: "$or",
+  not: "$not",
+};
+
+const buildAggregationExpressionFromExpression = (
+  expression: PlanExpression,
+  mapper: Mapper
+): any => {
+  const { operator, operands } = expression;
+
+  switch (operator) {
+    case "add":
+    case "sub":
+    case "mult":
+    case "div":
+    case "mod":
+    case "eq":
+    case "ne":
+    case "lt":
+    case "le":
+    case "gt":
+    case "ge":
+    case "and":
+    case "or": {
+      return {
+        [aggregationOperatorMap[operator] as string]: operands.map((op) =>
+          buildAggregationExpression(op, mapper)
+        ),
+      };
+    }
+    case "not": {
+      const operand = operands[0];
+      if (!operand) {
+        throw new Error("not operator requires an operand");
+      }
+      return { $not: [buildAggregationExpression(operand, mapper)] };
+    }
+    case "string": {
+      const operand = operands[0];
+      if (!operand) {
+        throw new Error("string conversion requires an operand");
+      }
+      return { $toString: buildAggregationExpression(operand, mapper) };
+    }
+    case "double": {
+      const operand = operands[0];
+      if (!operand) {
+        throw new Error("double conversion requires an operand");
+      }
+      return { $toDouble: buildAggregationExpression(operand, mapper) };
+    }
+    case "int": {
+      const operand = operands[0];
+      if (!operand) {
+        throw new Error("int conversion requires an operand");
+      }
+      return { $toInt: buildAggregationExpression(operand, mapper) };
+    }
+    case "if": {
+      const [ifOp, thenOp, elseOp] = operands;
+      if (!ifOp || !thenOp || !elseOp) {
+        throw new Error("if operator requires three operands");
+      }
+      return {
+        $cond: {
+          if: buildAggregationExpression(ifOp, mapper),
+          then: buildAggregationExpression(thenOp, mapper),
+          else: buildAggregationExpression(elseOp, mapper),
+        },
+      };
+    }
+    case "index": {
+      const [arrOp, idxOp] = operands;
+      if (!arrOp || !idxOp) {
+        throw new Error("index operator requires two operands");
+      }
+      return {
+        $arrayElemAt: [
+          buildAggregationExpression(arrOp, mapper),
+          buildAggregationExpression(idxOp, mapper),
+        ],
+      };
+    }
+    case "size": {
+      const operand = operands[0];
+      if (!operand) {
+        throw new Error("size operator requires an operand");
+      }
+      const inner = buildAggregationExpression(operand, mapper);
+      // Works for both arrays and strings: $size for arrays, $strLenCP otherwise.
+      return {
+        $cond: [{ $isArray: inner }, { $size: inner }, { $strLenCP: inner }],
+      };
+    }
+    case "matches": {
+      const [valueOp, patternOp] = operands;
+      if (!valueOp || !patternOp) {
+        throw new Error("matches operator requires two operands");
+      }
+      return {
+        $regexMatch: {
+          input: buildAggregationExpression(valueOp, mapper),
+          regex: buildAggregationExpression(patternOp, mapper),
+        },
+      };
+    }
+    default:
+      throw new Error(
+        `Unsupported operator inside aggregation expression: ${operator}`
+      );
+  }
+};
+
 const getOperandAt = (
   operands: PlanExpressionOperand[],
   index: number,
@@ -343,6 +492,18 @@ const buildMongooseFilterFromCerbosExpression = (
         `${operator} operator requires a value operand`
       );
 
+      // If either operand is a (non-relational) expression, emit a `$expr`
+      // with aggregation-pipeline operators. This covers arithmetic, type
+      // conversion, ternary, `index`, `size`, `matches` etc. on either side
+      // of the comparison (e.g. `aNumber == int(aString)` or `(a + 1) > b`).
+      if (isExpression(leftOperand) || isExpression(rightOperand)) {
+        const leftAgg = buildAggregationExpression(leftOperand, mapper);
+        const rightAgg = buildAggregationExpression(rightOperand, mapper);
+        return {
+          $expr: { [mongoOperator]: [leftAgg, rightAgg] },
+        };
+      }
+
       const left = resolveOperand(leftOperand);
       const right = resolveOperand(rightOperand);
 
@@ -407,6 +568,35 @@ const buildMongooseFilterFromCerbosExpression = (
       }
 
       return buildFieldFilter(path, comparison);
+    }
+
+    case "matches": {
+      const fieldOperand = requireOperandMatching(
+        (o) => isVariable(o),
+        "matches operator requires a field operand"
+      );
+      const patternOperand = requireOperandMatching(
+        (o) => isValue(o),
+        "matches operator requires a regex pattern value"
+      );
+      if (!isValue(patternOperand) || typeof patternOperand.value !== "string") {
+        throw new Error("matches operator requires a string regex pattern");
+      }
+
+      const { path, relation } = resolveOperand(fieldOperand);
+      const regexFilter = { $regex: patternOperand.value };
+
+      if (relation) {
+        if (relation.type === "many") {
+          return {
+            [relation.name]: {
+              $elemMatch: buildFieldFilter(path.slice(1), regexFilter),
+            },
+          };
+        }
+        return buildFieldFilter(path, regexFilter);
+      }
+      return buildFieldFilter(path, regexFilter);
     }
 
     case "contains":

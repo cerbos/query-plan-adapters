@@ -721,6 +721,123 @@ resourcePolicy:
           expr: "!request.resource.attr.aString.startsWith(\"str\")"
 
     - actions:
+        - "arith-add"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.aNumber + 1.0 > 2.0
+
+    - actions:
+        - "arith-sub"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.aNumber - 1.0 < 2.0
+
+    - actions:
+        - "arith-mult"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.aNumber * 2.0 > 2.0
+
+    - actions:
+        - "arith-div"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.aNumber / 2.0 > 0.0
+
+    - actions:
+        - "arith-mod"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: "int(request.resource.attr.aNumber) % 2 == 0"
+
+    - actions:
+        - "matches-regex"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.aString.matches("^str.*")
+
+    - actions:
+        - "index-list"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.ownedBy[0] == "user1"
+
+    - actions:
+        - "convert-string"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: string(request.resource.attr.aNumber) == "1"
+
+    - actions:
+        - "convert-double"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: double(request.resource.attr.aNumber) > 1.5
+
+    - actions:
+        - "convert-int"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: int(request.resource.attr.aString) > 0
+
+    - actions:
+        - "ternary"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: "(request.resource.attr.aBool ? request.resource.attr.aNumber : 0) > 0"
+
+    - actions:
+        - "string-size"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(request.resource.attr.aString) > 0
+
+    - actions:
+        - "empty-collection"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(request.resource.attr.tags) == 0
+
+    - actions:
         - "hierarchy-overlaps"
       effect: EFFECT_ALLOW
       roles:

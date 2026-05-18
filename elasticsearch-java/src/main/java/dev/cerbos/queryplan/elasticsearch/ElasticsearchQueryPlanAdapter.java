@@ -44,6 +44,8 @@ public class ElasticsearchQueryPlanAdapter {
                     Map.of("prefix", Map.of(field, Map.of("value", value)))),
             Map.entry("endsWith", (field, value) ->
                     Map.of("wildcard", Map.of(field, Map.of("value", "*" + escapeWildcard(value))))),
+            Map.entry("matches", (field, value) ->
+                    Map.of("regexp", Map.of(field, Map.of("value", toLuceneRegex(value.toString()))))),
             Map.entry("hasIntersection", (field, value) ->
                     Map.of("terms", Map.of(field, value instanceof List<?> l ? l : List.of(value)))),
             Map.entry("isSet", (field, value) ->
@@ -576,6 +578,29 @@ public class ElasticsearchQueryPlanAdapter {
                 .replace("\\", "\\\\")
                 .replace("*", "\\*")
                 .replace("?", "\\?");
+    }
+
+    // CEL `matches()` uses RE2 partial-match semantics with explicit `^` / `$` anchors.
+    // Elasticsearch's `regexp` query uses Lucene regex which always anchors the whole
+    // field — anchors aren't syntax, they'd match literal `^` / `$` characters. Convert:
+    //  - drop a leading `^` (Lucene already anchors at start)
+    //  - drop a trailing unescaped `$` (Lucene already anchors at end)
+    //  - if the CEL pattern wasn't anchored at start/end, wrap with `.*` so a partial
+    //    match in CEL still maps to a whole-field match in Lucene.
+    static String toLuceneRegex(String celPattern) {
+        boolean anchoredStart = celPattern.startsWith("^");
+        String body = anchoredStart ? celPattern.substring(1) : celPattern;
+        boolean anchoredEnd = body.endsWith("$") && !body.endsWith("\\$");
+        if (anchoredEnd) {
+            body = body.substring(0, body.length() - 1);
+        }
+        if (!anchoredStart && !body.startsWith(".*")) {
+            body = ".*" + body;
+        }
+        if (!anchoredEnd && !body.endsWith(".*")) {
+            body = body + ".*";
+        }
+        return body;
     }
 
     static Object protoValueToJava(Value value) {
