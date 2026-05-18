@@ -156,6 +156,67 @@ SQL fragments), or wait for adapter support.
 | `size(coll) <op> N` for `N > 0`                 | `size(R.attr.tags) > 5`                           | Only emptiness checks are supported. |
 | Hierarchy operators (`hierarchy-*`)             | `hierarchy.overlaps(...)`                         | Not yet ported from the Prisma adapter; ~250 LoC follow-up. |
 
+## Gotchas
+
+Things you're likely to hit when integrating the adapter into a Spring Boot app — see the
+[`example/`](example) photo-sharing application for a runnable end-to-end reference.
+
+### Pin `protobuf-java` to the cerbos-sdk-java's gencode version
+
+`cerbos-sdk-java` 0.18.0 ships protobuf message classes generated against
+`protobuf-java` 4.33.5. If your application classpath ends up with an **older** runtime
+— either because you pin it explicitly, or a transitive dependency wins resolution — the
+SDK throws on first message decode:
+
+```text
+com.google.protobuf.RuntimeVersion$ProtobufRuntimeVersionException:
+  Detected incompatible Protobuf Gencode/Runtime versions when loading Principal:
+  gencode 4.33.5, runtime 4.31.1. Runtime version cannot be older than the linked gencode version.
+```
+
+Fix — add a direct dependency matching the SDK's gencode:
+
+```kotlin
+implementation("com.google.protobuf:protobuf-java:4.33.5")
+```
+
+Spring Boot's BOM does not manage `protobuf-java`, so without an explicit pin Gradle's
+default conflict resolver picks the highest version on the graph. Pinning makes the
+contract explicit and survives BOM upgrades.
+
+### `@ElementCollection` / `@OneToMany` + `spring.jpa.open-in-view=false`
+
+Mapping a Cerbos attribute via `AttributeMapping.relation(...)` translates `"x" in tags`
+to a correlated `EXISTS` subquery — but the entity collection itself is still lazy by
+default. If your controller serializes the entity (or any field traversal happens after
+the transaction closes), you'll see:
+
+```text
+HttpMessageNotWritableException: Could not write JSON:
+  failed to lazily initialize a collection of role: …Photo.tags: could not initialize proxy - no Session
+```
+
+Pick one:
+
+- **Eager-fetch** the collection if it's small (`@ElementCollection(fetch = FetchType.EAGER)`).
+- **Do the entity-to-DTO mapping inside `@Transactional(readOnly = true)`** so the Hibernate
+  session is still open while you walk relations.
+- **Don't serialize entities** — return a DTO projection instead.
+
+The adapter itself has no opinion here — this is the same `open-in-view=false` footgun any
+JPA app hits — but it's worth flagging because Cerbos plans frequently *do* reference
+collection attributes (`tags`, `members`, `categories`), and those are the ones developers
+typically forget to fetch.
+
+### Don't cache the produced `Predicate`
+
+`Result.Conditional.toSpecification()` returns a Specification whose lambda **rebuilds the
+predicate tree against each invocation's `Root`/`CriteriaQuery`**. Spring Data's
+`findAll(spec, Pageable)` fires a separate `COUNT` query with its own root, and Hibernate 6
+rejects a `Predicate` produced against a stale root with
+`SqlTreeCreationException: Could not locate TableGroup`. Pass the Specification to
+repository methods; don't cache the `Predicate` it returns.
+
 ## Build
 
 From the `spring-data/` directory:
