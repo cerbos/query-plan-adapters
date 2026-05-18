@@ -135,6 +135,27 @@ Result<Contact> result =
     SpringDataQueryPlanAdapter.toSpecification(planResult, MAPPING, overrides);
 ```
 
+## Not yet supported
+
+The Criteria-based predicate builder has no shape for these CEL constructs; they
+throw `IllegalArgumentException` with a message naming the operator. Override
+via `OperatorFunction` when the runtime can express them (e.g. database-specific
+SQL fragments), or wait for adapter support.
+
+| Construct                                       | Example CEL                                       | Notes |
+|-------------------------------------------------|---------------------------------------------------|-------|
+| Arithmetic (`add`/`sub`/`mult`/`div`/`mod`)     | `R.attr.aNumber + 1 > 2`                          | `add` is supported only as constant folding inside `eq`/`ne`; other arithmetic on document fields requires a column-expression engine the Criteria API doesn't expose. |
+| Regex match                                     | `R.attr.aString.matches("^foo.*")`                | JPA has no portable regex predicate; override per-dialect (`regexp_like`, `~`, `REGEXP`). |
+| List indexing                                   | `R.attr.tags[0] == "x"`                           | JPA collections are unordered sets — no positional access. |
+| Type casts (`int(...)` / `double(...)` / `string(...)`) | `int(R.attr.aString) > 0`                 | No portable `CAST` in Criteria; override per-dialect. |
+| Ternary (`cond ? a : b`)                        | `(R.attr.aBool ? R.attr.aNumber : 0) > 0`         | The CEL planner emits this as `if(cond, then, else)`; JPA Criteria has no `CASE WHEN` value-expression builder. |
+| `size(string)`                                  | `size(R.attr.aString) > 0`                        | Only `size(collection)` (`Relation` mapping) is supported; for strings use `cb.length` via an override. |
+| Field-to-field comparison                       | `R.attr.aString == R.attr.id`                     | The leaf operator handler requires one variable + one value operand; throws explicitly. |
+| `eq(map(...), [...])`                           | `R.attr.tags.map(t, t.id) == ["tag1", "tag2"]`    | Use `hasIntersection(map(...), [...])` instead. |
+| `size(filter(...)) <op> N`                      | `size(R.attr.tags.filter(t, t.name == "x")) > 0`  | Use `exists(coll, lambda)` for emptiness; `size()` only accepts a Variable operand. |
+| `size(coll) <op> N` for `N > 0`                 | `size(R.attr.tags) > 5`                           | Only emptiness checks are supported. |
+| Hierarchy operators (`hierarchy-*`)             | `hierarchy.overlaps(...)`                         | Not yet ported from the Prisma adapter; ~250 LoC follow-up. |
+
 ## Build
 
 From the `spring-data/` directory:

@@ -622,8 +622,10 @@ public final class SpringDataQueryPlanAdapter {
             }
             return existsSubquery(scope, chain.get(0), (sub, joinFrom) -> {
                 // Recurse using an intermediate scope rooted at the current join + this subquery.
+                // The lambda variable name is internal-only — `$` is not a valid CEL identifier
+                // character, so this sentinel can never collide with a user-supplied lambda name.
                 AttributeMapping.Relation thisRel = chain.get(0);
-                Scope intermediate = Scope.lambda(joinFrom, sub, thisRel, "__chain__");
+                Scope intermediate = Scope.lambda(joinFrom, sub, thisRel, "$$chain$$");
                 return chainedExistsSubquery(intermediate, chain.subList(1, chain.size()), bodyBuilder);
             });
         }
@@ -750,6 +752,13 @@ public final class SpringDataQueryPlanAdapter {
      * numbers add. Used when the planner emits e.g. {@code eq(field, add("prefix:", "123"))}.
      */
     static Object foldAdd(Object left, Object right) {
+        if (left == null || right == null) {
+            // Reaching here means the planner emitted `add(null, ...)` or `add(..., null)`
+            // — neither side could satisfy any string/number equation, so report the shape
+            // explicitly rather than NPE'ing on `.getClass()` below.
+            throw new IllegalArgumentException(
+                    "add requires non-null operands, got " + left + " + " + right);
+        }
         if (left instanceof String || right instanceof String) {
             return String.valueOf(left) + String.valueOf(right);
         }
@@ -913,6 +922,8 @@ public final class SpringDataQueryPlanAdapter {
                     .toList();
             case STRUCT_VALUE -> value.getStructValue().getFieldsMap().entrySet().stream()
                     .collect(Collectors.toMap(Map.Entry::getKey, e -> protoValueToJava(e.getValue())));
+            case KIND_NOT_SET -> throw new IllegalArgumentException(
+                    "Protobuf Value has no kind set — the planner emitted a malformed operand");
             default -> throw new IllegalArgumentException(
                     "Unsupported protobuf value type: " + value.getKindCase());
         };

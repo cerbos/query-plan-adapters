@@ -39,6 +39,18 @@ public sealed interface Result<T> permits Result.AlwaysAllowed, Result.AlwaysDen
         }
     }
 
+    /**
+     * Wraps the translated Specification. The contained Specification is a fresh lambda that
+     * rebuilds the entire predicate tree from the {@code Root}/{@code CriteriaQuery} passed in
+     * on each invocation — this is required because Spring Data's
+     * {@code JpaSpecificationExecutor.findAll(spec, Pageable)} fires a separate {@code COUNT}
+     * query with its own {@code CriteriaQuery} and {@code Root}, and Hibernate 6 rejects a
+     * cached {@code Predicate} produced against a different {@code Root}
+     * ({@code SqlTreeCreationException: Could not locate TableGroup}). Callers must therefore
+     * never cache or re-use the {@code Predicate} returned by
+     * {@link Specification#toPredicate}; pass the Specification itself to repository methods
+     * and let Spring Data invoke it once per query.
+     */
     record Conditional<T>(Specification<T> specification) implements Result<T> {
         @Override
         public Specification<T> toSpecification() {
