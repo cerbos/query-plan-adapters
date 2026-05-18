@@ -73,11 +73,9 @@
     "@cerbos/grpc": "^0.25.0"
   },
   "overrides": {
-    "minimatch": "^10.0.0",
-    "hono": "^4.12.8",
-    "@hono/node-server": "^2.0.0",
-    "effect": "^3.20.0",
-    "lodash": "^4.17.23"
+    "@prisma/dev": {
+      "@hono/node-server": "^1.19.13"
+    }
   },
   "keywords": [
     "cerbos",
