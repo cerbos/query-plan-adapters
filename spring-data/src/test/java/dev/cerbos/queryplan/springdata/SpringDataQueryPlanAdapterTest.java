@@ -830,6 +830,125 @@ class SpringDataQueryPlanAdapterTest {
         }
     }
 
+    @Nested
+    class HierarchyOperators {
+
+        // Helpers: a hierarchy(...) wrapper and a list(...) of segments.
+        private Operand hierarchy(Operand inner, String delimiter) {
+            return exprOp("hierarchy", inner, sval(delimiter));
+        }
+
+        private Operand hierarchy(Operand inner) {
+            return exprOp("hierarchy", inner);
+        }
+
+        private Operand segList(Operand... segs) {
+            return exprOp("list", segs);
+        }
+
+        @Test
+        void ancestorOfConstantPrefixOfField() {
+            // ancestorOf(hierarchy("a:b", ":"), hierarchy(field, ":")) → field LIKE 'a:b:%'
+            Operand cond = exprOp("ancestorOf",
+                    hierarchy(sval("a:b"), ":"),
+                    hierarchy(var("request.resource.attr.aString"), ":"));
+            assertEquals(0, runCount(cond));
+        }
+
+        @Test
+        void ancestorOfFieldPrefixOfConstant() {
+            // ancestorOf(hierarchy(field, ":"), hierarchy("a:b:c", ":")) → field IN ('a', 'a:b')
+            Operand cond = exprOp("ancestorOf",
+                    hierarchy(var("request.resource.attr.aString"), ":"),
+                    hierarchy(sval("a:b:c"), ":"));
+            assertEquals(0, runCount(cond));
+        }
+
+        @Test
+        void descendentOfFieldUnderConstant() {
+            // descendentOf(hierarchy(field, ":"), hierarchy("a:b", ":")) → field LIKE 'a:b:%'
+            Operand cond = exprOp("descendentOf",
+                    hierarchy(var("request.resource.attr.aString"), ":"),
+                    hierarchy(sval("a:b"), ":"));
+            assertEquals(0, runCount(cond));
+        }
+
+        @Test
+        void overlapsFieldHierarchyWithConstant() {
+            // overlaps(hierarchy(field, ":"), hierarchy("a:b", ":"))
+            //   → field IN ('a') OR field = 'a:b' OR field LIKE 'a:b:%'
+            Operand cond = exprOp("overlaps",
+                    hierarchy(var("request.resource.attr.aString"), ":"),
+                    hierarchy(sval("a:b"), ":"));
+            assertEquals(0, runCount(cond));
+        }
+
+        @Test
+        void overlapsSegmentedWithField() {
+            // The policy shape: hierarchy("projects:123", ":").overlaps(hierarchy(["projects", R.id]))
+            //   → segment-wise: const "projects" matches, then field == "123"
+            Operand cond = exprOp("overlaps",
+                    hierarchy(sval("projects:123"), ":"),
+                    hierarchy(segList(sval("projects"), var("request.resource.attr.aString"))));
+            assertEquals(0, runCount(cond));
+        }
+
+        @Test
+        void overlapsConstantsMatchingPrefixIsAlwaysTrue() {
+            // overlaps("a", "a:b") — "a" is a prefix of "a:b", all constant → unconditionally true.
+            Operand cond = exprOp("overlaps",
+                    hierarchy(sval("a"), ":"),
+                    hierarchy(sval("a:b"), ":"));
+            assertEquals(0, runCount(cond));
+        }
+
+        @Test
+        void ancestorOfConstantsSatisfied() {
+            // ancestorOf("a", "a:b") — satisfied by constants alone → unconditionally true.
+            Operand cond = exprOp("ancestorOf",
+                    hierarchy(sval("a"), ":"),
+                    hierarchy(sval("a:b"), ":"));
+            assertEquals(0, runCount(cond));
+        }
+
+        @Test
+        void overlapsIncompatibleConstantsWithoutFieldThrows() {
+            // overlaps("a:b", "x:y") — no prefix relationship and no field to constrain → planner bug.
+            assertConditionThrows(
+                    exprOp("overlaps",
+                            hierarchy(sval("a:b"), ":"),
+                            hierarchy(sval("x:y"), ":")),
+                    "Cannot determine hierarchy overlap");
+        }
+
+        @Test
+        void ancestorOfConstantsNotSatisfiedThrows() {
+            assertConditionThrows(
+                    exprOp("ancestorOf",
+                            hierarchy(sval("x"), ":"),
+                            hierarchy(sval("a:b"), ":")),
+                    "ancestorOf", "do not satisfy");
+        }
+
+        @Test
+        void nonHierarchyOperandThrows() {
+            assertConditionThrows(
+                    exprOp("overlaps",
+                            var("request.resource.attr.aString"),
+                            sval("a:b")),
+                    "overlaps", "hierarchy(...) operands");
+        }
+
+        @Test
+        void twoFieldHierarchiesInOverlapThrows() {
+            assertConditionThrows(
+                    exprOp("overlaps",
+                            hierarchy(var("request.resource.attr.aString"), ":"),
+                            hierarchy(var("request.resource.attr.createdBy"), ":")),
+                    "two field-reference hierarchies");
+        }
+    }
+
     @Test
     void operatorOverrideIsUsed() {
         Operand cond = exprOp("eq", var("request.resource.attr.aString"), sval("foo"));
