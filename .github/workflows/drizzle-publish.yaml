@@ -24,7 +24,7 @@ jobs:
           registry-url: "https://registry.npmjs.org"
 
       - name: Setup Cerbos
-        uses: cerbos/cerbos-setup-action@6d88cfd96db5af84489633c6a2db42bf2522933b # v1
+        uses: cerbos/cerbos-setup-action@f8061b1f07da2d185acd233dedaa5d5eadb99214 # v1
 
       # Ensure npm 11.5.1 or later is installed
       - name: Update npm
