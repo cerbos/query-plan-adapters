@@ -1,0 +1,28 @@
+# Standalone Cerbos PDP for the photo-sharing example app.
+#
+#   docker compose up -d        # start the PDP
+#   ../gradlew bootRun          # run the Spring Boot app on :8080 (connects to :3593)
+#   docker compose logs cerbos  # see PlanResources decision logs
+#   docker compose down
+services:
+  cerbos:
+    image: ghcr.io/cerbos/cerbos:latest
+    container_name: cerbos-photos-example
+    command:
+      - "server"
+      - "--config=/config/cerbos-config.yaml"
+    environment:
+      CERBOS_NO_TELEMETRY: "1"
+      CERBOS_CONFIG: "/config/cerbos-config.yaml"
+    ports:
+      - "3592:3592"
+      - "3593:3593"
+    volumes:
+      - ./cerbos-config.yaml:/config/cerbos-config.yaml:ro
+      - ./policies:/policies:ro
+    healthcheck:
+      test: ["CMD", "/cerbos", "healthcheck"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 3s
