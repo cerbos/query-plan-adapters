@@ -155,6 +155,41 @@ class SpringDataQueryPlanAdapterTest {
         }
     }
 
+    /** {@link #runCount(Operand)} with per-operator overrides. */
+    private static int runCount(Operand condition, Map<String, OperatorFunction> overrides) {
+        PlanResourcesResponse resp =
+                buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+        Result<ResourceEntity> result =
+                SpringDataQueryPlanAdapter.toSpecification(resp, MAPPER, overrides);
+        assertInstanceOf(Result.Conditional.class, result);
+        Specification<ResourceEntity> spec = ((Result.Conditional<ResourceEntity>) result).specification();
+
+        EntityManager em = emf.createEntityManager();
+        try {
+            CriteriaBuilder cb = em.getCriteriaBuilder();
+            CriteriaQuery<Long> cq = cb.createQuery(Long.class);
+            Root<ResourceEntity> root = cq.from(ResourceEntity.class);
+            cq.select(cb.count(root));
+            Predicate p = spec.toPredicate(root, cq, cb);
+            if (p != null) cq.where(p);
+            return em.createQuery(cq).getSingleResult().intValue();
+        } finally {
+            em.close();
+        }
+    }
+
+    /** Thrown by {@link #THROWING_OVERRIDE} to prove an override hook was actually invoked. */
+    private static final class OverrideInvoked extends RuntimeException {
+        OverrideInvoked() {
+            super("override invoked");
+        }
+    }
+
+    /** An override that fails loudly when reached, so a test can assert the override path is taken. */
+    private static final OperatorFunction THROWING_OVERRIDE = (cb, field, value) -> {
+        throw new OverrideInvoked();
+    };
+
     @Test
     void alwaysAllowedResult() {
         PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_ALWAYS_ALLOWED, null);
@@ -374,6 +409,98 @@ class SpringDataQueryPlanAdapterTest {
                 var("request.resource.attr.tags"),
                 lambda("t", var("t.name")));
         assertEquals(0, runCount(exprOp("hasIntersection", mapExpr, listOp("public", "private"))));
+    }
+
+    @Test
+    void existsOneOnNestedRelation() {
+        // exists_one → correlated (SELECT COUNT(...)) = 1. Exercises the manual-correlation path
+        // that the other collection operators do not.
+        assertEquals(0, runCount(exprOp("exists_one",
+                var("request.resource.attr.tags"),
+                lambda("t",
+                        exprOp("eq", var("t.name"), sval("public"))))));
+    }
+
+    @Test
+    void existsOneWithCompoundBody() {
+        assertEquals(0, runCount(exprOp("exists_one",
+                var("request.resource.attr.tags"),
+                lambda("t",
+                        exprOp("or",
+                                exprOp("eq", var("t.id"), sval("tag1")),
+                                exprOp("eq", var("t.name"), sval("public")))))));
+    }
+
+    // -- empty-list intersection short-circuits (no dialect-dependent `IN ()`) --
+
+    @Test
+    void hasIntersectionScalarEmptyListCompiles() {
+        // hasIntersection(field, []) is always false and must not emit an empty `IN ()`.
+        assertEquals(0, runCount(exprOp("hasIntersection",
+                var("request.resource.attr.aString"), listOp())));
+    }
+
+    @Test
+    void hasIntersectionRelationEmptyListCompiles() {
+        assertEquals(0, runCount(exprOp("hasIntersection",
+                var("request.resource.attr.tags"), listOp())));
+    }
+
+    @Test
+    void hasIntersectionMapEmptyListCompiles() {
+        Operand mapExpr = exprOp("map",
+                var("request.resource.attr.tags"),
+                lambda("t", var("t.name")));
+        assertEquals(0, runCount(exprOp("hasIntersection", mapExpr, listOp())));
+    }
+
+    // -- override hook is consulted on every scalar-leaf path, not just the direct comparison --
+
+    @Test
+    void overrideAppliesToDirectComparison() {
+        Operand cond = exprOp("eq", var("request.resource.attr.aString"), sval("foo"));
+        assertThrows(OverrideInvoked.class,
+                () -> runCount(cond, Map.of("eq", THROWING_OVERRIDE)));
+    }
+
+    @Test
+    void overrideAppliesToAddFoldedComparison() {
+        // field == "prefix:" + "123" folds to a constant then compares — must hit the same override.
+        Operand cond = exprOp("eq",
+                var("request.resource.attr.aString"),
+                exprOp("add", sval("prefix:"), sval("123")));
+        assertThrows(OverrideInvoked.class,
+                () -> runCount(cond, Map.of("eq", THROWING_OVERRIDE)));
+    }
+
+    @Test
+    void overrideAppliesToNullRhs() {
+        // eq(field, null) must route through a registered override rather than forcing IS NULL.
+        Operand cond = exprOp("eq", var("request.resource.attr.aOptionalString"), nullVal());
+        assertThrows(OverrideInvoked.class,
+                () -> runCount(cond, Map.of("eq", THROWING_OVERRIDE)));
+    }
+
+    @Test
+    void overrideAppliesToBareBoolean() {
+        Operand cond = var("request.resource.attr.aBool");
+        assertThrows(OverrideInvoked.class,
+                () -> runCount(cond, Map.of("eq", THROWING_OVERRIDE)));
+    }
+
+    @Test
+    void overrideAppliesToScalarIn() {
+        Operand cond = exprOp("in",
+                var("request.resource.attr.aString"), listOp("a", "b"));
+        assertThrows(OverrideInvoked.class,
+                () -> runCount(cond, Map.of("in", THROWING_OVERRIDE)));
+    }
+
+    @Test
+    void overrideAppliesToIsSet() {
+        Operand cond = exprOp("isSet", var("request.resource.attr.aOptionalString"), bval(true));
+        assertThrows(OverrideInvoked.class,
+                () -> runCount(cond, Map.of("isSet", THROWING_OVERRIDE)));
     }
 
     @Test

@@ -109,11 +109,7 @@ public final class SpringDataQueryPlanAdapter {
 
         private Predicate handleBareVariable(String variable, Scope scope) {
             Path<?> path = scope.resolvePath(variable);
-            OperatorFunction fn = overrides.get("eq");
-            if (fn != null) {
-                return fn.apply(cb, path, true);
-            }
-            return cb.equal(path, true);
+            return applyLeaf("eq", path, true);
         }
 
         private Predicate traverseExpression(PlanResourcesFilter.Expression expression, Scope scope) {
@@ -217,6 +213,11 @@ public final class SpringDataQueryPlanAdapter {
             Path<?> path = scope.resolvePath(variable);
 
             if (value == null) {
+                // A registered override owns the operator's full translation, including a null RHS.
+                OperatorFunction override = overrides.get(op);
+                if (override != null) {
+                    return override.apply(cb, path, null);
+                }
                 return switch (op) {
                     case "eq" -> cb.isNull(path);
                     case "ne" -> cb.isNotNull(path);
@@ -225,11 +226,19 @@ public final class SpringDataQueryPlanAdapter {
                 };
             }
 
+            return applyLeaf(op, path, value);
+        }
+
+        /**
+         * Apply a scalar leaf operator, consulting the per-operator {@code overrides} hook first so a
+         * registered {@link OperatorFunction} wins on EVERY path that produces this operator — direct
+         * comparison, {@code add}-folded comparison, and bare-boolean — not just the direct one.
+         */
+        private Predicate applyLeaf(String op, Path<?> path, Object value) {
             OperatorFunction override = overrides.get(op);
             if (override != null) {
                 return override.apply(cb, path, value);
             }
-
             return defaultLeaf(op, path, value);
         }
 
@@ -276,7 +285,7 @@ public final class SpringDataQueryPlanAdapter {
                             "add(const, const) compared to a non-field operand is not supported");
                 }
                 Path<?> path = scope.resolvePath(otherOperand.getVariable());
-                return defaultLeaf(op, path, folded);
+                return applyLeaf(op, path, folded);
             }
 
             // Case 2: add(field, value) or add(value, field) — solve for the field.
@@ -317,7 +326,7 @@ public final class SpringDataQueryPlanAdapter {
                 return "eq".equals(op) ? cb.disjunction() : cb.conjunction();
             }
             Path<?> path = scope.resolvePath(fieldOp.getVariable());
-            return defaultLeaf(op, path, solved);
+            return applyLeaf(op, path, solved);
         }
 
         // -- isSet --
@@ -342,6 +351,10 @@ public final class SpringDataQueryPlanAdapter {
                 throw new IllegalArgumentException("Invalid isSet operands");
             }
             Path<?> path = scope.resolvePath(variable);
+            OperatorFunction override = overrides.get("isSet");
+            if (override != null) {
+                return override.apply(cb, path, flag);
+            }
             return flag ? cb.isNotNull(path) : cb.isNull(path);
         }
 
@@ -366,6 +379,10 @@ public final class SpringDataQueryPlanAdapter {
                 }
 
                 Path<?> path = scope.resolvePath(var);
+                OperatorFunction override = overrides.get("in");
+                if (override != null) {
+                    return override.apply(cb, path, val);
+                }
                 if (val instanceof List<?> list) {
                     if (list.isEmpty()) {
                         return cb.disjunction();
@@ -385,6 +402,10 @@ public final class SpringDataQueryPlanAdapter {
                     return collectionContainsAny(scope, rel, List.of(val));
                 }
                 Path<?> path = scope.resolvePath(var);
+                OperatorFunction override = overrides.get("in");
+                if (override != null) {
+                    return override.apply(cb, path, val);
+                }
                 return cb.equal(path, val);
             }
 
@@ -412,6 +433,10 @@ public final class SpringDataQueryPlanAdapter {
                     return collectionContainsAny(scope, rel, values);
                 }
                 Path<?> path = scope.resolvePath(var);
+                // hasIntersection(field, []) is always false; avoid a dialect-dependent empty `IN ()`.
+                if (values.isEmpty()) {
+                    return cb.disjunction();
+                }
                 return path.in(values);
             }
 
@@ -423,6 +448,10 @@ public final class SpringDataQueryPlanAdapter {
                 }
                 Object val = protoValueToJava(second.getValue());
                 List<?> values = (val instanceof List<?> l) ? l : List.of(val);
+                // hasIntersection(map(...), []) is always false; short-circuit before the subquery.
+                if (values.isEmpty()) {
+                    return cb.disjunction();
+                }
 
                 PlanResourcesFilter.Expression mapExpr = first.getExpression();
                 List<Operand> mapOperands = mapExpr.getOperandsList();
@@ -482,6 +511,11 @@ public final class SpringDataQueryPlanAdapter {
         }
 
         private Predicate collectionContainsAny(Scope outerScope, AttributeMapping.Relation rel, List<?> values) {
+            // Intersection with an empty value set is always false — and an EXISTS wrapping an
+            // empty `IN ()` is dialect-dependent — so short-circuit before building the subquery.
+            if (values.isEmpty()) {
+                return cb.disjunction();
+            }
             return existsSubquery(outerScope, rel, (sub, joinFrom) -> {
                 Path<?> field;
                 if (rel.defaultMemberField() != null && !rel.defaultMemberField().isEmpty()) {
