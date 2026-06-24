@@ -217,6 +217,25 @@ rejects a `Predicate` produced against a stale root with
 `SqlTreeCreationException: Could not locate TableGroup`. Pass the Specification to
 repository methods; don't cache the `Predicate` it returns.
 
+### MySQL / MariaDB `LIKE` backslash escaping
+
+`contains` / `startsWith` / `endsWith` translate to `cb.like(path, pattern, '\\')` — the
+adapter escapes `%`, `_`, and `\` in the user value and declares `\` as the SQL escape
+character (the three-arg `LIKE … ESCAPE '\'` form). On most databases this is exact and
+unambiguous.
+
+MySQL and MariaDB are the exception: by default they **also** treat `\` as an escape
+character *inside the string literal itself*, so the escape is effectively applied twice and
+a literal backslash in the attribute value can match incorrectly. If your data contains
+backslashes and you target MySQL/MariaDB, either:
+
+- run the server with [`NO_BACKSLASH_ESCAPES`](https://dev.mysql.com/doc/refman/en/sql-mode.html#sqlmode_no_backslash_escapes)
+  enabled (Hibernate 6.4+ emits standard-conforming escaping in that mode), or
+- register an `OperatorFunction` override for `contains`/`startsWith`/`endsWith` that builds
+  the `LIKE` predicate with an escape character your dialect handles cleanly.
+
+Values without backslashes are unaffected.
+
 ## Build
 
 From the `spring-data/` directory:

@@ -43,6 +43,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -149,6 +150,18 @@ class SpringDataIntegrationTest {
             Map.entry("request.resource.attr.nested.aNumber", AttributeMapping.field("nested.aNumber"))
     );
 
+    /** Records every SQL statement Hibernate executes, so a test can assert on query shape. */
+    public static final class SqlCapture implements org.hibernate.resource.jdbc.spi.StatementInspector {
+        static final java.util.List<String> STATEMENTS =
+                java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+
+        @Override
+        public String inspect(String sql) {
+            STATEMENTS.add(sql);
+            return sql;
+        }
+    }
+
     private static GenericContainer<?> createCerbosContainer() {
         GenericContainer<?> container = new GenericContainer<>("ghcr.io/cerbos/cerbos:latest")
                 .withExposedPorts(3593)
@@ -198,7 +211,10 @@ class SpringDataIntegrationTest {
         cerbosClient = new CerbosClientBuilder(host + ":" + port)
                 .withPlaintext().buildBlockingClient();
 
-        emf = Persistence.createEntityManagerFactory("test-pu");
+        // Install a StatementInspector so tests can assert on the generated SQL (e.g. that deeply
+        // nested correlated EXISTS subqueries don't degrade into a cartesian/cross join).
+        emf = Persistence.createEntityManagerFactory("test-pu",
+                Map.of("hibernate.session_factory.statement_inspector", SqlCapture.class.getName()));
         seedData();
     }
 
@@ -753,6 +769,37 @@ class SpringDataIntegrationTest {
             // same shape as map-deeply-nested
             assertEquals(List.of("1", "2", "3"),
                     runWithMapping("has-intersection-nested", CATEGORIES_MAP));
+        }
+
+        @Test
+        void threeLevelNestingIsCorrelatedNotCrossJoined() {
+            // categories.exists(c, c.subCategories.exists(s, s.labels.exists(l, l.name == "important")))
+            // — three relation hops, each a correlated EXISTS one level deeper than the last. This pins
+            // the generated SQL shape: a cross/cartesian join would still return rows but would wrongly
+            // pair unrelated subcategories/labels, so we assert directly on the SQL, not just the result.
+            SqlCapture.STATEMENTS.clear();
+            assertEquals(List.of("1", "3"),
+                    runWithMapping("deep-nested-category-label", CATEGORIES_MAP));
+
+            String sql = SqlCapture.STATEMENTS.stream()
+                    .filter(s -> s.toLowerCase().contains("exists"))
+                    .reduce("", (a, b) -> a.length() >= b.length() ? a : b)
+                    .toLowerCase();
+            assertFalse(sql.isEmpty(), "expected a SELECT with EXISTS to be captured");
+            // One correlated EXISTS per relation hop (categories -> subCategories -> labels).
+            assertEquals(3, countOccurrences(sql, "exists"),
+                    "expected three nested EXISTS subqueries, SQL was:\n" + sql);
+            // Correlated subqueries must not collapse into a cartesian product.
+            assertFalse(sql.contains("cross join"),
+                    "nested correlation degraded into a cross join, SQL was:\n" + sql);
+        }
+
+        private int countOccurrences(String haystack, String needle) {
+            int count = 0;
+            for (int i = haystack.indexOf(needle); i >= 0; i = haystack.indexOf(needle, i + needle.length())) {
+                count++;
+            }
+            return count;
         }
     }
 
