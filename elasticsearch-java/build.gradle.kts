@@ -18,7 +18,7 @@ dependencies {
     implementation("dev.cerbos:cerbos-sdk-java:0.18.0")
     implementation("com.google.protobuf:protobuf-java:4.35.1")
 
-    testImplementation(platform("org.junit:junit-bom:6.1.0"))
+    testImplementation(platform("org.junit:junit-bom:6.1.1"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testImplementation("org.testcontainers:testcontainers:2.0.5")
     testImplementation("org.testcontainers:junit-jupiter:1.21.4")
