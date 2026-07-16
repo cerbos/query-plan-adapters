@@ -16,6 +16,42 @@ const CERBOS_TO_PRISMA_OPERATOR: Record<string, string> = {
   ge: "gte",
 };
 
+// Directional operators mirror when their operands swap sides; symmetric operators are unchanged.
+const MIRRORED_OPERATOR: Record<string, string> = {
+  lt: "gt",
+  gt: "lt",
+  le: "ge",
+  ge: "le",
+};
+
+/**
+ * Normalize a binary comparison to field-side-first. The planner preserves policy source
+ * order, so a constant may precede the field it constrains (`1 < R.attr.x` arrives as
+ * `lt(value, variable)`) — swap the operands and mirror directional operators so downstream
+ * handlers can assume the field/expression side is first. Without this, value-first
+ * comparisons are silently inverted (#256).
+ */
+function normalizeBinaryOperands(
+  operator: string,
+  operands: PlanExpressionOperand[]
+): { operator: string; operands: PlanExpressionOperand[] } {
+  const first = operands[0];
+  const second = operands[1];
+  if (
+    operands.length === 2 &&
+    first !== undefined &&
+    second !== undefined &&
+    isValueOperand(first) &&
+    !isValueOperand(second)
+  ) {
+    return {
+      operator: MIRRORED_OPERATOR[operator] ?? operator,
+      operands: [second, first],
+    };
+  }
+  return { operator, operands };
+}
+
 // Type Definitions
 export type PrismaFilter = Record<string, any>;
 
@@ -652,6 +688,7 @@ function handleRelationalOperator(
   operands: PlanExpressionOperand[],
   mapper: Mapper
 ): PrismaFilter {
+  ({ operator, operands } = normalizeBinaryOperands(operator, operands));
   const prismaOperator = CERBOS_TO_PRISMA_OPERATOR[operator];
 
   if (!prismaOperator) {
@@ -787,6 +824,11 @@ function handleHasIntersectionOperator(
   if (operands.length !== 2) {
     throw new Error("hasIntersection requires exactly two operands");
   }
+
+  // Intersection is symmetric, and the planner preserves policy source order — e.g.
+  // `hasIntersection(["a"], R.attr.tags)` puts the constant list FIRST. Normalize to
+  // field/map-first (see #256).
+  ({ operands } = normalizeBinaryOperands("hasIntersection", operands));
 
   const leftOperand = assertDefined(
     operands[0],
