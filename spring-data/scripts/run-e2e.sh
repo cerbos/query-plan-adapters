@@ -43,8 +43,12 @@ if command -v gradle >/dev/null 2>&1; then
   TEST_EXIT=$?
 else
   echo "==> No local gradle found; falling back to gradle:8.12-jdk17 Docker image"
+  # The docker socket mount is required by AdversarialConformanceTest, which always spawns its
+  # own PDP (with its own hostile policy set) via Testcontainers even in external-PDP mode.
   docker run --rm \
     -v "$(pwd)/..":/app \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    -e TESTCONTAINERS_RYUK_DISABLED=true \
     --network host \
     -e CERBOS_HOST="${CERBOS_HOST}" \
     -e CERBOS_PORT="${CERBOS_PORT}" \

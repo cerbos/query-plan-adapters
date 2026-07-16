@@ -83,7 +83,7 @@ Compose it with your own filters:
 Specification<Contact> own =
     (root, query, cb) -> cb.like(root.get("name"), "Smith%");
 
-List<Contact> results = contactRepository.findAll(
+Page<Contact> results = contactRepository.findAll(
     own.and(result.toSpecification()), pageable);
 ```
 
@@ -253,7 +253,15 @@ gradle build --no-daemon
 ## End-to-end testing
 
 Every test runs against a **real Cerbos PDP container** — there is no stubbing of policy
-evaluation. Two run modes are supported:
+evaluation. Three suites with distinct roles:
+
+| Suite | Role |
+|---|---|
+| `SpringDataQueryPlanAdapterTest` | Unit: protobuf operands built by hand, executed against H2 to catch translation/mapping errors and pin error messages |
+| `SpringDataIntegrationTest` | Integration: the shared `/policies/resource.yaml` conformance actions planned by a live PDP, results asserted against seeded rows |
+| `AdversarialConformanceTest` | Differential: hostile policy shapes + hostile seed data (LIKE metacharacters, unicode, empty collections, value-first operand order); the adapter's filtered rows are compared per action against an oracle computed from the PDP's own `check` API — no hand-computed expectations, so any semantic divergence between the generated SQL and Cerbos's evaluation fails mechanically |
+
+Two run modes are supported:
 
 ### 1. Self-managed (default)
 
