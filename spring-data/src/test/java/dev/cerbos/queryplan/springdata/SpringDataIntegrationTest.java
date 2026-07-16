@@ -162,6 +162,12 @@ class SpringDataIntegrationTest {
         }
     }
 
+    // Hierarchy policies reference R.id (the resource id) and R.attr.scope (a delimited path column).
+    private static final Map<String, AttributeMapping> HIERARCHY_MAP = Map.ofEntries(
+            Map.entry("request.resource.id", AttributeMapping.field("id")),
+            Map.entry("request.resource.attr.scope", AttributeMapping.field("scope"))
+    );
+
     private static GenericContainer<?> createCerbosContainer() {
         GenericContainer<?> container = new GenericContainer<>("ghcr.io/cerbos/cerbos:latest")
                 .withExposedPorts(3593)
@@ -270,6 +276,7 @@ class SpringDataIntegrationTest {
         r1.setaNumber(1);
         r1.setaOptionalString("hello");
         r1.setCreatedBy("user1");
+        r1.setScope("a.b.c");
         r1.setOwnedBy(new java.util.ArrayList<>(List.of("user1", "user2")));
         r1.setTagNames(new java.util.ArrayList<>(List.of("public", "featured")));
         r1.addTag("tag1", "public");
@@ -293,6 +300,7 @@ class SpringDataIntegrationTest {
         r2.setaString("amIAString?");
         r2.setaNumber(2);
         r2.setCreatedBy("user2");
+        r2.setScope("a.x");
         r2.setOwnedBy(new java.util.ArrayList<>(List.of("user2")));
         r2.setTagNames(new java.util.ArrayList<>(List.of("private")));
         r2.addTag("tag3", "private");
@@ -316,6 +324,7 @@ class SpringDataIntegrationTest {
         r3.setaNumber(3);
         r3.setaOptionalString("world");
         r3.setCreatedBy("user3");
+        r3.setScope("a.b");
         r3.setOwnedBy(new java.util.ArrayList<>(List.of("user1")));
         r3.setTagNames(new java.util.ArrayList<>(List.of("public")));
         r3.addTag("tag1", "public");
@@ -1149,6 +1158,45 @@ class SpringDataIntegrationTest {
         @Test
         void sizeOfFilterThrows() {
             assertActionThrows("filter-count-gt", NESTED_FIELD_MAP, "size()");
+        }
+    }
+
+    @Nested
+    class HierarchyOperators {
+
+        // Resource scopes seeded above: r1="a.b.c", r2="a.x", r3="a.b".
+
+        @Test
+        void overlaps() {
+            // Policy: hierarchy(P.attr.context, ":").overlaps(hierarchy(["projects", R.id]))
+            // With context "projects:1" the segments are ["projects","1"] and the field segment is
+            // R.id, so the overlap reduces to id == "1".
+            Principal principal = Principal.newInstance("user1", "USER")
+                    .withAttribute("context", AttributeValue.stringValue("projects:1"));
+            assertEquals(List.of("1"), runWithPrincipalAndMapping(
+                    principal, "hierarchy-overlaps", HIERARCHY_MAP));
+        }
+
+        @Test
+        void ancestorOf() {
+            // Policy: hierarchy(P.attr.scope).ancestorOf(hierarchy(R.attr.scope))
+            // P.attr.scope "a.b" must be a strict prefix of R.attr.scope → scope LIKE 'a.b.%'.
+            // Only r1 ("a.b.c") is a strict descendant; r3 ("a.b") is equal (not strict).
+            Principal principal = Principal.newInstance("user1", "USER")
+                    .withAttribute("scope", AttributeValue.stringValue("a.b"));
+            assertEquals(List.of("1"), runWithPrincipalAndMapping(
+                    principal, "hierarchy-ancestor-of", HIERARCHY_MAP));
+        }
+
+        @Test
+        void descendentOf() {
+            // Policy: hierarchy(R.attr.scope).descendentOf(hierarchy(P.attr.scope))
+            // R.attr.scope must be a strict descendant of P.attr.scope "a.b" — same result as
+            // ancestorOf above (the relation is symmetric across the two operators).
+            Principal principal = Principal.newInstance("user1", "USER")
+                    .withAttribute("scope", AttributeValue.stringValue("a.b"));
+            assertEquals(List.of("1"), runWithPrincipalAndMapping(
+                    principal, "hierarchy-descendent-of", HIERARCHY_MAP));
         }
     }
 }

@@ -43,6 +43,9 @@ public class ResourceEntity {
     @Column(name = "created_by")
     private String createdBy;
 
+    @Column(name = "scope")
+    private String scope;
+
     @ElementCollection
     @CollectionTable(name = "resource_owned_by", joinColumns = @JoinColumn(name = "resource_id"))
     @Column(name = "owner")
@@ -89,6 +92,8 @@ public class ResourceEntity {
     public void setaOptionalString(String aOptionalString) { this.aOptionalString = aOptionalString; }
     public String getCreatedBy() { return createdBy; }
     public void setCreatedBy(String createdBy) { this.createdBy = createdBy; }
+    public String getScope() { return scope; }
+    public void setScope(String scope) { this.scope = scope; }
     public List<String> getOwnedBy() { return ownedBy; }
     public void setOwnedBy(List<String> ownedBy) { this.ownedBy = ownedBy; }
     public List<String> getTagNames() { return tagNames; }
