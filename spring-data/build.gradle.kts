@@ -16,7 +16,9 @@ repositories {
 
 dependencies {
     implementation("dev.cerbos:cerbos-sdk-java:0.18.0")
-    implementation("com.google.protobuf:protobuf-java:4.31.1")
+    // Must match the gencode version cerbos-sdk-java was generated against (see the README
+    // "Pin protobuf-java" gotcha) — older runtimes throw ProtobufRuntimeVersionException.
+    implementation("com.google.protobuf:protobuf-java:4.33.5")
     // Spring Data JPA + Jakarta Persistence are provided by the consuming application's
     // Spring Boot BOM (or equivalent). Declaring them as `compileOnly` keeps them out of
     // the published POM as transitive dependencies so they don't pin a specific version on

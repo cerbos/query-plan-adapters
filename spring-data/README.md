@@ -122,6 +122,8 @@ Map each `request.resource.attr.<name>` to a JPA path or a relation:
 | Bare boolean variable            | `cb.equal(path, true)`                                              |
 | `eq(field, add(const1, const2))` | Constant fold then compare: `cb.equal(field, const1 ⊕ const2)`     |
 | `eq(value, add(const, field))`   | Solve for `field` (string prefix/suffix strip; numeric subtract); unsolvable cases become `1=0` / `1=1` |
+| `hierarchy(...).overlaps / ancestorOf / descendentOf` | Segment/prefix predicates (`IN` over ancestor prefixes, `LIKE 'a:b:%'` for descendants), mirroring the Prisma adapter |
+| Value-first comparisons (`5 < R.attr.x`) | Normalized field-first with the operator mirrored (`x > 5`) |
 
 Unsupported operators raise `IllegalArgumentException` — override them with `OperatorFunction`:
 
@@ -154,7 +156,6 @@ SQL fragments), or wait for adapter support.
 | `eq(map(...), [...])`                           | `R.attr.tags.map(t, t.id) == ["tag1", "tag2"]`    | Use `hasIntersection(map(...), [...])` instead. |
 | `size(filter(...)) <op> N`                      | `size(R.attr.tags.filter(t, t.name == "x")) > 0`  | Use `exists(coll, lambda)` for emptiness; `size()` only accepts a Variable operand. |
 | `size(coll) <op> N` for `N > 0`                 | `size(R.attr.tags) > 5`                           | Only emptiness checks are supported. |
-| Hierarchy operators (`hierarchy-*`)             | `hierarchy.overlaps(...)`                         | Not yet ported from the Prisma adapter; ~250 LoC follow-up. |
 
 ## Gotchas
 
