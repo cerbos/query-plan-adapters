@@ -1,14 +1,11 @@
 package dev.cerbos.queryplan.springdata;
 
-import com.google.protobuf.Value;
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter;
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand;
 import dev.cerbos.api.v1.response.Response.PlanResourcesResponse;
 import dev.cerbos.sdk.PlanResourcesResult;
 
-import jakarta.persistence.criteria.AbstractQuery;
 import jakarta.persistence.criteria.CriteriaBuilder;
-import jakarta.persistence.criteria.CriteriaQuery;
 import jakarta.persistence.criteria.From;
 import jakarta.persistence.criteria.Join;
 import jakarta.persistence.criteria.Path;
@@ -48,7 +45,7 @@ public final class SpringDataQueryPlanAdapter {
         Operand condition = planResult.getCondition()
                 .orElseThrow(() -> new IllegalArgumentException("Conditional plan has no condition"));
         return new Result.Conditional<>((root, query, cb) ->
-                new Translator(cb, mapper, overrides).traverse(condition, Scope.root(root, query, mapper)));
+                new Translator(cb, overrides).traverse(condition, Scope.root(root, query, mapper)));
     }
 
     // -- PlanResourcesResponse overloads --
@@ -72,7 +69,7 @@ public final class SpringDataQueryPlanAdapter {
                     throw new IllegalArgumentException("Conditional plan has no condition");
                 }
                 yield new Result.Conditional<T>((root, query, cb) ->
-                        new Translator(cb, mapper, overrides).traverse(cond, Scope.root(root, query, mapper)));
+                        new Translator(cb, overrides).traverse(cond, Scope.root(root, query, mapper)));
             }
             default -> throw new IllegalArgumentException("Unknown filter kind: " + filter.getKind());
         };
@@ -82,15 +79,13 @@ public final class SpringDataQueryPlanAdapter {
 
     private static final class Translator {
         private final CriteriaBuilder cb;
-        private final Map<String, AttributeMapping> topMapper;
         private final Map<String, OperatorFunction> overrides;
+        private final HierarchyTranslator hierarchy;
 
-        Translator(CriteriaBuilder cb,
-                   Map<String, AttributeMapping> topMapper,
-                   Map<String, OperatorFunction> overrides) {
+        Translator(CriteriaBuilder cb, Map<String, OperatorFunction> overrides) {
             this.cb = cb;
-            this.topMapper = topMapper;
             this.overrides = overrides;
+            this.hierarchy = new HierarchyTranslator(cb);
         }
 
         Predicate traverse(Operand operand, Scope scope) {
@@ -127,50 +122,71 @@ public final class SpringDataQueryPlanAdapter {
                 case "hasIntersection", "has_intersection" -> handleHasIntersection(operands, scope);
                 case "isSet" -> handleIsSet(operands, scope);
                 case "in" -> handleIn(operands, scope);
-                case "overlaps" -> handleOverlaps(operands, scope);
-                case "ancestorOf" -> handleAncestorDescendant(operands, scope, true);
-                case "descendentOf" -> handleAncestorDescendant(operands, scope, false);
+                case "overlaps" -> hierarchy.handleOverlaps(operands, scope);
+                case "ancestorOf" -> hierarchy.handleAncestorDescendant(operands, scope, true);
+                case "descendentOf" -> hierarchy.handleAncestorDescendant(operands, scope, false);
                 default -> {
-                    Predicate sizePred = trySizeComparison(op, operands, scope);
+                    NormalizedBinary nb = NormalizedBinary.of(op, operands);
+                    Predicate sizePred = trySizeComparison(nb.op(), nb.operands(), scope);
                     if (sizePred != null) {
                         yield sizePred;
                     }
-                    yield handleLeafOperator(op, operands, scope);
+                    yield handleLeafOperator(nb.op(), nb.operands(), scope);
                 }
             };
         }
 
         /**
-         * Mirror a directional comparison operator, for normalizing value-first operand order.
-         * The planner preserves policy source order, so {@code 5 < R.attr.x} arrives as
-         * {@code lt(value(5), variable(x))} — which must translate to {@code x > 5}, not
-         * {@code x < 5}. Symmetric operators (eq/ne/...) are returned unchanged.
+         * A binary expression normalized to field-side-first. The planner preserves policy source
+         * order, so a constant may precede the field it constrains ({@code 5 < R.attr.x} arrives
+         * as {@code lt(value(5), variable(x))}). Normalizing once here — most field-like operand
+         * first (variable > nested expression > constant value), mirroring directional operators
+         * when swapping — lets every downstream handler assume field-first order. A consequence
+         * is that {@link OperatorFunction} overrides are consulted under the mirrored operator:
+         * a value-first {@code lt} is looked up as {@code gt}.
          */
-        private static String mirrorOperator(String op) {
-            return switch (op) {
-                case "lt" -> "gt";
-                case "gt" -> "lt";
-                case "le" -> "ge";
-                case "ge" -> "le";
-                default -> op;
-            };
+        private record NormalizedBinary(String op, List<Operand> operands) {
+
+            static NormalizedBinary of(String op, List<Operand> operands) {
+                if (operands.size() == 2 && rank(operands.get(0)) < rank(operands.get(1))) {
+                    return new NormalizedBinary(mirror(op), List.of(operands.get(1), operands.get(0)));
+                }
+                return new NormalizedBinary(op, operands);
+            }
+
+            private static int rank(Operand o) {
+                return switch (o.getNodeCase()) {
+                    case VARIABLE -> 2;
+                    case EXPRESSION -> 1;
+                    default -> 0;
+                };
+            }
+
+            /** lt/le/gt/ge mirror when their operands swap sides; symmetric operators are unchanged. */
+            private static String mirror(String op) {
+                return switch (op) {
+                    case "lt" -> "gt";
+                    case "gt" -> "lt";
+                    case "le" -> "ge";
+                    case "ge" -> "le";
+                    default -> op;
+                };
+            }
         }
 
         // -- Leaf operators (eq/ne/lt/gt/le/ge/contains/startsWith/endsWith) --
 
+        /** Operands must already be normalized field-first (see {@link NormalizedBinary}). */
         private Predicate handleLeafOperator(String op, List<Operand> operands, Scope scope) {
             // Detect leaf comparisons where one side is an 'add' expression (e.g. string
             // concatenation: `aString == "prefix:" + R.attr.id`). We fold constants and solve for
             // the field side when possible — same algorithm as the Prisma adapter.
             Operand addExprOperand = null;
             Operand otherOperand = null;
-            boolean addIsFirst = false;
-            for (int i = 0; i < operands.size(); i++) {
-                Operand o = operands.get(i);
+            for (Operand o : operands) {
                 if (o.getNodeCase() == Operand.NodeCase.EXPRESSION
                         && "add".equals(o.getExpression().getOperator())) {
                     addExprOperand = o;
-                    addIsFirst = i == 0;
                 } else {
                     otherOperand = o;
                 }
@@ -179,16 +195,13 @@ public final class SpringDataQueryPlanAdapter {
                 if (otherOperand == null) {
                     throw new IllegalArgumentException("add comparison requires a second operand");
                 }
-                return handleAddComparison(op, addExprOperand.getExpression(), otherOperand, addIsFirst, scope);
+                return handleAddComparison(op, addExprOperand.getExpression(), otherOperand, scope);
             }
 
             String variable = null;
-            int variableIndex = -1;
             Object value = null;
-            int valueIndex = -1;
             boolean valueSeen = false;
-            for (int i = 0; i < operands.size(); i++) {
-                Operand o = operands.get(i);
+            for (Operand o : operands) {
                 switch (o.getNodeCase()) {
                     case VARIABLE -> {
                         if (variable != null) {
@@ -200,11 +213,9 @@ public final class SpringDataQueryPlanAdapter {
                                             + op + "': " + variable + " vs " + o.getVariable());
                         }
                         variable = o.getVariable();
-                        variableIndex = i;
                     }
                     case VALUE -> {
-                        value = protoValueToJava(o.getValue());
-                        valueIndex = i;
+                        value = PlanValues.protoValueToJava(o.getValue());
                         valueSeen = true;
                     }
                     case EXPRESSION -> {
@@ -230,11 +241,6 @@ public final class SpringDataQueryPlanAdapter {
             }
             if (!valueSeen) {
                 throw new IllegalArgumentException("Missing value operand for " + op);
-            }
-            // Value-first comparisons (`5 < R.attr.x`) must mirror the operator so the predicate
-            // is built field-first with equivalent semantics (`x > 5`).
-            if (valueIndex < variableIndex) {
-                op = mirrorOperator(op);
             }
 
             Path<?> path = scope.resolvePath(variable);
@@ -279,21 +285,21 @@ public final class SpringDataQueryPlanAdapter {
                 case "gt" -> cb.greaterThan(raw, (Comparable) value);
                 case "le" -> cb.lessThanOrEqualTo(raw, (Comparable) value);
                 case "ge" -> cb.greaterThanOrEqualTo(raw, (Comparable) value);
-                case "contains" -> cb.like(path.as(String.class), "%" + escapeLike(String.valueOf(value)) + "%", '\\');
-                case "startsWith" -> cb.like(path.as(String.class), escapeLike(String.valueOf(value)) + "%", '\\');
-                case "endsWith" -> cb.like(path.as(String.class), "%" + escapeLike(String.valueOf(value)), '\\');
+                case "contains" -> cb.like(path.as(String.class),
+                        "%" + PlanValues.escapeLike(String.valueOf(value)) + "%", '\\');
+                case "startsWith" -> cb.like(path.as(String.class),
+                        PlanValues.escapeLike(String.valueOf(value)) + "%", '\\');
+                case "endsWith" -> cb.like(path.as(String.class),
+                        "%" + PlanValues.escapeLike(String.valueOf(value)), '\\');
                 default -> throw new IllegalArgumentException("Unsupported operator: " + op);
             };
         }
 
-        private static String escapeLike(String s) {
-            return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
-        }
-
         // -- add (fold + solve for string concat / numeric translation) --
 
+        /** Operands must already be normalized field-first (see {@link NormalizedBinary}). */
         private Predicate handleAddComparison(String op, PlanResourcesFilter.Expression addExpr,
-                                              Operand otherOperand, boolean addIsFirst, Scope scope) {
+                                              Operand otherOperand, Scope scope) {
             List<Operand> addOperands = addExpr.getOperandsList();
             if (addOperands.size() != 2) {
                 throw new IllegalArgumentException("add requires exactly 2 operands");
@@ -302,18 +308,19 @@ public final class SpringDataQueryPlanAdapter {
             Operand addRight = addOperands.get(1);
 
             // Case 1: add(value, value) — fold the two constants, then compare to the field.
+            // Normalization guarantees the field variable sits on the left of the comparison,
+            // so the folded constant compares as `field op folded`.
             if (addLeft.getNodeCase() == Operand.NodeCase.VALUE
                     && addRight.getNodeCase() == Operand.NodeCase.VALUE) {
-                Object folded = foldAdd(
-                        protoValueToJava(addLeft.getValue()),
-                        protoValueToJava(addRight.getValue()));
+                Object folded = PlanValues.foldAdd(
+                        PlanValues.protoValueToJava(addLeft.getValue()),
+                        PlanValues.protoValueToJava(addRight.getValue()));
                 if (otherOperand.getNodeCase() != Operand.NodeCase.VARIABLE) {
                     throw new IllegalArgumentException(
                             "add(const, const) compared to a non-field operand is not supported");
                 }
                 Path<?> path = scope.resolvePath(otherOperand.getVariable());
-                // `add(1, 2) < R.attr.x` means `3 < x` — mirror to build the predicate field-first.
-                return applyLeaf(addIsFirst ? mirrorOperator(op) : op, path, folded);
+                return applyLeaf(op, path, folded);
             }
 
             // Case 2: add(field, value) or add(value, field) — solve for the field.
@@ -327,7 +334,7 @@ public final class SpringDataQueryPlanAdapter {
                 throw new IllegalArgumentException(
                         "add(field, value) requires a value on the other side of the comparison");
             }
-            Object otherValue = protoValueToJava(otherOperand.getValue());
+            Object otherValue = PlanValues.protoValueToJava(otherOperand.getValue());
 
             Operand fieldOp;
             Object addConst;
@@ -335,19 +342,19 @@ public final class SpringDataQueryPlanAdapter {
             if (addLeft.getNodeCase() == Operand.NodeCase.VARIABLE
                     && addRight.getNodeCase() == Operand.NodeCase.VALUE) {
                 fieldOp = addLeft;
-                addConst = protoValueToJava(addRight.getValue());
+                addConst = PlanValues.protoValueToJava(addRight.getValue());
                 fieldIsLeft = true;
             } else if (addLeft.getNodeCase() == Operand.NodeCase.VALUE
                     && addRight.getNodeCase() == Operand.NodeCase.VARIABLE) {
                 fieldOp = addRight;
-                addConst = protoValueToJava(addLeft.getValue());
+                addConst = PlanValues.protoValueToJava(addLeft.getValue());
                 fieldIsLeft = false;
             } else {
                 throw new IllegalArgumentException(
                         "add requires exactly one field reference and one value, or two values");
             }
 
-            Object solved = solveAdd(otherValue, addConst, fieldIsLeft);
+            Object solved = PlanValues.solveAdd(otherValue, addConst, fieldIsLeft);
             if (solved == null) {
                 // No solution exists (e.g. "projects:123" == "users:" + R.id can never be true).
                 // eq → always-false; ne → always-true.
@@ -368,7 +375,7 @@ public final class SpringDataQueryPlanAdapter {
             for (Operand o : operands) {
                 if (o.getNodeCase() == Operand.NodeCase.VARIABLE) variable = o.getVariable();
                 else if (o.getNodeCase() == Operand.NodeCase.VALUE) {
-                    Object v = protoValueToJava(o.getValue());
+                    Object v = PlanValues.protoValueToJava(o.getValue());
                     if (!(v instanceof Boolean b)) {
                         throw new IllegalArgumentException("isSet second operand must be a boolean");
                     }
@@ -388,81 +395,61 @@ public final class SpringDataQueryPlanAdapter {
 
         // -- in (set membership or collection membership) --
 
-        private Predicate handleIn(List<Operand> operands, Scope scope) {
-            if (operands.size() != 2) {
+        private Predicate handleIn(List<Operand> rawOperands, Scope scope) {
+            if (rawOperands.size() != 2) {
                 throw new IllegalArgumentException("in requires exactly 2 operands");
             }
-            Operand left = operands.get(0);
-            Operand right = operands.get(1);
+            // Both shapes — `field in [values]` and `value in collection-field` — resolve the
+            // same way once normalized field-first: the mapping kind (Relation vs Field) decides
+            // whether this is collection membership or a scalar IN, not the operand order.
+            List<Operand> operands = NormalizedBinary.of("in", rawOperands).operands();
+            Operand fieldOp = operands.get(0);
+            Operand valueOp = operands.get(1);
+            if (fieldOp.getNodeCase() != Operand.NodeCase.VARIABLE
+                    || valueOp.getNodeCase() != Operand.NodeCase.VALUE) {
+                throw new IllegalArgumentException("Unsupported in operand combination: "
+                        + rawOperands.get(0).getNodeCase() + "/" + rawOperands.get(1).getNodeCase());
+            }
+            String var = fieldOp.getVariable();
+            Object val = PlanValues.protoValueToJava(valueOp.getValue());
 
-            if (left.getNodeCase() == Operand.NodeCase.VARIABLE
-                    && right.getNodeCase() == Operand.NodeCase.VALUE) {
-                String var = left.getVariable();
-                Object val = protoValueToJava(right.getValue());
-
-                AttributeMapping mapping = scope.resolveMapping(var);
-                if (mapping instanceof AttributeMapping.Relation rel) {
-                    List<?> values = (val instanceof List<?> l) ? l : List.of(val);
-                    return collectionContainsAny(scope, rel, values);
-                }
-
-                Path<?> path = scope.resolvePath(var);
-                OperatorFunction override = overrides.get("in");
-                if (override != null) {
-                    return override.apply(cb, path, val);
-                }
-                if (val instanceof List<?> list) {
-                    if (list.isEmpty()) {
-                        return cb.disjunction();
-                    }
-                    return path.in(list);
-                }
-                return cb.equal(path, val);
+            AttributeMapping mapping = scope.resolveMapping(var);
+            if (mapping instanceof AttributeMapping.Relation rel) {
+                List<?> values = (val instanceof List<?> l) ? l : List.of(val);
+                return collectionContainsAny(scope, rel, values);
             }
 
-            if (left.getNodeCase() == Operand.NodeCase.VALUE
-                    && right.getNodeCase() == Operand.NodeCase.VARIABLE) {
-                Object val = protoValueToJava(left.getValue());
-                String var = right.getVariable();
-
-                AttributeMapping mapping = scope.resolveMapping(var);
-                if (mapping instanceof AttributeMapping.Relation rel) {
-                    return collectionContainsAny(scope, rel, List.of(val));
-                }
-                Path<?> path = scope.resolvePath(var);
-                OperatorFunction override = overrides.get("in");
-                if (override != null) {
-                    return override.apply(cb, path, val);
-                }
-                return cb.equal(path, val);
+            Path<?> path = scope.resolvePath(var);
+            OperatorFunction override = overrides.get("in");
+            if (override != null) {
+                return override.apply(cb, path, val);
             }
-
-            throw new IllegalArgumentException(
-                    "Unsupported in operand combination: " + left.getNodeCase() + "/" + right.getNodeCase());
+            if (val instanceof List<?> list) {
+                if (list.isEmpty()) {
+                    return cb.disjunction();
+                }
+                return path.in(list);
+            }
+            return cb.equal(path, val);
         }
 
         // -- hasIntersection --
 
-        private Predicate handleHasIntersection(List<Operand> operands, Scope scope) {
-            if (operands.size() != 2) {
+        private Predicate handleHasIntersection(List<Operand> rawOperands, Scope scope) {
+            if (rawOperands.size() != 2) {
                 throw new IllegalArgumentException("hasIntersection requires exactly 2 operands");
             }
-            Operand first = operands.get(0);
-            Operand second = operands.get(1);
             // Intersection is symmetric, and the planner preserves policy source order —
             // `hasIntersection(P.attr.tags, R.attr.tags)` folds the principal side to a value
-            // list in the FIRST position. Normalize to field/map-first.
-            if (first.getNodeCase() == Operand.NodeCase.VALUE
-                    && second.getNodeCase() != Operand.NodeCase.VALUE) {
-                Operand tmp = first;
-                first = second;
-                second = tmp;
-            }
+            // list in the FIRST position. Normalization puts the field/map side first.
+            List<Operand> operands = NormalizedBinary.of("hasIntersection", rawOperands).operands();
+            Operand first = operands.get(0);
+            Operand second = operands.get(1);
 
             if (first.getNodeCase() == Operand.NodeCase.VARIABLE
                     && second.getNodeCase() == Operand.NodeCase.VALUE) {
                 String var = first.getVariable();
-                Object val = protoValueToJava(second.getValue());
+                Object val = PlanValues.protoValueToJava(second.getValue());
                 List<?> values = (val instanceof List<?> l) ? l : List.of(val);
 
                 AttributeMapping mapping = scope.resolveMapping(var);
@@ -483,71 +470,71 @@ public final class SpringDataQueryPlanAdapter {
                     throw new IllegalArgumentException(
                             "hasIntersection second operand must be a value list when used with map()");
                 }
-                Object val = protoValueToJava(second.getValue());
+                Object val = PlanValues.protoValueToJava(second.getValue());
                 List<?> values = (val instanceof List<?> l) ? l : List.of(val);
-                // hasIntersection(map(...), []) is always false; short-circuit before the subquery.
-                if (values.isEmpty()) {
-                    return cb.disjunction();
-                }
-
-                PlanResourcesFilter.Expression mapExpr = first.getExpression();
-                List<Operand> mapOperands = mapExpr.getOperandsList();
-                if (mapOperands.size() != 2) {
-                    throw new IllegalArgumentException("map requires exactly 2 operands");
-                }
-                Operand collectionOperand = mapOperands.get(0);
-                Operand lambdaOperand = mapOperands.get(1);
-
-                if (collectionOperand.getNodeCase() != Operand.NodeCase.VARIABLE) {
-                    throw new IllegalArgumentException("map first operand must be a variable");
-                }
-                if (lambdaOperand.getNodeCase() != Operand.NodeCase.EXPRESSION
-                        || !"lambda".equals(lambdaOperand.getExpression().getOperator())) {
-                    throw new IllegalArgumentException("map second operand must be a lambda");
-                }
-
-                String collectionVar = collectionOperand.getVariable();
-
-                PlanResourcesFilter.Expression lambdaExpr = lambdaOperand.getExpression();
-                List<Operand> lambdaOps = lambdaExpr.getOperandsList();
-                if (lambdaOps.size() != 2) {
-                    throw new IllegalArgumentException("map lambda requires exactly 2 operands (body, variable)");
-                }
-                Operand projection = lambdaOps.get(0);
-                Operand lambdaVar = lambdaOps.get(1);
-                if (projection.getNodeCase() != Operand.NodeCase.VARIABLE
-                        || lambdaVar.getNodeCase() != Operand.NodeCase.VARIABLE) {
-                    throw new IllegalArgumentException("map lambda body must be a simple variable projection");
-                }
-                String memberField = extractLambdaSuffix(projection.getVariable(), lambdaVar.getVariable());
-
-                // Check whether the collection path resolves through one Relation or a chain.
-                // A chain (e.g. "request.resource.attr.categories.subCategories") emits nested
-                // EXISTS subqueries — one per hop.
-                if (scope instanceof Scope.RootScope rootScope) {
-                    RelationChain chain = resolveRelationChain(rootScope.mapper(), collectionVar);
-                    if (chain != null && !chain.relations().isEmpty()) {
-                        AttributeMapping.Relation tailRel = chain.relations().get(chain.relations().size() - 1);
-                        return chainedExistsSubquery(scope, chain.relations(), (sub, joinFrom, correlated) -> {
-                            Path<?> field = resolveMemberPath(joinFrom, tailRel, memberField);
-                            return field.in(values);
-                        });
-                    }
-                }
-
-                AttributeMapping mapping = scope.resolveMapping(collectionVar);
-                if (mapping instanceof AttributeMapping.Relation rel) {
-                    return existsSubquery(scope, rel, (sub, joinFrom, correlated) -> {
-                        Path<?> field = resolveMemberPath(joinFrom, rel, memberField);
-                        return field.in(values);
-                    });
-                }
-                throw new IllegalArgumentException(
-                        "map can only be applied to a collection mapped as Relation: " + collectionVar);
+                return handleMapIntersection(first.getExpression(), values, scope);
             }
 
             throw new IllegalArgumentException(
                     "Unsupported hasIntersection operand shape: " + first.getNodeCase());
+        }
+
+        /** Translate {@code hasIntersection(map(collection, lambda), values)}. */
+        private Predicate handleMapIntersection(PlanResourcesFilter.Expression mapExpr,
+                                                List<?> values, Scope scope) {
+            // hasIntersection(map(...), []) is always false; short-circuit before the subquery.
+            if (values.isEmpty()) {
+                return cb.disjunction();
+            }
+
+            List<Operand> mapOperands = mapExpr.getOperandsList();
+            if (mapOperands.size() != 2) {
+                throw new IllegalArgumentException("map requires exactly 2 operands");
+            }
+            Operand collectionOperand = mapOperands.get(0);
+            Operand lambdaOperand = mapOperands.get(1);
+
+            if (collectionOperand.getNodeCase() != Operand.NodeCase.VARIABLE) {
+                throw new IllegalArgumentException("map first operand must be a variable");
+            }
+            if (lambdaOperand.getNodeCase() != Operand.NodeCase.EXPRESSION
+                    || !"lambda".equals(lambdaOperand.getExpression().getOperator())) {
+                throw new IllegalArgumentException("map second operand must be a lambda");
+            }
+
+            String collectionVar = collectionOperand.getVariable();
+
+            List<Operand> lambdaOps = lambdaOperand.getExpression().getOperandsList();
+            if (lambdaOps.size() != 2) {
+                throw new IllegalArgumentException("map lambda requires exactly 2 operands (body, variable)");
+            }
+            Operand projection = lambdaOps.get(0);
+            Operand lambdaVar = lambdaOps.get(1);
+            if (projection.getNodeCase() != Operand.NodeCase.VARIABLE
+                    || lambdaVar.getNodeCase() != Operand.NodeCase.VARIABLE) {
+                throw new IllegalArgumentException("map lambda body must be a simple variable projection");
+            }
+            String memberField = Scope.extractLambdaSuffix(projection.getVariable(), lambdaVar.getVariable());
+
+            // Check whether the collection path resolves through one Relation or a chain.
+            // A chain (e.g. "request.resource.attr.categories.subCategories") emits nested
+            // EXISTS subqueries — one per hop.
+            if (scope instanceof Scope.RootScope rootScope) {
+                Scope.RelationChain chain = Scope.resolveRelationChain(rootScope.mapper(), collectionVar);
+                if (chain != null && !chain.relations().isEmpty()) {
+                    AttributeMapping.Relation tailRel = chain.relations().get(chain.relations().size() - 1);
+                    return chainedExistsSubquery(scope, chain.relations(), (sub, joinFrom, correlated) ->
+                            Scope.memberPath(joinFrom, tailRel, memberField).in(values));
+                }
+            }
+
+            AttributeMapping mapping = scope.resolveMapping(collectionVar);
+            if (mapping instanceof AttributeMapping.Relation rel) {
+                return existsSubquery(scope, rel, (sub, joinFrom, correlated) ->
+                        Scope.memberPath(joinFrom, rel, memberField).in(values));
+            }
+            throw new IllegalArgumentException(
+                    "map can only be applied to a collection mapped as Relation: " + collectionVar);
         }
 
         private Predicate collectionContainsAny(Scope outerScope, AttributeMapping.Relation rel, List<?> values) {
@@ -557,13 +544,7 @@ public final class SpringDataQueryPlanAdapter {
                 return cb.disjunction();
             }
             return existsSubquery(outerScope, rel, (sub, joinFrom, correlated) -> {
-                Path<?> field;
-                if (rel.defaultMemberField() != null && !rel.defaultMemberField().isEmpty()) {
-                    field = joinFrom.get(rel.defaultMemberField());
-                } else {
-                    // @ElementCollection<primitive> - the join itself is the element value
-                    field = (Path<?>) joinFrom;
-                }
+                Path<?> field = Scope.memberPath(joinFrom, rel, null);
                 if (values.size() == 1) {
                     return cb.equal(field, values.get(0));
                 }
@@ -573,28 +554,21 @@ public final class SpringDataQueryPlanAdapter {
 
         // -- size(collection) <op> N --
 
+        /** Operands must already be normalized field-first (see {@link NormalizedBinary}). */
         private Predicate trySizeComparison(String op, List<Operand> operands, Scope scope) {
             PlanResourcesFilter.Expression sizeExpr = null;
-            boolean sizeIsFirst = false;
             Long numValue = null;
-            for (int i = 0; i < operands.size(); i++) {
-                Operand o = operands.get(i);
+            for (Operand o : operands) {
                 if (o.getNodeCase() == Operand.NodeCase.EXPRESSION
                         && "size".equals(o.getExpression().getOperator())) {
                     sizeExpr = o.getExpression();
-                    sizeIsFirst = i == 0;
                 } else if (o.getNodeCase() == Operand.NodeCase.VALUE) {
-                    Object v = protoValueToJava(o.getValue());
+                    Object v = PlanValues.protoValueToJava(o.getValue());
                     if (v instanceof Number n) numValue = n.longValue();
                 }
             }
             if (sizeExpr == null || numValue == null) {
                 return null;
-            }
-            // `0 < size(x)` arrives as lt(value(0), size(x)); mirror so the checks below can
-            // always assume the size() expression is on the left.
-            if (!sizeIsFirst) {
-                op = mirrorOperator(op);
             }
             List<Operand> sizeOps = sizeExpr.getOperandsList();
             if (sizeOps.size() != 1 || sizeOps.get(0).getNodeCase() != Operand.NodeCase.VARIABLE) {
@@ -624,7 +598,6 @@ public final class SpringDataQueryPlanAdapter {
 
         // -- exists / exists_one / all / except / filter --
 
-        @SuppressWarnings("unchecked")
         private Predicate handleCollectionOperator(String op, List<Operand> operands, Scope scope) {
             if (operands.size() != 2) {
                 throw new IllegalArgumentException(op + " requires exactly 2 operands");
@@ -647,8 +620,7 @@ public final class SpringDataQueryPlanAdapter {
                         op + " requires a Relation mapping for " + collectionVar);
             }
 
-            PlanResourcesFilter.Expression lambdaExpr = lambdaOperand.getExpression();
-            List<Operand> lambdaOps = lambdaExpr.getOperandsList();
+            List<Operand> lambdaOps = lambdaOperand.getExpression().getOperandsList();
             if (lambdaOps.size() != 2) {
                 throw new IllegalArgumentException("lambda requires exactly 2 operands");
             }
@@ -662,28 +634,20 @@ public final class SpringDataQueryPlanAdapter {
             return switch (op) {
                 case "exists", "filter" -> existsSubquery(scope, rel,
                         (sub, joinFrom, correlated) -> traverse(body,
-                                Scope.lambda(joinFrom, sub, rel, lambdaVarName, rebase(scope, correlated, sub))));
+                                Scope.lambda(joinFrom, sub, rel, lambdaVarName, Scope.rebase(scope, correlated, sub))));
                 case "except" -> existsSubquery(scope, rel,
                         (sub, joinFrom, correlated) -> cb.not(traverse(body,
-                                Scope.lambda(joinFrom, sub, rel, lambdaVarName, rebase(scope, correlated, sub)))));
+                                Scope.lambda(joinFrom, sub, rel, lambdaVarName, Scope.rebase(scope, correlated, sub)))));
                 case "all" -> cb.not(existsSubquery(scope, rel,
                         (sub, joinFrom, correlated) -> cb.not(traverse(body,
-                                Scope.lambda(joinFrom, sub, rel, lambdaVarName, rebase(scope, correlated, sub))))));
+                                Scope.lambda(joinFrom, sub, rel, lambdaVarName, Scope.rebase(scope, correlated, sub))))));
                 case "exists_one" -> {
                     Subquery<Long> sub = scope.parentQuery().subquery(Long.class);
-                    From<?, ?> outerFrom = scope.from();
-                    From<?, ?> correlated;
-                    if (outerFrom instanceof Root<?> r) {
-                        correlated = sub.correlate(r);
-                    } else if (outerFrom instanceof Join<?, ?> j) {
-                        correlated = sub.correlate((Join<Object, Object>) j);
-                    } else {
-                        throw new IllegalArgumentException("Cannot correlate scope: " + outerFrom);
-                    }
+                    From<?, ?> correlated = correlate(sub, scope.from());
                     Join<?, ?> joinFrom = correlated.join(rel.joinAttribute());
                     sub.select(cb.count(joinFrom));
                     sub.where(traverse(body,
-                            Scope.lambda(joinFrom, sub, rel, lambdaVarName, rebase(scope, correlated, sub))));
+                            Scope.lambda(joinFrom, sub, rel, lambdaVarName, Scope.rebase(scope, correlated, sub))));
                     yield cb.equal(sub, 1L);
                 }
                 default -> throw new IllegalArgumentException("Unsupported collection operator: " + op);
@@ -702,16 +666,16 @@ public final class SpringDataQueryPlanAdapter {
             Predicate build(Subquery<?> sub, From<?, ?> joinFrom, From<?, ?> correlated);
         }
 
-        /**
-         * Re-root {@code scope} at the correlated copy of its {@code from} inside a subquery, so
-         * paths resolved through it become valid correlation references of that subquery.
-         */
-        private static Scope rebase(Scope scope, From<?, ?> correlated, Subquery<?> sub) {
-            if (scope instanceof Scope.RootScope rs) {
-                return new Scope.RootScope(correlated, sub, rs.mapper());
+        /** Correlate the current scope's {@code From} into {@code sub}. */
+        @SuppressWarnings("unchecked")
+        private static From<?, ?> correlate(Subquery<?> sub, From<?, ?> outerFrom) {
+            if (outerFrom instanceof Root<?> r) {
+                return sub.correlate(r);
             }
-            Scope.LambdaScope ls = (Scope.LambdaScope) scope;
-            return new Scope.LambdaScope(correlated, sub, ls.relation(), ls.lambdaVar(), ls.outer());
+            if (outerFrom instanceof Join<?, ?> j) {
+                return sub.correlate((Join<Object, Object>) j);
+            }
+            throw new IllegalArgumentException("Cannot correlate from non-Root, non-Join scope: " + outerFrom);
         }
 
         /**
@@ -720,7 +684,7 @@ public final class SpringDataQueryPlanAdapter {
          * The {@code bodyBuilder} produces the leaf predicate against the innermost join.
          */
         private Predicate chainedExistsSubquery(Scope scope,
-                                                java.util.List<AttributeMapping.Relation> chain,
+                                                List<AttributeMapping.Relation> chain,
                                                 SubqueryBodyBuilder bodyBuilder) {
             if (chain.size() == 1) {
                 return existsSubquery(scope, chain.get(0), bodyBuilder);
@@ -731,621 +695,18 @@ public final class SpringDataQueryPlanAdapter {
                 // character, so this sentinel can never collide with a user-supplied lambda name.
                 AttributeMapping.Relation thisRel = chain.get(0);
                 Scope intermediate = Scope.lambda(joinFrom, sub, thisRel, "$$chain$$",
-                        rebase(scope, correlated, sub));
+                        Scope.rebase(scope, correlated, sub));
                 return chainedExistsSubquery(intermediate, chain.subList(1, chain.size()), bodyBuilder);
             });
         }
 
-        @SuppressWarnings("unchecked")
         private Predicate existsSubquery(Scope scope, AttributeMapping.Relation rel, SubqueryBodyBuilder bodyBuilder) {
-            From<?, ?> outerFrom = scope.from();
             Subquery<Integer> sub = scope.parentQuery().subquery(Integer.class);
-            From<?, ?> correlated;
-            if (outerFrom instanceof Root<?> r) {
-                correlated = sub.correlate(r);
-            } else if (outerFrom instanceof Join<?, ?> j) {
-                correlated = sub.correlate((Join<Object, Object>) j);
-            } else {
-                throw new IllegalArgumentException("Cannot correlate from non-Root, non-Join scope: " + outerFrom);
-            }
+            From<?, ?> correlated = correlate(sub, scope.from());
             Join<?, ?> joinFrom = correlated.join(rel.joinAttribute());
             sub.select(cb.literal(1));
-            Predicate body = bodyBuilder.build(sub, joinFrom, correlated);
-            sub.where(body);
+            sub.where(bodyBuilder.build(sub, joinFrom, correlated));
             return cb.exists(sub);
         }
-
-        // -- hierarchy operators (overlaps / ancestorOf / descendentOf) --
-        //
-        // A Cerbos hierarchy is a delimited path (e.g. "a:b:c"). Both sides of a hierarchy
-        // operator are wrapped in a `hierarchy(...)` expression that resolves to one of:
-        //   - a constant string split into segments,
-        //   - a single field whose column holds the whole delimited string, or
-        //   - a `list(...)` of segments, each a constant or a field.
-        // The translations mirror the Prisma adapter so behaviour is consistent across adapters.
-
-        private Predicate handleOverlaps(List<Operand> operands, Scope scope) {
-            Hierarchy[] both = extractHierarchyOperands("overlaps", operands, scope);
-            Hierarchy left = both[0];
-            Hierarchy right = both[1];
-
-            if (left instanceof Hierarchy.FieldRef || right instanceof Hierarchy.FieldRef) {
-                return handleFieldOverlaps(left, right);
-            }
-
-            List<Seg> leftSegs = toSegments(left);
-            List<Seg> rightSegs = toSegments(right);
-
-            List<Predicate> leftPrefixOfRight = checkPrefixConditions(leftSegs, rightSegs);
-            List<Predicate> rightPrefixOfLeft = checkPrefixConditions(rightSegs, leftSegs);
-
-            java.util.List<List<Predicate>> valid = new java.util.ArrayList<>();
-            if (leftPrefixOfRight != null) valid.add(leftPrefixOfRight);
-            if (rightPrefixOfLeft != null) valid.add(rightPrefixOfLeft);
-
-            if (valid.isEmpty()) {
-                // Neither side can be a prefix of the other. If a field is involved the overlap is
-                // simply never satisfiable (always-false); two incompatible constants are a planner bug.
-                boolean hasField = containsFieldSegment(leftSegs) || containsFieldSegment(rightSegs);
-                if (hasField) {
-                    return cb.disjunction();
-                }
-                throw new IllegalArgumentException("Cannot determine hierarchy overlap: no field references found");
-            }
-            // An empty condition list means every compared segment was a matching constant — overlap
-            // holds unconditionally.
-            for (List<Predicate> c : valid) {
-                if (c.isEmpty()) {
-                    return cb.conjunction();
-                }
-            }
-            // Both directions (equal-length hierarchies) compare the same segment pairs, so either
-            // condition set is equivalent; use the first.
-            List<Predicate> chosen = valid.get(0);
-            return chosen.size() == 1 ? chosen.get(0) : cb.and(chosen.toArray(Predicate[]::new));
-        }
-
-        private Predicate handleFieldOverlaps(Hierarchy left, Hierarchy right) {
-            if (left instanceof Hierarchy.FieldRef && right instanceof Hierarchy.FieldRef) {
-                throw new IllegalArgumentException("overlaps: cannot compare two field-reference hierarchies");
-            }
-            Hierarchy.FieldRef field = (left instanceof Hierarchy.FieldRef f) ? f : (Hierarchy.FieldRef) right;
-            Hierarchy other = (left instanceof Hierarchy.FieldRef) ? right : left;
-            if (!(other instanceof Hierarchy.Constant constant)) {
-                throw new IllegalArgumentException(
-                        "overlaps: segmented hierarchies with field hierarchies are not supported");
-            }
-
-            String delimiter = field.delimiter();
-            String otherRaw = String.join(delimiter, constant.segments());
-            List<String> strictPrefixes = getStrictPrefixes(constant.segments(), delimiter);
-
-            java.util.List<Predicate> conditions = new java.util.ArrayList<>();
-            // field is an ancestor of the constant...
-            if (!strictPrefixes.isEmpty()) {
-                conditions.add(field.path().in(strictPrefixes));
-            }
-            // ...or equal to it...
-            conditions.add(cb.equal(field.path(), otherRaw));
-            // ...or a descendant of it.
-            conditions.add(startsWithLiteral(field.path(), otherRaw + delimiter));
-
-            return conditions.size() == 1 ? conditions.get(0) : cb.or(conditions.toArray(Predicate[]::new));
-        }
-
-        private Predicate handleAncestorDescendant(List<Operand> operands, Scope scope, boolean isAncestor) {
-            String opName = isAncestor ? "ancestorOf" : "descendentOf";
-            Hierarchy[] both = extractHierarchyOperands(opName, operands, scope);
-            // ancestorOf(A, B) ⇔ A is a strict prefix of B; descendentOf(A, B) ⇔ B is a strict prefix of A.
-            Hierarchy ancestor = isAncestor ? both[0] : both[1];
-            Hierarchy descendant = isAncestor ? both[1] : both[0];
-
-            if (ancestor instanceof Hierarchy.Constant a && descendant instanceof Hierarchy.FieldRef d) {
-                String prefix = String.join(d.delimiter(), a.segments()) + d.delimiter();
-                return startsWithLiteral(d.path(), prefix);
-            }
-            if (ancestor instanceof Hierarchy.FieldRef a && descendant instanceof Hierarchy.Constant d) {
-                List<String> prefixes = getStrictPrefixes(d.segments(), a.delimiter());
-                if (prefixes.isEmpty()) {
-                    return cb.disjunction();
-                }
-                if (prefixes.size() == 1) {
-                    return cb.equal(a.path(), prefixes.get(0));
-                }
-                return a.path().in(prefixes);
-            }
-            if (ancestor instanceof Hierarchy.Constant a && descendant instanceof Hierarchy.Constant d) {
-                if (d.segments().size() > a.segments().size()
-                        && isPrefix(a.segments(), d.segments())) {
-                    return cb.conjunction();
-                }
-                throw new IllegalArgumentException(
-                        opName + ": constant operands do not satisfy the " + (isAncestor ? "ancestor" : "descendant")
-                                + " relationship");
-            }
-            throw new IllegalArgumentException(opName + ": unsupported hierarchy operand combination");
-        }
-
-        private Hierarchy[] extractHierarchyOperands(String opName, List<Operand> operands, Scope scope) {
-            if (operands.size() != 2) {
-                throw new IllegalArgumentException(opName + " requires exactly 2 operands");
-            }
-            return new Hierarchy[]{
-                    normalizeHierarchy(resolveHierarchy(opName, operands.get(0), scope)),
-                    normalizeHierarchy(resolveHierarchy(opName, operands.get(1), scope)),
-            };
-        }
-
-        private Hierarchy resolveHierarchy(String opName, Operand operand, Scope scope) {
-            if (operand.getNodeCase() != Operand.NodeCase.EXPRESSION
-                    || !"hierarchy".equals(operand.getExpression().getOperator())) {
-                throw new IllegalArgumentException(opName + " requires hierarchy(...) operands");
-            }
-            List<Operand> ops = operand.getExpression().getOperandsList();
-            if (ops.size() == 2) {
-                Operand strOp = ops.get(0);
-                Operand delimOp = ops.get(1);
-                if (delimOp.getNodeCase() != Operand.NodeCase.VALUE) {
-                    throw new IllegalArgumentException("hierarchy delimiter must be a value");
-                }
-                String delimiter = String.valueOf(protoValueToJava(delimOp.getValue()));
-                if (strOp.getNodeCase() == Operand.NodeCase.VALUE) {
-                    String raw = String.valueOf(protoValueToJava(strOp.getValue()));
-                    return new Hierarchy.Constant(splitLiteral(raw, delimiter), delimiter);
-                }
-                if (strOp.getNodeCase() == Operand.NodeCase.VARIABLE) {
-                    return new Hierarchy.FieldRef(scope.resolvePath(strOp.getVariable()), delimiter);
-                }
-                throw new IllegalArgumentException("hierarchy(string, delimiter) requires a value or field operand");
-            }
-            if (ops.size() == 1) {
-                Operand inner = ops.get(0);
-                return switch (inner.getNodeCase()) {
-                    case VALUE -> new Hierarchy.Constant(
-                            splitLiteral(String.valueOf(protoValueToJava(inner.getValue())), "."), ".");
-                    case VARIABLE -> new Hierarchy.FieldRef(scope.resolvePath(inner.getVariable()), ".");
-                    case EXPRESSION -> {
-                        if (!"list".equals(inner.getExpression().getOperator())) {
-                            throw new IllegalArgumentException("hierarchy requires a value, field, or list operand");
-                        }
-                        java.util.List<Seg> segs = new java.util.ArrayList<>();
-                        for (Operand seg : inner.getExpression().getOperandsList()) {
-                            switch (seg.getNodeCase()) {
-                                case VALUE -> segs.add(new Seg.Const(String.valueOf(protoValueToJava(seg.getValue()))));
-                                case VARIABLE -> segs.add(new Seg.FieldSeg(scope.resolvePath(seg.getVariable())));
-                                default -> throw new IllegalArgumentException(
-                                        "hierarchy list segment must be a value or field, got " + seg.getNodeCase());
-                            }
-                        }
-                        yield new Hierarchy.Segmented(segs);
-                    }
-                    default -> throw new IllegalArgumentException(
-                            "hierarchy requires a value, field, or list operand, got " + inner.getNodeCase());
-                };
-            }
-            throw new IllegalArgumentException("hierarchy requires 1 or 2 operands");
-        }
-
-        /** Collapse an all-constant segmented hierarchy to a plain Constant (default delimiter). */
-        private Hierarchy normalizeHierarchy(Hierarchy h) {
-            if (!(h instanceof Hierarchy.Segmented seg)) {
-                return h;
-            }
-            java.util.List<String> values = new java.util.ArrayList<>();
-            for (Seg s : seg.segments()) {
-                if (s instanceof Seg.Const c) {
-                    values.add(c.value());
-                } else {
-                    return h;
-                }
-            }
-            return new Hierarchy.Constant(values, ".");
-        }
-
-        private List<Seg> toSegments(Hierarchy h) {
-            if (h instanceof Hierarchy.Constant c) {
-                return c.segments().stream().map(s -> (Seg) new Seg.Const(s)).toList();
-            }
-            if (h instanceof Hierarchy.Segmented s) {
-                return s.segments();
-            }
-            throw new IllegalArgumentException("Cannot enumerate segments of a field-reference hierarchy");
-        }
-
-        /**
-         * If {@code shorter} is a prefix of {@code longer}, return the predicates that must hold for
-         * the field segments to line up (an empty list = unconditionally true). Returns {@code null}
-         * if {@code shorter} cannot be a prefix of {@code longer}.
-         */
-        private List<Predicate> checkPrefixConditions(List<Seg> shorter, List<Seg> longer) {
-            if (shorter.size() > longer.size()) {
-                return null;
-            }
-            java.util.List<Predicate> conditions = new java.util.ArrayList<>();
-            for (int i = 0; i < shorter.size(); i++) {
-                Seg s = shorter.get(i);
-                Seg l = longer.get(i);
-                if (s instanceof Seg.Const sc && l instanceof Seg.Const lc) {
-                    if (!sc.value().equals(lc.value())) {
-                        return null;
-                    }
-                } else if (s instanceof Seg.FieldSeg sf && l instanceof Seg.Const lc) {
-                    conditions.add(cb.equal(sf.path(), lc.value()));
-                } else if (s instanceof Seg.Const sc && l instanceof Seg.FieldSeg lf) {
-                    conditions.add(cb.equal(lf.path(), sc.value()));
-                } else {
-                    throw new IllegalArgumentException(
-                            "Cannot compare two field references in a hierarchy overlap");
-                }
-            }
-            return conditions;
-        }
-
-        private Predicate startsWithLiteral(Path<?> path, String prefix) {
-            return cb.like(path.as(String.class), escapeLike(prefix) + "%", '\\');
-        }
-
-        private static boolean containsFieldSegment(List<Seg> segs) {
-            return segs.stream().anyMatch(s -> s instanceof Seg.FieldSeg);
-        }
-
-        private static boolean isPrefix(List<String> shorter, List<String> longer) {
-            for (int i = 0; i < shorter.size(); i++) {
-                if (!shorter.get(i).equals(longer.get(i))) {
-                    return false;
-                }
-            }
-            return true;
-        }
-
-        /** All proper (strict) ancestor prefixes of a segment list, joined with {@code delimiter}. */
-        private static List<String> getStrictPrefixes(List<String> segments, String delimiter) {
-            if (segments.size() <= 1) {
-                return List.of();
-            }
-            java.util.List<String> prefixes = new java.util.ArrayList<>();
-            String current = segments.get(0);
-            prefixes.add(current);
-            for (int i = 1; i < segments.size() - 1; i++) {
-                current = current + delimiter + segments.get(i);
-                prefixes.add(current);
-            }
-            return prefixes;
-        }
-
-        /** Split on a literal delimiter (not a regex), keeping trailing empty segments. */
-        private static List<String> splitLiteral(String raw, String delimiter) {
-            return List.of(raw.split(java.util.regex.Pattern.quote(delimiter), -1));
-        }
-    }
-
-    // -- Scope --
-
-    private sealed interface Scope permits Scope.RootScope, Scope.LambdaScope {
-        Path<?> resolvePath(String cerbosVar);
-
-        AttributeMapping resolveMapping(String cerbosVar);
-
-        From<?, ?> from();
-
-        AbstractQuery<?> parentQuery();
-
-        static Scope root(From<?, ?> root, AbstractQuery<?> query, Map<String, AttributeMapping> mapper) {
-            return new RootScope(root, query, mapper);
-        }
-
-        static Scope lambda(From<?, ?> from, AbstractQuery<?> parentQuery,
-                            AttributeMapping.Relation relation, String lambdaVar, Scope outer) {
-            return new LambdaScope(from, parentQuery, relation, lambdaVar, outer);
-        }
-
-        record RootScope(From<?, ?> from, AbstractQuery<?> parentQuery, Map<String, AttributeMapping> mapper)
-                implements Scope {
-            @Override
-            public Path<?> resolvePath(String cerbosVar) {
-                AttributeMapping m = mapper.get(cerbosVar);
-                if (m == null) {
-                    throw new IllegalArgumentException("Unknown attribute: " + cerbosVar);
-                }
-                if (m instanceof AttributeMapping.Field f) {
-                    return traversePath(from, f.jpaPath());
-                }
-                throw new IllegalArgumentException(
-                        "Attribute " + cerbosVar + " is a Relation; cannot resolve as a scalar path");
-            }
-
-            @Override
-            public AttributeMapping resolveMapping(String cerbosVar) {
-                AttributeMapping m = mapper.get(cerbosVar);
-                if (m != null) {
-                    return m;
-                }
-
-                // Try resolving as a dotted suffix off a registered Relation prefix.
-                // Example: mapper has "request.resource.attr.categories" → Relation("categories", fields={"subCategories": Relation(...)})
-                // and we're asked for "request.resource.attr.categories.subCategories" — walk the chain.
-                String[] parts = cerbosVar.split("\\.");
-                for (int i = parts.length - 1; i > 0; i--) {
-                    String prefix = String.join(".", java.util.Arrays.copyOfRange(parts, 0, i));
-                    AttributeMapping prefixMapping = mapper.get(prefix);
-                    if (prefixMapping instanceof AttributeMapping.Relation rel) {
-                        AttributeMapping resolved = walkRelationChain(rel,
-                                java.util.Arrays.copyOfRange(parts, i, parts.length));
-                        if (resolved != null) {
-                            return resolved;
-                        }
-                    }
-                }
-
-                throw new IllegalArgumentException("Unknown attribute: " + cerbosVar);
-            }
-        }
-
-        /**
-         * Scope inside a collection lambda. Variables prefixed with the lambda variable resolve
-         * against the joined collection element; anything else (e.g. another
-         * {@code request.resource.attr.*} reference in the lambda body) delegates to {@code outer}
-         * — the enclosing scope re-rooted at the subquery's correlated parent, so the produced
-         * path is a legal correlation reference.
-         */
-        record LambdaScope(From<?, ?> from, AbstractQuery<?> parentQuery,
-                           AttributeMapping.Relation relation, String lambdaVar,
-                           Scope outer) implements Scope {
-
-            private boolean isLambdaRef(String cerbosVar) {
-                return cerbosVar.equals(lambdaVar) || cerbosVar.startsWith(lambdaVar + ".");
-            }
-
-            @Override
-            public Path<?> resolvePath(String cerbosVar) {
-                if (!isLambdaRef(cerbosVar)) {
-                    if (outer != null) {
-                        return outer.resolvePath(cerbosVar);
-                    }
-                    throw new IllegalArgumentException(
-                            "Variable '" + cerbosVar + "' does not start with lambda variable '" + lambdaVar + "'");
-                }
-                String suffix = extractLambdaSuffix(cerbosVar, lambdaVar);
-                if (suffix.isEmpty()) {
-                    if (relation.defaultMemberField() != null && !relation.defaultMemberField().isEmpty()) {
-                        return from.get(relation.defaultMemberField());
-                    }
-                    return (Path<?>) from;
-                }
-                AttributeMapping nested = relation.fields().get(suffix);
-                if (nested instanceof AttributeMapping.Field f) {
-                    return traversePath(from, f.jpaPath());
-                }
-                return traversePath(from, suffix);
-            }
-
-            @Override
-            public AttributeMapping resolveMapping(String cerbosVar) {
-                if (!isLambdaRef(cerbosVar)) {
-                    if (outer != null) {
-                        return outer.resolveMapping(cerbosVar);
-                    }
-                    throw new IllegalArgumentException(
-                            "Variable '" + cerbosVar + "' does not start with lambda variable '" + lambdaVar + "'");
-                }
-                String suffix = extractLambdaSuffix(cerbosVar, lambdaVar);
-                if (suffix.isEmpty()) {
-                    return relation;
-                }
-                AttributeMapping nested = relation.fields().get(suffix);
-                if (nested != null) {
-                    return nested;
-                }
-                return AttributeMapping.field(suffix);
-            }
-        }
-    }
-
-    // -- helpers --
-
-    /**
-     * Fold {@code add(left, right)} where both operands are constants. Strings concatenate;
-     * numbers add. Used when the planner emits e.g. {@code eq(field, add("prefix:", "123"))}.
-     */
-    static Object foldAdd(Object left, Object right) {
-        if (left == null || right == null) {
-            // Reaching here means the planner emitted `add(null, ...)` or `add(..., null)`
-            // — neither side could satisfy any string/number equation, so report the shape
-            // explicitly rather than NPE'ing on `.getClass()` below.
-            throw new IllegalArgumentException(
-                    "add requires non-null operands, got " + left + " + " + right);
-        }
-        if (left instanceof String || right instanceof String) {
-            return String.valueOf(left) + String.valueOf(right);
-        }
-        if (left instanceof Number ln && right instanceof Number rn) {
-            if (left instanceof Long && right instanceof Long) {
-                return ln.longValue() + rn.longValue();
-            }
-            return ln.doubleValue() + rn.doubleValue();
-        }
-        throw new IllegalArgumentException(
-                "add requires string or numeric operands, got " + left.getClass() + " + " + right.getClass());
-    }
-
-    /**
-     * Solve {@code field + addConstant == comparisonValue} (or with operands swapped if
-     * {@code !fieldIsLeft}). For strings: strip the prefix/suffix and return what the field must
-     * equal; return {@code null} if the comparison value doesn't match the constant's
-     * shape (which means no field value can satisfy the equation). For numbers: subtract.
-     */
-    static Object solveAdd(Object comparisonValue, Object addConstant, boolean fieldIsLeft) {
-        if (comparisonValue instanceof String compStr && addConstant instanceof String constStr) {
-            if (fieldIsLeft) {
-                // field + const == comparison  →  field == comparison stripped-of-suffix
-                if (!compStr.endsWith(constStr)) return null;
-                return compStr.substring(0, compStr.length() - constStr.length());
-            }
-            // const + field == comparison  →  field == comparison stripped-of-prefix
-            if (!compStr.startsWith(constStr)) return null;
-            return compStr.substring(constStr.length());
-        }
-        if (comparisonValue instanceof Number compNum && addConstant instanceof Number constNum) {
-            // Both orderings of numeric addition produce the same equation: field = comp - const
-            if (comparisonValue instanceof Long && addConstant instanceof Long) {
-                return compNum.longValue() - constNum.longValue();
-            }
-            return compNum.doubleValue() - constNum.doubleValue();
-        }
-        throw new IllegalArgumentException(
-                "add comparison type mismatch: " + comparisonValue.getClass() + " vs " + addConstant.getClass());
-    }
-
-    /**
-     * Walk a dotted suffix through a Relation's nested {@code fields()} map. Returns the leaf
-     * mapping (Field or Relation) reached, or {@code null} if any segment doesn't resolve.
-     */
-    private static AttributeMapping walkRelationChain(AttributeMapping.Relation rel, String[] suffixParts) {
-        AttributeMapping current = rel;
-        for (String part : suffixParts) {
-            if (!(current instanceof AttributeMapping.Relation r)) {
-                return null;
-            }
-            AttributeMapping next = r.fields().get(part);
-            if (next == null) {
-                return null;
-            }
-            current = next;
-        }
-        return current;
-    }
-
-    /**
-     * Resolve a dotted top-level Cerbos attribute to a chain of Relations, ending in either a
-     * leaf Field or the final Relation. Used by {@code hasIntersection(map(...))} when the map's
-     * collection operand is a dotted path through nested Relation mappings.
-     */
-    record RelationChain(List<AttributeMapping.Relation> relations, AttributeMapping.Field tail) {}
-
-    /** A resolved {@code hierarchy(...)} operand: a constant path, a whole-column field, or a list of segments. */
-    private sealed interface Hierarchy permits Hierarchy.Constant, Hierarchy.FieldRef, Hierarchy.Segmented {
-        /** A literal delimited path split into segments. */
-        record Constant(List<String> segments, String delimiter) implements Hierarchy {}
-
-        /** A single column holding the whole delimited string. */
-        record FieldRef(Path<?> path, String delimiter) implements Hierarchy {}
-
-        /** A {@code list(...)} of segments, each a constant or a field. */
-        record Segmented(List<Seg> segments) implements Hierarchy {}
-    }
-
-    /** One segment of a {@link Hierarchy.Segmented}: either a literal value or a field reference. */
-    private sealed interface Seg permits Seg.Const, Seg.FieldSeg {
-        record Const(String value) implements Seg {}
-
-        record FieldSeg(Path<?> path) implements Seg {}
-    }
-
-    private static RelationChain resolveRelationChain(Map<String, AttributeMapping> mapper, String cerbosVar) {
-        AttributeMapping direct = mapper.get(cerbosVar);
-        if (direct instanceof AttributeMapping.Relation rel) {
-            return new RelationChain(List.of(rel), null);
-        }
-        String[] parts = cerbosVar.split("\\.");
-        for (int i = parts.length - 1; i > 0; i--) {
-            String prefix = String.join(".", java.util.Arrays.copyOfRange(parts, 0, i));
-            AttributeMapping prefixMapping = mapper.get(prefix);
-            if (!(prefixMapping instanceof AttributeMapping.Relation rel)) {
-                continue;
-            }
-            String[] suffixParts = java.util.Arrays.copyOfRange(parts, i, parts.length);
-            java.util.List<AttributeMapping.Relation> chain = new java.util.ArrayList<>();
-            chain.add(rel);
-            AttributeMapping current = rel;
-            boolean ok = true;
-            for (int s = 0; s < suffixParts.length; s++) {
-                if (!(current instanceof AttributeMapping.Relation r)) {
-                    ok = false;
-                    break;
-                }
-                AttributeMapping next = r.fields().get(suffixParts[s]);
-                if (next == null) {
-                    ok = false;
-                    break;
-                }
-                if (next instanceof AttributeMapping.Relation nextRel) {
-                    chain.add(nextRel);
-                    current = nextRel;
-                } else if (next instanceof AttributeMapping.Field leafField && s == suffixParts.length - 1) {
-                    return new RelationChain(chain, leafField);
-                } else {
-                    ok = false;
-                    break;
-                }
-            }
-            if (ok) {
-                return new RelationChain(chain, null);
-            }
-        }
-        return null;
-    }
-
-    private static Path<?> resolveMemberPath(From<?, ?> joinFrom, AttributeMapping.Relation rel, String memberField) {
-        if (memberField == null || memberField.isEmpty()) {
-            if (rel.defaultMemberField() != null && !rel.defaultMemberField().isEmpty()) {
-                return joinFrom.get(rel.defaultMemberField());
-            }
-            return (Path<?>) joinFrom;
-        }
-        AttributeMapping nested = rel.fields().get(memberField);
-        if (nested instanceof AttributeMapping.Field f) {
-            return traversePath(joinFrom, f.jpaPath());
-        }
-        return traversePath(joinFrom, memberField);
-    }
-
-    private static Path<?> traversePath(From<?, ?> from, String dottedJpaPath) {
-        String[] parts = dottedJpaPath.split("\\.");
-        Path<?> p = from;
-        for (String part : parts) {
-            p = p.get(part);
-        }
-        return p;
-    }
-
-    private static String extractLambdaSuffix(String variable, String lambdaVar) {
-        if (variable.equals(lambdaVar)) {
-            return "";
-        }
-        String prefix = lambdaVar + ".";
-        if (!variable.startsWith(prefix)) {
-            throw new IllegalArgumentException(
-                    "Variable '" + variable + "' does not start with lambda variable '" + lambdaVar + "'");
-        }
-        return variable.substring(prefix.length());
-    }
-
-    static Object protoValueToJava(Value value) {
-        return switch (value.getKindCase()) {
-            case STRING_VALUE -> value.getStringValue();
-            case NUMBER_VALUE -> {
-                double d = value.getNumberValue();
-                if (d == Math.floor(d) && !Double.isInfinite(d)) {
-                    yield (long) d;
-                }
-                yield d;
-            }
-            case BOOL_VALUE -> value.getBoolValue();
-            case NULL_VALUE -> null;
-            case LIST_VALUE -> value.getListValue().getValuesList().stream()
-                    .map(SpringDataQueryPlanAdapter::protoValueToJava)
-                    .toList();
-            case STRUCT_VALUE -> {
-                // Not Collectors.toMap: it rejects null values, and struct fields may hold nulls.
-                Map<String, Object> struct = new java.util.LinkedHashMap<>();
-                value.getStructValue().getFieldsMap()
-                        .forEach((k, v) -> struct.put(k, protoValueToJava(v)));
-                yield struct;
-            }
-            case KIND_NOT_SET -> throw new IllegalArgumentException(
-                    "Protobuf Value has no kind set — the planner emitted a malformed operand");
-            default -> throw new IllegalArgumentException(
-                    "Unsupported protobuf value type: " + value.getKindCase());
-        };
     }
 }

@@ -86,40 +86,13 @@ class SpringDataIntegrationTest {
             Map.entry("request.resource.attr.nested.nextlevel.aString", AttributeMapping.field("nested.nextlevel.aString"))
     );
 
-    // Combined map used by tests that reference both nested.* and categories (e.g. combined-or)
-    // or the full kitchen-sink (tags + nested + tagObjects + ...).
-    private static final Map<String, AttributeMapping> COMBINED_MAP;
-    static {
-        java.util.HashMap<String, AttributeMapping> m = new java.util.HashMap<>();
-        m.put("request.resource.attr.aBool", AttributeMapping.field("aBool"));
-        m.put("request.resource.attr.aString", AttributeMapping.field("aString"));
-        m.put("request.resource.attr.aNumber", AttributeMapping.field("aNumber"));
-        m.put("request.resource.attr.id", AttributeMapping.field("oid"));
-        m.put("request.resource.attr.aOptionalString", AttributeMapping.field("aOptionalString"));
-        m.put("request.resource.attr.createdBy", AttributeMapping.field("createdBy"));
-        m.put("request.resource.attr.ownedBy", AttributeMapping.relation("ownedBy"));
-        // tags as the @OneToMany TagEntity collection (for exists/all/filter etc.)
-        m.put("request.resource.attr.tags", AttributeMapping.relation("tags", Map.of(
-                "id", AttributeMapping.field("id"),
-                "name", AttributeMapping.field("name")
-        )));
-        m.put("request.resource.attr.nested.aBool", AttributeMapping.field("nested.aBool"));
-        m.put("request.resource.attr.nested.aString", AttributeMapping.field("nested.aString"));
-        m.put("request.resource.attr.nested.aNumber", AttributeMapping.field("nested.aNumber"));
-        m.put("request.resource.attr.nested.aOptionalString", AttributeMapping.field("nested.aOptionalString"));
-        m.put("request.resource.attr.nested.nextlevel.aBool", AttributeMapping.field("nested.nextlevel.aBool"));
-        m.put("request.resource.attr.nested.nextlevel.aString", AttributeMapping.field("nested.nextlevel.aString"));
-        m.put("request.resource.attr.categories", AttributeMapping.relation("categories", Map.of(
-                "name", AttributeMapping.field("name"),
-                "subCategories", AttributeMapping.relation("subCategories", Map.of(
-                        "name", AttributeMapping.field("name"),
-                        "labels", AttributeMapping.relation("labels", Map.of(
-                                "name", AttributeMapping.field("name")
-                        ))
-                ))
-        )));
-        COMBINED_MAP = Map.copyOf(m);
-    }
+    // FIELD_MAP, but with tags as the @OneToMany TagEntity collection (for exists/all/filter etc.)
+    // instead of the flat tagNames element collection.
+    private static final Map<String, AttributeMapping> NESTED_FIELD_MAP = merge(FIELD_MAP,
+            Map.of("request.resource.attr.tags", AttributeMapping.relation("tags", Map.of(
+                    "id", AttributeMapping.field("id"),
+                    "name", AttributeMapping.field("name")
+            ))));
 
     private static final Map<String, AttributeMapping> CATEGORIES_MAP = Map.ofEntries(
             Map.entry("request.resource.attr.categories", AttributeMapping.relation("categories", Map.of(
@@ -133,22 +106,17 @@ class SpringDataIntegrationTest {
             )))
     );
 
-    private static final Map<String, AttributeMapping> NESTED_FIELD_MAP = Map.ofEntries(
-            Map.entry("request.resource.attr.aBool", AttributeMapping.field("aBool")),
-            Map.entry("request.resource.attr.aString", AttributeMapping.field("aString")),
-            Map.entry("request.resource.attr.aNumber", AttributeMapping.field("aNumber")),
-            Map.entry("request.resource.attr.id", AttributeMapping.field("oid")),
-            Map.entry("request.resource.attr.aOptionalString", AttributeMapping.field("aOptionalString")),
-            Map.entry("request.resource.attr.createdBy", AttributeMapping.field("createdBy")),
-            Map.entry("request.resource.attr.ownedBy", AttributeMapping.relation("ownedBy")),
-            Map.entry("request.resource.attr.tags", AttributeMapping.relation("tags", Map.of(
-                    "id", AttributeMapping.field("id"),
-                    "name", AttributeMapping.field("name")
-            ))),
-            Map.entry("request.resource.attr.nested.aBool", AttributeMapping.field("nested.aBool")),
-            Map.entry("request.resource.attr.nested.aString", AttributeMapping.field("nested.aString")),
-            Map.entry("request.resource.attr.nested.aNumber", AttributeMapping.field("nested.aNumber"))
-    );
+    // Kitchen-sink map for tests that mix nested.*, TagEntity tags, and categories (combined-or,
+    // kitchensink, principal-attribute actions).
+    private static final Map<String, AttributeMapping> COMBINED_MAP = merge(NESTED_FIELD_MAP, CATEGORIES_MAP);
+
+    /** Right-biased union of attribute maps. */
+    private static Map<String, AttributeMapping> merge(Map<String, AttributeMapping> base,
+                                                       Map<String, AttributeMapping> overlay) {
+        java.util.HashMap<String, AttributeMapping> m = new java.util.HashMap<>(base);
+        m.putAll(overlay);
+        return Map.copyOf(m);
+    }
 
     /** Records every SQL statement Hibernate executes, so a test can assert on query shape. */
     public static final class SqlCapture implements org.hibernate.resource.jdbc.spi.StatementInspector {

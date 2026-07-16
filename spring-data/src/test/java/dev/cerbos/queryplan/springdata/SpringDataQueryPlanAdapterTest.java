@@ -134,25 +134,7 @@ class SpringDataQueryPlanAdapterTest {
      * Exercises the full path so any IllegalArgumentException during predicate building surfaces.
      */
     private static int runCount(Operand condition) {
-        PlanResourcesResponse resp =
-                buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
-        Result<ResourceEntity> result =
-                SpringDataQueryPlanAdapter.toSpecification(resp, MAPPER);
-        assertInstanceOf(Result.Conditional.class, result);
-        Specification<ResourceEntity> spec = ((Result.Conditional<ResourceEntity>) result).specification();
-
-        EntityManager em = emf.createEntityManager();
-        try {
-            CriteriaBuilder cb = em.getCriteriaBuilder();
-            CriteriaQuery<Long> cq = cb.createQuery(Long.class);
-            Root<ResourceEntity> root = cq.from(ResourceEntity.class);
-            cq.select(cb.count(root));
-            Predicate p = spec.toPredicate(root, cq, cb);
-            if (p != null) cq.where(p);
-            return em.createQuery(cq).getSingleResult().intValue();
-        } finally {
-            em.close();
-        }
+        return runCount(condition, Map.of());
     }
 
     /** {@link #runCount(Operand)} with per-operator overrides. */
@@ -1126,7 +1108,7 @@ class SpringDataQueryPlanAdapterTest {
                 .putFields("a", Value.newBuilder().setNullValue(NullValue.NULL_VALUE).build())
                 .putFields("b", Value.newBuilder().setStringValue("x").build())
                 .build();
-        Object converted = SpringDataQueryPlanAdapter.protoValueToJava(
+        Object converted = PlanValues.protoValueToJava(
                 Value.newBuilder().setStructValue(struct).build());
         assertInstanceOf(Map.class, converted);
         Map<?, ?> map = (Map<?, ?>) converted;
@@ -1138,28 +1120,10 @@ class SpringDataQueryPlanAdapterTest {
     @Test
     void operatorOverrideIsUsed() {
         Operand cond = exprOp("eq", var("request.resource.attr.aString"), sval("foo"));
-        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, cond);
-
-        // Override eq to always produce IS NULL — so result count is 0 (no nulls in empty table either, still 0).
+        // Override eq to always produce IS NULL — result count stays 0 and the override path
+        // is exercised end-to-end (runCount asserts the Conditional kind internally).
         Map<String, OperatorFunction> overrides = Map.of(
                 "eq", (cb, field, value) -> cb.isNull(field));
-
-        Result<ResourceEntity> result =
-                SpringDataQueryPlanAdapter.toSpecification(resp, MAPPER, overrides);
-        assertInstanceOf(Result.Conditional.class, result);
-
-        Specification<ResourceEntity> spec = ((Result.Conditional<ResourceEntity>) result).specification();
-        EntityManager em = emf.createEntityManager();
-        try {
-            CriteriaBuilder cb = em.getCriteriaBuilder();
-            CriteriaQuery<Long> cq = cb.createQuery(Long.class);
-            Root<ResourceEntity> root = cq.from(ResourceEntity.class);
-            cq.select(cb.count(root));
-            Predicate p = spec.toPredicate(root, cq, cb);
-            cq.where(p);
-            assertEquals(0L, em.createQuery(cq).getSingleResult().longValue());
-        } finally {
-            em.close();
-        }
+        assertEquals(0, runCount(cond, overrides));
     }
 }
