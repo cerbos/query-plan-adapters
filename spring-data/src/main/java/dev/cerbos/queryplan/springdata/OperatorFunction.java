@@ -16,6 +16,10 @@ import jakarta.persistence.criteria.Predicate;
  * {@code value} is the {@link Boolean} flag), and the scalar {@code in} (where {@code value} is the
  * resolved value or {@link java.util.List}).
  *
+ * <p>Operand order is normalized before overrides are consulted: a value-first comparison such as
+ * {@code 5 < R.attr.x} is mirrored to field-first form, so the override is looked up (and invoked)
+ * under {@code gt}, matching the semantics of the predicate being built.
+ *
  * <p>Overrides are <em>not</em> consulted for operators that translate to correlated {@code EXISTS}
  * subqueries against a {@code Relation} mapping — {@code exists}/{@code exists_one}/{@code all}/
  * {@code except}/{@code filter}, {@code hasIntersection} over a relation, {@code size(...)}, and the

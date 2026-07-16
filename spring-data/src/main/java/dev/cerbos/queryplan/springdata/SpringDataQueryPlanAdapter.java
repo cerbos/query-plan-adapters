@@ -18,7 +18,6 @@ import jakarta.persistence.criteria.Subquery;
 
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 /**
  * Translates a Cerbos {@code PlanResources} response into a Spring Data JPA
@@ -26,11 +25,6 @@ import java.util.stream.Collectors;
  * {@code JpaSpecificationExecutor}.
  */
 public final class SpringDataQueryPlanAdapter {
-
-    // Alias for the deeply-nested protobuf type to avoid collision with jakarta.persistence.criteria.Expression
-    private static final class PlanExpr {
-        private PlanExpr() {}
-    }
 
     private SpringDataQueryPlanAdapter() {}
 
@@ -129,7 +123,8 @@ public final class SpringDataQueryPlanAdapter {
                 }
                 case "exists", "exists_one", "all", "except", "filter" ->
                         handleCollectionOperator(op, operands, scope);
-                case "hasIntersection" -> handleHasIntersection(operands, scope);
+                // has_intersection is the deprecated pre-camelCase alias still accepted by the PDP.
+                case "hasIntersection", "has_intersection" -> handleHasIntersection(operands, scope);
                 case "isSet" -> handleIsSet(operands, scope);
                 case "in" -> handleIn(operands, scope);
                 case "overlaps" -> handleOverlaps(operands, scope);
@@ -145,6 +140,22 @@ public final class SpringDataQueryPlanAdapter {
             };
         }
 
+        /**
+         * Mirror a directional comparison operator, for normalizing value-first operand order.
+         * The planner preserves policy source order, so {@code 5 < R.attr.x} arrives as
+         * {@code lt(value(5), variable(x))} — which must translate to {@code x > 5}, not
+         * {@code x < 5}. Symmetric operators (eq/ne/...) are returned unchanged.
+         */
+        private static String mirrorOperator(String op) {
+            return switch (op) {
+                case "lt" -> "gt";
+                case "gt" -> "lt";
+                case "le" -> "ge";
+                case "ge" -> "le";
+                default -> op;
+            };
+        }
+
         // -- Leaf operators (eq/ne/lt/gt/le/ge/contains/startsWith/endsWith) --
 
         private Predicate handleLeafOperator(String op, List<Operand> operands, Scope scope) {
@@ -153,10 +164,13 @@ public final class SpringDataQueryPlanAdapter {
             // the field side when possible — same algorithm as the Prisma adapter.
             Operand addExprOperand = null;
             Operand otherOperand = null;
-            for (Operand o : operands) {
+            boolean addIsFirst = false;
+            for (int i = 0; i < operands.size(); i++) {
+                Operand o = operands.get(i);
                 if (o.getNodeCase() == Operand.NodeCase.EXPRESSION
                         && "add".equals(o.getExpression().getOperator())) {
                     addExprOperand = o;
+                    addIsFirst = i == 0;
                 } else {
                     otherOperand = o;
                 }
@@ -165,13 +179,16 @@ public final class SpringDataQueryPlanAdapter {
                 if (otherOperand == null) {
                     throw new IllegalArgumentException("add comparison requires a second operand");
                 }
-                return handleAddComparison(op, addExprOperand.getExpression(), otherOperand, scope);
+                return handleAddComparison(op, addExprOperand.getExpression(), otherOperand, addIsFirst, scope);
             }
 
             String variable = null;
+            int variableIndex = -1;
             Object value = null;
+            int valueIndex = -1;
             boolean valueSeen = false;
-            for (Operand o : operands) {
+            for (int i = 0; i < operands.size(); i++) {
+                Operand o = operands.get(i);
                 switch (o.getNodeCase()) {
                     case VARIABLE -> {
                         if (variable != null) {
@@ -183,9 +200,11 @@ public final class SpringDataQueryPlanAdapter {
                                             + op + "': " + variable + " vs " + o.getVariable());
                         }
                         variable = o.getVariable();
+                        variableIndex = i;
                     }
                     case VALUE -> {
                         value = protoValueToJava(o.getValue());
+                        valueIndex = i;
                         valueSeen = true;
                     }
                     case EXPRESSION -> {
@@ -211,6 +230,11 @@ public final class SpringDataQueryPlanAdapter {
             }
             if (!valueSeen) {
                 throw new IllegalArgumentException("Missing value operand for " + op);
+            }
+            // Value-first comparisons (`5 < R.attr.x`) must mirror the operator so the predicate
+            // is built field-first with equivalent semantics (`x > 5`).
+            if (valueIndex < variableIndex) {
+                op = mirrorOperator(op);
             }
 
             Path<?> path = scope.resolvePath(variable);
@@ -269,7 +293,7 @@ public final class SpringDataQueryPlanAdapter {
         // -- add (fold + solve for string concat / numeric translation) --
 
         private Predicate handleAddComparison(String op, PlanResourcesFilter.Expression addExpr,
-                                              Operand otherOperand, Scope scope) {
+                                              Operand otherOperand, boolean addIsFirst, Scope scope) {
             List<Operand> addOperands = addExpr.getOperandsList();
             if (addOperands.size() != 2) {
                 throw new IllegalArgumentException("add requires exactly 2 operands");
@@ -288,7 +312,8 @@ public final class SpringDataQueryPlanAdapter {
                             "add(const, const) compared to a non-field operand is not supported");
                 }
                 Path<?> path = scope.resolvePath(otherOperand.getVariable());
-                return applyLeaf(op, path, folded);
+                // `add(1, 2) < R.attr.x` means `3 < x` — mirror to build the predicate field-first.
+                return applyLeaf(addIsFirst ? mirrorOperator(op) : op, path, folded);
             }
 
             // Case 2: add(field, value) or add(value, field) — solve for the field.
@@ -424,6 +449,15 @@ public final class SpringDataQueryPlanAdapter {
             }
             Operand first = operands.get(0);
             Operand second = operands.get(1);
+            // Intersection is symmetric, and the planner preserves policy source order —
+            // `hasIntersection(P.attr.tags, R.attr.tags)` folds the principal side to a value
+            // list in the FIRST position. Normalize to field/map-first.
+            if (first.getNodeCase() == Operand.NodeCase.VALUE
+                    && second.getNodeCase() != Operand.NodeCase.VALUE) {
+                Operand tmp = first;
+                first = second;
+                second = tmp;
+            }
 
             if (first.getNodeCase() == Operand.NodeCase.VARIABLE
                     && second.getNodeCase() == Operand.NodeCase.VALUE) {
@@ -476,6 +510,9 @@ public final class SpringDataQueryPlanAdapter {
 
                 PlanResourcesFilter.Expression lambdaExpr = lambdaOperand.getExpression();
                 List<Operand> lambdaOps = lambdaExpr.getOperandsList();
+                if (lambdaOps.size() != 2) {
+                    throw new IllegalArgumentException("map lambda requires exactly 2 operands (body, variable)");
+                }
                 Operand projection = lambdaOps.get(0);
                 Operand lambdaVar = lambdaOps.get(1);
                 if (projection.getNodeCase() != Operand.NodeCase.VARIABLE
@@ -491,7 +528,7 @@ public final class SpringDataQueryPlanAdapter {
                     RelationChain chain = resolveRelationChain(rootScope.mapper(), collectionVar);
                     if (chain != null && !chain.relations().isEmpty()) {
                         AttributeMapping.Relation tailRel = chain.relations().get(chain.relations().size() - 1);
-                        return chainedExistsSubquery(scope, chain.relations(), (sub, joinFrom) -> {
+                        return chainedExistsSubquery(scope, chain.relations(), (sub, joinFrom, correlated) -> {
                             Path<?> field = resolveMemberPath(joinFrom, tailRel, memberField);
                             return field.in(values);
                         });
@@ -500,7 +537,7 @@ public final class SpringDataQueryPlanAdapter {
 
                 AttributeMapping mapping = scope.resolveMapping(collectionVar);
                 if (mapping instanceof AttributeMapping.Relation rel) {
-                    return existsSubquery(scope, rel, (sub, joinFrom) -> {
+                    return existsSubquery(scope, rel, (sub, joinFrom, correlated) -> {
                         Path<?> field = resolveMemberPath(joinFrom, rel, memberField);
                         return field.in(values);
                     });
@@ -519,7 +556,7 @@ public final class SpringDataQueryPlanAdapter {
             if (values.isEmpty()) {
                 return cb.disjunction();
             }
-            return existsSubquery(outerScope, rel, (sub, joinFrom) -> {
+            return existsSubquery(outerScope, rel, (sub, joinFrom, correlated) -> {
                 Path<?> field;
                 if (rel.defaultMemberField() != null && !rel.defaultMemberField().isEmpty()) {
                     field = joinFrom.get(rel.defaultMemberField());
@@ -538,11 +575,14 @@ public final class SpringDataQueryPlanAdapter {
 
         private Predicate trySizeComparison(String op, List<Operand> operands, Scope scope) {
             PlanResourcesFilter.Expression sizeExpr = null;
+            boolean sizeIsFirst = false;
             Long numValue = null;
-            for (Operand o : operands) {
+            for (int i = 0; i < operands.size(); i++) {
+                Operand o = operands.get(i);
                 if (o.getNodeCase() == Operand.NodeCase.EXPRESSION
                         && "size".equals(o.getExpression().getOperator())) {
                     sizeExpr = o.getExpression();
+                    sizeIsFirst = i == 0;
                 } else if (o.getNodeCase() == Operand.NodeCase.VALUE) {
                     Object v = protoValueToJava(o.getValue());
                     if (v instanceof Number n) numValue = n.longValue();
@@ -550,6 +590,11 @@ public final class SpringDataQueryPlanAdapter {
             }
             if (sizeExpr == null || numValue == null) {
                 return null;
+            }
+            // `0 < size(x)` arrives as lt(value(0), size(x)); mirror so the checks below can
+            // always assume the size() expression is on the left.
+            if (!sizeIsFirst) {
+                op = mirrorOperator(op);
             }
             List<Operand> sizeOps = sizeExpr.getOperandsList();
             if (sizeOps.size() != 1 || sizeOps.get(0).getNodeCase() != Operand.NodeCase.VARIABLE) {
@@ -567,10 +612,10 @@ public final class SpringDataQueryPlanAdapter {
                     || ("lt".equals(op) && numValue == 1L);
 
             if (nonEmpty) {
-                return existsSubquery(scope, rel, (sub, joinFrom) -> cb.conjunction());
+                return existsSubquery(scope, rel, (sub, joinFrom, correlated) -> cb.conjunction());
             }
             if (empty) {
-                return cb.not(existsSubquery(scope, rel, (sub, joinFrom) -> cb.conjunction()));
+                return cb.not(existsSubquery(scope, rel, (sub, joinFrom, correlated) -> cb.conjunction()));
             }
             throw new IllegalArgumentException(
                     "Unsupported size comparison: size(" + var + ") " + op + " " + numValue
@@ -616,11 +661,14 @@ public final class SpringDataQueryPlanAdapter {
 
             return switch (op) {
                 case "exists", "filter" -> existsSubquery(scope, rel,
-                        (sub, joinFrom) -> traverse(body, Scope.lambda(joinFrom, sub, rel, lambdaVarName)));
+                        (sub, joinFrom, correlated) -> traverse(body,
+                                Scope.lambda(joinFrom, sub, rel, lambdaVarName, rebase(scope, correlated, sub))));
                 case "except" -> existsSubquery(scope, rel,
-                        (sub, joinFrom) -> cb.not(traverse(body, Scope.lambda(joinFrom, sub, rel, lambdaVarName))));
+                        (sub, joinFrom, correlated) -> cb.not(traverse(body,
+                                Scope.lambda(joinFrom, sub, rel, lambdaVarName, rebase(scope, correlated, sub)))));
                 case "all" -> cb.not(existsSubquery(scope, rel,
-                        (sub, joinFrom) -> cb.not(traverse(body, Scope.lambda(joinFrom, sub, rel, lambdaVarName)))));
+                        (sub, joinFrom, correlated) -> cb.not(traverse(body,
+                                Scope.lambda(joinFrom, sub, rel, lambdaVarName, rebase(scope, correlated, sub))))));
                 case "exists_one" -> {
                     Subquery<Long> sub = scope.parentQuery().subquery(Long.class);
                     From<?, ?> outerFrom = scope.from();
@@ -634,7 +682,8 @@ public final class SpringDataQueryPlanAdapter {
                     }
                     Join<?, ?> joinFrom = correlated.join(rel.joinAttribute());
                     sub.select(cb.count(joinFrom));
-                    sub.where(traverse(body, Scope.lambda(joinFrom, sub, rel, lambdaVarName)));
+                    sub.where(traverse(body,
+                            Scope.lambda(joinFrom, sub, rel, lambdaVarName, rebase(scope, correlated, sub))));
                     yield cb.equal(sub, 1L);
                 }
                 default -> throw new IllegalArgumentException("Unsupported collection operator: " + op);
@@ -643,7 +692,26 @@ public final class SpringDataQueryPlanAdapter {
 
         @FunctionalInterface
         private interface SubqueryBodyBuilder {
-            Predicate build(Subquery<?> sub, From<?, ?> joinFrom);
+            /**
+             * @param sub        the subquery being built
+             * @param joinFrom   the join over the Relation's collection inside the subquery
+             * @param correlated the outer entity correlated into the subquery — lambda bodies
+             *                   resolve non-lambda variables (e.g. {@code request.resource.attr.x})
+             *                   against this so outer references stay legal JPA correlation paths
+             */
+            Predicate build(Subquery<?> sub, From<?, ?> joinFrom, From<?, ?> correlated);
+        }
+
+        /**
+         * Re-root {@code scope} at the correlated copy of its {@code from} inside a subquery, so
+         * paths resolved through it become valid correlation references of that subquery.
+         */
+        private static Scope rebase(Scope scope, From<?, ?> correlated, Subquery<?> sub) {
+            if (scope instanceof Scope.RootScope rs) {
+                return new Scope.RootScope(correlated, sub, rs.mapper());
+            }
+            Scope.LambdaScope ls = (Scope.LambdaScope) scope;
+            return new Scope.LambdaScope(correlated, sub, ls.relation(), ls.lambdaVar(), ls.outer());
         }
 
         /**
@@ -657,12 +725,13 @@ public final class SpringDataQueryPlanAdapter {
             if (chain.size() == 1) {
                 return existsSubquery(scope, chain.get(0), bodyBuilder);
             }
-            return existsSubquery(scope, chain.get(0), (sub, joinFrom) -> {
+            return existsSubquery(scope, chain.get(0), (sub, joinFrom, correlated) -> {
                 // Recurse using an intermediate scope rooted at the current join + this subquery.
                 // The lambda variable name is internal-only — `$` is not a valid CEL identifier
                 // character, so this sentinel can never collide with a user-supplied lambda name.
                 AttributeMapping.Relation thisRel = chain.get(0);
-                Scope intermediate = Scope.lambda(joinFrom, sub, thisRel, "$$chain$$");
+                Scope intermediate = Scope.lambda(joinFrom, sub, thisRel, "$$chain$$",
+                        rebase(scope, correlated, sub));
                 return chainedExistsSubquery(intermediate, chain.subList(1, chain.size()), bodyBuilder);
             });
         }
@@ -681,7 +750,7 @@ public final class SpringDataQueryPlanAdapter {
             }
             Join<?, ?> joinFrom = correlated.join(rel.joinAttribute());
             sub.select(cb.literal(1));
-            Predicate body = bodyBuilder.build(sub, joinFrom);
+            Predicate body = bodyBuilder.build(sub, joinFrom, correlated);
             sub.where(body);
             return cb.exists(sub);
         }
@@ -966,8 +1035,8 @@ public final class SpringDataQueryPlanAdapter {
         }
 
         static Scope lambda(From<?, ?> from, AbstractQuery<?> parentQuery,
-                            AttributeMapping.Relation relation, String lambdaVar) {
-            return new LambdaScope(from, parentQuery, relation, lambdaVar);
+                            AttributeMapping.Relation relation, String lambdaVar, Scope outer) {
+            return new LambdaScope(from, parentQuery, relation, lambdaVar, outer);
         }
 
         record RootScope(From<?, ?> from, AbstractQuery<?> parentQuery, Map<String, AttributeMapping> mapper)
@@ -1012,10 +1081,30 @@ public final class SpringDataQueryPlanAdapter {
             }
         }
 
+        /**
+         * Scope inside a collection lambda. Variables prefixed with the lambda variable resolve
+         * against the joined collection element; anything else (e.g. another
+         * {@code request.resource.attr.*} reference in the lambda body) delegates to {@code outer}
+         * — the enclosing scope re-rooted at the subquery's correlated parent, so the produced
+         * path is a legal correlation reference.
+         */
         record LambdaScope(From<?, ?> from, AbstractQuery<?> parentQuery,
-                           AttributeMapping.Relation relation, String lambdaVar) implements Scope {
+                           AttributeMapping.Relation relation, String lambdaVar,
+                           Scope outer) implements Scope {
+
+            private boolean isLambdaRef(String cerbosVar) {
+                return cerbosVar.equals(lambdaVar) || cerbosVar.startsWith(lambdaVar + ".");
+            }
+
             @Override
             public Path<?> resolvePath(String cerbosVar) {
+                if (!isLambdaRef(cerbosVar)) {
+                    if (outer != null) {
+                        return outer.resolvePath(cerbosVar);
+                    }
+                    throw new IllegalArgumentException(
+                            "Variable '" + cerbosVar + "' does not start with lambda variable '" + lambdaVar + "'");
+                }
                 String suffix = extractLambdaSuffix(cerbosVar, lambdaVar);
                 if (suffix.isEmpty()) {
                     if (relation.defaultMemberField() != null && !relation.defaultMemberField().isEmpty()) {
@@ -1032,6 +1121,13 @@ public final class SpringDataQueryPlanAdapter {
 
             @Override
             public AttributeMapping resolveMapping(String cerbosVar) {
+                if (!isLambdaRef(cerbosVar)) {
+                    if (outer != null) {
+                        return outer.resolveMapping(cerbosVar);
+                    }
+                    throw new IllegalArgumentException(
+                            "Variable '" + cerbosVar + "' does not start with lambda variable '" + lambdaVar + "'");
+                }
                 String suffix = extractLambdaSuffix(cerbosVar, lambdaVar);
                 if (suffix.isEmpty()) {
                     return relation;
@@ -1239,8 +1335,13 @@ public final class SpringDataQueryPlanAdapter {
             case LIST_VALUE -> value.getListValue().getValuesList().stream()
                     .map(SpringDataQueryPlanAdapter::protoValueToJava)
                     .toList();
-            case STRUCT_VALUE -> value.getStructValue().getFieldsMap().entrySet().stream()
-                    .collect(Collectors.toMap(Map.Entry::getKey, e -> protoValueToJava(e.getValue())));
+            case STRUCT_VALUE -> {
+                // Not Collectors.toMap: it rejects null values, and struct fields may hold nulls.
+                Map<String, Object> struct = new java.util.LinkedHashMap<>();
+                value.getStructValue().getFieldsMap()
+                        .forEach((k, v) -> struct.put(k, protoValueToJava(v)));
+                yield struct;
+            }
             case KIND_NOT_SET -> throw new IllegalArgumentException(
                     "Protobuf Value has no kind set — the planner emitted a malformed operand");
             default -> throw new IllegalArgumentException(

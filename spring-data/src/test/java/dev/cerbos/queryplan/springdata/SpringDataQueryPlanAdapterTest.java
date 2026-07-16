@@ -178,6 +178,27 @@ class SpringDataQueryPlanAdapterTest {
         }
     }
 
+    /** Persist {@code entity}, run {@code body}, then always delete the row again. */
+    private static void withResource(ResourceEntity entity, Runnable body) {
+        EntityManager em = emf.createEntityManager();
+        em.getTransaction().begin();
+        em.persist(entity);
+        em.getTransaction().commit();
+        em.close();
+        try {
+            body.run();
+        } finally {
+            EntityManager cleanup = emf.createEntityManager();
+            cleanup.getTransaction().begin();
+            ResourceEntity managed = cleanup.find(ResourceEntity.class, entity.getId());
+            if (managed != null) {
+                cleanup.remove(managed);
+            }
+            cleanup.getTransaction().commit();
+            cleanup.close();
+        }
+    }
+
     /** Thrown by {@link #THROWING_OVERRIDE} to prove an override hook was actually invoked. */
     private static final class OverrideInvoked extends RuntimeException {
         OverrideInvoked() {
@@ -947,6 +968,171 @@ class SpringDataQueryPlanAdapterTest {
                             hierarchy(var("request.resource.attr.createdBy"), ":")),
                     "two field-reference hierarchies");
         }
+    }
+
+    // -- Operand order: the planner preserves policy source order, so a value (or folded
+    // constant) can appear BEFORE the field. Directional operators must mirror or results are
+    // silently inverted. These tests seed a real row because an empty table cannot distinguish
+    // `x < 3` from `x > 3`.
+
+    @Nested
+    class OperandOrderSemantics {
+
+        private ResourceEntity seeded() {
+            ResourceEntity r = new ResourceEntity("seed-1");
+            r.setaBool(true);
+            r.setaString("seededString");
+            r.setaNumber(5);
+            r.setOwnedBy(new java.util.ArrayList<>(java.util.List.of("user1")));
+            r.addTag("tagX", "x");
+            return r;
+        }
+
+        @Test
+        void ltValueFirstMeansFieldGreaterThan() {
+            // 3 < aNumber, with aNumber = 5 → must match. The naive (unmirrored) translation
+            // `aNumber < 3` would return 0.
+            withResource(seeded(), () -> {
+                assertEquals(1, runCount(exprOp("lt", nval(3), var("request.resource.attr.aNumber"))));
+                // Control: field-first form keeps its meaning.
+                assertEquals(0, runCount(exprOp("lt", var("request.resource.attr.aNumber"), nval(3))));
+            });
+        }
+
+        @Test
+        void gtValueFirstMeansFieldLessThan() {
+            // 10 > aNumber, with aNumber = 5 → match.
+            withResource(seeded(), () ->
+                    assertEquals(1, runCount(exprOp("gt", nval(10), var("request.resource.attr.aNumber")))));
+        }
+
+        @Test
+        void leGeValueFirstAreMirrored() {
+            withResource(seeded(), () -> {
+                // 5 <= aNumber → aNumber >= 5 → match
+                assertEquals(1, runCount(exprOp("le", nval(5), var("request.resource.attr.aNumber"))));
+                // 4 >= aNumber → aNumber <= 4 → no match
+                assertEquals(0, runCount(exprOp("ge", nval(4), var("request.resource.attr.aNumber"))));
+            });
+        }
+
+        @Test
+        void sizeValueFirstNonEmptyCheck() {
+            // 0 < size(ownedBy) → EXISTS; seeded row has one owner.
+            withResource(seeded(), () ->
+                    assertEquals(1, runCount(exprOp("lt",
+                            nval(0),
+                            exprOp("size", var("request.resource.attr.ownedBy"))))));
+        }
+
+        @Test
+        void sizeValueFirstEmptinessCheck() {
+            // 1 > size(ownedBy) → size < 1 → NOT EXISTS; seeded row is non-empty → 0.
+            withResource(seeded(), () ->
+                    assertEquals(0, runCount(exprOp("gt",
+                            nval(1),
+                            exprOp("size", var("request.resource.attr.ownedBy"))))));
+        }
+
+        @Test
+        void addFoldedConstantValueFirstIsMirrored() {
+            // (1 + 2) < aNumber → aNumber > 3, with aNumber = 5 → match.
+            withResource(seeded(), () ->
+                    assertEquals(1, runCount(exprOp("lt",
+                            exprOp("add", nval(1), nval(2)),
+                            var("request.resource.attr.aNumber")))));
+        }
+
+        @Test
+        void hasIntersectionValueFirstIsSymmetric() {
+            // hasIntersection(["user1","other"], R.attr.ownedBy) — value list first.
+            withResource(seeded(), () ->
+                    assertEquals(1, runCount(exprOp("hasIntersection",
+                            listOp("user1", "other"),
+                            var("request.resource.attr.ownedBy")))));
+        }
+
+        @Test
+        void hasIntersectionSnakeCaseAliasIsAccepted() {
+            // The PDP still accepts the deprecated has_intersection spelling in policies.
+            withResource(seeded(), () ->
+                    assertEquals(1, runCount(exprOp("has_intersection",
+                            var("request.resource.attr.ownedBy"),
+                            listOp("user1")))));
+        }
+
+        @Test
+        void overrideIsConsultedUnderMirroredOperator() {
+            // 3 < aNumber builds a gt predicate — the override must be looked up as "gt".
+            Operand cond = exprOp("lt", nval(3), var("request.resource.attr.aNumber"));
+            assertThrows(OverrideInvoked.class,
+                    () -> runCount(cond, Map.of("gt", THROWING_OVERRIDE)));
+        }
+    }
+
+    // -- Lambda bodies referencing outer (non-lambda) resource attributes --
+
+    @Nested
+    class OuterReferencesInsideLambda {
+
+        @Test
+        void outerAttributeInsideExistsLambda() {
+            // R.attr.tags.exists(t, t.name == "x" && R.attr.aBool) — the PDP keeps the residual
+            // R.attr.aBool INSIDE the lambda body; it must resolve against the correlated outer
+            // entity, not the joined tag.
+            ResourceEntity r = new ResourceEntity("seed-2");
+            r.setaBool(true);
+            r.setaNumber(1);
+            r.setaString("s");
+            r.addTag("tagX", "x");
+
+            withResource(r, () -> {
+                Operand cond = exprOp("exists",
+                        var("request.resource.attr.tags"),
+                        lambda("t", exprOp("and",
+                                exprOp("eq", var("t.name"), sval("x")),
+                                var("request.resource.attr.aBool"))));
+                assertEquals(1, runCount(cond));
+
+                // Same shape with a non-matching outer comparison → excluded.
+                Operand condNoMatch = exprOp("exists",
+                        var("request.resource.attr.tags"),
+                        lambda("t", exprOp("and",
+                                exprOp("eq", var("t.name"), sval("x")),
+                                exprOp("eq", var("request.resource.attr.aBool"), bval(false)))));
+                assertEquals(0, runCount(condNoMatch));
+            });
+        }
+    }
+
+    // -- Malformed / hostile operand shapes --
+
+    @Test
+    void mapLambdaWithWrongArityThrowsCleanly() {
+        // A malformed lambda inside map() must produce IllegalArgumentException, not
+        // IndexOutOfBoundsException.
+        Operand mapExpr = exprOp("map",
+                var("request.resource.attr.tags"),
+                exprOp("lambda", var("t")));
+        assertConditionThrows(
+                exprOp("hasIntersection", mapExpr, listOp("x")),
+                "map lambda requires exactly 2 operands");
+    }
+
+    @Test
+    void structValueWithNullEntryDoesNotThrow() {
+        // Struct fields may hold nulls; Collectors.toMap would NPE on them.
+        com.google.protobuf.Struct struct = com.google.protobuf.Struct.newBuilder()
+                .putFields("a", Value.newBuilder().setNullValue(NullValue.NULL_VALUE).build())
+                .putFields("b", Value.newBuilder().setStringValue("x").build())
+                .build();
+        Object converted = SpringDataQueryPlanAdapter.protoValueToJava(
+                Value.newBuilder().setStructValue(struct).build());
+        assertInstanceOf(Map.class, converted);
+        Map<?, ?> map = (Map<?, ?>) converted;
+        assertEquals(2, map.size());
+        assertNull(map.get("a"));
+        assertEquals("x", map.get("b"));
     }
 
     @Test

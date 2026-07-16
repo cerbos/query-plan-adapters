@@ -71,11 +71,11 @@ List<Contact> contacts = contactRepository.findAll(result.toSpecification());
 
 `Result.toSpecification()` returns a Specification that captures all three plan kinds, so you don't need to switch on the result kind unless you want to short-circuit the DB hit:
 
-| Kind                   | Specification                          |
-|------------------------|----------------------------------------|
-| `Result.AlwaysAllowed` | always-true predicate (`1=1`)          |
-| `Result.AlwaysDenied`  | always-false predicate (`1=0`)         |
-| `Result.Conditional`   | the translated predicate tree          |
+| Kind                   | Specification                                                |
+|------------------------|--------------------------------------------------------------|
+| `Result.AlwaysAllowed` | `null` predicate — Spring Data omits the `WHERE` clause      |
+| `Result.AlwaysDenied`  | always-false predicate (`1=0`)                               |
+| `Result.Conditional`   | the translated predicate tree                                |
 
 Compose it with your own filters:
 

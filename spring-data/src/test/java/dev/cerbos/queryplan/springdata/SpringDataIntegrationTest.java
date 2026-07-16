@@ -1161,6 +1161,41 @@ class SpringDataIntegrationTest {
         }
     }
 
+    // -- Operand order: value-first comparisons and outer references inside lambdas --
+    // The planner preserves policy source order; these actions pin the shapes end-to-end.
+
+    @Nested
+    class OperandOrder {
+
+        @Test
+        void valueFirstLt() {
+            // 1 < aNumber → aNumber > 1 → r2 (2), r3 (3). An unmirrored translation
+            // (aNumber < 1) would return [].
+            assertEquals(List.of("2", "3"), run("value-first-lt"));
+        }
+
+        @Test
+        void valueFirstSize() {
+            // 0 < size(ownedBy) → non-empty → all three.
+            assertEquals(List.of("1", "2", "3"), run("value-first-size"));
+        }
+
+        @Test
+        void valueFirstIntersect() {
+            // hasIntersection(["user1","userX"], ownedBy) → r1 [user1,user2], r3 [user1].
+            assertEquals(List.of("1", "3"), run("value-first-intersect"));
+        }
+
+        @Test
+        void outerAttributeInsideLambda() {
+            // tags.exists(tag, tag.name == "public" && R.attr.aBool)
+            //   r1: aBool=true, has public tag → ✓
+            //   r2: aBool=false             → ✗
+            //   r3: aBool=true, has public tag → ✓
+            assertEquals(List.of("1", "3"), runNested("outer-attr-in-lambda"));
+        }
+    }
+
     @Nested
     class HierarchyOperators {
 
