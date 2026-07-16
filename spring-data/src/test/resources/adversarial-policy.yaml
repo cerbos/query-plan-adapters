@@ -1,0 +1,194 @@
+# yaml-language-server: $schema=https://api.cerbos.dev/latest/cerbos/policy/v1/Policy.schema.json
+#
+# Hostile policy shapes for the adversarial differential test. Each action is exercised through
+# a REAL PDP and the adapter's filtered result set is compared against an oracle computed by
+# calling the check API per seeded row — no hand-computed expectations.
+
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: adversarial
+  rules:
+    # -- value-first comparisons (planner preserves source order) --
+    - actions: ["vf-le"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 3 <= R.attr.aNumber
+
+    - actions: ["vf-ge"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 2 >= R.attr.aNumber
+
+    - actions: ["vf-ne"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '"one" != R.attr.aString'
+
+    # -- in normalization (single element -> eq; empty -> always-denied) --
+    - actions: ["in-single"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aString in ["one"]
+
+    - actions: ["in-empty"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aString in []
+
+    # -- LIKE metacharacters must be escaped, not interpreted --
+    - actions: ["like-percent"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aString.startsWith("100%")
+
+    - actions: ["like-underscore"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aString.contains("a_b")
+
+    - actions: ["like-backslash"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aString.endsWith("\\")
+
+    # -- string edge values --
+    - actions: ["unicode-eq"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aString == "héllo🚀"
+
+    - actions: ["empty-string-eq"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aString == ""
+
+    # -- numeric edges --
+    - actions: ["neg-number"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aNumber < -1
+
+    - actions: ["double-threshold"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aNumber >= 1.5
+
+    # -- collection macro semantics on empty/multi collections --
+    - actions: ["all-on-empty"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.tags.all(t, t.name == "public")
+
+    - actions: ["exists-on-empty"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.tags.exists(t, t.name == "public")
+
+    - actions: ["exists-one-multi"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.tags.exists_one(t, t.name == "public")
+
+    - actions: ["not-exists"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!R.attr.tags.exists(t, t.name == "private")'
+
+    # -- outer resource attribute at TWO lambda depths (correlation-rebase probe) --
+    - actions: ["outer-attr-depth2"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.categories.exists(c, c.subCategories.exists(s, s.name == "finance" && R.attr.aBool))
+
+    # -- principal list folded into a lambda-scoped in --
+    - actions: ["lambda-in-principal"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.tags.exists(t, t.name in P.attr.allowedTags)
+
+    # -- logical shapes --
+    - actions: ["nary-and"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          all:
+            of:
+              - expr: R.attr.aBool
+              - expr: R.attr.aNumber >= 0
+              - expr: R.attr.aString != "one"
+
+    - actions: ["double-negation"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(!R.attr.aBool)'
+
+    - actions: ["triple-negation"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(!(!R.attr.aBool))'
+
+    # not over NOT EXISTS (size==0) — negation composing over a negated subquery predicate
+    - actions: ["not-empty"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(size(R.attr.tags) == 0)'
+
+    # -- null-attribute alignment: CEL missing-attr error (deny) vs SQL NULL (excluded) --
+    - actions: ["optional-ne"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aOptionalString != "x"
+
+    # -- documented unsupported shape: field-to-field inside a lambda must throw cleanly --
+    - actions: ["lambda-field-to-field"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.tags.exists(t, t.name == R.attr.aString)

@@ -101,6 +101,17 @@ public final class SpringDataQueryPlanAdapter {
             return applyLeaf("eq", path, true);
         }
 
+        /**
+         * Logical negation with a junction barrier. Hibernate 6's SQM negation is stateful for
+         * comparison predicates: {@code cb.not(cb.not(p))} stays negated instead of toggling
+         * back (verified against Hibernate 6.6.18 — a double-negated {@code eq} still renders
+         * a single {@code NOT}). Wrapping in a single-element conjunction gives each {@code not}
+         * a fresh node to negate, so nested negations compose correctly.
+         */
+        private Predicate negate(Predicate p) {
+            return cb.not(cb.and(p));
+        }
+
         private Predicate traverseExpression(PlanResourcesFilter.Expression expression, Scope scope) {
             String op = expression.getOperator();
             List<Operand> operands = expression.getOperandsList();
@@ -114,7 +125,7 @@ public final class SpringDataQueryPlanAdapter {
                     if (operands.size() != 1) {
                         throw new IllegalArgumentException("not requires exactly 1 operand");
                     }
-                    yield cb.not(traverse(operands.get(0), scope));
+                    yield negate(traverse(operands.get(0), scope));
                 }
                 case "exists", "exists_one", "all", "except", "filter" ->
                         handleCollectionOperator(op, operands, scope);
@@ -277,10 +288,15 @@ public final class SpringDataQueryPlanAdapter {
 
         @SuppressWarnings({"rawtypes", "unchecked"})
         private Predicate defaultLeaf(String op, Path<?> path, Object value) {
-            Path raw = path;
+            // Fractional constants compare in double space: protoValueToJava yields Double only
+            // for non-whole numbers, and Hibernate refuses to coerce e.g. 1.5 into an
+            // Integer-typed path ("not a whole number") — but `intColumn >= 1.5` is legal CEL
+            // that the planner emits verbatim.
+            jakarta.persistence.criteria.Expression raw =
+                    (value instanceof Double) ? path.as(Double.class) : path;
             return switch (op) {
-                case "eq" -> cb.equal(path, value);
-                case "ne" -> cb.notEqual(path, value);
+                case "eq" -> cb.equal(raw, value);
+                case "ne" -> cb.notEqual(raw, value);
                 case "lt" -> cb.lessThan(raw, (Comparable) value);
                 case "gt" -> cb.greaterThan(raw, (Comparable) value);
                 case "le" -> cb.lessThanOrEqualTo(raw, (Comparable) value);
@@ -589,7 +605,7 @@ public final class SpringDataQueryPlanAdapter {
                 return existsSubquery(scope, rel, (sub, joinFrom, correlated) -> cb.conjunction());
             }
             if (empty) {
-                return cb.not(existsSubquery(scope, rel, (sub, joinFrom, correlated) -> cb.conjunction()));
+                return negate(existsSubquery(scope, rel, (sub, joinFrom, correlated) -> cb.conjunction()));
             }
             throw new IllegalArgumentException(
                     "Unsupported size comparison: size(" + var + ") " + op + " " + numValue
@@ -636,10 +652,10 @@ public final class SpringDataQueryPlanAdapter {
                         (sub, joinFrom, correlated) -> traverse(body,
                                 Scope.lambda(joinFrom, sub, rel, lambdaVarName, Scope.rebase(scope, correlated, sub))));
                 case "except" -> existsSubquery(scope, rel,
-                        (sub, joinFrom, correlated) -> cb.not(traverse(body,
+                        (sub, joinFrom, correlated) -> negate(traverse(body,
                                 Scope.lambda(joinFrom, sub, rel, lambdaVarName, Scope.rebase(scope, correlated, sub)))));
-                case "all" -> cb.not(existsSubquery(scope, rel,
-                        (sub, joinFrom, correlated) -> cb.not(traverse(body,
+                case "all" -> negate(existsSubquery(scope, rel,
+                        (sub, joinFrom, correlated) -> negate(traverse(body,
                                 Scope.lambda(joinFrom, sub, rel, lambdaVarName, Scope.rebase(scope, correlated, sub))))));
                 case "exists_one" -> {
                     Subquery<Long> sub = scope.parentQuery().subquery(Long.class);
