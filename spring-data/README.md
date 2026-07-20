@@ -119,6 +119,8 @@ Map each `request.resource.attr.<name>` to a JPA path or a relation:
 | `size(string)`                   | `cb.length(column)` (see Gotchas for astral-character caveat)       |
 | Field-to-field (`R.attr.a == R.attr.b`) | `cb.equal(pathA, pathB)` and friends for `eq`/`ne`/`lt`/`gt`/`le`/`ge`, incl. inside lambdas |
 | Ternary (`cond ? a : b`)         | Predicate rewrite: `(cond AND cmp(a, v)) OR (NOT cond AND cmp(b, v))` — nested, boolean-position, and value-first forms compose; constant residues fold (see Gotchas for `NULL` semantics) |
+| Arithmetic in comparisons (`add`/`sub`/`mult`/`div`) | `cb.sum`/`diff`/`prod`/`quot` in double space, compared via `eq`/`ne`/`lt`/`gt`/`le`/`ge`; nested and both-sides shapes compose (see Gotchas — CEL attribute arithmetic is double arithmetic) |
+| Field-to-field `contains`/`startsWith`/`endsWith` | `cb.like` over a `REPLACE`-escaped column-derived pattern (`\`, `%`, `_`), with an `IS NOT NULL` needle guard |
 | `exists(coll, lambda)`           | Correlated `EXISTS` with lambda body                                |
 | `exists_one(coll, lambda)`       | Correlated `(SELECT COUNT...) = 1`                                  |
 | `all(coll, lambda)`              | `NOT EXISTS (... AND NOT(body))`                                    |
@@ -151,11 +153,11 @@ SQL fragments), or wait for adapter support.
 
 | Construct                                       | Example CEL                                       | Notes |
 |-------------------------------------------------|---------------------------------------------------|-------|
-| Arithmetic (`add`/`sub`/`mult`/`div`/`mod`)     | `R.attr.aNumber + 1 > 2`                          | `add` is supported only as constant folding inside `eq`/`ne`; other arithmetic on document fields requires a column-expression engine the Criteria API doesn't expose. |
+| `mod`                                           | `R.attr.aNumber % 2 == 0`                         | CEL `%` is int-only and Cerbos attribute numbers are doubles, so `%` on an attribute always errors → the check API denies every row; translating to SQL `MOD` would fabricate matches. |
+| Arithmetic on non-numeric operands              | `R.attr.aString + "x" < "y"`                      | Ordering through string concatenation is not translated; `add` string folding remains `eq`/`ne`-only. |
 | Regex match                                     | `R.attr.aString.matches("^foo.*")`                | JPA has no portable regex predicate; override per-dialect (`regexp_like`, `~`, `REGEXP`). |
 | List indexing                                   | `R.attr.tags[0] == "x"`                           | JPA collections are unordered sets — no positional access. |
 | Type casts (`int(...)` / `double(...)` / `string(...)`) | `int(R.attr.aString) > 0`                 | No portable `CAST` in Criteria; override per-dialect. |
-| Field-to-field `contains`/`startsWith`/`endsWith` | `R.attr.aString.contains(R.attr.createdBy)`     | Comparison operators support field-to-field; LIKE against a column-derived pattern has no portable escaping. |
 | `eq(map(...), [...])`                           | `R.attr.tags.map(t, t.id) == ["tag1", "tag2"]`    | Use `hasIntersection(map(...), [...])` instead. |
 
 ## Gotchas
@@ -173,6 +175,26 @@ Multilingual Plane (emoji, some CJK extensions): `size("héllo🚀")` is 6 in CE
 lengths near those values, rows can be filtered differently than a `check` call would
 decide. Keep length thresholds away from values that straddle the difference, or avoid
 `size(string)` in policies over data that contains astral characters.
+
+### Attribute arithmetic is double arithmetic — use double literals in policies
+
+Cerbos attribute values arrive as protobuf numbers, which CEL treats as doubles.
+CEL arithmetic has no int/double cross-type overloads, so `R.attr.aNumber + 1`
+(int literal) is an evaluation error at `check` time — every row is denied — while
+`R.attr.aNumber + 1.0` evaluates normally. The planner erases the distinction (both
+forms produce an identical wire plan), so the adapter translates the double reading,
+the only satisfiable one: `/` is true double division (`5 / 2.0 == 2.5`), never
+integer truncation. Write double literals (`1.0`, `2.0`) in policy arithmetic over
+attributes, or the plan-based filter and per-resource `check` calls will disagree.
+
+### Field-to-field string matching builds its pattern with `REPLACE`
+
+`R.attr.a.contains(R.attr.b)` becomes `a LIKE CONCAT('%', <escaped b>, '%') ESCAPE '\'`
+where `b` is escaped via nested `REPLACE` calls (`\`, `%`, `_`) — chosen because
+`REPLACE` is available on H2, PostgreSQL, MySQL, Oracle, and SQL Server. A `NULL`
+needle column excludes the row (`IS NOT NULL` guard), which matches CEL
+missing-attribute → deny and also defends against dialects whose `CONCAT` treats
+`NULL` as `''` (which would otherwise turn the pattern into match-everything `'%%'`).
 
 ### Ternary with a `NULL` condition column excludes the row
 

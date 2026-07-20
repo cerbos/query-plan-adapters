@@ -283,3 +283,87 @@ resourcePolicy:
       condition:
         match:
           expr: '(R.attr.aOptionalString != "x" ? R.attr.aNumber : 0) > 1'
+
+    # -- field-to-field contains/startsWith/endsWith: the needle is a COLUMN, so its LIKE
+    # metacharacters (b1/b2/b3 seeds hold _ % \) must be escaped dynamically; NULL needle
+    # rows (a2/a4/a8) are a CEL missing-attr error (deny) and must be excluded in SQL too.
+    - actions: ["f2f-contains"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aString.contains(R.attr.aOptionalString)
+
+    - actions: ["f2f-startswith"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aString.startsWith(R.attr.aOptionalString)
+
+    - actions: ["f2f-endswith"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aString.endsWith(R.attr.aOptionalString)
+
+    # -- arithmetic in comparisons. Literals are double-typed on purpose: Cerbos attribute
+    # values are CEL doubles, so int-literal arithmetic (e.g. R.attr.aNumber + 1) is a CEL
+    # no-overload error that denies EVERY row at check time — and the wire plan is identical
+    # for both spellings, so the adapter translates the (only satisfiable) double semantics.
+    - actions: ["arith-add"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aNumber + 1.0 > 2.0'
+
+    # Value-first: constant on the left, arithmetic on the right (mirrored by the adapter).
+    - actions: ["arith-vf"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '2.0 < R.attr.aNumber + 1.0'
+
+    - actions: ["arith-sub"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aNumber - 3.0 <= 0.0'
+
+    # Negative multiplier: emitted as SQL-side arithmetic, so no inequality flipping.
+    # Negative seeds (a2:-2, a5:-5, b3:-4) sit on the excluded side.
+    - actions: ["arith-mult-neg"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aNumber * -2.0 < 3.0'
+
+    # Division truncation probe: 2/2.0 == 1.0 matches, but 3/2.0 == 1.5 must NOT — an
+    # adapter doing integer division would wrongly include the aNumber==3 seed (a6).
+    - actions: ["arith-div"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aNumber / 2.0 == 1.0'
+
+    # Fractional threshold over division (double-space comparison end to end).
+    - actions: ["arith-div-frac"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aNumber / 2.0 >= 1.5'
+
+    # Arithmetic on BOTH sides of the comparison: n + 1 > n * 2 ⇔ n < 1.
+    - actions: ["arith-both"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aNumber + 1.0 > R.attr.aNumber * 2.0'

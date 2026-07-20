@@ -100,7 +100,14 @@ class AdversarialConformanceTest {
             // Field-to-field witness: aString == aOptionalString == a tag name, so the
             // field-to-field and lambda-field-to-field oracles are non-degenerate.
             new Seed("a9", true, "same", 4, "same",
-                    List.of(new Tag("t9a", "same")), List.of())
+                    List.of(new Tag("t9a", "same")), List.of()),
+            // Field-to-field LIKE witnesses: the NEEDLE column (aOptionalString) holds LIKE
+            // metacharacters. b1 discriminates escaping for all three ops ("oneXtwo" does not
+            // literally contain "one_two", but an unescaped '_' wildcard would match the 'X');
+            // b2/b3 are literal % and \ matches that only work when the escape is correct.
+            new Seed("b1", true, "oneXtwo", 7, "one_two", List.of(), List.of()),
+            new Seed("b2", false, "50%_off", 6, "%_o", List.of(), List.of()),
+            new Seed("b3", true, "back\\slash", -4, "k\\s", List.of(), List.of())
     );
 
     private static GenericContainer<?> cerbos;
@@ -251,6 +258,9 @@ class AdversarialConformanceTest {
             "size-threshold", "size-filter-count", "string-size",
             "ternary-cmp", "ternary-expr-cond", "ternary-nested", "ternary-negated",
             "ternary-bare", "ternary-value-first", "ternary-null-cond",
+            "f2f-contains", "f2f-startswith", "f2f-endswith",
+            "arith-add", "arith-vf", "arith-sub", "arith-mult-neg",
+            "arith-div", "arith-div-frac", "arith-both",
     })
     void adapterMatchesCheckOracle(String action) {
         List<String> oracle = oracleAllowedIds(action);

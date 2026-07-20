@@ -984,7 +984,8 @@ class SpringDataIntegrationTest {
     // -- CEL primitives (PR #223) --
     // `empty-collection` (size(coll) == 0) is natively supported via the existing emptiness
     // path in trySizeComparison, and the CEL ternary (`if(cond, then, else)`) is rewritten into
-    // an OR of guarded branch predicates. Arithmetic, regex, casts, and list indexing still
+    // an OR of guarded branch predicates. Arithmetic (add/sub/mult/div) in comparisons is
+    // translated as double-space SQL arithmetic. mod, regex, casts, and list indexing still
     // throw — the Spring Data adapter has no shape for them in its Criteria-based predicate
     // builder.
 
@@ -998,28 +999,35 @@ class SpringDataIntegrationTest {
         }
 
         @Test
-        void arithAddThrows() {
-            // The planner emits gt(add(field, 1.0), 2.0); handleAddComparison rejects non-eq/ne.
-            assertActionThrows("arith-add", FIELD_MAP, "add", "gt");
+        void arithAdd() {
+            // aNumber + 1.0 > 2.0 → aNumber > 1 (double-space SQL arithmetic).
+            //   r1: 1+1=2 > 2 ✗   r2: 3 > 2 ✓   r3: 4 > 2 ✓
+            assertEquals(List.of("2", "3"), run("arith-add"));
         }
 
         @Test
-        void arithSubThrows() {
-            assertActionThrows("arith-sub", FIELD_MAP, "sub");
+        void arithSub() {
+            // aNumber - 1.0 < 2.0 → aNumber < 3 → r1 (1), r2 (2).
+            assertEquals(List.of("1", "2"), run("arith-sub"));
         }
 
         @Test
-        void arithMultThrows() {
-            assertActionThrows("arith-mult", FIELD_MAP, "mult");
+        void arithMult() {
+            // aNumber * 2.0 > 2.0 → aNumber > 1 → r2, r3.
+            assertEquals(List.of("2", "3"), run("arith-mult"));
         }
 
         @Test
-        void arithDivThrows() {
-            assertActionThrows("arith-div", FIELD_MAP, "div");
+        void arithDiv() {
+            // aNumber / 2.0 > 0.0 → aNumber > 0 → all rows. CEL division on attributes is
+            // double division, so the adapter divides in double space (no truncation).
+            assertEquals(List.of("1", "2", "3"), run("arith-div"));
         }
 
         @Test
         void arithModThrows() {
+            // int(aNumber) % 2 == 0 — CEL % is integer-only while attribute values are
+            // doubles, so mod comparisons stay unsupported (see tryArithmeticComparison).
             assertActionThrows("arith-mod", FIELD_MAP, "mod");
         }
 

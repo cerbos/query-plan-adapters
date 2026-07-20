@@ -149,6 +149,10 @@ public final class SpringDataQueryPlanAdapter {
                     if (sizePred != null) {
                         yield sizePred;
                     }
+                    Predicate arithPred = tryArithmeticComparison(nb.op(), nb.operands(), scope);
+                    if (arithPred != null) {
+                        yield arithPred;
+                    }
                     yield handleLeafOperator(nb.op(), nb.operands(), scope);
                 }
             };
@@ -480,10 +484,9 @@ public final class SpringDataQueryPlanAdapter {
         }
 
         /**
-         * Compare two mapped columns directly (eq/ne/lt/gt/le/ge). Operand source order is
-         * preserved — two variables rank equally, so {@link NormalizedBinary} never swaps them.
-         * Non-comparison operators (contains/startsWith/endsWith) have no portable JPA
-         * column-to-column translation and still throw.
+         * Compare two mapped columns directly (eq/ne/lt/gt/le/ge) or pattern-match one column
+         * against another (contains/startsWith/endsWith). Operand source order is preserved —
+         * two variables rank equally, so {@link NormalizedBinary} never swaps them.
          */
         @SuppressWarnings({"rawtypes", "unchecked"})
         private Predicate fieldToFieldComparison(String op, String leftVar, String rightVar,
@@ -497,10 +500,48 @@ public final class SpringDataQueryPlanAdapter {
                 case "gt" -> cb.greaterThan(left, right);
                 case "le" -> cb.lessThanOrEqualTo(left, right);
                 case "ge" -> cb.greaterThanOrEqualTo(left, right);
+                case "contains" -> fieldToFieldLike(left, right, true, true);
+                case "startsWith" -> fieldToFieldLike(left, right, false, true);
+                case "endsWith" -> fieldToFieldLike(left, right, true, false);
                 default -> throw new IllegalArgumentException(
                         "Field-to-field comparison is not supported for operator '" + op + "': "
                                 + leftVar + " vs " + rightVar);
             };
+        }
+
+        /**
+         * {@code haystackColumn LIKE wildcards(escape(needleColumn))} — the column-to-column
+         * analogue of the constant LIKE path in {@link #defaultLeaf}. The needle is data, so its
+         * LIKE metacharacters are escaped dynamically with nested {@code REPLACE} (portable:
+         * H2/Postgres/MySQL/Oracle/SQL Server): {@code \} first, then {@code %} and {@code _},
+         * mirroring {@link PlanValues#escapeLike} and the same explicit {@code '\'} escape char.
+         *
+         * <p>The explicit {@code IS NOT NULL} guard on the needle matches CEL (a missing
+         * attribute is an evaluation error → deny) and also defends against dialects whose
+         * {@code CONCAT} treats NULL as {@code ''}, which would otherwise turn a NULL needle
+         * into a match-anything {@code '%%'} pattern.
+         */
+        private Predicate fieldToFieldLike(jakarta.persistence.criteria.Expression<?> haystack,
+                                           jakarta.persistence.criteria.Expression<?> needle,
+                                           boolean leadingWildcard, boolean trailingWildcard) {
+            jakarta.persistence.criteria.Expression<String> escaped =
+                    needle.as(String.class);
+            escaped = cb.function("replace", String.class,
+                    escaped, cb.literal("\\"), cb.literal("\\\\"));
+            escaped = cb.function("replace", String.class,
+                    escaped, cb.literal("%"), cb.literal("\\%"));
+            escaped = cb.function("replace", String.class,
+                    escaped, cb.literal("_"), cb.literal("\\_"));
+            jakarta.persistence.criteria.Expression<String> pattern = escaped;
+            if (leadingWildcard) {
+                pattern = cb.concat(cb.literal("%"), pattern);
+            }
+            if (trailingWildcard) {
+                pattern = cb.concat(pattern, cb.literal("%"));
+            }
+            return cb.and(
+                    cb.isNotNull(needle),
+                    cb.like(haystack.as(String.class), pattern, '\\'));
         }
 
         /**
@@ -539,6 +580,150 @@ public final class SpringDataQueryPlanAdapter {
                         "%" + PlanValues.escapeLike(String.valueOf(value)), '\\');
                 default -> throw new IllegalArgumentException("Unsupported operator: " + op);
             };
+        }
+
+        // -- arithmetic (add/sub/mult/div) as a comparison operand --
+
+        /** CEL arithmetic operators that can appear as an operand of a comparison. */
+        private static final Set<String> ARITHMETIC_OPS = Set.of("add", "sub", "mult", "div", "mod");
+
+        /**
+         * Translate {@code cmp(arith(...), other)} — e.g. {@code R.attr.aNumber + 1.0 > 2.0}
+         * arriving as {@code gt(add(variable, value(1)), value(2))} — by emitting the arithmetic
+         * on the SQL side ({@code cb.sum}/{@code diff}/{@code prod}/{@code quot}) and comparing.
+         *
+         * <p>Everything is computed and compared in DOUBLE space. This is not a convenience:
+         * Cerbos attribute values are protobuf {@code Value} numbers, i.e. ALWAYS CEL doubles at
+         * check time, so the only arithmetic that can evaluate without a no-overload error is
+         * double-typed — verified against a live PDP: {@code R.attr.n + 1} (int literal) denies
+         * every row, {@code + 1.0} works, and {@code / 2.0} is true double division
+         * ({@code 5 / 2.0 == 2.5}). Integer truncation is therefore never observable through the
+         * check API, and the wire plan erases the int/double distinction anyway (both arrive as
+         * {@code number_value}). Emitting the arithmetic (rather than solving algebraically)
+         * also means multiplication/division by negative constants needs no inequality flipping.
+         *
+         * <p>{@code mod} stays unsupported: CEL {@code %} has no double overload, so on
+         * attribute values it always errors (deny) — translating it to SQL {@code MOD} would
+         * fabricate rows the PDP denies.
+         *
+         * @return the predicate, or {@code null} if this comparison involves no arithmetic
+         *         expression or the shape is owned by the {@code add} fold/solve path (which
+         *         also handles string concatenation and the override hooks)
+         */
+        private Predicate tryArithmeticComparison(String op, List<Operand> operands, Scope scope) {
+            if (!TERNARY_COMPARISONS.contains(op) || operands.size() != 2) {
+                return null;
+            }
+            boolean hasArith = operands.stream().anyMatch(o ->
+                    o.getNodeCase() == Operand.NodeCase.EXPRESSION
+                            && ARITHMETIC_OPS.contains(o.getExpression().getOperator()));
+            if (!hasArith) {
+                return null;
+            }
+            if (addFoldSolveOwns(op, operands.get(0), operands.get(1))
+                    || addFoldSolveOwns(op, operands.get(1), operands.get(0))) {
+                return null;
+            }
+            jakarta.persistence.criteria.Expression<Double> left =
+                    resolveNumericExpression(operands.get(0), scope);
+            jakarta.persistence.criteria.Expression<Double> right =
+                    resolveNumericExpression(operands.get(1), scope);
+            return switch (op) {
+                case "eq" -> cb.equal(left, right);
+                case "ne" -> cb.notEqual(left, right);
+                case "lt" -> cb.lt(left, right);
+                case "gt" -> cb.gt(left, right);
+                case "le" -> cb.le(left, right);
+                case "ge" -> cb.ge(left, right);
+                default -> throw new IllegalArgumentException(
+                        "Unsupported arithmetic comparison operator: " + op);
+            };
+        }
+
+        /**
+         * Whether {@code cmp(candidate, other)} is a shape {@link #handleAddComparison} already
+         * translates — those keep their existing path (constant folding, string concat
+         * solving, and the {@link OperatorFunction} override hooks): {@code add(value, value)}
+         * against a field for any operator, and {@code add} of one field and one value against
+         * a value for eq/ne.
+         */
+        private static boolean addFoldSolveOwns(String op, Operand candidate, Operand other) {
+            if (candidate.getNodeCase() != Operand.NodeCase.EXPRESSION
+                    || !"add".equals(candidate.getExpression().getOperator())
+                    || candidate.getExpression().getOperandsCount() != 2) {
+                return false;
+            }
+            Operand l = candidate.getExpression().getOperands(0);
+            Operand r = candidate.getExpression().getOperands(1);
+            boolean bothValues = l.getNodeCase() == Operand.NodeCase.VALUE
+                    && r.getNodeCase() == Operand.NodeCase.VALUE;
+            if (bothValues && other.getNodeCase() == Operand.NodeCase.VARIABLE) {
+                return true; // fold path
+            }
+            boolean oneFieldOneValue =
+                    (l.getNodeCase() == Operand.NodeCase.VARIABLE
+                            && r.getNodeCase() == Operand.NodeCase.VALUE)
+                    || (l.getNodeCase() == Operand.NodeCase.VALUE
+                            && r.getNodeCase() == Operand.NodeCase.VARIABLE);
+            return ("eq".equals(op) || "ne".equals(op))
+                    && oneFieldOneValue
+                    && other.getNodeCase() == Operand.NodeCase.VALUE; // solve path
+        }
+
+        /**
+         * Resolve a comparison operand to a numeric SQL expression in double space:
+         * variable → column cast to double; value → double literal; nested
+         * add/sub/mult/div → recursive {@code cb.sum}/{@code diff}/{@code prod}/{@code quot}.
+         */
+        private jakarta.persistence.criteria.Expression<Double> resolveNumericExpression(
+                Operand operand, Scope scope) {
+            switch (operand.getNodeCase()) {
+                case VARIABLE -> {
+                    return scope.resolvePath(operand.getVariable()).as(Double.class);
+                }
+                case VALUE -> {
+                    Object v = PlanValues.protoValueToJava(operand.getValue());
+                    if (!(v instanceof Number n)) {
+                        throw new IllegalArgumentException(
+                                "Arithmetic comparison requires numeric operands, got "
+                                        + typeName(v));
+                    }
+                    return cb.literal(n.doubleValue());
+                }
+                case EXPRESSION -> {
+                    PlanResourcesFilter.Expression expr = operand.getExpression();
+                    String op = expr.getOperator();
+                    if ("mod".equals(op)) {
+                        throw new IllegalArgumentException(
+                                "mod is not supported in comparisons: CEL % is integer-only and "
+                                        + "attribute values are always doubles at check time, so "
+                                        + "the condition can never be satisfied by the PDP");
+                    }
+                    if (!ARITHMETIC_OPS.contains(op)) {
+                        throw new IllegalArgumentException(
+                                "Unexpected " + op + "() expression inside an arithmetic "
+                                        + "comparison operand");
+                    }
+                    if (expr.getOperandsCount() != 2) {
+                        throw new IllegalArgumentException(op + " requires exactly 2 operands");
+                    }
+                    jakarta.persistence.criteria.Expression<Double> l =
+                            resolveNumericExpression(expr.getOperands(0), scope);
+                    jakarta.persistence.criteria.Expression<Double> r =
+                            resolveNumericExpression(expr.getOperands(1), scope);
+                    return switch (op) {
+                        case "add" -> cb.sum(l, r);
+                        case "sub" -> cb.diff(l, r);
+                        case "mult" -> cb.prod(l, r);
+                        case "div" -> cb.quot(l, r).as(Double.class);
+                        default -> throw new IllegalArgumentException(
+                                "Unsupported arithmetic operator: " + op);
+                    };
+                }
+                default -> throw new IllegalArgumentException(
+                        "Unexpected operand type in arithmetic comparison: "
+                                + operand.getNodeCase());
+            }
         }
 
         // -- add (fold + solve for string concat / numeric translation) --

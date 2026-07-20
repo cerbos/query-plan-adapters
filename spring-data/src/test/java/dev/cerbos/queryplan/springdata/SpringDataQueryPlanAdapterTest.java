@@ -680,42 +680,8 @@ class SpringDataQueryPlanAdapterTest {
                     nval(0))));
         }
 
-        @Test
-        void arithAddInComparisonThrows() {
-            // gt(add(field, 1.0), 2.0) — handleAddComparison rejects non-eq/ne ops.
-            assertConditionThrows(
-                    exprOp("gt",
-                            exprOp("add", var("request.resource.attr.aNumber"), nval(1)),
-                            nval(2)),
-                    "add", "gt");
-        }
-
-        @Test
-        void arithSubThrows() {
-            assertConditionThrows(
-                    exprOp("lt",
-                            exprOp("sub", var("request.resource.attr.aNumber"), nval(1)),
-                            nval(2)),
-                    "sub");
-        }
-
-        @Test
-        void arithMultThrows() {
-            assertConditionThrows(
-                    exprOp("gt",
-                            exprOp("mult", var("request.resource.attr.aNumber"), nval(2)),
-                            nval(2)),
-                    "mult");
-        }
-
-        @Test
-        void arithDivThrows() {
-            assertConditionThrows(
-                    exprOp("gt",
-                            exprOp("div", var("request.resource.attr.aNumber"), nval(2)),
-                            nval(0)),
-                    "div");
-        }
+        // add/sub/mult/div appearing as a comparison operand are supported (double-space SQL
+        // arithmetic) — see ArithmeticComparisons. Only mod remains rejected.
 
         @Test
         void arithModThrows() {
@@ -855,13 +821,14 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         @Test
-        void fieldToFieldNonComparisonOperatorStillThrows() {
-            // contains(var, var) has no portable JPA translation — the specific message stays.
+        void fieldToFieldUnsupportedOperatorStillThrows() {
+            // contains/startsWith/endsWith(var, var) are supported (see FieldToFieldStringMatch);
+            // anything else without a column-to-column translation keeps the specific message.
             assertConditionThrows(
-                    exprOp("contains",
+                    exprOp("matches",
                             var("request.resource.attr.aString"),
                             var("request.resource.attr.createdBy")),
-                    "Field-to-field", "contains");
+                    "Field-to-field", "matches");
         }
 
         @Test
@@ -1563,5 +1530,230 @@ class SpringDataQueryPlanAdapterTest {
         Map<String, OperatorFunction> overrides = Map.of(
                 "eq", (cb, field, value) -> cb.isNull(field));
         assertEquals(0, runCount(cond, overrides));
+    }
+
+    // -- SPIKE 1: field-to-field contains/startsWith/endsWith --
+    // The needle is a COLUMN, so LIKE metacharacters it holds must be escaped dynamically
+    // (nested REPLACE) before being wrapped in wildcards. CEL semantics: case-sensitive
+    // literal substring; a NULL needle is a missing attribute → deny (row excluded).
+
+    @Nested
+    class FieldToFieldStringMatch {
+
+        private ResourceEntity row(String id, String aString, String createdBy) {
+            ResourceEntity r = new ResourceEntity(id);
+            r.setaString(aString);
+            r.setCreatedBy(createdBy);
+            return r;
+        }
+
+        private int count(String op) {
+            return runCount(exprOp(op,
+                    var("request.resource.attr.aString"),
+                    var("request.resource.attr.createdBy")));
+        }
+
+        @Test
+        void metacharactersInNeedleColumnAreEscaped() {
+            // "oneXtwo" does NOT literally contain/start-with/end-with "one_two", but an
+            // UNESCAPED pattern ('%one_two%' / 'one_two%' / '%one_two') would match all
+            // three ways because '_' matches the 'X'. All three must be no-match.
+            withResource(row("f2f-like-1", "oneXtwo", "one_two"), () -> {
+                assertEquals(0, count("contains"));
+                assertEquals(0, count("startsWith"));
+                assertEquals(0, count("endsWith"));
+            });
+        }
+
+        @Test
+        void containsColumnLiteralMatch() {
+            withResource(row("f2f-like-2", "a_one_two_b", "one_two"), () ->
+                    assertEquals(1, count("contains")));
+        }
+
+        @Test
+        void startsWithColumn() {
+            withResource(row("f2f-like-3", "one_twoTail", "one_two"), () -> {
+                assertEquals(1, count("startsWith"));
+                assertEquals(1, count("contains"));
+                assertEquals(0, count("endsWith"));
+            });
+        }
+
+        @Test
+        void endsWithColumn() {
+            withResource(row("f2f-like-4", "Headone_two", "one_two"), () -> {
+                assertEquals(1, count("endsWith"));
+                assertEquals(0, count("startsWith"));
+            });
+        }
+
+        @Test
+        void percentAndBackslashInNeedleColumn() {
+            withResource(row("f2f-like-5", "50%_off", "%_o"), () ->
+                    assertEquals(1, count("contains")));
+            withResource(row("f2f-like-6", "back\\slash", "k\\s"), () ->
+                    assertEquals(1, count("contains")));
+            // A literal backslash in the needle must not act as an escape prefix.
+            withResource(row("f2f-like-7", "backXslash", "k\\s"), () ->
+                    assertEquals(0, count("contains")));
+        }
+
+        @Test
+        void nullNeedleColumnExcludesRow() {
+            // CEL: missing attribute → error → deny. Guarded explicitly because some
+            // dialects' CONCAT treats NULL as '' which would turn the pattern into
+            // match-anything '%%'.
+            withResource(row("f2f-like-8", "anything", null), () -> {
+                assertEquals(0, count("contains"));
+                assertEquals(0, count("startsWith"));
+                assertEquals(0, count("endsWith"));
+            });
+        }
+
+        @Test
+        void emptyNeedleColumnMatchesLikeCel() {
+            // CEL: "x".contains("") / startsWith("") / endsWith("") are all true.
+            withResource(row("f2f-like-9", "x", ""), () -> {
+                assertEquals(1, count("contains"));
+                assertEquals(1, count("startsWith"));
+                assertEquals(1, count("endsWith"));
+            });
+        }
+    }
+
+    // -- SPIKE 2: arithmetic (add/sub/mult/div) as a comparison operand --
+    // Cerbos attribute values are ALWAYS CEL doubles (protobuf Value numbers), so the only
+    // arithmetic that can evaluate at check time is double-typed — verified against a live
+    // PDP: `R.attr.n + 1 > 2` (int literal) is a no-overload error → deny, `+ 1.0` works,
+    // and `/ 2.0` is true double division (5/2.0 == 2.5). The adapter therefore computes
+    // the whole comparison in double space; integer truncation is never observable.
+    // `mod` stays unsupported: CEL `%` is int-only, so it always errors on attributes.
+
+    @Nested
+    class ArithmeticComparisons {
+
+        private ResourceEntity seeded() {
+            ResourceEntity r = new ResourceEntity("arith-seed-1");
+            r.setaNumber(5);
+            return r;
+        }
+
+        private Operand numVar() {
+            return var("request.resource.attr.aNumber");
+        }
+
+        @Test
+        void addInGtComparison() {
+            withResource(seeded(), () -> {
+                assertEquals(1, runCount(exprOp("gt",
+                        exprOp("add", numVar(), nval(1)), nval(2))));
+                assertEquals(0, runCount(exprOp("gt",
+                        exprOp("add", numVar(), nval(1)), nval(6))));
+            });
+        }
+
+        @Test
+        void subInLtComparison() {
+            withResource(seeded(), () -> {
+                assertEquals(1, runCount(exprOp("lt",
+                        exprOp("sub", numVar(), nval(1)), nval(10))));
+                assertEquals(0, runCount(exprOp("lt",
+                        exprOp("sub", numVar(), nval(1)), nval(2))));
+                // Constant-minus-field keeps direction: 10 - 5 = 5 <= 5.
+                assertEquals(1, runCount(exprOp("le",
+                        exprOp("sub", nval(10), numVar()), nval(5))));
+            });
+        }
+
+        @Test
+        void multInComparisonIncludingNegativeConstant() {
+            withResource(seeded(), () -> {
+                assertEquals(1, runCount(exprOp("gt",
+                        exprOp("mult", numVar(), nval(2)), nval(9))));
+                assertEquals(0, runCount(exprOp("gt",
+                        exprOp("mult", numVar(), nval(2)), nval(10))));
+                // Negative multiplier: arithmetic is emitted on the SQL side, so no
+                // inequality flipping is needed: 5 * -2 = -10 < 3.
+                assertEquals(1, runCount(exprOp("lt",
+                        exprOp("mult", numVar(), nval(-2)), nval(3))));
+                assertEquals(1, runCount(exprOp("gt",
+                        exprOp("mult", numVar(), nval(-2)), nval(-11))));
+            });
+        }
+
+        @Test
+        void divIsDoubleDivision() {
+            // CEL semantics on attributes are double: 5 / 2.0 == 2.5, NOT 2 (int
+            // truncation is a CEL runtime error on double attrs, verified vs live PDP).
+            withResource(seeded(), () -> {
+                assertEquals(1, runCount(exprOp("eq",
+                        exprOp("div", numVar(), nval(2)), nval(2.5))));
+                assertEquals(0, runCount(exprOp("eq",
+                        exprOp("div", numVar(), nval(2)), nval(2))));
+                assertEquals(1, runCount(exprOp("ge",
+                        exprOp("div", numVar(), nval(2)), nval(2.5))));
+                assertEquals(0, runCount(exprOp("ge",
+                        exprOp("div", numVar(), nval(2)), nval(2.6))));
+            });
+        }
+
+        @Test
+        void valueFirstComparisonIsMirrored() {
+            // 2 < aNumber + 1 → NormalizedBinary mirrors to (aNumber + 1) > 2.
+            withResource(seeded(), () -> {
+                assertEquals(1, runCount(exprOp("lt",
+                        nval(2), exprOp("add", numVar(), nval(1)))));
+                assertEquals(0, runCount(exprOp("lt",
+                        nval(6), exprOp("add", numVar(), nval(1)))));
+            });
+        }
+
+        @Test
+        void arithmeticOnBothSides() {
+            // aNumber + 1 <op> aNumber * 2 → 6 vs 10.
+            withResource(seeded(), () -> {
+                assertEquals(1, runCount(exprOp("lt",
+                        exprOp("add", numVar(), nval(1)),
+                        exprOp("mult", numVar(), nval(2)))));
+                assertEquals(0, runCount(exprOp("gt",
+                        exprOp("add", numVar(), nval(1)),
+                        exprOp("mult", numVar(), nval(2)))));
+            });
+        }
+
+        @Test
+        void nestedArithmetic() {
+            // (aNumber + 1) * 2 > 11 → 12 > 11.
+            withResource(seeded(), () -> {
+                assertEquals(1, runCount(exprOp("gt",
+                        exprOp("mult", exprOp("add", numVar(), nval(1)), nval(2)),
+                        nval(11))));
+                assertEquals(0, runCount(exprOp("gt",
+                        exprOp("mult", exprOp("add", numVar(), nval(1)), nval(2)),
+                        nval(12))));
+            });
+        }
+
+        @Test
+        void modStillThrows() {
+            // CEL `%` has no double overload and attribute values are always doubles, so a
+            // mod comparison can never be satisfied at check time — translating it to SQL
+            // MOD would fabricate rows the PDP denies. It must keep throwing.
+            assertConditionThrows(
+                    exprOp("eq",
+                            exprOp("mod", numVar(), nval(2)), nval(1)),
+                    "mod");
+        }
+
+        @Test
+        void nonNumericOperandThrows() {
+            // lt over string concatenation has no numeric translation.
+            assertConditionThrows(
+                    exprOp("lt",
+                            exprOp("add", var("request.resource.attr.aString"), sval("x")),
+                            sval("z")),
+                    "numeric");
+        }
     }
 }
