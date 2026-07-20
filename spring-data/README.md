@@ -108,7 +108,7 @@ Map each `request.resource.attr.<name>` to a JPA path or a relation:
 | `eq` / `ne`                      | `cb.equal` / `cb.notEqual` (auto `isNull`/`isNotNull` for `null` RHS) |
 | `lt` / `gt` / `le` / `ge`        | `cb.lessThan` / `greaterThan` / `lessThanOrEqualTo` / `greaterThanOrEqualTo` |
 | `in`                             | `path.in(values)` or correlated `EXISTS` for collections            |
-| `contains` / `startsWith` / `endsWith` | `cb.like(...)` with proper `_`/`%`/`\` escaping              |
+| `contains` / `startsWith` / `endsWith` | `cb.like(...)` with proper `_`/`%`/`\` escaping — incl. the constant-receiver form (`"a,b".contains(R.attr.x)`: the constant is the haystack, the column the needle) |
 | `isSet(field, true/false)`       | `cb.isNotNull` / `cb.isNull`                                        |
 | `hasIntersection(coll, [values])` | Correlated `EXISTS` with `IN`                                      |
 | `hasIntersection(coll.map(x, x.f), [values])` | Correlated `EXISTS` with projected `IN`             |
@@ -121,6 +121,7 @@ Map each `request.resource.attr.<name>` to a JPA path or a relation:
 | Ternary (`cond ? a : b`)         | Predicate rewrite: `(cond AND cmp(a, v)) OR (NOT cond AND cmp(b, v))` — nested, boolean-position, and value-first forms compose; constant residues fold (see Gotchas for `NULL` semantics) |
 | Arithmetic in comparisons (`add`/`sub`/`mult`/`div`) | `cb.sum`/`diff`/`prod`/`quot` in double space, compared via `eq`/`ne`/`lt`/`gt`/`le`/`ge`; nested and both-sides shapes compose (see Gotchas — CEL attribute arithmetic is double arithmetic) |
 | Field-to-field `contains`/`startsWith`/`endsWith` | `cb.like` over a `REPLACE`-escaped column-derived pattern (`\`, `%`, `_`), with an `IS NOT NULL` needle guard |
+| Multi-hop relation chains (`R.attr.categories.subCategories`) | Correlated subquery joining through every hop; `exists`/`in`/`hasIntersection`/`size` all treat the chain as the flattened union of tail elements |
 | `exists(coll, lambda)`           | Correlated `EXISTS` with lambda body                                |
 | `exists_one(coll, lambda)`       | Correlated `(SELECT COUNT...) = 1`                                  |
 | `all(coll, lambda)`              | `NOT EXISTS (... AND NOT(body))`                                    |
@@ -195,6 +196,30 @@ where `b` is escaped via nested `REPLACE` calls (`\`, `%`, `_`) — chosen becau
 needle column excludes the row (`IS NOT NULL` guard), which matches CEL
 missing-attribute → deny and also defends against dialects whose `CONCAT` treats
 `NULL` as `''` (which would otherwise turn the pattern into match-everything `'%%'`).
+
+### NULL columns follow CEL error semantics — even under negation
+
+Cerbos denies a check when the condition hits a CEL evaluation error (typically a
+null/missing attribute where no null overload exists). The adapter mirrors this with SQL
+three-valued logic, including the places where naive translations leak under `NOT`:
+
+- Collection macros are tri-state: `R.attr.items.all(t, t.qty > 0)` with an item whose
+  `qty` is NULL yields UNKNOWN (row excluded under both `all(...)` and `!all(...)`),
+  matching CEL's error-absorption rules — `exists` is still true if *any* element
+  matches, `all` is still false if *any* element fails, `exists_one` errors on any
+  unknown element. This costs two extra correlated `COUNT` subqueries per macro.
+- Ternaries carry a third arm that is UNKNOWN exactly when the condition column is NULL,
+  so `!(ternary...)` cannot flip a null-condition row to included.
+- `ne` against an unsolvable string concatenation reduces to `IS NOT NULL`, not `TRUE`.
+
+### Division by a column is guarded with `NULLIF` — zero divisors deny
+
+CEL double division by zero yields ±Infinity (a defined result that a comparison could
+turn into ALLOW); SQL raises an error that would abort the whole query. The adapter
+divides by `NULLIF(divisor, 0)`, so zero-divisor rows become UNKNOWN and are excluded.
+This is deliberately under-inclusive: a policy relying on `x / 0 == Infinity` semantics
+will deny those rows here while a per-resource `check` would allow them. Constant
+arithmetic (including `0/0 → NaN`) is folded in Java with full IEEE fidelity.
 
 ### Ternary with a `NULL` condition column excludes the row
 

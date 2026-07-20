@@ -763,9 +763,13 @@ class SpringDataIntegrationTest {
                     .reduce("", (a, b) -> a.length() >= b.length() ? a : b)
                     .toLowerCase();
             assertFalse(sql.isEmpty(), "expected a SELECT with EXISTS to be captured");
-            // One correlated EXISTS per relation hop (categories -> subCategories -> labels).
-            assertEquals(3, countOccurrences(sql, "exists"),
-                    "expected three nested EXISTS subqueries, SQL was:\n" + sql);
+            // At least one correlated EXISTS per relation hop (categories -> subCategories ->
+            // labels). The tri-state macro translation re-translates each hop's body inside its
+            // unknown-element COUNT subqueries, so the total EXISTS count exceeds three — the
+            // nesting guarantee is the lower bound plus the cross-join ban and the exact result
+            // rows asserted above.
+            assertTrue(countOccurrences(sql, "exists") >= 3,
+                    "expected at least three nested EXISTS subqueries, SQL was:\n" + sql);
             // Correlated subqueries must not collapse into a cartesian product.
             assertFalse(sql.contains("cross join"),
                     "nested correlation degraded into a cross join, SQL was:\n" + sql);

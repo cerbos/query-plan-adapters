@@ -21,9 +21,38 @@ sealed interface Scope permits Scope.RootScope, Scope.LambdaScope {
 
     AttributeMapping resolveMapping(String cerbosVar);
 
+    /**
+     * Resolve a relation-valued variable to the JOIN CHAIN reaching its elements together with
+     * the scope that OWNS the first hop, or {@code null} when the variable is not
+     * relation-valued. The owner is the resolution site — the root scope for
+     * {@code request.resource.attr.*} references (even when resolved from inside a lambda,
+     * whose scope merely delegates outward), or the lambda scope itself when the chain hangs
+     * off the lambda element. A subquery over the relation must correlate the OWNER's
+     * {@code from()}: joining the chain off any other {@code From} either fails at query-build
+     * time or silently queries a same-named collection on the wrong entity.
+     */
+    ResolvedRelation resolveRelation(String cerbosVar);
+
     From<?, ?> from();
 
     AbstractQuery<?> parentQuery();
+
+    /**
+     * A relation-valued variable resolved to the Relations to join through — in hop order,
+     * first hop owned by {@code owner.from()} — ending at the {@code tail} Relation whose
+     * elements the enclosing operator ranges over. Multi-hop chains
+     * ({@code categories.subCategories}) denote the FLATTENED union of tail elements across
+     * the intermediate hops, which is exactly what a correlated join chain expresses.
+     */
+    record ResolvedRelation(Scope owner, List<AttributeMapping.Relation> chain) {
+        public ResolvedRelation {
+            chain = List.copyOf(chain);
+        }
+
+        AttributeMapping.Relation tail() {
+            return chain.get(chain.size() - 1);
+        }
+    }
 
     static Scope root(From<?, ?> root, AbstractQuery<?> query, Map<String, AttributeMapping> mapper) {
         return new RootScope(root, query, mapper);
@@ -44,6 +73,28 @@ sealed interface Scope permits Scope.RootScope, Scope.LambdaScope {
         }
         LambdaScope ls = (LambdaScope) scope;
         return new LambdaScope(correlated, sub, ls.relation(), ls.lambdaVar(), ls.outer());
+    }
+
+    /**
+     * Re-root the scope CHAIN for use inside a subquery that correlated {@code target}'s
+     * {@code from()}: the level identical to {@code target} is rebased at {@code correlated}
+     * (see {@link #rebase}); levels between {@code scope} and the target keep their Froms —
+     * paths through them stay legal as implicit correlation references, the same reliance
+     * {@link #rebase} already has on untouched {@code outer} links — but adopt {@code sub} as
+     * the query any deeper subqueries are built against. When {@code scope == target} this is
+     * exactly {@link #rebase}. Identity comparison is deliberate: the target is always a scope
+     * object returned by {@link #resolveRelation} on this same chain.
+     */
+    static Scope rebaseAt(Scope scope, Scope target, From<?, ?> correlated, AbstractQuery<?> sub) {
+        if (scope == target) {
+            return rebase(scope, correlated, sub);
+        }
+        if (scope instanceof LambdaScope ls && ls.outer() != null) {
+            return new LambdaScope(ls.from(), sub, ls.relation(), ls.lambdaVar(),
+                    rebaseAt(ls.outer(), target, correlated, sub));
+        }
+        throw new IllegalArgumentException(
+                "Relation owner scope is not on the current resolution chain");
     }
 
     record RootScope(From<?, ?> from, AbstractQuery<?> parentQuery, Map<String, AttributeMapping> mapper)
@@ -77,6 +128,15 @@ sealed interface Scope permits Scope.RootScope, Scope.LambdaScope {
                         : chain.relations().get(chain.relations().size() - 1);
             }
             throw new IllegalArgumentException("Unknown attribute: " + cerbosVar);
+        }
+
+        @Override
+        public ResolvedRelation resolveRelation(String cerbosVar) {
+            RelationChain chain = resolveRelationChain(mapper, cerbosVar);
+            if (chain != null && chain.tail() == null) {
+                return new ResolvedRelation(this, chain.relations());
+            }
+            return null;
         }
     }
 
@@ -125,6 +185,29 @@ sealed interface Scope permits Scope.RootScope, Scope.LambdaScope {
                 return nested;
             }
             return AttributeMapping.field(suffix);
+        }
+
+        @Override
+        public ResolvedRelation resolveRelation(String cerbosVar) {
+            if (!isLambdaRef(cerbosVar)) {
+                // An outer reference: the OWNING scope is found further out — e.g.
+                // request.resource.attr.tags inside a categories lambda is owned by the root.
+                return outer != null ? outer.resolveRelation(cerbosVar) : null;
+            }
+            String suffix = extractLambdaSuffix(cerbosVar, lambdaVar);
+            if (suffix.isEmpty()) {
+                return null; // the bare lambda var is the element itself, not a relation
+            }
+            List<AttributeMapping.Relation> chain = new ArrayList<>();
+            AttributeMapping.Relation current = relation;
+            for (String part : suffix.split("\\.")) {
+                if (!(current.fields().get(part) instanceof AttributeMapping.Relation next)) {
+                    return null; // scalar (or unmapped) hop — not relation-valued
+                }
+                chain.add(next);
+                current = next;
+            }
+            return new ResolvedRelation(this, chain);
         }
     }
 

@@ -139,10 +139,16 @@ class SpringDataQueryPlanAdapterTest {
 
     /** {@link #runCount(Operand)} with per-operator overrides. */
     private static int runCount(Operand condition, Map<String, OperatorFunction> overrides) {
+        return runCount(condition, MAPPER, overrides);
+    }
+
+    /** {@link #runCount(Operand)} against a caller-supplied attribute mapper. */
+    private static int runCount(Operand condition, Map<String, AttributeMapping> mapper,
+                                Map<String, OperatorFunction> overrides) {
         PlanResourcesResponse resp =
                 buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
         Result<ResourceEntity> result =
-                SpringDataQueryPlanAdapter.toSpecification(resp, MAPPER, overrides);
+                SpringDataQueryPlanAdapter.toSpecification(resp, mapper, overrides);
         assertInstanceOf(Result.Conditional.class, result);
         Specification<ResourceEntity> spec = ((Result.Conditional<ResourceEntity>) result).specification();
 
@@ -416,6 +422,105 @@ class SpringDataQueryPlanAdapterTest {
         }
     }
 
+    // -- Fractional size() thresholds: COUNT/LENGTH are integral, so a fractional constant f
+    // can never be hit exactly. Correct semantics: eq → always-false; ne → always-true (but a
+    // NULL string column is a missing attribute → CEL error → deny); ge/gt f → ge ceil(f);
+    // le/lt f → le floor(f). Truncation (`>= 1.5` becoming `>= 1`) over-included.
+
+    @Nested
+    class FractionalSizeThresholds {
+
+        private ResourceEntity seeded() {
+            ResourceEntity r = new ResourceEntity("size-frac-seed-1");
+            r.setOwnedBy(new java.util.ArrayList<>(java.util.List.of("user1", "user2")));
+            return r;
+        }
+
+        private Operand sizeCmp(String op, double threshold) {
+            return exprOp(op,
+                    exprOp("size", var("request.resource.attr.ownedBy")),
+                    nval(threshold));
+        }
+
+        @Test
+        void eqFractionalIsAlwaysFalse() {
+            // size == 2.5 can never hold for an integral count; truncation made it eq 2.
+            withResource(seeded(), () -> assertEquals(0, runCount(sizeCmp("eq", 2.5))));
+        }
+
+        @Test
+        void neFractionalIsAlwaysTrue() {
+            // size != 2.5 always holds; truncation made it ne 2 (false for the seeded row).
+            withResource(seeded(), () -> assertEquals(1, runCount(sizeCmp("ne", 2.5))));
+        }
+
+        @Test
+        void geFractionalRoundsUp() {
+            // size >= 2.5 ⇔ size >= 3; truncation made it >= 2 (over-inclusive).
+            withResource(seeded(), () -> {
+                assertEquals(0, runCount(sizeCmp("ge", 2.5)));
+                assertEquals(1, runCount(sizeCmp("ge", 1.5)));
+            });
+        }
+
+        @Test
+        void gtFractionalRoundsUp() {
+            // gt f ⇔ ge ceil(f) for integral counts.
+            withResource(seeded(), () -> {
+                assertEquals(1, runCount(sizeCmp("gt", 1.5)));
+                assertEquals(0, runCount(sizeCmp("gt", 2.5)));
+            });
+        }
+
+        @Test
+        void ltFractionalRoundsDown() {
+            // size < 2.5 ⇔ size <= 2; truncation made it lt 2 (under-inclusive).
+            withResource(seeded(), () -> {
+                assertEquals(1, runCount(sizeCmp("lt", 2.5)));
+                assertEquals(0, runCount(sizeCmp("lt", 1.5)));
+            });
+        }
+
+        @Test
+        void leFractionalRoundsDown() {
+            withResource(seeded(), () -> {
+                assertEquals(0, runCount(sizeCmp("le", 1.5)));
+                assertEquals(1, runCount(sizeCmp("le", 2.5)));
+            });
+        }
+
+        @Test
+        void fractionalEmptinessShortcutsStillRoute() {
+            // ge 0.5 ⇔ ge 1 → EXISTS; lt 0.5 ⇔ le 0 → NOT EXISTS.
+            withResource(seeded(), () -> {
+                assertEquals(1, runCount(sizeCmp("ge", 0.5)));
+                assertEquals(0, runCount(sizeCmp("lt", 0.5)));
+            });
+        }
+
+        @Test
+        void stringSizeFractionalNeExcludesNullColumn() {
+            // size(string) != 1.5 is vacuously true for any PRESENT string, but a NULL
+            // column is a missing attribute → CEL error → deny. Always-true would leak it.
+            Operand cond = exprOp("ne",
+                    exprOp("size", var("request.resource.attr.aOptionalString")),
+                    nval(1.5));
+            ResourceEntity withValue = new ResourceEntity("size-frac-str-1");
+            withValue.setaOptionalString("ab");
+            ResourceEntity withNull = new ResourceEntity("size-frac-str-2");
+            withNull.setaOptionalString(null);
+            withResource(withValue, () -> withResource(withNull, () ->
+                    assertEquals(1, runCount(cond))));
+            // eq fractional over a string length is always false, NULL or not.
+            Operand eqCond = exprOp("eq",
+                    exprOp("size", var("request.resource.attr.aOptionalString")),
+                    nval(1.5));
+            ResourceEntity another = new ResourceEntity("size-frac-str-3");
+            another.setaOptionalString("ab");
+            withResource(another, () -> assertEquals(0, runCount(eqCond)));
+        }
+    }
+
     @Test
     void existsOnNestedRelation() {
         assertEquals(0, runCount(exprOp("exists",
@@ -618,6 +723,32 @@ class SpringDataQueryPlanAdapterTest {
                 exprOp("add", sval("projects:"), var("request.resource.attr.aString")));
         // 1=0 filter → 0 results expected (table is empty anyway, this just confirms no exception)
         assertEquals(0, runCount(cond));
+    }
+
+    @Test
+    void addNoSolutionNeExcludesNullRows() {
+        // ne("abc", add("users:", R.attr.aOptionalString)): no field value can make the
+        // concatenation equal "abc", BUT a missing attribute makes `"users:" + null` a CEL
+        // evaluation error → deny. An always-true collapse would leak the NULL row; the
+        // correct translation is IS NOT NULL (non-NULL rows in, NULL rows out).
+        Operand neCond = exprOp("ne",
+                sval("abc"),
+                exprOp("add", sval("users:"), var("request.resource.attr.aOptionalString")));
+        Operand eqCond = exprOp("eq",
+                sval("abc"),
+                exprOp("add", sval("users:"), var("request.resource.attr.aOptionalString")));
+
+        ResourceEntity withValue = new ResourceEntity("ne-add-1");
+        withValue.setaOptionalString("x");
+        ResourceEntity withNull = new ResourceEntity("ne-add-2");
+        withNull.setaOptionalString(null);
+
+        withResource(withValue, () -> withResource(withNull, () -> {
+            // Only the non-NULL row survives ne; the NULL row is a CEL error → deny.
+            assertEquals(1, runCount(neCond));
+            // eq stays always-false: neither row matches (NULL row denied there too).
+            assertEquals(0, runCount(eqCond));
+        }));
     }
 
     // -- DeMorgan / negated operator wrappers (PR #222) --
@@ -903,6 +1034,196 @@ class SpringDataQueryPlanAdapterTest {
                 assertEquals(0, runCount(exprOp("eq", exprOp("size", filterExpr), nval(0))));
                 // Value-first is mirrored: 3 > size(filter) → count < 3 → match.
                 assertEquals(1, runCount(exprOp("gt", nval(3), exprOp("size", filterExpr))));
+            });
+        }
+    }
+
+    // -- NULL element columns under collection macros (three-valued lambda bodies) --
+    // CEL semantics (cel-spec macro definitions; a NULL element column is a missing attribute,
+    // so touching it is an evaluation error → deny):
+    //   exists     — OR with error absorption: true if ANY element is true; error if no true
+    //                and ≥1 error; false otherwise.
+    //   all        — AND with error absorption: false if ANY element is false; error if no
+    //                false and ≥1 error; true otherwise.
+    //   exists_one — errors if ANY element errors; else true iff exactly one matches.
+    // The SQL translation must map ERROR to UNKNOWN (excluded under BOTH polarities), never
+    // FALSE — NOT(FALSE) = TRUE would leak rows the PDP denies.
+
+    @Nested
+    class CollectionMacroNullElements {
+
+        private Operand existsPublic() {
+            return exprOp("exists", var("request.resource.attr.tags"),
+                    lambda("t", exprOp("eq", var("t.name"), sval("public"))));
+        }
+
+        private Operand allNotX() {
+            return exprOp("all", var("request.resource.attr.tags"),
+                    lambda("t", exprOp("ne", var("t.name"), sval("x"))));
+        }
+
+        private Operand existsOnePublic() {
+            return exprOp("exists_one", var("request.resource.attr.tags"),
+                    lambda("t", exprOp("eq", var("t.name"), sval("public"))));
+        }
+
+        /**
+         * Probe for the UNKNOWN boolean constant the macro translations compose with:
+         * {@code 1 = NULL} must render as a genuinely UNKNOWN predicate in Hibernate 6 —
+         * matching no rows under EITHER polarity (NOT(UNKNOWN) = UNKNOWN).
+         */
+        @Test
+        void unknownBooleanConstantProbe() {
+            withResource(new ResourceEntity("null-elem-probe"), () -> {
+                EntityManager em = emf.createEntityManager();
+                try {
+                    CriteriaBuilder cb = em.getCriteriaBuilder();
+                    CriteriaQuery<Long> positive = cb.createQuery(Long.class);
+                    positive.select(cb.count(positive.from(ResourceEntity.class)));
+                    positive.where(cb.equal(cb.literal(1), cb.nullLiteral(Integer.class)));
+                    assertEquals(0, em.createQuery(positive).getSingleResult().intValue());
+
+                    // Junction-barriered negation, mirroring the adapter's negate() helper.
+                    CriteriaQuery<Long> negated = cb.createQuery(Long.class);
+                    negated.select(cb.count(negated.from(ResourceEntity.class)));
+                    negated.where(cb.not(cb.and(
+                            cb.equal(cb.literal(1), cb.nullLiteral(Integer.class)))));
+                    assertEquals(0, em.createQuery(negated).getSingleResult().intValue());
+                } finally {
+                    em.close();
+                }
+            });
+        }
+
+        @Test
+        void notExistsWithNullElementExcludesRow() {
+            // Single NULL-name element: exists = error (no true, one error) → deny.
+            // The leak: EXISTS(name = 'public') is FALSE for the NULL element, and
+            // NOT(FALSE) = TRUE would include the row.
+            ResourceEntity r = new ResourceEntity("null-elem-exists-1");
+            r.addTag("ne1", null);
+            withResource(r, () -> {
+                assertEquals(0, runCount(existsPublic()));
+                assertEquals(0, runCount(exprOp("not", existsPublic())));
+            });
+        }
+
+        @Test
+        void existsAbsorbsErrorWhenAnotherElementIsTrue() {
+            // Positive control: CEL exists absorbs errors through a true witness, so the
+            // row IS included even though a sibling element is NULL.
+            ResourceEntity r = new ResourceEntity("null-elem-exists-2");
+            r.addTag("ne2a", null);
+            r.addTag("ne2b", "public");
+            withResource(r, () -> {
+                assertEquals(1, runCount(existsPublic()));
+                assertEquals(0, runCount(exprOp("not", existsPublic())));
+            });
+        }
+
+        @Test
+        void allWithNullElementAndNoFalseExcludesRow() {
+            // No false element, one NULL element: all = error → deny under BOTH polarities.
+            // The leak: NOT EXISTS(NOT(name != 'x')) is TRUE (the UNKNOWN body never matches).
+            ResourceEntity lone = new ResourceEntity("null-elem-all-1");
+            lone.addTag("na1", null);
+            withResource(lone, () -> {
+                assertEquals(0, runCount(allNotX()));
+                assertEquals(0, runCount(exprOp("not", allNotX())));
+            });
+
+            // Mixed collection: a determined-true sibling must not mask the unknown element.
+            ResourceEntity mixed = new ResourceEntity("null-elem-all-2");
+            mixed.addTag("na2a", null);
+            mixed.addTag("na2b", "ok");
+            withResource(mixed, () -> {
+                assertEquals(0, runCount(allNotX()));
+                assertEquals(0, runCount(exprOp("not", allNotX())));
+            });
+        }
+
+        @Test
+        void allFalseElementDominatesEvenWithNullElement() {
+            // CEL all absorbs errors through a false witness: all = false (not error), so
+            // NOT(all) must still include the row.
+            ResourceEntity r = new ResourceEntity("null-elem-all-3");
+            r.addTag("na3a", "x");
+            r.addTag("na3b", null);
+            withResource(r, () -> {
+                assertEquals(0, runCount(allNotX()));
+                assertEquals(1, runCount(exprOp("not", allNotX())));
+            });
+        }
+
+        @Test
+        void existsOneWithNullElementExcludesRow() {
+            // exists_one has NO error absorption: one true + one NULL element still errors.
+            ResourceEntity oneTrueOneNull = new ResourceEntity("null-elem-one-1");
+            oneTrueOneNull.addTag("no1a", "public");
+            oneTrueOneNull.addTag("no1b", null);
+            withResource(oneTrueOneNull, () -> {
+                assertEquals(0, runCount(existsOnePublic()));
+                assertEquals(0, runCount(exprOp("not", existsOnePublic())));
+            });
+
+            // Zero true + one NULL element: COUNT(...) = 1 is FALSE, and NOT would leak.
+            ResourceEntity onlyNull = new ResourceEntity("null-elem-one-2");
+            onlyNull.addTag("no2a", null);
+            withResource(onlyNull, () -> {
+                assertEquals(0, runCount(existsOnePublic()));
+                assertEquals(0, runCount(exprOp("not", existsOnePublic())));
+            });
+
+            // Control: exactly one true, no NULLs — unchanged behaviour.
+            ResourceEntity clean = new ResourceEntity("null-elem-one-3");
+            clean.addTag("no3a", "public");
+            clean.addTag("no3b", "other");
+            withResource(clean, () -> {
+                assertEquals(1, runCount(existsOnePublic()));
+                assertEquals(0, runCount(exprOp("not", existsOnePublic())));
+            });
+        }
+
+        @Test
+        void filterAndExceptFollowExistsFamilySemantics() {
+            Operand filterPublic = exprOp("filter", var("request.resource.attr.tags"),
+                    lambda("t", exprOp("eq", var("t.name"), sval("public"))));
+            Operand exceptPublic = exprOp("except", var("request.resource.attr.tags"),
+                    lambda("t", exprOp("eq", var("t.name"), sval("public"))));
+
+            ResourceEntity r = new ResourceEntity("null-elem-fe-1");
+            r.addTag("fe1", null);
+            withResource(r, () -> {
+                assertEquals(0, runCount(filterPublic));
+                assertEquals(0, runCount(exprOp("not", filterPublic)));
+                assertEquals(0, runCount(exceptPublic));
+                assertEquals(0, runCount(exprOp("not", exceptPublic)));
+            });
+        }
+
+        @Test
+        void mapIntersectionWithNullProjectionExcludesRow() {
+            // CEL map() has no error absorption: a NULL projected column errors the whole
+            // hasIntersection even when another element would intersect.
+            Operand mapNames = exprOp("hasIntersection",
+                    exprOp("map", var("request.resource.attr.tags"),
+                            lambda("t", var("t.name"))),
+                    listOp("public"));
+
+            ResourceEntity withNull = new ResourceEntity("null-elem-map-1");
+            withNull.addTag("nm1a", "public");
+            withNull.addTag("nm1b", null);
+            withResource(withNull, () -> {
+                assertEquals(0, runCount(mapNames));
+                assertEquals(0, runCount(exprOp("not", mapNames)));
+            });
+
+            // Control: no NULL projections — the plain intersection still matches.
+            ResourceEntity clean = new ResourceEntity("null-elem-map-2");
+            clean.addTag("nm2a", "public");
+            withResource(clean, () -> {
+                assertEquals(1, runCount(mapNames));
+                assertEquals(0, runCount(exprOp("not", mapNames)));
             });
         }
     }
@@ -1429,6 +1750,65 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         @Test
+        void negatedTernaryWithNullConditionExcludesRow() {
+            // !((aOptionalString != "x" ? aNumber : 0.0) > 1.0) — a NULL condition column is
+            // a CEL evaluation error (deny), so the SQL must be UNKNOWN under BOTH polarities.
+            Operand comparison = exprOp("gt",
+                    exprOp("if",
+                            exprOp("ne", var("request.resource.attr.aOptionalString"), sval("x")),
+                            var("request.resource.attr.aNumber"),
+                            nval(0.0)),
+                    nval(1.0));
+
+            // Both branch comparisons false: (NULL AND FALSE) OR (NULL AND FALSE) must not
+            // collapse to FALSE — NOT(FALSE) = TRUE would leak the row.
+            ResourceEntity bothBranchesFalse = new ResourceEntity("ternary-nullcond-1");
+            bothBranchesFalse.setaOptionalString(null);
+            bothBranchesFalse.setaNumber(0);
+            withResource(bothBranchesFalse, () -> {
+                assertEquals(0, runCount(comparison));
+                assertEquals(0, runCount(exprOp("not", comparison)));
+            });
+
+            // Then-branch true: still UNKNOWN (the PDP denies), excluded either way.
+            ResourceEntity thenBranchTrue = new ResourceEntity("ternary-nullcond-2");
+            thenBranchTrue.setaOptionalString(null);
+            thenBranchTrue.setaNumber(5);
+            withResource(thenBranchTrue, () -> {
+                assertEquals(0, runCount(comparison));
+                assertEquals(0, runCount(exprOp("not", comparison)));
+            });
+
+            // Known-condition control: the UNKNOWN arm must vanish for non-NULL conditions.
+            ResourceEntity knownCondition = new ResourceEntity("ternary-nullcond-3");
+            knownCondition.setaOptionalString("y");
+            knownCondition.setaNumber(5);
+            withResource(knownCondition, () -> {
+                assertEquals(1, runCount(comparison));
+                assertEquals(0, runCount(exprOp("not", comparison)));
+            });
+        }
+
+        @Test
+        void negatedBareTernaryWithNullConditionExcludesRow() {
+            // aOptionalString != "x" ? aNumber > 1 : aBool — bare boolean-position ternary
+            // with a NULL condition column: same UNKNOWN-not-FALSE contract as above.
+            Operand plan = exprOp("if",
+                    exprOp("ne", var("request.resource.attr.aOptionalString"), sval("x")),
+                    exprOp("gt", var("request.resource.attr.aNumber"), nval(1)),
+                    var("request.resource.attr.aBool"));
+
+            ResourceEntity nullCondition = new ResourceEntity("ternary-barenull-1");
+            nullCondition.setaOptionalString(null);
+            nullCondition.setaNumber(0);
+            nullCondition.setaBool(false);
+            withResource(nullCondition, () -> {
+                assertEquals(0, runCount(plan));
+                assertEquals(0, runCount(exprOp("not", plan)));
+            });
+        }
+
+        @Test
         void ternaryWithWrongOperandCountThrows() {
             // if() with 2 operands inside a comparison — malformed plan, not a silent drop.
             assertConditionThrows(
@@ -1488,6 +1868,193 @@ class SpringDataQueryPlanAdapterTest {
                                 exprOp("eq", var("t.name"), sval("x")),
                                 exprOp("eq", var("request.resource.attr.aBool"), bval(false)))));
                 assertEquals(0, runCount(condNoMatch));
+            });
+        }
+    }
+
+    /**
+     * Structural join-anchoring defects:
+     *
+     * <p>W1 — a dotted relation CHAIN ({@code categories.subCategories}) must join through
+     * every intermediate hop. Resolving only the tail Relation and joining its attribute off
+     * the root either fails at query-build time (the root has no such attribute) or — worse —
+     * silently joins a same-named collection on the wrong entity. Chain semantics are the
+     * FLATTENED union of tail elements across all intermediate hops, which is exactly what a
+     * correlated join chain expresses for exists/in/hasIntersection and a JOIN-through COUNT
+     * expresses for size().
+     *
+     * <p>W2 — a subquery for a relation referenced inside a lambda body must correlate the
+     * From that OWNS the relation attribute. {@code R.attr.tags} inside a
+     * {@code categories.exists(c, ...)} lambda resolves through the outer scope against the
+     * ROOT entity; anchoring the tags join to the lambda's category join instead is a wrong
+     * From — build-time failure or a silent wrong join if the element entity had a same-named
+     * collection.
+     */
+    @Nested
+    class MultiHopRelationChains {
+
+        private static final String CHAIN = "request.resource.attr.categories.subCategories";
+
+        private final Map<String, AttributeMapping> chainMapper = Map.ofEntries(
+                Map.entry("request.resource.attr.aString", AttributeMapping.field("aString")),
+                Map.entry("request.resource.attr.tags", AttributeMapping.relation("tags", Map.of(
+                        "id", AttributeMapping.field("id"),
+                        "name", AttributeMapping.field("name")))),
+                Map.entry("request.resource.attr.categories", AttributeMapping.relation("categories", Map.of(
+                        "name", AttributeMapping.field("name"),
+                        "subCategories", AttributeMapping.relation("subCategories", "name", Map.of(
+                                "name", AttributeMapping.field("name")))))));
+
+        private int runChainCount(Operand condition) {
+            return runCount(condition, chainMapper, Map.of());
+        }
+
+        /**
+         * Persist a resource plus its (non-cascaded) category/sub-category graph, run
+         * {@code body}, then delete everything again — the shared in-memory schema must stay
+         * empty for the other tests.
+         */
+        private void withCategoryGraph(ResourceEntity resource,
+                                       java.util.List<dev.cerbos.queryplan.springdata.testmodel.CategoryEntity> categories,
+                                       java.util.List<dev.cerbos.queryplan.springdata.testmodel.SubCategoryEntity> subCategories,
+                                       Runnable body) {
+            EntityManager em = emf.createEntityManager();
+            em.getTransaction().begin();
+            subCategories.forEach(em::persist);
+            categories.forEach(em::persist);
+            em.persist(resource);
+            em.getTransaction().commit();
+            em.close();
+            try {
+                body.run();
+            } finally {
+                EntityManager cleanup = emf.createEntityManager();
+                cleanup.getTransaction().begin();
+                ResourceEntity managed = cleanup.find(ResourceEntity.class, resource.getId());
+                if (managed != null) {
+                    cleanup.remove(managed);
+                }
+                for (dev.cerbos.queryplan.springdata.testmodel.CategoryEntity c : categories) {
+                    dev.cerbos.queryplan.springdata.testmodel.CategoryEntity mc =
+                            cleanup.find(dev.cerbos.queryplan.springdata.testmodel.CategoryEntity.class, c.getId());
+                    if (mc != null) {
+                        cleanup.remove(mc);
+                    }
+                }
+                for (dev.cerbos.queryplan.springdata.testmodel.SubCategoryEntity s : subCategories) {
+                    dev.cerbos.queryplan.springdata.testmodel.SubCategoryEntity ms =
+                            cleanup.find(dev.cerbos.queryplan.springdata.testmodel.SubCategoryEntity.class, s.getId());
+                    if (ms != null) {
+                        cleanup.remove(ms);
+                    }
+                }
+                cleanup.getTransaction().commit();
+                cleanup.close();
+            }
+        }
+
+        @Test
+        void existsOverTwoHopChainJoinsThroughIntermediateHop() {
+            var fin = new dev.cerbos.queryplan.springdata.testmodel.SubCategoryEntity("chain-sub-e1", "finance");
+            var biz = new dev.cerbos.queryplan.springdata.testmodel.CategoryEntity("chain-cat-e1", "business");
+            biz.setSubCategories(java.util.List.of(fin));
+            ResourceEntity r = new ResourceEntity("chain-r-e1");
+            r.setCategories(java.util.List.of(biz));
+
+            withCategoryGraph(r, java.util.List.of(biz), java.util.List.of(fin), () -> {
+                Operand matching = exprOp("exists", var(CHAIN),
+                        lambda("s", exprOp("eq", var("s.name"), sval("finance"))));
+                assertEquals(1, runChainCount(matching));
+
+                Operand nonMatching = exprOp("exists", var(CHAIN),
+                        lambda("s", exprOp("eq", var("s.name"), sval("nope"))));
+                assertEquals(0, runChainCount(nonMatching));
+            });
+        }
+
+        @Test
+        void inOverTwoHopChainJoinsThroughIntermediateHop() {
+            var fin = new dev.cerbos.queryplan.springdata.testmodel.SubCategoryEntity("chain-sub-i1", "finance");
+            var biz = new dev.cerbos.queryplan.springdata.testmodel.CategoryEntity("chain-cat-i1", "business");
+            biz.setSubCategories(java.util.List.of(fin));
+            ResourceEntity r = new ResourceEntity("chain-r-i1");
+            r.setCategories(java.util.List.of(biz));
+
+            withCategoryGraph(r, java.util.List.of(biz), java.util.List.of(fin), () -> {
+                // "finance" in R.attr.categories.subCategories — value-first, as the planner
+                // preserves source order; membership tests the tail's defaultMemberField (name).
+                assertEquals(1, runChainCount(exprOp("in", sval("finance"), var(CHAIN))));
+                assertEquals(0, runChainCount(exprOp("in", sval("nope"), var(CHAIN))));
+            });
+        }
+
+        @Test
+        void hasIntersectionOverTwoHopChainJoinsThroughIntermediateHop() {
+            var fin = new dev.cerbos.queryplan.springdata.testmodel.SubCategoryEntity("chain-sub-h1", "finance");
+            var biz = new dev.cerbos.queryplan.springdata.testmodel.CategoryEntity("chain-cat-h1", "business");
+            biz.setSubCategories(java.util.List.of(fin));
+            ResourceEntity r = new ResourceEntity("chain-r-h1");
+            r.setCategories(java.util.List.of(biz));
+
+            withCategoryGraph(r, java.util.List.of(biz), java.util.List.of(fin), () -> {
+                assertEquals(1, runChainCount(
+                        exprOp("hasIntersection", var(CHAIN), listOp("finance", "zz"))));
+                assertEquals(0, runChainCount(
+                        exprOp("hasIntersection", var(CHAIN), listOp("zz"))));
+            });
+        }
+
+        @Test
+        void sizeOverTwoHopChainCountsFlattenedElements() {
+            // Two categories with one sub-category each: the FLATTENED chain count is 2 — a
+            // tail join anchored to the wrong parent could never produce it.
+            var s1 = new dev.cerbos.queryplan.springdata.testmodel.SubCategoryEntity("chain-sub-s1", "finance");
+            var s2 = new dev.cerbos.queryplan.springdata.testmodel.SubCategoryEntity("chain-sub-s2", "tech");
+            var c1 = new dev.cerbos.queryplan.springdata.testmodel.CategoryEntity("chain-cat-s1", "business");
+            var c2 = new dev.cerbos.queryplan.springdata.testmodel.CategoryEntity("chain-cat-s2", "development");
+            c1.setSubCategories(java.util.List.of(s1));
+            c2.setSubCategories(java.util.List.of(s2));
+            ResourceEntity r = new ResourceEntity("chain-r-s1");
+            r.setCategories(java.util.List.of(c1, c2));
+
+            withCategoryGraph(r, java.util.List.of(c1, c2), java.util.List.of(s1, s2), () -> {
+                // Non-empty shortcut (EXISTS through the chain).
+                assertEquals(1, runChainCount(
+                        exprOp("gt", exprOp("size", var(CHAIN)), nval(0))));
+                // Arbitrary-N JOIN-through COUNT: 2 flattened elements.
+                assertEquals(1, runChainCount(
+                        exprOp("ge", exprOp("size", var(CHAIN)), nval(2))));
+                assertEquals(0, runChainCount(
+                        exprOp("gt", exprOp("size", var(CHAIN)), nval(2))));
+            });
+        }
+
+        @Test
+        void rootRelationSubqueryInsideLambdaAnchorsToOwningEntity() {
+            // W2: R.attr.categories.exists(c, c.name == "business" && R.attr.tags.exists(u, ...))
+            // — the inner tags subquery must correlate the ROOT entity (owner of "tags"), not
+            // the category join the lambda scope is rooted at.
+            var fin = new dev.cerbos.queryplan.springdata.testmodel.SubCategoryEntity("chain-sub-w1", "finance");
+            var biz = new dev.cerbos.queryplan.springdata.testmodel.CategoryEntity("chain-cat-w1", "business");
+            biz.setSubCategories(java.util.List.of(fin));
+            ResourceEntity r = new ResourceEntity("chain-r-w1");
+            r.setCategories(java.util.List.of(biz));
+            r.addTag("chain-tag-w1", "public");
+
+            withCategoryGraph(r, java.util.List.of(biz), java.util.List.of(fin), () -> {
+                Operand matching = exprOp("exists", var("request.resource.attr.categories"),
+                        lambda("c", exprOp("and",
+                                exprOp("eq", var("c.name"), sval("business")),
+                                exprOp("exists", var("request.resource.attr.tags"),
+                                        lambda("u", exprOp("eq", var("u.name"), sval("public")))))));
+                assertEquals(1, runChainCount(matching));
+
+                Operand nonMatching = exprOp("exists", var("request.resource.attr.categories"),
+                        lambda("c", exprOp("and",
+                                exprOp("eq", var("c.name"), sval("business")),
+                                exprOp("exists", var("request.resource.attr.tags"),
+                                        lambda("u", exprOp("eq", var("u.name"), sval("private")))))));
+                assertEquals(0, runChainCount(nonMatching));
             });
         }
     }
@@ -1622,6 +2189,123 @@ class SpringDataQueryPlanAdapterTest {
         }
     }
 
+    // -- Constant-receiver string matches: `"a,b".contains(R.attr.x)` --
+    // CEL string-match methods are receiver-sensitive and the planner preserves policy source
+    // order, so the constant RECEIVER arrives FIRST: contains(value, variable). The constant is
+    // the haystack and the COLUMN is the needle — operand-order normalization must not swap
+    // them (that silently inverts the match), and the column needle's LIKE metacharacters must
+    // be escaped dynamically.
+
+    @Nested
+    class ConstantReceiverStringMatch {
+
+        private ResourceEntity row(String id, String aString) {
+            ResourceEntity r = new ResourceEntity(id);
+            r.setaString(aString);
+            return r;
+        }
+
+        private Operand plan(String op, String constant) {
+            // Receiver (constant) first — exactly as the planner emits it.
+            return exprOp(op, sval(constant), var("request.resource.attr.aString"));
+        }
+
+        @Test
+        void constantReceiverContains() {
+            // "role1,role2".contains(aString): aString="role1" IS contained → match.
+            // The inverted translation (aString LIKE '%role1,role2%') would return 0.
+            withResource(row("cr-1", "role1"), () -> {
+                assertEquals(1, runCount(plan("contains", "role1,role2")));
+                // Control: the column-receiver form keeps its meaning.
+                assertEquals(0, runCount(exprOp("contains",
+                        var("request.resource.attr.aString"), sval("role1,role2"))));
+            });
+            withResource(row("cr-2", "admin"), () ->
+                    assertEquals(0, runCount(plan("contains", "role1,role2"))));
+        }
+
+        @Test
+        void constantReceiverStartsWith() {
+            // "one_two,three".startsWith(aString): aString="one_two" is a prefix → match.
+            withResource(row("cr-3", "one_two"), () ->
+                    assertEquals(1, runCount(plan("startsWith", "one_two,three"))));
+            withResource(row("cr-4", "three"), () ->
+                    assertEquals(0, runCount(plan("startsWith", "one_two,three"))));
+        }
+
+        @Test
+        void constantReceiverEndsWith() {
+            withResource(row("cr-5", "one_two"), () ->
+                    assertEquals(1, runCount(plan("endsWith", "three,one_two"))));
+            withResource(row("cr-6", "three"), () ->
+                    assertEquals(0, runCount(plan("endsWith", "three,one_two"))));
+        }
+
+        @Test
+        void columnNeedleMetacharactersAreEscaped() {
+            // Column holds "a_b"; the constant "aXb-list" does NOT literally contain it, but
+            // an UNESCAPED needle pattern ('%a_b%') would match the 'X'. Same for the
+            // startsWith/endsWith shapes.
+            withResource(row("cr-7", "a_b"), () -> {
+                assertEquals(0, runCount(plan("contains", "aXb-list")));
+                assertEquals(0, runCount(plan("startsWith", "aXb-list")));
+                assertEquals(0, runCount(plan("endsWith", "list-aXb")));
+            });
+            // Literal metacharacter matches only work when the escape is correct.
+            withResource(row("cr-8", "a_b"), () -> {
+                assertEquals(1, runCount(plan("contains", "xa_by")));
+                assertEquals(1, runCount(plan("startsWith", "a_b-tail")));
+                assertEquals(1, runCount(plan("endsWith", "head-a_b")));
+            });
+        }
+
+        @Test
+        void nullColumnNeedleExcludesRow() {
+            // A NULL column is a missing attribute → CEL error → deny for all three ops.
+            withResource(row("cr-9", null), () -> {
+                assertEquals(0, runCount(plan("contains", "anything")));
+                assertEquals(0, runCount(plan("startsWith", "anything")));
+                assertEquals(0, runCount(plan("endsWith", "anything")));
+            });
+        }
+
+        @Test
+        void emptyColumnNeedleMatchesLikeCel() {
+            // CEL: "x".contains("") / startsWith("") / endsWith("") are all true.
+            withResource(row("cr-10", ""), () -> {
+                assertEquals(1, runCount(plan("contains", "x")));
+                assertEquals(1, runCount(plan("startsWith", "x")));
+                assertEquals(1, runCount(plan("endsWith", "x")));
+            });
+        }
+
+        @Test
+        void addFoldedConstantReceiver() {
+            // ("role1," + "role2").contains(aString) — if the planner ever ships the concat
+            // unfolded, the receiver arrives as add(value, value) and must fold into the same
+            // constant-haystack translation, not the inverted column-haystack one.
+            Operand cond = exprOp("contains",
+                    exprOp("add", sval("role1,"), sval("role2")),
+                    var("request.resource.attr.aString"));
+            withResource(row("cr-11", "role1"), () -> assertEquals(1, runCount(cond)));
+            withResource(row("cr-12", "admin"), () -> assertEquals(0, runCount(cond)));
+        }
+    }
+
+    // -- Leaf operand-count guard: extra operands must fail loudly, not drop silently --
+
+    @Test
+    void leafWithExtraOperandThrows() {
+        // A 3-operand eq previously kept the field-to-field comparison and silently DROPPED
+        // the value operand. Malformed plans must throw instead.
+        assertConditionThrows(
+                exprOp("eq",
+                        var("request.resource.attr.aString"),
+                        var("request.resource.attr.createdBy"),
+                        sval("x")),
+                "eq", "2 operands");
+    }
+
     // -- SPIKE 2: arithmetic (add/sub/mult/div) as a comparison operand --
     // Cerbos attribute values are ALWAYS CEL doubles (protobuf Value numbers), so the only
     // arithmetic that can evaluate at check time is double-typed — verified against a live
@@ -1733,6 +2417,46 @@ class SpringDataQueryPlanAdapterTest {
                         exprOp("mult", exprOp("add", numVar(), nval(1)), nval(2)),
                         nval(12))));
             });
+        }
+
+        @Test
+        void divByZeroColumnDivisorDoesNotAbortQuery() {
+            // gt(div(aNumber, aNumber), 0.5): a zero-valued row makes the divisor 0. SQL
+            // division by zero would abort the WHOLE query; CEL 0.0/0.0 is NaN, whose
+            // comparisons are all false → deny. The divisor is guarded with NULLIF so the
+            // zero-divisor row becomes UNKNOWN → excluded, and the query survives.
+            Operand cond = exprOp("gt",
+                    exprOp("div", numVar(), numVar()),
+                    nval(0.5));
+            ResourceEntity nonZero = new ResourceEntity("div-zero-1");
+            nonZero.setaNumber(5);
+            ResourceEntity zero = new ResourceEntity("div-zero-2");
+            zero.setaNumber(0);
+            withResource(nonZero, () -> withResource(zero, () ->
+                    // 5/5 = 1.0 > 0.5 → only the non-zero-divisor row matches.
+                    assertEquals(1, runCount(cond))));
+        }
+
+        @Test
+        void fractionalMultiplicationComparesInIeeeDoubleSpace() {
+            // IEEE doubles: 3 * 0.1 = 0.30000000000000004 != 0.3, so CEL (and the PDP)
+            // exclude the row. Decimal-exact DB arithmetic would wrongly include it.
+            ResourceEntity r = new ResourceEntity("frac-mult-1");
+            r.setaNumber(3);
+            withResource(r, () -> assertEquals(0, runCount(exprOp("eq",
+                    exprOp("mult", numVar(), nval(0.1)),
+                    nval(0.3)))));
+        }
+
+        @Test
+        void overrideAppliesToArithmeticComparison() {
+            // OperatorFunction contract: overrides win on EVERY scalar path. The arithmetic
+            // expression is passed as the field argument; the plan constant as the value.
+            Operand cond = exprOp("gt",
+                    exprOp("add", numVar(), nval(1.0)),
+                    nval(2.0));
+            assertThrows(OverrideInvoked.class,
+                    () -> runCount(cond, Map.of("gt", THROWING_OVERRIDE)));
         }
 
         @Test

@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Supplier;
 
 /**
  * Translates a Cerbos {@code PlanResources} response into a Spring Data JPA
@@ -166,11 +167,28 @@ public final class SpringDataQueryPlanAdapter {
          * when swapping — lets every downstream handler assume field-first order. A consequence
          * is that {@link OperatorFunction} overrides are consulted under the mirrored operator:
          * a value-first {@code lt} is looked up as {@code gt}.
+         *
+         * <p>Only operators whose semantics survive a swap are reordered: symmetric ones
+         * ({@code eq}/{@code ne}/{@code in}/{@code hasIntersection}) and the mirrorable
+         * inequalities ({@code lt}/{@code gt}/{@code le}/{@code ge}). The CEL string-match
+         * methods ({@code contains}/{@code startsWith}/{@code endsWith}) are RECEIVER-SENSITIVE:
+         * {@code "a,b".contains(R.attr.x)} arrives as {@code contains(value, variable)} where
+         * the constant is the haystack — swapping it would silently invert haystack and needle
+         * (translating {@code x LIKE '%a,b%'} instead of testing whether {@code "a,b"} contains
+         * the column value). Those keep planner source order and are handled positionally by
+         * {@link #handleLeafOperator}.
          */
         private record NormalizedBinary(String op, List<Operand> operands) {
 
+            /** Operators whose operands may be reordered without changing meaning. */
+            private static final Set<String> ORDER_NORMALIZABLE = Set.of(
+                    "eq", "ne", "lt", "gt", "le", "ge",
+                    "in", "hasIntersection", "has_intersection");
+
             static NormalizedBinary of(String op, List<Operand> operands) {
-                if (operands.size() == 2 && rank(operands.get(0)) < rank(operands.get(1))) {
+                if (ORDER_NORMALIZABLE.contains(op)
+                        && operands.size() == 2
+                        && rank(operands.get(0)) < rank(operands.get(1))) {
                     return new NormalizedBinary(mirror(op), List.of(operands.get(1), operands.get(0)));
                 }
                 return new NormalizedBinary(op, operands);
@@ -206,7 +224,7 @@ public final class SpringDataQueryPlanAdapter {
          * Rewrite a comparison wrapping a CEL ternary — {@code cmp(if(c, a, b), other)} — into a
          * pure predicate:
          *
-         * <pre>{@code (pred(c) AND cmp(a, other)) OR (NOT pred(c) AND cmp(b, other))}</pre>
+         * <pre>{@code (pred(c) AND cmp(a, other)) OR (NOT pred(c) AND cmp(b, other)) OR NOT(pred(c) OR NOT pred(c))}</pre>
          *
          * We rewrite instead of emitting {@code CASE WHEN} ({@code cb.selectCase}) because this
          * translator is predicate-only: every existing typed leaf path — field-first
@@ -216,10 +234,14 @@ public final class SpringDataQueryPlanAdapter {
          * paths, so a ternary branch behaves identically to the same comparison written directly.
          * Recursion also handles nested ternaries and a ternary on the other side for free.
          *
-         * <p>Null semantics: under SQL three-valued logic a NULL condition column makes both
-         * {@code pred(c)} and {@code NOT pred(c)} unknown, so the row is excluded from both
-         * branches. This matches Cerbos: a null/missing condition in a CEL ternary is an
-         * evaluation error and the check denies.
+         * <p>Null semantics: a null/missing condition in a CEL ternary is an evaluation error
+         * and the check denies, so the SQL must evaluate to UNKNOWN — never FALSE — when the
+         * condition column is NULL. The two branch arms alone are not enough: with both branch
+         * comparisons false they evaluate {@code (NULL AND FALSE) OR (NULL AND FALSE) = FALSE},
+         * which {@code not(...)} flips to TRUE and leaks rows the PDP denies. The third arm
+         * ({@link #unknownWhenConditionUnknown}) restores the missing UNKNOWN: it is FALSE for a
+         * known condition (no effect on the OR) and UNKNOWN for a NULL one, driving the whole OR
+         * to UNKNOWN so the row is excluded under BOTH polarities.
          *
          * @return the rewritten predicate, or {@code null} if this comparison involves no ternary
          */
@@ -270,7 +292,22 @@ public final class SpringDataQueryPlanAdapter {
             // unsafe.
             return cb.or(
                     cb.and(traverse(condition, scope), thenCmp),
-                    cb.and(negate(traverse(condition, scope)), elseCmp));
+                    cb.and(negate(traverse(condition, scope)), elseCmp),
+                    unknownWhenConditionUnknown(condition, scope));
+        }
+
+        /**
+         * UNKNOWN exactly when {@code condition} is UNKNOWN, FALSE when it is known:
+         * {@code NOT(c OR NOT c)}. Truth table: condition TRUE → {@code NOT(TRUE OR FALSE)} =
+         * FALSE; condition FALSE → {@code NOT(FALSE OR TRUE)} = FALSE; condition UNKNOWN →
+         * {@code NOT(UNKNOWN OR UNKNOWN)} = UNKNOWN. As the last arm of the ternary OR it
+         * therefore vanishes for known conditions and forces the whole predicate to UNKNOWN for
+         * NULL-derived ones — matching the CEL evaluation error (deny) under both polarities.
+         * The condition is translated fresh for each occurrence (Hibernate 6 negation is
+         * stateful — see {@link #negate}).
+         */
+        private Predicate unknownWhenConditionUnknown(Operand condition, Scope scope) {
+            return negate(cb.or(traverse(condition, scope), negate(traverse(condition, scope))));
         }
 
         /**
@@ -278,7 +315,7 @@ public final class SpringDataQueryPlanAdapter {
          * so both branches are themselves boolean. Same predicate rewrite (and same rationale and
          * null semantics) as {@link #tryTernaryComparison}:
          *
-         * <pre>{@code (pred(c) AND pred(a)) OR (NOT pred(c) AND pred(b))}</pre>
+         * <pre>{@code (pred(c) AND pred(a)) OR (NOT pred(c) AND pred(b)) OR NOT(pred(c) OR NOT pred(c))}</pre>
          */
         private Predicate handleBareTernary(List<Operand> operands, Scope scope) {
             if (operands.size() != 3) {
@@ -304,7 +341,8 @@ public final class SpringDataQueryPlanAdapter {
             // Translate the condition once per occurrence — see tryTernaryComparison.
             return cb.or(
                     cb.and(traverse(condition, scope), booleanBranchPredicate(thenBranch, scope)),
-                    cb.and(negate(traverse(condition, scope)), booleanBranchPredicate(elseBranch, scope)));
+                    cb.and(negate(traverse(condition, scope)), booleanBranchPredicate(elseBranch, scope)),
+                    unknownWhenConditionUnknown(condition, scope));
         }
 
         /**
@@ -342,18 +380,56 @@ public final class SpringDataQueryPlanAdapter {
 
         // -- Leaf operators (eq/ne/lt/gt/le/ge/contains/startsWith/endsWith) --
 
+        /** The receiver-sensitive CEL string-match methods (see {@link NormalizedBinary}). */
+        private static final Set<String> STRING_MATCH_OPS =
+                Set.of("contains", "startsWith", "endsWith");
+
         /** Operands must already be normalized field-first (see {@link NormalizedBinary}). */
         private Predicate handleLeafOperator(String op, List<Operand> operands, Scope scope) {
+            // Every leaf operator is binary. Extra operands are a malformed plan and must fail
+            // loudly: the collector below would otherwise silently DROP one (a 3-operand eq
+            // kept the field-to-field comparison and ignored the value).
+            if (operands.size() != 2) {
+                throw new IllegalArgumentException(
+                        op + " requires exactly 2 operands, got " + operands.size());
+            }
+
             // Constant-vs-constant comparisons are statically evaluated. The planner never emits
             // them directly, but ternary substitution produces them — the else branch of
             // `(aBool ? aNumber : 0) > 0` becomes gt(value(0), value(0)).
             if (TERNARY_COMPARISONS.contains(op)
-                    && operands.size() == 2
                     && operands.get(0).getNodeCase() == Operand.NodeCase.VALUE
                     && operands.get(1).getNodeCase() == Operand.NodeCase.VALUE) {
                 return constantComparison(op,
                         PlanValues.protoValueToJava(operands.get(0).getValue()),
                         PlanValues.protoValueToJava(operands.get(1).getValue()));
+            }
+
+            // Constant-receiver string matches: `"a,b".contains(R.attr.x)` arrives as
+            // contains(value, variable) — the CONSTANT is the haystack and the COLUMN the
+            // needle (NormalizedBinary deliberately leaves these in source order). This must
+            // be checked BEFORE the add-detection below so an unfolded concat receiver
+            // (`("a" + "b").contains(R.attr.x)`) routes here too, not into the add-solve path
+            // (which would fold the constant and translate the INVERTED column-haystack LIKE).
+            if (STRING_MATCH_OPS.contains(op)
+                    && operands.get(1).getNodeCase() == Operand.NodeCase.VARIABLE) {
+                Object receiver = constantReceiverOrNull(operands.get(0));
+                if (receiver != null) {
+                    if (!(receiver instanceof String haystack)) {
+                        throw new IllegalArgumentException(
+                                op + " requires a string receiver, got " + typeName(receiver));
+                    }
+                    Path<?> needle = scope.resolvePath(operands.get(1).getVariable());
+                    // The needle is a column, so it is escaped dynamically; a NULL needle is
+                    // a missing attribute → CEL error → deny (fieldToFieldLike guards it).
+                    return switch (op) {
+                        case "contains" -> fieldToFieldLike(cb.literal(haystack), needle, true, true);
+                        case "startsWith" -> fieldToFieldLike(cb.literal(haystack), needle, false, true);
+                        case "endsWith" -> fieldToFieldLike(cb.literal(haystack), needle, true, false);
+                        default -> throw new IllegalArgumentException(
+                                "Unsupported string-match operator: " + op);
+                    };
+                }
             }
 
             // Detect leaf comparisons where one side is an 'add' expression (e.g. string
@@ -484,6 +560,31 @@ public final class SpringDataQueryPlanAdapter {
         }
 
         /**
+         * The constant value of a string-match RECEIVER operand: a plain VALUE, or an
+         * {@code add(value, value)} concatenation folded to its constant. Returns {@code null}
+         * when the operand is not a constant (e.g. a variable or a field-bearing expression),
+         * in which case the caller falls through to the ordinary leaf paths.
+         */
+        private static Object constantReceiverOrNull(Operand o) {
+            return switch (o.getNodeCase()) {
+                case VALUE -> PlanValues.protoValueToJava(o.getValue());
+                case EXPRESSION -> {
+                    PlanResourcesFilter.Expression e = o.getExpression();
+                    if ("add".equals(e.getOperator())
+                            && e.getOperandsCount() == 2
+                            && e.getOperands(0).getNodeCase() == Operand.NodeCase.VALUE
+                            && e.getOperands(1).getNodeCase() == Operand.NodeCase.VALUE) {
+                        yield PlanValues.foldAdd(
+                                PlanValues.protoValueToJava(e.getOperands(0).getValue()),
+                                PlanValues.protoValueToJava(e.getOperands(1).getValue()));
+                    }
+                    yield null;
+                }
+                default -> null;
+            };
+        }
+
+        /**
          * Compare two mapped columns directly (eq/ne/lt/gt/le/ge) or pattern-match one column
          * against another (contains/startsWith/endsWith). Operand source order is preserved —
          * two variables rank equally, so {@link NormalizedBinary} never swaps them.
@@ -602,9 +703,23 @@ public final class SpringDataQueryPlanAdapter {
          * {@code number_value}). Emitting the arithmetic (rather than solving algebraically)
          * also means multiplication/division by negative constants needs no inequality flipping.
          *
+         * <p>DOUBLE space must be enforced explicitly, because DB decimal arithmetic is not
+         * IEEE double arithmetic (see {@link #resolveNumericOperand}): columns are CAST, plan
+         * constants are folded in Java or bound as double parameters, and pure-constant
+         * comparisons are evaluated statically in Java (full CEL fidelity, Infinity/NaN
+         * included).
+         *
          * <p>{@code mod} stays unsupported: CEL {@code %} has no double overload, so on
          * attribute values it always errors (deny) — translating it to SQL {@code MOD} would
          * fabricate rows the PDP denies.
+         *
+         * <p>{@link OperatorFunction} overrides win here like on every other scalar path when
+         * the comparison has a plan constant on one side: the arithmetic SQL expression is
+         * passed as the field argument and the folded constant (always a {@link Double} — the
+         * arithmetic path is double-space end to end) as the value. Expression-vs-expression
+         * comparisons (arithmetic against arithmetic or against another column) have no
+         * (field, value) pair and are not consulted — the same exclusion as field-to-field
+         * comparisons.
          *
          * @return the predicate, or {@code null} if this comparison involves no arithmetic
          *         expression or the shape is owned by the {@code add} fold/solve path (which
@@ -624,17 +739,58 @@ public final class SpringDataQueryPlanAdapter {
                     || addFoldSolveOwns(op, operands.get(1), operands.get(0))) {
                 return null;
             }
-            jakarta.persistence.criteria.Expression<Double> left =
-                    resolveNumericExpression(operands.get(0), scope);
-            jakarta.persistence.criteria.Expression<Double> right =
-                    resolveNumericExpression(operands.get(1), scope);
+            NumericOperand left = resolveNumericOperand(operands.get(0), scope);
+            NumericOperand right = resolveNumericOperand(operands.get(1), scope);
+
+            // Both sides folded to constants (e.g. ternary substitution producing
+            // gt(add(1.0, 2.0), 4.0)) — evaluate statically with IEEE semantics.
+            if (left instanceof NumericOperand.Constant lc
+                    && right instanceof NumericOperand.Constant rc) {
+                return constantComparison(op, lc.value(), rc.value());
+            }
+            // Keep the SQL side on the left (mirroring the operator) so a constant right side
+            // can bind through the plain-Number overloads. Normalization usually guarantees
+            // this already, but an expression that FOLDS to a constant (add(1.0, 2.0)) ranks
+            // as an expression and can still arrive first.
+            if (left instanceof NumericOperand.Constant) {
+                NumericOperand tmp = left;
+                left = right;
+                right = tmp;
+                op = NormalizedBinary.mirror(op);
+            }
+            jakarta.persistence.criteria.Expression<Double> lhs =
+                    ((NumericOperand.Sql) left).expr();
+
+            if (right instanceof NumericOperand.Constant rc) {
+                OperatorFunction override = overrides.get(op);
+                if (override != null) {
+                    return override.apply(cb, lhs, rc.value());
+                }
+                // Plain-value overloads bind the constant as a genuine double PARAMETER; a
+                // cb.literal would inline `0.3`, which H2/Postgres type as exact NUMERIC and
+                // drag the comparison out of IEEE space (see resolveNumericOperand).
+                double v = rc.value();
+                return switch (op) {
+                    case "eq" -> cb.equal(lhs, v);
+                    case "ne" -> cb.notEqual(lhs, v);
+                    case "lt" -> cb.lt(lhs, v);
+                    case "gt" -> cb.gt(lhs, v);
+                    case "le" -> cb.le(lhs, v);
+                    case "ge" -> cb.ge(lhs, v);
+                    default -> throw new IllegalArgumentException(
+                            "Unsupported arithmetic comparison operator: " + op);
+                };
+            }
+
+            jakarta.persistence.criteria.Expression<Double> rhs =
+                    ((NumericOperand.Sql) right).expr();
             return switch (op) {
-                case "eq" -> cb.equal(left, right);
-                case "ne" -> cb.notEqual(left, right);
-                case "lt" -> cb.lt(left, right);
-                case "gt" -> cb.gt(left, right);
-                case "le" -> cb.le(left, right);
-                case "ge" -> cb.ge(left, right);
+                case "eq" -> cb.equal(lhs, rhs);
+                case "ne" -> cb.notEqual(lhs, rhs);
+                case "lt" -> cb.lt(lhs, rhs);
+                case "gt" -> cb.gt(lhs, rhs);
+                case "le" -> cb.le(lhs, rhs);
+                case "ge" -> cb.ge(lhs, rhs);
                 default -> throw new IllegalArgumentException(
                         "Unsupported arithmetic comparison operator: " + op);
             };
@@ -671,15 +827,52 @@ public final class SpringDataQueryPlanAdapter {
         }
 
         /**
-         * Resolve a comparison operand to a numeric SQL expression in double space:
-         * variable → column cast to double; value → double literal; nested
-         * add/sub/mult/div → recursive {@code cb.sum}/{@code diff}/{@code prod}/{@code quot}.
+         * A resolved arithmetic operand: either a pure-constant subtree folded in Java —
+         * genuine IEEE double semantics, exactly matching CEL, including division by zero
+         * yielding ±Infinity/NaN — or a SQL expression forced into double space.
          */
-        private jakarta.persistence.criteria.Expression<Double> resolveNumericExpression(
-                Operand operand, Scope scope) {
+        private sealed interface NumericOperand {
+            record Constant(double value) implements NumericOperand {}
+            record Sql(jakarta.persistence.criteria.Expression<Double> expr)
+                    implements NumericOperand {}
+        }
+
+        /**
+         * Resolve a comparison operand to double space. DB decimal arithmetic is NOT IEEE
+         * double arithmetic: H2 (and Postgres) type a bare {@code 0.1} literal as exact
+         * NUMERIC and evaluate {@code intCol * 0.1} decimally, so {@code aNumber * 0.1 == 0.3}
+         * matched rows the PDP (IEEE: {@code 0.30000000000000004}) denies. Verified against
+         * H2 2.3: only {@code CAST(col AS DOUBLE) * CAST(0.1 AS DOUBLE)} diverges from
+         * {@code 0.3}; {@code Expression.as(Double.class)} renders NO SQL cast (it is a type
+         * marker only) and {@code cb.toDouble(literal)} elides the cast on a node already
+         * Double-typed, both leaving the arithmetic decimal. Therefore:
+         * <ul>
+         *   <li>columns go through {@code cb.toDouble} (renders {@code cast(col as float(53))});</li>
+         *   <li>constant subtrees fold in Java ({@link NumericOperand.Constant});</li>
+         *   <li>constants mixed into SQL arithmetic bind through the plain-{@code Number}
+         *       CriteriaBuilder overloads, which emit genuine double-typed bind parameters
+         *       instead of decimal literals.</li>
+         * </ul>
+         *
+         * <p>Division guard: SQL raises an error on a zero divisor — a data-dependent runtime
+         * failure of the WHOLE query — while CEL double division is defined (±Infinity, or NaN
+         * for 0/0). Portable Infinity semantics are not expressible in SQL, so a column
+         * divisor is wrapped in {@code NULLIF(d, 0)}: zero-divisor rows become UNKNOWN →
+         * EXCLUDED. Documented divergence, under-inclusive in the safe direction: CEL would
+         * ALLOW rows where the comparison against ±Infinity holds (e.g. {@code x/0 > 1} with
+         * {@code x > 0}); the adapter denies them, and the query survives. For 0/0 CEL yields
+         * NaN, whose comparisons are all false (deny) — the exclusion matches exactly.
+         * Constant divisors are decided statically: non-zero skips the guard, zero collapses
+         * the division to a NULL literal (UNKNOWN for every row).
+         */
+        private NumericOperand resolveNumericOperand(Operand operand, Scope scope) {
             switch (operand.getNodeCase()) {
                 case VARIABLE -> {
-                    return scope.resolvePath(operand.getVariable()).as(Double.class);
+                    @SuppressWarnings("unchecked")
+                    jakarta.persistence.criteria.Expression<? extends Number> path =
+                            (jakarta.persistence.criteria.Expression<? extends Number>)
+                                    scope.resolvePath(operand.getVariable());
+                    return new NumericOperand.Sql(cb.toDouble(path));
                 }
                 case VALUE -> {
                     Object v = PlanValues.protoValueToJava(operand.getValue());
@@ -688,7 +881,7 @@ public final class SpringDataQueryPlanAdapter {
                                 "Arithmetic comparison requires numeric operands, got "
                                         + typeName(v));
                     }
-                    return cb.literal(n.doubleValue());
+                    return new NumericOperand.Constant(n.doubleValue());
                 }
                 case EXPRESSION -> {
                     PlanResourcesFilter.Expression expr = operand.getExpression();
@@ -707,23 +900,68 @@ public final class SpringDataQueryPlanAdapter {
                     if (expr.getOperandsCount() != 2) {
                         throw new IllegalArgumentException(op + " requires exactly 2 operands");
                     }
-                    jakarta.persistence.criteria.Expression<Double> l =
-                            resolveNumericExpression(expr.getOperands(0), scope);
-                    jakarta.persistence.criteria.Expression<Double> r =
-                            resolveNumericExpression(expr.getOperands(1), scope);
-                    return switch (op) {
-                        case "add" -> cb.sum(l, r);
-                        case "sub" -> cb.diff(l, r);
-                        case "mult" -> cb.prod(l, r);
-                        case "div" -> cb.quot(l, r).as(Double.class);
-                        default -> throw new IllegalArgumentException(
-                                "Unsupported arithmetic operator: " + op);
-                    };
+                    NumericOperand l = resolveNumericOperand(expr.getOperands(0), scope);
+                    NumericOperand r = resolveNumericOperand(expr.getOperands(1), scope);
+                    if (l instanceof NumericOperand.Constant lc
+                            && r instanceof NumericOperand.Constant rc) {
+                        return new NumericOperand.Constant(switch (op) {
+                            case "add" -> lc.value() + rc.value();
+                            case "sub" -> lc.value() - rc.value();
+                            case "mult" -> lc.value() * rc.value();
+                            case "div" -> lc.value() / rc.value(); // IEEE: ±Infinity, 0/0 = NaN
+                            default -> throw new IllegalArgumentException(
+                                    "Unsupported arithmetic operator: " + op);
+                        });
+                    }
+                    return new NumericOperand.Sql(arithmeticSql(op, l, r));
                 }
                 default -> throw new IllegalArgumentException(
                         "Unexpected operand type in arithmetic comparison: "
                                 + operand.getNodeCase());
             }
+        }
+
+        /**
+         * Emit one SQL arithmetic node; at least one side is a SQL expression. Constants go
+         * through the plain-{@code Number} overloads (double bind parameters — see
+         * {@link #resolveNumericOperand}).
+         */
+        private jakarta.persistence.criteria.Expression<Double> arithmeticSql(
+                String op, NumericOperand l, NumericOperand r) {
+            jakarta.persistence.criteria.Expression<Double> le =
+                    l instanceof NumericOperand.Sql s ? s.expr() : null;
+            jakarta.persistence.criteria.Expression<Double> re =
+                    r instanceof NumericOperand.Sql s ? s.expr() : null;
+            Double lc = l instanceof NumericOperand.Constant c ? c.value() : null;
+            Double rc = r instanceof NumericOperand.Constant c ? c.value() : null;
+            return switch (op) {
+                case "add" -> le == null ? cb.sum(lc, re)
+                        : re == null ? cb.sum(le, rc) : cb.sum(le, re);
+                case "sub" -> le == null ? cb.diff(lc, re)
+                        : re == null ? cb.diff(le, rc) : cb.diff(le, re);
+                case "mult" -> le == null ? cb.prod(lc, re)
+                        : re == null ? cb.prod(le, rc) : cb.prod(le, re);
+                case "div" -> divisionSql(le, lc, re, rc);
+                default -> throw new IllegalArgumentException(
+                        "Unsupported arithmetic operator: " + op);
+            };
+        }
+
+        /** Division with the NULLIF zero-divisor guard (see {@link #resolveNumericOperand}). */
+        private jakarta.persistence.criteria.Expression<Double> divisionSql(
+                jakarta.persistence.criteria.Expression<Double> le, Double lc,
+                jakarta.persistence.criteria.Expression<Double> re, Double rc) {
+            if (rc != null) {
+                // Constant divisor, numerator is a SQL expression (both-constant subtrees
+                // fold before reaching here). Zero → UNKNOWN for every row; non-zero → no
+                // guard needed.
+                if (rc == 0.0) {
+                    return cb.nullLiteral(Double.class);
+                }
+                return cb.quot(le, rc).as(Double.class);
+            }
+            jakarta.persistence.criteria.Expression<Double> guarded = cb.nullif(re, 0.0);
+            return (lc != null ? cb.quot(lc, guarded) : cb.quot(le, guarded)).as(Double.class);
         }
 
         // -- add (fold + solve for string concat / numeric translation) --
@@ -788,8 +1026,14 @@ public final class SpringDataQueryPlanAdapter {
             Object solved = PlanValues.solveAdd(otherValue, addConst, fieldIsLeft);
             if (solved == null) {
                 // No solution exists (e.g. "projects:123" == "users:" + R.id can never be true).
-                // eq → always-false; ne → always-true.
-                return "eq".equals(op) ? cb.disjunction() : cb.conjunction();
+                // eq → always-false. ne is NOT always-true: a missing attribute makes the
+                // concatenation a CEL evaluation error ("users:" + null) → deny, so NULL rows
+                // must stay excluded — IS NOT NULL, not an unconditional 1=1 (which leaked
+                // exactly the rows the PDP denies).
+                if ("eq".equals(op)) {
+                    return cb.disjunction();
+                }
+                return cb.isNotNull(scope.resolvePath(fieldOp.getVariable()));
             }
             Path<?> path = scope.resolvePath(fieldOp.getVariable());
             return applyLeaf(op, path, solved);
@@ -844,10 +1088,10 @@ public final class SpringDataQueryPlanAdapter {
             String var = fieldOp.getVariable();
             Object val = PlanValues.protoValueToJava(valueOp.getValue());
 
-            AttributeMapping mapping = scope.resolveMapping(var);
-            if (mapping instanceof AttributeMapping.Relation rel) {
+            Scope.ResolvedRelation relRef = scope.resolveRelation(var);
+            if (relRef != null) {
                 List<?> values = (val instanceof List<?> l) ? l : List.of(val);
-                return collectionContainsAny(scope, rel, values);
+                return collectionContainsAny(scope, relRef, values);
             }
 
             Path<?> path = scope.resolvePath(var);
@@ -883,9 +1127,9 @@ public final class SpringDataQueryPlanAdapter {
                 Object val = PlanValues.protoValueToJava(second.getValue());
                 List<?> values = (val instanceof List<?> l) ? l : List.of(val);
 
-                AttributeMapping mapping = scope.resolveMapping(var);
-                if (mapping instanceof AttributeMapping.Relation rel) {
-                    return collectionContainsAny(scope, rel, values);
+                Scope.ResolvedRelation relRef = scope.resolveRelation(var);
+                if (relRef != null) {
+                    return collectionContainsAny(scope, relRef, values);
                 }
                 Path<?> path = scope.resolvePath(var);
                 // hasIntersection(field, []) is always false; avoid a dialect-dependent empty `IN ()`.
@@ -947,35 +1191,50 @@ public final class SpringDataQueryPlanAdapter {
             }
             String memberField = Scope.extractLambdaSuffix(projection.getVariable(), lambdaVar.getVariable());
 
-            // Check whether the collection path resolves through one Relation or a chain.
-            // A chain (e.g. "request.resource.attr.categories.subCategories") emits nested
-            // EXISTS subqueries — one per hop.
-            if (scope instanceof Scope.RootScope rootScope) {
-                Scope.RelationChain chain = Scope.resolveRelationChain(rootScope.mapper(), collectionVar);
-                if (chain != null && !chain.relations().isEmpty()) {
-                    AttributeMapping.Relation tailRel = chain.relations().get(chain.relations().size() - 1);
-                    return chainedExistsSubquery(scope, chain.relations(), (sub, joinFrom, correlated) ->
-                            Scope.memberPath(joinFrom, tailRel, memberField).in(values));
-                }
+            // Resolve the collection to its owner-anchored join chain. Single Relations and
+            // dotted chains ("request.resource.attr.categories.subCategories") share one path:
+            // the subquery correlates the OWNING From and joins through every hop, so the
+            // projection ranges over the flattened tail elements.
+            Scope.ResolvedRelation ref = scope.resolveRelation(collectionVar);
+            if (ref == null) {
+                scope.resolveMapping(collectionVar); // throws "Unknown attribute" when unmapped
+                throw new IllegalArgumentException(
+                        "map can only be applied to a collection mapped as Relation: " + collectionVar);
             }
-
-            AttributeMapping mapping = scope.resolveMapping(collectionVar);
-            if (mapping instanceof AttributeMapping.Relation rel) {
-                return existsSubquery(scope, rel, (sub, joinFrom, correlated) ->
-                        Scope.memberPath(joinFrom, rel, memberField).in(values));
-            }
-            throw new IllegalArgumentException(
-                    "map can only be applied to a collection mapped as Relation: " + collectionVar);
+            return mapIntersectionWithNullGuard(
+                    existsSubquery(scope, ref, (sub, tailJoin, rebased) ->
+                            Scope.memberPath(tailJoin, ref.tail(), memberField).in(values)),
+                    () -> existsSubquery(scope, ref, (sub, tailJoin, rebased) ->
+                            cb.isNull(Scope.memberPath(tailJoin, ref.tail(), memberField))));
         }
 
-        private Predicate collectionContainsAny(Scope outerScope, AttributeMapping.Relation rel, List<?> values) {
+        /**
+         * CEL {@code map()} has no error absorption: a NULL projected column is a missing element
+         * attribute, so the whole {@code hasIntersection(map(...), values)} is an evaluation
+         * error (deny) even when another element would intersect. Truth table:
+         * <ul>
+         *   <li>no NULL projection → {@code (in AND TRUE) OR (FALSE AND UNKNOWN)} = in-EXISTS</li>
+         *   <li>≥1 NULL projection → {@code (in AND FALSE) OR (TRUE AND UNKNOWN)} = UNKNOWN (deny)</li>
+         * </ul>
+         * The null-witness EXISTS is supplied as a factory and built fresh per occurrence
+         * (Hibernate 6 negation is stateful — see {@link #negate}); {@code IS NULL} itself is
+         * two-valued, so both EXISTS legs are safe to compose.
+         */
+        private Predicate mapIntersectionWithNullGuard(Predicate inExists,
+                                                       Supplier<Predicate> nullProjectionExists) {
+            return cb.or(
+                    cb.and(inExists, negate(nullProjectionExists.get())),
+                    cb.and(nullProjectionExists.get(), unknownPredicate()));
+        }
+
+        private Predicate collectionContainsAny(Scope scope, Scope.ResolvedRelation ref, List<?> values) {
             // Intersection with an empty value set is always false — and an EXISTS wrapping an
             // empty `IN ()` is dialect-dependent — so short-circuit before building the subquery.
             if (values.isEmpty()) {
                 return cb.disjunction();
             }
-            return existsSubquery(outerScope, rel, (sub, joinFrom, correlated) -> {
-                Path<?> field = Scope.memberPath(joinFrom, rel, null);
+            return existsSubquery(scope, ref, (sub, tailJoin, rebased) -> {
+                Path<?> field = Scope.memberPath(tailJoin, ref.tail(), null);
                 if (values.size() == 1) {
                     return cb.equal(field, values.get(0));
                 }
@@ -988,18 +1247,49 @@ public final class SpringDataQueryPlanAdapter {
         /** Operands must already be normalized field-first (see {@link NormalizedBinary}). */
         private Predicate trySizeComparison(String op, List<Operand> operands, Scope scope) {
             PlanResourcesFilter.Expression sizeExpr = null;
-            Long numValue = null;
+            Double numRaw = null;
             for (Operand o : operands) {
                 if (o.getNodeCase() == Operand.NodeCase.EXPRESSION
                         && "size".equals(o.getExpression().getOperator())) {
                     sizeExpr = o.getExpression();
                 } else if (o.getNodeCase() == Operand.NodeCase.VALUE) {
                     Object v = PlanValues.protoValueToJava(o.getValue());
-                    if (v instanceof Number n) numValue = n.longValue();
+                    if (v instanceof Number n) numRaw = n.doubleValue();
                 }
             }
-            if (sizeExpr == null || numValue == null) {
+            if (sizeExpr == null || numRaw == null) {
                 return null;
+            }
+
+            // Fractional thresholds: COUNT/LENGTH are integral, so a fractional constant f can
+            // never be hit exactly. Truncating (`>= 1.5` becoming `>= 1`) over-included rows
+            // the PDP denies. Correct integer-count semantics:
+            //   eq f      → always-false
+            //   ne f      → always-true (Field-mapping NULL caveat handled below: a NULL
+            //               string column is a missing attribute → CEL error → deny)
+            //   ge f/gt f → ge ceil(f)   (the count being integral makes gt and ge coincide)
+            //   le f/lt f → le floor(f)
+            // Integral thresholds keep the operator untouched. The always-true/false collapses
+            // flow through the same constant predicates the other static folds use
+            // (cb.conjunction()/cb.disjunction()), so the size(filter(...)) unknown-element
+            // machinery below still wraps them.
+            String cmpOp = op;
+            long numValue;
+            Boolean fractionalCollapse = null; // TRUE → always-true, FALSE → always-false
+            if (numRaw != Math.rint(numRaw)) {
+                switch (op) {
+                    case "eq" -> fractionalCollapse = Boolean.FALSE;
+                    case "ne" -> fractionalCollapse = Boolean.TRUE;
+                    case "gt", "ge" -> cmpOp = "ge";
+                    case "lt", "le" -> cmpOp = "le";
+                    default -> throw new IllegalArgumentException(
+                            "Unsupported size comparison operator: " + op);
+                }
+                numValue = "ge".equals(cmpOp)
+                        ? (long) Math.ceil(numRaw)
+                        : (long) Math.floor(numRaw);
+            } else {
+                numValue = numRaw.longValue();
             }
             List<Operand> sizeOps = sizeExpr.getOperandsList();
             if (sizeOps.size() != 1) {
@@ -1032,46 +1322,74 @@ public final class SpringDataQueryPlanAdapter {
             } else {
                 throw new IllegalArgumentException("Unsupported size() expression");
             }
-            AttributeMapping mapping = scope.resolveMapping(var);
-            if (mapping instanceof AttributeMapping.Field) {
+            Scope.ResolvedRelation ref = scope.resolveRelation(var);
+            if (ref == null) {
+                AttributeMapping mapping = scope.resolveMapping(var);
+                if (!(mapping instanceof AttributeMapping.Field)) {
+                    throw new IllegalArgumentException(
+                            "size() requires a collection (Relation) mapping for " + var);
+                }
                 // size(string) — CEL string length → LENGTH(column) <op> N.
                 if (lambdaBody != null) {
                     throw new IllegalArgumentException(
                             "size(filter(...)) requires a collection (Relation) mapping for " + var);
                 }
                 Path<?> path = scope.resolvePath(var);
-                return compareCount(cb.length(path.as(String.class)), op, numValue.intValue());
-            }
-            if (!(mapping instanceof AttributeMapping.Relation rel)) {
-                throw new IllegalArgumentException("size() requires a collection (Relation) mapping for " + var);
+                if (fractionalCollapse != null) {
+                    // ne f is vacuously true only for a PRESENT string: a NULL column is a
+                    // missing attribute → CEL error → deny, so it must stay excluded —
+                    // IS NOT NULL, never an unconditional 1=1. eq f excludes everything.
+                    return fractionalCollapse ? cb.isNotNull(path) : cb.disjunction();
+                }
+                return compareCount(cb.length(path.as(String.class)), cmpOp, (int) numValue);
             }
             final Operand fBody = lambdaBody;
             final String fVar = lambdaVarName;
-            SubqueryBodyBuilder bodyBuilder = (sub, joinFrom, correlated) ->
+            SubqueryBodyBuilder bodyBuilder = (sub, tailJoin, rebased) ->
                     fBody == null ? cb.conjunction()
-                            : traverse(fBody, Scope.lambda(joinFrom, sub, rel, fVar,
-                                    Scope.rebase(scope, correlated, sub)));
+                            : traverse(fBody, Scope.lambda(tailJoin, sub, ref.tail(), fVar, rebased));
 
-            boolean nonEmpty = ("gt".equals(op) && numValue == 0L) || ("ge".equals(op) && numValue == 1L);
-            boolean empty = ("eq".equals(op) && numValue == 0L)
-                    || ("le".equals(op) && numValue == 0L)
-                    || ("lt".equals(op) && numValue == 1L);
+            boolean nonEmpty = ("gt".equals(cmpOp) && numValue == 0L)
+                    || ("ge".equals(cmpOp) && numValue == 1L);
+            boolean empty = ("eq".equals(cmpOp) && numValue == 0L)
+                    || ("le".equals(cmpOp) && numValue == 0L)
+                    || ("lt".equals(cmpOp) && numValue == 1L);
 
-            if (nonEmpty) {
-                return existsSubquery(scope, rel, bodyBuilder);
+            Predicate base;
+            if (fractionalCollapse != null) {
+                // A Relation count is always defined (an empty join is count 0), so the
+                // fractional eq/ne collapse is unconditional here. Falls through to the
+                // size(filter(...)) unknown-element guard below so an erroring lambda body
+                // still denies the row.
+                base = fractionalCollapse ? cb.conjunction() : cb.disjunction();
+            } else if (nonEmpty) {
+                base = existsSubquery(scope, ref, bodyBuilder);
+            } else if (empty) {
+                base = negate(existsSubquery(scope, ref, bodyBuilder));
+            } else {
+                // Arbitrary N → correlated (SELECT COUNT(...)) <op> N, same shape as exists_one.
+                // For a multi-hop chain the COUNT joins through every hop, so it counts the
+                // FLATTENED tail elements — the same element set the EXISTS shortcuts range over.
+                ChainSubquery<Long> cs = chainSubquery(Long.class, scope, ref);
+                cs.sub().select(cb.count(cs.tailJoin()));
+                if (fBody != null) {
+                    cs.sub().where(bodyBuilder.build(cs.sub(), cs.tailJoin(), cs.rebasedOuter()));
+                }
+                base = compareCount(cs.sub(), cmpOp, numValue);
             }
-            if (empty) {
-                return negate(existsSubquery(scope, rel, bodyBuilder));
+            if (fBody == null) {
+                // size(collection) counts rows without evaluating a lambda — no element can be
+                // UNKNOWN, so the plain comparison is already exact.
+                return base;
             }
-            // Arbitrary N → correlated (SELECT COUNT(...)) <op> N, same shape as exists_one.
-            Subquery<Long> sub = scope.parentQuery().subquery(Long.class);
-            From<?, ?> correlated = correlate(sub, scope.from());
-            Join<?, ?> joinFrom = correlated.join(rel.joinAttribute());
-            sub.select(cb.count(joinFrom));
-            if (fBody != null) {
-                sub.where(bodyBuilder.build(sub, joinFrom, correlated));
-            }
-            return compareCount(sub, op, numValue);
+            // size(coll.filter(x, pred)): CEL filter has NO error absorption — any element whose
+            // predicate errors (NULL-derived UNKNOWN body) errors the whole expression (deny),
+            // even when the count comparison would otherwise hold. Same combinator as exists_one:
+            //   ≥1 UNKNOWN element → (base AND FALSE) OR (TRUE AND UNKNOWN) = UNKNOWN (deny)
+            //   no UNKNOWN element → (base AND TRUE) OR (FALSE AND …)       = base
+            return cb.or(
+                    cb.and(base, negate(unknownElementExists(scope, ref, bodyBuilder))),
+                    cb.and(unknownElementExists(scope, ref, bodyBuilder), unknownPredicate()));
         }
 
         /** Compare a numeric size expression (COUNT subquery or LENGTH) against a constant. */
@@ -1091,6 +1409,31 @@ public final class SpringDataQueryPlanAdapter {
 
         // -- exists / exists_one / all / except / filter --
 
+        /**
+         * Collection macros translate TRI-STATE to mirror CEL error semantics (per the cel-spec
+         * macro definitions; a NULL element column is a missing element attribute, so a lambda
+         * body touching it is a CEL evaluation error → deny):
+         * <ul>
+         *   <li>{@code exists} — OR with error absorption: true if ANY element matches; error if
+         *       none matches and at least one errors; false otherwise.</li>
+         *   <li>{@code all} — AND with error absorption: false if ANY element fails; error if
+         *       none fails and at least one errors; true otherwise.</li>
+         *   <li>{@code exists_one} — errors if ANY element errors; else true iff exactly one
+         *       matches.</li>
+         * </ul>
+         * ERROR maps to SQL UNKNOWN so the row stays excluded under BOTH polarities
+         * ({@code NOT(UNKNOWN) = UNKNOWN}). A plain EXISTS is not enough: an element whose body
+         * is UNKNOWN silently fails to match, collapsing the error case to FALSE — which
+         * {@code not(...)} flips to TRUE, an authorization leak. Building blocks:
+         * {@code EXISTS(elem WHERE body)} (true witness), {@code EXISTS(elem WHERE NOT body)}
+         * (false witness), {@link #unknownElementExists} (any UNKNOWN-body element) and
+         * {@link #unknownPredicate} (a constant SQL UNKNOWN to compose with).
+         *
+         * <p>{@code filter}/{@code except} in boolean position are kept consistent with the
+         * {@code exists} family. Cost note: the unknown machinery (two correlated COUNT
+         * subqueries) is always emitted — the attribute mapping carries no column-nullability
+         * metadata, so a NULL-free lambda body cannot be detected statically.
+         */
         private Predicate handleCollectionOperator(String op, List<Operand> operands, Scope scope) {
             if (operands.size() != 2) {
                 throw new IllegalArgumentException(op + " requires exactly 2 operands");
@@ -1107,8 +1450,11 @@ public final class SpringDataQueryPlanAdapter {
             }
 
             String collectionVar = listOperand.getVariable();
-            AttributeMapping mapping = scope.resolveMapping(collectionVar);
-            if (!(mapping instanceof AttributeMapping.Relation rel)) {
+            // Owner-anchored chain resolution: multi-hop chains join through every hop, and a
+            // relation referenced from inside a lambda anchors to the scope that owns it.
+            Scope.ResolvedRelation ref = scope.resolveRelation(collectionVar);
+            if (ref == null) {
+                scope.resolveMapping(collectionVar); // throws "Unknown attribute" when unmapped
                 throw new IllegalArgumentException(
                         op + " requires a Relation mapping for " + collectionVar);
             }
@@ -1124,42 +1470,103 @@ public final class SpringDataQueryPlanAdapter {
             }
             String lambdaVarName = lambdaVar.getVariable();
 
+            // Every invocation re-traverses the body, so each occurrence gets a fresh Predicate
+            // tree (Hibernate 6 negation is stateful — see negate()).
+            SubqueryBodyBuilder bodyBuilder = (sub, tailJoin, rebased) -> traverse(body,
+                    Scope.lambda(tailJoin, sub, ref.tail(), lambdaVarName, rebased));
+            SubqueryBodyBuilder negatedBodyBuilder = (sub, tailJoin, rebased) ->
+                    negate(bodyBuilder.build(sub, tailJoin, rebased));
+
             return switch (op) {
-                case "exists", "filter" -> existsSubquery(scope, rel,
-                        (sub, joinFrom, correlated) -> traverse(body,
-                                Scope.lambda(joinFrom, sub, rel, lambdaVarName, Scope.rebase(scope, correlated, sub))));
-                case "except" -> existsSubquery(scope, rel,
-                        (sub, joinFrom, correlated) -> negate(traverse(body,
-                                Scope.lambda(joinFrom, sub, rel, lambdaVarName, Scope.rebase(scope, correlated, sub)))));
-                case "all" -> negate(existsSubquery(scope, rel,
-                        (sub, joinFrom, correlated) -> negate(traverse(body,
-                                Scope.lambda(joinFrom, sub, rel, lambdaVarName, Scope.rebase(scope, correlated, sub))))));
+                // exists (and filter): true-witness OR (unknown-element AND UNKNOWN).
+                //   any TRUE element            → TRUE OR …                    = TRUE (absorbed)
+                //   no TRUE, ≥1 UNKNOWN element → FALSE OR (TRUE AND UNKNOWN)  = UNKNOWN (deny)
+                //   no TRUE, no UNKNOWN         → FALSE OR (FALSE AND UNKNOWN) = FALSE
+                case "exists", "filter" -> cb.or(
+                        existsSubquery(scope, ref, bodyBuilder),
+                        cb.and(unknownElementExists(scope, ref, bodyBuilder), unknownPredicate()));
+                // except is "some element fails the body" — the exists table with the false
+                // witness in the true-witness seat; an UNKNOWN body is UNKNOWN under NOT too.
+                case "except" -> cb.or(
+                        existsSubquery(scope, ref, negatedBodyBuilder),
+                        cb.and(unknownElementExists(scope, ref, bodyBuilder), unknownPredicate()));
+                // all: NOT false-witness AND (NOT unknown-element OR UNKNOWN).
+                //   any FALSE element            → FALSE AND …                   = FALSE (absorbed)
+                //   no FALSE, ≥1 UNKNOWN element → TRUE AND (FALSE OR UNKNOWN)   = UNKNOWN (deny)
+                //   no FALSE, no UNKNOWN         → TRUE AND (TRUE OR UNKNOWN)    = TRUE
+                case "all" -> cb.and(
+                        negate(existsSubquery(scope, ref, negatedBodyBuilder)),
+                        cb.or(negate(unknownElementExists(scope, ref, bodyBuilder)), unknownPredicate()));
+                // exists_one: (COUNT(body) = 1 AND NOT unknown-element) OR (unknown-element AND UNKNOWN).
+                //   ≥1 UNKNOWN element → (… AND FALSE) OR (TRUE AND UNKNOWN) = UNKNOWN (deny)
+                //   no UNKNOWN element → (COUNT=1 AND TRUE) OR (FALSE AND …) = COUNT=1
                 case "exists_one" -> {
-                    Subquery<Long> sub = scope.parentQuery().subquery(Long.class);
-                    From<?, ?> correlated = correlate(sub, scope.from());
-                    Join<?, ?> joinFrom = correlated.join(rel.joinAttribute());
-                    sub.select(cb.count(joinFrom));
-                    sub.where(traverse(body,
-                            Scope.lambda(joinFrom, sub, rel, lambdaVarName, Scope.rebase(scope, correlated, sub))));
-                    yield cb.equal(sub, 1L);
+                    ChainSubquery<Long> cs = chainSubquery(Long.class, scope, ref);
+                    cs.sub().select(cb.count(cs.tailJoin()));
+                    cs.sub().where(bodyBuilder.build(cs.sub(), cs.tailJoin(), cs.rebasedOuter()));
+                    yield cb.or(
+                            cb.and(cb.equal(cs.sub(), 1L),
+                                    negate(unknownElementExists(scope, ref, bodyBuilder))),
+                            cb.and(unknownElementExists(scope, ref, bodyBuilder), unknownPredicate()));
                 }
                 default -> throw new IllegalArgumentException("Unsupported collection operator: " + op);
             };
         }
 
+        /**
+         * TRUE iff the relation holds at least one element whose lambda body evaluates to SQL
+         * UNKNOWN (NULL-derived). Not expressible as a single EXISTS: inside a subquery WHERE an
+         * UNKNOWN body simply fails to match, so {@code EXISTS(body)} and {@code EXISTS(NOT body)}
+         * both skip exactly the rows to be detected. Counting closes the gap — an element is
+         * <em>determined</em> iff {@code body OR NOT body} matches it, therefore
+         * {@code COUNT(elem) > COUNT(elem WHERE body OR NOT body)} holds iff at least one element
+         * is UNKNOWN, including mixed collections where sibling elements are determined
+         * true/false. Both COUNTs never yield NULL, so the comparison itself is two-valued and
+         * safe to {@link #negate}. The body is translated fresh per occurrence (stateful
+         * negation — see {@link #negate}).
+         */
+        private Predicate unknownElementExists(Scope scope, Scope.ResolvedRelation ref,
+                                               SubqueryBodyBuilder bodyBuilder) {
+            ChainSubquery<Long> total = chainSubquery(Long.class, scope, ref);
+            total.sub().select(cb.count(total.tailJoin()));
+
+            ChainSubquery<Long> determined = chainSubquery(Long.class, scope, ref);
+            determined.sub().select(cb.count(determined.tailJoin()));
+            determined.sub().where(cb.or(
+                    bodyBuilder.build(determined.sub(), determined.tailJoin(), determined.rebasedOuter()),
+                    negate(bodyBuilder.build(determined.sub(), determined.tailJoin(), determined.rebasedOuter()))));
+
+            return cb.greaterThan(total.sub(), determined.sub());
+        }
+
+        /**
+         * A constant SQL UNKNOWN: {@code 1 = NULL} (validated by the unknownBooleanConstantProbe
+         * unit test against Hibernate 6). Composes by three-valued logic exactly like CEL error
+         * absorption: {@code x AND UNKNOWN} is FALSE when x is FALSE (a false witness absorbs the
+         * error) and UNKNOWN when x is TRUE; {@code x OR UNKNOWN} is TRUE when x is TRUE and
+         * UNKNOWN when x is FALSE. Its negation is UNKNOWN as well, so predicates carrying it
+         * stay excluded under both polarities.
+         */
+        private Predicate unknownPredicate() {
+            return cb.equal(cb.literal(1), cb.nullLiteral(Integer.class));
+        }
+
         @FunctionalInterface
         private interface SubqueryBodyBuilder {
             /**
-             * @param sub        the subquery being built
-             * @param joinFrom   the join over the Relation's collection inside the subquery
-             * @param correlated the outer entity correlated into the subquery — lambda bodies
-             *                   resolve non-lambda variables (e.g. {@code request.resource.attr.x})
-             *                   against this so outer references stay legal JPA correlation paths
+             * @param sub          the subquery being built
+             * @param tailJoin     the join over the chain's TAIL Relation inside the subquery —
+             *                     for a single Relation, the join over its collection; for a
+             *                     multi-hop chain, the innermost join of the join chain
+             * @param rebasedOuter the enclosing scope re-rooted for use inside {@code sub}
+             *                     (see {@link Scope#rebaseAt}) — lambda bodies resolve
+             *                     non-lambda variables (e.g. {@code request.resource.attr.x})
+             *                     through this so outer references stay legal correlation paths
              */
-            Predicate build(Subquery<?> sub, From<?, ?> joinFrom, From<?, ?> correlated);
+            Predicate build(Subquery<?> sub, Join<?, ?> tailJoin, Scope rebasedOuter);
         }
 
-        /** Correlate the current scope's {@code From} into {@code sub}. */
+        /** Correlate {@code outerFrom} (the relation owner's {@code From}) into {@code sub}. */
         @SuppressWarnings("unchecked")
         private static From<?, ?> correlate(Subquery<?> sub, From<?, ?> outerFrom) {
             if (outerFrom instanceof Root<?> r) {
@@ -1172,34 +1579,48 @@ public final class SpringDataQueryPlanAdapter {
         }
 
         /**
-         * Build nested EXISTS subqueries for a chain of Relations: the outermost EXISTS joins the
-         * first Relation, an inner EXISTS correlates from that join through the next, and so on.
-         * The {@code bodyBuilder} produces the leaf predicate against the innermost join.
+         * A correlated subquery spanning a resolved relation chain: {@code sub} correlates the
+         * chain OWNER's {@code From} and joins through every hop to {@code tailJoin}, with
+         * {@code rebasedOuter} being the evaluation scope re-rooted inside {@code sub}.
          */
-        private Predicate chainedExistsSubquery(Scope scope,
-                                                List<AttributeMapping.Relation> chain,
-                                                SubqueryBodyBuilder bodyBuilder) {
-            if (chain.size() == 1) {
-                return existsSubquery(scope, chain.get(0), bodyBuilder);
+        private record ChainSubquery<T>(Subquery<T> sub, Join<?, ?> tailJoin, Scope rebasedOuter) {}
+
+        /**
+         * Build the shared skeleton of every relation subquery. Two invariants fix the two
+         * join-anchoring failure modes:
+         * <ul>
+         *   <li>the correlation anchor is {@code ref.owner().from()} — the {@code From} that
+         *       OWNS the first relation attribute — never the evaluation scope's own
+         *       {@code from()}, which inside a lambda is the lambda element join and does not
+         *       hold outer relations like {@code request.resource.attr.tags};</li>
+         *   <li>a multi-hop chain ({@code categories.subCategories}) joins THROUGH every hop
+         *       off that anchor, so the subquery ranges over the flattened tail elements —
+         *       joining only the tail attribute off the anchor would either fail at query-build
+         *       time or silently query a same-named collection on the wrong entity.</li>
+         * </ul>
+         * EXISTS over the join chain and COUNT over {@code tailJoin} therefore express
+         * exists/in/hasIntersection membership and {@code size()} of the flattened union with
+         * the same element set, so the tri-state unknown-element machinery composes with chains
+         * unchanged (its COUNT subqueries traverse the identical chain).
+         */
+        private <T> ChainSubquery<T> chainSubquery(Class<T> resultType, Scope scope,
+                                                   Scope.ResolvedRelation ref) {
+            Subquery<T> sub = scope.parentQuery().subquery(resultType);
+            From<?, ?> correlated = correlate(sub, ref.owner().from());
+            Join<?, ?> join = correlated.join(ref.chain().get(0).joinAttribute());
+            for (int i = 1; i < ref.chain().size(); i++) {
+                join = join.join(ref.chain().get(i).joinAttribute());
             }
-            return existsSubquery(scope, chain.get(0), (sub, joinFrom, correlated) -> {
-                // Recurse using an intermediate scope rooted at the current join + this subquery.
-                // The lambda variable name is internal-only — `$` is not a valid CEL identifier
-                // character, so this sentinel can never collide with a user-supplied lambda name.
-                AttributeMapping.Relation thisRel = chain.get(0);
-                Scope intermediate = Scope.lambda(joinFrom, sub, thisRel, "$$chain$$",
-                        Scope.rebase(scope, correlated, sub));
-                return chainedExistsSubquery(intermediate, chain.subList(1, chain.size()), bodyBuilder);
-            });
+            Scope rebased = Scope.rebaseAt(scope, ref.owner(), correlated, sub);
+            return new ChainSubquery<>(sub, join, rebased);
         }
 
-        private Predicate existsSubquery(Scope scope, AttributeMapping.Relation rel, SubqueryBodyBuilder bodyBuilder) {
-            Subquery<Integer> sub = scope.parentQuery().subquery(Integer.class);
-            From<?, ?> correlated = correlate(sub, scope.from());
-            Join<?, ?> joinFrom = correlated.join(rel.joinAttribute());
-            sub.select(cb.literal(1));
-            sub.where(bodyBuilder.build(sub, joinFrom, correlated));
-            return cb.exists(sub);
+        private Predicate existsSubquery(Scope scope, Scope.ResolvedRelation ref,
+                                         SubqueryBodyBuilder bodyBuilder) {
+            ChainSubquery<Integer> cs = chainSubquery(Integer.class, scope, ref);
+            cs.sub().select(cb.literal(1));
+            cs.sub().where(bodyBuilder.build(cs.sub(), cs.tailJoin(), cs.rebasedOuter()));
+            return cb.exists(cs.sub());
         }
     }
 }
