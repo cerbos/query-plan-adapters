@@ -116,7 +116,7 @@ final class HierarchyTranslator {
         // ...or a descendant of it.
         conditions.add(startsWithLiteral(field.path(), otherRaw + delimiter));
 
-        return conditions.size() == 1 ? conditions.get(0) : cb.or(conditions.toArray(Predicate[]::new));
+        return cb.or(conditions.toArray(Predicate[]::new));
     }
 
     Predicate handleAncestorDescendant(List<Operand> operands, Scope scope, boolean isAncestor) {
@@ -300,8 +300,24 @@ final class HierarchyTranslator {
         return prefixes;
     }
 
-    /** Split on a literal delimiter (not a regex), keeping trailing empty segments. */
+    /**
+     * Split on a literal delimiter (not a regex), keeping trailing empty segments — the
+     * {@code split(Pattern.quote(delimiter), -1)} semantics without compiling a Pattern per
+     * call ({@code \Q..\E} defeats String.split's single-char fast path).
+     */
     private static List<String> splitLiteral(String raw, String delimiter) {
-        return List.of(raw.split(Pattern.quote(delimiter), -1));
+        if (delimiter.isEmpty()) {
+            // Zero-width delimiter: defer to the regex engine's empty-match semantics.
+            return List.of(raw.split(Pattern.quote(delimiter), -1));
+        }
+        List<String> parts = new ArrayList<>();
+        int start = 0;
+        int idx;
+        while ((idx = raw.indexOf(delimiter, start)) >= 0) {
+            parts.add(raw.substring(start, idx));
+            start = idx + delimiter.length();
+        }
+        parts.add(raw.substring(start));
+        return List.copyOf(parts);
     }
 }

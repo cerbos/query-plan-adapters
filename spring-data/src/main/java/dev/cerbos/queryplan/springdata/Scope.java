@@ -64,30 +64,22 @@ sealed interface Scope permits Scope.RootScope, Scope.LambdaScope {
     }
 
     /**
-     * Re-root {@code scope} at the correlated copy of its {@code from} inside a subquery, so
-     * paths resolved through it become valid correlation references of that subquery.
-     */
-    static Scope rebase(Scope scope, From<?, ?> correlated, AbstractQuery<?> sub) {
-        if (scope instanceof RootScope rs) {
-            return new RootScope(correlated, sub, rs.mapper());
-        }
-        LambdaScope ls = (LambdaScope) scope;
-        return new LambdaScope(correlated, sub, ls.relation(), ls.lambdaVar(), ls.outer());
-    }
-
-    /**
      * Re-root the scope CHAIN for use inside a subquery that correlated {@code target}'s
-     * {@code from()}: the level identical to {@code target} is rebased at {@code correlated}
-     * (see {@link #rebase}); levels between {@code scope} and the target keep their Froms —
-     * paths through them stay legal as implicit correlation references, the same reliance
-     * {@link #rebase} already has on untouched {@code outer} links — but adopt {@code sub} as
-     * the query any deeper subqueries are built against. When {@code scope == target} this is
-     * exactly {@link #rebase}. Identity comparison is deliberate: the target is always a scope
-     * object returned by {@link #resolveRelation} on this same chain.
+     * {@code from()}: the level identical to {@code target} is re-rooted at {@code correlated},
+     * so paths resolved through it become valid correlation references of that subquery; levels
+     * between {@code scope} and the target keep their Froms — paths through them stay legal as
+     * implicit correlation references, the same reliance the base case already places on
+     * untouched {@code outer} links — but adopt {@code sub} as the query any deeper subqueries
+     * are built against. Identity comparison is deliberate: the target is always a scope object
+     * returned by {@link #resolveRelation} on this same chain.
      */
     static Scope rebaseAt(Scope scope, Scope target, From<?, ?> correlated, AbstractQuery<?> sub) {
         if (scope == target) {
-            return rebase(scope, correlated, sub);
+            if (scope instanceof RootScope rs) {
+                return new RootScope(correlated, sub, rs.mapper());
+            }
+            LambdaScope ls = (LambdaScope) scope;
+            return new LambdaScope(correlated, sub, ls.relation(), ls.lambdaVar(), ls.outer());
         }
         if (scope instanceof LambdaScope ls && ls.outer() != null) {
             return new LambdaScope(ls.from(), sub, ls.relation(), ls.lambdaVar(),

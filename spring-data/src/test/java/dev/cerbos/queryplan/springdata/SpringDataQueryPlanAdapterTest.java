@@ -1311,6 +1311,14 @@ class SpringDataQueryPlanAdapterTest {
                     hierarchy(sval("a"), ":"),
                     hierarchy(sval("a:b"), ":"));
             assertEquals(0, runCount(cond));
+
+            // A trailing delimiter is a real (empty) segment: "a:b:" splits to ["a","b",""],
+            // so "a:b" is still a strict prefix. If splitLiteral dropped trailing empties this
+            // would throw "do not satisfy" instead of translating to always-true.
+            Operand trailing = exprOp("ancestorOf",
+                    hierarchy(sval("a:b"), ":"),
+                    hierarchy(sval("a:b:"), ":"));
+            assertEquals(0, runCount(trailing));
         }
 
         @Test

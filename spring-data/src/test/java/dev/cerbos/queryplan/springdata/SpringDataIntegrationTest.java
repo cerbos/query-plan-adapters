@@ -804,9 +804,8 @@ class SpringDataIntegrationTest {
         @Test
         void isSetNested() {
             // request.resource.attr.nested.aOptionalString != null
-            // Only r1's nested has aOptionalString set... actually we didn't set it, so all are null.
-            // To actually test this, set on r1's nested. We do it via a separate test setup.
-            // Here we just verify the predicate compiles and runs without error.
+            // No seeded row sets nested.aOptionalString, so the result is empty: this verifies
+            // the nested-path predicate translates and executes, not a positive match.
             assertEquals(List.of(), runWithMapping("is-set-nested", FIELD_MAP));
         }
     }

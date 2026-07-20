@@ -13,6 +13,8 @@ import jakarta.persistence.criteria.Predicate;
 import jakarta.persistence.criteria.Root;
 import jakarta.persistence.criteria.Subquery;
 
+import com.google.protobuf.Value;
+
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -216,52 +218,78 @@ public final class SpringDataQueryPlanAdapter {
 
         // -- if (CEL ternary) --
 
-        /** Binary comparison operators that accept a ternary operand (see {@link #tryTernaryComparison}). */
-        private static final Set<String> TERNARY_COMPARISONS =
+        /**
+         * The orderable/equality comparison operators (eq/ne/lt/gt/le/ge) — shared by the
+         * ternary rewrite, the arithmetic path, and the constant-vs-constant fold.
+         */
+        private static final Set<String> COMPARISON_OPS =
                 Set.of("eq", "ne", "lt", "gt", "le", "ge");
 
         /**
-         * Rewrite a comparison wrapping a CEL ternary — {@code cmp(if(c, a, b), other)} — into a
-         * pure predicate:
+         * A comparison wrapping a CEL ternary — {@code cmp(if(c, a, b), other)}. Each branch is
+         * substituted back into the comparison and recursed through {@link #traverseExpression},
+         * so a ternary branch behaves identically to the same comparison written directly (see
+         * {@link #translateTernary} for the rewrite and its null semantics). Recursion also
+         * handles nested ternaries and a ternary on the other side for free.
          *
-         * <pre>{@code (pred(c) AND cmp(a, other)) OR (NOT pred(c) AND cmp(b, other)) OR NOT(pred(c) OR NOT pred(c))}</pre>
+         * @return the rewritten predicate, or {@code null} if this comparison involves no ternary
+         */
+        private Predicate tryTernaryComparison(String op, List<Operand> operands, Scope scope) {
+            if (!COMPARISON_OPS.contains(op) || operands.size() != 2) {
+                return null;
+            }
+            int idx;
+            if (isIfExpression(operands.get(0))) {
+                idx = 0;
+            } else if (isIfExpression(operands.get(1))) {
+                idx = 1;
+            } else {
+                return null;
+            }
+            List<Operand> ifOps = operands.get(idx).getExpression().getOperandsList();
+            return translateTernary(ifOps,
+                    branch -> traverseExpression(substituteOperand(op, operands, idx, branch), scope),
+                    scope);
+        }
+
+        private static boolean isIfExpression(Operand o) {
+            return o.getNodeCase() == Operand.NodeCase.EXPRESSION
+                    && "if".equals(o.getExpression().getOperator());
+        }
+
+        /**
+         * Rewrite a CEL ternary {@code if(c, a, b)} into a pure predicate:
          *
-         * We rewrite instead of emitting {@code CASE WHEN} ({@code cb.selectCase}) because this
-         * translator is predicate-only: every existing typed leaf path — field-first
-         * normalization, size() handling, add-fold, fractional double-space comparison — operates
-         * on comparison predicates. Substituting each branch back into the comparison and
-         * recursing through {@link #traverseExpression} routes the branches through those exact
-         * paths, so a ternary branch behaves identically to the same comparison written directly.
-         * Recursion also handles nested ternaries and a ternary on the other side for free.
+         * <pre>{@code (pred(c) AND branch(a)) OR (NOT pred(c) AND branch(b)) OR NOT(pred(c) OR NOT pred(c))}</pre>
+         *
+         * where {@code branch} is supplied by the caller — comparison substitution for
+         * {@link #tryTernaryComparison}, {@link #booleanBranchPredicate} for
+         * {@link #handleBareTernary}. We rewrite instead of emitting {@code CASE WHEN}
+         * ({@code cb.selectCase}) because this translator is predicate-only: every existing typed
+         * leaf path — field-first normalization, size() handling, add-fold, fractional
+         * double-space comparison — operates on comparison predicates, and routing the branches
+         * back through those exact paths keeps them identical to the same condition written
+         * directly.
+         *
+         * <p>A constant boolean condition folds to a single branch — only that branch is
+         * translated, so an untranslatable dead branch cannot fail the whole plan.
          *
          * <p>Null semantics: a null/missing condition in a CEL ternary is an evaluation error
          * and the check denies, so the SQL must evaluate to UNKNOWN — never FALSE — when the
          * condition column is NULL. The two branch arms alone are not enough: with both branch
-         * comparisons false they evaluate {@code (NULL AND FALSE) OR (NULL AND FALSE) = FALSE},
+         * predicates false they evaluate {@code (NULL AND FALSE) OR (NULL AND FALSE) = FALSE},
          * which {@code not(...)} flips to TRUE and leaks rows the PDP denies. The third arm
          * ({@link #unknownWhenConditionUnknown}) restores the missing UNKNOWN: it is FALSE for a
          * known condition (no effect on the OR) and UNKNOWN for a NULL one, driving the whole OR
          * to UNKNOWN so the row is excluded under BOTH polarities.
          *
-         * @return the rewritten predicate, or {@code null} if this comparison involves no ternary
+         * <p>The condition is translated fresh for each arm: Hibernate 6 negation is stateful
+         * (see {@link #negate}), so sharing one Predicate node between the positive and negated
+         * arms is unsafe.
          */
-        private Predicate tryTernaryComparison(String op, List<Operand> operands, Scope scope) {
-            if (!TERNARY_COMPARISONS.contains(op) || operands.size() != 2) {
-                return null;
-            }
-            int idx = -1;
-            for (int i = 0; i < operands.size(); i++) {
-                Operand o = operands.get(i);
-                if (o.getNodeCase() == Operand.NodeCase.EXPRESSION
-                        && "if".equals(o.getExpression().getOperator())) {
-                    idx = i;
-                    break;
-                }
-            }
-            if (idx < 0) {
-                return null;
-            }
-            List<Operand> ifOps = operands.get(idx).getExpression().getOperandsList();
+        private Predicate translateTernary(List<Operand> ifOps,
+                                           java.util.function.Function<Operand, Predicate> branchTranslator,
+                                           Scope scope) {
             if (ifOps.size() != 3) {
                 throw new IllegalArgumentException(
                         "if (ternary) requires exactly 3 operands (condition, then, else), got "
@@ -271,28 +299,18 @@ public final class SpringDataQueryPlanAdapter {
             Operand thenBranch = ifOps.get(1);
             Operand elseBranch = ifOps.get(2);
 
-            // A constant boolean condition folds to a single branch — translate only that branch
-            // so an untranslatable dead branch cannot fail the whole plan.
             if (condition.getNodeCase() == Operand.NodeCase.VALUE) {
                 Boolean known = constantBooleanOrNull(condition);
                 if (known == null) {
                     throw new IllegalArgumentException(
                             "if (ternary) condition must be a boolean expression");
                 }
-                return traverseExpression(
-                        substituteOperand(op, operands, idx, known ? thenBranch : elseBranch), scope);
+                return branchTranslator.apply(known ? thenBranch : elseBranch);
             }
 
-            Predicate thenCmp = traverseExpression(
-                    substituteOperand(op, operands, idx, thenBranch), scope);
-            Predicate elseCmp = traverseExpression(
-                    substituteOperand(op, operands, idx, elseBranch), scope);
-            // Translate the condition once per occurrence: Hibernate 6 negation is stateful (see
-            // negate()), so sharing one Predicate node between the positive and negated arms is
-            // unsafe.
             return cb.or(
-                    cb.and(traverse(condition, scope), thenCmp),
-                    cb.and(negate(traverse(condition, scope)), elseCmp),
+                    cb.and(traverse(condition, scope), branchTranslator.apply(thenBranch)),
+                    cb.and(negate(traverse(condition, scope)), branchTranslator.apply(elseBranch)),
                     unknownWhenConditionUnknown(condition, scope));
         }
 
@@ -312,36 +330,12 @@ public final class SpringDataQueryPlanAdapter {
 
         /**
          * A CEL ternary in boolean position — {@code if(c, a, b)} used directly as a condition,
-         * so both branches are themselves boolean. Same predicate rewrite (and same rationale and
-         * null semantics) as {@link #tryTernaryComparison}:
-         *
-         * <pre>{@code (pred(c) AND pred(a)) OR (NOT pred(c) AND pred(b)) OR NOT(pred(c) OR NOT pred(c))}</pre>
+         * so both branches are themselves boolean and translate through
+         * {@link #booleanBranchPredicate}. Same rewrite, rationale and null semantics as
+         * {@link #translateTernary}.
          */
         private Predicate handleBareTernary(List<Operand> operands, Scope scope) {
-            if (operands.size() != 3) {
-                throw new IllegalArgumentException(
-                        "if (ternary) requires exactly 3 operands (condition, then, else), got "
-                                + operands.size());
-            }
-            Operand condition = operands.get(0);
-            Operand thenBranch = operands.get(1);
-            Operand elseBranch = operands.get(2);
-
-            // Constant boolean condition folds to a single branch — see tryTernaryComparison.
-            if (condition.getNodeCase() == Operand.NodeCase.VALUE) {
-                Boolean known = constantBooleanOrNull(condition);
-                if (known == null) {
-                    throw new IllegalArgumentException(
-                            "if (ternary) condition must be a boolean expression");
-                }
-                return booleanBranchPredicate(known ? thenBranch : elseBranch, scope);
-            }
-
-            // Translate the condition once per occurrence — see tryTernaryComparison.
-            return cb.or(
-                    cb.and(traverse(condition, scope), booleanBranchPredicate(thenBranch, scope)),
-                    cb.and(negate(traverse(condition, scope)), booleanBranchPredicate(elseBranch, scope)),
-                    unknownWhenConditionUnknown(condition, scope));
+            return translateTernary(operands, branch -> booleanBranchPredicate(branch, scope), scope);
         }
 
         /**
@@ -395,7 +389,7 @@ public final class SpringDataQueryPlanAdapter {
             // Constant-vs-constant comparisons are statically evaluated. The planner never emits
             // them directly, but ternary substitution produces them — the else branch of
             // `(aBool ? aNumber : 0) > 0` becomes gt(value(0), value(0)).
-            if (TERNARY_COMPARISONS.contains(op)
+            if (COMPARISON_OPS.contains(op)
                     && operands.get(0).getNodeCase() == Operand.NodeCase.VALUE
                     && operands.get(1).getNodeCase() == Operand.NodeCase.VALUE) {
                 return constantComparison(op,
@@ -499,16 +493,12 @@ public final class SpringDataQueryPlanAdapter {
 
             if (value == null) {
                 // A registered override owns the operator's full translation, including a null RHS.
-                OperatorFunction override = overrides.get(op);
-                if (override != null) {
-                    return override.apply(cb, path, null);
-                }
-                return switch (op) {
+                return withOverride(op, path, null, () -> switch (op) {
                     case "eq" -> cb.isNull(path);
                     case "ne" -> cb.isNotNull(path);
                     default -> throw new IllegalArgumentException(
                             "Null values are only supported with eq and ne operators (got " + op + ")");
-                };
+                });
             }
 
             return applyLeaf(op, path, value);
@@ -587,11 +577,31 @@ public final class SpringDataQueryPlanAdapter {
          * against another (contains/startsWith/endsWith). Operand source order is preserved —
          * two variables rank equally, so {@link NormalizedBinary} never swaps them.
          */
-        @SuppressWarnings({"rawtypes", "unchecked"})
         private Predicate fieldToFieldComparison(String op, String leftVar, String rightVar,
                                                  Scope scope) {
-            jakarta.persistence.criteria.Expression left = scope.resolvePath(leftVar);
-            jakarta.persistence.criteria.Expression right = scope.resolvePath(rightVar);
+            jakarta.persistence.criteria.Expression<?> left = scope.resolvePath(leftVar);
+            jakarta.persistence.criteria.Expression<?> right = scope.resolvePath(rightVar);
+            return switch (op) {
+                case "eq", "ne", "lt", "gt", "le", "ge" -> comparePredicate(op, left, right);
+                case "contains" -> fieldToFieldLike(left, right, true, true);
+                case "startsWith" -> fieldToFieldLike(left, right, false, true);
+                case "endsWith" -> fieldToFieldLike(left, right, true, false);
+                default -> throw new IllegalArgumentException(
+                        "Field-to-field comparison is not supported for operator '" + op + "': "
+                                + leftVar + " vs " + rightVar);
+            };
+        }
+
+        /**
+         * Raw-typed comparison of two SQL expressions — the shared dispatch of field-to-field
+         * comparisons and arithmetic expression-vs-expression comparisons. Constant-RHS shapes
+         * do NOT route here: they bind through the plain-value overloads on purpose (double
+         * bind parameters — see {@link #tryArithmeticComparison}).
+         */
+        @SuppressWarnings({"rawtypes", "unchecked"})
+        private Predicate comparePredicate(String op,
+                                           jakarta.persistence.criteria.Expression left,
+                                           jakarta.persistence.criteria.Expression right) {
             return switch (op) {
                 case "eq" -> cb.equal(left, right);
                 case "ne" -> cb.notEqual(left, right);
@@ -599,12 +609,8 @@ public final class SpringDataQueryPlanAdapter {
                 case "gt" -> cb.greaterThan(left, right);
                 case "le" -> cb.lessThanOrEqualTo(left, right);
                 case "ge" -> cb.greaterThanOrEqualTo(left, right);
-                case "contains" -> fieldToFieldLike(left, right, true, true);
-                case "startsWith" -> fieldToFieldLike(left, right, false, true);
-                case "endsWith" -> fieldToFieldLike(left, right, true, false);
                 default -> throw new IllegalArgumentException(
-                        "Field-to-field comparison is not supported for operator '" + op + "': "
-                                + leftVar + " vs " + rightVar);
+                        "Unsupported arithmetic comparison operator: " + op);
             };
         }
 
@@ -649,11 +655,22 @@ public final class SpringDataQueryPlanAdapter {
          * comparison, {@code add}-folded comparison, and bare-boolean — not just the direct one.
          */
         private Predicate applyLeaf(String op, Path<?> path, Object value) {
+            return withOverride(op, path, value, () -> defaultLeaf(op, path, value));
+        }
+
+        /**
+         * Route a scalar (field, value) translation through the per-operator {@code overrides}
+         * hook: a registered {@link OperatorFunction} owns the operator's full translation
+         * (mirrored operators are consulted under the mirrored name — see
+         * {@link NormalizedBinary}); otherwise the supplied default applies.
+         */
+        private Predicate withOverride(String op, jakarta.persistence.criteria.Expression<?> field,
+                                       Object value, Supplier<Predicate> dflt) {
             OperatorFunction override = overrides.get(op);
             if (override != null) {
-                return override.apply(cb, path, value);
+                return override.apply(cb, field, value);
             }
-            return defaultLeaf(op, path, value);
+            return dflt.get();
         }
 
         @SuppressWarnings({"rawtypes", "unchecked"})
@@ -724,7 +741,7 @@ public final class SpringDataQueryPlanAdapter {
          *         also handles string concatenation and the override hooks)
          */
         private Predicate tryArithmeticComparison(String op, List<Operand> operands, Scope scope) {
-            if (!TERNARY_COMPARISONS.contains(op) || operands.size() != 2) {
+            if (!COMPARISON_OPS.contains(op) || operands.size() != 2) {
                 return null;
             }
             boolean hasArith = operands.stream().anyMatch(o ->
@@ -760,15 +777,12 @@ public final class SpringDataQueryPlanAdapter {
                     ((NumericOperand.Sql) left).expr();
 
             if (right instanceof NumericOperand.Constant rc) {
-                OperatorFunction override = overrides.get(op);
-                if (override != null) {
-                    return override.apply(cb, lhs, rc.value());
-                }
                 // Plain-value overloads bind the constant as a genuine double PARAMETER; a
                 // cb.literal would inline `0.3`, which H2/Postgres type as exact NUMERIC and
                 // drag the comparison out of IEEE space (see resolveNumericOperand).
+                String cmpOp = op;
                 double v = rc.value();
-                return switch (op) {
+                return withOverride(cmpOp, lhs, rc.value(), () -> switch (cmpOp) {
                     case "eq" -> cb.equal(lhs, v);
                     case "ne" -> cb.notEqual(lhs, v);
                     case "lt" -> cb.lt(lhs, v);
@@ -776,22 +790,13 @@ public final class SpringDataQueryPlanAdapter {
                     case "le" -> cb.le(lhs, v);
                     case "ge" -> cb.ge(lhs, v);
                     default -> throw new IllegalArgumentException(
-                            "Unsupported arithmetic comparison operator: " + op);
-                };
+                            "Unsupported arithmetic comparison operator: " + cmpOp);
+                });
             }
 
             jakarta.persistence.criteria.Expression<Double> rhs =
                     ((NumericOperand.Sql) right).expr();
-            return switch (op) {
-                case "eq" -> cb.equal(lhs, rhs);
-                case "ne" -> cb.notEqual(lhs, rhs);
-                case "lt" -> cb.lt(lhs, rhs);
-                case "gt" -> cb.gt(lhs, rhs);
-                case "le" -> cb.le(lhs, rhs);
-                case "ge" -> cb.ge(lhs, rhs);
-                default -> throw new IllegalArgumentException(
-                        "Unsupported arithmetic comparison operator: " + op);
-            };
+            return comparePredicate(op, lhs, rhs);
         }
 
         /**
@@ -1059,14 +1064,17 @@ public final class SpringDataQueryPlanAdapter {
                 throw new IllegalArgumentException("Invalid isSet operands");
             }
             Path<?> path = scope.resolvePath(variable);
-            OperatorFunction override = overrides.get("isSet");
-            if (override != null) {
-                return override.apply(cb, path, flag);
-            }
-            return flag ? cb.isNotNull(path) : cb.isNull(path);
+            boolean isSet = flag;
+            return withOverride("isSet", path, isSet,
+                    () -> isSet ? cb.isNotNull(path) : cb.isNull(path));
         }
 
         // -- in (set membership or collection membership) --
+
+        /** Wrap a scalar plan constant as a single-element list; lists pass through unchanged. */
+        private static List<?> asList(Object val) {
+            return (val instanceof List<?> l) ? l : List.of(val);
+        }
 
         private Predicate handleIn(List<Operand> rawOperands, Scope scope) {
             if (rawOperands.size() != 2) {
@@ -1088,22 +1096,19 @@ public final class SpringDataQueryPlanAdapter {
 
             Scope.ResolvedRelation relRef = scope.resolveRelation(var);
             if (relRef != null) {
-                List<?> values = (val instanceof List<?> l) ? l : List.of(val);
-                return collectionContainsAny(scope, relRef, values);
+                return collectionContainsAny(scope, relRef, asList(val));
             }
 
             Path<?> path = scope.resolvePath(var);
-            OperatorFunction override = overrides.get("in");
-            if (override != null) {
-                return override.apply(cb, path, val);
-            }
-            if (val instanceof List<?> list) {
-                if (list.isEmpty()) {
-                    return cb.disjunction();
+            return withOverride("in", path, val, () -> {
+                if (val instanceof List<?> list) {
+                    if (list.isEmpty()) {
+                        return cb.disjunction();
+                    }
+                    return path.in(list);
                 }
-                return path.in(list);
-            }
-            return cb.equal(path, val);
+                return cb.equal(path, val);
+            });
         }
 
         // -- hasIntersection --
@@ -1123,7 +1128,7 @@ public final class SpringDataQueryPlanAdapter {
                     && second.getNodeCase() == Operand.NodeCase.VALUE) {
                 String var = first.getVariable();
                 Object val = PlanValues.protoValueToJava(second.getValue());
-                List<?> values = (val instanceof List<?> l) ? l : List.of(val);
+                List<?> values = asList(val);
 
                 Scope.ResolvedRelation relRef = scope.resolveRelation(var);
                 if (relRef != null) {
@@ -1144,12 +1149,36 @@ public final class SpringDataQueryPlanAdapter {
                             "hasIntersection second operand must be a value list when used with map()");
                 }
                 Object val = PlanValues.protoValueToJava(second.getValue());
-                List<?> values = (val instanceof List<?> l) ? l : List.of(val);
-                return handleMapIntersection(first.getExpression(), values, scope);
+                return handleMapIntersection(first.getExpression(), asList(val), scope);
             }
 
             throw new IllegalArgumentException(
                     "Unsupported hasIntersection operand shape: " + first.getNodeCase());
+        }
+
+        /** A parsed CEL lambda operand: its body and the name of its iteration variable. */
+        private record ParsedLambda(Operand body, String varName) {}
+
+        /**
+         * Validate and unpack a {@code lambda(body, var)} operand — an EXPRESSION with operator
+         * {@code lambda}, exactly two operands, the second a VARIABLE. Error messages are
+         * caller-supplied so each operator keeps its exact wording.
+         */
+        private static ParsedLambda parseLambda(Operand lambdaOperand, String notLambdaMessage,
+                                                String arityMessage, String varMessage) {
+            if (lambdaOperand.getNodeCase() != Operand.NodeCase.EXPRESSION
+                    || !"lambda".equals(lambdaOperand.getExpression().getOperator())) {
+                throw new IllegalArgumentException(notLambdaMessage);
+            }
+            List<Operand> lambdaOps = lambdaOperand.getExpression().getOperandsList();
+            if (lambdaOps.size() != 2) {
+                throw new IllegalArgumentException(arityMessage);
+            }
+            Operand varOp = lambdaOps.get(1);
+            if (varOp.getNodeCase() != Operand.NodeCase.VARIABLE) {
+                throw new IllegalArgumentException(varMessage);
+            }
+            return new ParsedLambda(lambdaOps.get(0), varOp.getVariable());
         }
 
         /** Translate {@code hasIntersection(map(collection, lambda), values)}. */
@@ -1170,24 +1199,18 @@ public final class SpringDataQueryPlanAdapter {
             if (collectionOperand.getNodeCase() != Operand.NodeCase.VARIABLE) {
                 throw new IllegalArgumentException("map first operand must be a variable");
             }
-            if (lambdaOperand.getNodeCase() != Operand.NodeCase.EXPRESSION
-                    || !"lambda".equals(lambdaOperand.getExpression().getOperator())) {
-                throw new IllegalArgumentException("map second operand must be a lambda");
-            }
-
             String collectionVar = collectionOperand.getVariable();
 
-            List<Operand> lambdaOps = lambdaOperand.getExpression().getOperandsList();
-            if (lambdaOps.size() != 2) {
-                throw new IllegalArgumentException("map lambda requires exactly 2 operands (body, variable)");
-            }
-            Operand projection = lambdaOps.get(0);
-            Operand lambdaVar = lambdaOps.get(1);
-            if (projection.getNodeCase() != Operand.NodeCase.VARIABLE
-                    || lambdaVar.getNodeCase() != Operand.NodeCase.VARIABLE) {
+            ParsedLambda lambda = parseLambda(lambdaOperand,
+                    "map second operand must be a lambda",
+                    "map lambda requires exactly 2 operands (body, variable)",
+                    "map lambda body must be a simple variable projection");
+            // map()'s extra shape constraint: the body must project a plain member variable.
+            Operand projection = lambda.body();
+            if (projection.getNodeCase() != Operand.NodeCase.VARIABLE) {
                 throw new IllegalArgumentException("map lambda body must be a simple variable projection");
             }
-            String memberField = Scope.extractLambdaSuffix(projection.getVariable(), lambdaVar.getVariable());
+            String memberField = Scope.extractLambdaSuffix(projection.getVariable(), lambda.varName());
 
             // Resolve the collection to its owner-anchored join chain. Single Relations and
             // dotted chains ("request.resource.attr.categories.subCategories") share one path:
@@ -1244,18 +1267,27 @@ public final class SpringDataQueryPlanAdapter {
 
         /** Operands must already be normalized field-first (see {@link NormalizedBinary}). */
         private Predicate trySizeComparison(String op, List<Operand> operands, Scope scope) {
+            // Detect the size() operand first: every ordinary leaf comparison probes through
+            // here, and converting the VALUE operand up front would materialize lists/structs
+            // only to discard them when no size() expression is present.
             PlanResourcesFilter.Expression sizeExpr = null;
-            Double numRaw = null;
             for (Operand o : operands) {
                 if (o.getNodeCase() == Operand.NodeCase.EXPRESSION
                         && "size".equals(o.getExpression().getOperator())) {
                     sizeExpr = o.getExpression();
-                } else if (o.getNodeCase() == Operand.NodeCase.VALUE) {
-                    Object v = PlanValues.protoValueToJava(o.getValue());
-                    if (v instanceof Number n) numRaw = n.doubleValue();
                 }
             }
-            if (sizeExpr == null || numRaw == null) {
+            if (sizeExpr == null) {
+                return null;
+            }
+            Double numRaw = null;
+            for (Operand o : operands) {
+                if (o.getNodeCase() == Operand.NodeCase.VALUE
+                        && o.getValue().getKindCase() == Value.KindCase.NUMBER_VALUE) {
+                    numRaw = o.getValue().getNumberValue();
+                }
+            }
+            if (numRaw == null) {
                 return null;
             }
 
@@ -1304,19 +1336,16 @@ public final class SpringDataQueryPlanAdapter {
                 // size(coll.filter(x, pred)) — count only the elements matching the lambda.
                 List<Operand> filterOps = sizeArg.getExpression().getOperandsList();
                 if (filterOps.size() != 2
-                        || filterOps.get(0).getNodeCase() != Operand.NodeCase.VARIABLE
-                        || filterOps.get(1).getNodeCase() != Operand.NodeCase.EXPRESSION
-                        || !"lambda".equals(filterOps.get(1).getExpression().getOperator())) {
+                        || filterOps.get(0).getNodeCase() != Operand.NodeCase.VARIABLE) {
                     throw new IllegalArgumentException("Unsupported size(filter(...)) expression");
                 }
                 var = filterOps.get(0).getVariable();
-                List<Operand> lambdaOps = filterOps.get(1).getExpression().getOperandsList();
-                if (lambdaOps.size() != 2
-                        || lambdaOps.get(1).getNodeCase() != Operand.NodeCase.VARIABLE) {
-                    throw new IllegalArgumentException("lambda requires exactly 2 operands");
-                }
-                lambdaBody = lambdaOps.get(0);
-                lambdaVarName = lambdaOps.get(1).getVariable();
+                ParsedLambda lambda = parseLambda(filterOps.get(1),
+                        "Unsupported size(filter(...)) expression",
+                        "lambda requires exactly 2 operands",
+                        "lambda requires exactly 2 operands");
+                lambdaBody = lambda.body();
+                lambdaVarName = lambda.varName();
             } else {
                 throw new IllegalArgumentException("Unsupported size() expression");
             }
@@ -1347,12 +1376,6 @@ public final class SpringDataQueryPlanAdapter {
                     fBody == null ? cb.conjunction()
                             : traverse(fBody, Scope.lambda(tailJoin, sub, ref.tail(), fVar, rebased));
 
-            boolean nonEmpty = ("gt".equals(cmpOp) && numValue == 0L)
-                    || ("ge".equals(cmpOp) && numValue == 1L);
-            boolean empty = ("eq".equals(cmpOp) && numValue == 0L)
-                    || ("le".equals(cmpOp) && numValue == 0L)
-                    || ("lt".equals(cmpOp) && numValue == 1L);
-
             Predicate base;
             if (fractionalCollapse != null) {
                 // A Relation count is always defined (an empty join is count 0), so the
@@ -1360,20 +1383,27 @@ public final class SpringDataQueryPlanAdapter {
                 // size(filter(...)) unknown-element guard below so an erroring lambda body
                 // still denies the row.
                 base = fractionalCollapse ? cb.conjunction() : cb.disjunction();
-            } else if (nonEmpty) {
-                base = existsSubquery(scope, ref, bodyBuilder);
-            } else if (empty) {
-                base = negate(existsSubquery(scope, ref, bodyBuilder));
             } else {
-                // Arbitrary N → correlated (SELECT COUNT(...)) <op> N, same shape as exists_one.
-                // For a multi-hop chain the COUNT joins through every hop, so it counts the
-                // FLATTENED tail elements — the same element set the EXISTS shortcuts range over.
-                ChainSubquery<Long> cs = chainSubquery(Long.class, scope, ref);
-                cs.sub().select(cb.count(cs.tailJoin()));
-                if (fBody != null) {
-                    cs.sub().where(bodyBuilder.build(cs.sub(), cs.tailJoin(), cs.rebasedOuter()));
+                boolean nonEmpty = ("gt".equals(cmpOp) && numValue == 0L)
+                        || ("ge".equals(cmpOp) && numValue == 1L);
+                boolean empty = ("eq".equals(cmpOp) && numValue == 0L)
+                        || ("le".equals(cmpOp) && numValue == 0L)
+                        || ("lt".equals(cmpOp) && numValue == 1L);
+                if (nonEmpty) {
+                    base = existsSubquery(scope, ref, bodyBuilder);
+                } else if (empty) {
+                    base = negate(existsSubquery(scope, ref, bodyBuilder));
+                } else {
+                    // Arbitrary N → correlated (SELECT COUNT(...)) <op> N, same shape as
+                    // exists_one. For a multi-hop chain the COUNT joins through every hop, so it
+                    // counts the FLATTENED tail elements — the same element set the EXISTS
+                    // shortcuts range over.
+                    ChainSubquery<Long> cs = countSubquery(scope, ref);
+                    if (fBody != null) {
+                        cs.sub().where(bodyBuilder.build(cs.sub(), cs.tailJoin(), cs.rebasedOuter()));
+                    }
+                    base = compareCount(cs.sub(), cmpOp, numValue);
                 }
-                base = compareCount(cs.sub(), cmpOp, numValue);
             }
             if (fBody == null) {
                 // size(collection) counts rows without evaluating a lambda — no element can be
@@ -1428,9 +1458,12 @@ public final class SpringDataQueryPlanAdapter {
          * {@link #unknownPredicate} (a constant SQL UNKNOWN to compose with).
          *
          * <p>{@code filter}/{@code except} in boolean position are kept consistent with the
-         * {@code exists} family. Cost note: the unknown machinery (two correlated COUNT
-         * subqueries) is always emitted — the attribute mapping carries no column-nullability
-         * metadata, so a NULL-free lambda body cannot be detected statically.
+         * {@code exists} family. Cost note: the unknown machinery is always emitted — each
+         * {@link #unknownElementExists} probe is two correlated COUNT subqueries, and
+         * {@code exists_one} (like the arbitrary-N {@code size(filter(...))} shape) emits the
+         * probe twice, i.e. five correlated subqueries including the base COUNT — the attribute
+         * mapping carries no column-nullability metadata, so a NULL-free lambda body cannot be
+         * detected statically.
          */
         private Predicate handleCollectionOperator(String op, List<Operand> operands, Scope scope) {
             if (operands.size() != 2) {
@@ -1457,16 +1490,12 @@ public final class SpringDataQueryPlanAdapter {
                         op + " requires a Relation mapping for " + collectionVar);
             }
 
-            List<Operand> lambdaOps = lambdaOperand.getExpression().getOperandsList();
-            if (lambdaOps.size() != 2) {
-                throw new IllegalArgumentException("lambda requires exactly 2 operands");
-            }
-            Operand body = lambdaOps.get(0);
-            Operand lambdaVar = lambdaOps.get(1);
-            if (lambdaVar.getNodeCase() != Operand.NodeCase.VARIABLE) {
-                throw new IllegalArgumentException("lambda variable must be a variable operand");
-            }
-            String lambdaVarName = lambdaVar.getVariable();
+            ParsedLambda lambda = parseLambda(lambdaOperand,
+                    op + " second operand must be a lambda",
+                    "lambda requires exactly 2 operands",
+                    "lambda variable must be a variable operand");
+            Operand body = lambda.body();
+            String lambdaVarName = lambda.varName();
 
             // Every invocation re-traverses the body, so each occurrence gets a fresh Predicate
             // tree (Hibernate 6 negation is stateful — see negate()).
@@ -1499,8 +1528,7 @@ public final class SpringDataQueryPlanAdapter {
                 //   ≥1 UNKNOWN element → (… AND FALSE) OR (TRUE AND UNKNOWN) = UNKNOWN (deny)
                 //   no UNKNOWN element → (COUNT=1 AND TRUE) OR (FALSE AND …) = COUNT=1
                 case "exists_one" -> {
-                    ChainSubquery<Long> cs = chainSubquery(Long.class, scope, ref);
-                    cs.sub().select(cb.count(cs.tailJoin()));
+                    ChainSubquery<Long> cs = countSubquery(scope, ref);
                     cs.sub().where(bodyBuilder.build(cs.sub(), cs.tailJoin(), cs.rebasedOuter()));
                     yield cb.or(
                             cb.and(cb.equal(cs.sub(), 1L),
@@ -1525,11 +1553,9 @@ public final class SpringDataQueryPlanAdapter {
          */
         private Predicate unknownElementExists(Scope scope, Scope.ResolvedRelation ref,
                                                SubqueryBodyBuilder bodyBuilder) {
-            ChainSubquery<Long> total = chainSubquery(Long.class, scope, ref);
-            total.sub().select(cb.count(total.tailJoin()));
+            ChainSubquery<Long> total = countSubquery(scope, ref);
 
-            ChainSubquery<Long> determined = chainSubquery(Long.class, scope, ref);
-            determined.sub().select(cb.count(determined.tailJoin()));
+            ChainSubquery<Long> determined = countSubquery(scope, ref);
             determined.sub().where(cb.or(
                     bodyBuilder.build(determined.sub(), determined.tailJoin(), determined.rebasedOuter()),
                     negate(bodyBuilder.build(determined.sub(), determined.tailJoin(), determined.rebasedOuter()))));
@@ -1611,6 +1637,13 @@ public final class SpringDataQueryPlanAdapter {
             }
             Scope rebased = Scope.rebaseAt(scope, ref.owner(), correlated, sub);
             return new ChainSubquery<>(sub, join, rebased);
+        }
+
+        /** A chain subquery seeded to {@code SELECT COUNT(tailJoin)} — the shared seed of every counting shape. */
+        private ChainSubquery<Long> countSubquery(Scope scope, Scope.ResolvedRelation ref) {
+            ChainSubquery<Long> cs = chainSubquery(Long.class, scope, ref);
+            cs.sub().select(cb.count(cs.tailJoin()));
+            return cs;
         }
 
         private Predicate existsSubquery(Scope scope, Scope.ResolvedRelation ref,
