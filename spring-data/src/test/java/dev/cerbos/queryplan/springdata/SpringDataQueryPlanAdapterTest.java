@@ -362,14 +362,58 @@ class SpringDataQueryPlanAdapterTest {
                 nval(0))));
     }
 
-    @Test
-    void unsupportedSizeComparisonThrows() {
-        // Only emptiness checks (size > 0, size == 0) are supported; size > 5 must throw.
-        assertConditionThrows(
-                exprOp("gt",
-                        exprOp("size", var("request.resource.attr.ownedBy")),
-                        nval(5)),
-                "size", "Unsupported size comparison");
+    // -- size(collection) compared with arbitrary N → correlated (SELECT COUNT(...)) <op> N.
+    // Seeds a real row because an empty table cannot distinguish count thresholds.
+
+    @Nested
+    class SizeCountComparisons {
+
+        private ResourceEntity seeded() {
+            ResourceEntity r = new ResourceEntity("size-seed-1");
+            r.setOwnedBy(new java.util.ArrayList<>(java.util.List.of("user1", "user2")));
+            r.addTag("tagX", "x");
+            return r;
+        }
+
+        @Test
+        void sizeComparedWithArbitraryN() {
+            // Seeded row has 2 owners (@ElementCollection) and 1 tag (@OneToMany).
+            withResource(seeded(), () -> {
+                assertEquals(1, runCount(exprOp("eq",
+                        exprOp("size", var("request.resource.attr.ownedBy")), nval(2))));
+                assertEquals(0, runCount(exprOp("eq",
+                        exprOp("size", var("request.resource.attr.ownedBy")), nval(3))));
+                assertEquals(1, runCount(exprOp("gt",
+                        exprOp("size", var("request.resource.attr.ownedBy")), nval(1))));
+                assertEquals(0, runCount(exprOp("gt",
+                        exprOp("size", var("request.resource.attr.ownedBy")), nval(2))));
+                assertEquals(1, runCount(exprOp("le",
+                        exprOp("size", var("request.resource.attr.ownedBy")), nval(2))));
+                assertEquals(0, runCount(exprOp("lt",
+                        exprOp("size", var("request.resource.attr.ownedBy")), nval(2))));
+                assertEquals(0, runCount(exprOp("ge",
+                        exprOp("size", var("request.resource.attr.ownedBy")), nval(3))));
+                assertEquals(0, runCount(exprOp("ne",
+                        exprOp("size", var("request.resource.attr.ownedBy")), nval(2))));
+                // Entity relation (@OneToMany), not just element collections.
+                assertEquals(1, runCount(exprOp("eq",
+                        exprOp("size", var("request.resource.attr.tags")), nval(1))));
+            });
+        }
+
+        @Test
+        void sizeValueFirstWithArbitraryNIsMirrored() {
+            // 3 > size(ownedBy) → size < 3, with 2 owners → match. The naive (unmirrored)
+            // translation `size > 3` would return 0.
+            withResource(seeded(), () -> {
+                assertEquals(1, runCount(exprOp("gt",
+                        nval(3),
+                        exprOp("size", var("request.resource.attr.ownedBy")))));
+                assertEquals(1, runCount(exprOp("lt",
+                        nval(1),
+                        exprOp("size", var("request.resource.attr.ownedBy")))));
+            });
+        }
     }
 
     @Test
@@ -728,23 +772,25 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         @Test
-        void ternaryThrows() {
-            // The CEL planner emits ternary as `if(cond, then, else)` in the AST.
-            Operand ternary = exprOp("if",
-                    var("request.resource.attr.aBool"),
-                    var("request.resource.attr.aNumber"),
-                    nval(0));
-            assertConditionThrows(exprOp("gt", ternary, nval(0)), "if()");
-        }
-
-        @Test
-        void stringSizeThrows() {
-            // size(aString) > 0 — size() requires a Relation mapping; aString is a Field.
-            assertConditionThrows(
-                    exprOp("gt",
-                            exprOp("size", var("request.resource.attr.aString")),
-                            nval(0)),
-                    "size()", "Relation");
+        void stringSizeComparesLength() {
+            // size(aString) on a Field mapping → LENGTH(a_string) <op> N.
+            // Seeded aString = "seededString" (12 chars).
+            ResourceEntity r = new ResourceEntity("string-size-seed-1");
+            r.setaString("seededString");
+            withResource(r, () -> {
+                assertEquals(1, runCount(exprOp("eq",
+                        exprOp("size", var("request.resource.attr.aString")), nval(12))));
+                assertEquals(0, runCount(exprOp("eq",
+                        exprOp("size", var("request.resource.attr.aString")), nval(5))));
+                assertEquals(1, runCount(exprOp("gt",
+                        exprOp("size", var("request.resource.attr.aString")), nval(0))));
+                assertEquals(0, runCount(exprOp("gt",
+                        exprOp("size", var("request.resource.attr.aString")), nval(20))));
+                // Value-first is mirrored: 5 < size(aString) → length > 5 → match.
+                assertEquals(1, runCount(exprOp("lt",
+                        nval(5),
+                        exprOp("size", var("request.resource.attr.aString")))));
+            });
         }
     }
 
@@ -761,13 +807,61 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         @Test
-        void equalFieldToFieldThrows() {
-            // eq(var, var) — adapter rejects two-variable comparisons with a specific message.
+        void fieldToFieldEquality() {
+            // eq/ne over two variables compares the two columns directly.
+            // Seeded: aString == createdBy == "same"; aOptionalString differs.
+            ResourceEntity r = new ResourceEntity("f2f-seed-1");
+            r.setaString("same");
+            r.setCreatedBy("same");
+            r.setaOptionalString("different");
+            withResource(r, () -> {
+                assertEquals(1, runCount(exprOp("eq",
+                        var("request.resource.attr.aString"),
+                        var("request.resource.attr.createdBy"))));
+                assertEquals(0, runCount(exprOp("eq",
+                        var("request.resource.attr.aString"),
+                        var("request.resource.attr.aOptionalString"))));
+                assertEquals(0, runCount(exprOp("ne",
+                        var("request.resource.attr.aString"),
+                        var("request.resource.attr.createdBy"))));
+                assertEquals(1, runCount(exprOp("ne",
+                        var("request.resource.attr.aString"),
+                        var("request.resource.attr.aOptionalString"))));
+            });
+        }
+
+        @Test
+        void fieldToFieldOrderingKeepsOperandDirection() {
+            // lt/gt over two variables must honor source order: createdBy < aString
+            // with createdBy = "abc", aString = "xyz" → match; the swapped form must not.
+            ResourceEntity r = new ResourceEntity("f2f-seed-2");
+            r.setaString("xyz");
+            r.setCreatedBy("abc");
+            r.setaNumber(5);
+            withResource(r, () -> {
+                assertEquals(1, runCount(exprOp("lt",
+                        var("request.resource.attr.createdBy"),
+                        var("request.resource.attr.aString"))));
+                assertEquals(0, runCount(exprOp("lt",
+                        var("request.resource.attr.aString"),
+                        var("request.resource.attr.createdBy"))));
+                assertEquals(1, runCount(exprOp("le",
+                        var("request.resource.attr.aNumber"),
+                        var("request.resource.attr.aNumber"))));
+                assertEquals(0, runCount(exprOp("gt",
+                        var("request.resource.attr.aNumber"),
+                        var("request.resource.attr.aNumber"))));
+            });
+        }
+
+        @Test
+        void fieldToFieldNonComparisonOperatorStillThrows() {
+            // contains(var, var) has no portable JPA translation — the specific message stays.
             assertConditionThrows(
-                    exprOp("eq",
+                    exprOp("contains",
                             var("request.resource.attr.aString"),
                             var("request.resource.attr.createdBy")),
-                    "Field-to-field", "eq");
+                    "Field-to-field", "contains");
         }
 
         @Test
@@ -822,14 +916,27 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         @Test
-        void sizeOfFilterThrows() {
-            // size(tags.filter(t, t.name == "public")) > 0 — size() operand must be a variable.
+        void sizeOfFilterCountsMatchingElements() {
+            // size(tags.filter(t, t.name == "public")) <op> N → correlated
+            // (SELECT COUNT(...) WHERE lambda) <op> N. Seeded row: tags [public, public, x].
+            ResourceEntity r = new ResourceEntity("size-filter-seed-1");
+            r.addTag("tagA", "public");
+            r.addTag("tagB", "public");
+            r.addTag("tagC", "x");
             Operand filterExpr = exprOp("filter",
                     var("request.resource.attr.tags"),
                     lambda("t", exprOp("eq", var("t.name"), sval("public"))));
-            assertConditionThrows(
-                    exprOp("gt", exprOp("size", filterExpr), nval(0)),
-                    "size()");
+            withResource(r, () -> {
+                assertEquals(1, runCount(exprOp("eq", exprOp("size", filterExpr), nval(2))));
+                assertEquals(0, runCount(exprOp("eq", exprOp("size", filterExpr), nval(3))));
+                assertEquals(1, runCount(exprOp("gt", exprOp("size", filterExpr), nval(1))));
+                assertEquals(0, runCount(exprOp("gt", exprOp("size", filterExpr), nval(2))));
+                // Emptiness checks work through the same path.
+                assertEquals(1, runCount(exprOp("gt", exprOp("size", filterExpr), nval(0))));
+                assertEquals(0, runCount(exprOp("eq", exprOp("size", filterExpr), nval(0))));
+                // Value-first is mirrored: 3 > size(filter) → count < 3 → match.
+                assertEquals(1, runCount(exprOp("gt", nval(3), exprOp("size", filterExpr))));
+            });
         }
     }
 
@@ -1049,6 +1156,337 @@ class SpringDataQueryPlanAdapterTest {
             Operand cond = exprOp("lt", nval(3), var("request.resource.attr.aNumber"));
             assertThrows(OverrideInvoked.class,
                     () -> runCount(cond, Map.of("gt", THROWING_OVERRIDE)));
+        }
+    }
+
+    // -- CEL ternary (PR: ternary support): `if(cond, then, else)` is rewritten into pure
+    // predicates — cmp(if(c,a,b), other) → (c AND cmp(a, other)) OR (NOT c AND cmp(b, other)).
+    // Seeds real rows because an empty table cannot distinguish the branch predicates.
+
+    @Nested
+    class TernaryIfExpressions {
+
+        /** gt(if(aBool, aNumber, 0), 0) — the canonical `(R.attr.aBool ? R.attr.aNumber : 0) > 0`. */
+        private Operand canonicalPlan() {
+            return exprOp("gt",
+                    exprOp("if",
+                            var("request.resource.attr.aBool"),
+                            var("request.resource.attr.aNumber"),
+                            nval(0)),
+                    nval(0));
+        }
+
+        @Test
+        void comparisonWrappingTernary() {
+            // aBool = true → then-branch compares aNumber > 0.
+            ResourceEntity match = new ResourceEntity("ternary-seed-1");
+            match.setaBool(true);
+            match.setaNumber(10);
+            withResource(match, () -> assertEquals(1, runCount(canonicalPlan())));
+
+            ResourceEntity zeroThen = new ResourceEntity("ternary-seed-2");
+            zeroThen.setaBool(true);
+            zeroThen.setaNumber(0);
+            withResource(zeroThen, () -> assertEquals(0, runCount(canonicalPlan())));
+
+            // aBool = false → else branch folds to gt(0, 0) → always false, whatever aNumber is.
+            ResourceEntity elseBranch = new ResourceEntity("ternary-seed-3");
+            elseBranch.setaBool(false);
+            elseBranch.setaNumber(10);
+            withResource(elseBranch, () -> assertEquals(0, runCount(canonicalPlan())));
+        }
+
+        @Test
+        void bareBooleanTernary() {
+            // aBool ? aString == "x" : aNumber > 5 — the ternary IS the condition, both
+            // branches are boolean expressions.
+            Operand plan = exprOp("if",
+                    var("request.resource.attr.aBool"),
+                    exprOp("eq", var("request.resource.attr.aString"), sval("x")),
+                    exprOp("gt", var("request.resource.attr.aNumber"), nval(5)));
+
+            ResourceEntity thenMatch = new ResourceEntity("ternary-bare-1");
+            thenMatch.setaBool(true);
+            thenMatch.setaString("x");
+            thenMatch.setaNumber(0);
+            withResource(thenMatch, () -> assertEquals(1, runCount(plan)));
+
+            // then-branch active but not satisfied — the else branch must NOT rescue the row.
+            ResourceEntity thenMiss = new ResourceEntity("ternary-bare-2");
+            thenMiss.setaBool(true);
+            thenMiss.setaString("y");
+            thenMiss.setaNumber(10);
+            withResource(thenMiss, () -> assertEquals(0, runCount(plan)));
+
+            ResourceEntity elseMatch = new ResourceEntity("ternary-bare-3");
+            elseMatch.setaBool(false);
+            elseMatch.setaString("x");
+            elseMatch.setaNumber(10);
+            withResource(elseMatch, () -> assertEquals(1, runCount(plan)));
+
+            ResourceEntity elseMiss = new ResourceEntity("ternary-bare-4");
+            elseMiss.setaBool(false);
+            elseMiss.setaString("x");
+            elseMiss.setaNumber(1);
+            withResource(elseMiss, () -> assertEquals(0, runCount(plan)));
+        }
+
+        @Test
+        void bareBooleanTernaryWithConstantBranch() {
+            // aBool ? true : aNumber > 5 — a boolean VALUE branch folds to 1=1 / 1=0.
+            Operand plan = exprOp("if",
+                    var("request.resource.attr.aBool"),
+                    bval(true),
+                    exprOp("gt", var("request.resource.attr.aNumber"), nval(5)));
+
+            ResourceEntity thenMatch = new ResourceEntity("ternary-bare-const-1");
+            thenMatch.setaBool(true);
+            thenMatch.setaNumber(0);
+            withResource(thenMatch, () -> assertEquals(1, runCount(plan)));
+
+            ResourceEntity elseMiss = new ResourceEntity("ternary-bare-const-2");
+            elseMiss.setaBool(false);
+            elseMiss.setaNumber(1);
+            withResource(elseMiss, () -> assertEquals(0, runCount(plan)));
+
+            // aBool ? false : aNumber > 5 — a false then-branch excludes matching-condition rows.
+            Operand planFalse = exprOp("if",
+                    var("request.resource.attr.aBool"),
+                    bval(false),
+                    exprOp("gt", var("request.resource.attr.aNumber"), nval(5)));
+            ResourceEntity falseThen = new ResourceEntity("ternary-bare-const-3");
+            falseThen.setaBool(true);
+            falseThen.setaNumber(10);
+            withResource(falseThen, () -> assertEquals(0, runCount(planFalse)));
+        }
+
+        @Test
+        void valueFirstComparisonIsMirrored() {
+            // 3 < (aBool ? aNumber : 0) — planner preserves source order, so the constant sits
+            // on the LEFT. Branch substitution keeps positions, and NormalizedBinary mirrors the
+            // recursed comparisons: lt(3, aNumber) → aNumber > 3.
+            Operand plan = exprOp("lt",
+                    nval(3),
+                    exprOp("if",
+                            var("request.resource.attr.aBool"),
+                            var("request.resource.attr.aNumber"),
+                            nval(0)));
+
+            ResourceEntity match = new ResourceEntity("ternary-mirror-1");
+            match.setaBool(true);
+            match.setaNumber(5);
+            withResource(match, () -> assertEquals(1, runCount(plan)));
+
+            // Naive (unmirrored) translation `aNumber < 3` would wrongly match this row.
+            ResourceEntity below = new ResourceEntity("ternary-mirror-2");
+            below.setaBool(true);
+            below.setaNumber(2);
+            withResource(below, () -> assertEquals(0, runCount(plan)));
+
+            // else branch: 3 < 0 folds to always-false — aNumber must not leak in.
+            ResourceEntity elseRow = new ResourceEntity("ternary-mirror-3");
+            elseRow.setaBool(false);
+            elseRow.setaNumber(99);
+            withResource(elseRow, () -> assertEquals(0, runCount(plan)));
+        }
+
+        @Test
+        void nestedTernaryInBranch() {
+            // (aBool ? (aString == "x" ? aNumber : 1) : 0) > 2 — the then-branch is itself a
+            // ternary; substitution recurses until no `if` remains.
+            Operand plan = exprOp("gt",
+                    exprOp("if",
+                            var("request.resource.attr.aBool"),
+                            exprOp("if",
+                                    exprOp("eq", var("request.resource.attr.aString"), sval("x")),
+                                    var("request.resource.attr.aNumber"),
+                                    nval(1)),
+                            nval(0)),
+                    nval(2));
+
+            ResourceEntity innerThen = new ResourceEntity("ternary-nested-1");
+            innerThen.setaBool(true);
+            innerThen.setaString("x");
+            innerThen.setaNumber(5);
+            withResource(innerThen, () -> assertEquals(1, runCount(plan)));
+
+            // Inner else: 1 > 2 → always false, even though aNumber would match.
+            ResourceEntity innerElse = new ResourceEntity("ternary-nested-2");
+            innerElse.setaBool(true);
+            innerElse.setaString("y");
+            innerElse.setaNumber(5);
+            withResource(innerElse, () -> assertEquals(0, runCount(plan)));
+
+            // Outer else: 0 > 2 → always false.
+            ResourceEntity outerElse = new ResourceEntity("ternary-nested-3");
+            outerElse.setaBool(false);
+            outerElse.setaString("x");
+            outerElse.setaNumber(5);
+            withResource(outerElse, () -> assertEquals(0, runCount(plan)));
+        }
+
+        @Test
+        void ternaryUnderLogicalOperators() {
+            // The rewrite produces an OR-of-ANDs; it must compose under not/and/or like any
+            // other predicate (negation goes through the junction-barrier helper).
+            Operand comparison = exprOp("gt",
+                    exprOp("if",
+                            var("request.resource.attr.aBool"),
+                            var("request.resource.attr.aNumber"),
+                            nval(0)),
+                    nval(0));
+
+            ResourceEntity truthy = new ResourceEntity("ternary-logic-1");
+            truthy.setaBool(true);
+            truthy.setaString("x");
+            truthy.setaNumber(10);
+            withResource(truthy, () -> {
+                assertEquals(0, runCount(exprOp("not", comparison)));
+                // Double negation must toggle back (junction barrier, not raw cb.not).
+                assertEquals(1, runCount(exprOp("not", exprOp("not", comparison))));
+                assertEquals(1, runCount(exprOp("and", comparison,
+                        exprOp("eq", var("request.resource.attr.aString"), sval("x")))));
+                assertEquals(0, runCount(exprOp("and", comparison,
+                        exprOp("eq", var("request.resource.attr.aString"), sval("z")))));
+                assertEquals(1, runCount(exprOp("or", comparison,
+                        exprOp("eq", var("request.resource.attr.aString"), sval("z")))));
+            });
+
+            // Row where the ternary comparison is false: NOT must select it, OR must rescue it
+            // only through the other arm.
+            ResourceEntity falsy = new ResourceEntity("ternary-logic-2");
+            falsy.setaBool(false);
+            falsy.setaString("x");
+            falsy.setaNumber(10);
+            withResource(falsy, () -> {
+                assertEquals(1, runCount(exprOp("not", comparison)));
+                assertEquals(0, runCount(exprOp("not", exprOp("not", comparison))));
+                assertEquals(1, runCount(exprOp("or", comparison,
+                        exprOp("eq", var("request.resource.attr.aString"), sval("x")))));
+                assertEquals(0, runCount(exprOp("or", comparison,
+                        exprOp("eq", var("request.resource.attr.aString"), sval("z")))));
+            });
+        }
+
+        @Test
+        void ternaryWithExpressionCondition() {
+            // (aNumber > 5 ? aString : "none") == "x" — condition is a boolean EXPRESSION,
+            // not a bare variable.
+            Operand plan = exprOp("eq",
+                    exprOp("if",
+                            exprOp("gt", var("request.resource.attr.aNumber"), nval(5)),
+                            var("request.resource.attr.aString"),
+                            sval("none")),
+                    sval("x"));
+
+            ResourceEntity condTrue = new ResourceEntity("ternary-exprcond-1");
+            condTrue.setaNumber(10);
+            condTrue.setaString("x");
+            withResource(condTrue, () -> assertEquals(1, runCount(plan)));
+
+            // Condition false → eq("none", "x") folds to always-false.
+            ResourceEntity condFalse = new ResourceEntity("ternary-exprcond-2");
+            condFalse.setaNumber(1);
+            condFalse.setaString("x");
+            withResource(condFalse, () -> assertEquals(0, runCount(plan)));
+        }
+
+        @Test
+        void eqNeWithTernary() {
+            // (aBool ? aString : "none") == "x"  /  != "x"
+            Operand ternary = exprOp("if",
+                    var("request.resource.attr.aBool"),
+                    var("request.resource.attr.aString"),
+                    sval("none"));
+            Operand eqPlan = exprOp("eq", ternary, sval("x"));
+            Operand nePlan = exprOp("ne", ternary, sval("x"));
+
+            ResourceEntity thenX = new ResourceEntity("ternary-eqne-1");
+            thenX.setaBool(true);
+            thenX.setaString("x");
+            withResource(thenX, () -> {
+                assertEquals(1, runCount(eqPlan));
+                assertEquals(0, runCount(nePlan));
+            });
+
+            ResourceEntity thenY = new ResourceEntity("ternary-eqne-2");
+            thenY.setaBool(true);
+            thenY.setaString("y");
+            withResource(thenY, () -> {
+                assertEquals(0, runCount(eqPlan));
+                assertEquals(1, runCount(nePlan));
+            });
+
+            // else branch folds: eq("none", "x") → always false; ne("none", "x") → always true.
+            ResourceEntity elseRow = new ResourceEntity("ternary-eqne-3");
+            elseRow.setaBool(false);
+            elseRow.setaString("x");
+            withResource(elseRow, () -> {
+                assertEquals(0, runCount(eqPlan));
+                assertEquals(1, runCount(nePlan));
+            });
+        }
+
+        @Test
+        void constantVersusConstantComparisonsFold() {
+            // (aBool ? 1 : 0) > 0 — BOTH branches collapse to constant comparisons, leaving
+            // only the condition predicate. Seeded row: matches iff aBool is true.
+            Operand allConstBranches = exprOp("gt",
+                    exprOp("if", var("request.resource.attr.aBool"), nval(1), nval(0)),
+                    nval(0));
+
+            ResourceEntity boolTrue = new ResourceEntity("ternary-const-1");
+            boolTrue.setaBool(true);
+            withResource(boolTrue, () -> {
+                assertEquals(1, runCount(allConstBranches));
+
+                // Direct value-vs-value plans exercise the fold through the public seam:
+                // numbers compare in double space (1.0 == 1, 0.5 < 1), strings via compareTo,
+                // mixed incomparable types are eq → false / ne → true.
+                assertEquals(1, runCount(exprOp("eq", nval(1.0), nval(1))));
+                assertEquals(1, runCount(exprOp("lt", nval(0.5), nval(1))));
+                assertEquals(0, runCount(exprOp("gt", nval(0), nval(0))));
+                assertEquals(1, runCount(exprOp("ge", nval(2), nval(2))));
+                assertEquals(1, runCount(exprOp("lt", sval("a"), sval("b"))));
+                assertEquals(0, runCount(exprOp("eq", sval("a"), nval(1))));
+                assertEquals(1, runCount(exprOp("ne", sval("a"), nval(1))));
+                assertEquals(1, runCount(exprOp("eq", bval(true), bval(true))));
+                // Ordering incomparable constant types is a planner bug and must throw.
+                assertConditionThrows(exprOp("lt", sval("a"), nval(1)),
+                        "Cannot order", "lt");
+            });
+
+            ResourceEntity boolFalse = new ResourceEntity("ternary-const-2");
+            boolFalse.setaBool(false);
+            withResource(boolFalse, () -> assertEquals(0, runCount(allConstBranches)));
+        }
+
+        @Test
+        void ternaryWithWrongOperandCountThrows() {
+            // if() with 2 operands inside a comparison — malformed plan, not a silent drop.
+            assertConditionThrows(
+                    exprOp("gt",
+                            exprOp("if", var("request.resource.attr.aBool"), nval(1)),
+                            nval(0)),
+                    "if (ternary) requires exactly 3 operands", "got 2");
+            // Same contract for a bare-boolean-position ternary.
+            assertConditionThrows(
+                    exprOp("if", var("request.resource.attr.aBool"), bval(true)),
+                    "if (ternary) requires exactly 3 operands", "got 2");
+        }
+
+        @Test
+        void ternaryUnderUnsupportedWrapperNamesOperator() {
+            // contains(if(...), "x") — only eq/ne/lt/gt/le/ge accept a ternary operand; the
+            // error must name the offending wrapper operator.
+            assertConditionThrows(
+                    exprOp("contains",
+                            exprOp("if",
+                                    var("request.resource.attr.aBool"),
+                                    var("request.resource.attr.aString"),
+                                    sval("none")),
+                            sval("x")),
+                    "if()", "contains");
         }
     }
 

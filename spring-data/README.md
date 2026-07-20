@@ -114,6 +114,11 @@ Map each `request.resource.attr.<name>` to a JPA path or a relation:
 | `hasIntersection(coll.map(x, x.f), [values])` | Correlated `EXISTS` with projected `IN`             |
 | `size(coll) > 0` / `>= 1`        | Correlated `EXISTS`                                                 |
 | `size(coll) == 0` / `<= 0` / `< 1`| `NOT EXISTS`                                                       |
+| `size(coll) <op> N`              | Correlated `(SELECT COUNT...) <op> N`                               |
+| `size(coll.filter(x, pred)) <op> N` | Correlated `(SELECT COUNT... WHERE pred) <op> N`                 |
+| `size(string)`                   | `cb.length(column)` (see Gotchas for astral-character caveat)       |
+| Field-to-field (`R.attr.a == R.attr.b`) | `cb.equal(pathA, pathB)` and friends for `eq`/`ne`/`lt`/`gt`/`le`/`ge`, incl. inside lambdas |
+| Ternary (`cond ? a : b`)         | Predicate rewrite: `(cond AND cmp(a, v)) OR (NOT cond AND cmp(b, v))` — nested, boolean-position, and value-first forms compose; constant residues fold (see Gotchas for `NULL` semantics) |
 | `exists(coll, lambda)`           | Correlated `EXISTS` with lambda body                                |
 | `exists_one(coll, lambda)`       | Correlated `(SELECT COUNT...) = 1`                                  |
 | `all(coll, lambda)`              | `NOT EXISTS (... AND NOT(body))`                                    |
@@ -150,17 +155,34 @@ SQL fragments), or wait for adapter support.
 | Regex match                                     | `R.attr.aString.matches("^foo.*")`                | JPA has no portable regex predicate; override per-dialect (`regexp_like`, `~`, `REGEXP`). |
 | List indexing                                   | `R.attr.tags[0] == "x"`                           | JPA collections are unordered sets — no positional access. |
 | Type casts (`int(...)` / `double(...)` / `string(...)`) | `int(R.attr.aString) > 0`                 | No portable `CAST` in Criteria; override per-dialect. |
-| Ternary (`cond ? a : b`)                        | `(R.attr.aBool ? R.attr.aNumber : 0) > 0`         | The CEL planner emits this as `if(cond, then, else)`; JPA Criteria has no `CASE WHEN` value-expression builder. |
-| `size(string)`                                  | `size(R.attr.aString) > 0`                        | Only `size(collection)` (`Relation` mapping) is supported; for strings use `cb.length` via an override. |
-| Field-to-field comparison                       | `R.attr.aString == R.attr.id`                     | The leaf operator handler requires one variable + one value operand; throws explicitly. |
+| Field-to-field `contains`/`startsWith`/`endsWith` | `R.attr.aString.contains(R.attr.createdBy)`     | Comparison operators support field-to-field; LIKE against a column-derived pattern has no portable escaping. |
 | `eq(map(...), [...])`                           | `R.attr.tags.map(t, t.id) == ["tag1", "tag2"]`    | Use `hasIntersection(map(...), [...])` instead. |
-| `size(filter(...)) <op> N`                      | `size(R.attr.tags.filter(t, t.name == "x")) > 0`  | Use `exists(coll, lambda)` for emptiness; `size()` only accepts a Variable operand. |
-| `size(coll) <op> N` for `N > 0`                 | `size(R.attr.tags) > 5`                           | Only emptiness checks are supported. |
 
 ## Gotchas
 
 Things you're likely to hit when integrating the adapter into a Spring Boot app — see the
 [`example/`](example) photo-sharing application for a runnable end-to-end reference.
+
+### `size(string)` counts differently for astral characters
+
+CEL's `size(string)` counts Unicode code points; the adapter translates it to SQL
+`LENGTH()`, whose unit varies by database (UTF-16 units on H2, characters on PostgreSQL,
+bytes on some MySQL collations). The two only diverge for characters outside the Basic
+Multilingual Plane (emoji, some CJK extensions): `size("héllo🚀")` is 6 in CEL but
+`LENGTH` may report 7. If your data contains astral characters and a policy compares
+lengths near those values, rows can be filtered differently than a `check` call would
+decide. Keep length thresholds away from values that straddle the difference, or avoid
+`size(string)` in policies over data that contains astral characters.
+
+### Ternary with a `NULL` condition column excludes the row
+
+A comparison wrapping a ternary is rewritten as
+`(cond AND cmp(then, v)) OR (NOT cond AND cmp(else, v))`. Under SQL three-valued
+logic a `NULL` condition column makes both arms unknown, so the row matches
+neither branch. This is deliberate: in CEL a null/missing ternary condition is
+an evaluation error, and Cerbos denies the check — the SQL filter and a
+per-resource `check` call agree. It differs from what a SQL `CASE WHEN` would
+do (fall through to the `ELSE` branch).
 
 ### Pin `protobuf-java` to the cerbos-sdk-java's gencode version
 

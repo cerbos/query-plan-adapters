@@ -40,7 +40,6 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -97,7 +96,11 @@ class AdversarialConformanceTest {
             new Seed("a7", true, "tail\\", 0, "z",
                     List.of(new Tag("t7a", "other")), List.of()),
             new Seed("a8", true, "", 2, null,
-                    List.of(new Tag("t8a", "public")), List.of("tech"))
+                    List.of(new Tag("t8a", "public")), List.of("tech")),
+            // Field-to-field witness: aString == aOptionalString == a tag name, so the
+            // field-to-field and lambda-field-to-field oracles are non-degenerate.
+            new Seed("a9", true, "same", 4, "same",
+                    List.of(new Tag("t9a", "same")), List.of())
     );
 
     private static GenericContainer<?> cerbos;
@@ -244,21 +247,16 @@ class AdversarialConformanceTest {
             "outer-attr-depth2", "lambda-in-principal",
             "nary-and", "double-negation", "triple-negation", "not-empty",
             "optional-ne",
+            "lambda-field-to-field", "field-to-field",
+            "size-threshold", "size-filter-count", "string-size",
+            "ternary-cmp", "ternary-expr-cond", "ternary-nested", "ternary-negated",
+            "ternary-bare", "ternary-value-first", "ternary-null-cond",
     })
     void adapterMatchesCheckOracle(String action) {
         List<String> oracle = oracleAllowedIds(action);
         List<String> filtered = adapterFilteredIds(action);
         assertEquals(oracle, filtered,
                 "adapter result diverges from check-API oracle for action '" + action + "'");
-    }
-
-    @Test
-    void fieldToFieldInsideLambdaFailsLoudly() {
-        // Documented unsupported shape — must be a clear error, never a silently wrong result.
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> adapterFilteredIds("lambda-field-to-field"));
-        assertTrue(ex.getMessage().contains("Field-to-field"),
-                "expected the field-to-field guard, got: " + ex.getMessage());
     }
 
     @Test

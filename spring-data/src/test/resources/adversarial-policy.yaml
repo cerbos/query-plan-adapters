@@ -185,10 +185,101 @@ resourcePolicy:
         match:
           expr: R.attr.aOptionalString != "x"
 
-    # -- documented unsupported shape: field-to-field inside a lambda must throw cleanly --
+    # -- field-to-field comparison inside a lambda (join column vs correlated outer column) --
     - actions: ["lambda-field-to-field"]
       effect: EFFECT_ALLOW
       roles: ["USER"]
       condition:
         match:
           expr: R.attr.tags.exists(t, t.name == R.attr.aString)
+
+    # -- size(coll) compared with a non-zero threshold → correlated COUNT subquery --
+    - actions: ["size-threshold"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: size(R.attr.tags) > 1
+
+    # -- size over a filtered collection → COUNT subquery with the lambda as WHERE --
+    - actions: ["size-filter-count"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: size(R.attr.tags.filter(t, t.name == "public")) == 1
+
+    # -- size(string) → LENGTH(column). Threshold chosen so the astral-char seed ("héllo🚀",
+    # 6 code points in CEL vs 7 UTF-16 units in the DB) lands on the same side either way.
+    - actions: ["string-size"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: size(R.attr.aString) > 4
+
+    # -- top-level field-to-field: column compared to column, incl. NULL exclusion semantics --
+    - actions: ["field-to-field"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aString == R.attr.aOptionalString
+
+    # -- CEL ternary (planner emits if(cond, then, else)) --
+    # Canonical comparison-wrapped ternary: cmp(if(c,a,b), v) rewritten into guarded branches.
+    - actions: ["ternary-cmp"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '(R.attr.aBool ? R.attr.aNumber : 0) > 1'
+
+    # Ternary whose condition is itself an expression (startsWith), not a bare bool column.
+    - actions: ["ternary-expr-cond"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '(R.attr.aString.startsWith("100") ? R.attr.aNumber : -1) >= 0'
+
+    # Nested ternary: the then-branch is another ternary; empty-string seed lands in the inner else.
+    - actions: ["ternary-nested"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '(R.attr.aBool ? (R.attr.aString == "" ? 0 : R.attr.aNumber) : -1) >= 2'
+
+    # Ternary under !(...): NOT over the OR-of-guarded-branches rewrite.
+    - actions: ["ternary-negated"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!((R.attr.aBool ? R.attr.aNumber : 0) > 1)'
+
+    # Bare boolean-result ternary: both branches are predicates, no wrapping comparison.
+    - actions: ["ternary-bare"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aBool ? R.attr.aString == "one" : R.attr.aNumber < 0'
+
+    # Value-first form: constant on the left of the comparison wrapping the ternary.
+    - actions: ["ternary-value-first"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '0 < (R.attr.aBool ? R.attr.aNumber : -1)'
+
+    # NULL condition column (aOptionalString is NULL on a2/a4/a8): CEL missing-attr error (deny)
+    # must align with SQL three-valued logic excluding the row from BOTH rewritten branches.
+    - actions: ["ternary-null-cond"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '(R.attr.aOptionalString != "x" ? R.attr.aNumber : 0) > 1'

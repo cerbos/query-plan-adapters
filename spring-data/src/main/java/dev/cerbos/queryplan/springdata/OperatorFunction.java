@@ -23,7 +23,9 @@ import jakarta.persistence.criteria.Predicate;
  * <p>Overrides are <em>not</em> consulted for operators that translate to correlated {@code EXISTS}
  * subqueries against a {@code Relation} mapping — {@code exists}/{@code exists_one}/{@code all}/
  * {@code except}/{@code filter}, {@code hasIntersection} over a relation, {@code size(...)}, and the
- * relation form of {@code in} — because those have no single resolved (field, value) pair.
+ * relation form of {@code in} — because those have no single resolved (field, value) pair. The same
+ * applies to {@code size(string)} length comparisons and field-to-field comparisons
+ * ({@code R.attr.a == R.attr.b}), where the right-hand side is a column, not a value.
  */
 @FunctionalInterface
 public interface OperatorFunction {

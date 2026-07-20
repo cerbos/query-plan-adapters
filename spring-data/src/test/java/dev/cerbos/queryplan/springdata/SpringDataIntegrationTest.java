@@ -982,10 +982,11 @@ class SpringDataIntegrationTest {
     }
 
     // -- CEL primitives (PR #223) --
-    // Only `empty-collection` (size(coll) == 0) is natively supported via the existing emptiness
-    // path in trySizeComparison. Arithmetic, regex, casts, ternary, list indexing, and
-    // size() over a scalar string all throw — the Spring Data adapter has no shape for them in
-    // its Criteria-based predicate builder.
+    // `empty-collection` (size(coll) == 0) is natively supported via the existing emptiness
+    // path in trySizeComparison, and the CEL ternary (`if(cond, then, else)`) is rewritten into
+    // an OR of guarded branch predicates. Arithmetic, regex, casts, and list indexing still
+    // throw — the Spring Data adapter has no shape for them in its Criteria-based predicate
+    // builder.
 
     @Nested
     class CelPrimitives {
@@ -1048,15 +1049,20 @@ class SpringDataIntegrationTest {
         }
 
         @Test
-        void ternaryThrows() {
-            // The CEL planner emits ternary as `if(cond, then, else)` — not `conditional`.
-            assertActionThrows("ternary", FIELD_MAP, "if()");
+        void ternarySelectsThenBranchRows() {
+            // Policy: (R.attr.aBool ? R.attr.aNumber : 0) > 0 — the planner emits the ternary as
+            // if(cond, then, else); the adapter rewrites cmp(if(c,a,b), v) into
+            // OR(AND(c, a cmp v), AND(!c, b cmp v)).
+            //   r1: aBool=true  → then-branch: aNumber=1 > 0 → ✓
+            //   r2: aBool=false → else-branch: 0 > 0        → ✗
+            //   r3: aBool=true  → then-branch: aNumber=3 > 0 → ✓
+            assertEquals(List.of("1", "3"), run("ternary"));
         }
 
         @Test
-        void stringSizeThrows() {
-            // size(R.attr.aString) > 0 — adapter only handles size() on Relation mappings.
-            assertActionThrows("string-size", FIELD_MAP, "size()", "Relation");
+        void stringSizeComparesLength() {
+            // size(R.attr.aString) > 0 → LENGTH(a_string) > 0; every row has a non-empty aString.
+            assertEquals(List.of("1", "2", "3"), run("string-size"));
         }
     }
 
@@ -1072,9 +1078,17 @@ class SpringDataIntegrationTest {
         }
 
         @Test
-        void equalFieldToFieldThrows() {
-            // aString == id — adapter rejects two-variable comparisons with a specific message.
-            assertActionThrows("equal-field-to-field", FIELD_MAP, "Field-to-field", "eq");
+        void equalFieldToField() {
+            // aString == id (mapped to oid) — no row's aString equals its oid.
+            assertEquals(List.of(), run("equal-field-to-field"));
+            // The ne direction is non-degenerate: every row's aString differs from its oid.
+            assertEquals(List.of("1", "2", "3"), run("not-equal-field-to-field"));
+        }
+
+        @Test
+        void sizeCountThreshold() {
+            // size(ownedBy) >= 2 → COUNT subquery; only r1 has two owners.
+            assertEquals(List.of("1"), run("size-count-threshold"));
         }
 
         @Test
@@ -1121,11 +1135,10 @@ class SpringDataIntegrationTest {
                     "map(...)", "hasIntersection");
         }
 
-        // TODO(#232): trySizeComparison only accepts a Variable as size()'s operand, so
-        // `size(filter(...)) > 0` falls through and throws.
         @Test
-        void sizeOfFilterThrows() {
-            assertActionThrows("filter-count-gt", NESTED_FIELD_MAP, "size()");
+        void sizeOfFilterCountsMatchingElements() {
+            // size(tags.filter(t, t.name == "public")) > 0 → r1 and r3 have a "public" tag.
+            assertEquals(List.of("1", "3"), runNested("filter-count-gt"));
         }
     }
 
