@@ -23,6 +23,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.jpa.domain.Specification;
@@ -40,6 +41,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -62,7 +64,7 @@ class AdversarialConformanceTest {
             Map.entry("request.resource.attr.aString", AttributeMapping.field("aString")),
             Map.entry("request.resource.attr.aNumber", AttributeMapping.field("aNumber")),
             Map.entry("request.resource.attr.aOptionalString", AttributeMapping.field("aOptionalString")),
-            // probe additions: ISO-date string column + flattened struct member
+            // ISO-date string column + flattened struct member for the p-* probes
             Map.entry("request.resource.attr.createdBy", AttributeMapping.field("createdBy")),
             Map.entry("request.resource.attr.obj.inner", AttributeMapping.field("aString")),
             Map.entry("request.resource.attr.tags", AttributeMapping.relation("tags", Map.of(
@@ -359,13 +361,13 @@ class AdversarialConformanceTest {
      * silently-wrong filter). Messages pinned so a regression to silent acceptance is caught.
      */
     @ParameterizedTest(name = "{0}")
-    @org.junit.jupiter.params.provider.CsvSource({
+    @CsvSource({
             "p-timestamp, Unexpected timestamp() expression in leaf operand of lt",
             "p-matches, Unsupported operator: matches",
             "p-index, Unexpected get-field() expression in leaf operand of eq",
     })
     void unsupportedShapesThrow(String action, String expectedMessage) {
-        IllegalArgumentException ex = org.junit.jupiter.api.Assertions.assertThrows(
+        IllegalArgumentException ex = assertThrows(
                 IllegalArgumentException.class, () -> adapterFilteredIds(action));
         assertEquals(expectedMessage, ex.getMessage());
     }

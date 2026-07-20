@@ -7,7 +7,9 @@ import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter;
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression;
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand;
 import dev.cerbos.api.v1.response.Response.PlanResourcesResponse;
+import dev.cerbos.queryplan.springdata.testmodel.CategoryEntity;
 import dev.cerbos.queryplan.springdata.testmodel.ResourceEntity;
+import dev.cerbos.queryplan.springdata.testmodel.SubCategoryEntity;
 
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityManagerFactory;
@@ -23,6 +25,8 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.jpa.domain.Specification;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -376,7 +380,7 @@ class SpringDataQueryPlanAdapterTest {
 
         private ResourceEntity seeded() {
             ResourceEntity r = new ResourceEntity("size-seed-1");
-            r.setOwnedBy(new java.util.ArrayList<>(java.util.List.of("user1", "user2")));
+            r.setOwnedBy(new ArrayList<>(List.of("user1", "user2")));
             r.addTag("tagX", "x");
             return r;
         }
@@ -432,7 +436,7 @@ class SpringDataQueryPlanAdapterTest {
 
         private ResourceEntity seeded() {
             ResourceEntity r = new ResourceEntity("size-frac-seed-1");
-            r.setOwnedBy(new java.util.ArrayList<>(java.util.List.of("user1", "user2")));
+            r.setOwnedBy(new ArrayList<>(List.of("user1", "user2")));
             return r;
         }
 
@@ -1360,7 +1364,7 @@ class SpringDataQueryPlanAdapterTest {
             r.setaBool(true);
             r.setaString("seededString");
             r.setaNumber(5);
-            r.setOwnedBy(new java.util.ArrayList<>(java.util.List.of("user1")));
+            r.setOwnedBy(new ArrayList<>(List.of("user1")));
             r.addTag("tagX", "x");
             return r;
         }
@@ -1447,7 +1451,7 @@ class SpringDataQueryPlanAdapterTest {
         }
     }
 
-    // -- CEL ternary (PR: ternary support): `if(cond, then, else)` is rewritten into pure
+    // -- CEL ternary: `if(cond, then, else)` is rewritten into pure
     // predicates — cmp(if(c,a,b), other) → (c AND cmp(a, other)) OR (NOT c AND cmp(b, other)).
     // Seeds real rows because an empty table cannot distinguish the branch predicates.
 
@@ -1915,8 +1919,8 @@ class SpringDataQueryPlanAdapterTest {
          * empty for the other tests.
          */
         private void withCategoryGraph(ResourceEntity resource,
-                                       java.util.List<dev.cerbos.queryplan.springdata.testmodel.CategoryEntity> categories,
-                                       java.util.List<dev.cerbos.queryplan.springdata.testmodel.SubCategoryEntity> subCategories,
+                                       List<CategoryEntity> categories,
+                                       List<SubCategoryEntity> subCategories,
                                        Runnable body) {
             EntityManager em = emf.createEntityManager();
             em.getTransaction().begin();
@@ -1934,16 +1938,14 @@ class SpringDataQueryPlanAdapterTest {
                 if (managed != null) {
                     cleanup.remove(managed);
                 }
-                for (dev.cerbos.queryplan.springdata.testmodel.CategoryEntity c : categories) {
-                    dev.cerbos.queryplan.springdata.testmodel.CategoryEntity mc =
-                            cleanup.find(dev.cerbos.queryplan.springdata.testmodel.CategoryEntity.class, c.getId());
+                for (CategoryEntity c : categories) {
+                    CategoryEntity mc = cleanup.find(CategoryEntity.class, c.getId());
                     if (mc != null) {
                         cleanup.remove(mc);
                     }
                 }
-                for (dev.cerbos.queryplan.springdata.testmodel.SubCategoryEntity s : subCategories) {
-                    dev.cerbos.queryplan.springdata.testmodel.SubCategoryEntity ms =
-                            cleanup.find(dev.cerbos.queryplan.springdata.testmodel.SubCategoryEntity.class, s.getId());
+                for (SubCategoryEntity s : subCategories) {
+                    SubCategoryEntity ms = cleanup.find(SubCategoryEntity.class, s.getId());
                     if (ms != null) {
                         cleanup.remove(ms);
                     }
@@ -1955,13 +1957,13 @@ class SpringDataQueryPlanAdapterTest {
 
         @Test
         void existsOverTwoHopChainJoinsThroughIntermediateHop() {
-            var fin = new dev.cerbos.queryplan.springdata.testmodel.SubCategoryEntity("chain-sub-e1", "finance");
-            var biz = new dev.cerbos.queryplan.springdata.testmodel.CategoryEntity("chain-cat-e1", "business");
-            biz.setSubCategories(java.util.List.of(fin));
+            var fin = new SubCategoryEntity("chain-sub-e1", "finance");
+            var biz = new CategoryEntity("chain-cat-e1", "business");
+            biz.setSubCategories(List.of(fin));
             ResourceEntity r = new ResourceEntity("chain-r-e1");
-            r.setCategories(java.util.List.of(biz));
+            r.setCategories(List.of(biz));
 
-            withCategoryGraph(r, java.util.List.of(biz), java.util.List.of(fin), () -> {
+            withCategoryGraph(r, List.of(biz), List.of(fin), () -> {
                 Operand matching = exprOp("exists", var(CHAIN),
                         lambda("s", exprOp("eq", var("s.name"), sval("finance"))));
                 assertEquals(1, runChainCount(matching));
@@ -1974,13 +1976,13 @@ class SpringDataQueryPlanAdapterTest {
 
         @Test
         void inOverTwoHopChainJoinsThroughIntermediateHop() {
-            var fin = new dev.cerbos.queryplan.springdata.testmodel.SubCategoryEntity("chain-sub-i1", "finance");
-            var biz = new dev.cerbos.queryplan.springdata.testmodel.CategoryEntity("chain-cat-i1", "business");
-            biz.setSubCategories(java.util.List.of(fin));
+            var fin = new SubCategoryEntity("chain-sub-i1", "finance");
+            var biz = new CategoryEntity("chain-cat-i1", "business");
+            biz.setSubCategories(List.of(fin));
             ResourceEntity r = new ResourceEntity("chain-r-i1");
-            r.setCategories(java.util.List.of(biz));
+            r.setCategories(List.of(biz));
 
-            withCategoryGraph(r, java.util.List.of(biz), java.util.List.of(fin), () -> {
+            withCategoryGraph(r, List.of(biz), List.of(fin), () -> {
                 // "finance" in R.attr.categories.subCategories — value-first, as the planner
                 // preserves source order; membership tests the tail's defaultMemberField (name).
                 assertEquals(1, runChainCount(exprOp("in", sval("finance"), var(CHAIN))));
@@ -1990,13 +1992,13 @@ class SpringDataQueryPlanAdapterTest {
 
         @Test
         void hasIntersectionOverTwoHopChainJoinsThroughIntermediateHop() {
-            var fin = new dev.cerbos.queryplan.springdata.testmodel.SubCategoryEntity("chain-sub-h1", "finance");
-            var biz = new dev.cerbos.queryplan.springdata.testmodel.CategoryEntity("chain-cat-h1", "business");
-            biz.setSubCategories(java.util.List.of(fin));
+            var fin = new SubCategoryEntity("chain-sub-h1", "finance");
+            var biz = new CategoryEntity("chain-cat-h1", "business");
+            biz.setSubCategories(List.of(fin));
             ResourceEntity r = new ResourceEntity("chain-r-h1");
-            r.setCategories(java.util.List.of(biz));
+            r.setCategories(List.of(biz));
 
-            withCategoryGraph(r, java.util.List.of(biz), java.util.List.of(fin), () -> {
+            withCategoryGraph(r, List.of(biz), List.of(fin), () -> {
                 assertEquals(1, runChainCount(
                         exprOp("hasIntersection", var(CHAIN), listOp("finance", "zz"))));
                 assertEquals(0, runChainCount(
@@ -2008,16 +2010,16 @@ class SpringDataQueryPlanAdapterTest {
         void sizeOverTwoHopChainCountsFlattenedElements() {
             // Two categories with one sub-category each: the FLATTENED chain count is 2 — a
             // tail join anchored to the wrong parent could never produce it.
-            var s1 = new dev.cerbos.queryplan.springdata.testmodel.SubCategoryEntity("chain-sub-s1", "finance");
-            var s2 = new dev.cerbos.queryplan.springdata.testmodel.SubCategoryEntity("chain-sub-s2", "tech");
-            var c1 = new dev.cerbos.queryplan.springdata.testmodel.CategoryEntity("chain-cat-s1", "business");
-            var c2 = new dev.cerbos.queryplan.springdata.testmodel.CategoryEntity("chain-cat-s2", "development");
-            c1.setSubCategories(java.util.List.of(s1));
-            c2.setSubCategories(java.util.List.of(s2));
+            var s1 = new SubCategoryEntity("chain-sub-s1", "finance");
+            var s2 = new SubCategoryEntity("chain-sub-s2", "tech");
+            var c1 = new CategoryEntity("chain-cat-s1", "business");
+            var c2 = new CategoryEntity("chain-cat-s2", "development");
+            c1.setSubCategories(List.of(s1));
+            c2.setSubCategories(List.of(s2));
             ResourceEntity r = new ResourceEntity("chain-r-s1");
-            r.setCategories(java.util.List.of(c1, c2));
+            r.setCategories(List.of(c1, c2));
 
-            withCategoryGraph(r, java.util.List.of(c1, c2), java.util.List.of(s1, s2), () -> {
+            withCategoryGraph(r, List.of(c1, c2), List.of(s1, s2), () -> {
                 // Non-empty shortcut (EXISTS through the chain).
                 assertEquals(1, runChainCount(
                         exprOp("gt", exprOp("size", var(CHAIN)), nval(0))));
@@ -2034,14 +2036,14 @@ class SpringDataQueryPlanAdapterTest {
             // W2: R.attr.categories.exists(c, c.name == "business" && R.attr.tags.exists(u, ...))
             // — the inner tags subquery must correlate the ROOT entity (owner of "tags"), not
             // the category join the lambda scope is rooted at.
-            var fin = new dev.cerbos.queryplan.springdata.testmodel.SubCategoryEntity("chain-sub-w1", "finance");
-            var biz = new dev.cerbos.queryplan.springdata.testmodel.CategoryEntity("chain-cat-w1", "business");
-            biz.setSubCategories(java.util.List.of(fin));
+            var fin = new SubCategoryEntity("chain-sub-w1", "finance");
+            var biz = new CategoryEntity("chain-cat-w1", "business");
+            biz.setSubCategories(List.of(fin));
             ResourceEntity r = new ResourceEntity("chain-r-w1");
-            r.setCategories(java.util.List.of(biz));
+            r.setCategories(List.of(biz));
             r.addTag("chain-tag-w1", "public");
 
-            withCategoryGraph(r, java.util.List.of(biz), java.util.List.of(fin), () -> {
+            withCategoryGraph(r, List.of(biz), List.of(fin), () -> {
                 Operand matching = exprOp("exists", var("request.resource.attr.categories"),
                         lambda("c", exprOp("and",
                                 exprOp("eq", var("c.name"), sval("business")),
@@ -2099,7 +2101,7 @@ class SpringDataQueryPlanAdapterTest {
         assertEquals(0, runCount(cond, overrides));
     }
 
-    // -- SPIKE 1: field-to-field contains/startsWith/endsWith --
+    // -- Field-to-field contains/startsWith/endsWith --
     // The needle is a COLUMN, so LIKE metacharacters it holds must be escaped dynamically
     // (nested REPLACE) before being wrapped in wildcards. CEL semantics: case-sensitive
     // literal substring; a NULL needle is a missing attribute → deny (row excluded).
@@ -2306,7 +2308,7 @@ class SpringDataQueryPlanAdapterTest {
                 "eq", "2 operands");
     }
 
-    // -- SPIKE 2: arithmetic (add/sub/mult/div) as a comparison operand --
+    // -- Arithmetic (add/sub/mult/div) as a comparison operand --
     // Cerbos attribute values are ALWAYS CEL doubles (protobuf Value numbers), so the only
     // arithmetic that can evaluate at check time is double-typed — verified against a live
     // PDP: `R.attr.n + 1 > 2` (int literal) is a no-overload error → deny, `+ 1.0` works,

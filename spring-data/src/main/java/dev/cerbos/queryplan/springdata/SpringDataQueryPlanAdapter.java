@@ -327,8 +327,7 @@ public final class SpringDataQueryPlanAdapter {
             Operand thenBranch = operands.get(1);
             Operand elseBranch = operands.get(2);
 
-            // A constant boolean condition folds to a single branch — translate only that branch
-            // so an untranslatable dead branch cannot fail the whole plan.
+            // Constant boolean condition folds to a single branch — see tryTernaryComparison.
             if (condition.getNodeCase() == Operand.NodeCase.VALUE) {
                 Boolean known = constantBooleanOrNull(condition);
                 if (known == null) {
@@ -387,8 +386,7 @@ public final class SpringDataQueryPlanAdapter {
         /** Operands must already be normalized field-first (see {@link NormalizedBinary}). */
         private Predicate handleLeafOperator(String op, List<Operand> operands, Scope scope) {
             // Every leaf operator is binary. Extra operands are a malformed plan and must fail
-            // loudly: the collector below would otherwise silently DROP one (a 3-operand eq
-            // kept the field-to-field comparison and ignored the value).
+            // loudly: the collector below would otherwise silently DROP one.
             if (operands.size() != 2) {
                 throw new IllegalArgumentException(
                         op + " requires exactly 2 operands, got " + operands.size());
