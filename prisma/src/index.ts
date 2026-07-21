@@ -33,9 +33,19 @@ export type Mapper =
   | Record<string, MapperConfig>
   | ((key: string) => MapperConfig);
 
+export type ExpressionMapperArgs = {
+  expression: PlanExpressionOperand;
+  mapper: Mapper;
+};
+
+export type ExpressionMapper = (
+  args: ExpressionMapperArgs
+) => PrismaFilter | undefined;
+
 export interface QueryPlanToPrismaArgs {
   queryPlan: PlanResourcesResponse;
   mapper?: Mapper;
+  expressionMapper?: ExpressionMapper;
 }
 
 export type QueryPlanToPrismaResult =
@@ -126,6 +136,15 @@ type ResolvedValue = {
 
 type ResolvedOperand = ResolvedFieldReference | ResolvedValue;
 
+type TranslationContext = {
+  mapper: Mapper;
+  expressionMapper?: ExpressionMapper;
+};
+
+type ExpressionMapping =
+  | { kind: "mapped"; filter: PrismaFilter }
+  | { kind: "unmapped" };
+
 function isResolvedFieldReference(
   operand: ResolvedOperand
 ): operand is ResolvedFieldReference {
@@ -214,6 +233,7 @@ function buildFieldDirectOrInFilter(
 export function queryPlanToPrisma({
   queryPlan,
   mapper = {},
+  expressionMapper,
 }: QueryPlanToPrismaArgs): QueryPlanToPrismaResult {
   switch (queryPlan.kind) {
     case PlanKind.ALWAYS_ALLOWED:
@@ -225,7 +245,7 @@ export function queryPlanToPrisma({
         kind: PlanKind.CONDITIONAL,
         filters: buildPrismaFilterFromCerbosExpression(
           queryPlan.condition,
-          mapper
+          { mapper, expressionMapper }
         ),
       };
     default:
@@ -385,7 +405,9 @@ function resolveOperand(
   } else if (isOperatorOperand(operand)) {
     const folded = tryFoldValueExpression(operand, mapper);
     if (folded !== null) return { value: folded };
-    const nestedResult = buildPrismaFilterFromCerbosExpression(operand, mapper);
+    const nestedResult = buildPrismaFilterFromCerbosExpression(operand, {
+      mapper,
+    });
     return { value: nestedResult };
   }
   throw new Error("Operand must have name, value, or be an expression");
@@ -481,8 +503,32 @@ function createScopedMapper(
  */
 function buildPrismaFilterFromCerbosExpression(
   expression: PlanExpressionOperand,
-  mapper: Mapper
+  context: TranslationContext
 ): PrismaFilter {
+  const mapping = mapExpression(expression, context);
+  if (mapping.kind === "mapped") {
+    return mapping.filter;
+  }
+
+  return buildPrismaFilterFromCerbosExpressionBuiltIn(expression, context);
+}
+
+function mapExpression(
+  expression: PlanExpressionOperand,
+  context: TranslationContext
+): ExpressionMapping {
+  const { mapper, expressionMapper } = context;
+  const filter = expressionMapper?.({ expression, mapper });
+  return filter === undefined
+    ? { kind: "unmapped" }
+    : { kind: "mapped", filter };
+}
+
+function buildPrismaFilterFromCerbosExpressionBuiltIn(
+  expression: PlanExpressionOperand,
+  context: TranslationContext
+): PrismaFilter {
+  const { mapper } = context;
   // A bare named operand represents a boolean field reference (e.g. `R.attr.booleanAttr`)
   if (isNamedOperand(expression)) {
     const fieldRef = resolveFieldReference(expression.name, mapper);
@@ -500,14 +546,20 @@ function buildPrismaFilterFromCerbosExpression(
     case "and":
       return {
         AND: operands.map((operand) =>
-          buildPrismaFilterFromCerbosExpression(operand, mapper)
+          buildPrismaFilterFromCerbosExpression(
+            operand,
+            context
+          )
         ),
       };
 
     case "or":
       return {
         OR: operands.map((operand) =>
-          buildPrismaFilterFromCerbosExpression(operand, mapper)
+          buildPrismaFilterFromCerbosExpression(
+            operand,
+            context
+          )
         ),
       };
 
@@ -526,7 +578,10 @@ function buildPrismaFilterFromCerbosExpression(
         }
       }
       return {
-        NOT: buildPrismaFilterFromCerbosExpression(operand, mapper),
+        NOT: buildPrismaFilterFromCerbosExpression(
+          operand,
+          context
+        ),
       };
     }
 
@@ -558,7 +613,7 @@ function buildPrismaFilterFromCerbosExpression(
     }
 
     case "lambda": {
-      return handleLambdaOperator(operands);
+      return handleLambdaOperator(operands, context);
     }
 
     case "exists":
@@ -566,7 +621,11 @@ function buildPrismaFilterFromCerbosExpression(
     case "all":
     case "except":
     case "filter": {
-      return handleCollectionOperator(operator, operands, mapper);
+      return handleCollectionOperator(
+        operator,
+        operands,
+        context
+      );
     }
 
     case "map": {
@@ -890,7 +949,10 @@ function handleHasIntersectionOperator(
 /**
  * Helper function to handle "lambda" operator
  */
-function handleLambdaOperator(operands: PlanExpressionOperand[]): PrismaFilter {
+function handleLambdaOperator(
+  operands: PlanExpressionOperand[],
+  context: TranslationContext
+): PrismaFilter {
   const condition = assertDefined(
     operands[0],
     "Lambda requires a condition operand"
@@ -904,9 +966,15 @@ function handleLambdaOperator(operands: PlanExpressionOperand[]): PrismaFilter {
     throw new Error("Lambda variable must have a name");
   }
 
-  return buildPrismaFilterFromCerbosExpression(condition, (key: string) => ({
-    field: key.replace(`${variable.name}.`, ""),
-  }));
+  return buildPrismaFilterFromCerbosExpression(
+    condition,
+    {
+      ...context,
+      mapper: (key: string) => ({
+        field: key.replace(`${variable.name}.`, ""),
+      }),
+    }
+  );
 }
 
 /**
@@ -915,8 +983,9 @@ function handleLambdaOperator(operands: PlanExpressionOperand[]): PrismaFilter {
 function handleCollectionOperator(
   operator: string,
   operands: PlanExpressionOperand[],
-  mapper: Mapper
+  context: TranslationContext
 ): PrismaFilter {
+  const { mapper, expressionMapper } = context;
   if (operands.length !== 2) {
     throw new Error(`${operator} requires exactly two operands`);
   }
@@ -967,10 +1036,18 @@ function handleCollectionOperator(
     lambda.operands[0],
     "Lambda expression must provide a condition"
   );
-  const lambdaCondition = buildPrismaFilterFromCerbosExpression(
-    lambdaConditionOperand, // Use the condition part of the lambda
-    scopedMapper
-  );
+  const scopedContext = {
+    mapper: scopedMapper,
+    expressionMapper,
+  } satisfies TranslationContext;
+  const lambdaMapping = mapExpression(lambdaConditionOperand, scopedContext);
+  const lambdaCondition =
+    lambdaMapping.kind === "mapped"
+      ? lambdaMapping.filter
+      : buildPrismaFilterFromCerbosExpressionBuiltIn(
+          lambdaConditionOperand,
+          scopedContext
+        );
 
   const relation = assertDefined(
     relations[0],
@@ -979,7 +1056,13 @@ function handleCollectionOperator(
   let filterValue = lambdaCondition;
 
   // If the lambda condition already has a relation structure, merge it
-  if (lambdaCondition["AND"] || lambdaCondition["OR"]) {
+  if (lambdaMapping.kind === "mapped") {
+    filterValue = lambdaMapping.filter;
+  } else if (
+    lambdaCondition["AND"] ||
+    lambdaCondition["OR"] ||
+    lambdaCondition["NOT"]
+  ) {
     filterValue = lambdaCondition;
   } else {
     const lambdaKeys = Object.keys(lambdaCondition);
