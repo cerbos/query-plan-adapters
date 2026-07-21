@@ -18,7 +18,12 @@ final class PlanValues {
             case STRING_VALUE -> value.getStringValue();
             case NUMBER_VALUE -> {
                 double d = value.getNumberValue();
-                if (d == Math.floor(d) && !Double.isInfinite(d)) {
+                // Whole numbers become longs only inside [-2^63, 2^63): casting a double
+                // outside that range saturates to Long.MIN/MAX_VALUE (JLS 5.1.3), silently
+                // changing the constant. Out-of-range values stay doubles, which every
+                // comparison path already handles in double space.
+                if (d == Math.floor(d) && !Double.isInfinite(d)
+                        && d >= -0x1p63 && d < 0x1p63) {
                     yield (long) d;
                 }
                 yield d;

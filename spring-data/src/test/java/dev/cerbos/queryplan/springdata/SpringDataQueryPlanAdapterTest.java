@@ -1751,6 +1751,12 @@ class SpringDataQueryPlanAdapterTest {
                 assertEquals(0, runCount(exprOp("eq", sval("a"), nval(1))));
                 assertEquals(1, runCount(exprOp("ne", sval("a"), nval(1))));
                 assertEquals(1, runCount(exprOp("eq", bval(true), bval(true))));
+                // Whole-number constants beyond the long range must stay doubles: a
+                // saturating (long) cast collapses 1.0e19 and 9.3e18 both to
+                // Long.MAX_VALUE, inverting these comparisons.
+                assertEquals(1, runCount(exprOp("gt", nval(1.0e19), nval(9.3e18))));
+                assertEquals(1, runCount(exprOp("ne", nval(1.0e19), nval(9.3e18))));
+                assertEquals(0, runCount(exprOp("eq", nval(-1.0e19), nval(-9.3e18))));
                 // Ordering incomparable constant types is a planner bug and must throw.
                 assertConditionThrows(exprOp("lt", sval("a"), nval(1)),
                         "Cannot order", "lt");
