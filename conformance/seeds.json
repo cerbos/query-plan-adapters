@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Hostile seed rows for the adversarial differential harness. This is the single source of truth for BOTH the DB rows an adapter's harness must persist AND the check()-oracle attributes derived from them (see README.md's 'NULL is a missing attribute' convention). Field names match the attributes referenced by conformance/policies/adversarial.yaml (R.attr.*).",
+  "principal": {
+    "id": "u1",
+    "roles": ["USER"],
+    "attr": {
+      "allowedTags": ["public", "special"]
+    }
+  },
+  "resourceKind": "adversarial",
+  "seeds": [
+    { "id": "a1", "aBool": true,  "aString": "one",        "aNumber": 5,  "aOptionalString": "set",  "tags": [{"id": "t1a", "name": "public"}], "subCategoryNames": ["finance"] },
+    { "id": "a2", "aBool": false, "aString": "100%_done",   "aNumber": -2, "aOptionalString": null,   "tags": [], "subCategoryNames": [] },
+    { "id": "a3", "aBool": true,  "aString": "100xdone",    "aNumber": 2,  "aOptionalString": "x",    "tags": [{"id": "t3a", "name": "public"}, {"id": "t3b", "name": "public"}], "subCategoryNames": [] },
+    { "id": "a4", "aBool": true,  "aString": "xa_by",       "aNumber": 1,  "aOptionalString": null,   "tags": [{"id": "t4a", "name": "private"}], "subCategoryNames": [] },
+    { "id": "a5", "aBool": false, "aString": "xaXby",       "aNumber": -5, "aOptionalString": "y",    "tags": [{"id": "t5a", "name": "public"}], "subCategoryNames": [] },
+    { "id": "a6", "aBool": true,  "aString": "héllo🚀",     "aNumber": 3,  "aOptionalString": "",     "tags": [{"id": "t6a", "name": "public"}, {"id": "t6b", "name": "private"}], "subCategoryNames": ["finance"] },
+    { "id": "a7", "aBool": true,  "aString": "tail\\",      "aNumber": 0,  "aOptionalString": "z",    "tags": [{"id": "t7a", "name": "other"}], "subCategoryNames": [] },
+    { "id": "a8", "aBool": true,  "aString": "",            "aNumber": 2,  "aOptionalString": null,   "tags": [{"id": "t8a", "name": "public"}], "subCategoryNames": ["tech"] },
+    { "id": "a9", "aBool": true,  "aString": "same",        "aNumber": 4,  "aOptionalString": "same", "tags": [{"id": "t9a", "name": "same"}], "subCategoryNames": [],
+      "note": "field-to-field witness: aString == aOptionalString == a tag name, so the field-to-field and lambda-field-to-field oracles are non-degenerate" },
+    { "id": "b1", "aBool": true,  "aString": "oneXtwo",     "aNumber": 7,  "aOptionalString": "one_two", "tags": [], "subCategoryNames": [],
+      "note": "field-to-field LIKE witness: unescaped '_' would wrongly match the 'X' in oneXtwo" },
+    { "id": "b2", "aBool": false, "aString": "50%_off",     "aNumber": 6,  "aOptionalString": "%_o",  "tags": [], "subCategoryNames": [],
+      "note": "field-to-field LIKE witness: literal '%' match" },
+    { "id": "b3", "aBool": true,  "aString": "back\\slash", "aNumber": -4, "aOptionalString": "k\\s", "tags": [], "subCategoryNames": [],
+      "note": "field-to-field LIKE witness: literal '\\' match" },
+    { "id": "b4", "aBool": false, "aString": "mirror",      "aNumber": 8,  "aOptionalString": "mirror", "tags": [{"id": "mirror", "name": "mirror"}], "subCategoryNames": [],
+      "note": "lambda-inner field-to-field witness: tag id == tag name" },
+    { "id": "b5", "aBool": true,  "aString": "nulltag",     "aNumber": 9,  "aOptionalString": "nt",   "tags": [{"id": "t10a", "name": null}], "subCategoryNames": [],
+      "note": "NULL element column: only a NULL-name tag (no true/false witness -> macro errors)" },
+    { "id": "b6", "aBool": false, "aString": "mixed",       "aNumber": 10, "aOptionalString": "mx",   "tags": [{"id": "t11a", "name": null}, {"id": "t11b", "name": "public"}], "subCategoryNames": [],
+      "note": "NULL element column mixed with a determined witness: exists absorbs the error, all/exists_one/map do not" }
+  ]
+}

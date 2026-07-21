@@ -1,0 +1,70 @@
+{
+  "action": "outer-attr-depth2",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "exists",
+        "operands": [
+          {
+            "variable": "request.resource.attr.categories"
+          },
+          {
+            "expression": {
+              "operator": "lambda",
+              "operands": [
+                {
+                  "expression": {
+                    "operator": "exists",
+                    "operands": [
+                      {
+                        "variable": "c.subCategories"
+                      },
+                      {
+                        "expression": {
+                          "operator": "lambda",
+                          "operands": [
+                            {
+                              "expression": {
+                                "operator": "and",
+                                "operands": [
+                                  {
+                                    "expression": {
+                                      "operator": "eq",
+                                      "operands": [
+                                        {
+                                          "variable": "s.name"
+                                        },
+                                        {
+                                          "value": "finance"
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  {
+                                    "variable": "request.resource.attr.aBool"
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "variable": "s"
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "variable": "c"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

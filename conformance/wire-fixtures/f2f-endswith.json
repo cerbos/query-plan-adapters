@@ -1,0 +1,20 @@
+{
+  "action": "f2f-endswith",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "endsWith",
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "variable": "request.resource.attr.aOptionalString"
+          }
+        ]
+      }
+    }
+  }
+}

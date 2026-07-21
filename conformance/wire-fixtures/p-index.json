@@ -1,0 +1,40 @@
+{
+  "action": "p-index",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "eq",
+        "operands": [
+          {
+            "expression": {
+              "operator": "get-field",
+              "operands": [
+                {
+                  "expression": {
+                    "operator": "index",
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.tags"
+                      },
+                      {
+                        "value": 0
+                      }
+                    ]
+                  }
+                },
+                {
+                  "variable": "name"
+                }
+              ]
+            }
+          },
+          {
+            "value": "public"
+          }
+        ]
+      }
+    }
+  }
+}

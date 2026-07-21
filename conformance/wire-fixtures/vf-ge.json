@@ -1,0 +1,20 @@
+{
+  "action": "vf-ge",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "ge",
+        "operands": [
+          {
+            "value": 2
+          },
+          {
+            "variable": "request.resource.attr.aNumber"
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "action": "cr-startswith-concat",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "startsWith",
+        "operands": [
+          {
+            "value": "xaXby-tail"
+          },
+          {
+            "variable": "request.resource.attr.aString"
+          }
+        ]
+      }
+    }
+  }
+}
