@@ -24,6 +24,7 @@ model Resource {
   nestedResourceId String
   tags             Tag[] // Add many-to-many relationship
   aOptionalString  String?
+  aOptionalBool    Boolean?
   categories       Category[] // Add categories relation
 }
 

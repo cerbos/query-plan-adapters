@@ -176,6 +176,7 @@ const fixtureResources: Prisma.ResourceCreateInput[] = [
     aNumber: 1,
     aString: "string",
     aOptionalString: "optionalString",
+    aOptionalBool: true,
     createdBy: {
       connect: {
         id: "user1",
@@ -207,6 +208,7 @@ const fixtureResources: Prisma.ResourceCreateInput[] = [
     aBool: false,
     aNumber: 2,
     aString: "string2",
+    aOptionalBool: false,
     createdBy: {
       connect: {
         id: "user2",
@@ -6890,7 +6892,28 @@ describe("Type Conversion Operators", () => {
 });
 
 describe("Ternary Operator", () => {
-  test("ternary (if) is unsupported", async () => {
+  const mapper = {
+    "request.resource.attr.aBool": { field: "aBool" },
+    "request.resource.attr.aNumber": { field: "aNumber" },
+    "request.resource.attr.aString": { field: "aString" },
+    "request.resource.attr.aOptionalString": { field: "aOptionalString" },
+    "request.resource.attr.aOptionalBool": { field: "aOptionalBool" },
+  };
+
+  async function matchingResourceIds(
+    queryPlan: PlanResourcesResponse
+  ): Promise<string[]> {
+    const result = queryPlanToPrisma({ queryPlan, mapper });
+    if (result.kind !== PlanKind.CONDITIONAL) {
+      throw new Error("Expected CONDITIONAL result");
+    }
+    const resources = await prisma.resource.findMany({
+      where: { ...result.filters },
+    });
+    return resources.map((resource) => resource.id).sort();
+  }
+
+  test("rewrites a comparison-wrapped ternary from the PDP", async () => {
     const queryPlan = await cerbos.planResources({
       principal: { id: "user1", roles: ["USER"] },
       resource: { kind: "resource" },
@@ -6913,15 +6936,303 @@ describe("Ternary Operator", () => {
       ],
     });
 
-    expect(() =>
+    expect(queryPlanToPrisma({ queryPlan, mapper })).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        OR: [
+          {
+            AND: [
+              { aBool: { equals: true } },
+              { aNumber: { gt: 0 } },
+            ],
+          },
+          {
+            AND: [
+              { aBool: { equals: true } },
+              { aBool: { equals: false } },
+            ],
+          },
+        ],
+      },
+    });
+    expect(await matchingResourceIds(queryPlan)).toEqual(["resource1"]);
+  });
+
+  test("rewrites a ternary used directly as a boolean predicate", async () => {
+    const queryPlan = createConditionalPlan({
+      operator: "if",
+      operands: [
+        { name: "request.resource.attr.aBool" },
+        {
+          operator: "gt",
+          operands: [
+            { name: "request.resource.attr.aNumber" },
+            { value: 0 },
+          ],
+        },
+        {
+          operator: "eq",
+          operands: [
+            { name: "request.resource.attr.aString" },
+            { value: "string3" },
+          ],
+        },
+      ],
+    });
+
+    expect(await matchingResourceIds(queryPlan)).toEqual([
+      "resource1",
+      "resource3",
+    ]);
+  });
+
+  test("recursively rewrites nested ternary branches", async () => {
+    const queryPlan = createConditionalPlan({
+      operator: "gt",
+      operands: [
+        {
+          operator: "if",
+          operands: [
+            { name: "request.resource.attr.aBool" },
+            {
+              operator: "if",
+              operands: [
+                {
+                  operator: "eq",
+                  operands: [
+                    { name: "request.resource.attr.aString" },
+                    { value: "string" },
+                  ],
+                },
+                { name: "request.resource.attr.aNumber" },
+                { value: 0 },
+              ],
+            },
+            { value: 0 },
+          ],
+        },
+        { value: 0 },
+      ],
+    });
+
+    expect(await matchingResourceIds(queryPlan)).toEqual(["resource1"]);
+  });
+
+  test("mirrors a value-first comparison around a ternary", async () => {
+    const queryPlan = createConditionalPlan({
+      operator: "lt",
+      operands: [
+        { value: 0 },
+        {
+          operator: "if",
+          operands: [
+            { name: "request.resource.attr.aBool" },
+            { name: "request.resource.attr.aNumber" },
+            { value: -1 },
+          ],
+        },
+      ],
+    });
+
+    const result = queryPlanToPrisma({ queryPlan, mapper });
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        OR: [
+          {
+            AND: [
+              { aBool: { equals: true } },
+              { aNumber: { gt: 0 } },
+            ],
+          },
+          {
+            AND: [
+              { aBool: { equals: true } },
+              { aBool: { equals: false } },
+            ],
+          },
+        ],
+      },
+    });
+    expect(await matchingResourceIds(queryPlan)).toEqual(["resource1"]);
+  });
+
+  test("keeps a nullable condition unknown under outer negation", async () => {
+    const queryPlan = createConditionalPlan({
+      operator: "not",
+      operands: [
+        {
+          operator: "if",
+          operands: [
+            { name: "request.resource.attr.aOptionalBool" },
+            { value: false },
+            { value: false },
+          ],
+        },
+      ],
+    });
+
+    expect(await matchingResourceIds(queryPlan)).toEqual([
+      "resource1",
+      "resource2",
+    ]);
+  });
+
+  test("negates a relation-backed boolean condition as a whole", () => {
+    const queryPlan = createConditionalPlan({
+      operator: "if",
+      operands: [
+        { name: "request.resource.attr.ownedBy.aBool" },
+        { value: false },
+        { value: true },
+      ],
+    });
+
+    expect(
       queryPlanToPrisma({
         queryPlan,
         mapper: {
-          "request.resource.attr.aBool": { field: "aBool" },
-          "request.resource.attr.aNumber": { field: "aNumber" },
+          "request.resource.attr.ownedBy": {
+            relation: {
+              name: "ownedBy",
+              type: "many",
+              fields: { aBool: { field: "aBool" } },
+            },
+          },
         },
       })
-    ).toThrow("Unsupported operator: if");
+    ).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        OR: [
+          {
+            NOT: {
+              ownedBy: {
+                some: { aBool: { equals: true } },
+              },
+            },
+          },
+          {
+            AND: [
+              {
+                ownedBy: {
+                  some: { aBool: { equals: true } },
+                },
+              },
+              {
+                NOT: {
+                  ownedBy: {
+                    some: { aBool: { equals: true } },
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      },
+    });
+  });
+
+  test("rejects malformed and non-boolean ternary conditions", () => {
+    expect(() =>
+      queryPlanToPrisma({
+        queryPlan: createConditionalPlan({
+          operator: "if",
+          operands: [
+            { name: "request.resource.attr.aBool" },
+            { value: true },
+          ],
+        }),
+        mapper,
+      })
+    ).toThrow(
+      "if (ternary) requires exactly 3 operands (condition, then, else), got 2"
+    );
+
+    expect(() =>
+      queryPlanToPrisma({
+        queryPlan: createConditionalPlan({
+          operator: "if",
+          operands: [{ value: null }, { value: true }, { value: false }],
+        }),
+        mapper,
+      })
+    ).toThrow("if (ternary) condition must be a boolean expression");
+
+    expect(() =>
+      queryPlanToPrisma({
+        queryPlan: createConditionalPlan({
+          operator: "eq",
+          operands: [
+            {
+              operator: "if",
+              operands: [
+                { name: "request.resource.attr.aBool" },
+                { value: true },
+                { value: false },
+              ],
+            },
+            { value: true },
+            { value: false },
+          ],
+        }),
+        mapper,
+      })
+    ).toThrow("eq with a ternary requires exactly 2 operands, got 3");
+  });
+
+  test("handles planner-normalized constant conditions", async () => {
+    const bareTrue = createConditionalPlan({
+      operator: "if",
+      operands: [{ value: true }, { value: true }, { value: false }],
+    });
+    const bareFalse = createConditionalPlan({
+      operator: "if",
+      operands: [{ value: true }, { value: false }, { value: true }],
+    });
+    const comparisonFalse = createConditionalPlan({
+      operator: "gt",
+      operands: [
+        {
+          operator: "if",
+          operands: [{ value: true }, { value: 0 }, { value: 1 }],
+        },
+        { value: 0 },
+      ],
+    });
+
+    expect(await matchingResourceIds(bareTrue)).toEqual([
+      "resource1",
+      "resource2",
+      "resource3",
+    ]);
+    expect(() => queryPlanToPrisma({ queryPlan: bareFalse, mapper })).toThrow(
+      "A constant-false conditional predicate must be folded by the Cerbos planner"
+    );
+    expect(() =>
+      queryPlanToPrisma({ queryPlan: comparisonFalse, mapper })
+    ).toThrow(
+      "A constant-false conditional predicate must be folded by the Cerbos planner"
+    );
+  });
+
+  test("orders folded strings by Unicode code point", async () => {
+    const queryPlan = createConditionalPlan({
+      operator: "lt",
+      operands: [
+        {
+          operator: "if",
+          operands: [
+            { name: "request.resource.attr.aBool" },
+            { value: "\u{10000}" },
+            { value: "\u{10000}" },
+          ],
+        },
+        { value: "\uE000" },
+      ],
+    });
+
+    expect(await matchingResourceIds(queryPlan)).toEqual([]);
   });
 });
 

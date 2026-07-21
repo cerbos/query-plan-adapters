@@ -1,7 +1,7 @@
-import {
+import { PlanKind } from "@cerbos/core";
+import type {
   PlanResourcesResponse,
   PlanExpressionOperand,
-  PlanKind,
   Value,
 } from "@cerbos/core";
 
@@ -243,6 +243,14 @@ function buildFieldDirectOrInFilter(
       : { [fieldName]: { in: values } };
   return wrapRelations(fieldRef.relations, baseFilter);
 }
+
+function buildAlwaysTrueFilter(): PrismaFilter {
+  return {};
+}
+
+type TernaryBranchPredicate =
+  | { kind: "constant"; value: boolean }
+  | { kind: "filter"; filter: PrismaFilter };
 
 /**
  * Converts a Cerbos query plan to a Prisma filter.
@@ -566,6 +574,10 @@ function buildPrismaFilterFromCerbosExpression(
       };
     }
 
+    case "if": {
+      return handleBooleanTernaryOperator(operands, mapper);
+    }
+
     case "eq":
     case "ne":
     case "lt":
@@ -624,6 +636,382 @@ function buildPrismaFilterFromCerbosExpression(
     default:
       throw new Error(`Unsupported operator: ${operator}`);
   }
+}
+
+function getTernaryOperands(operands: PlanExpressionOperand[]): {
+  condition: PlanExpressionOperand;
+  thenBranch: PlanExpressionOperand;
+  elseBranch: PlanExpressionOperand;
+} {
+  if (operands.length !== 3) {
+    throw new Error(
+      `if (ternary) requires exactly 3 operands (condition, then, else), got ${operands.length}`
+    );
+  }
+
+  return {
+    condition: assertDefined(
+      operands[0],
+      "if (ternary) requires a condition operand"
+    ),
+    thenBranch: assertDefined(
+      operands[1],
+      "if (ternary) requires a then operand"
+    ),
+    elseBranch: assertDefined(
+      operands[2],
+      "if (ternary) requires an else operand"
+    ),
+  };
+}
+
+function getConstantBooleanCondition(
+  condition: PlanExpressionOperand
+): boolean | undefined {
+  if (!isValueOperand(condition)) {
+    return undefined;
+  }
+  if (typeof condition.value !== "boolean") {
+    throw new Error("if (ternary) condition must be a boolean expression");
+  }
+  return condition.value;
+}
+
+function buildBooleanBranchFilter(
+  branch: PlanExpressionOperand,
+  mapper: Mapper
+): TernaryBranchPredicate {
+  if (!isValueOperand(branch)) {
+    return {
+      kind: "filter",
+      filter: buildPrismaFilterFromCerbosExpression(branch, mapper),
+    };
+  }
+  if (typeof branch.value !== "boolean") {
+    throw new Error(
+      "if (ternary) branch in boolean position must be a boolean"
+    );
+  }
+  return { kind: "constant", value: branch.value };
+}
+
+function buildFalseConditionFilter(
+  condition: PlanExpressionOperand,
+  mapper: Mapper
+): PrismaFilter {
+  if (isValueOperand(condition)) {
+    throw new Error("Constant ternary conditions must be folded before use");
+  }
+
+  if (isNamedOperand(condition)) {
+    const fieldRef = resolveFieldReference(condition.name, mapper);
+    if (!fieldRef.relations || fieldRef.relations.length === 0) {
+      return buildFieldEqualsFilter(fieldRef, false);
+    }
+    return {
+      NOT: buildFieldEqualsFilter(fieldRef, true),
+    };
+  }
+
+  if (isOperatorOperand(condition) && condition.operator === "not") {
+    return buildPrismaFilterFromCerbosExpression(
+      assertDefined(condition.operands[0], "not operator requires an operand"),
+      mapper
+    );
+  }
+
+  return {
+    NOT: buildPrismaFilterFromCerbosExpression(condition, mapper),
+  };
+}
+
+function buildGuardedTernaryFilter({
+  condition,
+  thenFilter,
+  elseFilter,
+  mapper,
+}: {
+  condition: PlanExpressionOperand;
+  thenFilter: TernaryBranchPredicate;
+  elseFilter: TernaryBranchPredicate;
+  mapper: Mapper;
+}): PrismaFilter {
+  const conditionTrue = buildPrismaFilterFromCerbosExpression(
+    condition,
+    mapper
+  );
+  const conditionFalse = buildFalseConditionFilter(condition, mapper);
+  const guardedBranches: PrismaFilter[] = [];
+
+  if (thenFilter.kind === "filter") {
+    guardedBranches.push({ AND: [conditionTrue, thenFilter.filter] });
+  } else if (thenFilter.value) {
+    guardedBranches.push(conditionTrue);
+  }
+
+  if (elseFilter.kind === "filter") {
+    guardedBranches.push({ AND: [conditionFalse, elseFilter.filter] });
+  } else if (elseFilter.value) {
+    guardedBranches.push(conditionFalse);
+  }
+
+  // For a known condition this contradiction is false. If the condition is
+  // NULL/error-derived, both sides are SQL UNKNOWN, which keeps the whole
+  // ternary UNKNOWN under an outer NOT instead of authorizing the row.
+  guardedBranches.push({ AND: [conditionTrue, conditionFalse] });
+
+  return {
+    OR: guardedBranches,
+  };
+}
+
+function finalizeTernaryBranchPredicate(
+  predicate: TernaryBranchPredicate
+): PrismaFilter {
+  if (predicate.kind === "filter") {
+    return predicate.filter;
+  }
+  if (predicate.value) {
+    return buildAlwaysTrueFilter();
+  }
+  // Prisma has no model-agnostic always-false `where` shape: empty logical
+  // arrays are ignored. Real PDP plans fold this case to ALWAYS_DENIED.
+  throw new Error(
+    "A constant-false conditional predicate must be folded by the Cerbos planner"
+  );
+}
+
+function handleBooleanTernaryOperator(
+  operands: PlanExpressionOperand[],
+  mapper: Mapper
+): PrismaFilter {
+  const { condition, thenBranch, elseBranch } = getTernaryOperands(operands);
+  const constantCondition = getConstantBooleanCondition(condition);
+  if (constantCondition !== undefined) {
+    return finalizeTernaryBranchPredicate(
+      buildBooleanBranchFilter(
+        constantCondition ? thenBranch : elseBranch,
+        mapper
+      )
+    );
+  }
+
+  return buildGuardedTernaryFilter({
+    condition,
+    thenFilter: buildBooleanBranchFilter(thenBranch, mapper),
+    elseFilter: buildBooleanBranchFilter(elseBranch, mapper),
+    mapper,
+  });
+}
+
+function buildTernaryComparisonBranch({
+  operator,
+  operands,
+  ternaryIndex,
+  branch,
+  mapper,
+}: {
+  operator: string;
+  operands: PlanExpressionOperand[];
+  ternaryIndex: number;
+  branch: PlanExpressionOperand;
+  mapper: Mapper;
+}): TernaryBranchPredicate {
+  const substitutedOperands = operands.map((operand, index) =>
+    index === ternaryIndex ? branch : operand
+  );
+  assertDefined(substitutedOperands[0], `${operator} requires a left operand`);
+  assertDefined(substitutedOperands[1], `${operator} requires a right operand`);
+
+  const normalized = normalizeBinaryOperands(operator, substitutedOperands);
+
+  const normalizedFirst = normalized.operands[0];
+  const normalizedSecond = normalized.operands[1];
+  if (
+    normalized.operands.length === 2 &&
+    normalizedFirst !== undefined &&
+    normalizedSecond !== undefined &&
+    isValueOperand(normalizedFirst) &&
+    isValueOperand(normalizedSecond)
+  ) {
+    return {
+      kind: "constant",
+      value: evaluateConstantComparison(
+        normalized.operator,
+        normalizedFirst.value,
+        normalizedSecond.value
+      ),
+    };
+  }
+
+  return {
+    kind: "filter",
+    filter: buildPrismaFilterFromCerbosExpression(normalized, mapper),
+  };
+}
+
+function tryHandleTernaryComparison(
+  operator: string,
+  operands: PlanExpressionOperand[],
+  mapper: Mapper
+): PrismaFilter | null {
+  if (CERBOS_TO_PRISMA_OPERATOR[operator] === undefined) {
+    return null;
+  }
+
+  const ternaryIndex = operands.findIndex(
+    (operand) => isOperatorOperand(operand) && operand.operator === "if"
+  );
+  if (ternaryIndex === -1) {
+    return null;
+  }
+  if (operands.length !== 2) {
+    throw new Error(
+      `${operator} with a ternary requires exactly 2 operands, got ${operands.length}`
+    );
+  }
+
+  const ternary = assertDefined(
+    operands[ternaryIndex],
+    "Ternary comparison operand is missing"
+  );
+  if (!isOperatorOperand(ternary)) {
+    throw new Error("Ternary comparison operand must be an expression");
+  }
+
+  const { condition, thenBranch, elseBranch } = getTernaryOperands(
+    ternary.operands
+  );
+  const constantCondition = getConstantBooleanCondition(condition);
+  if (constantCondition !== undefined) {
+    return finalizeTernaryBranchPredicate(
+      buildTernaryComparisonBranch({
+        operator,
+        operands,
+        ternaryIndex,
+        branch: constantCondition ? thenBranch : elseBranch,
+        mapper,
+      })
+    );
+  }
+
+  return buildGuardedTernaryFilter({
+    condition,
+    thenFilter: buildTernaryComparisonBranch({
+      operator,
+      operands,
+      ternaryIndex,
+      branch: thenBranch,
+      mapper,
+    }),
+    elseFilter: buildTernaryComparisonBranch({
+      operator,
+      operands,
+      ternaryIndex,
+      branch: elseBranch,
+      mapper,
+    }),
+    mapper,
+  });
+}
+
+function evaluateConstantComparison(
+  operator: string,
+  left: Value,
+  right: Value
+): boolean {
+  switch (operator) {
+    case "eq":
+      return areValuesEqual(left, right);
+    case "ne":
+      return !areValuesEqual(left, right);
+    case "lt":
+    case "le":
+    case "gt":
+    case "ge": {
+      if (
+        !(
+          (typeof left === "number" && typeof right === "number") ||
+          (typeof left === "string" && typeof right === "string")
+        )
+      ) {
+        throw new Error(
+          `${operator} constant comparison requires two numbers or two strings`
+        );
+      }
+      switch (operator) {
+        case "lt":
+          return compareConstantValues(left, right) < 0;
+        case "le":
+          return compareConstantValues(left, right) <= 0;
+        case "gt":
+          return compareConstantValues(left, right) > 0;
+        case "ge":
+          return compareConstantValues(left, right) >= 0;
+      }
+    }
+  }
+
+  throw new Error(`Unsupported constant comparison operator: ${operator}`);
+}
+
+function compareConstantValues(left: number | string, right: number | string) {
+  if (typeof left === "number" && typeof right === "number") {
+    return left === right ? 0 : left < right ? -1 : 1;
+  }
+  if (typeof left !== "string" || typeof right !== "string") {
+    throw new Error("Cannot order constant values of different types");
+  }
+
+  const leftCodePoints = Array.from(left, (character) =>
+    character.codePointAt(0)
+  );
+  const rightCodePoints = Array.from(right, (character) =>
+    character.codePointAt(0)
+  );
+  const sharedLength = Math.min(leftCodePoints.length, rightCodePoints.length);
+  for (let index = 0; index < sharedLength; index++) {
+    const leftCodePoint = leftCodePoints[index]!;
+    const rightCodePoint = rightCodePoints[index]!;
+    if (leftCodePoint !== rightCodePoint) {
+      return leftCodePoint < rightCodePoint ? -1 : 1;
+    }
+  }
+  return leftCodePoints.length === rightCodePoints.length
+    ? 0
+    : leftCodePoints.length < rightCodePoints.length
+      ? -1
+      : 1;
+}
+
+function areValuesEqual(left: Value, right: Value): boolean {
+  if (Array.isArray(left)) {
+    return (
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((value, index) => areValuesEqual(value, right[index]!))
+    );
+  }
+
+  if (Array.isArray(right)) {
+    return false;
+  }
+
+  if (typeof left === "object" && left !== null) {
+    if (typeof right !== "object" || right === null) {
+      return false;
+    }
+    const leftKeys = Object.keys(left);
+    const rightKeys = Object.keys(right);
+    return (
+      leftKeys.length === rightKeys.length &&
+      leftKeys.every(
+        (key) => key in right && areValuesEqual(left[key]!, right[key]!)
+      )
+    );
+  }
+
+  return left === right;
 }
 
 function handleSizeComparison(
@@ -688,6 +1076,15 @@ function handleRelationalOperator(
   operands: PlanExpressionOperand[],
   mapper: Mapper
 ): PrismaFilter {
+  const ternaryFilter = tryHandleTernaryComparison(
+    operator,
+    operands,
+    mapper
+  );
+  if (ternaryFilter) {
+    return ternaryFilter;
+  }
+
   ({ operator, operands } = normalizeBinaryOperands(operator, operands));
   const prismaOperator = CERBOS_TO_PRISMA_OPERATOR[operator];
 
