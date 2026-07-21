@@ -1,0 +1,23 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:photos;DB_CLOSE_DELAY=-1
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    properties:
+      hibernate.format_sql: true
+    open-in-view: false
+
+# Where the Cerbos PDP is listening. docker-compose.yml maps :3593 to localhost.
+cerbos:
+  host: ${CERBOS_HOST:localhost}
+  port: ${CERBOS_PORT:3593}
+
+logging:
+  level:
+    org.hibernate.SQL: DEBUG
+    org.hibernate.orm.jdbc.bind: TRACE
+    dev.cerbos.example: INFO

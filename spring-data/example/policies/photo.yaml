@@ -1,0 +1,53 @@
+# yaml-language-server: $schema=https://api.cerbos.dev/latest/cerbos/policy/v1/Policy.schema.json
+#
+# Photo-sharing example policy. The cerbos-spring-data adapter translates
+# the PDP's query-plan response into a JPA Specification<Photo> at runtime,
+# so each rule below corresponds to one or more JPA Criteria predicates.
+#
+#   view    : public + not archived OR ownerId == self
+#   edit    : ownerId == self
+#   delete  : ownerId == self
+#   comment : public + not archived, OR "friends" tag set, OR ownerId == self
+#   admin   : unconditional ALLOW on all actions
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  resource: photo
+  version: default
+  rules:
+    - actions: ["view"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          any:
+            of:
+              - all:
+                  of:
+                    - expr: request.resource.attr.public == true
+                    - expr: request.resource.attr.archived == false
+              - expr: request.resource.attr.ownerId == request.principal.id
+
+    - actions: ["edit", "delete"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          expr: request.resource.attr.ownerId == request.principal.id
+
+    - actions: ["comment"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          any:
+            of:
+              - all:
+                  of:
+                    - expr: request.resource.attr.public == true
+                    - expr: request.resource.attr.archived == false
+              - expr: '"friends" in request.resource.attr.tags'
+              - expr: request.resource.attr.ownerId == request.principal.id
+
+    - actions: ["view", "edit", "delete", "comment"]
+      effect: EFFECT_ALLOW
+      roles: ["admin"]

@@ -1,0 +1,693 @@
+# yaml-language-server: $schema=https://api.cerbos.dev/latest/cerbos/policy/v1/Policy.schema.json
+#
+# Hostile policy shapes for the adversarial differential test. Each action is exercised through
+# a REAL PDP and the adapter's filtered result set is compared against an oracle computed by
+# calling the check API per seeded row — no hand-computed expectations.
+
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: adversarial
+  rules:
+    # -- value-first comparisons (planner preserves source order) --
+    - actions: ["vf-le"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 3 <= R.attr.aNumber
+
+    - actions: ["vf-ge"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 2 >= R.attr.aNumber
+
+    - actions: ["vf-ne"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '"one" != R.attr.aString'
+
+    # -- in normalization (single element -> eq; empty -> always-denied) --
+    - actions: ["in-single"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aString in ["one"]
+
+    - actions: ["in-empty"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aString in []
+
+    # -- LIKE metacharacters must be escaped, not interpreted --
+    - actions: ["like-percent"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aString.startsWith("100%")
+
+    - actions: ["like-underscore"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aString.contains("a_b")
+
+    - actions: ["like-backslash"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aString.endsWith("\\")
+
+    # -- string edge values --
+    - actions: ["unicode-eq"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aString == "héllo🚀"
+
+    - actions: ["empty-string-eq"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aString == ""
+
+    # -- numeric edges --
+    - actions: ["neg-number"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aNumber < -1
+
+    - actions: ["double-threshold"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aNumber >= 1.5
+
+    # -- collection macro semantics on empty/multi collections --
+    - actions: ["all-on-empty"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.tags.all(t, t.name == "public")
+
+    - actions: ["exists-on-empty"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.tags.exists(t, t.name == "public")
+
+    - actions: ["exists-one-multi"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.tags.exists_one(t, t.name == "public")
+
+    - actions: ["not-exists"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!R.attr.tags.exists(t, t.name == "private")'
+
+    # -- outer resource attribute at TWO lambda depths (correlation-rebase probe) --
+    - actions: ["outer-attr-depth2"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.categories.exists(c, c.subCategories.exists(s, s.name == "finance" && R.attr.aBool))
+
+    # -- principal list folded into a lambda-scoped in --
+    - actions: ["lambda-in-principal"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.tags.exists(t, t.name in P.attr.allowedTags)
+
+    # -- logical shapes --
+    - actions: ["nary-and"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          all:
+            of:
+              - expr: R.attr.aBool
+              - expr: R.attr.aNumber >= 0
+              - expr: R.attr.aString != "one"
+
+    - actions: ["double-negation"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(!R.attr.aBool)'
+
+    - actions: ["triple-negation"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(!(!R.attr.aBool))'
+
+    # not over NOT EXISTS (size==0) — negation composing over a negated subquery predicate
+    - actions: ["not-empty"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(size(R.attr.tags) == 0)'
+
+    # -- null-attribute alignment: CEL missing-attr error (deny) vs SQL NULL (excluded) --
+    - actions: ["optional-ne"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aOptionalString != "x"
+
+    # -- field-to-field comparison inside a lambda (join column vs correlated outer column) --
+    - actions: ["lambda-field-to-field"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.tags.exists(t, t.name == R.attr.aString)
+
+    # -- size(coll) compared with a non-zero threshold → correlated COUNT subquery --
+    - actions: ["size-threshold"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: size(R.attr.tags) > 1
+
+    # -- size over a filtered collection → COUNT subquery with the lambda as WHERE --
+    - actions: ["size-filter-count"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: size(R.attr.tags.filter(t, t.name == "public")) == 1
+
+    # -- size(string) → LENGTH(column). Threshold chosen so the astral-char seed ("héllo🚀",
+    # 6 code points in CEL vs 7 UTF-16 units in the DB) lands on the same side either way.
+    - actions: ["string-size"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: size(R.attr.aString) > 4
+
+    # -- top-level field-to-field: column compared to column, incl. NULL exclusion semantics --
+    - actions: ["field-to-field"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aString == R.attr.aOptionalString
+
+    # -- CEL ternary (planner emits if(cond, then, else)) --
+    # Canonical comparison-wrapped ternary: cmp(if(c,a,b), v) rewritten into guarded branches.
+    - actions: ["ternary-cmp"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '(R.attr.aBool ? R.attr.aNumber : 0) > 1'
+
+    # Ternary whose condition is itself an expression (startsWith), not a bare bool column.
+    - actions: ["ternary-expr-cond"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '(R.attr.aString.startsWith("100") ? R.attr.aNumber : -1) >= 0'
+
+    # Nested ternary: the then-branch is another ternary; empty-string seed lands in the inner else.
+    - actions: ["ternary-nested"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '(R.attr.aBool ? (R.attr.aString == "" ? 0 : R.attr.aNumber) : -1) >= 2'
+
+    # Ternary under !(...): NOT over the OR-of-guarded-branches rewrite.
+    - actions: ["ternary-negated"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!((R.attr.aBool ? R.attr.aNumber : 0) > 1)'
+
+    # Bare boolean-result ternary: both branches are predicates, no wrapping comparison.
+    - actions: ["ternary-bare"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aBool ? R.attr.aString == "one" : R.attr.aNumber < 0'
+
+    # Value-first form: constant on the left of the comparison wrapping the ternary.
+    - actions: ["ternary-value-first"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '0 < (R.attr.aBool ? R.attr.aNumber : -1)'
+
+    # NULL condition column (aOptionalString is NULL on a2/a4/a8): CEL missing-attr error (deny)
+    # must align with SQL three-valued logic excluding the row from BOTH rewritten branches.
+    - actions: ["ternary-null-cond"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '(R.attr.aOptionalString != "x" ? R.attr.aNumber : 0) > 1'
+
+    # -- field-to-field contains/startsWith/endsWith: the needle is a COLUMN, so its LIKE
+    # metacharacters (b1/b2/b3 seeds hold _ % \) must be escaped dynamically; NULL needle
+    # rows (a2/a4/a8) are a CEL missing-attr error (deny) and must be excluded in SQL too.
+    - actions: ["f2f-contains"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aString.contains(R.attr.aOptionalString)
+
+    - actions: ["f2f-startswith"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aString.startsWith(R.attr.aOptionalString)
+
+    - actions: ["f2f-endswith"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aString.endsWith(R.attr.aOptionalString)
+
+    # -- arithmetic in comparisons. Literals are double-typed on purpose: Cerbos attribute
+    # values are CEL doubles, so int-literal arithmetic (e.g. R.attr.aNumber + 1) is a CEL
+    # no-overload error that denies EVERY row at check time — and the wire plan is identical
+    # for both spellings, so the adapter translates the (only satisfiable) double semantics.
+    - actions: ["arith-add"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aNumber + 1.0 > 2.0'
+
+    # Value-first: constant on the left, arithmetic on the right (mirrored by the adapter).
+    - actions: ["arith-vf"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '2.0 < R.attr.aNumber + 1.0'
+
+    - actions: ["arith-sub"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aNumber - 3.0 <= 0.0'
+
+    # Negative multiplier: emitted as SQL-side arithmetic, so no inequality flipping.
+    # Negative seeds (a2:-2, a5:-5, b3:-4) sit on the excluded side.
+    - actions: ["arith-mult-neg"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aNumber * -2.0 < 3.0'
+
+    # Division truncation probe: 2/2.0 == 1.0 matches, but 3/2.0 == 1.5 must NOT — an
+    # adapter doing integer division would wrongly include the aNumber==3 seed (a6).
+    - actions: ["arith-div"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aNumber / 2.0 == 1.0'
+
+    # Fractional threshold over division (double-space comparison end to end).
+    - actions: ["arith-div-frac"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aNumber / 2.0 >= 1.5'
+
+    # Arithmetic on BOTH sides of the comparison: n + 1 > n * 2 ⇔ n < 1.
+    - actions: ["arith-both"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aNumber + 1.0 > R.attr.aNumber * 2.0'
+
+    # ==================== clean-room probes (coverage gap hunt) ====================
+
+    # -- GROUP A: compositions claimed-supported but unproven e2e --
+
+    # A1: ternary inside an exists() lambda body.
+    - actions: ["p-ternary-in-exists"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.tags.exists(t, (R.attr.aBool ? t.name : "zz") == "public")'
+
+    # A2: arithmetic inside a lambda body (over the outer numeric attr).
+    - actions: ["p-arith-in-lambda"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.tags.exists(t, t.name == "public" && R.attr.aNumber + 1.0 > 2.0)'
+
+    # A3: field-to-field where BOTH fields are lambda-element columns (b4 is the witness).
+    - actions: ["p-lambda-inner-f2f"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.tags.exists(t, t.id == t.name)'
+
+    # A4: field-to-field LIKE inside a lambda, needle is an OUTER attr column
+    # (a8 has aString == "" so every tag matches contains("")).
+    - actions: ["p-lambda-f2f-like"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.tags.exists(t, t.name.contains(R.attr.aString))'
+
+    # A5: size() of a NESTED relation path (relation reached through another relation).
+    - actions: ["p-size-nested"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.categories.exists(c, size(c.subCategories) == 1)'
+
+    # A6a: ternary whose BOTH branches are themselves ternaries.
+    - actions: ["p-ternary-of-ternaries"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '(R.attr.aBool ? (R.attr.aString == "" ? 0.0 : R.attr.aNumber) : (R.attr.aNumber < 0.0 ? -1.0 : 5.0)) > 1.0'
+
+    # A6b: ternaries on BOTH sides of the comparison.
+    - actions: ["p-ternary-vs-ternary"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '(R.attr.aBool ? R.attr.aNumber : 0.0) > (R.attr.aString == "" ? 1.0 : 2.0)'
+
+    # A6c: ternary under all().
+    - actions: ["p-ternary-under-all"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.tags.all(t, (R.attr.aBool ? t.name : "zz") != "private")'
+
+    # A7: hasIntersection over a map(...) projection with unicode + LIKE metachars in the list.
+    - actions: ["p-hasintersection-map"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'hasIntersection(R.attr.tags.map(t, t.name), ["public", "héllo🚀", "100%_x"])'
+
+    # A8: deep and/or/not nesting (5+ levels) mixing arith, LIKE, exists, f2f.
+    - actions: ["p-deep-nest"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!((R.attr.aBool && (R.attr.aNumber + 1.0 > 2.0 || R.attr.aString.startsWith("100%"))) || (!R.attr.aBool && R.attr.tags.exists(t, t.name == "public" || t.name == R.attr.aString)))'
+
+    # A9a: single-element in against a NULLABLE column.
+    - actions: ["p-in-null-single"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aOptionalString in ["x"]'
+
+    # A9b: multi-element in against a NULLABLE column.
+    - actions: ["p-in-null-multi"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aOptionalString in ["x", "one_two"]'
+
+    # A10: startsWith with a constant-folded concat needle.
+    - actions: ["p-startswith-concat"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aString.startsWith("100" + "%")'
+
+    # -- GROUP B: suspected-unsupported shapes; record throw vs silent-wrong --
+
+    # B11: timestamp comparison over an ISO-date string column (createdBy is seeded with ISO dates).
+    - actions: ["p-timestamp"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'timestamp(R.attr.createdBy) < timestamp("2025-01-01T00:00:00Z")'
+
+    # B12: has() macro over an optional attribute.
+    - actions: ["p-has"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'has(R.attr.aOptionalString)'
+
+    # B13: map/struct member access (obj.inner mirrors aString on the check side).
+    - actions: ["p-struct"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.obj.inner == "one"'
+
+    # B14: matches() regex.
+    - actions: ["p-matches"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aString.matches("^h")'
+
+    # B15: list indexing.
+    - actions: ["p-index"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.tags[0].name == "public"'
+
+    # B16: negation of a NULL-condition ternary (three-valued logic under NOT).
+    - actions: ["p-not-ternary-null"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!((R.attr.aOptionalString != "x" ? R.attr.aNumber : 0.0) > 1.0)'
+
+    # B17: negated exists over rows with ZERO tags (a2/b1/b2/b3).
+    - actions: ["p-not-exists-empty"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!R.attr.tags.exists(t, t.name == "public")'
+
+    # B18: non-representable fraction: 3 * 0.1 != 0.3 in IEEE double.
+    - actions: ["p-double-frac"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aNumber * 0.1 == 0.3'
+
+    # ==================== NULL element columns under collection macros ====================
+    # b5 has ONLY a NULL-name tag; b6 mixes a NULL-name tag with a "public" one. A missing
+    # element attribute is a CEL evaluation error: exists/all absorb it only through a
+    # true/false witness, exists_one never does. The SQL translation must keep these rows
+    # UNKNOWN (excluded under both polarities), never FALSE — NOT(FALSE) leaks.
+
+    # exists_one errors on ANY erroring element — even alongside a true one (b6).
+    - actions: ["n-not-exists-one-null"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!R.attr.tags.exists_one(t, t.name == "public")'
+
+    # all with a determined-true sibling and one NULL element (b6): no false witness, so the
+    # error surfaces — the unknown-element detection must work on MIXED collections.
+    - actions: ["n-all-mixed-null"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.tags.all(t, t.name != "x")'
+
+    # NOT over an erroring all(): !error is still an error → deny.
+    - actions: ["n-not-all-null"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!R.attr.tags.all(t, t.name == "public")'
+
+    # Absorption control: b6 has a FALSE witness for this body ("public" != "public"), so
+    # all = false (not error) and the negation must still ALLOW despite the NULL sibling.
+    - actions: ["n-not-all-absorb"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!R.attr.tags.all(t, t.name != "public")'
+
+    # ==================== constant-receiver string matches ====================
+    # The CONSTANT is the receiver (haystack) and the COLUMN the needle: the planner preserves
+    # source order, so these arrive as contains(value, variable) and must NOT be operand-order
+    # normalized (swapping silently inverts haystack and needle). Constants are chosen so the
+    # metacharacter seeds discriminate needle escaping: a2 "100%_done" (unescaped '%…_…' would
+    # falsely match "…100Xdone…"), a4 "xa_by" (unescaped '_' would match the 'X' in "xaXby…"),
+    # a7 "tail\" (a mis-escaped '\' turns the pattern into a literal '%').
+
+    # True for a1 ("one" ⊂ "…Xdone…"), a7 ("tail\" ⊂ "…-tail\one…"), a8 (""); a2 is the
+    # escaping discriminator.
+    - actions: ["cr-contains"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '"s100Xdone-tail\\one-end".contains(R.attr.aString)'
+
+    # True for a5 ("xaXby" prefix) and a8 (""); a4 "xa_by" is the escaping discriminator.
+    - actions: ["cr-startswith"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '"xaXby-tail".startsWith(R.attr.aString)'
+
+    # True for a5 ("xaXby" suffix) and a8 (""); a4 "xa_by" is the escaping discriminator.
+    - actions: ["cr-endswith"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '"prefix-xaXby".endsWith(R.attr.aString)'
+
+    # Concat RECEIVER: whether the planner ships it folded or as add(value, value), the
+    # adapter must treat the fold as the haystack, never as a column-receiver LIKE.
+    - actions: ["cr-startswith-concat"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '("xaX" + "by-tail").startsWith(R.attr.aString)'
+
+    # ==================== arithmetic edge probes ====================
+
+    # Column divisor with a zero row (a7 aNumber=0): CEL 0.0/0.0 is NaN → all comparisons
+    # false → deny; the SQL must not abort on division by zero (NULLIF guard → UNKNOWN →
+    # excluded, which matches the NaN denial exactly).
+    - actions: ["cr-div-zero"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aNumber / R.attr.aNumber > 0.5'
+
+    # ==================== multi-hop relation chains (W1) ====================
+    # Direct dotted-chain syntax. mainCategory is a SINGLE nested object on the check side
+    # (each seed holds at most one category) so CEL evaluates the chain naturally, while the
+    # adapter maps the same path through TWO collection hops (categories JOIN subCategories):
+    # the translated subquery must join through the intermediate hop, never off the root.
+    # Rows without the attribute are a CEL missing-attr error (deny) on the check side and an
+    # empty join chain (excluded) on the SQL side.
+
+    - actions: ["w1-exists-chain"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.mainCategory.subCategories.exists(s, s.name == "finance")'
+
+    # size() over the chain = JOIN-through COUNT of the flattened tail elements.
+    - actions: ["w1-size-chain"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'size(R.attr.mainCategory.subCategories) > 0'
+
+    # Plain membership over the chained string list (adapter: defaultMemberField name).
+    - actions: ["w1-in-chain"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '"finance" in R.attr.mainCategory.subNames'
+
+    # ==================== root relation inside a lambda body (W2) ====================
+    # The inner R.attr.tags.exists(...) is planned INSIDE the categories lambda; its subquery
+    # must correlate the ROOT entity (owner of "tags"), not the category join the lambda scope
+    # is rooted at — CategoryEntity has no tags collection, so a wrongly anchored join fails at
+    # query-build time (and would be silently wrong if a same-named collection existed).
+    - actions: ["w2-outer-relation"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.categories.exists(c, size(c.subCategories) == 1 && R.attr.tags.exists(t, t.name == "public"))'
+
+    # ==================== fractional size() thresholds ====================
+    # COUNT is integral: >= 1.5 must round UP to >= 2 (truncation to >= 1 over-includes).
+    # Only the ORDERING operators are probeable end to end — CEL rejects ==/!= between int
+    # and double (no matching overload), so the planner can never emit a fractional eq/ne
+    # against size(); the defensive adapter collapse for those is unit-tested only.
+    - actions: ["cr-size-frac-ge"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'size(R.attr.tags) >= 1.5'
