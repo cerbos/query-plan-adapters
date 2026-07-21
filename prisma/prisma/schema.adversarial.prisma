@@ -1,0 +1,51 @@
+// Dedicated schema for the adversarial differential harness (src/adversarial.test.ts). Kept
+// separate from schema.prisma/schema.v6.prisma because the shared conformance/ corpus needs
+// hostile shapes the "realistic" fixture schema can't hold: NULL tag names and duplicate tag
+// names across (and within) resources. The main Resource/Tag models use globally-unique,
+// many-to-many shared reference tags, which cannot represent either.
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma-adversarial"
+  engineType   = "client"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model AdversarialResource {
+  id              String                @id
+  aBool           Boolean
+  aString         String
+  aNumber         Int
+  aOptionalString String?
+  createdBy       String
+  tags            AdversarialTag[]
+  categories      AdversarialCategory[]
+}
+
+// Owned one-to-many child row (unlike the shared, globally-unique Tag model) so hostile seeds
+// can hold NULL and duplicate tag names.
+model AdversarialTag {
+  id         String              @id @default(cuid())
+  tagId      String
+  name       String?
+  resource   AdversarialResource @relation(fields: [resourceId], references: [id])
+  resourceId String
+}
+
+model AdversarialCategory {
+  id            String                   @id @default(cuid())
+  name          String
+  resource      AdversarialResource      @relation(fields: [resourceId], references: [id])
+  resourceId    String
+  subCategories AdversarialSubCategory[]
+}
+
+model AdversarialSubCategory {
+  id         String              @id @default(cuid())
+  name       String
+  category   AdversarialCategory @relation(fields: [categoryId], references: [id])
+  categoryId String
+}

@@ -16,13 +16,26 @@ An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanRe
 
 - One-to-one: `is`, `isNot`
 - One-to-many/Many-to-many: `some`, `none`, `every`
-- Collection operators: `exists`, `exists_one`, `all`, `filter`, `except`
+- Collection operators: `exists`, `all`, `except` (`exists_one` requires counting matches,
+  which Prisma where-filters cannot express — it throws rather than silently degrading to
+  `exists`; `filter` only appears inside other expressions)
 - Set operations: `hasIntersection`
 
-#### String Concatenation
+#### Arithmetic
 
-- `add` operator for string/numeric concatenation in conditions
-- Algebraic solving: `P.attr.context == "projects:" + R.attr.id` → `{ id: { equals: "123" } }`
+- `add`, `sub`, `mult`, `div` with a constant side are solved algebraically to a plain column
+  comparison: `R.attr.aNumber + 1 > 2` → `{ aNumber: { gt: 1 } }` (Prisma where-filters cannot
+  express column arithmetic). Multiplying/dividing by a negative constant mirrors directional
+  operators. Arithmetic on both sides of a comparison, or division BY a column, throws.
+- String concatenation solving: `P.attr.context == "projects:" + R.attr.id` → `{ id: { equals: "123" } }`
+
+#### Field-to-field comparisons
+
+Comparisons between two columns of the same model compile to
+[Prisma field references](https://www.prisma.io/docs/orm/reference/prisma-client-reference#compare-columns-in-the-same-table).
+Pass the Prisma model name via the `model` option (root columns) or `relation.model` in the
+mapper (columns of a related model inside a collection expression). Comparisons across models
+throw — Prisma only supports references between fields of the same model.
 
 #### Hierarchy Operators
 
@@ -37,6 +50,23 @@ An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanRe
 - Collection mapping and filtering
 - Complex condition combinations
 - Type-safe field mappings
+- Outer-column references inside collection expressions (e.g.
+  `R.attr.tags.exists(t, t.name == "x" && R.attr.aBool)`) are hoisted or case-split so every
+  filter lands on the model it belongs to
+- Three-valued-logic guards for nullable element columns: mark a relation field as
+  `nullable: true` in the mapper and collection macros (`all`, negated `exists`,
+  `hasIntersection` over `map`) exclude rows whose elements hold `NULL` in that column,
+  matching Cerbos's treatment of a missing attribute as a deny
+
+#### Known limitations (loud failures, never silently-wrong filters)
+
+- LIKE wildcards: Prisma emits `LIKE` without an `ESCAPE` clause, so `contains`/`startsWith`/
+  `endsWith` with a needle containing `%` or `_`, or with a column-valued needle, throws.
+  (A constant *receiver* with a column needle — `"a-b".startsWith(R.attr.x)` — is translated
+  exactly by enumerating candidate needles into an `in` filter.)
+- Counting: `exists_one`, `size()` thresholds other than empty/non-empty, and string-length
+  comparisons throw (`_count` is not supported inside Prisma `where`).
+- Cross-model column comparisons throw (Prisma field references are same-model only).
 
 ## Requirements
 

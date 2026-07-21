@@ -512,6 +512,7 @@ describe("Field Operations", () => {
         }
       );
 
+      // Without the model name there is no container for a Prisma field reference.
       expect(() =>
         queryPlanToPrisma({
           queryPlan,
@@ -520,7 +521,38 @@ describe("Field Operations", () => {
             "request.resource.attr.id": { field: "id" },
           },
         })
-      ).toThrow(/Right operand must be a value/);
+      ).toThrow(
+        "Field-to-field comparison requires the `model` option (the Prisma model name) to build a field reference"
+      );
+
+      // With the model name, the comparison compiles to a Prisma field reference.
+      const result = queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.aString": { field: "aString" },
+          "request.resource.attr.id": { field: "id" },
+        },
+        model: "Resource",
+      });
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          aString: { equals: { _ref: "id", _container: "Resource" } },
+        },
+      });
+
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
+      const query = await prisma.resource.findMany({
+        where: { ...result.filters },
+      });
+      expect(query.map((r) => r.id).sort()).toEqual(
+        fixtureResources
+          .filter((r) => r.aString === r.id)
+          .map((r) => r.id)
+          .sort()
+      );
     });
 
     test("conditional - ne", async () => {
@@ -2164,62 +2196,24 @@ describe("Collection Operations", () => {
         }
       );
 
-      const result = queryPlanToPrisma({
-        queryPlan,
-        mapper: {
-          "request.resource.attr.tags": {
-            relation: {
-              name: "tags",
-              type: "many",
-            },
-          },
-        },
-      });
-
-      expect(result).toStrictEqual({
-        kind: PlanKind.CONDITIONAL,
-        filters: {
-          tags: {
-            some: {
-              name: { equals: "public" },
-            },
-          },
-          AND: [
-            {
-              tags: {
-                every: {
-                  OR: [
-                    { name: { equals: "public" } },
-                    { NOT: { name: { equals: "public" } } },
-                  ],
-                },
+      // exists_one means EXACTLY one matching element, which requires counting matches —
+      // inexpressible in Prisma's where shape. The previous translation silently degraded
+      // to a plain exists (its `every: OR[P, NOT P]` clause was a tautology), returning
+      // wrong rows whenever a resource had two or more matches; it now fails loudly.
+      expect(() =>
+        queryPlanToPrisma({
+          queryPlan,
+          mapper: {
+            "request.resource.attr.tags": {
+              relation: {
+                name: "tags",
+                type: "many",
               },
             },
-          ],
-        },
-      });
-
-      if (result.kind !== PlanKind.CONDITIONAL) {
-        throw new Error("Expected CONDITIONAL result");
-      }
-
-      const query = await prisma.resource.findMany({
-        where: { ...result.filters },
-      });
-
-      expect(query.map((r) => r.id)).toEqual(
-        fixtureResources
-          .filter(
-            (a) =>
-              Array.isArray(a.tags?.connect) &&
-              a.tags?.connect
-                .map((t) => {
-                  return fixtureTags.find((f) => f.id === t.id);
-                })
-                .filter((t) => t?.id === "tag1" && t?.name === "public")
-                .length > 0
-          )
-          .map((r) => r.id)
+          },
+        })
+      ).toThrow(
+        "exists_one requires counting matching elements, which Prisma where-filters cannot express"
       );
     });
 
@@ -6566,13 +6560,13 @@ describe("Add Operator", () => {
   });
 });
 
-// Coverage for additional CEL operators emitted by the planner.
-// Most of these are unsupported in Prisma's type-safe filter API because they
-// require expressing computed columns / CASTs / regex / list indexing — none of
-// which Prisma's where shape exposes. They throw the adapter's existing
-// "Unsupported operator: <op>" error so callers can detect them.
+// Coverage for additional CEL operators emitted by the planner. Linear arithmetic with a
+// constant side is solved to a plain column comparison (Prisma's where shape cannot express
+// computed columns); genuinely inexpressible shapes (mod, regex, list indexing, arithmetic
+// on both sides) throw the adapter's "Unsupported operator: <op>" error so callers can
+// detect them.
 describe("Arithmetic Operators", () => {
-  test("arith-add (gt with field+value add) is unsupported", async () => {
+  test("arith-add (gt with field+value add) solves for the column", async () => {
     const queryPlan = await cerbos.planResources({
       principal: { id: "user1", roles: ["USER"] },
       resource: { kind: "resource" },
@@ -6594,19 +6588,33 @@ describe("Arithmetic Operators", () => {
       ],
     });
 
-    expect(() =>
-      queryPlanToPrisma({
-        queryPlan,
-        mapper: {
-          "request.resource.attr.aNumber": { field: "aNumber" },
-        },
-      })
-    ).toThrow(
-      "Operator gt is not supported with add and field references"
+    // aNumber + 1 > 2  ⇔  aNumber > 1
+    const result = queryPlanToPrisma({
+      queryPlan,
+      mapper: {
+        "request.resource.attr.aNumber": { field: "aNumber" },
+      },
+    });
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { aNumber: { gt: 1 } },
+    });
+
+    if (result.kind !== PlanKind.CONDITIONAL) {
+      throw new Error("Expected CONDITIONAL result");
+    }
+    const query = await prisma.resource.findMany({
+      where: { ...result.filters },
+    });
+    expect(query.map((r) => r.id).sort()).toEqual(
+      fixtureResources
+        .filter((r) => r.aNumber + 1 > 2)
+        .map((r) => r.id)
+        .sort()
     );
   });
 
-  test("arith-sub is unsupported", async () => {
+  test("arith-sub solves for the column", async () => {
     const queryPlan = await cerbos.planResources({
       principal: { id: "user1", roles: ["USER"] },
       resource: { kind: "resource" },
@@ -6628,17 +6636,33 @@ describe("Arithmetic Operators", () => {
       ],
     });
 
-    expect(() =>
-      queryPlanToPrisma({
-        queryPlan,
-        mapper: {
-          "request.resource.attr.aNumber": { field: "aNumber" },
-        },
-      })
-    ).toThrow("Unsupported operator: sub");
+    // aNumber - 1 < 2  ⇔  aNumber < 3
+    const result = queryPlanToPrisma({
+      queryPlan,
+      mapper: {
+        "request.resource.attr.aNumber": { field: "aNumber" },
+      },
+    });
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { aNumber: { lt: 3 } },
+    });
+
+    if (result.kind !== PlanKind.CONDITIONAL) {
+      throw new Error("Expected CONDITIONAL result");
+    }
+    const query = await prisma.resource.findMany({
+      where: { ...result.filters },
+    });
+    expect(query.map((r) => r.id).sort()).toEqual(
+      fixtureResources
+        .filter((r) => r.aNumber - 1 < 2)
+        .map((r) => r.id)
+        .sort()
+    );
   });
 
-  test("arith-mult is unsupported", async () => {
+  test("arith-mult solves for the column", async () => {
     const queryPlan = await cerbos.planResources({
       principal: { id: "user1", roles: ["USER"] },
       resource: { kind: "resource" },
@@ -6660,17 +6684,33 @@ describe("Arithmetic Operators", () => {
       ],
     });
 
-    expect(() =>
-      queryPlanToPrisma({
-        queryPlan,
-        mapper: {
-          "request.resource.attr.aNumber": { field: "aNumber" },
-        },
-      })
-    ).toThrow("Unsupported operator: mult");
+    // aNumber * 2 > 2  ⇔  aNumber > 1
+    const result = queryPlanToPrisma({
+      queryPlan,
+      mapper: {
+        "request.resource.attr.aNumber": { field: "aNumber" },
+      },
+    });
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { aNumber: { gt: 1 } },
+    });
+
+    if (result.kind !== PlanKind.CONDITIONAL) {
+      throw new Error("Expected CONDITIONAL result");
+    }
+    const query = await prisma.resource.findMany({
+      where: { ...result.filters },
+    });
+    expect(query.map((r) => r.id).sort()).toEqual(
+      fixtureResources
+        .filter((r) => r.aNumber * 2 > 2)
+        .map((r) => r.id)
+        .sort()
+    );
   });
 
-  test("arith-div is unsupported", async () => {
+  test("arith-div solves for the column", async () => {
     const queryPlan = await cerbos.planResources({
       principal: { id: "user1", roles: ["USER"] },
       resource: { kind: "resource" },
@@ -6692,14 +6732,30 @@ describe("Arithmetic Operators", () => {
       ],
     });
 
-    expect(() =>
-      queryPlanToPrisma({
-        queryPlan,
-        mapper: {
-          "request.resource.attr.aNumber": { field: "aNumber" },
-        },
-      })
-    ).toThrow("Unsupported operator: div");
+    // aNumber / 2 > 0  ⇔  aNumber > 0
+    const result = queryPlanToPrisma({
+      queryPlan,
+      mapper: {
+        "request.resource.attr.aNumber": { field: "aNumber" },
+      },
+    });
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { aNumber: { gt: 0 } },
+    });
+
+    if (result.kind !== PlanKind.CONDITIONAL) {
+      throw new Error("Expected CONDITIONAL result");
+    }
+    const query = await prisma.resource.findMany({
+      where: { ...result.filters },
+    });
+    expect(query.map((r) => r.id).sort()).toEqual(
+      fixtureResources
+        .filter((r) => r.aNumber / 2 > 0)
+        .map((r) => r.id)
+        .sort()
+    );
   });
 
   test("arith-mod is unsupported", async () => {

@@ -41,8 +41,9 @@
     "version": "git add -A src",
     "prisma:generate": "bash scripts/generate-clients.sh",
     "test": "npm run test:v7",
-    "test:v6": "node node_modules/prisma-v6/build/index.js db push --force-reset --schema=prisma/schema.v6.prisma && PRISMA_VERSION=6 cerbos run --log-level=error --set=storage.disk.directory=../policies --set=telemetry.disabled=true -- jest src/**.test.ts",
-    "test:v7": "node node_modules/prisma/build/index.js db push --force-reset && PRISMA_VERSION=7 cerbos run --log-level=error --set=storage.disk.directory=../policies --set=telemetry.disabled=true -- jest src/**.test.ts",
+    "test:v6": "node node_modules/prisma-v6/build/index.js db push --force-reset --schema=prisma/schema.v6.prisma && PRISMA_VERSION=6 cerbos run --log-level=error --set=storage.disk.directory=../policies --set=telemetry.disabled=true -- jest src/index.test.ts",
+    "test:v7": "node node_modules/prisma/build/index.js db push --force-reset && PRISMA_VERSION=7 cerbos run --log-level=error --set=storage.disk.directory=../policies --set=telemetry.disabled=true -- jest src/index.test.ts",
+    "test:adversarial": "node node_modules/prisma/build/index.js db push --force-reset --schema=prisma/schema.adversarial.prisma --url=file:./prisma/dev-adversarial.db && cerbos run --log-level=error --set=storage.disk.directory=../conformance/policies --set=telemetry.disabled=true -- jest --config jest.adversarial.config.js",
     "cerbos": "cerbos server --config=./cerbos-config.yaml"
   },
   "engines": {
