@@ -510,12 +510,12 @@ class TestGetQuery:
     def test_equal_field_to_field(
         self, cerbos_client, principal, resource_desc, resource_table, conn
     ):
-        # `aString == id` -> both operands are `variable`. The adapter's
-        # boolean-leaf path expects exactly one `variable` and one `value`
-        # operand and currently raises `KeyError: 'value'` when both sides
-        # are variables.
-        # TODO: extend the SQLAlchemy adapter to resolve variable-vs-variable
-        # comparisons (both sides via `resolve_variable`).
+        # `aString == id` -> both operands are `variable`. The adapter resolves
+        # variable-vs-variable comparisons as a column-to-column predicate
+        # (previously it raised `KeyError: 'value'`; fixed as part of the
+        # adversarial conformance work, #263 — see the `field-to-field` corpus
+        # action). No row's aString equals its numeric id, so the filter
+        # matches nothing.
         plan = cerbos_client.plan_resources(
             "equal-field-to-field", principal, resource_desc
         )
@@ -523,8 +523,11 @@ class TestGetQuery:
             "request.resource.attr.aString": resource_table.aString,
             "request.resource.attr.id": resource_table.id,
         }
-        with pytest.raises(KeyError):
-            get_query(plan, resource_table, attr)
+        query = get_query(plan, resource_table, attr)
+        compiled = str(query.compile(compile_kwargs={"literal_binds": True}))
+        assert 'resource."aString" = resource.id' in compiled
+        res = conn.execute(query).fetchall()
+        assert len(res) == 0
 
     def test_equal_bool_false(
         self, cerbos_client, principal, resource_desc, resource_table, conn
@@ -597,9 +600,12 @@ class TestGetQuery:
         #                               ne(tag.id, "tag1")), var:tag)).
         # TODO(#232): the SQLAlchemy adapter has no built-in handler for the
         # CEL `all` collection macro (nor for `lambda`); without an override
-        # the default path emits `ValueError: Unrecognised operator: and`
-        # — the adapter recurses into the lambda body before it can be
-        # short-circuited. Locks in current behavior.
+        # the default path fails loudly on the unsupported `lambda` operator.
+        # (Previously it tripped earlier, on the `and` INSIDE the lambda body;
+        # boolean combinators nested in value expressions are now translatable
+        # as part of the adversarial conformance work, #263, so the traversal
+        # reaches the comprehension itself before raising.) Locks in current
+        # behavior.
         plan = cerbos_client.plan_resources("all-nested", principal, resource_desc)
         cond = _condition_to_dict(plan)
         assert cond["expression"]["operator"] == "all"
@@ -617,7 +623,7 @@ class TestGetQuery:
             "tag.id": resource_table.id,
             "tag.name": resource_table.name,
         }
-        with pytest.raises(ValueError, match="Unrecognised operator: and"):
+        with pytest.raises(ValueError, match="Unrecognised operator: lambda"):
             get_query(plan, resource_table, attr)
 
     def test_map_compared(
