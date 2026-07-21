@@ -6,7 +6,20 @@ from cerbos.response.v1 import response_pb2
 from cerbos.sdk.model import PlanResourcesFilterKind, PlanResourcesResponse
 from google.protobuf.json_format import MessageToDict
 
-from sqlalchemy import Column, Float, Integer, String, Table, and_, case, cast, func, not_, or_, select
+from sqlalchemy import (
+    Column,
+    Float,
+    Integer,
+    String,
+    Table,
+    and_,
+    case,
+    cast,
+    func,
+    not_,
+    or_,
+    select,
+)
 from sqlalchemy.orm import DeclarativeMeta, InstrumentedAttribute
 from sqlalchemy.sql import Select
 from sqlalchemy.sql.expression import BinaryExpression, ColumnOperators
@@ -46,6 +59,18 @@ __operator_fns: OperatorFnMap = {
     "size": lambda c, _: func.length(c),
 }
 OPERATOR_FNS = MappingProxyType(__operator_fns)
+
+# Directional operators mirror when their operands swap sides; symmetric operators are
+# unchanged. The planner preserves policy source order, so `1 < R.attr.x` arrives as
+# lt(value(1), variable(x)) and must translate as `x > 1`, not `x < 1` (#257).
+_MIRRORED_OPERATORS = MappingProxyType(
+    {
+        "lt": "gt",
+        "gt": "lt",
+        "le": "ge",
+        "ge": "le",
+    }
+)
 
 # Unary value-returning operators take a single non-value input.
 _UNARY_VALUE_OPERATORS = frozenset({"string", "double", "int", "size"})
@@ -198,9 +223,11 @@ def get_query(
         if (
             operator_override_fns
             and operator in operator_override_fns
-            and (has_nested_expression or len(child_operands) != 2 or not all(
-                "variable" in o or "value" in o for o in child_operands
-            ))
+            and (
+                has_nested_expression
+                or len(child_operands) != 2
+                or not all("variable" in o or "value" in o for o in child_operands)
+            )
         ):
             resolved = [resolve_operand(o) for o in child_operands]
             if len(resolved) == 1:
@@ -217,10 +244,14 @@ def get_query(
             return get_operator_fn(operator, left, right)
 
         # otherwise, they are a list[dict] (len==2), in the form: `[{'variable': 'foo'}, {'value': 'bar'}]`
-        # The order of the keys `variable` and `value` is not guaranteed.
+        # The order of the operands is NOT guaranteed to be variable-first: the planner
+        # preserves policy source order, so mirror directional operators when the value
+        # precedes the variable (`1 < R.attr.x` means `x > 1`).
         d = {k: v for o in child_operands for k, v in o.items()}
         variable = d["variable"]
         value = d["value"]
+        if "value" in child_operands[0]:
+            operator = _MIRRORED_OPERATORS.get(operator, operator)
 
         column = resolve_variable(variable)
 

@@ -1,5 +1,7 @@
 name: SQLAlchemy Pull Request
 
+# No branch filter: like the other adapter workflows, tests must also run on PRs
+# targeting non-main bases (e.g. stacked PRs).
 on:
   pull_request:
     paths:
@@ -7,8 +9,6 @@ on:
       - "policies/**"
       - ".github/workflows/sqlalchemy_pr.yaml"
       - ".github/workflows/sqlalchemy_release.yaml"
-    branches:
-      - main
 
 defaults:
   run:

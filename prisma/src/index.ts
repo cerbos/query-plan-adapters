@@ -16,21 +16,41 @@ const CERBOS_TO_PRISMA_OPERATOR: Record<string, string> = {
   ge: "gte",
 };
 
-const TERNARY_COMPARISON_OPERATORS = new Set([
-  "eq",
-  "ne",
-  "lt",
-  "le",
-  "gt",
-  "ge",
-]);
-
-const MIRRORED_TERNARY_COMPARISON_OPERATOR: Record<string, string> = {
+// Directional operators mirror when their operands swap sides; symmetric operators are unchanged.
+const MIRRORED_OPERATOR: Record<string, string> = {
   lt: "gt",
-  le: "ge",
   gt: "lt",
+  le: "ge",
   ge: "le",
 };
+
+/**
+ * Normalize a binary comparison to field-side-first. The planner preserves policy source
+ * order, so a constant may precede the field it constrains (`1 < R.attr.x` arrives as
+ * `lt(value, variable)`) — swap the operands and mirror directional operators so downstream
+ * handlers can assume the field/expression side is first. Without this, value-first
+ * comparisons are silently inverted (#256).
+ */
+function normalizeBinaryOperands(
+  operator: string,
+  operands: PlanExpressionOperand[]
+): { operator: string; operands: PlanExpressionOperand[] } {
+  const first = operands[0];
+  const second = operands[1];
+  if (
+    operands.length === 2 &&
+    first !== undefined &&
+    second !== undefined &&
+    isValueOperand(first) &&
+    !isValueOperand(second)
+  ) {
+    return {
+      operator: MIRRORED_OPERATOR[operator] ?? operator,
+      operands: [second, first],
+    };
+  }
+  return { operator, operands };
+}
 
 // Type Definitions
 export type PrismaFilter = Record<string, any>;
@@ -800,24 +820,10 @@ function buildTernaryComparisonBranch({
   const substitutedOperands = operands.map((operand, index) =>
     index === ternaryIndex ? branch : operand
   );
-  const first = assertDefined(
-    substitutedOperands[0],
-    `${operator} requires a left operand`
-  );
-  const second = assertDefined(
-    substitutedOperands[1],
-    `${operator} requires a right operand`
-  );
+  assertDefined(substitutedOperands[0], `${operator} requires a left operand`);
+  assertDefined(substitutedOperands[1], `${operator} requires a right operand`);
 
-  // Keep value-first normalization scoped to the comparison produced by this
-  // ternary rewrite; generic comparison normalization is separate work.
-  const normalized =
-    isValueOperand(first) && !isValueOperand(second)
-      ? {
-          operator: MIRRORED_TERNARY_COMPARISON_OPERATOR[operator] ?? operator,
-          operands: [second, first],
-        }
-      : { operator, operands: substitutedOperands };
+  const normalized = normalizeBinaryOperands(operator, substitutedOperands);
 
   const normalizedFirst = normalized.operands[0];
   const normalizedSecond = normalized.operands[1];
@@ -849,7 +855,7 @@ function tryHandleTernaryComparison(
   operands: PlanExpressionOperand[],
   mapper: Mapper
 ): PrismaFilter | null {
-  if (!TERNARY_COMPARISON_OPERATORS.has(operator)) {
+  if (CERBOS_TO_PRISMA_OPERATOR[operator] === undefined) {
     return null;
   }
 
@@ -1079,6 +1085,7 @@ function handleRelationalOperator(
     return ternaryFilter;
   }
 
+  ({ operator, operands } = normalizeBinaryOperands(operator, operands));
   const prismaOperator = CERBOS_TO_PRISMA_OPERATOR[operator];
 
   if (!prismaOperator) {
@@ -1214,6 +1221,11 @@ function handleHasIntersectionOperator(
   if (operands.length !== 2) {
     throw new Error("hasIntersection requires exactly two operands");
   }
+
+  // Intersection is symmetric, and the planner preserves policy source order — e.g.
+  // `hasIntersection(["a"], R.attr.tags)` puts the constant list FIRST. Normalize to
+  // field/map-first (see #256).
+  ({ operands } = normalizeBinaryOperands("hasIntersection", operands));
 
   const leftOperand = assertDefined(
     operands[0],

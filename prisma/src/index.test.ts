@@ -7874,3 +7874,143 @@ describe("Hierarchy descendentOf", () => {
     });
   });
 });
+
+// The planner preserves policy source order, so a constant can be the FIRST operand of a
+// comparison (`1 < R.attr.aNumber`). Directional operators must be mirrored when the value
+// precedes the field, or the filter is silently inverted. See #256.
+describe("Value-First Operand Order", () => {
+  test("conditional - lt with value first (1 < aNumber means aNumber > 1)", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "value-first-lt",
+    });
+
+    expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+    expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+      operator: "lt",
+      operands: [{ value: 1 }, { name: "request.resource.attr.aNumber" }],
+    });
+
+    const result = queryPlanToPrisma({
+      queryPlan,
+      mapper: {
+        "request.resource.attr.aNumber": { field: "aNumber" },
+      },
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { aNumber: { gt: 1 } },
+    });
+
+    if (result.kind !== PlanKind.CONDITIONAL) {
+      throw new Error("Expected CONDITIONAL result");
+    }
+
+    const query = await prisma.resource.findMany({
+      where: { ...result.filters },
+    });
+    expect(query.map((r) => r.id).sort()).toEqual(
+      fixtureResources
+        .filter((r) => r.aNumber > 1)
+        .map((r) => r.id)
+        .sort()
+    );
+  });
+
+  test("conditional - size with value first (0 < size(ownedBy) means non-empty)", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "value-first-size",
+    });
+
+    expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+
+    const result = queryPlanToPrisma({
+      queryPlan,
+      mapper: {
+        "request.resource.attr.ownedBy": {
+          relation: { name: "ownedBy", type: "many", field: "id" },
+        },
+      },
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { ownedBy: { some: {} } },
+    });
+
+    if (result.kind !== PlanKind.CONDITIONAL) {
+      throw new Error("Expected CONDITIONAL result");
+    }
+
+    const query = await prisma.resource.findMany({
+      where: { ...result.filters },
+    });
+    expect(query.map((r) => r.id).sort()).toEqual(
+      fixtureResources
+        .filter(
+          (r) =>
+            Array.isArray(r.ownedBy?.connect) &&
+            (r.ownedBy.connect as { id: string }[]).length > 0
+        )
+        .map((r) => r.id)
+        .sort()
+    );
+  });
+
+  test("conditional - hasIntersection with value first (constant list is operand 0)", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "value-first-intersect",
+    });
+
+    expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+    expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+      operator: "hasIntersection",
+      operands: [
+        { value: ["user1", "userX"] },
+        { name: "request.resource.attr.ownedBy" },
+      ],
+    });
+
+    const result = queryPlanToPrisma({
+      queryPlan,
+      mapper: {
+        "request.resource.attr.ownedBy": {
+          relation: { name: "ownedBy", type: "many", field: "id" },
+        },
+      },
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        ownedBy: { some: { id: { in: ["user1", "userX"] } } },
+      },
+    });
+
+    if (result.kind !== PlanKind.CONDITIONAL) {
+      throw new Error("Expected CONDITIONAL result");
+    }
+
+    const query = await prisma.resource.findMany({
+      where: { ...result.filters },
+    });
+    expect(query.map((r) => r.id).sort()).toEqual(
+      fixtureResources
+        .filter(
+          (r) =>
+            Array.isArray(r.ownedBy?.connect) &&
+            (r.ownedBy.connect as { id: string }[]).some((o) =>
+              ["user1", "userX"].includes(o.id)
+            )
+        )
+        .map((r) => r.id)
+        .sort()
+    );
+  });
+});
