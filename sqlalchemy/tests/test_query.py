@@ -146,6 +146,21 @@ class TestGetQuery:
         assert len(res) == 2
         assert all(map(lambda x: x.name in {"resource2", "resource3"}, res))
 
+    def test_value_first_lt(
+        self, cerbos_client, principal, resource_desc, resource_table, conn
+    ):
+        # The planner preserves policy source order: `1 < R.attr.aNumber` arrives as
+        # lt(value(1), variable(aNumber)) — the constant is the FIRST operand. The operator
+        # must be mirrored (aNumber > 1) or the filter is silently inverted (#257).
+        plan = cerbos_client.plan_resources("value-first-lt", principal, resource_desc)
+        attr = {
+            "request.resource.attr.aNumber": resource_table.aNumber,
+        }
+        query = get_query(plan, resource_table, attr)
+        res = conn.execute(query).fetchall()
+        assert len(res) == 2
+        assert all(map(lambda x: x.name in {"resource2", "resource3"}, res))
+
     def test_lte(self, cerbos_client, principal, resource_desc, resource_table, conn):
         plan = cerbos_client.plan_resources("lte", principal, resource_desc)
         attr = {
