@@ -856,6 +856,24 @@ resourcePolicy:
           expr: request.resource.attr.aString == request.resource.attr.id
 
     - actions:
+        - "not-equal-field-to-field"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: request.resource.attr.aString != request.resource.attr.id
+
+    - actions:
+        - "size-count-threshold"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(request.resource.attr.ownedBy) >= 2
+
+    - actions:
         - "equal-bool-false"
       effect: EFFECT_ALLOW
       roles:
@@ -941,5 +959,46 @@ resourcePolicy:
         match:
           expr: >
             hierarchy(R.attr.scope).descendentOf(hierarchy(P.attr.scope))
+
+    # Operand-order conformance: the planner preserves policy source order, so these
+    # value-first shapes reach adapters with the constant as the FIRST operand. Directional
+    # operators must be mirrored by adapters or results are silently inverted.
+    - actions:
+        - "value-first-lt"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: 1 < R.attr.aNumber
+
+    - actions:
+        - "value-first-size"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: 0 < size(R.attr.ownedBy)
+
+    - actions:
+        - "value-first-intersect"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: hasIntersection(["user1", "userX"], R.attr.ownedBy)
+
+    # A residual resource attribute INSIDE a collection lambda body — adapters must resolve
+    # it against the outer entity, not the collection element.
+    - actions:
+        - "outer-attr-in-lambda"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.tags.exists(tag, tag.name == "public" && R.attr.aBool)
 
 

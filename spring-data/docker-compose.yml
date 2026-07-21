@@ -1,0 +1,38 @@
+# Standalone Cerbos PDP for running the spring-data e2e tests against an externally-managed
+# container — matches the sidecar pattern the Prisma adapter uses with `cerbos run`.
+#
+# Usage:
+#   docker compose up -d                  # start the PDP
+#   CERBOS_HOST=localhost CERBOS_PORT=3593 ./gradlew test
+#   docker compose down                   # tear it down
+#
+# Or use the bundled helper:
+#   ./scripts/run-e2e.sh
+#
+# When CERBOS_HOST/CERBOS_PORT are NOT set, the test suite falls back to a self-managed
+# Testcontainers-spawned PDP (the default for developer machines and CI).
+
+services:
+  cerbos:
+    image: ghcr.io/cerbos/cerbos:latest
+    container_name: cerbos-spring-data-e2e
+    command:
+      - "server"
+      - "--config=/config/cerbos-config.yaml"
+    environment:
+      CERBOS_NO_TELEMETRY: "1"
+      CERBOS_CONFIG: "/config/cerbos-config.yaml"
+    ports:
+      - "3592:3592"
+      - "3593:3593"
+    volumes:
+      - ./cerbos-config.yaml:/config/cerbos-config.yaml:ro
+      - ../policies:/policies:ro
+    # Healthcheck uses the cerbos binary's built-in healthcheck command, which reads the same
+    # config file as the server (CERBOS_CONFIG env var) and probes the gRPC endpoint.
+    healthcheck:
+      test: ["CMD", "/cerbos", "healthcheck"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 3s

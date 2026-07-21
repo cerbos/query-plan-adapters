@@ -1,0 +1,26 @@
+---
+server:
+  httpListenAddr: ":3592"
+  grpcListenAddr: ":3593"
+
+storage:
+  driver: "disk"
+  disk:
+    directory: /policies
+    watchForChanges: true
+
+telemetry:
+  disabled: true
+
+schema:
+  enforcement: reject
+
+# Stream audit decisions (PlanResources / CheckResources) to stdout as JSON so the e2e run-log
+# proves the spring-data adapter is genuinely hitting a live PDP, not a stub.
+audit:
+  enabled: true
+  accessLogsEnabled: true
+  decisionLogsEnabled: true
+  backend: file
+  file:
+    path: stdout
