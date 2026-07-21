@@ -1242,6 +1242,96 @@ describe("Field Operations", () => {
           .map((r) => r.id)
       );
     });
+
+    const valueFirstDirectionalCases = [
+      {
+        operator: "lt",
+        prismaOperator: "gt",
+        matches: (value: number, field: number) => value < field,
+      },
+      {
+        operator: "le",
+        prismaOperator: "gte",
+        matches: (value: number, field: number) => value <= field,
+      },
+      {
+        operator: "gt",
+        prismaOperator: "lt",
+        matches: (value: number, field: number) => value > field,
+      },
+      {
+        operator: "ge",
+        prismaOperator: "lte",
+        matches: (value: number, field: number) => value >= field,
+      },
+    ] satisfies {
+      operator: string;
+      prismaOperator: string;
+      matches: (value: number, field: number) => boolean;
+    }[];
+
+    test.each(valueFirstDirectionalCases)(
+      "conditional - value-first $operator mirrors to $prismaOperator",
+      async ({ operator, prismaOperator, matches }) => {
+        const value = 2;
+        const result = queryPlanToPrisma({
+          queryPlan: createConditionalPlan({
+            operator,
+            operands: [
+              { value },
+              { name: "request.resource.attr.aNumber" },
+            ],
+          }),
+          mapper: {
+            "request.resource.attr.aNumber": { field: "aNumber" },
+          },
+        });
+
+        expect(result).toStrictEqual({
+          kind: PlanKind.CONDITIONAL,
+          filters: { aNumber: { [prismaOperator]: value } },
+        });
+
+        if (result.kind !== PlanKind.CONDITIONAL) {
+          throw new Error("Expected CONDITIONAL result");
+        }
+
+        const query = await prisma.resource.findMany({
+          where: { ...result.filters },
+        });
+        expect(query.map((resource) => resource.id)).toEqual(
+          fixtureResources
+            .filter((resource) => matches(value, resource.aNumber))
+            .map((resource) => resource.id)
+        );
+      }
+    );
+
+    test.each([
+      { operator: "eq", prismaOperator: "equals" },
+      { operator: "ne", prismaOperator: "not" },
+    ])(
+      "conditional - value-first symmetric $operator remains $prismaOperator",
+      ({ operator, prismaOperator }) => {
+        const result = queryPlanToPrisma({
+          queryPlan: createConditionalPlan({
+            operator,
+            operands: [
+              { value: 2 },
+              { name: "request.resource.attr.aNumber" },
+            ],
+          }),
+          mapper: {
+            "request.resource.attr.aNumber": { field: "aNumber" },
+          },
+        });
+
+        expect(result).toStrictEqual({
+          kind: PlanKind.CONDITIONAL,
+          filters: { aNumber: { [prismaOperator]: 2 } },
+        });
+      }
+    );
   });
 
   describe("String Tests", () => {
@@ -3354,6 +3444,39 @@ describe("Relations", () => {
           filters: { ownedBy: { some: {} } },
         });
       });
+
+      test.each([
+        { operator: "lt", value: 0, prismaOperator: "some" },
+        { operator: "le", value: 1, prismaOperator: "some" },
+        { operator: "gt", value: 1, prismaOperator: "none" },
+        { operator: "ge", value: 0, prismaOperator: "none" },
+      ])(
+        "conditional - value-first $operator size(field) produces $prismaOperator",
+        ({ operator, value, prismaOperator }) => {
+          const result = queryPlanToPrisma({
+            queryPlan: createConditionalPlan({
+              operator,
+              operands: [
+                { value },
+                {
+                  operator: "size",
+                  operands: [{ name: "request.resource.attr.ownedBy" }],
+                },
+              ],
+            }),
+            mapper: {
+              "request.resource.attr.ownedBy": {
+                relation: { name: "ownedBy", type: "many", field: "id" },
+              },
+            },
+          });
+
+          expect(result).toStrictEqual({
+            kind: PlanKind.CONDITIONAL,
+            filters: { ownedBy: { [prismaOperator]: {} } },
+          });
+        }
+      );
 
       test("conditional - size on nested relation walks full chain", () => {
         const result = queryPlanToPrisma({

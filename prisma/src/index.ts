@@ -16,6 +16,13 @@ const CERBOS_TO_PRISMA_OPERATOR: Record<string, string> = {
   ge: "gte",
 };
 
+const MIRRORED_RELATIONAL_OPERATOR: Record<string, string> = {
+  lt: "gt",
+  le: "ge",
+  gt: "lt",
+  ge: "le",
+};
+
 // Type Definitions
 export type PrismaFilter = Record<string, any>;
 
@@ -652,35 +659,60 @@ function handleRelationalOperator(
   operands: PlanExpressionOperand[],
   mapper: Mapper
 ): PrismaFilter {
-  const prismaOperator = CERBOS_TO_PRISMA_OPERATOR[operator];
+  const fieldOperandIndex = operands.findIndex(
+    (operand) => isNamedOperand(operand) || isOperatorOperand(operand)
+  );
+  if (fieldOperandIndex === -1) {
+    throw new Error("No valid left operand found");
+  }
+
+  const fieldOperand = operands[fieldOperandIndex];
+  if (!fieldOperand) {
+    throw new Error("No valid left operand found");
+  }
+
+  const valueOperand = operands.find(
+    (_, operandIndex) => operandIndex !== fieldOperandIndex
+  );
+  if (!valueOperand) {
+    throw new Error("No valid right operand found");
+  }
+
+  const normalizedOperator =
+    fieldOperandIndex === 0
+      ? operator
+      : (MIRRORED_RELATIONAL_OPERATOR[operator] ?? operator);
+  const prismaOperator = CERBOS_TO_PRISMA_OPERATOR[normalizedOperator];
 
   if (!prismaOperator) {
-    throw new Error(`Unsupported operator: ${operator}`);
+    throw new Error(`Unsupported operator: ${normalizedOperator}`);
   }
 
-  const leftOperand = operands.find(
-    (o) => isNamedOperand(o) || isOperatorOperand(o)
-  );
-  if (!leftOperand) throw new Error("No valid left operand found");
-
-  const rightOperand = operands.find((o) => o !== leftOperand);
-  if (!rightOperand) throw new Error("No valid right operand found");
-
-  if (isOperatorOperand(leftOperand) && leftOperand.operator === "size") {
-    return handleSizeComparison(operator, leftOperand, rightOperand, mapper);
+  if (isOperatorOperand(fieldOperand) && fieldOperand.operator === "size") {
+    return handleSizeComparison(
+      normalizedOperator,
+      fieldOperand,
+      valueOperand,
+      mapper
+    );
   }
 
-  const addOperand = [leftOperand, rightOperand].find(
+  const addOperand = [fieldOperand, valueOperand].find(
     (o): o is OperatorOperand =>
       isOperatorOperand(o) && o.operator === "add"
   );
   if (addOperand) {
     const otherOperand =
-      addOperand === leftOperand ? rightOperand : leftOperand;
-    return handleAddComparison(operator, addOperand, otherOperand, mapper);
+      addOperand === fieldOperand ? valueOperand : fieldOperand;
+    return handleAddComparison(
+      normalizedOperator,
+      addOperand,
+      otherOperand,
+      mapper
+    );
   }
 
-  const mapOperand = [leftOperand, rightOperand].find(
+  const mapOperand = [fieldOperand, valueOperand].find(
     (o): o is OperatorOperand =>
       isOperatorOperand(o) && o.operator === "map"
   );
@@ -691,9 +723,9 @@ function handleRelationalOperator(
     );
   }
 
-  const left = resolveOperand(leftOperand, mapper);
+  const left = resolveOperand(fieldOperand, mapper);
   const right = requireResolvedValue(
-    resolveOperand(rightOperand, mapper),
+    resolveOperand(valueOperand, mapper),
     "Right operand must be a value"
   );
 
