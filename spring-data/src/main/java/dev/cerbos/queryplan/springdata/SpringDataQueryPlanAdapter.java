@@ -84,11 +84,14 @@ public final class SpringDataQueryPlanAdapter {
 
     private static final class Translator {
         private final CriteriaBuilder cb;
+        private final TriPredicate tri;
         private final Map<String, OperatorFunction> overrides;
         private final HierarchyTranslator hierarchy;
+        private final ComparisonTranslator comparisons = new ComparisonTranslator();
 
         Translator(CriteriaBuilder cb, Map<String, OperatorFunction> overrides) {
             this.cb = cb;
+            this.tri = new TriPredicate(cb);
             this.overrides = overrides;
             this.hierarchy = new HierarchyTranslator(cb);
         }
@@ -106,17 +109,6 @@ public final class SpringDataQueryPlanAdapter {
             return applyLeaf("eq", path, true);
         }
 
-        /**
-         * Logical negation with a junction barrier. Hibernate 6's SQM negation is stateful for
-         * comparison predicates: {@code cb.not(cb.not(p))} stays negated instead of toggling
-         * back (verified against Hibernate 6.6.18 — a double-negated {@code eq} still renders
-         * a single {@code NOT}). Wrapping in a single-element conjunction gives each {@code not}
-         * a fresh node to negate, so nested negations compose correctly.
-         */
-        private Predicate negate(Predicate p) {
-            return cb.not(cb.and(p));
-        }
-
         private Predicate traverseExpression(PlanResourcesFilter.Expression expression, Scope scope) {
             String op = expression.getOperator();
             List<Operand> operands = expression.getOperandsList();
@@ -130,7 +122,7 @@ public final class SpringDataQueryPlanAdapter {
                     if (operands.size() != 1) {
                         throw new IllegalArgumentException("not requires exactly 1 operand");
                     }
-                    yield negate(traverse(operands.get(0), scope));
+                    yield tri.not(traverse(operands.get(0), scope));
                 }
                 case "exists", "exists_one", "all", "except", "filter" ->
                         handleCollectionOperator(op, operands, scope);
@@ -138,26 +130,11 @@ public final class SpringDataQueryPlanAdapter {
                 case "hasIntersection", "has_intersection" -> handleHasIntersection(operands, scope);
                 case "isSet" -> handleIsSet(operands, scope);
                 case "in" -> handleIn(operands, scope);
-                case "if" -> handleBareTernary(operands, scope);
+                case "if" -> comparisons.handleBareTernary(operands, scope);
                 case "overlaps" -> hierarchy.handleOverlaps(operands, scope);
                 case "ancestorOf" -> hierarchy.handleAncestorDescendant(operands, scope, true);
                 case "descendentOf" -> hierarchy.handleAncestorDescendant(operands, scope, false);
-                default -> {
-                    Predicate ternaryPred = tryTernaryComparison(op, operands, scope);
-                    if (ternaryPred != null) {
-                        yield ternaryPred;
-                    }
-                    NormalizedBinary nb = NormalizedBinary.of(op, operands);
-                    Predicate sizePred = trySizeComparison(nb.op(), nb.operands(), scope);
-                    if (sizePred != null) {
-                        yield sizePred;
-                    }
-                    Predicate arithPred = tryArithmeticComparison(nb.op(), nb.operands(), scope);
-                    if (arithPred != null) {
-                        yield arithPred;
-                    }
-                    yield handleLeafOperator(nb.op(), nb.operands(), scope);
-                }
+                default -> comparisons.translate(op, operands, scope);
             };
         }
 
@@ -178,7 +155,7 @@ public final class SpringDataQueryPlanAdapter {
          * the constant is the haystack — swapping it would silently invert haystack and needle
          * (translating {@code x LIKE '%a,b%'} instead of testing whether {@code "a,b"} contains
          * the column value). Those keep planner source order and are handled positionally by
-         * {@link #handleLeafOperator}.
+         * the constant-receiver case of {@link ComparisonTranslator#dispatch}.
          */
         private record NormalizedBinary(String op, List<Operand> operands) {
 
@@ -214,439 +191,6 @@ public final class SpringDataQueryPlanAdapter {
                     default -> op;
                 };
             }
-        }
-
-        // -- if (CEL ternary) --
-
-        /**
-         * The orderable/equality comparison operators (eq/ne/lt/gt/le/ge) — shared by the
-         * ternary rewrite, the arithmetic path, and the constant-vs-constant fold.
-         */
-        private static final Set<String> COMPARISON_OPS =
-                Set.of("eq", "ne", "lt", "gt", "le", "ge");
-
-        /**
-         * A comparison wrapping a CEL ternary — {@code cmp(if(c, a, b), other)}. Each branch is
-         * substituted back into the comparison and recursed through {@link #traverseExpression},
-         * so a ternary branch behaves identically to the same comparison written directly (see
-         * {@link #translateTernary} for the rewrite and its null semantics). Recursion also
-         * handles nested ternaries and a ternary on the other side for free.
-         *
-         * @return the rewritten predicate, or {@code null} if this comparison involves no ternary
-         */
-        private Predicate tryTernaryComparison(String op, List<Operand> operands, Scope scope) {
-            if (!COMPARISON_OPS.contains(op) || operands.size() != 2) {
-                return null;
-            }
-            int idx;
-            if (isIfExpression(operands.get(0))) {
-                idx = 0;
-            } else if (isIfExpression(operands.get(1))) {
-                idx = 1;
-            } else {
-                return null;
-            }
-            List<Operand> ifOps = operands.get(idx).getExpression().getOperandsList();
-            return translateTernary(ifOps,
-                    branch -> traverseExpression(substituteOperand(op, operands, idx, branch), scope),
-                    scope);
-        }
-
-        private static boolean isIfExpression(Operand o) {
-            return o.getNodeCase() == Operand.NodeCase.EXPRESSION
-                    && "if".equals(o.getExpression().getOperator());
-        }
-
-        /**
-         * Rewrite a CEL ternary {@code if(c, a, b)} into a pure predicate:
-         *
-         * <pre>{@code (pred(c) AND branch(a)) OR (NOT pred(c) AND branch(b)) OR NOT(pred(c) OR NOT pred(c))}</pre>
-         *
-         * where {@code branch} is supplied by the caller — comparison substitution for
-         * {@link #tryTernaryComparison}, {@link #booleanBranchPredicate} for
-         * {@link #handleBareTernary}. We rewrite instead of emitting {@code CASE WHEN}
-         * ({@code cb.selectCase}) because this translator is predicate-only: every existing typed
-         * leaf path — field-first normalization, size() handling, add-fold, fractional
-         * double-space comparison — operates on comparison predicates, and routing the branches
-         * back through those exact paths keeps them identical to the same condition written
-         * directly.
-         *
-         * <p>A constant boolean condition folds to a single branch — only that branch is
-         * translated, so an untranslatable dead branch cannot fail the whole plan.
-         *
-         * <p>Null semantics: a null/missing condition in a CEL ternary is an evaluation error
-         * and the check denies, so the SQL must evaluate to UNKNOWN — never FALSE — when the
-         * condition column is NULL. The two branch arms alone are not enough: with both branch
-         * predicates false they evaluate {@code (NULL AND FALSE) OR (NULL AND FALSE) = FALSE},
-         * which {@code not(...)} flips to TRUE and leaks rows the PDP denies. The third arm
-         * ({@link #unknownWhenConditionUnknown}) restores the missing UNKNOWN: it is FALSE for a
-         * known condition (no effect on the OR) and UNKNOWN for a NULL one, driving the whole OR
-         * to UNKNOWN so the row is excluded under BOTH polarities.
-         *
-         * <p>The condition is translated fresh for each arm: Hibernate 6 negation is stateful
-         * (see {@link #negate}), so sharing one Predicate node between the positive and negated
-         * arms is unsafe.
-         */
-        private Predicate translateTernary(List<Operand> ifOps,
-                                           java.util.function.Function<Operand, Predicate> branchTranslator,
-                                           Scope scope) {
-            if (ifOps.size() != 3) {
-                throw new IllegalArgumentException(
-                        "if (ternary) requires exactly 3 operands (condition, then, else), got "
-                                + ifOps.size());
-            }
-            Operand condition = ifOps.get(0);
-            Operand thenBranch = ifOps.get(1);
-            Operand elseBranch = ifOps.get(2);
-
-            if (condition.getNodeCase() == Operand.NodeCase.VALUE) {
-                Boolean known = constantBooleanOrNull(condition);
-                if (known == null) {
-                    throw new IllegalArgumentException(
-                            "if (ternary) condition must be a boolean expression");
-                }
-                return branchTranslator.apply(known ? thenBranch : elseBranch);
-            }
-
-            return cb.or(
-                    cb.and(traverse(condition, scope), branchTranslator.apply(thenBranch)),
-                    cb.and(negate(traverse(condition, scope)), branchTranslator.apply(elseBranch)),
-                    unknownWhenConditionUnknown(condition, scope));
-        }
-
-        /**
-         * UNKNOWN exactly when {@code condition} is UNKNOWN, FALSE when it is known:
-         * {@code NOT(c OR NOT c)}. Truth table: condition TRUE → {@code NOT(TRUE OR FALSE)} =
-         * FALSE; condition FALSE → {@code NOT(FALSE OR TRUE)} = FALSE; condition UNKNOWN →
-         * {@code NOT(UNKNOWN OR UNKNOWN)} = UNKNOWN. As the last arm of the ternary OR it
-         * therefore vanishes for known conditions and forces the whole predicate to UNKNOWN for
-         * NULL-derived ones — matching the CEL evaluation error (deny) under both polarities.
-         * The condition is translated fresh for each occurrence (Hibernate 6 negation is
-         * stateful — see {@link #negate}).
-         */
-        private Predicate unknownWhenConditionUnknown(Operand condition, Scope scope) {
-            return negate(cb.or(traverse(condition, scope), negate(traverse(condition, scope))));
-        }
-
-        /**
-         * A CEL ternary in boolean position — {@code if(c, a, b)} used directly as a condition,
-         * so both branches are themselves boolean and translate through
-         * {@link #booleanBranchPredicate}. Same rewrite, rationale and null semantics as
-         * {@link #translateTernary}.
-         */
-        private Predicate handleBareTernary(List<Operand> operands, Scope scope) {
-            return translateTernary(operands, branch -> booleanBranchPredicate(branch, scope), scope);
-        }
-
-        /**
-         * A ternary branch in boolean position: a boolean VALUE folds to the always-true /
-         * always-false predicate (the same collapse the unsolvable add-solve cases use); anything
-         * else translates as a normal boolean operand (bare variables become {@code path = true}).
-         */
-        private Predicate booleanBranchPredicate(Operand branch, Scope scope) {
-            if (branch.getNodeCase() == Operand.NodeCase.VALUE) {
-                Boolean constant = constantBooleanOrNull(branch);
-                if (constant == null) {
-                    throw new IllegalArgumentException(
-                            "if (ternary) branch in boolean position must be a boolean");
-                }
-                return constant ? cb.conjunction() : cb.disjunction();
-            }
-            return traverse(branch, scope);
-        }
-
-        /** Rebuild {@code op(operands...)} with the operand at {@code idx} replaced. */
-        private static PlanResourcesFilter.Expression substituteOperand(
-                String op, List<Operand> operands, int idx, Operand replacement) {
-            PlanResourcesFilter.Expression.Builder b =
-                    PlanResourcesFilter.Expression.newBuilder().setOperator(op);
-            for (int i = 0; i < operands.size(); i++) {
-                b.addOperands(i == idx ? replacement : operands.get(i));
-            }
-            return b.build();
-        }
-
-        /** The operand's boolean constant, or {@code null} if it is not a boolean VALUE. */
-        private static Boolean constantBooleanOrNull(Operand o) {
-            return PlanValues.protoValueToJava(o.getValue()) instanceof Boolean b ? b : null;
-        }
-
-        // -- Leaf operators (eq/ne/lt/gt/le/ge/contains/startsWith/endsWith) --
-
-        /** The receiver-sensitive CEL string-match methods (see {@link NormalizedBinary}). */
-        private static final Set<String> STRING_MATCH_OPS =
-                Set.of("contains", "startsWith", "endsWith");
-
-        /** Operands must already be normalized field-first (see {@link NormalizedBinary}). */
-        private Predicate handleLeafOperator(String op, List<Operand> operands, Scope scope) {
-            // Every leaf operator is binary. Extra operands are a malformed plan and must fail
-            // loudly: the collector below would otherwise silently DROP one.
-            if (operands.size() != 2) {
-                throw new IllegalArgumentException(
-                        op + " requires exactly 2 operands, got " + operands.size());
-            }
-
-            // Constant-vs-constant comparisons are statically evaluated. The planner never emits
-            // them directly, but ternary substitution produces them — the else branch of
-            // `(aBool ? aNumber : 0) > 0` becomes gt(value(0), value(0)).
-            if (COMPARISON_OPS.contains(op)
-                    && operands.get(0).getNodeCase() == Operand.NodeCase.VALUE
-                    && operands.get(1).getNodeCase() == Operand.NodeCase.VALUE) {
-                return constantComparison(op,
-                        PlanValues.protoValueToJava(operands.get(0).getValue()),
-                        PlanValues.protoValueToJava(operands.get(1).getValue()));
-            }
-
-            // Constant-receiver string matches: `"a,b".contains(R.attr.x)` arrives as
-            // contains(value, variable) — the CONSTANT is the haystack and the COLUMN the
-            // needle (NormalizedBinary deliberately leaves these in source order). This must
-            // be checked BEFORE the add-detection below so an unfolded concat receiver
-            // (`("a" + "b").contains(R.attr.x)`) routes here too, not into the add-solve path
-            // (which would fold the constant and translate the INVERTED column-haystack LIKE).
-            if (STRING_MATCH_OPS.contains(op)
-                    && operands.get(1).getNodeCase() == Operand.NodeCase.VARIABLE) {
-                Object receiver = constantReceiverOrNull(operands.get(0));
-                if (receiver != null) {
-                    if (!(receiver instanceof String haystack)) {
-                        throw new IllegalArgumentException(
-                                op + " requires a string receiver, got " + typeName(receiver));
-                    }
-                    Path<?> needle = scope.resolvePath(operands.get(1).getVariable());
-                    // The needle is a column, so it is escaped dynamically; a NULL needle is
-                    // a missing attribute → CEL error → deny (fieldToFieldLike guards it).
-                    return switch (op) {
-                        case "contains" -> fieldToFieldLike(cb.literal(haystack), needle, true, true);
-                        case "startsWith" -> fieldToFieldLike(cb.literal(haystack), needle, false, true);
-                        case "endsWith" -> fieldToFieldLike(cb.literal(haystack), needle, true, false);
-                        default -> throw new IllegalArgumentException(
-                                "Unsupported string-match operator: " + op);
-                    };
-                }
-            }
-
-            // Detect leaf comparisons where one side is an 'add' expression (e.g. string
-            // concatenation: `aString == "prefix:" + R.attr.id`). We fold constants and solve for
-            // the field side when possible — same algorithm as the Prisma adapter.
-            Operand addExprOperand = null;
-            Operand otherOperand = null;
-            for (Operand o : operands) {
-                if (o.getNodeCase() == Operand.NodeCase.EXPRESSION
-                        && "add".equals(o.getExpression().getOperator())) {
-                    addExprOperand = o;
-                } else {
-                    otherOperand = o;
-                }
-            }
-            if (addExprOperand != null) {
-                if (otherOperand == null) {
-                    throw new IllegalArgumentException("add comparison requires a second operand");
-                }
-                return handleAddComparison(op, addExprOperand.getExpression(), otherOperand, scope);
-            }
-
-            String variable = null;
-            String secondVariable = null;
-            Object value = null;
-            boolean valueSeen = false;
-            for (Operand o : operands) {
-                switch (o.getNodeCase()) {
-                    case VARIABLE -> {
-                        if (variable != null) {
-                            secondVariable = o.getVariable();
-                        } else {
-                            variable = o.getVariable();
-                        }
-                    }
-                    case VALUE -> {
-                        value = PlanValues.protoValueToJava(o.getValue());
-                        valueSeen = true;
-                    }
-                    case EXPRESSION -> {
-                        // H3: map() compositions are only accepted inside hasIntersection.
-                        // A direct comparison like eq(map(...), [...]) reaches here; point users
-                        // at the supported shape rather than throwing a generic operand error.
-                        String innerOp = o.getExpression().getOperator();
-                        if ("map".equals(innerOp)) {
-                            throw new IllegalArgumentException(
-                                    "Direct comparison of map(...) to a value is not supported "
-                                            + "(operator: " + op + "). Wrap the map() expression in "
-                                            + "hasIntersection(map(...), [...]) instead.");
-                        }
-                        throw new IllegalArgumentException(
-                                "Unexpected " + innerOp + "() expression in leaf operand of " + op);
-                    }
-                    default -> throw new IllegalArgumentException(
-                            "Unexpected operand type in leaf expression: " + o.getNodeCase());
-                }
-            }
-            if (variable == null) {
-                throw new IllegalArgumentException("Missing variable operand for " + op);
-            }
-            if (secondVariable != null) {
-                return fieldToFieldComparison(op, variable, secondVariable, scope);
-            }
-            if (!valueSeen) {
-                throw new IllegalArgumentException("Missing value operand for " + op);
-            }
-
-            Path<?> path = scope.resolvePath(variable);
-
-            if (value == null) {
-                // A registered override owns the operator's full translation, including a null RHS.
-                return withOverride(op, path, null, () -> switch (op) {
-                    case "eq" -> cb.isNull(path);
-                    case "ne" -> cb.isNotNull(path);
-                    default -> throw new IllegalArgumentException(
-                            "Null values are only supported with eq and ne operators (got " + op + ")");
-                });
-            }
-
-            return applyLeaf(op, path, value);
-        }
-
-        /**
-         * Statically evaluate a comparison between two plan constants and collapse it to an
-         * always-true ({@code 1=1}) or always-false ({@code 1=0}) predicate — the same collapse
-         * the unsolvable {@code add}-solve cases use. Numbers compare in double space: protobuf
-         * {@code Value.getNumberValue()} is a double, and {@link PlanValues#protoValueToJava}
-         * only splits Long/Double for whole-number cosmetics, not semantics. Strings compare
-         * lexicographically; booleans (and mixed incomparable types) support eq/ne only —
-         * eq → false, ne → true — while ordering them is a planner bug and throws.
-         */
-        private Predicate constantComparison(String op, Object left, Object right) {
-            boolean result;
-            if ("eq".equals(op) || "ne".equals(op)) {
-                boolean equal = (left instanceof Number ln && right instanceof Number rn)
-                        ? ln.doubleValue() == rn.doubleValue()
-                        : Objects.equals(left, right);
-                result = "eq".equals(op) == equal;
-            } else {
-                int cmp;
-                if (left instanceof Number ln && right instanceof Number rn) {
-                    cmp = Double.compare(ln.doubleValue(), rn.doubleValue());
-                } else if (left instanceof String ls && right instanceof String rs) {
-                    cmp = ls.compareTo(rs);
-                } else {
-                    throw new IllegalArgumentException(
-                            "Cannot order constant operands of " + op + ": "
-                                    + typeName(left) + " vs " + typeName(right));
-                }
-                result = switch (op) {
-                    case "lt" -> cmp < 0;
-                    case "gt" -> cmp > 0;
-                    case "le" -> cmp <= 0;
-                    case "ge" -> cmp >= 0;
-                    default -> throw new IllegalArgumentException(
-                            "Unsupported constant comparison operator: " + op);
-                };
-            }
-            return result ? cb.conjunction() : cb.disjunction();
-        }
-
-        private static String typeName(Object o) {
-            return o == null ? "null" : o.getClass().getSimpleName();
-        }
-
-        /**
-         * The constant value of a string-match RECEIVER operand: a plain VALUE, or an
-         * {@code add(value, value)} concatenation folded to its constant. Returns {@code null}
-         * when the operand is not a constant (e.g. a variable or a field-bearing expression),
-         * in which case the caller falls through to the ordinary leaf paths.
-         */
-        private static Object constantReceiverOrNull(Operand o) {
-            return switch (o.getNodeCase()) {
-                case VALUE -> PlanValues.protoValueToJava(o.getValue());
-                case EXPRESSION -> {
-                    PlanResourcesFilter.Expression e = o.getExpression();
-                    if ("add".equals(e.getOperator())
-                            && e.getOperandsCount() == 2
-                            && e.getOperands(0).getNodeCase() == Operand.NodeCase.VALUE
-                            && e.getOperands(1).getNodeCase() == Operand.NodeCase.VALUE) {
-                        yield PlanValues.foldAdd(
-                                PlanValues.protoValueToJava(e.getOperands(0).getValue()),
-                                PlanValues.protoValueToJava(e.getOperands(1).getValue()));
-                    }
-                    yield null;
-                }
-                default -> null;
-            };
-        }
-
-        /**
-         * Compare two mapped columns directly (eq/ne/lt/gt/le/ge) or pattern-match one column
-         * against another (contains/startsWith/endsWith). Operand source order is preserved —
-         * two variables rank equally, so {@link NormalizedBinary} never swaps them.
-         */
-        private Predicate fieldToFieldComparison(String op, String leftVar, String rightVar,
-                                                 Scope scope) {
-            jakarta.persistence.criteria.Expression<?> left = scope.resolvePath(leftVar);
-            jakarta.persistence.criteria.Expression<?> right = scope.resolvePath(rightVar);
-            return switch (op) {
-                case "eq", "ne", "lt", "gt", "le", "ge" -> comparePredicate(op, left, right);
-                case "contains" -> fieldToFieldLike(left, right, true, true);
-                case "startsWith" -> fieldToFieldLike(left, right, false, true);
-                case "endsWith" -> fieldToFieldLike(left, right, true, false);
-                default -> throw new IllegalArgumentException(
-                        "Field-to-field comparison is not supported for operator '" + op + "': "
-                                + leftVar + " vs " + rightVar);
-            };
-        }
-
-        /**
-         * Raw-typed comparison of two SQL expressions — the shared dispatch of field-to-field
-         * comparisons and arithmetic expression-vs-expression comparisons. Constant-RHS shapes
-         * do NOT route here: they bind through the plain-value overloads on purpose (double
-         * bind parameters — see {@link #tryArithmeticComparison}).
-         */
-        @SuppressWarnings({"rawtypes", "unchecked"})
-        private Predicate comparePredicate(String op,
-                                           jakarta.persistence.criteria.Expression left,
-                                           jakarta.persistence.criteria.Expression right) {
-            return switch (op) {
-                case "eq" -> cb.equal(left, right);
-                case "ne" -> cb.notEqual(left, right);
-                case "lt" -> cb.lessThan(left, right);
-                case "gt" -> cb.greaterThan(left, right);
-                case "le" -> cb.lessThanOrEqualTo(left, right);
-                case "ge" -> cb.greaterThanOrEqualTo(left, right);
-                default -> throw new IllegalArgumentException(
-                        "Unsupported arithmetic comparison operator: " + op);
-            };
-        }
-
-        /**
-         * {@code haystackColumn LIKE wildcards(escape(needleColumn))} — the column-to-column
-         * analogue of the constant LIKE path in {@link #defaultLeaf}. The needle is data, so its
-         * LIKE metacharacters are escaped dynamically with nested {@code REPLACE} (portable:
-         * H2/Postgres/MySQL/Oracle/SQL Server): {@code \} first, then {@code %} and {@code _},
-         * mirroring {@link PlanValues#escapeLike} and the same explicit {@code '\'} escape char.
-         *
-         * <p>The explicit {@code IS NOT NULL} guard on the needle matches CEL (a missing
-         * attribute is an evaluation error → deny) and also defends against dialects whose
-         * {@code CONCAT} treats NULL as {@code ''}, which would otherwise turn a NULL needle
-         * into a match-anything {@code '%%'} pattern.
-         */
-        private Predicate fieldToFieldLike(jakarta.persistence.criteria.Expression<?> haystack,
-                                           jakarta.persistence.criteria.Expression<?> needle,
-                                           boolean leadingWildcard, boolean trailingWildcard) {
-            jakarta.persistence.criteria.Expression<String> escaped =
-                    needle.as(String.class);
-            escaped = cb.function("replace", String.class,
-                    escaped, cb.literal("\\"), cb.literal("\\\\"));
-            escaped = cb.function("replace", String.class,
-                    escaped, cb.literal("%"), cb.literal("\\%"));
-            escaped = cb.function("replace", String.class,
-                    escaped, cb.literal("_"), cb.literal("\\_"));
-            jakarta.persistence.criteria.Expression<String> pattern = escaped;
-            if (leadingWildcard) {
-                pattern = cb.concat(cb.literal("%"), pattern);
-            }
-            if (trailingWildcard) {
-                pattern = cb.concat(pattern, cb.literal("%"));
-            }
-            return cb.and(
-                    cb.isNotNull(needle),
-                    cb.like(haystack.as(String.class), pattern, '\\'));
         }
 
         /**
@@ -698,349 +242,1070 @@ public final class SpringDataQueryPlanAdapter {
             };
         }
 
-        // -- arithmetic (add/sub/mult/div) as a comparison operand --
-
-        /** CEL arithmetic operators that can appear as an operand of a comparison. */
-        private static final Set<String> ARITHMETIC_OPS = Set.of("add", "sub", "mult", "div", "mod");
-
         /**
-         * Translate {@code cmp(arith(...), other)} — e.g. {@code R.attr.aNumber + 1.0 > 2.0}
-         * arriving as {@code gt(add(variable, value(1)), value(2))} — by emitting the arithmetic
-         * on the SQL side ({@code cb.sum}/{@code diff}/{@code prod}/{@code quot}) and comparing.
+         * The comparison-translation module: every leaf comparison — plain {@code field op value},
+         * field-to-field, constant-vs-constant, constant-receiver string matches, arithmetic,
+         * ternary-wrapped and {@code size()} comparisons — enters through {@link #translate} and
+         * nowhere else. Inside, one operand-resolution seam ({@link #resolve}) classifies each
+         * operand into a {@link Resolved} shape, and {@link #dispatch} translates the resolved
+         * pair; predicate-level rewrites (the CEL ternary, the eq/ne string-concat solve) are
+         * explicit steps in {@code translate}/{@code dispatch}, ordered by code structure. What
+         * this replaces: a chain of order-dependent probes (ternary → size → arithmetic → a leaf
+         * collector loop) where each probe re-scanned the raw operands and an ownership referee
+         * decided whether the {@code add} fold/solve path or the arithmetic path translated a
+         * given shape — the ordering was the specification, and it lived in comments.
          *
-         * <p>Everything is computed and compared in DOUBLE space. This is not a convenience:
-         * Cerbos attribute values are protobuf {@code Value} numbers, i.e. ALWAYS CEL doubles at
-         * check time, so the only arithmetic that can evaluate without a no-overload error is
-         * double-typed — verified against a live PDP: {@code R.attr.n + 1} (int literal) denies
-         * every row, {@code + 1.0} works, and {@code / 2.0} is true double division
-         * ({@code 5 / 2.0 == 2.5}). Integer truncation is therefore never observable through the
-         * check API, and the wire plan erases the int/double distinction anyway (both arrive as
-         * {@code number_value}). Emitting the arithmetic (rather than solving algebraically)
-         * also means multiplication/division by negative constants needs no inequality flipping.
+         * <p>Design note — rejected alternative: an eagerly-converting resolver
+         * ({@code resolve(operand) -> Constant(javaValue) | Column(path) | NumericSql(expr)})
+         * that folds {@code add(value, value)} with {@link PlanValues#foldAdd} and converts
+         * VALUES/paths at classification time was sketched first. It was rejected because
+         * conversion errors are part of the observable contract: WHICH message a malformed
+         * operand raises depends on the whole comparison's shape (a boolean inside {@code add}
+         * is a foldAdd type error against a field but "Arithmetic comparison requires numeric
+         * operands" against a constant; an unknown attribute must not preempt an "Unexpected
+         * X() expression" on the sibling operand), so eager conversion either re-orders pinned
+         * messages or forces the resolver to take a context parameter — which reintroduces the
+         * caller-knows-best coupling the seam exists to remove. The chosen shape classifies
+         * structurally and converts lazily at the dispatch site that consumes the operand.
          *
-         * <p>DOUBLE space must be enforced explicitly, because DB decimal arithmetic is not
-         * IEEE double arithmetic (see {@link #resolveNumericOperand}): columns are CAST, plan
-         * constants are folded in Java or bound as double parameters, and pure-constant
-         * comparisons are evaluated statically in Java (full CEL fidelity, Infinity/NaN
-         * included).
-         *
-         * <p>{@code mod} stays unsupported: CEL {@code %} has no double overload, so on
-         * attribute values it always errors (deny) — translating it to SQL {@code MOD} would
-         * fabricate rows the PDP denies.
-         *
-         * <p>{@link OperatorFunction} overrides win here like on every other scalar path when
-         * the comparison has a plan constant on one side: the arithmetic SQL expression is
-         * passed as the field argument and the folded constant (always a {@link Double} — the
-         * arithmetic path is double-space end to end) as the value. Expression-vs-expression
-         * comparisons (arithmetic against arithmetic or against another column) have no
-         * (field, value) pair and are not consulted — the same exclusion as field-to-field
-         * comparisons.
-         *
-         * @return the predicate, or {@code null} if this comparison involves no arithmetic
-         *         expression or the shape is owned by the {@code add} fold/solve path (which
-         *         also handles string concatenation and the override hooks)
+         * <p><b>Extension recipe — adding a new comparison-operand type</b>, worked example
+         * {@code timestamp("2024-01-01T00:00:00Z")} appearing as a comparison operand:
+         * <ol>
+         *   <li>Add a {@code Resolved} case: {@code record Timestamp(Operand arg)} with a lazy
+         *       accessor that parses the argument (its errors are then part of the contract);</li>
+         *   <li>Classify it in {@link #resolve}'s EXPRESSION arm (before the {@code Opaque}
+         *       fallback): {@code "timestamp".equals(exprOp) -> new Resolved.Timestamp(...)};
+         *       a pure-constant argument folds HERE, in the accessor — never in dispatch;</li>
+         *   <li>Handle the new pairings in {@link #dispatch} next to the existing typed cases
+         *       (e.g. {@code Field vs Timestamp} → compare the column against the parsed
+         *       instant via {@link #applyLeaf} so {@link OperatorFunction} overrides keep
+         *       working).</li>
+         * </ol>
+         * Nothing else changes: no new probe, no re-scan, no ordering decision — unmatched
+         * pairings still fall through to {@link #leafOperandError}, whose "Unexpected
+         * timestamp() expression in leaf operand of X" message is the pinned behavior today.
          */
-        private Predicate tryArithmeticComparison(String op, List<Operand> operands, Scope scope) {
-            if (!COMPARISON_OPS.contains(op) || operands.size() != 2) {
-                return null;
-            }
-            boolean hasArith = operands.stream().anyMatch(o ->
-                    o.getNodeCase() == Operand.NodeCase.EXPRESSION
-                            && ARITHMETIC_OPS.contains(o.getExpression().getOperator()));
-            if (!hasArith) {
-                return null;
-            }
-            if (addFoldSolveOwns(op, operands.get(0), operands.get(1))
-                    || addFoldSolveOwns(op, operands.get(1), operands.get(0))) {
-                return null;
-            }
-            NumericOperand left = resolveNumericOperand(operands.get(0), scope);
-            NumericOperand right = resolveNumericOperand(operands.get(1), scope);
+        private final class ComparisonTranslator {
 
-            // Both sides folded to constants (e.g. ternary substitution producing
-            // gt(add(1.0, 2.0), 4.0)) — evaluate statically with IEEE semantics.
-            if (left instanceof NumericOperand.Constant lc
-                    && right instanceof NumericOperand.Constant rc) {
-                return constantComparison(op, lc.value(), rc.value());
-            }
-            // Keep the SQL side on the left (mirroring the operator) so a constant right side
-            // can bind through the plain-Number overloads. Normalization usually guarantees
-            // this already, but an expression that FOLDS to a constant (add(1.0, 2.0)) ranks
-            // as an expression and can still arrive first.
-            if (left instanceof NumericOperand.Constant) {
-                NumericOperand tmp = left;
-                left = right;
-                right = tmp;
-                op = NormalizedBinary.mirror(op);
-            }
-            jakarta.persistence.criteria.Expression<Double> lhs =
-                    ((NumericOperand.Sql) left).expr();
-
-            if (right instanceof NumericOperand.Constant rc) {
-                // Plain-value overloads bind the constant as a genuine double PARAMETER; a
-                // cb.literal would inline `0.3`, which H2/Postgres type as exact NUMERIC and
-                // drag the comparison out of IEEE space (see resolveNumericOperand).
-                String cmpOp = op;
-                double v = rc.value();
-                return withOverride(cmpOp, lhs, rc.value(), () -> switch (cmpOp) {
-                    case "eq" -> cb.equal(lhs, v);
-                    case "ne" -> cb.notEqual(lhs, v);
-                    case "lt" -> cb.lt(lhs, v);
-                    case "gt" -> cb.gt(lhs, v);
-                    case "le" -> cb.le(lhs, v);
-                    case "ge" -> cb.ge(lhs, v);
-                    default -> throw new IllegalArgumentException(
-                            "Unsupported arithmetic comparison operator: " + cmpOp);
-                });
-            }
-
-            jakarta.persistence.criteria.Expression<Double> rhs =
-                    ((NumericOperand.Sql) right).expr();
-            return comparePredicate(op, lhs, rhs);
-        }
-
-        /**
-         * Whether {@code cmp(candidate, other)} is a shape {@link #handleAddComparison} already
-         * translates — those keep their existing path (constant folding, string concat
-         * solving, and the {@link OperatorFunction} override hooks): {@code add(value, value)}
-         * against a field for any operator, and {@code add} of one field and one value against
-         * a value for eq/ne.
-         */
-        private static boolean addFoldSolveOwns(String op, Operand candidate, Operand other) {
-            if (candidate.getNodeCase() != Operand.NodeCase.EXPRESSION
-                    || !"add".equals(candidate.getExpression().getOperator())
-                    || candidate.getExpression().getOperandsCount() != 2) {
-                return false;
-            }
-            Operand l = candidate.getExpression().getOperands(0);
-            Operand r = candidate.getExpression().getOperands(1);
-            boolean bothValues = l.getNodeCase() == Operand.NodeCase.VALUE
-                    && r.getNodeCase() == Operand.NodeCase.VALUE;
-            if (bothValues && other.getNodeCase() == Operand.NodeCase.VARIABLE) {
-                return true; // fold path
-            }
-            boolean oneFieldOneValue =
-                    (l.getNodeCase() == Operand.NodeCase.VARIABLE
-                            && r.getNodeCase() == Operand.NodeCase.VALUE)
-                    || (l.getNodeCase() == Operand.NodeCase.VALUE
-                            && r.getNodeCase() == Operand.NodeCase.VARIABLE);
-            return ("eq".equals(op) || "ne".equals(op))
-                    && oneFieldOneValue
-                    && other.getNodeCase() == Operand.NodeCase.VALUE; // solve path
-        }
-
-        /**
-         * A resolved arithmetic operand: either a pure-constant subtree folded in Java —
-         * genuine IEEE double semantics, exactly matching CEL, including division by zero
-         * yielding ±Infinity/NaN — or a SQL expression forced into double space.
-         */
-        private sealed interface NumericOperand {
-            record Constant(double value) implements NumericOperand {}
-            record Sql(jakarta.persistence.criteria.Expression<Double> expr)
-                    implements NumericOperand {}
-        }
-
-        /**
-         * Resolve a comparison operand to double space. DB decimal arithmetic is NOT IEEE
-         * double arithmetic: H2 (and Postgres) type a bare {@code 0.1} literal as exact
-         * NUMERIC and evaluate {@code intCol * 0.1} decimally, so {@code aNumber * 0.1 == 0.3}
-         * matched rows the PDP (IEEE: {@code 0.30000000000000004}) denies. Verified against
-         * H2 2.3: only {@code CAST(col AS DOUBLE) * CAST(0.1 AS DOUBLE)} diverges from
-         * {@code 0.3}; {@code Expression.as(Double.class)} renders NO SQL cast (it is a type
-         * marker only) and {@code cb.toDouble(literal)} elides the cast on a node already
-         * Double-typed, both leaving the arithmetic decimal. Therefore:
-         * <ul>
-         *   <li>columns go through {@code cb.toDouble} (renders {@code cast(col as float(53))});</li>
-         *   <li>constant subtrees fold in Java ({@link NumericOperand.Constant});</li>
-         *   <li>constants mixed into SQL arithmetic bind through the plain-{@code Number}
-         *       CriteriaBuilder overloads, which emit genuine double-typed bind parameters
-         *       instead of decimal literals.</li>
-         * </ul>
-         *
-         * <p>Division guard: SQL raises an error on a zero divisor — a data-dependent runtime
-         * failure of the WHOLE query — while CEL double division is defined (±Infinity, or NaN
-         * for 0/0). Portable Infinity semantics are not expressible in SQL, so a column
-         * divisor is wrapped in {@code NULLIF(d, 0)}: zero-divisor rows become UNKNOWN →
-         * EXCLUDED. Documented divergence, under-inclusive in the safe direction: CEL would
-         * ALLOW rows where the comparison against ±Infinity holds (e.g. {@code x/0 > 1} with
-         * {@code x > 0}); the adapter denies them, and the query survives. For 0/0 CEL yields
-         * NaN, whose comparisons are all false (deny) — the exclusion matches exactly.
-         * Constant divisors are decided statically: non-zero skips the guard, zero collapses
-         * the division to a NULL literal (UNKNOWN for every row).
-         */
-        private NumericOperand resolveNumericOperand(Operand operand, Scope scope) {
-            switch (operand.getNodeCase()) {
-                case VARIABLE -> {
-                    @SuppressWarnings("unchecked")
-                    jakarta.persistence.criteria.Expression<? extends Number> path =
-                            (jakarta.persistence.criteria.Expression<? extends Number>)
-                                    scope.resolvePath(operand.getVariable());
-                    return new NumericOperand.Sql(cb.toDouble(path));
+            /**
+             * The single entry point for the {@code default} arm of
+             * {@code traverseExpression}: translate {@code op(operands...)} where {@code op} is
+             * not one of the structural operators handled by name. The pipeline is fixed by code
+             * order, not by probe-chain position:
+             * <ol>
+             *   <li><b>Ternary rewrite</b> on the RAW operands — a {@code cmp(if(...), other)}
+             *       substitutes each branch back into the comparison and recurses, so it must see
+             *       source order before any mirroring;</li>
+             *   <li><b>Normalization</b> to field-first form (mirroring directional operators —
+             *       see {@link NormalizedBinary}); every later stage assumes it;</li>
+             *   <li><b>size() comparisons</b> as a dedicated step: the emptiness shortcuts
+             *       (EXISTS / NOT EXISTS), the COUNT/LENGTH shapes and the tri-state
+             *       {@code size(filter(...))} guard are subquery translations, not operand
+             *       resolutions, and their SQL shapes are pinned by the differential oracle;</li>
+             *   <li><b>Operand resolution</b> — each operand through the single {@link #resolve}
+             *       seam;</li>
+             *   <li><b>Dispatch</b> on the resolved pair ({@link #dispatch}).</li>
+             * </ol>
+             */
+            Predicate translate(String op, List<Operand> operands, Scope scope) {
+                Predicate ternaryPred = tryTernaryComparison(op, operands, scope);
+                if (ternaryPred != null) {
+                    return ternaryPred;
                 }
-                case VALUE -> {
-                    Object v = PlanValues.protoValueToJava(operand.getValue());
-                    if (!(v instanceof Number n)) {
-                        throw new IllegalArgumentException(
-                                "Arithmetic comparison requires numeric operands, got "
-                                        + typeName(v));
-                    }
-                    return new NumericOperand.Constant(n.doubleValue());
+                NormalizedBinary nb = NormalizedBinary.of(op, operands);
+                Predicate sizePred = trySizeComparison(nb.op(), nb.operands(), scope);
+                if (sizePred != null) {
+                    return sizePred;
                 }
-                case EXPRESSION -> {
-                    PlanResourcesFilter.Expression expr = operand.getExpression();
-                    String op = expr.getOperator();
-                    if ("mod".equals(op)) {
-                        throw new IllegalArgumentException(
-                                "mod is not supported in comparisons: CEL % is integer-only and "
-                                        + "attribute values are always doubles at check time, so "
-                                        + "the condition can never be satisfied by the PDP");
-                    }
-                    if (!ARITHMETIC_OPS.contains(op)) {
-                        throw new IllegalArgumentException(
-                                "Unexpected " + op + "() expression inside an arithmetic "
-                                        + "comparison operand");
-                    }
-                    if (expr.getOperandsCount() != 2) {
-                        throw new IllegalArgumentException(op + " requires exactly 2 operands");
-                    }
-                    NumericOperand l = resolveNumericOperand(expr.getOperands(0), scope);
-                    NumericOperand r = resolveNumericOperand(expr.getOperands(1), scope);
-                    if (l instanceof NumericOperand.Constant lc
-                            && r instanceof NumericOperand.Constant rc) {
-                        return new NumericOperand.Constant(switch (op) {
-                            case "add" -> lc.value() + rc.value();
-                            case "sub" -> lc.value() - rc.value();
-                            case "mult" -> lc.value() * rc.value();
-                            case "div" -> lc.value() / rc.value(); // IEEE: ±Infinity, 0/0 = NaN
-                            default -> throw new IllegalArgumentException(
-                                    "Unsupported arithmetic operator: " + op);
-                        });
-                    }
-                    return new NumericOperand.Sql(arithmeticSql(op, l, r));
-                }
-                default -> throw new IllegalArgumentException(
-                        "Unexpected operand type in arithmetic comparison: "
-                                + operand.getNodeCase());
-            }
-        }
-
-        /**
-         * Emit one SQL arithmetic node; at least one side is a SQL expression. Constants go
-         * through the plain-{@code Number} overloads (double bind parameters — see
-         * {@link #resolveNumericOperand}).
-         */
-        private jakarta.persistence.criteria.Expression<Double> arithmeticSql(
-                String op, NumericOperand l, NumericOperand r) {
-            jakarta.persistence.criteria.Expression<Double> le =
-                    l instanceof NumericOperand.Sql s ? s.expr() : null;
-            jakarta.persistence.criteria.Expression<Double> re =
-                    r instanceof NumericOperand.Sql s ? s.expr() : null;
-            Double lc = l instanceof NumericOperand.Constant c ? c.value() : null;
-            Double rc = r instanceof NumericOperand.Constant c ? c.value() : null;
-            return switch (op) {
-                case "add" -> le == null ? cb.sum(lc, re)
-                        : re == null ? cb.sum(le, rc) : cb.sum(le, re);
-                case "sub" -> le == null ? cb.diff(lc, re)
-                        : re == null ? cb.diff(le, rc) : cb.diff(le, re);
-                case "mult" -> le == null ? cb.prod(lc, re)
-                        : re == null ? cb.prod(le, rc) : cb.prod(le, re);
-                case "div" -> divisionSql(le, lc, re, rc);
-                default -> throw new IllegalArgumentException(
-                        "Unsupported arithmetic operator: " + op);
-            };
-        }
-
-        /** Division with the NULLIF zero-divisor guard (see {@link #resolveNumericOperand}). */
-        private jakarta.persistence.criteria.Expression<Double> divisionSql(
-                jakarta.persistence.criteria.Expression<Double> le, Double lc,
-                jakarta.persistence.criteria.Expression<Double> re, Double rc) {
-            if (rc != null) {
-                // Constant divisor, numerator is a SQL expression (both-constant subtrees
-                // fold before reaching here). Zero → UNKNOWN for every row; non-zero → no
-                // guard needed.
-                if (rc == 0.0) {
-                    return cb.nullLiteral(Double.class);
-                }
-                return cb.quot(le, rc).as(Double.class);
-            }
-            jakarta.persistence.criteria.Expression<Double> guarded = cb.nullif(re, 0.0);
-            return (lc != null ? cb.quot(lc, guarded) : cb.quot(le, guarded)).as(Double.class);
-        }
-
-        // -- add (fold + solve for string concat / numeric translation) --
-
-        /** Operands must already be normalized field-first (see {@link NormalizedBinary}). */
-        private Predicate handleAddComparison(String op, PlanResourcesFilter.Expression addExpr,
-                                              Operand otherOperand, Scope scope) {
-            List<Operand> addOperands = addExpr.getOperandsList();
-            if (addOperands.size() != 2) {
-                throw new IllegalArgumentException("add requires exactly 2 operands");
-            }
-            Operand addLeft = addOperands.get(0);
-            Operand addRight = addOperands.get(1);
-
-            // Case 1: add(value, value) — fold the two constants, then compare to the field.
-            // Normalization guarantees the field variable sits on the left of the comparison,
-            // so the folded constant compares as `field op folded`.
-            if (addLeft.getNodeCase() == Operand.NodeCase.VALUE
-                    && addRight.getNodeCase() == Operand.NodeCase.VALUE) {
-                Object folded = PlanValues.foldAdd(
-                        PlanValues.protoValueToJava(addLeft.getValue()),
-                        PlanValues.protoValueToJava(addRight.getValue()));
-                if (otherOperand.getNodeCase() != Operand.NodeCase.VARIABLE) {
+                // Every leaf operator is binary. Extra operands are a malformed plan and must
+                // fail loudly rather than silently dropping one.
+                if (nb.operands().size() != 2) {
                     throw new IllegalArgumentException(
-                            "add(const, const) compared to a non-field operand is not supported");
+                            nb.op() + " requires exactly 2 operands, got " + nb.operands().size());
                 }
-                Path<?> path = scope.resolvePath(otherOperand.getVariable());
-                return applyLeaf(op, path, folded);
+                return dispatch(nb.op(),
+                        resolve(nb.operands().get(0)),
+                        resolve(nb.operands().get(1)),
+                        nb.operands(), scope);
             }
 
-            // Case 2: add(field, value) or add(value, field) — solve for the field.
-            // Only eq/ne are supported; lt/gt/etc. against a synthesized expression would require
-            // emitting more complex predicates we don't try to support here.
-            if (!"eq".equals(op) && !"ne".equals(op)) {
+            // -- if (CEL ternary) --
+
+            /**
+             * The orderable/equality comparison operators (eq/ne/lt/gt/le/ge) — shared by the
+             * ternary rewrite, the arithmetic path, and the constant-vs-constant fold.
+             */
+            private static final Set<String> COMPARISON_OPS =
+                    Set.of("eq", "ne", "lt", "gt", "le", "ge");
+
+            /**
+             * A comparison wrapping a CEL ternary — {@code cmp(if(c, a, b), other)}. Each branch is
+             * substituted back into the comparison and recursed through {@link #traverseExpression},
+             * so a ternary branch behaves identically to the same comparison written directly (see
+             * {@link #translateTernary} for the rewrite and its null semantics). Recursion also
+             * handles nested ternaries and a ternary on the other side for free.
+             *
+             * @return the rewritten predicate, or {@code null} if this comparison involves no ternary
+             */
+            private Predicate tryTernaryComparison(String op, List<Operand> operands, Scope scope) {
+                if (!COMPARISON_OPS.contains(op) || operands.size() != 2) {
+                    return null;
+                }
+                int idx;
+                if (isIfExpression(operands.get(0))) {
+                    idx = 0;
+                } else if (isIfExpression(operands.get(1))) {
+                    idx = 1;
+                } else {
+                    return null;
+                }
+                List<Operand> ifOps = operands.get(idx).getExpression().getOperandsList();
+                return translateTernary(ifOps,
+                        branch -> traverseExpression(substituteOperand(op, operands, idx, branch), scope),
+                        scope);
+            }
+
+            private static boolean isIfExpression(Operand o) {
+                return o.getNodeCase() == Operand.NodeCase.EXPRESSION
+                        && "if".equals(o.getExpression().getOperator());
+            }
+
+            /**
+             * Rewrite a CEL ternary {@code if(c, a, b)} into a pure predicate:
+             *
+             * <pre>{@code (pred(c) AND branch(a)) OR (NOT pred(c) AND branch(b)) OR NOT(pred(c) OR NOT pred(c))}</pre>
+             *
+             * where {@code branch} is supplied by the caller — comparison substitution for
+             * {@link #tryTernaryComparison}, {@link #booleanBranchPredicate} for
+             * {@link #handleBareTernary}. We rewrite instead of emitting {@code CASE WHEN}
+             * ({@code cb.selectCase}) because this translator is predicate-only: every existing typed
+             * leaf path — field-first normalization, size() handling, add-fold, fractional
+             * double-space comparison — operates on comparison predicates, and routing the branches
+             * back through those exact paths keeps them identical to the same condition written
+             * directly.
+             *
+             * <p>A constant boolean condition folds to a single branch — only that branch is
+             * translated, so an untranslatable dead branch cannot fail the whole plan.
+             *
+             * <p>Null semantics and the third (condition-UNKNOWN) arm are owned by
+             * {@link TriPredicate#ternary}: a null/missing condition in a CEL ternary is an
+             * evaluation error and the check denies, so the SQL must evaluate to UNKNOWN — never
+             * FALSE — when the condition column is NULL. The condition is passed as a Supplier and
+             * translated fresh for each arm (Hibernate 6 negation is stateful — see
+             * {@link TriPredicate#not}).
+             */
+            private Predicate translateTernary(List<Operand> ifOps,
+                                               java.util.function.Function<Operand, Predicate> branchTranslator,
+                                               Scope scope) {
+                if (ifOps.size() != 3) {
+                    throw new IllegalArgumentException(
+                            "if (ternary) requires exactly 3 operands (condition, then, else), got "
+                                    + ifOps.size());
+                }
+                Operand condition = ifOps.get(0);
+                Operand thenBranch = ifOps.get(1);
+                Operand elseBranch = ifOps.get(2);
+
+                if (condition.getNodeCase() == Operand.NodeCase.VALUE) {
+                    Boolean known = constantBooleanOrNull(condition);
+                    if (known == null) {
+                        throw new IllegalArgumentException(
+                                "if (ternary) condition must be a boolean expression");
+                    }
+                    return branchTranslator.apply(known ? thenBranch : elseBranch);
+                }
+
+                return tri.ternary(
+                        () -> traverse(condition, scope),
+                        () -> branchTranslator.apply(thenBranch),
+                        () -> branchTranslator.apply(elseBranch));
+            }
+
+            /**
+             * A CEL ternary in boolean position — {@code if(c, a, b)} used directly as a condition,
+             * so both branches are themselves boolean and translate through
+             * {@link #booleanBranchPredicate}. Same rewrite, rationale and null semantics as
+             * {@link #translateTernary}.
+             */
+            private Predicate handleBareTernary(List<Operand> operands, Scope scope) {
+                return translateTernary(operands, branch -> booleanBranchPredicate(branch, scope), scope);
+            }
+
+            /**
+             * A ternary branch in boolean position: a boolean VALUE folds to the always-true /
+             * always-false predicate (the same collapse the unsolvable add-solve cases use); anything
+             * else translates as a normal boolean operand (bare variables become {@code path = true}).
+             */
+            private Predicate booleanBranchPredicate(Operand branch, Scope scope) {
+                if (branch.getNodeCase() == Operand.NodeCase.VALUE) {
+                    Boolean constant = constantBooleanOrNull(branch);
+                    if (constant == null) {
+                        throw new IllegalArgumentException(
+                                "if (ternary) branch in boolean position must be a boolean");
+                    }
+                    return constant ? cb.conjunction() : cb.disjunction();
+                }
+                return traverse(branch, scope);
+            }
+
+            /** Rebuild {@code op(operands...)} with the operand at {@code idx} replaced. */
+            private static PlanResourcesFilter.Expression substituteOperand(
+                    String op, List<Operand> operands, int idx, Operand replacement) {
+                PlanResourcesFilter.Expression.Builder b =
+                        PlanResourcesFilter.Expression.newBuilder().setOperator(op);
+                for (int i = 0; i < operands.size(); i++) {
+                    b.addOperands(i == idx ? replacement : operands.get(i));
+                }
+                return b.build();
+            }
+
+            /** The operand's boolean constant, or {@code null} if it is not a boolean VALUE. */
+            private static Boolean constantBooleanOrNull(Operand o) {
+                return PlanValues.protoValueToJava(o.getValue()) instanceof Boolean b ? b : null;
+            }
+
+            // -- the operand-resolution seam --
+
+            /** The receiver-sensitive CEL string-match methods (see {@link NormalizedBinary}). */
+            private static final Set<String> STRING_MATCH_OPS =
+                    Set.of("contains", "startsWith", "endsWith");
+
+            /**
+             * A comparison operand resolved to its translation-relevant shape — the single seam
+             * every leaf comparison goes through ({@link #resolve}). Resolution is purely
+             * structural: values convert and constants fold LAZILY (at the dispatch site that
+             * consumes them), because WHICH error a malformed operand raises depends on the shape
+             * of the whole comparison — e.g. a non-numeric constant inside {@code add} is a
+             * type-mismatch when solved against a field but an
+             * "Arithmetic comparison requires numeric operands" when lowered to SQL arithmetic —
+             * and eager conversion here would re-order those pinned messages.
+             */
+            private sealed interface Resolved {
+                /** A plan constant (raw VALUE node); {@link #value()} converts on demand. */
+                record Constant(Operand operand) implements Resolved {
+                    Object value() {
+                        return PlanValues.protoValueToJava(operand.getValue());
+                    }
+                }
+
+                /** A mapped column reference; the path resolves at the consuming dispatch site. */
+                record Field(String variable) implements Resolved {}
+
+                /**
+                 * {@code add(value, value)} — a pure-constant subtree. {@link #fold()} folds it
+                 * with {@link PlanValues#foldAdd} (strings concatenate, numbers add), so by the
+                 * time the resolved pair is dispatched no "who owns the fold" question exists.
+                 */
+                record ConstantAdd(Operand left, Operand right) implements Resolved {
+                    Object fold() {
+                        return PlanValues.foldAdd(
+                                PlanValues.protoValueToJava(left.getValue()),
+                                PlanValues.protoValueToJava(right.getValue()));
+                    }
+                }
+
+                /**
+                 * {@code add(field, value)} / {@code add(value, field)} — solvable for the field
+                 * under eq/ne against a constant ({@link PlanValues#solveAdd}); every other
+                 * pairing lowers to SQL arithmetic.
+                 */
+                record FieldPlusConstant(String fieldVariable, Operand constant, boolean fieldIsLeft)
+                        implements Resolved {}
+
+                /**
+                 * Any other arithmetic-rooted expression ({@code sub}/{@code mult}/{@code div}/
+                 * {@code mod}, or {@code add} in a shape with nested expressions or wrong arity) —
+                 * lowered to double-space SQL by {@link #resolveNumericOperand}.
+                 */
+                record Arithmetic(String operator) implements Resolved {}
+
+                /**
+                 * An operand no leaf comparison understands ({@code timestamp()}, {@code map()},
+                 * {@code lambda}, an unset node...). Dispatch routes these to
+                 * {@link #leafOperandError}, which reports from the RAW operands so each shape
+                 * keeps its exact message.
+                 */
+                record Opaque() implements Resolved {}
+            }
+
+            /**
+             * THE operand-resolution seam: classify one comparison operand. Adding a new operand
+             * type starts here — see the extension recipe on {@link ComparisonTranslator}.
+             */
+            private Resolved resolve(Operand o) {
+                return switch (o.getNodeCase()) {
+                    case VALUE -> new Resolved.Constant(o);
+                    case VARIABLE -> new Resolved.Field(o.getVariable());
+                    case EXPRESSION -> {
+                        PlanResourcesFilter.Expression e = o.getExpression();
+                        String exprOp = e.getOperator();
+                        if (!ARITHMETIC_OPS.contains(exprOp)) {
+                            yield new Resolved.Opaque();
+                        }
+                        if ("add".equals(exprOp) && e.getOperandsCount() == 2) {
+                            Operand l = e.getOperands(0);
+                            Operand r = e.getOperands(1);
+                            boolean lValue = l.getNodeCase() == Operand.NodeCase.VALUE;
+                            boolean rValue = r.getNodeCase() == Operand.NodeCase.VALUE;
+                            if (lValue && rValue) {
+                                yield new Resolved.ConstantAdd(l, r);
+                            }
+                            if (l.getNodeCase() == Operand.NodeCase.VARIABLE && rValue) {
+                                yield new Resolved.FieldPlusConstant(l.getVariable(), r, true);
+                            }
+                            if (lValue && r.getNodeCase() == Operand.NodeCase.VARIABLE) {
+                                yield new Resolved.FieldPlusConstant(r.getVariable(), l, false);
+                            }
+                        }
+                        yield new Resolved.Arithmetic(exprOp);
+                    }
+                    default -> new Resolved.Opaque();
+                };
+            }
+
+            /** Whether this operand resolved to an {@code add}-rooted expression (any shape). */
+            private static boolean isAddRooted(Resolved r) {
+                return r instanceof Resolved.ConstantAdd
+                        || r instanceof Resolved.FieldPlusConstant
+                        || (r instanceof Resolved.Arithmetic a && "add".equals(a.operator()));
+            }
+
+            /** Whether this operand resolved to any arithmetic-rooted expression. */
+            private static boolean isArithmeticRooted(Resolved r) {
+                return r instanceof Resolved.ConstantAdd
+                        || r instanceof Resolved.FieldPlusConstant
+                        || r instanceof Resolved.Arithmetic;
+            }
+
+            // -- dispatch on the resolved pair --
+
+            /**
+             * Translate one leaf comparison from its resolved operand pair. Cases are ordered by
+             * code structure, top to bottom; {@code operands} is the (normalized) raw operand list,
+             * kept only for the paths that must see raw shapes — SQL arithmetic lowering
+             * ({@link #resolveNumericOperand} walks subtrees) and error reporting
+             * ({@link #leafOperandError} pins per-shape messages).
+             */
+            private Predicate dispatch(String op, Resolved left, Resolved right,
+                                       List<Operand> operands, Scope scope) {
+                // Constant-vs-constant comparisons are statically evaluated. The planner never emits
+                // them directly, but ternary substitution produces them — the else branch of
+                // `(aBool ? aNumber : 0) > 0` becomes gt(value(0), value(0)).
+                if (COMPARISON_OPS.contains(op)
+                        && left instanceof Resolved.Constant lc
+                        && right instanceof Resolved.Constant rc) {
+                    return constantComparison(op, lc.value(), rc.value());
+                }
+
+                // Constant-receiver string matches: `"a,b".contains(R.attr.x)` arrives as
+                // contains(value, variable) — the CONSTANT is the haystack and the COLUMN the
+                // needle (NormalizedBinary deliberately leaves these in source order). An unfolded
+                // concat receiver (`("a" + "b").contains(R.attr.x)`) folds here too — NOT into the
+                // add-solve path, which would translate the INVERTED column-haystack LIKE.
+                if (STRING_MATCH_OPS.contains(op) && right instanceof Resolved.Field needleField) {
+                    Object receiver = left instanceof Resolved.Constant c ? c.value()
+                            : left instanceof Resolved.ConstantAdd ca ? ca.fold()
+                            : null;
+                    if (receiver != null) {
+                        if (!(receiver instanceof String haystack)) {
+                            throw new IllegalArgumentException(
+                                    op + " requires a string receiver, got " + typeName(receiver));
+                        }
+                        Path<?> needle = scope.resolvePath(needleField.variable());
+                        // The needle is a column, so it is escaped dynamically; a NULL needle is
+                        // a missing attribute → CEL error → deny (fieldToFieldLike guards it).
+                        return switch (op) {
+                            case "contains" -> fieldToFieldLike(cb.literal(haystack), needle, true, true);
+                            case "startsWith" -> fieldToFieldLike(cb.literal(haystack), needle, false, true);
+                            case "endsWith" -> fieldToFieldLike(cb.literal(haystack), needle, true, false);
+                            default -> throw new IllegalArgumentException(
+                                    "Unsupported string-match operator: " + op);
+                        };
+                    }
+                    // A NULL receiver constant is not a haystack; fall through so the null-RHS
+                    // leaf branch below owns the error message.
+                }
+
+                if (COMPARISON_OPS.contains(op)) {
+                    // Fold: `field op add(value, value)` — the folded constant compares like any
+                    // plan constant (normalization guarantees the field arrives first). Strings
+                    // concatenate here, matching CEL — this shape never enters double space.
+                    if (left instanceof Resolved.Field f && right instanceof Resolved.ConstantAdd ca) {
+                        return applyLeaf(op, scope.resolvePath(f.variable()), ca.fold());
+                    }
+                    // Solve: `add(field, const) eq/ne constant` — string concat/numeric solve for
+                    // the field side (same algorithm as the Prisma adapter).
+                    if (("eq".equals(op) || "ne".equals(op))
+                            && left instanceof Resolved.FieldPlusConstant fpc
+                            && right instanceof Resolved.Constant other) {
+                        return solveAddComparison(op, fpc, other, scope);
+                    }
+                    // Everything else arithmetic-rooted lowers to SQL-side double-space arithmetic.
+                    if (isArithmeticRooted(left) || isArithmeticRooted(right)) {
+                        return numericComparison(op, operands, scope);
+                    }
+                } else if (isAddRooted(left) || isAddRooted(right)) {
+                    // add under a non-comparison operator (string matches, unknown operators):
+                    // only the constant fold against a field translates; everything else reports
+                    // the add-specific shape errors.
+                    return addFoldOrError(op, operands, scope);
+                }
+
+                if (left instanceof Resolved.Field a && right instanceof Resolved.Field b) {
+                    return fieldToFieldComparison(op, a.variable(), b.variable(), scope);
+                }
+
+                // The ordinary scalar leaf: one mapped column against one plan constant. Order-
+                // insensitive on purpose — receiver-sensitive operators are never normalized, so a
+                // null receiver arrives value-first and must still reach the null-RHS message.
+                Resolved.Field field = left instanceof Resolved.Field lf ? lf
+                        : right instanceof Resolved.Field rf ? rf : null;
+                Resolved.Constant constant = left instanceof Resolved.Constant lc2 ? lc2
+                        : right instanceof Resolved.Constant rc2 ? rc2 : null;
+                if (field != null && constant != null) {
+                    return leafFieldValue(op, field, constant, scope);
+                }
+
+                throw leafOperandError(op, operands);
+            }
+
+            /** `field op value` (or value-first for non-normalized operators): the scalar leaf. */
+            private Predicate leafFieldValue(String op, Resolved.Field field,
+                                             Resolved.Constant constant, Scope scope) {
+                Object value = constant.value();
+                Path<?> path = scope.resolvePath(field.variable());
+
+                if (value == null) {
+                    // A registered override owns the operator's full translation, including a null RHS.
+                    return withOverride(op, path, null, () -> switch (op) {
+                        case "eq" -> cb.isNull(path);
+                        case "ne" -> cb.isNotNull(path);
+                        default -> throw new IllegalArgumentException(
+                                "Null values are only supported with eq and ne operators (got " + op + ")");
+                    });
+                }
+
+                return applyLeaf(op, path, value);
+            }
+
+            /**
+             * Solve {@code add(field, const) eq/ne constant} for the field. When no solution
+             * exists (e.g. {@code "projects:123" == "users:" + R.id} can never be true), eq is
+             * always-false; ne is NOT always-true — a missing attribute makes the concatenation a
+             * CEL evaluation error ({@code "users:" + null}) → deny, so NULL rows must stay
+             * excluded: IS NOT NULL, never an unconditional {@code 1=1} (which would leak exactly
+             * the rows the PDP denies).
+             */
+            private Predicate solveAddComparison(String op, Resolved.FieldPlusConstant fpc,
+                                                 Resolved.Constant other, Scope scope) {
+                Object otherValue = other.value();
+                Object addConst = PlanValues.protoValueToJava(fpc.constant().getValue());
+                Object solved = PlanValues.solveAdd(otherValue, addConst, fpc.fieldIsLeft());
+                if (solved == null) {
+                    if ("eq".equals(op)) {
+                        return cb.disjunction();
+                    }
+                    return cb.isNotNull(scope.resolvePath(fpc.fieldVariable()));
+                }
+                return applyLeaf(op, scope.resolvePath(fpc.fieldVariable()), solved);
+            }
+
+            /**
+             * {@code add} under a non-comparison operator. The only translatable shape is the
+             * constant fold against a field ({@code ("a" + "b") op field} with the fold as the
+             * VALUE side); the rest report the add-specific shape errors, matching the raw
+             * operand layout (either side may hold the {@code add}).
+             */
+            private Predicate addFoldOrError(String op, List<Operand> operands, Scope scope) {
+                Operand addExprOperand = null;
+                Operand otherOperand = null;
+                for (Operand o : operands) {
+                    if (o.getNodeCase() == Operand.NodeCase.EXPRESSION
+                            && "add".equals(o.getExpression().getOperator())) {
+                        addExprOperand = o;
+                    } else {
+                        otherOperand = o;
+                    }
+                }
+                if (otherOperand == null) {
+                    throw new IllegalArgumentException("add comparison requires a second operand");
+                }
+                List<Operand> addOperands = addExprOperand.getExpression().getOperandsList();
+                if (addOperands.size() != 2) {
+                    throw new IllegalArgumentException("add requires exactly 2 operands");
+                }
+                Operand addLeft = addOperands.get(0);
+                Operand addRight = addOperands.get(1);
+                if (addLeft.getNodeCase() == Operand.NodeCase.VALUE
+                        && addRight.getNodeCase() == Operand.NodeCase.VALUE) {
+                    Object folded = PlanValues.foldAdd(
+                            PlanValues.protoValueToJava(addLeft.getValue()),
+                            PlanValues.protoValueToJava(addRight.getValue()));
+                    if (otherOperand.getNodeCase() != Operand.NodeCase.VARIABLE) {
+                        throw new IllegalArgumentException(
+                                "add(const, const) compared to a non-field operand is not supported");
+                    }
+                    return applyLeaf(op, scope.resolvePath(otherOperand.getVariable()), folded);
+                }
                 throw new IllegalArgumentException(
                         "add comparison with a field reference only supports eq/ne (got " + op + ")");
             }
-            if (otherOperand.getNodeCase() != Operand.NodeCase.VALUE) {
-                throw new IllegalArgumentException(
-                        "add(field, value) requires a value on the other side of the comparison");
-            }
-            Object otherValue = PlanValues.protoValueToJava(otherOperand.getValue());
 
-            Operand fieldOp;
-            Object addConst;
-            boolean fieldIsLeft;
-            if (addLeft.getNodeCase() == Operand.NodeCase.VARIABLE
-                    && addRight.getNodeCase() == Operand.NodeCase.VALUE) {
-                fieldOp = addLeft;
-                addConst = PlanValues.protoValueToJava(addRight.getValue());
-                fieldIsLeft = true;
-            } else if (addLeft.getNodeCase() == Operand.NodeCase.VALUE
-                    && addRight.getNodeCase() == Operand.NodeCase.VARIABLE) {
-                fieldOp = addRight;
-                addConst = PlanValues.protoValueToJava(addLeft.getValue());
-                fieldIsLeft = false;
-            } else {
-                throw new IllegalArgumentException(
-                        "add requires exactly one field reference and one value, or two values");
-            }
-
-            Object solved = PlanValues.solveAdd(otherValue, addConst, fieldIsLeft);
-            if (solved == null) {
-                // No solution exists (e.g. "projects:123" == "users:" + R.id can never be true).
-                // eq → always-false. ne is NOT always-true: a missing attribute makes the
-                // concatenation a CEL evaluation error ("users:" + null) → deny, so NULL rows
-                // must stay excluded — IS NOT NULL, not an unconditional 1=1 (which leaked
-                // exactly the rows the PDP denies).
-                if ("eq".equals(op)) {
-                    return cb.disjunction();
+            /**
+             * Report an operand shape no leaf case accepts. Reads the RAW operands in order so
+             * each malformed shape keeps its exact message: {@code map()} points at the supported
+             * {@code hasIntersection} wrapping, other expressions name themselves, unset nodes
+             * report their node case, and an all-constant pair reports the missing variable.
+             */
+            private IllegalArgumentException leafOperandError(String op, List<Operand> operands) {
+                String variable = null;
+                for (Operand o : operands) {
+                    switch (o.getNodeCase()) {
+                        case VARIABLE -> variable = o.getVariable();
+                        // Conversion can itself reject a malformed VALUE — same order as reading
+                        // the operands left to right.
+                        case VALUE -> PlanValues.protoValueToJava(o.getValue());
+                        case EXPRESSION -> {
+                            // H3: map() compositions are only accepted inside hasIntersection.
+                            // A direct comparison like eq(map(...), [...]) reaches here; point users
+                            // at the supported shape rather than throwing a generic operand error.
+                            String innerOp = o.getExpression().getOperator();
+                            if ("map".equals(innerOp)) {
+                                throw new IllegalArgumentException(
+                                        "Direct comparison of map(...) to a value is not supported "
+                                                + "(operator: " + op + "). Wrap the map() expression in "
+                                                + "hasIntersection(map(...), [...]) instead.");
+                            }
+                            throw new IllegalArgumentException(
+                                    "Unexpected " + innerOp + "() expression in leaf operand of " + op);
+                        }
+                        default -> throw new IllegalArgumentException(
+                                "Unexpected operand type in leaf expression: " + o.getNodeCase());
+                    }
                 }
-                return cb.isNotNull(scope.resolvePath(fieldOp.getVariable()));
+                if (variable == null) {
+                    return new IllegalArgumentException("Missing variable operand for " + op);
+                }
+                return new IllegalArgumentException("Missing value operand for " + op);
             }
-            Path<?> path = scope.resolvePath(fieldOp.getVariable());
-            return applyLeaf(op, path, solved);
+
+            /**
+             * Statically evaluate a comparison between two plan constants and collapse it to an
+             * always-true ({@code 1=1}) or always-false ({@code 1=0}) predicate — the same collapse
+             * the unsolvable {@code add}-solve cases use. Numbers compare in double space: protobuf
+             * {@code Value.getNumberValue()} is a double, and {@link PlanValues#protoValueToJava}
+             * only splits Long/Double for whole-number cosmetics, not semantics. Strings compare
+             * lexicographically; booleans (and mixed incomparable types) support eq/ne only —
+             * eq → false, ne → true — while ordering them is a planner bug and throws.
+             */
+            private Predicate constantComparison(String op, Object left, Object right) {
+                boolean result;
+                if ("eq".equals(op) || "ne".equals(op)) {
+                    boolean equal = (left instanceof Number ln && right instanceof Number rn)
+                            ? ln.doubleValue() == rn.doubleValue()
+                            : Objects.equals(left, right);
+                    result = "eq".equals(op) == equal;
+                } else {
+                    int cmp;
+                    if (left instanceof Number ln && right instanceof Number rn) {
+                        cmp = Double.compare(ln.doubleValue(), rn.doubleValue());
+                    } else if (left instanceof String ls && right instanceof String rs) {
+                        cmp = ls.compareTo(rs);
+                    } else {
+                        throw new IllegalArgumentException(
+                                "Cannot order constant operands of " + op + ": "
+                                        + typeName(left) + " vs " + typeName(right));
+                    }
+                    result = switch (op) {
+                        case "lt" -> cmp < 0;
+                        case "gt" -> cmp > 0;
+                        case "le" -> cmp <= 0;
+                        case "ge" -> cmp >= 0;
+                        default -> throw new IllegalArgumentException(
+                                "Unsupported constant comparison operator: " + op);
+                    };
+                }
+                return result ? cb.conjunction() : cb.disjunction();
+            }
+
+            private static String typeName(Object o) {
+                return o == null ? "null" : o.getClass().getSimpleName();
+            }
+
+            /**
+             * Compare two mapped columns directly (eq/ne/lt/gt/le/ge) or pattern-match one column
+             * against another (contains/startsWith/endsWith). Operand source order is preserved —
+             * two variables rank equally, so {@link NormalizedBinary} never swaps them.
+             */
+            private Predicate fieldToFieldComparison(String op, String leftVar, String rightVar,
+                                                     Scope scope) {
+                jakarta.persistence.criteria.Expression<?> left = scope.resolvePath(leftVar);
+                jakarta.persistence.criteria.Expression<?> right = scope.resolvePath(rightVar);
+                return switch (op) {
+                    case "eq", "ne", "lt", "gt", "le", "ge" -> comparePredicate(op, left, right);
+                    case "contains" -> fieldToFieldLike(left, right, true, true);
+                    case "startsWith" -> fieldToFieldLike(left, right, false, true);
+                    case "endsWith" -> fieldToFieldLike(left, right, true, false);
+                    default -> throw new IllegalArgumentException(
+                            "Field-to-field comparison is not supported for operator '" + op + "': "
+                                    + leftVar + " vs " + rightVar);
+                };
+            }
+
+            /**
+             * Raw-typed comparison of two SQL expressions — the shared dispatch of field-to-field
+             * comparisons and arithmetic expression-vs-expression comparisons. Constant-RHS shapes
+             * do NOT route here: they bind through the plain-value overloads on purpose (double
+             * bind parameters — see {@link #numericComparison}).
+             */
+            @SuppressWarnings({"rawtypes", "unchecked"})
+            private Predicate comparePredicate(String op,
+                                               jakarta.persistence.criteria.Expression left,
+                                               jakarta.persistence.criteria.Expression right) {
+                return switch (op) {
+                    case "eq" -> cb.equal(left, right);
+                    case "ne" -> cb.notEqual(left, right);
+                    case "lt" -> cb.lessThan(left, right);
+                    case "gt" -> cb.greaterThan(left, right);
+                    case "le" -> cb.lessThanOrEqualTo(left, right);
+                    case "ge" -> cb.greaterThanOrEqualTo(left, right);
+                    default -> throw new IllegalArgumentException(
+                            "Unsupported arithmetic comparison operator: " + op);
+                };
+            }
+
+            /**
+             * {@code haystackColumn LIKE wildcards(escape(needleColumn))} — the column-to-column
+             * analogue of the constant LIKE path in {@link #defaultLeaf}. The needle is data, so its
+             * LIKE metacharacters are escaped dynamically with nested {@code REPLACE} (portable:
+             * H2/Postgres/MySQL/Oracle/SQL Server): {@code \} first, then {@code %} and {@code _},
+             * mirroring {@link PlanValues#escapeLike} and the same explicit {@code '\'} escape char.
+             *
+             * <p>The explicit {@code IS NOT NULL} guard on the needle matches CEL (a missing
+             * attribute is an evaluation error → deny) and also defends against dialects whose
+             * {@code CONCAT} treats NULL as {@code ''}, which would otherwise turn a NULL needle
+             * into a match-anything {@code '%%'} pattern.
+             */
+            private Predicate fieldToFieldLike(jakarta.persistence.criteria.Expression<?> haystack,
+                                               jakarta.persistence.criteria.Expression<?> needle,
+                                               boolean leadingWildcard, boolean trailingWildcard) {
+                jakarta.persistence.criteria.Expression<String> escaped =
+                        needle.as(String.class);
+                escaped = cb.function("replace", String.class,
+                        escaped, cb.literal("\\"), cb.literal("\\\\"));
+                escaped = cb.function("replace", String.class,
+                        escaped, cb.literal("%"), cb.literal("\\%"));
+                escaped = cb.function("replace", String.class,
+                        escaped, cb.literal("_"), cb.literal("\\_"));
+                jakarta.persistence.criteria.Expression<String> pattern = escaped;
+                if (leadingWildcard) {
+                    pattern = cb.concat(cb.literal("%"), pattern);
+                }
+                if (trailingWildcard) {
+                    pattern = cb.concat(pattern, cb.literal("%"));
+                }
+                return cb.and(
+                        cb.isNotNull(needle),
+                        cb.like(haystack.as(String.class), pattern, '\\'));
+            }
+
+            // -- arithmetic (add/sub/mult/div) as a comparison operand --
+
+            /** CEL arithmetic operators that can appear as an operand of a comparison. */
+            private static final Set<String> ARITHMETIC_OPS = Set.of("add", "sub", "mult", "div", "mod");
+
+            /**
+             * Translate {@code cmp(arith(...), other)} — e.g. {@code R.attr.aNumber + 1.0 > 2.0}
+             * arriving as {@code gt(add(variable, value(1)), value(2))} — by emitting the arithmetic
+             * on the SQL side ({@code cb.sum}/{@code diff}/{@code prod}/{@code quot}) and comparing.
+             *
+             * <p>Everything is computed and compared in DOUBLE space. This is not a convenience:
+             * Cerbos attribute values are protobuf {@code Value} numbers, i.e. ALWAYS CEL doubles at
+             * check time, so the only arithmetic that can evaluate without a no-overload error is
+             * double-typed — verified against a live PDP: {@code R.attr.n + 1} (int literal) denies
+             * every row, {@code + 1.0} works, and {@code / 2.0} is true double division
+             * ({@code 5 / 2.0 == 2.5}). Integer truncation is therefore never observable through the
+             * check API, and the wire plan erases the int/double distinction anyway (both arrive as
+             * {@code number_value}). Emitting the arithmetic (rather than solving algebraically)
+             * also means multiplication/division by negative constants needs no inequality flipping.
+             *
+             * <p>DOUBLE space must be enforced explicitly, because DB decimal arithmetic is not
+             * IEEE double arithmetic (see {@link #resolveNumericOperand}): columns are CAST, plan
+             * constants are folded in Java or bound as double parameters, and pure-constant
+             * comparisons are evaluated statically in Java (full CEL fidelity, Infinity/NaN
+             * included).
+             *
+             * <p>{@code mod} stays unsupported: CEL {@code %} has no double overload, so on
+             * attribute values it always errors (deny) — translating it to SQL {@code MOD} would
+             * fabricate rows the PDP denies.
+             *
+             * <p>{@link OperatorFunction} overrides win here like on every other scalar path when
+             * the comparison has a plan constant on one side: the arithmetic SQL expression is
+             * passed as the field argument and the folded constant (always a {@link Double} — the
+             * arithmetic path is double-space end to end) as the value. Expression-vs-expression
+             * comparisons (arithmetic against arithmetic or against another column) have no
+             * (field, value) pair and are not consulted — the same exclusion as field-to-field
+             * comparisons.
+             *
+             * <p>Only {@link #dispatch} routes here, and only for arithmetic-rooted shapes it did
+             * not consume as the {@code add} fold ({@code field op add(value, value)}) or the
+             * eq/ne concat solve — those never enter double space.
+             */
+            private Predicate numericComparison(String op, List<Operand> operands, Scope scope) {
+                NumericOperand left = resolveNumericOperand(operands.get(0), scope);
+                NumericOperand right = resolveNumericOperand(operands.get(1), scope);
+
+                // Both sides folded to constants (e.g. ternary substitution producing
+                // gt(add(1.0, 2.0), 4.0)) — evaluate statically with IEEE semantics.
+                if (left instanceof NumericOperand.Constant lc
+                        && right instanceof NumericOperand.Constant rc) {
+                    return constantComparison(op, lc.value(), rc.value());
+                }
+                // Keep the SQL side on the left (mirroring the operator) so a constant right side
+                // can bind through the plain-Number overloads. Normalization usually guarantees
+                // this already, but an expression that FOLDS to a constant (add(1.0, 2.0)) ranks
+                // as an expression and can still arrive first.
+                if (left instanceof NumericOperand.Constant) {
+                    NumericOperand tmp = left;
+                    left = right;
+                    right = tmp;
+                    op = NormalizedBinary.mirror(op);
+                }
+                jakarta.persistence.criteria.Expression<Double> lhs =
+                        ((NumericOperand.Sql) left).expr();
+
+                if (right instanceof NumericOperand.Constant rc) {
+                    // Plain-value overloads bind the constant as a genuine double PARAMETER; a
+                    // cb.literal would inline `0.3`, which H2/Postgres type as exact NUMERIC and
+                    // drag the comparison out of IEEE space (see resolveNumericOperand).
+                    String cmpOp = op;
+                    double v = rc.value();
+                    return withOverride(cmpOp, lhs, rc.value(), () -> switch (cmpOp) {
+                        case "eq" -> cb.equal(lhs, v);
+                        case "ne" -> cb.notEqual(lhs, v);
+                        case "lt" -> cb.lt(lhs, v);
+                        case "gt" -> cb.gt(lhs, v);
+                        case "le" -> cb.le(lhs, v);
+                        case "ge" -> cb.ge(lhs, v);
+                        default -> throw new IllegalArgumentException(
+                                "Unsupported arithmetic comparison operator: " + cmpOp);
+                    });
+                }
+
+                jakarta.persistence.criteria.Expression<Double> rhs =
+                        ((NumericOperand.Sql) right).expr();
+                return comparePredicate(op, lhs, rhs);
+            }
+
+            /**
+             * A resolved arithmetic operand: either a pure-constant subtree folded in Java —
+             * genuine IEEE double semantics, exactly matching CEL, including division by zero
+             * yielding ±Infinity/NaN — or a SQL expression forced into double space.
+             */
+            private sealed interface NumericOperand {
+                record Constant(double value) implements NumericOperand {}
+                record Sql(jakarta.persistence.criteria.Expression<Double> expr)
+                        implements NumericOperand {}
+            }
+
+            /**
+             * Resolve a comparison operand to double space. DB decimal arithmetic is NOT IEEE
+             * double arithmetic: H2 (and Postgres) type a bare {@code 0.1} literal as exact
+             * NUMERIC and evaluate {@code intCol * 0.1} decimally, so {@code aNumber * 0.1 == 0.3}
+             * matched rows the PDP (IEEE: {@code 0.30000000000000004}) denies. Verified against
+             * H2 2.3: only {@code CAST(col AS DOUBLE) * CAST(0.1 AS DOUBLE)} diverges from
+             * {@code 0.3}; {@code Expression.as(Double.class)} renders NO SQL cast (it is a type
+             * marker only) and {@code cb.toDouble(literal)} elides the cast on a node already
+             * Double-typed, both leaving the arithmetic decimal. Therefore:
+             * <ul>
+             *   <li>columns go through {@code cb.toDouble} (renders {@code cast(col as float(53))});</li>
+             *   <li>constant subtrees fold in Java ({@link NumericOperand.Constant});</li>
+             *   <li>constants mixed into SQL arithmetic bind through the plain-{@code Number}
+             *       CriteriaBuilder overloads, which emit genuine double-typed bind parameters
+             *       instead of decimal literals.</li>
+             * </ul>
+             *
+             * <p>Division guard: SQL raises an error on a zero divisor — a data-dependent runtime
+             * failure of the WHOLE query — while CEL double division is defined (±Infinity, or NaN
+             * for 0/0). Portable Infinity semantics are not expressible in SQL, so a column
+             * divisor is wrapped in {@code NULLIF(d, 0)}: zero-divisor rows become UNKNOWN →
+             * EXCLUDED. Documented divergence, under-inclusive in the safe direction: CEL would
+             * ALLOW rows where the comparison against ±Infinity holds (e.g. {@code x/0 > 1} with
+             * {@code x > 0}); the adapter denies them, and the query survives. For 0/0 CEL yields
+             * NaN, whose comparisons are all false (deny) — the exclusion matches exactly.
+             * Constant divisors are decided statically: non-zero skips the guard, zero collapses
+             * the division to a NULL literal (UNKNOWN for every row).
+             */
+            private NumericOperand resolveNumericOperand(Operand operand, Scope scope) {
+                switch (operand.getNodeCase()) {
+                    case VARIABLE -> {
+                        @SuppressWarnings("unchecked")
+                        jakarta.persistence.criteria.Expression<? extends Number> path =
+                                (jakarta.persistence.criteria.Expression<? extends Number>)
+                                        scope.resolvePath(operand.getVariable());
+                        return new NumericOperand.Sql(cb.toDouble(path));
+                    }
+                    case VALUE -> {
+                        Object v = PlanValues.protoValueToJava(operand.getValue());
+                        if (!(v instanceof Number n)) {
+                            throw new IllegalArgumentException(
+                                    "Arithmetic comparison requires numeric operands, got "
+                                            + typeName(v));
+                        }
+                        return new NumericOperand.Constant(n.doubleValue());
+                    }
+                    case EXPRESSION -> {
+                        PlanResourcesFilter.Expression expr = operand.getExpression();
+                        String op = expr.getOperator();
+                        if ("mod".equals(op)) {
+                            throw new IllegalArgumentException(
+                                    "mod is not supported in comparisons: CEL % is integer-only and "
+                                            + "attribute values are always doubles at check time, so "
+                                            + "the condition can never be satisfied by the PDP");
+                        }
+                        if (!ARITHMETIC_OPS.contains(op)) {
+                            throw new IllegalArgumentException(
+                                    "Unexpected " + op + "() expression inside an arithmetic "
+                                            + "comparison operand");
+                        }
+                        if (expr.getOperandsCount() != 2) {
+                            throw new IllegalArgumentException(op + " requires exactly 2 operands");
+                        }
+                        NumericOperand l = resolveNumericOperand(expr.getOperands(0), scope);
+                        NumericOperand r = resolveNumericOperand(expr.getOperands(1), scope);
+                        if (l instanceof NumericOperand.Constant lc
+                                && r instanceof NumericOperand.Constant rc) {
+                            return new NumericOperand.Constant(switch (op) {
+                                case "add" -> lc.value() + rc.value();
+                                case "sub" -> lc.value() - rc.value();
+                                case "mult" -> lc.value() * rc.value();
+                                case "div" -> lc.value() / rc.value(); // IEEE: ±Infinity, 0/0 = NaN
+                                default -> throw new IllegalArgumentException(
+                                        "Unsupported arithmetic operator: " + op);
+                            });
+                        }
+                        return new NumericOperand.Sql(arithmeticSql(op, l, r));
+                    }
+                    default -> throw new IllegalArgumentException(
+                            "Unexpected operand type in arithmetic comparison: "
+                                    + operand.getNodeCase());
+                }
+            }
+
+            /**
+             * Emit one SQL arithmetic node; at least one side is a SQL expression. Constants go
+             * through the plain-{@code Number} overloads (double bind parameters — see
+             * {@link #resolveNumericOperand}).
+             */
+            private jakarta.persistence.criteria.Expression<Double> arithmeticSql(
+                    String op, NumericOperand l, NumericOperand r) {
+                jakarta.persistence.criteria.Expression<Double> le =
+                        l instanceof NumericOperand.Sql s ? s.expr() : null;
+                jakarta.persistence.criteria.Expression<Double> re =
+                        r instanceof NumericOperand.Sql s ? s.expr() : null;
+                Double lc = l instanceof NumericOperand.Constant c ? c.value() : null;
+                Double rc = r instanceof NumericOperand.Constant c ? c.value() : null;
+                return switch (op) {
+                    case "add" -> le == null ? cb.sum(lc, re)
+                            : re == null ? cb.sum(le, rc) : cb.sum(le, re);
+                    case "sub" -> le == null ? cb.diff(lc, re)
+                            : re == null ? cb.diff(le, rc) : cb.diff(le, re);
+                    case "mult" -> le == null ? cb.prod(lc, re)
+                            : re == null ? cb.prod(le, rc) : cb.prod(le, re);
+                    case "div" -> divisionSql(le, lc, re, rc);
+                    default -> throw new IllegalArgumentException(
+                            "Unsupported arithmetic operator: " + op);
+                };
+            }
+
+            /** Division with the NULLIF zero-divisor guard (see {@link #resolveNumericOperand}). */
+            private jakarta.persistence.criteria.Expression<Double> divisionSql(
+                    jakarta.persistence.criteria.Expression<Double> le, Double lc,
+                    jakarta.persistence.criteria.Expression<Double> re, Double rc) {
+                if (rc != null) {
+                    // Constant divisor, numerator is a SQL expression (both-constant subtrees
+                    // fold before reaching here). Zero → UNKNOWN for every row; non-zero → no
+                    // guard needed.
+                    if (rc == 0.0) {
+                        return cb.nullLiteral(Double.class);
+                    }
+                    return cb.quot(le, rc).as(Double.class);
+                }
+                jakarta.persistence.criteria.Expression<Double> guarded = cb.nullif(re, 0.0);
+                return (lc != null ? cb.quot(lc, guarded) : cb.quot(le, guarded)).as(Double.class);
+            }
+
+            // -- size(collection) <op> N --
+
+            /** Operands must already be normalized field-first (see {@link NormalizedBinary}). */
+            private Predicate trySizeComparison(String op, List<Operand> operands, Scope scope) {
+                // Detect the size() operand first: every ordinary leaf comparison probes through
+                // here, and converting the VALUE operand up front would materialize lists/structs
+                // only to discard them when no size() expression is present.
+                PlanResourcesFilter.Expression sizeExpr = null;
+                for (Operand o : operands) {
+                    if (o.getNodeCase() == Operand.NodeCase.EXPRESSION
+                            && "size".equals(o.getExpression().getOperator())) {
+                        sizeExpr = o.getExpression();
+                    }
+                }
+                if (sizeExpr == null) {
+                    return null;
+                }
+                Double numRaw = null;
+                for (Operand o : operands) {
+                    if (o.getNodeCase() == Operand.NodeCase.VALUE
+                            && o.getValue().getKindCase() == Value.KindCase.NUMBER_VALUE) {
+                        numRaw = o.getValue().getNumberValue();
+                    }
+                }
+                if (numRaw == null) {
+                    return null;
+                }
+
+                // Fractional thresholds: COUNT/LENGTH are integral, so a fractional constant f can
+                // never be hit exactly. Truncating (`>= 1.5` becoming `>= 1`) over-included rows
+                // the PDP denies. Correct integer-count semantics:
+                //   eq f      → always-false
+                //   ne f      → always-true (Field-mapping NULL caveat handled below: a NULL
+                //               string column is a missing attribute → CEL error → deny)
+                //   ge f/gt f → ge ceil(f)   (the count being integral makes gt and ge coincide)
+                //   le f/lt f → le floor(f)
+                // Integral thresholds keep the operator untouched. The always-true/false collapses
+                // flow through the same constant predicates the other static folds use
+                // (cb.conjunction()/cb.disjunction()), so the size(filter(...)) unknown-element
+                // machinery below still wraps them.
+                String cmpOp = op;
+                long numValue;
+                Boolean fractionalCollapse = null; // TRUE → always-true, FALSE → always-false
+                if (numRaw != Math.rint(numRaw)) {
+                    switch (op) {
+                        case "eq" -> fractionalCollapse = Boolean.FALSE;
+                        case "ne" -> fractionalCollapse = Boolean.TRUE;
+                        case "gt", "ge" -> cmpOp = "ge";
+                        case "lt", "le" -> cmpOp = "le";
+                        default -> throw new IllegalArgumentException(
+                                "Unsupported size comparison operator: " + op);
+                    }
+                    numValue = "ge".equals(cmpOp)
+                            ? (long) Math.ceil(numRaw)
+                            : (long) Math.floor(numRaw);
+                } else {
+                    numValue = numRaw.longValue();
+                }
+                List<Operand> sizeOps = sizeExpr.getOperandsList();
+                if (sizeOps.size() != 1) {
+                    throw new IllegalArgumentException("Unsupported size() expression");
+                }
+                Operand sizeArg = sizeOps.get(0);
+                String var;
+                Operand lambdaBody = null;
+                String lambdaVarName = null;
+                if (sizeArg.getNodeCase() == Operand.NodeCase.VARIABLE) {
+                    var = sizeArg.getVariable();
+                } else if (sizeArg.getNodeCase() == Operand.NodeCase.EXPRESSION
+                        && "filter".equals(sizeArg.getExpression().getOperator())) {
+                    // size(coll.filter(x, pred)) — count only the elements matching the lambda.
+                    List<Operand> filterOps = sizeArg.getExpression().getOperandsList();
+                    if (filterOps.size() != 2
+                            || filterOps.get(0).getNodeCase() != Operand.NodeCase.VARIABLE) {
+                        throw new IllegalArgumentException("Unsupported size(filter(...)) expression");
+                    }
+                    var = filterOps.get(0).getVariable();
+                    ParsedLambda lambda = parseLambda(filterOps.get(1),
+                            "Unsupported size(filter(...)) expression",
+                            "lambda requires exactly 2 operands",
+                            "lambda requires exactly 2 operands");
+                    lambdaBody = lambda.body();
+                    lambdaVarName = lambda.varName();
+                } else {
+                    throw new IllegalArgumentException("Unsupported size() expression");
+                }
+                Scope.ResolvedRelation ref = scope.resolveRelation(var);
+                if (ref == null) {
+                    AttributeMapping mapping = scope.resolveMapping(var);
+                    if (!(mapping instanceof AttributeMapping.Field)) {
+                        throw new IllegalArgumentException(
+                                "size() requires a collection (Relation) mapping for " + var);
+                    }
+                    // size(string) — CEL string length → LENGTH(column) <op> N.
+                    if (lambdaBody != null) {
+                        throw new IllegalArgumentException(
+                                "size(filter(...)) requires a collection (Relation) mapping for " + var);
+                    }
+                    Path<?> path = scope.resolvePath(var);
+                    if (fractionalCollapse != null) {
+                        // ne f is vacuously true only for a PRESENT string: a NULL column is a
+                        // missing attribute → CEL error → deny, so it must stay excluded —
+                        // IS NOT NULL, never an unconditional 1=1. eq f excludes everything.
+                        return fractionalCollapse ? cb.isNotNull(path) : cb.disjunction();
+                    }
+                    return compareCount(cb.length(path.as(String.class)), cmpOp, (int) numValue);
+                }
+                final Operand fBody = lambdaBody;
+                final String fVar = lambdaVarName;
+                SubqueryBodyBuilder bodyBuilder = (sub, tailJoin, rebased) ->
+                        fBody == null ? cb.conjunction()
+                                : traverse(fBody, Scope.lambda(tailJoin, sub, ref.tail(), fVar, rebased));
+
+                Predicate base;
+                if (fractionalCollapse != null) {
+                    // A Relation count is always defined (an empty join is count 0), so the
+                    // fractional eq/ne collapse is unconditional here. Falls through to the
+                    // size(filter(...)) unknown-element guard below so an erroring lambda body
+                    // still denies the row.
+                    base = fractionalCollapse ? cb.conjunction() : cb.disjunction();
+                } else {
+                    boolean nonEmpty = ("gt".equals(cmpOp) && numValue == 0L)
+                            || ("ge".equals(cmpOp) && numValue == 1L);
+                    boolean empty = ("eq".equals(cmpOp) && numValue == 0L)
+                            || ("le".equals(cmpOp) && numValue == 0L)
+                            || ("lt".equals(cmpOp) && numValue == 1L);
+                    if (nonEmpty) {
+                        base = existsSubquery(scope, ref, bodyBuilder);
+                    } else if (empty) {
+                        base = tri.not(existsSubquery(scope, ref, bodyBuilder));
+                    } else {
+                        // Arbitrary N → correlated (SELECT COUNT(...)) <op> N, same shape as
+                        // exists_one. For a multi-hop chain the COUNT joins through every hop, so it
+                        // counts the FLATTENED tail elements — the same element set the EXISTS
+                        // shortcuts range over.
+                        ChainSubquery<Long> cs = countSubquery(scope, ref);
+                        if (fBody != null) {
+                            cs.sub().where(bodyBuilder.build(cs.sub(), cs.tailJoin(), cs.rebasedOuter()));
+                        }
+                        base = compareCount(cs.sub(), cmpOp, numValue);
+                    }
+                }
+                if (fBody == null) {
+                    // size(collection) counts rows without evaluating a lambda — no element can be
+                    // UNKNOWN, so the plain comparison is already exact.
+                    return base;
+                }
+                // size(coll.filter(x, pred)): CEL filter has NO error absorption — any element whose
+                // predicate errors (NULL-derived UNKNOWN body) errors the whole expression (deny),
+                // even when the count comparison would otherwise hold. Same strict table as
+                // exists_one: TriPredicate.baseUnlessUnknown.
+                return tri.baseUnlessUnknown(base,
+                        () -> unknownElementExists(scope, ref, bodyBuilder));
+            }
+
+            /** Compare a numeric size expression (COUNT subquery or LENGTH) against a constant. */
+            private <N extends Number & Comparable<N>> Predicate compareCount(
+                    jakarta.persistence.criteria.Expression<N> count, String op, N n) {
+                return switch (op) {
+                    case "eq" -> cb.equal(count, n);
+                    case "ne" -> cb.notEqual(count, n);
+                    case "lt" -> cb.lessThan(count, n);
+                    case "gt" -> cb.greaterThan(count, n);
+                    case "le" -> cb.lessThanOrEqualTo(count, n);
+                    case "ge" -> cb.greaterThanOrEqualTo(count, n);
+                    default -> throw new IllegalArgumentException(
+                            "Unsupported size comparison operator: " + op);
+                };
+            }
         }
+        // -- end ComparisonTranslator --
 
         // -- isSet --
 
@@ -1222,30 +1487,16 @@ public final class SpringDataQueryPlanAdapter {
                 throw new IllegalArgumentException(
                         "map can only be applied to a collection mapped as Relation: " + collectionVar);
             }
-            return mapIntersectionWithNullGuard(
+            // CEL map() has no error absorption: a NULL projected column is a missing element
+            // attribute, so the whole hasIntersection(map(...), values) is an evaluation error
+            // (deny) even when another element would intersect — the strict
+            // TriPredicate.baseUnlessUnknown table, with the null-witness EXISTS as the unknown
+            // detector (IS NULL itself is two-valued, so both EXISTS legs are safe to compose).
+            return tri.baseUnlessUnknown(
                     existsSubquery(scope, ref, (sub, tailJoin, rebased) ->
                             Scope.memberPath(tailJoin, ref.tail(), memberField).in(values)),
                     () -> existsSubquery(scope, ref, (sub, tailJoin, rebased) ->
                             cb.isNull(Scope.memberPath(tailJoin, ref.tail(), memberField))));
-        }
-
-        /**
-         * CEL {@code map()} has no error absorption: a NULL projected column is a missing element
-         * attribute, so the whole {@code hasIntersection(map(...), values)} is an evaluation
-         * error (deny) even when another element would intersect. Truth table:
-         * <ul>
-         *   <li>no NULL projection → {@code (in AND TRUE) OR (FALSE AND UNKNOWN)} = in-EXISTS</li>
-         *   <li>≥1 NULL projection → {@code (in AND FALSE) OR (TRUE AND UNKNOWN)} = UNKNOWN (deny)</li>
-         * </ul>
-         * The null-witness EXISTS is supplied as a factory and built fresh per occurrence
-         * (Hibernate 6 negation is stateful — see {@link #negate}); {@code IS NULL} itself is
-         * two-valued, so both EXISTS legs are safe to compose.
-         */
-        private Predicate mapIntersectionWithNullGuard(Predicate inExists,
-                                                       Supplier<Predicate> nullProjectionExists) {
-            return cb.or(
-                    cb.and(inExists, negate(nullProjectionExists.get())),
-                    cb.and(nullProjectionExists.get(), unknownPredicate()));
         }
 
         private Predicate collectionContainsAny(Scope scope, Scope.ResolvedRelation ref, List<?> values) {
@@ -1261,178 +1512,6 @@ public final class SpringDataQueryPlanAdapter {
                 }
                 return field.in(values);
             });
-        }
-
-        // -- size(collection) <op> N --
-
-        /** Operands must already be normalized field-first (see {@link NormalizedBinary}). */
-        private Predicate trySizeComparison(String op, List<Operand> operands, Scope scope) {
-            // Detect the size() operand first: every ordinary leaf comparison probes through
-            // here, and converting the VALUE operand up front would materialize lists/structs
-            // only to discard them when no size() expression is present.
-            PlanResourcesFilter.Expression sizeExpr = null;
-            for (Operand o : operands) {
-                if (o.getNodeCase() == Operand.NodeCase.EXPRESSION
-                        && "size".equals(o.getExpression().getOperator())) {
-                    sizeExpr = o.getExpression();
-                }
-            }
-            if (sizeExpr == null) {
-                return null;
-            }
-            Double numRaw = null;
-            for (Operand o : operands) {
-                if (o.getNodeCase() == Operand.NodeCase.VALUE
-                        && o.getValue().getKindCase() == Value.KindCase.NUMBER_VALUE) {
-                    numRaw = o.getValue().getNumberValue();
-                }
-            }
-            if (numRaw == null) {
-                return null;
-            }
-
-            // Fractional thresholds: COUNT/LENGTH are integral, so a fractional constant f can
-            // never be hit exactly. Truncating (`>= 1.5` becoming `>= 1`) over-included rows
-            // the PDP denies. Correct integer-count semantics:
-            //   eq f      → always-false
-            //   ne f      → always-true (Field-mapping NULL caveat handled below: a NULL
-            //               string column is a missing attribute → CEL error → deny)
-            //   ge f/gt f → ge ceil(f)   (the count being integral makes gt and ge coincide)
-            //   le f/lt f → le floor(f)
-            // Integral thresholds keep the operator untouched. The always-true/false collapses
-            // flow through the same constant predicates the other static folds use
-            // (cb.conjunction()/cb.disjunction()), so the size(filter(...)) unknown-element
-            // machinery below still wraps them.
-            String cmpOp = op;
-            long numValue;
-            Boolean fractionalCollapse = null; // TRUE → always-true, FALSE → always-false
-            if (numRaw != Math.rint(numRaw)) {
-                switch (op) {
-                    case "eq" -> fractionalCollapse = Boolean.FALSE;
-                    case "ne" -> fractionalCollapse = Boolean.TRUE;
-                    case "gt", "ge" -> cmpOp = "ge";
-                    case "lt", "le" -> cmpOp = "le";
-                    default -> throw new IllegalArgumentException(
-                            "Unsupported size comparison operator: " + op);
-                }
-                numValue = "ge".equals(cmpOp)
-                        ? (long) Math.ceil(numRaw)
-                        : (long) Math.floor(numRaw);
-            } else {
-                numValue = numRaw.longValue();
-            }
-            List<Operand> sizeOps = sizeExpr.getOperandsList();
-            if (sizeOps.size() != 1) {
-                throw new IllegalArgumentException("Unsupported size() expression");
-            }
-            Operand sizeArg = sizeOps.get(0);
-            String var;
-            Operand lambdaBody = null;
-            String lambdaVarName = null;
-            if (sizeArg.getNodeCase() == Operand.NodeCase.VARIABLE) {
-                var = sizeArg.getVariable();
-            } else if (sizeArg.getNodeCase() == Operand.NodeCase.EXPRESSION
-                    && "filter".equals(sizeArg.getExpression().getOperator())) {
-                // size(coll.filter(x, pred)) — count only the elements matching the lambda.
-                List<Operand> filterOps = sizeArg.getExpression().getOperandsList();
-                if (filterOps.size() != 2
-                        || filterOps.get(0).getNodeCase() != Operand.NodeCase.VARIABLE) {
-                    throw new IllegalArgumentException("Unsupported size(filter(...)) expression");
-                }
-                var = filterOps.get(0).getVariable();
-                ParsedLambda lambda = parseLambda(filterOps.get(1),
-                        "Unsupported size(filter(...)) expression",
-                        "lambda requires exactly 2 operands",
-                        "lambda requires exactly 2 operands");
-                lambdaBody = lambda.body();
-                lambdaVarName = lambda.varName();
-            } else {
-                throw new IllegalArgumentException("Unsupported size() expression");
-            }
-            Scope.ResolvedRelation ref = scope.resolveRelation(var);
-            if (ref == null) {
-                AttributeMapping mapping = scope.resolveMapping(var);
-                if (!(mapping instanceof AttributeMapping.Field)) {
-                    throw new IllegalArgumentException(
-                            "size() requires a collection (Relation) mapping for " + var);
-                }
-                // size(string) — CEL string length → LENGTH(column) <op> N.
-                if (lambdaBody != null) {
-                    throw new IllegalArgumentException(
-                            "size(filter(...)) requires a collection (Relation) mapping for " + var);
-                }
-                Path<?> path = scope.resolvePath(var);
-                if (fractionalCollapse != null) {
-                    // ne f is vacuously true only for a PRESENT string: a NULL column is a
-                    // missing attribute → CEL error → deny, so it must stay excluded —
-                    // IS NOT NULL, never an unconditional 1=1. eq f excludes everything.
-                    return fractionalCollapse ? cb.isNotNull(path) : cb.disjunction();
-                }
-                return compareCount(cb.length(path.as(String.class)), cmpOp, (int) numValue);
-            }
-            final Operand fBody = lambdaBody;
-            final String fVar = lambdaVarName;
-            SubqueryBodyBuilder bodyBuilder = (sub, tailJoin, rebased) ->
-                    fBody == null ? cb.conjunction()
-                            : traverse(fBody, Scope.lambda(tailJoin, sub, ref.tail(), fVar, rebased));
-
-            Predicate base;
-            if (fractionalCollapse != null) {
-                // A Relation count is always defined (an empty join is count 0), so the
-                // fractional eq/ne collapse is unconditional here. Falls through to the
-                // size(filter(...)) unknown-element guard below so an erroring lambda body
-                // still denies the row.
-                base = fractionalCollapse ? cb.conjunction() : cb.disjunction();
-            } else {
-                boolean nonEmpty = ("gt".equals(cmpOp) && numValue == 0L)
-                        || ("ge".equals(cmpOp) && numValue == 1L);
-                boolean empty = ("eq".equals(cmpOp) && numValue == 0L)
-                        || ("le".equals(cmpOp) && numValue == 0L)
-                        || ("lt".equals(cmpOp) && numValue == 1L);
-                if (nonEmpty) {
-                    base = existsSubquery(scope, ref, bodyBuilder);
-                } else if (empty) {
-                    base = negate(existsSubquery(scope, ref, bodyBuilder));
-                } else {
-                    // Arbitrary N → correlated (SELECT COUNT(...)) <op> N, same shape as
-                    // exists_one. For a multi-hop chain the COUNT joins through every hop, so it
-                    // counts the FLATTENED tail elements — the same element set the EXISTS
-                    // shortcuts range over.
-                    ChainSubquery<Long> cs = countSubquery(scope, ref);
-                    if (fBody != null) {
-                        cs.sub().where(bodyBuilder.build(cs.sub(), cs.tailJoin(), cs.rebasedOuter()));
-                    }
-                    base = compareCount(cs.sub(), cmpOp, numValue);
-                }
-            }
-            if (fBody == null) {
-                // size(collection) counts rows without evaluating a lambda — no element can be
-                // UNKNOWN, so the plain comparison is already exact.
-                return base;
-            }
-            // size(coll.filter(x, pred)): CEL filter has NO error absorption — any element whose
-            // predicate errors (NULL-derived UNKNOWN body) errors the whole expression (deny),
-            // even when the count comparison would otherwise hold. Same combinator as exists_one:
-            //   ≥1 UNKNOWN element → (base AND FALSE) OR (TRUE AND UNKNOWN) = UNKNOWN (deny)
-            //   no UNKNOWN element → (base AND TRUE) OR (FALSE AND …)       = base
-            return cb.or(
-                    cb.and(base, negate(unknownElementExists(scope, ref, bodyBuilder))),
-                    cb.and(unknownElementExists(scope, ref, bodyBuilder), unknownPredicate()));
-        }
-
-        /** Compare a numeric size expression (COUNT subquery or LENGTH) against a constant. */
-        private <N extends Number & Comparable<N>> Predicate compareCount(
-                jakarta.persistence.criteria.Expression<N> count, String op, N n) {
-            return switch (op) {
-                case "eq" -> cb.equal(count, n);
-                case "ne" -> cb.notEqual(count, n);
-                case "lt" -> cb.lessThan(count, n);
-                case "gt" -> cb.greaterThan(count, n);
-                case "le" -> cb.lessThanOrEqualTo(count, n);
-                case "ge" -> cb.greaterThanOrEqualTo(count, n);
-                default -> throw new IllegalArgumentException(
-                        "Unsupported size comparison operator: " + op);
-            };
         }
 
         // -- exists / exists_one / all / except / filter --
@@ -1454,8 +1533,8 @@ public final class SpringDataQueryPlanAdapter {
          * is UNKNOWN silently fails to match, collapsing the error case to FALSE — which
          * {@code not(...)} flips to TRUE, an authorization leak. Building blocks:
          * {@code EXISTS(elem WHERE body)} (true witness), {@code EXISTS(elem WHERE NOT body)}
-         * (false witness), {@link #unknownElementExists} (any UNKNOWN-body element) and
-         * {@link #unknownPredicate} (a constant SQL UNKNOWN to compose with).
+         * (false witness) and {@link #unknownElementExists} (any UNKNOWN-body element); the
+         * truth tables composing them live in {@link TriPredicate}.
          *
          * <p>{@code filter}/{@code except} in boolean position are kept consistent with the
          * {@code exists} family. Cost note: the unknown machinery is always emitted — each
@@ -1498,42 +1577,34 @@ public final class SpringDataQueryPlanAdapter {
             String lambdaVarName = lambda.varName();
 
             // Every invocation re-traverses the body, so each occurrence gets a fresh Predicate
-            // tree (Hibernate 6 negation is stateful — see negate()).
+            // tree (Hibernate 6 negation is stateful — see TriPredicate.not()).
             SubqueryBodyBuilder bodyBuilder = (sub, tailJoin, rebased) -> traverse(body,
                     Scope.lambda(tailJoin, sub, ref.tail(), lambdaVarName, rebased));
             SubqueryBodyBuilder negatedBodyBuilder = (sub, tailJoin, rebased) ->
-                    negate(bodyBuilder.build(sub, tailJoin, rebased));
+                    tri.not(bodyBuilder.build(sub, tailJoin, rebased));
 
             return switch (op) {
-                // exists (and filter): true-witness OR (unknown-element AND UNKNOWN).
-                //   any TRUE element            → TRUE OR …                    = TRUE (absorbed)
-                //   no TRUE, ≥1 UNKNOWN element → FALSE OR (TRUE AND UNKNOWN)  = UNKNOWN (deny)
-                //   no TRUE, no UNKNOWN         → FALSE OR (FALSE AND UNKNOWN) = FALSE
-                case "exists", "filter" -> cb.or(
+                // exists (and filter): OR with error absorption — TriPredicate.anyTrueOrUnknown.
+                case "exists", "filter" -> tri.anyTrueOrUnknown(
                         existsSubquery(scope, ref, bodyBuilder),
-                        cb.and(unknownElementExists(scope, ref, bodyBuilder), unknownPredicate()));
+                        unknownElementExists(scope, ref, bodyBuilder));
                 // except is "some element fails the body" — the exists table with the false
                 // witness in the true-witness seat; an UNKNOWN body is UNKNOWN under NOT too.
-                case "except" -> cb.or(
+                case "except" -> tri.anyTrueOrUnknown(
                         existsSubquery(scope, ref, negatedBodyBuilder),
-                        cb.and(unknownElementExists(scope, ref, bodyBuilder), unknownPredicate()));
-                // all: NOT false-witness AND (NOT unknown-element OR UNKNOWN).
-                //   any FALSE element            → FALSE AND …                   = FALSE (absorbed)
-                //   no FALSE, ≥1 UNKNOWN element → TRUE AND (FALSE OR UNKNOWN)   = UNKNOWN (deny)
-                //   no FALSE, no UNKNOWN         → TRUE AND (TRUE OR UNKNOWN)    = TRUE
-                case "all" -> cb.and(
-                        negate(existsSubquery(scope, ref, negatedBodyBuilder)),
-                        cb.or(negate(unknownElementExists(scope, ref, bodyBuilder)), unknownPredicate()));
-                // exists_one: (COUNT(body) = 1 AND NOT unknown-element) OR (unknown-element AND UNKNOWN).
-                //   ≥1 UNKNOWN element → (… AND FALSE) OR (TRUE AND UNKNOWN) = UNKNOWN (deny)
-                //   no UNKNOWN element → (COUNT=1 AND TRUE) OR (FALSE AND …) = COUNT=1
+                        unknownElementExists(scope, ref, bodyBuilder));
+                // all: AND with error absorption — TriPredicate.allTrueOrUnknown, with the
+                // false witness EXISTS(elem WHERE NOT body).
+                case "all" -> tri.allTrueOrUnknown(
+                        existsSubquery(scope, ref, negatedBodyBuilder),
+                        unknownElementExists(scope, ref, bodyBuilder));
+                // exists_one: strict — any UNKNOWN element denies, else COUNT(body) = 1 —
+                // TriPredicate.baseUnlessUnknown.
                 case "exists_one" -> {
                     ChainSubquery<Long> cs = countSubquery(scope, ref);
                     cs.sub().where(bodyBuilder.build(cs.sub(), cs.tailJoin(), cs.rebasedOuter()));
-                    yield cb.or(
-                            cb.and(cb.equal(cs.sub(), 1L),
-                                    negate(unknownElementExists(scope, ref, bodyBuilder))),
-                            cb.and(unknownElementExists(scope, ref, bodyBuilder), unknownPredicate()));
+                    yield tri.baseUnlessUnknown(cb.equal(cs.sub(), 1L),
+                            () -> unknownElementExists(scope, ref, bodyBuilder));
                 }
                 default -> throw new IllegalArgumentException("Unsupported collection operator: " + op);
             };
@@ -1548,31 +1619,19 @@ public final class SpringDataQueryPlanAdapter {
          * {@code COUNT(elem) > COUNT(elem WHERE body OR NOT body)} holds iff at least one element
          * is UNKNOWN, including mixed collections where sibling elements are determined
          * true/false. Both COUNTs never yield NULL, so the comparison itself is two-valued and
-         * safe to {@link #negate}. The body is translated fresh per occurrence (stateful
-         * negation — see {@link #negate}).
+         * safe to negate through {@link TriPredicate#not}. The body is supplied to
+         * {@link TriPredicate#determined} as a Supplier and translated fresh per occurrence
+         * (stateful negation — see {@link TriPredicate#not}).
          */
         private Predicate unknownElementExists(Scope scope, Scope.ResolvedRelation ref,
                                                SubqueryBodyBuilder bodyBuilder) {
             ChainSubquery<Long> total = countSubquery(scope, ref);
 
             ChainSubquery<Long> determined = countSubquery(scope, ref);
-            determined.sub().where(cb.or(
-                    bodyBuilder.build(determined.sub(), determined.tailJoin(), determined.rebasedOuter()),
-                    negate(bodyBuilder.build(determined.sub(), determined.tailJoin(), determined.rebasedOuter()))));
+            determined.sub().where(tri.determined(() -> bodyBuilder.build(
+                    determined.sub(), determined.tailJoin(), determined.rebasedOuter())));
 
             return cb.greaterThan(total.sub(), determined.sub());
-        }
-
-        /**
-         * A constant SQL UNKNOWN: {@code 1 = NULL} (validated by the unknownBooleanConstantProbe
-         * unit test against Hibernate 6). Composes by three-valued logic exactly like CEL error
-         * absorption: {@code x AND UNKNOWN} is FALSE when x is FALSE (a false witness absorbs the
-         * error) and UNKNOWN when x is TRUE; {@code x OR UNKNOWN} is TRUE when x is TRUE and
-         * UNKNOWN when x is FALSE. Its negation is UNKNOWN as well, so predicates carrying it
-         * stay excluded under both polarities.
-         */
-        private Predicate unknownPredicate() {
-            return cb.equal(cb.literal(1), cb.nullLiteral(Integer.class));
         }
 
         @FunctionalInterface

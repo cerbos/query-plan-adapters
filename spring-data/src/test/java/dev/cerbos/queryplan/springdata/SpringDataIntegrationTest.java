@@ -930,8 +930,8 @@ class SpringDataIntegrationTest {
     }
 
     // -- DeMorgan / negated operator wrappers (PR #222) --
-    // The adapter handles `not` by wrapping `cb.not(...)` around the inner predicate;
-    // every supported inner operator composes without source changes.
+    // The adapter handles `not` through TriPredicate.not() (junction-barriered negation)
+    // around the inner predicate; every supported inner operator composes without source changes.
 
     @Nested
     class DeMorganNegation {

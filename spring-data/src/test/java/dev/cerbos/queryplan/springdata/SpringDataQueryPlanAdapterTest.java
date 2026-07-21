@@ -1072,9 +1072,11 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * Probe for the UNKNOWN boolean constant the macro translations compose with:
-         * {@code 1 = NULL} must render as a genuinely UNKNOWN predicate in Hibernate 6 —
-         * matching no rows under EITHER polarity (NOT(UNKNOWN) = UNKNOWN).
+         * Probe for the UNKNOWN boolean constant the macro translations compose with: the
+         * predicate {@link TriPredicate#unknown()} produces must render as a genuinely UNKNOWN
+         * predicate in Hibernate 6 — matching no rows under EITHER polarity
+         * (NOT(UNKNOWN) = UNKNOWN). Asserted directly against the module seam the adapter
+         * composes through; the full algebra truth tables live in {@link TriPredicateTest}.
          */
         @Test
         void unknownBooleanConstantProbe() {
@@ -1082,16 +1084,16 @@ class SpringDataQueryPlanAdapterTest {
                 EntityManager em = emf.createEntityManager();
                 try {
                     CriteriaBuilder cb = em.getCriteriaBuilder();
+                    TriPredicate tri = new TriPredicate(cb);
                     CriteriaQuery<Long> positive = cb.createQuery(Long.class);
                     positive.select(cb.count(positive.from(ResourceEntity.class)));
-                    positive.where(cb.equal(cb.literal(1), cb.nullLiteral(Integer.class)));
+                    positive.where(tri.unknown());
                     assertEquals(0, em.createQuery(positive).getSingleResult().intValue());
 
-                    // Junction-barriered negation, mirroring the adapter's negate() helper.
+                    // Junction-barriered negation — the module's own not().
                     CriteriaQuery<Long> negated = cb.createQuery(Long.class);
                     negated.select(cb.count(negated.from(ResourceEntity.class)));
-                    negated.where(cb.not(cb.and(
-                            cb.equal(cb.literal(1), cb.nullLiteral(Integer.class)))));
+                    negated.where(tri.not(tri.unknown()));
                     assertEquals(0, em.createQuery(negated).getSingleResult().intValue());
                 } finally {
                     em.close();
