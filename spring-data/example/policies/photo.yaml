@@ -8,7 +8,15 @@
 #   edit    : ownerId == self
 #   delete  : ownerId == self
 #   comment : public + not archived, OR "friends" tag set, OR ownerId == self
-#   admin   : unconditional ALLOW on all actions
+#   discover         : numeric comparison on a scalar and an embedded field
+#   located          : nullable-field isSet/null semantics
+#   similar          : intersection with a principal list attribute
+#   needs-moderation : exists() over structured label entities
+#   fully-reviewed   : all() over labels, including the empty-set case
+#   unlabelled       : size() over a relation
+#   exactly-one-reviewed: exists_one() over a relation
+#   percent/underscore-title: literal SQL LIKE metacharacter escaping
+#   admin            : unconditional ALLOW on all actions
 apiVersion: api.cerbos.dev/v1
 resourcePolicy:
   resource: photo
@@ -48,6 +56,140 @@ resourcePolicy:
               - expr: '"friends" in request.resource.attr.tags'
               - expr: request.resource.attr.ownerId == request.principal.id
 
-    - actions: ["view", "edit", "delete", "comment"]
+    - actions: ["discover"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.resource.attr.rating >= 4
+              - expr: request.resource.attr.metadata.width >= 3000
+
+    - actions: ["located"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          expr: request.resource.attr.location != null
+
+    - actions: ["similar"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          expr: hasIntersection(request.resource.attr.tags, request.principal.attr.interests)
+
+    - actions: ["needs-moderation"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          expr: >
+            request.resource.attr.labels.exists(label,
+              label.name == "safety" && label.confidence >= 0.8)
+
+    - actions: ["fully-reviewed"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          expr: request.resource.attr.labels.all(label, label.reviewed == true)
+
+    - actions: ["unlabelled"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          expr: size(request.resource.attr.labels) == 0
+
+    - actions: ["exactly-one-reviewed"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          expr: request.resource.attr.labels.exists_one(label, label.reviewed == true)
+
+    - actions: ["percent-title"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          expr: 'request.resource.attr.title.contains("%")'
+
+    - actions: ["underscore-title"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          expr: 'request.resource.attr.title.contains("_")'
+
+    # Enterprise delegated access: the local JPA tenant Specification is the mandatory outer
+    # boundary; these policy checks add defense in depth and validate each grant against its
+    # owning photo so a malformed cross-tenant grant cannot authorize.
+    - actions: ["delegated-view"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          expr: >
+            request.resource.attr.tenantId == request.principal.attr.tenantId &&
+            request.resource.attr.grants.exists(grant,
+              grant.tenantId == request.resource.attr.tenantId &&
+              grant.permission == "view" &&
+              (grant.userId == request.principal.id ||
+               grant.groupId in request.principal.attr.groups))
+
+    # These three actions deliberately distinguish CEL UNKNOWN from false for nullable child
+    # fields. A null-only grant is excluded under both the positive and unguarded negated forms.
+    - actions: ["group-grant"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          expr: >
+            request.resource.attr.tenantId == request.principal.attr.tenantId &&
+            request.resource.attr.grants.exists(grant,
+              grant.groupId in request.principal.attr.groups)
+
+    - actions: ["no-group-grant"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          expr: >
+            request.resource.attr.tenantId == request.principal.attr.tenantId &&
+            !request.resource.attr.grants.exists(grant,
+              grant.groupId in request.principal.attr.groups)
+
+    - actions: ["no-group-grant-safe"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          expr: >
+            request.resource.attr.tenantId == request.principal.attr.tenantId &&
+            !request.resource.attr.grants.exists(grant,
+              grant.groupId != null &&
+              grant.groupId in request.principal.attr.groups)
+
+    - actions:
+        - "view"
+        - "edit"
+        - "delete"
+        - "comment"
+        - "discover"
+        - "located"
+        - "similar"
+        - "needs-moderation"
+        - "fully-reviewed"
+        - "unlabelled"
+        - "exactly-one-reviewed"
+        - "percent-title"
+        - "underscore-title"
+        - "delegated-view"
+        - "group-grant"
+        - "no-group-grant"
+        - "no-group-grant-safe"
       effect: EFFECT_ALLOW
       roles: ["admin"]
