@@ -1,0 +1,33 @@
+# yaml-language-server: $schema=https://api.cerbos.dev/latest/cerbos/policy/v1/Policy.schema.json
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  resource: workspace
+  version: default
+  rules:
+    - actions: ["access"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.resource.attr.tenantId == request.principal.attr.tenantId
+              - expr: request.resource.attr.active == true
+              - any:
+                  of:
+                    - expr: request.resource.attr.ownerId == request.principal.id
+                    - expr: request.principal.id in request.resource.attr.members
+
+    - actions: ["administer"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.resource.attr.tenantId == request.principal.attr.tenantId
+              - expr: request.resource.attr.ownerId == request.principal.id
+
+    - actions: ["access", "administer"]
+      effect: EFFECT_ALLOW
+      roles: ["admin"]
