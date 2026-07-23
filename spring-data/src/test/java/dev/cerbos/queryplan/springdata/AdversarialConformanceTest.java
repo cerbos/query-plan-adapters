@@ -1,6 +1,7 @@
 package dev.cerbos.queryplan.springdata;
 
 import dev.cerbos.queryplan.springdata.testmodel.CategoryEntity;
+import dev.cerbos.queryplan.springdata.testmodel.LabelEntity;
 import dev.cerbos.queryplan.springdata.testmodel.ResourceEntity;
 import dev.cerbos.queryplan.springdata.testmodel.SubCategoryEntity;
 import dev.cerbos.sdk.CerbosBlockingClient;
@@ -92,7 +93,11 @@ class AdversarialConformanceTest {
             Map.entry("request.resource.attr.categories", AttributeMapping.relation("categories", Map.of(
                     "name", AttributeMapping.field("name"),
                     "subCategories", AttributeMapping.relation("subCategories", Map.of(
-                            "name", AttributeMapping.field("name")
+                            "name", AttributeMapping.field("name"),
+                            // Third macro level for the macro-depth3-* actions.
+                            "labels", AttributeMapping.relation("labels", Map.of(
+                                    "name", AttributeMapping.field("name")
+                            ))
                     ))
             ))),
             // Multi-hop chain probe (W1): mainCategory is a SINGLE nested object on the check
@@ -179,6 +184,27 @@ class AdversarialConformanceTest {
             new Seed("d1", true, "[SEC]ret", 13, "[SEC]", List.of(), List.of()),
             new Seed("d2", false, "Secret", 14, "xSECy", List.of(), List.of())
     );
+
+    /**
+     * Deterministic label names per seed for the {@code macro-depth3-*} actions — the third
+     * macro level (categories → subCategories → labels). A {@code null} entry seeds a label
+     * whose {@code name} column is NULL: a missing element attribute on the check side, so the
+     * innermost lambda body touching it is a CEL evaluation error that must propagate up
+     * through BOTH enclosing macro levels (deny) — and SQL UNKNOWN through the nested scoring
+     * subqueries on the adapter side. a1 is the true witness ("gold"), a6 the error witness
+     * (no true sibling to absorb the NULL-name error), a8 the determined-false witness, and
+     * c1 the collation witness ("Gold" vs "gold"). Only consulted for seeds that hold a
+     * category/subCategory chain.
+     */
+    private static List<String> labelsFor(Seed s) {
+        return switch (s.id()) {
+            case "a1" -> java.util.Arrays.asList("gold", "silver");
+            case "a6" -> java.util.Arrays.asList(null, "silver");
+            case "a8" -> List.of("silver");
+            case "c1" -> List.of("Gold");
+            default -> List.of();
+        };
+    }
 
     /** Deterministic ISO instant per seed for the timestamp probe: split around 2025-01-01. */
     private static String isoFor(Seed s) {
@@ -390,6 +416,15 @@ class AdversarialConformanceTest {
             for (String subName : s.subCategoryNames()) {
                 catSeq++;
                 SubCategoryEntity sub = new SubCategoryEntity("adv-sub-" + catSeq, subName);
+                List<LabelEntity> labels = new ArrayList<>();
+                int labSeq = 0;
+                for (String labelName : labelsFor(s)) {
+                    labSeq++;
+                    LabelEntity label = new LabelEntity("adv-lab-" + catSeq + "-" + labSeq, labelName);
+                    em.persist(label);
+                    labels.add(label);
+                }
+                sub.setLabels(labels);
                 em.persist(sub);
                 CategoryEntity cat = new CategoryEntity("adv-cat-" + catSeq, "business");
                 cat.setSubCategories(new ArrayList<>(List.of(sub)));
@@ -429,7 +464,10 @@ class AdversarialConformanceTest {
                                 "name", AttributeValue.stringValue("business"),
                                 "subCategories", AttributeValue.listValue(
                                         AttributeValue.mapValue(Map.of(
-                                                "name", AttributeValue.stringValue(subName)))))))
+                                                "name", AttributeValue.stringValue(subName),
+                                                "labels", AttributeValue.listValue(labelsFor(s).stream()
+                                                        .map(AdversarialConformanceTest::asLabelAttribute)
+                                                        .toList())))))))
                         .toList()));
         // A DB NULL is a missing attribute on the check side — conditions touching it must
         // deny (CEL error), matching SQL three-valued logic excluding the row.
@@ -463,6 +501,15 @@ class AdversarialConformanceTest {
                             .toList()))));
         }
         return r;
+    }
+
+    /** A NULL label name in the DB is a missing element attribute on the check side. */
+    private static AttributeValue asLabelAttribute(String name) {
+        Map<String, AttributeValue> attrs = new LinkedHashMap<>();
+        if (name != null) {
+            attrs.put("name", AttributeValue.stringValue(name));
+        }
+        return AttributeValue.mapValue(attrs);
     }
 
     /** A NULL tag name in the DB is a missing element attribute on the check side. */
@@ -564,6 +611,11 @@ class AdversarialConformanceTest {
             // multi-hop relation chains via DIRECT dotted syntax (W1) and a root relation
             // subquery anchored from inside a lambda body (W2)
             "w1-exists-chain", "w1-size-chain", "w1-in-chain", "w2-outer-relation",
+            // depth-3 nested macros (categories → subCategories → labels): the single-
+            // subquery-per-polarity scoring translation must keep tri-state semantics through
+            // deep nesting — a1 true witness, a6 NULL-name label error propagating up both
+            // levels, a8 determined false, c1 case witness (labelsFor seeds)
+            "macro-depth3-exists", "macro-depth3-not-exists", "macro-depth3-all",
             // hierarchy operators: both operand orders per operator (field-first ancestorOf
             // and constant-first descendentOf route to the strict-prefix IN-list branch;
             // the mirrored orders route to the prefix-LIKE branch) plus LIKE-metacharacter
