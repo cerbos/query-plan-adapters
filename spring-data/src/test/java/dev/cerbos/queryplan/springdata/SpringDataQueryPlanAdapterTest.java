@@ -2575,6 +2575,113 @@ class SpringDataQueryPlanAdapterTest {
         }
     }
 
+    // -- Constant NaN / ±Infinity ordering --
+    // CEL/IEEE define EVERY ordering comparison involving NaN as false. The planner does
+    // NOT fold div(0,0) (verified vs live PDP: `(R.attr.aBool ? 1.0 : 0.0/0.0) > 0.5`
+    // arrives as gt(if(aBool, 1, div(0,0)), 0.5)), so resolveNumericOperand folds it to
+    // NaN in Java and constantComparison must order with primitive IEEE operators.
+    // Double.compare's total order ranks NaN above every number (and -0.0 below 0.0),
+    // which would collapse gt/ge against a NaN constant to always-true — over-inclusion.
+
+    @Nested
+    class ConstantNanInfinityOrdering {
+
+        /** {@code div(0, 0)} — folds to NaN in Java, exactly as delivered on the wire. */
+        private Operand nan() {
+            return exprOp("div", nval(0), nval(0));
+        }
+
+        private Operand posInf() {
+            return exprOp("div", nval(1), nval(0));
+        }
+
+        private Operand negInf() {
+            return exprOp("div", nval(-1), nval(0));
+        }
+
+        /** An arithmetic subtree folding to 0.5, so both sides rank as expressions. */
+        private Operand half() {
+            return exprOp("div", nval(1), nval(2));
+        }
+
+        @Test
+        void nanOnLeftExcludesForAllOrderingOperators() {
+            // Expression-vs-value keeps source order: constantComparison sees (NaN, 0.5).
+            ResourceEntity r = new ResourceEntity("nan-ord-1");
+            withResource(r, () -> {
+                for (String op : List.of("gt", "ge", "lt", "le")) {
+                    assertEquals(0, runCount(exprOp(op, nan(), nval(0.5))),
+                            op + "(NaN, 0.5) must exclude every row");
+                }
+            });
+        }
+
+        @Test
+        void nanOnRightExcludesForAllOrderingOperators() {
+            // Arithmetic on BOTH sides so normalization cannot mirror the NaN to the left:
+            // constantComparison sees (0.5, NaN).
+            ResourceEntity r = new ResourceEntity("nan-ord-2");
+            withResource(r, () -> {
+                for (String op : List.of("gt", "ge", "lt", "le")) {
+                    assertEquals(0, runCount(exprOp(op, half(), nan())),
+                            op + "(0.5, NaN) must exclude every row");
+                }
+            });
+        }
+
+        @Test
+        void infinityOrderingFollowsIeee() {
+            // ±Infinity is ORDERED normally in IEEE space — it must NOT be excluded the
+            // way NaN is.
+            ResourceEntity r = new ResourceEntity("nan-ord-3");
+            withResource(r, () -> {
+                assertEquals(1, runCount(exprOp("gt", posInf(), nval(0.5))));
+                assertEquals(1, runCount(exprOp("ge", posInf(), nval(0.5))));
+                assertEquals(0, runCount(exprOp("lt", posInf(), nval(0.5))));
+                assertEquals(0, runCount(exprOp("le", posInf(), nval(0.5))));
+                assertEquals(1, runCount(exprOp("lt", negInf(), nval(0.5))));
+                assertEquals(1, runCount(exprOp("le", negInf(), nval(0.5))));
+                assertEquals(0, runCount(exprOp("gt", negInf(), nval(0.5))));
+                assertEquals(1, runCount(exprOp("lt", negInf(), posInf())));
+            });
+        }
+
+        @Test
+        void negativeZeroOrderingFollowsIeee() {
+            // mult(-1, 0) folds to -0.0 in Java. IEEE: -0.0 == 0.0, so lt is false and
+            // ge is true — Double.compare(-0.0, 0.0) = -1 would invert both (the same
+            // total-order defect as NaN, on the same line).
+            Operand negZero = exprOp("mult", nval(-1), nval(0));
+            Operand zero = exprOp("mult", nval(1), nval(0));
+            ResourceEntity r = new ResourceEntity("nan-ord-4");
+            withResource(r, () -> {
+                assertEquals(0, runCount(exprOp("lt", negZero, zero)));
+                assertEquals(1, runCount(exprOp("le", negZero, zero)));
+                assertEquals(1, runCount(exprOp("ge", negZero, zero)));
+                assertEquals(0, runCount(exprOp("gt", negZero, zero)));
+            });
+        }
+
+        @Test
+        void ternaryNanElseArmExcludesRows() {
+            // The live-PDP reproduction: `(R.attr.aBool ? 1.0 : 0.0/0.0) > 0.5` arrives
+            // as gt(if(aBool, 1, div(0,0)), 0.5). check() denies every aBool=false
+            // resource (NaN > 0.5 is false), so the rewritten else arm must contribute
+            // exclusion — old code produced (NOT aBool AND 1=1), returning the row.
+            Operand plan = exprOp("gt",
+                    exprOp("if", var("request.resource.attr.aBool"), nval(1), nan()),
+                    nval(0.5));
+
+            ResourceEntity allowed = new ResourceEntity("nan-tern-1");
+            allowed.setaBool(true);
+            withResource(allowed, () -> assertEquals(1, runCount(plan)));
+
+            ResourceEntity denied = new ResourceEntity("nan-tern-2");
+            denied.setaBool(false);
+            withResource(denied, () -> assertEquals(0, runCount(plan)));
+        }
+    }
+
     /**
      * {@code repository.delete(Specification)} guard. Relation-mapped operators translate to
      * correlated subqueries over collection tables; Hibernate's multi-table bulk delete first

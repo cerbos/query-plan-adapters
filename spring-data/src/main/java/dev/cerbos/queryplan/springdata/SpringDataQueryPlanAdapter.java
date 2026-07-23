@@ -829,6 +829,14 @@ public final class SpringDataQueryPlanAdapter {
              * only splits Long/Double for whole-number cosmetics, not semantics. Strings compare
              * lexicographically; booleans (and mixed incomparable types) support eq/ne only —
              * eq → false, ne → true — while ordering them is a planner bug and throws.
+             *
+             * <p>Numeric ordering uses the primitive IEEE operators, NOT {@link Double#compare}:
+             * the total order ranks {@code NaN} above every number (and {@code -0.0} below
+             * {@code 0.0}), so {@code Double.compare} would collapse {@code gt}/{@code ge}
+             * against a NaN constant — reachable via an unfolded {@code div(0,0)}, e.g. the
+             * else arm of {@code (aBool ? 1.0 : 0.0/0.0) > 0.5} — to always-true, returning
+             * rows the PDP denies. CEL/IEEE define every ordering comparison involving NaN as
+             * false → {@code cb.disjunction()} (exclusion).
              */
             private Predicate constantComparison(String op, Object left, Object right) {
                 boolean result;
@@ -837,17 +845,19 @@ public final class SpringDataQueryPlanAdapter {
                             ? ln.doubleValue() == rn.doubleValue()
                             : Objects.equals(left, right);
                     result = "eq".equals(op) == equal;
-                } else {
-                    int cmp;
-                    if (left instanceof Number ln && right instanceof Number rn) {
-                        cmp = Double.compare(ln.doubleValue(), rn.doubleValue());
-                    } else if (left instanceof String ls && right instanceof String rs) {
-                        cmp = ls.compareTo(rs);
-                    } else {
-                        throw new IllegalArgumentException(
-                                "Cannot order constant operands of " + op + ": "
-                                        + typeName(left) + " vs " + typeName(right));
-                    }
+                } else if (left instanceof Number ln && right instanceof Number rn) {
+                    double l = ln.doubleValue();
+                    double r = rn.doubleValue();
+                    result = switch (op) {
+                        case "lt" -> l < r;
+                        case "gt" -> l > r;
+                        case "le" -> l <= r;
+                        case "ge" -> l >= r;
+                        default -> throw new IllegalArgumentException(
+                                "Unsupported constant comparison operator: " + op);
+                    };
+                } else if (left instanceof String ls && right instanceof String rs) {
+                    int cmp = ls.compareTo(rs);
                     result = switch (op) {
                         case "lt" -> cmp < 0;
                         case "gt" -> cmp > 0;
@@ -856,6 +866,10 @@ public final class SpringDataQueryPlanAdapter {
                         default -> throw new IllegalArgumentException(
                                 "Unsupported constant comparison operator: " + op);
                     };
+                } else {
+                    throw new IllegalArgumentException(
+                            "Cannot order constant operands of " + op + ": "
+                                    + typeName(left) + " vs " + typeName(right));
                 }
                 return result ? cb.conjunction() : cb.disjunction();
             }

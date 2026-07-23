@@ -464,6 +464,9 @@ class AdversarialConformanceTest {
             // arithmetic + size edges: zero column divisor (NaN → deny), fractional count
             // threshold (only ordering ops compile in CEL — int vs double eq/ne does not)
             "cr-div-zero", "cr-size-frac-ge",
+            // constant NaN / ±Infinity ordering: unfolded div(0,0) → NaN; every NaN
+            // ordering is false in CEL/IEEE, while ±Infinity orders normally
+            "nan-ord-ternary", "nan-ord-ternary-vf", "nan-ord-le", "nan-ord-inf",
             // multi-hop relation chains via DIRECT dotted syntax (W1) and a root relation
             // subquery anchored from inside a lambda body (W2)
             "w1-exists-chain", "w1-size-chain", "w1-in-chain", "w2-outer-relation",
