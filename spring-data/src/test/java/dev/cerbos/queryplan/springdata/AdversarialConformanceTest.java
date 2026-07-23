@@ -774,8 +774,8 @@ class AdversarialConformanceTest {
      * PLANNER, so every query-plan adapter is affected equally; this adapter translates the
      * always-allowed plan faithfully. That is why {@code p-has} is excluded from the
      * {@code adapterMatchesCheckOracle} {@code @ValueSource}: the differential comparison
-     * cannot pass while the planner itself over-grants. (No public cerbos/cerbos issue tracks
-     * the fold at the time of writing — searched 2026-07.)
+     * cannot pass while the planner itself over-grants. (Tracked in the Cerbos team's
+     * internal issue tracker as of 2026-07; no public cerbos/cerbos issue exists.)
      *
      * <p>This test asserts BOTH halves of the divergence — the plan kind AND the check()
      * denials — so that the moment an upstream image stops folding, the test fails with

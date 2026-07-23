@@ -378,8 +378,8 @@ three-valued logic, including the places where naive translations leak under `NO
 ### `has(...)` over-grants at the planner level — write `!= null` instead
 
 This one is an **upstream Cerbos planner issue, not an adapter bug, and it affects every
-query-plan adapter equally** (no public cerbos/cerbos issue tracks it at the time of
-writing). The planner constant-folds an attribute-presence check like
+query-plan adapter equally** (tracked in the Cerbos team's internal issue tracker). The
+planner constant-folds an attribute-presence check like
 
 ```
 has(R.attr.aOptionalString)
