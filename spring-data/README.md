@@ -190,7 +190,7 @@ Map each `request.resource.attr.<name>` to a JPA path or a relation:
 | `size(coll) > 0` / `>= 1`        | Correlated `EXISTS`                                                 |
 | `size(coll) == 0` / `<= 0` / `< 1`| `NOT EXISTS`                                                       |
 | `size(coll) <op> N`              | Correlated `(SELECT COUNT...) <op> N`                               |
-| `size(coll.filter(x, pred)) <op> N` | Correlated `(SELECT COUNT... WHERE pred) <op> N`                 |
+| `size(coll.filter(x, pred)) <op> N` | Correlated strict-count subquery: counts elements matching `pred`, NULL-poisoned (→ UNKNOWN → excluded) when any element body is undetermined |
 | `size(string)`                   | `cb.length(column)` (see Gotchas for astral-character caveat)       |
 | Field-to-field (`R.attr.a == R.attr.b`) | `cb.equal(pathA, pathB)` and friends for `eq`/`ne`/`lt`/`gt`/`le`/`ge`, incl. inside lambdas |
 | Ternary (`cond ? a : b`)         | Predicate rewrite: `(cond AND cmp(a, v)) OR (NOT cond AND cmp(b, v))` — nested, boolean-position, and value-first forms compose; constant residues fold (see Gotchas for `NULL` semantics) |
@@ -198,10 +198,10 @@ Map each `request.resource.attr.<name>` to a JPA path or a relation:
 | Timestamp comparisons (`timestamp(R.attr.createdAt) < now() - duration("24h")`) | Temporal column comparison for all of `eq`/`ne`/`lt`/`gt`/`le`/`ge`, both operand orders (value-first forms mirror). The planner folds `now()`/`now() - duration(...)` to a constant RFC-3339 instant at **plan time**, so the window is fixed per query — re-plan to refresh it. The mapped column must be `java.time.Instant` or `java.time.OffsetDateTime` (both denote an absolute instant; Hibernate 6 stores them UTC-normalized). `LocalDateTime`, `java.util.Date`, and `String` columns throw a named error — they are ambiguous about the absolute instant they store (see Gotchas). A `NULL` column value is excluded, matching `check()` denying on the missing attribute. |
 | Field-to-field `contains`/`startsWith`/`endsWith` | `cb.like` over a `REPLACE`-escaped column-derived pattern (`\`, `%`, `_`, `[`), with an `IS NOT NULL` needle guard |
 | Multi-hop relation chains (`R.attr.categories.subCategories`) | Correlated subquery joining through every hop; `exists`/`in`/`hasIntersection`/`size` all treat the chain as the flattened union of tail elements |
-| `exists(coll, lambda)`           | Correlated `EXISTS` with lambda body                                |
-| `exists_one(coll, lambda)`       | Correlated `(SELECT COUNT...) = 1`                                  |
-| `all(coll, lambda)`              | `NOT EXISTS (... AND NOT(body))`                                    |
-| `except(coll, lambda)`           | Correlated `EXISTS (... AND NOT(body))`                             |
+| `exists(coll, lambda)`           | One correlated aggregate scoring subquery (`MAX(CASE WHEN body … WHEN NOT body … ELSE …)`) whose comparison is TRUE/FALSE/UNKNOWN per the CEL truth table — see the nested-macros gotcha |
+| `exists_one(coll, lambda)`       | One correlated strict-count subquery `= 1` (NULL-poisoned when any element body is undetermined) |
+| `all(coll, lambda)`              | Same scoring subquery as `exists`, compared for "no false and no undetermined element" |
+| `except(coll, lambda)`           | Same scoring subquery as `all`, compared for "some element fails the body" |
 | `filter(coll, lambda)`           | Same as `exists` (filter returns a list — treated as "exists matching") |
 | Bare boolean variable            | `cb.equal(path, true)`                                              |
 | `eq(field, add(const1, const2))` | Constant fold then compare: `cb.equal(field, const1 ⊕ const2)`     |
@@ -368,7 +368,8 @@ three-valued logic, including the places where naive translations leak under `NO
   `qty` is NULL yields UNKNOWN (row excluded under both `all(...)` and `!all(...)`),
   matching CEL's error-absorption rules — `exists` is still true if *any* element
   matches, `all` is still false if *any* element fails, `exists_one` errors on any
-  unknown element. This costs two extra correlated `COUNT` subqueries per macro.
+  unknown element. The tri-state machinery is folded into each macro's single scoring
+  subquery (see the nested-macros gotcha below for the cost model).
 - Ternaries carry a third arm that is UNKNOWN exactly when the condition column is NULL,
   so `!(ternary...)` cannot flip a null-condition row to included.
 - `ne` against an unsolvable string concatenation reduces to `IS NOT NULL`, not `TRUE`.
@@ -406,6 +407,36 @@ safe drop-in edit. The only semantic difference from true `has()` is the
 explicitly-`null` attribute value, which `has()` treats as *present* — for column-backed
 attributes that distinction doesn't exist, because SQL `NULL` is the only representation
 of "not set".
+
+### Nested collection macros multiply correlated subqueries — depth is bounded
+
+Every collection macro (`exists`/`exists_one`/`all`/`filter`/`except`/
+`size(filter(...))`) translates to a single correlated aggregate subquery, but the
+lambda body inside it is translated once per polarity — positive and negated — because
+Hibernate 6's criteria negation is stateful and a `Predicate` tree cannot be shared
+between polarities. Nesting therefore multiplies: a depth-`d` `exists` chain emits
+`2^d − 1` correlated subqueries (`exists_one` and `size(filter(...))` add a third body
+translation for their match counter, so a chain of those grows at `3^d`). Measured on
+the benchmark suite (`MacroNestingBenchmarkTest`, H2, ~3 000 rows across the chain):
+
+| depth | correlated subqueries | translate | execute |
+|-------|-----------------------|-----------|---------|
+| 1     | 1                     | ~0.2 ms   | ~1.7 ms |
+| 2     | 3                     | ~0.3 ms   | ~2.2 ms |
+| 3     | 7                     | ~0.6 ms   | ~2.8 ms |
+| 4     | 15                    | ~1.3 ms   | ~5.9 ms |
+
+To keep a legal-but-degenerate deeply nested policy from silently timing out on
+production-sized tables, the translator bounds macro nesting depth at **5** by default
+and throws `IllegalArgumentException` beyond it (fail closed, at translation time). If
+your policies intentionally nest deeper, raise the limit via a system property:
+
+```
+-Ddev.cerbos.queryplan.springdata.maxMacroDepth=8
+```
+
+The property is read per translation, must be a positive integer, and applies to
+`exists`/`exists_one`/`all`/`filter`/`except` and `size(filter(...))` nesting.
 
 ### Division by a column is guarded with `NULLIF` — zero divisors deny
 

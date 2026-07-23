@@ -185,52 +185,7 @@ class TriPredicateTest {
                 () -> unknownLeaf(cb, root), () -> knownTrue(cb, root), () -> knownTrue(cb, root))));
     }
 
-    // -- anyTrueOrUnknown(): the exists/filter/except absorption table --
-
-    @Test
-    void anyTrueOrUnknownTruthTable() {
-        // True witness absorbs an unknown sibling → TRUE.
-        assertEquals(1, count((cb, tri, root) ->
-                tri.anyTrueOrUnknown(knownTrue(cb, root), knownTrue(cb, root))));
-        assertEquals(0, countNegated((cb, tri, root) ->
-                tri.anyTrueOrUnknown(knownTrue(cb, root), knownTrue(cb, root))));
-        // No true witness, unknown witness → UNKNOWN (deny) under both polarities.
-        assertEquals(0, count((cb, tri, root) ->
-                tri.anyTrueOrUnknown(knownFalse(cb, root), knownTrue(cb, root))));
-        assertEquals(0, countNegated((cb, tri, root) ->
-                tri.anyTrueOrUnknown(knownFalse(cb, root), knownTrue(cb, root))));
-        // No true witness, no unknown witness → plain FALSE (flips under NOT).
-        assertEquals(0, count((cb, tri, root) ->
-                tri.anyTrueOrUnknown(knownFalse(cb, root), knownFalse(cb, root))));
-        assertEquals(1, countNegated((cb, tri, root) ->
-                tri.anyTrueOrUnknown(knownFalse(cb, root), knownFalse(cb, root))));
-        // True witness, no unknown → plain TRUE.
-        assertEquals(1, count((cb, tri, root) ->
-                tri.anyTrueOrUnknown(knownTrue(cb, root), knownFalse(cb, root))));
-    }
-
-    // -- allTrueOrUnknown(): the all absorption table --
-
-    @Test
-    void allTrueOrUnknownTruthTable() {
-        // False witness absorbs an unknown sibling → FALSE (flips under NOT).
-        assertEquals(0, count((cb, tri, root) ->
-                tri.allTrueOrUnknown(knownTrue(cb, root), knownTrue(cb, root))));
-        assertEquals(1, countNegated((cb, tri, root) ->
-                tri.allTrueOrUnknown(knownTrue(cb, root), knownTrue(cb, root))));
-        // No false witness, unknown witness → UNKNOWN (deny) under both polarities.
-        assertEquals(0, count((cb, tri, root) ->
-                tri.allTrueOrUnknown(knownFalse(cb, root), knownTrue(cb, root))));
-        assertEquals(0, countNegated((cb, tri, root) ->
-                tri.allTrueOrUnknown(knownFalse(cb, root), knownTrue(cb, root))));
-        // No false witness, no unknown witness → TRUE.
-        assertEquals(1, count((cb, tri, root) ->
-                tri.allTrueOrUnknown(knownFalse(cb, root), knownFalse(cb, root))));
-        assertEquals(0, countNegated((cb, tri, root) ->
-                tri.allTrueOrUnknown(knownFalse(cb, root), knownFalse(cb, root))));
-    }
-
-    // -- baseUnlessUnknown(): the exists_one / size(filter) / map-intersection strict table --
+    // -- baseUnlessUnknown(): the map-intersection strict table --
 
     @Test
     void baseUnlessUnknownWithFalseBaseAndUnknownWitnessIsUnknownNotFalse() {
