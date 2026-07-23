@@ -780,6 +780,28 @@ public final class SpringDataQueryPlanAdapter {
             private Predicate leafFieldValue(String op, Resolved.Field field,
                                              Resolved.Constant constant, Scope scope) {
                 Object value = constant.value();
+
+                // A structured constant — a CEL list literal (`R.attr.tags == ["a", "b"]`
+                // arrives as eq(variable, value-list) verbatim; PDP-verified in both operand
+                // orders) or, defensively, a struct VALUE (protoValueToJava can produce a Map,
+                // though the planner emits map literals as struct() expressions, which
+                // leafOperandError already names). No scalar-column comparison exists for
+                // these: letting the value through dies inside Hibernate with a raw coercion
+                // error ("Could not convert ... ListN to java.lang.String") instead of the
+                // adapter's named-IllegalArgumentException contract. Checked BEFORE path
+                // resolution so a Relation-mapped attribute reports this shape too, not the
+                // generic "is a Relation" resolution error. Reports the shape only — element
+                // values never leak into the message.
+                if (value instanceof List<?> || value instanceof Map<?, ?>) {
+                    throw new IllegalArgumentException(
+                            op + " comparison against a " + constantShape(value)
+                                    + " constant is not supported for attribute "
+                                    + field.variable() + ". Whole-" + kindWord(value)
+                                    + " equality is not translatable to a scalar column"
+                                    + " comparison; map the attribute as a Relation and use"
+                                    + " in/hasIntersection, or compare elements individually.");
+                }
+
                 Path<?> path = scope.resolvePath(field.variable());
 
                 if (value == null) {
@@ -866,6 +888,23 @@ public final class SpringDataQueryPlanAdapter {
                             "Unsupported constant timestamp comparison operator: " + op);
                 };
                 return result ? cb.conjunction() : cb.disjunction();
+            }
+
+            /**
+             * Shape description for a structured constant in an error message: size and kind
+             * only — never element values, matching the adapter's no-value-leak discipline
+             * (see {@link #typeName}).
+             */
+            private static String constantShape(Object value) {
+                if (value instanceof List<?> l) {
+                    return "list of " + l.size() + " element" + (l.size() == 1 ? "" : "s");
+                }
+                Map<?, ?> m = (Map<?, ?>) value;
+                return "map of " + m.size() + " entr" + (m.size() == 1 ? "y" : "ies");
+            }
+
+            private static String kindWord(Object value) {
+                return value instanceof List<?> ? "list" : "map";
             }
 
             /**

@@ -249,6 +249,7 @@ the construct: rows marked **no** are rejected while resolving an operand,
 | `eq(map(...), [...])`                           | `R.attr.tags.map(t, t.id) == ["tag1", "tag2"]`    | no          | Use `hasIntersection(map(...), [...])` instead. |
 | Timestamp comparison on an ambiguous column type | `timestamp(R.attr.createdAt) < now() - duration("24h")` with `createdAt` mapped to `LocalDateTime`/`java.util.Date`/`String` | yes (the comparison operator) | The supported shape (see table above) requires an `Instant` or `OffsetDateTime` column. Other types don't pin the absolute instant they store — a wrong zone/format assumption would silently diverge from `check()`. The override receives the parsed `Instant` and can apply schema-specific knowledge. |
 | Timestamp shapes beyond `timestamp(field) vs constant` | `timestamp(R.attr.a) < timestamp(R.attr.b)`, `timestamp(...)` inside arithmetic | no | Only the leaf comparison shape the planner emits for time-window policies is translated; nested/derived shapes keep their named errors. |
+| `eq`/`ne` against a list constant               | `R.attr.tags == ["a", "b"]`                       | no          | Whole-list equality has no scalar-column translation (the plan arrives as `eq(variable, value-list)` verbatim); rejected before path resolution. Map the attribute as a Relation and use `in`/`hasIntersection`, or compare elements individually. |
 
 ## Gotchas
 

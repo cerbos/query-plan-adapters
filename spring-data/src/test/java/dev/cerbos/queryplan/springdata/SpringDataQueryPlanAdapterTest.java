@@ -2,6 +2,7 @@ package dev.cerbos.queryplan.springdata;
 
 import com.google.protobuf.ListValue;
 import com.google.protobuf.NullValue;
+import com.google.protobuf.Struct;
 import com.google.protobuf.Value;
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter;
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression;
@@ -33,6 +34,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -681,6 +683,94 @@ class SpringDataQueryPlanAdapterTest {
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
                 () -> runCount(cond));
         assertTrue(ex.getMessage().contains("Unsupported operator"));
+    }
+
+    // -- eq/ne against a structured (list/map) constant: named error, not a raw Hibernate one --
+
+    /**
+     * PDP-verified wire shapes (Cerbos {@code :latest}, 2026-07-23): {@code R.attr.tags ==
+     * ["a", "b"]} arrives as {@code eq(variable, value-list)} verbatim — in BOTH operand
+     * orders — and {@code ne} likewise. Without the guard, {@code cb.equal(stringPath, List)}
+     * dies inside Hibernate with a raw coercion error ("Could not convert
+     * java.util.ImmutableCollections$ListN to java.lang.String"), violating the README's
+     * contract that unsupported constructs throw {@link IllegalArgumentException} naming the
+     * operator. These tests pin the named error AND that no element values leak into it.
+     */
+    @Nested
+    class StructuredConstantComparison {
+
+        /** Distinctive element values so the no-leak assertions cannot false-negative. */
+        private static final String ELEM_A = "leak-canary-alpha";
+        private static final String ELEM_B = "leak-canary-beta";
+
+        private static IllegalArgumentException assertNamedError(Operand cond, String op,
+                                                                 String attribute, String shape) {
+            IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                    () -> runCount(cond));
+            String msg = ex.getMessage();
+            assertTrue(msg.contains(op), "expected operator '" + op + "' in: " + msg);
+            assertTrue(msg.contains(attribute), "expected attribute '" + attribute + "' in: " + msg);
+            assertTrue(msg.contains(shape), "expected shape '" + shape + "' in: " + msg);
+            assertTrue(msg.contains("hasIntersection"),
+                    "expected the supported alternative in: " + msg);
+            assertFalse(msg.contains(ELEM_A), "element value leaked into: " + msg);
+            assertFalse(msg.contains(ELEM_B), "element value leaked into: " + msg);
+            return ex;
+        }
+
+        @Test
+        void eqFieldAgainstListConstantThrowsNamedError() {
+            assertNamedError(
+                    exprOp("eq", var("request.resource.attr.aString"), listOp(ELEM_A, ELEM_B)),
+                    "eq", "request.resource.attr.aString", "list of 2 elements");
+        }
+
+        @Test
+        void neFieldAgainstListConstantThrowsNamedError() {
+            assertNamedError(
+                    exprOp("ne", var("request.resource.attr.aString"), listOp(ELEM_A, ELEM_B)),
+                    "ne", "request.resource.attr.aString", "list of 2 elements");
+        }
+
+        @Test
+        void eqValueFirstListConstantThrowsNamedError() {
+            // ["a", "b"] == R.attr.x — source order is preserved on the wire; NormalizedBinary
+            // mirrors it back to field-first, so the same named error must surface.
+            assertNamedError(
+                    exprOp("eq", listOp(ELEM_A), var("request.resource.attr.aString")),
+                    "eq", "request.resource.attr.aString", "list of 1 element");
+        }
+
+        @Test
+        void neValueFirstListConstantThrowsNamedError() {
+            assertNamedError(
+                    exprOp("ne", listOp(ELEM_A, ELEM_B), var("request.resource.attr.aString")),
+                    "ne", "request.resource.attr.aString", "list of 2 elements");
+        }
+
+        @Test
+        void eqRelationAgainstListConstantThrowsNamedError() {
+            // Relation-mapped attribute: previously surfaced the generic "is a Relation;
+            // cannot resolve as a scalar path" — the structured-constant guard runs before
+            // path resolution so this shape gets the same actionable message.
+            assertNamedError(
+                    exprOp("eq", var("request.resource.attr.tags"), listOp(ELEM_A, ELEM_B)),
+                    "eq", "request.resource.attr.tags", "list of 2 elements");
+        }
+
+        @Test
+        void eqFieldAgainstStructConstantThrowsNamedError() {
+            // Defensive: the planner emits map literals as struct() expressions (which throw a
+            // named error via leafOperandError), but protoValueToJava can produce a Map from a
+            // STRUCT_VALUE — pin the same contract for that shape.
+            Operand structConstant = Operand.newBuilder()
+                    .setValue(Value.newBuilder().setStructValue(Struct.newBuilder()
+                            .putFields("k", Value.newBuilder().setStringValue(ELEM_A).build())))
+                    .build();
+            assertNamedError(
+                    exprOp("eq", var("request.resource.attr.aString"), structConstant),
+                    "eq", "request.resource.attr.aString", "map of 1 entry");
+        }
     }
 
     // -- add operator --
