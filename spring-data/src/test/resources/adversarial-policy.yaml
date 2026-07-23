@@ -521,7 +521,10 @@ resourcePolicy:
 
     # -- GROUP B: suspected-unsupported shapes; record throw vs silent-wrong --
 
-    # B11: timestamp comparison over an ISO-date string column (createdBy is seeded with ISO dates).
+    # B11: timestamp comparison over an ISO-date STRING column (createdBy is seeded with ISO
+    # dates). Supported timestamp() comparisons require an Instant/OffsetDateTime column —
+    # a String column is ambiguous about the instant it stores, so this stays fail-closed
+    # with the named column-type error (see the ts-* actions for the supported shape).
     - actions: ["p-timestamp"]
       effect: EFFECT_ALLOW
       roles: ["USER"]
@@ -773,3 +776,57 @@ resourcePolicy:
       condition:
         match:
           expr: '(R.attr.aBool ? 1.0/0.0 : -1.0/0.0) > 0.5'
+
+    # -- timestamp(field) vs constant-instant comparisons (ts-*) --
+    # Wire shape (PDP-verified): the planner folds now()-duration arithmetic to a constant
+    # instant and re-wraps it in timestamp("<RFC-3339>"); both operand orders keep policy
+    # source order (both sides are EXPRESSION nodes — no normalization applies), so the
+    # value-first form below exercises the adapter's mirroring, not inversion.
+
+    # The retention-cutoff / time-window shape: rows older than 24h. now() is evaluated at
+    # PLAN time; the seeds are split firmly before 2026 and after 2036 so the boundary never
+    # lands near a seed. a3 has no created_at: timestamp(missing attr) is a CEL error →
+    # check() denies, and the SQL comparison over NULL excludes the row — both sides agree.
+    - actions: ["ts-window"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'timestamp(R.attr.createdAt) < now() - duration("24h")'
+
+    # Value-first form of the same window: gt(timestamp(constant), timestamp(variable)) on
+    # the wire. An inversion bug (translating lt instead of the mirrored gt) flips the
+    # entire included set — the oracle catches it on every seed.
+    - actions: ["ts-vf"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'now() - duration("24h") > timestamp(R.attr.createdAt)'
+
+    # Instant equality against a literal (a4 is the exact-match witness).
+    - actions: ["ts-eq"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'timestamp(R.attr.createdAt) == timestamp("2024-06-01T00:00:00Z")'
+
+    # The same instant expressed at a non-UTC offset: CEL timestamp equality is INSTANT
+    # equality (PDP-verified), so a4 must still match — pins the adapter's offset
+    # normalization (OffsetDateTime.parse fallback → Instant).
+    - actions: ["ts-eq-offset"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'timestamp(R.attr.createdAt) == timestamp("2024-06-01T02:00:00+02:00")'
+
+    # ne: allows every row EXCEPT the equal one — and except a3 (NULL created_at), whose
+    # missing attribute errors at check time while SQL three-valued logic excludes it.
+    - actions: ["ts-ne"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'timestamp(R.attr.createdAt) != timestamp("2024-06-01T00:00:00Z")'
