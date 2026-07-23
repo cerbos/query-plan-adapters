@@ -953,6 +953,77 @@ resourcePolicy:
         match:
           expr: 'timestamp(R.attr.createdAt) != timestamp("2024-06-01T00:00:00Z")'
 
+    # ==================== in-lists containing null ====================
+    # `R.attr.owner in [..., null]` compiles and the planner emits the null element
+    # VERBATIM in the value list; check() ALLOWS an explicitly-null attribute (CEL
+    # `null in [..., null]` is true). `owner` maps to the a_optional_string column, and —
+    # unlike aOptionalString — the oracle sends an EXPLICIT null attribute for NULL columns,
+    # matching the adapter's eq-null → IS NULL convention (the planner itself folds
+    # `x in [null]` to `eq(x, null)`). The null element must become an IS NULL disjunct:
+    # `IN (nonNulls) OR IS NULL`; a raw `IN (..., NULL)` silently excludes null rows and
+    # makes the negation UNKNOWN everywhere.
+
+    # Mixed list: matching ("x" → a3, "one_two" → b1), null (a2/a4/a8/c2), non-matching rest.
+    - actions: ["in-null-elem-mixed"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.owner in ["x", "one_two", null]'
+
+    # Negation: three-valued trap — over `IN (..., NULL)` the negation returned NOTHING.
+    - actions: ["in-null-elem-neg"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(R.attr.owner in ["x", "one_two", null])'
+
+    # Degenerate all-null list: the planner folds this to eq(owner, null) → pure IS NULL.
+    - actions: ["in-null-elem-only"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.owner in [null]'
+
+    - actions: ["in-null-elem-only-neg"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(R.attr.owner in [null])'
+
+    # Relation variant: `null in collection` is true iff the collection holds a null
+    # element (tagNames projects tags.name; b5/b6 hold NULL-name tags and the oracle sends
+    # those as explicit null list elements) → EXISTS(member IS NULL).
+    - actions: ["in-null-elem-rel"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'null in R.attr.tagNames'
+
+    # Negation: rows with no null member — including EMPTY collections (`null in []` is
+    # false, so the negation allows them).
+    - actions: ["in-null-elem-rel-neg"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(null in R.attr.tagNames)'
+
+    # hasIntersection with a null element behaves like `in` (PDP-verified: allows
+    # tagNames=[null]): the null element intersects collections holding a null member,
+    # so the shared EXISTS translation gains the same IS NULL disjunct. b5/b6 (NULL-name
+    # tags) plus the "public"-tagged rows must come back.
+    - actions: ["in-null-elem-hasint"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'hasIntersection(R.attr.tagNames, ["public", null])'
+
     # ==================== depth-3 nested collection macros ====================
     # Three macro levels (categories → subCategories → labels). Pins that the single-
     # subquery-per-polarity macro translation preserves tri-state semantics through deep

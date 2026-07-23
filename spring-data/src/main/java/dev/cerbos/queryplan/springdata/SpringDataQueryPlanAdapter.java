@@ -1703,9 +1703,13 @@ public final class SpringDataQueryPlanAdapter {
 
         // -- in (set membership or collection membership) --
 
-        /** Wrap a scalar plan constant as a single-element list; lists pass through unchanged. */
+        /**
+         * Wrap a scalar plan constant as a single-element list; lists pass through unchanged.
+         * The scalar may be the null constant ({@code null in R.attr.items} is planner-emitted),
+         * so the wrapper must be null-tolerant — {@code List.of} is not.
+         */
         private static List<?> asList(Object val) {
-            return (val instanceof List<?> l) ? l : List.of(val);
+            return (val instanceof List<?> l) ? l : java.util.Collections.singletonList(val);
         }
 
         private Predicate handleIn(List<Operand> rawOperands, Scope scope) {
@@ -1737,10 +1741,38 @@ public final class SpringDataQueryPlanAdapter {
                     if (list.isEmpty()) {
                         return cb.disjunction();
                     }
-                    return path.in(list);
+                    return scalarInWithNullElements(path, list);
+                }
+                // Scalar membership over a Field mapping is equality — and equality against
+                // the null constant is IS NULL, mirroring the eq-null leaf translation.
+                if (val == null) {
+                    return cb.isNull(path);
                 }
                 return cb.equal(path, val);
             });
+        }
+
+        /**
+         * {@code path IN (list)} with CEL null-element semantics. CEL {@code x in [..., null]}
+         * is TRUE for an explicitly-null {@code x} (PDP-verified for both {@code in} and
+         * {@code hasIntersection}; the planner even folds the degenerate {@code x in [null]}
+         * to {@code eq(x, null)}, which this adapter translates as IS NULL) — so a null list
+         * element must become an IS NULL disjunct. Passing it to {@code path.in} instead
+         * renders {@code IN (..., NULL)} (verified on Hibernate 6.6/H2), whose SQL
+         * three-valued semantics silently EXCLUDE null rows — and make the negation UNKNOWN
+         * for every non-matching row, returning nothing. Both disjuncts here are two-valued
+         * for every row (IS NULL absorbs the NULL-column case), so {@code tri.not} composes
+         * cleanly over the OR. Callers guarantee a non-empty list.
+         */
+        private Predicate scalarInWithNullElements(Path<?> path, List<?> list) {
+            List<?> nonNull = list.stream().filter(Objects::nonNull).toList();
+            if (nonNull.size() == list.size()) {
+                return path.in(list);
+            }
+            if (nonNull.isEmpty()) {
+                return cb.isNull(path);
+            }
+            return cb.or(path.in(nonNull), cb.isNull(path));
         }
 
         // -- hasIntersection --
@@ -1771,7 +1803,7 @@ public final class SpringDataQueryPlanAdapter {
                 if (values.isEmpty()) {
                     return cb.disjunction();
                 }
-                return path.in(values);
+                return scalarInWithNullElements(path, values);
             }
 
             if (first.getNodeCase() == Operand.NodeCase.EXPRESSION
@@ -1859,9 +1891,21 @@ public final class SpringDataQueryPlanAdapter {
             // (deny) even when another element would intersect — the strict
             // TriPredicate.baseUnlessUnknown table, with the null-witness EXISTS as the unknown
             // detector (IS NULL itself is two-valued, so both EXISTS legs are safe to compose).
+            //
+            // A null element in the constant list only matches an explicitly-null projection,
+            // which member ACCESS can never yield from the column model: a NULL member column
+            // is the missing-attribute error above (PDP-verified: tags=[{}] denies under BOTH
+            // polarities even with null in the list; tags=[{"name": null}] would allow, but a
+            // column cannot distinguish that case and the error convention wins here). Null
+            // elements are therefore inert — stripped so they don't render as a never-matching
+            // SQL `IN (..., NULL)` literal — while NULL-projection rows stay UNKNOWN.
+            List<?> nonNull = values.stream().filter(Objects::nonNull).toList();
+            Predicate base = nonNull.isEmpty()
+                    ? cb.disjunction()
+                    : existsSubquery(scope, ref, (sub, tailJoin, rebased) ->
+                            Scope.memberPath(tailJoin, ref.tail(), memberField).in(nonNull));
             return tri.baseUnlessUnknown(
-                    existsSubquery(scope, ref, (sub, tailJoin, rebased) ->
-                            Scope.memberPath(tailJoin, ref.tail(), memberField).in(values)),
+                    base,
                     () -> existsSubquery(scope, ref, (sub, tailJoin, rebased) ->
                             cb.isNull(Scope.memberPath(tailJoin, ref.tail(), memberField))));
         }
@@ -1872,12 +1916,28 @@ public final class SpringDataQueryPlanAdapter {
             if (values.isEmpty()) {
                 return cb.disjunction();
             }
+            // CEL membership/intersection with a null constant is satisfied by a collection
+            // element that IS null (PDP-verified for both routes here: `null in R.attr.xs`
+            // with xs=["a", null] allows, and hasIntersection(R.attr.xs, ["public", null])
+            // with xs=[null] allows). A related row whose member column is NULL is exactly
+            // such an element under the scalar-projection (defaultMemberField) view, so the
+            // null constant becomes an IS NULL disjunct inside the EXISTS body —
+            // `member IN (...)`/`member = NULL` never matches it in SQL. (Contrast with
+            // map(t, t.name) member ACCESS, where a NULL column is a MISSING element
+            // attribute → CEL error; see handleMapIntersection.)
+            List<?> nonNull = values.stream().filter(Objects::nonNull).toList();
+            boolean hasNull = nonNull.size() < values.size();
             return existsSubquery(scope, ref, (sub, tailJoin, rebased) -> {
                 Path<?> field = Scope.memberPath(tailJoin, ref.tail(), null);
-                if (values.size() == 1) {
-                    return cb.equal(field, values.get(0));
+                if (!hasNull) {
+                    return values.size() == 1 ? cb.equal(field, values.get(0)) : field.in(values);
                 }
-                return field.in(values);
+                if (nonNull.isEmpty()) {
+                    return cb.isNull(field);
+                }
+                Predicate match = nonNull.size() == 1
+                        ? cb.equal(field, nonNull.get(0)) : field.in(nonNull);
+                return cb.or(match, cb.isNull(field));
             });
         }
 
