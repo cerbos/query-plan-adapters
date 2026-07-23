@@ -55,9 +55,12 @@ final class PlanValues {
         if (left == null || right == null) {
             // Reaching here means the planner emitted `add(null, ...)` or `add(..., null)`
             // — neither side could satisfy any string/number equation, so report the shape
-            // explicitly rather than NPE'ing on `.getClass()` below.
+            // explicitly rather than NPE'ing on `.getClass()` below. Report TYPES only:
+            // plan constants can carry folded principal-attribute values (PII), and every
+            // other error site in the adapter deliberately keeps values out of messages.
             throw new IllegalArgumentException(
-                    "add requires non-null operands, got " + left + " + " + right);
+                    "add requires non-null operands, got " + typeName(left) + " + "
+                            + typeName(right));
         }
         if (left instanceof String || right instanceof String) {
             return String.valueOf(left) + String.valueOf(right);
@@ -69,7 +72,13 @@ final class PlanValues {
             return ln.doubleValue() + rn.doubleValue();
         }
         throw new IllegalArgumentException(
-                "add requires string or numeric operands, got " + left.getClass() + " + " + right.getClass());
+                "add requires string or numeric operands, got " + typeName(left) + " + "
+                        + typeName(right));
+    }
+
+    /** Type-only operand description for error messages — operand VALUES never leak. */
+    private static String typeName(Object o) {
+        return o == null ? "null" : o.getClass().getSimpleName();
     }
 
     /**

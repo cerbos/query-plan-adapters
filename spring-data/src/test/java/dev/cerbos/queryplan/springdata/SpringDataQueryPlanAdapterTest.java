@@ -687,12 +687,48 @@ class SpringDataQueryPlanAdapterTest {
                         exprOp("eq", var("t.name"), sval("public"))))));
     }
 
+    // -- except: a two-list function with no JPA translation — every arrival shape throws --
+    //
+    // PDP-verified wire shapes (Cerbos latest, 2026-07): `size(R.attr.tags.except(["archived"]))
+    // > 0` arrives as gt(size(except(variable, value-list)), 0), and `R.attr.tags.except(
+    // ["archived"]) == []` as eq(except(variable, value-list), value-list). except NEVER
+    // arrives with a lambda operand — a previous lambda-except translation here was
+    // unreachable from any real plan and has been removed.
+
     @Test
-    void exceptOnNestedRelation() {
-        assertEquals(0, runCount(exprOp("except",
-                var("request.resource.attr.tags"),
-                lambda("t",
-                        exprOp("eq", var("t.name"), sval("public"))))));
+    void sizeOfExceptThrowsNamedError() {
+        assertConditionThrows(
+                exprOp("gt",
+                        exprOp("size",
+                                exprOp("except",
+                                        var("request.resource.attr.tags"), listOp("archived"))),
+                        nval(0)),
+                "except is not supported", "except(list, list)", "exists");
+    }
+
+    @Test
+    void exceptComparedToListThrowsNamedError() {
+        assertConditionThrows(
+                exprOp("eq",
+                        exprOp("except",
+                                var("request.resource.attr.tags"), listOp("archived")),
+                        listOp()),
+                "except is not supported", "except(list, list)");
+    }
+
+    @Test
+    void bareExceptThrowsNamedError() {
+        // Top-level except in boolean position — including the old synthetic lambda shape —
+        // must fail closed with the named error, not translate invented semantics.
+        assertConditionThrows(
+                exprOp("except",
+                        var("request.resource.attr.tags"),
+                        lambda("t", exprOp("eq", var("t.name"), sval("public")))),
+                "except is not supported", "except(list, list)");
+        assertConditionThrows(
+                exprOp("except",
+                        var("request.resource.attr.tags"), listOp("archived")),
+                "except is not supported", "except(list, list)");
     }
 
     @Test
@@ -1612,10 +1648,8 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         @Test
-        void filterAndExceptFollowExistsFamilySemantics() {
+        void filterFollowsExistsFamilySemantics() {
             Operand filterPublic = exprOp("filter", var("request.resource.attr.tags"),
-                    lambda("t", exprOp("eq", var("t.name"), sval("public"))));
-            Operand exceptPublic = exprOp("except", var("request.resource.attr.tags"),
                     lambda("t", exprOp("eq", var("t.name"), sval("public"))));
 
             ResourceEntity r = new ResourceEntity("null-elem-fe-1");
@@ -1623,8 +1657,6 @@ class SpringDataQueryPlanAdapterTest {
             withResource(r, () -> {
                 assertEquals(0, runCount(filterPublic));
                 assertEquals(0, runCount(exprOp("not", filterPublic)));
-                assertEquals(0, runCount(exceptPublic));
-                assertEquals(0, runCount(exprOp("not", exceptPublic)));
             });
         }
 
@@ -3165,6 +3197,188 @@ class SpringDataQueryPlanAdapterTest {
         }
     }
 
+    /**
+     * {@code in(variable, variable)} — attribute-in-attribute membership. PDP-verified wire
+     * shape (Cerbos latest, 2026-07): {@code R.attr.createdBy in R.attr.ownedBy} arrives as
+     * {@code in(variable, variable)} verbatim, member first. Translated as a correlated EXISTS
+     * comparing the collection's member column to the outer scalar column, with a NULL scalar
+     * matching a NULL member element (CEL {@code null in [..., null]} is TRUE — check()
+     * verified for every branch below; see the translator Javadoc for the truth table).
+     */
+    @Nested
+    class InVariableVariable {
+
+        private Operand inVarVar() {
+            return exprOp("in",
+                    var("request.resource.attr.createdBy"),
+                    var("request.resource.attr.ownedBy"));
+        }
+
+        @Test
+        void memberMatchingElementIncludesRow() {
+            ResourceEntity r = new ResourceEntity("ivv-1");
+            r.setCreatedBy("alice");
+            r.setOwnedBy(new ArrayList<>(List.of("alice", "bob")));
+            withResource(r, () -> {
+                assertEquals(1, runCount(inVarVar()));
+                assertEquals(0, runCount(exprOp("not", inVarVar())));
+            });
+        }
+
+        @Test
+        void memberNotInCollectionExcludesRowAndNegationIncludesIt() {
+            ResourceEntity r = new ResourceEntity("ivv-2");
+            r.setCreatedBy("carol");
+            r.setOwnedBy(new ArrayList<>(List.of("alice", "bob")));
+            withResource(r, () -> {
+                assertEquals(0, runCount(inVarVar()));
+                assertEquals(1, runCount(exprOp("not", inVarVar())));
+            });
+        }
+
+        @Test
+        void emptyCollectionExcludesRowAndNegationIncludesIt() {
+            // CEL: `x in []` is FALSE (not an error) — check() verified: deny, negation allows.
+            ResourceEntity r = new ResourceEntity("ivv-3");
+            r.setCreatedBy("alice");
+            withResource(r, () -> {
+                assertEquals(0, runCount(inVarVar()));
+                assertEquals(1, runCount(exprOp("not", inVarVar())));
+            });
+        }
+
+        private Operand optInTagNames() {
+            return exprOp("in",
+                    var("request.resource.attr.aOptionalString"),
+                    var("request.resource.attr.tagNames"));
+        }
+
+        @Test
+        void nullScalarMatchesNullElement() {
+            // check() verified: `null in ["a", null]` is TRUE under the explicit-null
+            // conventions the adapter's other null translations already pin.
+            ResourceEntity r = new ResourceEntity("ivv-4");
+            r.setaOptionalString(null);
+            r.addTag("ivv4a", null);
+            r.addTag("ivv4b", "a");
+            withResource(r, () -> {
+                assertEquals(1, runCount(optInTagNames()));
+                assertEquals(0, runCount(exprOp("not", optInTagNames())));
+            });
+        }
+
+        @Test
+        void nullScalarWithoutNullElementExcludesRowAndNegationIncludesIt() {
+            // check() verified: `null in ["a", "b"]` is FALSE (not an error) — deny under
+            // `in`, allow under the negation.
+            ResourceEntity r = new ResourceEntity("ivv-5");
+            r.setaOptionalString(null);
+            r.addTag("ivv5a", "a");
+            withResource(r, () -> {
+                assertEquals(0, runCount(optInTagNames()));
+                assertEquals(1, runCount(exprOp("not", optInTagNames())));
+            });
+        }
+
+        @Test
+        void scalarSecondOperandThrowsNamedError() {
+            assertConditionThrows(
+                    exprOp("in",
+                            var("request.resource.attr.aString"),
+                            var("request.resource.attr.createdBy")),
+                    "request.resource.attr.createdBy", "Relation", "scalar Field mapping");
+        }
+
+        @Test
+        void unknownCollectionAttributeThrows() {
+            assertConditionThrows(
+                    exprOp("in",
+                            var("request.resource.attr.aString"),
+                            var("request.resource.attr.nonexistent")),
+                    "Unknown attribute");
+        }
+    }
+
+    /**
+     * Defensive copies (API hardening): {@code AttributeMapping} records validate and copy at
+     * construction, and {@code toSpecification} captures copies of the caller's maps — so
+     * post-construction mutation cannot silently change which columns the authorization filter
+     * resolves.
+     */
+    @Nested
+    class DefensiveCopies {
+
+        @Test
+        void nullConstructorArgumentsThrowNamedNpe() {
+            NullPointerException f = assertThrows(NullPointerException.class,
+                    () -> AttributeMapping.field(null));
+            assertTrue(f.getMessage().contains("jpaPath"), "message: " + f.getMessage());
+
+            NullPointerException j = assertThrows(NullPointerException.class,
+                    () -> new AttributeMapping.Relation(null, null, Map.of()));
+            assertTrue(j.getMessage().contains("joinAttribute"), "message: " + j.getMessage());
+
+            NullPointerException fields = assertThrows(NullPointerException.class,
+                    () -> new AttributeMapping.Relation("tags", null, null));
+            assertTrue(fields.getMessage().contains("fields"), "message: " + fields.getMessage());
+        }
+
+        @Test
+        void relationFieldsMapIsCopiedAndImmutable() {
+            java.util.HashMap<String, AttributeMapping> fields = new java.util.HashMap<>();
+            fields.put("name", AttributeMapping.field("name"));
+            AttributeMapping.Relation rel = AttributeMapping.relation("tags", fields);
+
+            fields.put("name", AttributeMapping.field("id"));
+            assertEquals(AttributeMapping.field("name"), rel.fields().get("name"),
+                    "mutating the caller's fields map must not affect the Relation");
+            assertThrows(UnsupportedOperationException.class,
+                    () -> rel.fields().put("x", AttributeMapping.field("x")));
+        }
+
+        @Test
+        void mutatingCallerMapperAfterToSpecificationDoesNotAffectSpecification() {
+            // aString and aOptionalString hold different values, so a re-resolved column
+            // is observable as a changed row set.
+            ResourceEntity r = new ResourceEntity("copy-1");
+            r.setaString("match");
+            r.setaOptionalString("other");
+            withResource(r, () -> {
+                java.util.HashMap<String, AttributeMapping> mapper = new java.util.HashMap<>();
+                mapper.put("request.resource.attr.aString", AttributeMapping.field("aString"));
+                Operand cond = exprOp("eq", var("request.resource.attr.aString"), sval("match"));
+                PlanResourcesResponse resp =
+                        buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, cond);
+                Result<ResourceEntity> result =
+                        SpringDataQueryPlanAdapter.toSpecification(resp, mapper);
+                Specification<ResourceEntity> spec =
+                        ((Result.Conditional<ResourceEntity>) result).specification();
+
+                assertEquals(1, countWithSpec(spec));
+                // Redirect the attribute at a different column AFTER construction: the
+                // Specification (re-invoked fresh per execution) must keep the original mapping.
+                mapper.put("request.resource.attr.aString", AttributeMapping.field("aOptionalString"));
+                assertEquals(1, countWithSpec(spec),
+                        "post-construction mapper mutation changed the captured Specification");
+            });
+        }
+
+        private int countWithSpec(Specification<ResourceEntity> spec) {
+            EntityManager em = emf.createEntityManager();
+            try {
+                CriteriaBuilder cb = em.getCriteriaBuilder();
+                CriteriaQuery<Long> cq = cb.createQuery(Long.class);
+                Root<ResourceEntity> root = cq.from(ResourceEntity.class);
+                cq.select(cb.count(root));
+                Predicate p = spec.toPredicate(root, cq, cb);
+                if (p != null) cq.where(p);
+                return em.createQuery(cq).getSingleResult().intValue();
+            } finally {
+                em.close();
+            }
+        }
+    }
+
     // -- Leaf operand-count guard: extra operands must fail loudly, not drop silently --
 
     @Test
@@ -3177,6 +3391,117 @@ class SpringDataQueryPlanAdapterTest {
                         var("request.resource.attr.createdBy"),
                         sval("x")),
                 "eq", "2 operands");
+    }
+
+    @Test
+    void sizeComparisonWithExtraOperandThrows() {
+        // The size() probe used to run BEFORE the arity guard and scan operands
+        // last-match-wins: a malformed eq(size(tags), variable, value) translated to
+        // COUNT(tags) = value, silently discarding the variable constraint. The guard now
+        // fires first, so the size() path shares the loud-failure contract of plain leaves.
+        assertConditionThrows(
+                exprOp("eq",
+                        exprOp("size", var("request.resource.attr.tags")),
+                        var("request.resource.attr.aString"),
+                        nval(2)),
+                "eq", "2 operands");
+    }
+
+    // -- Error-message context and the no-value-leak discipline --
+
+    @Test
+    void foldAddNullOperandErrorDoesNotLeakConstantValues() {
+        // eq(field, add(null, "<folded principal attr>")) — PDP-reachable when a policy
+        // concatenates principal attributes and one is null: the folded value can carry PII
+        // and consuming apps log translation errors at ERROR. The message must report operand
+        // TYPES only, never the values.
+        Operand cond = exprOp("eq",
+                var("request.resource.attr.aString"),
+                exprOp("add", nullVal(), sval("canary-secret-value")));
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> runCount(cond));
+        assertTrue(ex.getMessage().contains("add requires non-null operands"),
+                "unexpected message: " + ex.getMessage());
+        assertTrue(ex.getMessage().contains("null") && ex.getMessage().contains("String"),
+                "expected operand types in message: " + ex.getMessage());
+        assertFalse(ex.getMessage().contains("canary-secret-value"),
+                "constant value leaked into the error message: " + ex.getMessage());
+
+        // Mirrored shape: the null on the right.
+        IllegalArgumentException ex2 = assertThrows(IllegalArgumentException.class,
+                () -> runCount(exprOp("eq",
+                        var("request.resource.attr.aString"),
+                        exprOp("add", sval("canary-secret-value"), nullVal()))));
+        assertFalse(ex2.getMessage().contains("canary-secret-value"),
+                "constant value leaked into the error message: " + ex2.getMessage());
+    }
+
+    @Test
+    void bothOperandsAddExpressionsReportsShapeNotArity() {
+        // contains(add(...), add(...)): there ARE two operands — the old message
+        // ("add comparison requires a second operand") misstated the problem as arity.
+        assertConditionThrows(
+                exprOp("contains",
+                        exprOp("add", sval("a"), sval("b")),
+                        exprOp("add", sval("c"), sval("d"))),
+                "contains", "two add() expressions");
+    }
+
+    @Test
+    void invalidIsSetOperandsReportBothNodeCases() {
+        // Missing boolean flag (two variables): the bare "Invalid isSet operands" gave an
+        // on-call engineer nothing; the message must describe both operands.
+        assertConditionThrows(
+                exprOp("isSet",
+                        var("request.resource.attr.aString"),
+                        var("request.resource.attr.createdBy")),
+                "Invalid isSet operands",
+                "VARIABLE 'request.resource.attr.aString'",
+                "VARIABLE 'request.resource.attr.createdBy'");
+        // Missing variable (two booleans).
+        assertConditionThrows(
+                exprOp("isSet", bval(true), bval(false)),
+                "Invalid isSet operands", "VALUE (BOOL_VALUE)");
+    }
+
+    @Test
+    void hasIntersectionVariableVariableReportsBothOperands() {
+        // The PDP can emit hasIntersection(variable, variable); the error must name BOTH
+        // operands (the old message printed only the first node case — "VARIABLE" — which is
+        // individually a supported shape) and point at the supported shapes.
+        assertConditionThrows(
+                exprOp("hasIntersection",
+                        var("request.resource.attr.tagNames"),
+                        var("request.resource.attr.ownedBy")),
+                "VARIABLE 'request.resource.attr.tagNames'",
+                "VARIABLE 'request.resource.attr.ownedBy'",
+                "Supported shapes");
+    }
+
+    @Test
+    void sizeArityErrorReportsOperandCount() {
+        assertConditionThrows(
+                exprOp("gt",
+                        exprOp("size",
+                                var("request.resource.attr.tags"),
+                                var("request.resource.attr.tagNames")),
+                        nval(0)),
+                "size() takes exactly 1 argument, got 2");
+    }
+
+    @Test
+    void sizeBadArgumentErrorNamesTheOffendingShape() {
+        assertConditionThrows(
+                exprOp("gt", exprOp("size", sval("x")), nval(0)),
+                "size() argument must be a collection attribute or filter(...)",
+                "VALUE (STRING_VALUE)");
+        assertConditionThrows(
+                exprOp("gt",
+                        exprOp("size", exprOp("map",
+                                var("request.resource.attr.tags"), lambda("t", var("t.name")))),
+                        nval(0)),
+                "size() argument must be a collection attribute or filter(...)",
+                "EXPRESSION map()");
     }
 
     // -- Arithmetic (add/sub/mult/div) as a comparison operand --

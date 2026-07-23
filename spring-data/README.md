@@ -183,6 +183,7 @@ Map each `request.resource.attr.<name>` to a JPA path or a relation:
 | `eq` / `ne`                      | `cb.equal` / `cb.notEqual` (auto `isNull`/`isNotNull` for `null` RHS) |
 | `lt` / `gt` / `le` / `ge`        | `cb.lessThan` / `greaterThan` / `lessThanOrEqualTo` / `greaterThanOrEqualTo` |
 | `in`                             | `path.in(values)` or correlated `EXISTS` for collections            |
+| `in(R.attr.x, R.attr.coll)` (attribute-in-attribute) | Correlated `EXISTS` comparing the collection's member column to the outer scalar column; a `NULL` scalar matches a `NULL` member element (CEL `null in [..., null]` is true) |
 | `contains` / `startsWith` / `endsWith` | `cb.like(...)` with proper `_`/`%`/`\`/`[` escaping (`[` guards SQL Server character classes — see Gotchas) — incl. the constant-receiver form (`"a,b".contains(R.attr.x)`: the constant is the haystack, the column the needle) |
 | `isSet(field, true/false)`       | `cb.isNotNull` / `cb.isNull`                                        |
 | `hasIntersection(coll, [values])` | Correlated `EXISTS` with `IN`                                      |
@@ -201,7 +202,6 @@ Map each `request.resource.attr.<name>` to a JPA path or a relation:
 | `exists(coll, lambda)`           | One correlated aggregate scoring subquery (`MAX(CASE WHEN body … WHEN NOT body … ELSE …)`) whose comparison is TRUE/FALSE/UNKNOWN per the CEL truth table — see the nested-macros gotcha |
 | `exists_one(coll, lambda)`       | One correlated strict-count subquery `= 1` (NULL-poisoned when any element body is undetermined) |
 | `all(coll, lambda)`              | Same scoring subquery as `exists`, compared for "no false and no undetermined element" |
-| `except(coll, lambda)`           | Same scoring subquery as `all`, compared for "some element fails the body" |
 | `filter(coll, lambda)`           | Same as `exists` (filter returns a list — treated as "exists matching") |
 | Bare boolean variable            | `cb.equal(path, true)`                                              |
 | `eq(field, add(const1, const2))` | Constant fold then compare: `cb.equal(field, const1 ⊕ const2)`     |
@@ -250,6 +250,7 @@ the construct: rows marked **no** are rejected while resolving an operand,
 | Timestamp comparison on an ambiguous column type | `timestamp(R.attr.createdAt) < now() - duration("24h")` with `createdAt` mapped to `LocalDateTime`/`java.util.Date`/`String` | yes (the comparison operator) | The supported shape (see table above) requires an `Instant` or `OffsetDateTime` column. Other types don't pin the absolute instant they store — a wrong zone/format assumption would silently diverge from `check()`. The override receives the parsed `Instant` and can apply schema-specific knowledge. |
 | Timestamp shapes beyond `timestamp(field) vs constant` | `timestamp(R.attr.a) < timestamp(R.attr.b)`, `timestamp(...)` inside arithmetic | no | Only the leaf comparison shape the planner emits for time-window policies is translated; nested/derived shapes keep their named errors. |
 | `eq`/`ne` against a list constant               | `R.attr.tags == ["a", "b"]`                       | no          | Whole-list equality has no scalar-column translation (the plan arrives as `eq(variable, value-list)` verbatim); rejected before path resolution. Map the attribute as a Relation and use `in`/`hasIntersection`, or compare elements individually. |
+| `except` (list difference)                      | `size(R.attr.tags.except(["archived"])) > 0`      | no          | Cerbos `except(list, list)` is a two-list function (the wire shape is `except(variable, value-list)`, typically inside `size()` — PDP-verified); list difference has no JPA Criteria translation. Rewrite with an equivalent macro: `size(coll.except([...])) > 0` ≡ `coll.exists(x, !(x in [...]))`. |
 
 ## Gotchas
 
@@ -410,7 +411,7 @@ of "not set".
 
 ### Nested collection macros multiply correlated subqueries — depth is bounded
 
-Every collection macro (`exists`/`exists_one`/`all`/`filter`/`except`/
+Every collection macro (`exists`/`exists_one`/`all`/`filter`/
 `size(filter(...))`) translates to a single correlated aggregate subquery, but the
 lambda body inside it is translated once per polarity — positive and negated — because
 Hibernate 6's criteria negation is stateful and a `Predicate` tree cannot be shared
@@ -436,7 +437,7 @@ your policies intentionally nest deeper, raise the limit via a system property:
 ```
 
 The property is read per translation, must be a positive integer, and applies to
-`exists`/`exists_one`/`all`/`filter`/`except` and `size(filter(...))` nesting.
+`exists`/`exists_one`/`all`/`filter` and `size(filter(...))` nesting.
 
 ### Division by a column is guarded with `NULLIF` — zero divisors deny
 
