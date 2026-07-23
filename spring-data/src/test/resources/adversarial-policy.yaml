@@ -691,3 +691,43 @@ resourcePolicy:
       condition:
         match:
           expr: 'size(R.attr.tags) >= 1.5'
+
+    # ==================== constant NaN / ±Infinity ordering ====================
+    # CEL/IEEE define every ordering comparison involving NaN as false. The planner does
+    # NOT fold div(0,0): the else arm below arrives as an unfolded div(0,0) subtree, so
+    # the adapter folds it to NaN in Java and must order with IEEE semantics — a
+    # Double.compare total order ranks NaN above every number and would turn the else arm
+    # into always-true, returning every aBool=false row the PDP denies.
+    - actions: ["nan-ord-ternary"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '(R.attr.aBool ? 1.0 : 0.0/0.0) > 0.5'
+
+    # Value-first spelling: the planner preserves source order, so the mirrored branch
+    # comparison places the folded NaN on the normalized LEFT (lt → gt divergence arm).
+    - actions: ["nan-ord-ternary-vf"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '0.5 < (R.attr.aBool ? 1.0 : 0.0/0.0)'
+
+    # NaN on the RIGHT of the comparison (ternary vs ternary — both sides stay
+    # expressions, so no mirror moves the NaN): le(0.5, NaN) must also be false.
+    - actions: ["nan-ord-le"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '(R.attr.aBool ? 1.0/1.0 : 1.0/2.0) <= (R.attr.aBool ? 0.5 : 0.0/0.0)'
+
+    # ±Infinity sanity: infinities are ORDERED normally in IEEE space (+Inf > 0.5 allows,
+    # -Inf > 0.5 denies) — they must not be excluded the way NaN is.
+    - actions: ["nan-ord-inf"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '(R.attr.aBool ? 1.0/0.0 : -1.0/0.0) > 0.5'
