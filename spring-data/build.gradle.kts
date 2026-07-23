@@ -26,6 +26,12 @@ dependencies {
     // as `<optional>true</optional>`.
     compileOnly("org.springframework.data:spring-data-jpa:3.5.1")
     compileOnly("jakarta.persistence:jakarta.persistence-api:3.2.0")
+    // Hibernate is needed only to compile MySqlDoubleCastFunctionContributor (the MySQL
+    // IEEE double-cast registration) and the adapter's classpath-guarded probe for it.
+    // `compileOnly` for the same reason as Spring Data JPA above: the consuming
+    // application provides its own Hibernate, and the adapter degrades gracefully (plain
+    // cb.toDouble casts) when Hibernate is absent at runtime.
+    compileOnly("org.hibernate.orm:hibernate-core:6.6.18.Final")
 
     testImplementation("org.springframework.data:spring-data-jpa:3.5.1")
     testImplementation("jakarta.persistence:jakarta.persistence-api:3.2.0")
@@ -75,5 +81,14 @@ tasks.test {
         ?: System.getenv("ADAPTER_TEST_MYSQL_COLLATION")
     if (mysqlCollation != null) {
         systemProperty("adapter.test.mysql.collation", mysqlCollation)
+    }
+    // The MySQL leg runs with Connector/J's default CLIENT-side prepared statements so the
+    // differential oracle pins the adapter's `cast(... as double)` rendering (see the README
+    // "MySQL: keeping arithmetic IEEE-faithful" gotcha). Set this to true to run the same
+    // leg with server-side prepared statements — both modes must pass.
+    val mysqlServerPrep = System.getProperty("adapter.test.mysql.serverPrepStmts")
+        ?: System.getenv("ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS")
+    if (mysqlServerPrep != null) {
+        systemProperty("adapter.test.mysql.serverPrepStmts", mysqlServerPrep)
     }
 }
