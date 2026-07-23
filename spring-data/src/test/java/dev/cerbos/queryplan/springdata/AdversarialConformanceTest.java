@@ -316,7 +316,8 @@ class AdversarialConformanceTest {
 
     @BeforeAll
     static void setUp() throws Exception {
-        cerbos = new GenericContainer<>("ghcr.io/cerbos/cerbos:latest")
+        // Pinned PDP image — see CerbosTestImage for the pin rationale and bump policy.
+        cerbos = new GenericContainer<>(CerbosTestImage.IMAGE)
                 .withExposedPorts(3593)
                 .withCommand("server", "--set=storage.disk.directory=/policies")
                 .withEnv("CERBOS_NO_TELEMETRY", "1")
@@ -330,6 +331,8 @@ class AdversarialConformanceTest {
             throw new UncheckedIOException(e);
         }
         cerbos.start();
+        System.out.printf("==> Adversarial-oracle Cerbos PDP image: %s (digest %s)%n",
+                CerbosTestImage.IMAGE, CerbosTestImage.resolvedDigest(cerbos));
         client = new CerbosClientBuilder(cerbos.getHost() + ":" + cerbos.getMappedPort(3593))
                 .withPlaintext().buildBlockingClient();
 
@@ -777,8 +780,10 @@ class AdversarialConformanceTest {
      * <p>This test asserts BOTH halves of the divergence — the plan kind AND the check()
      * denials — so that the moment an upstream image stops folding, the test fails with
      * explicit re-inclusion instructions instead of the coverage hole silently becoming
-     * permanent (the suite tracks {@code cerbos:latest}, so the fix would otherwise flow in
-     * unnoticed with {@code p-has} still excluded).
+     * permanent. NOTE: the suite runs against the pinned image in {@link CerbosTestImage},
+     * so this "fires when upstream fixes the fold" property is dormant between image bumps —
+     * the tripwire is re-evaluated on every deliberate bump of that pin (see the bump policy
+     * in {@code CerbosTestImage}), which is when an upstream fix would surface here.
      *
      * <p>README "Gotchas" documents the policy-author workaround:
      * {@code R.attr.aOptionalString != null} plans as a conditional {@code ne(variable, null)}

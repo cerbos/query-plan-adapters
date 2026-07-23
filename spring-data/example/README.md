@@ -11,10 +11,16 @@ is the mandatory tenant boundary, composed outside the Cerbos specification so i
 to `KIND_ALWAYS_ALLOWED`. Changing the resource policies under [`policies/`](policies/) changes
 the policy-controlled result sets without changing the app.
 
-> **Demo identity only:** the endpoints accept `user`, `role`, `tenant`, and `groups` query
-> parameters so the smoke harness can switch principals. Never copy that identity handling into
-> production. Derive all of them from authenticated, server-controlled state; otherwise a caller
-> could request `role=admin` or cross a tenant boundary.
+> [!WARNING]
+> **Demo identity only — do not copy this pattern.** The endpoints accept `user`, `role`,
+> `tenant`, and `groups` as unauthenticated query parameters so the smoke harness can switch
+> principals from `curl`. In a real application, **derive the principal from your
+> authentication layer (Spring Security, a verified JWT/OIDC token, mTLS identity), never
+> from request input**. Anything a caller can type is not an identity: here
+> `?role=admin` grants the unconditional-ALLOW admin rule and `?tenant=...` crosses the
+> tenant boundary. The correct shape is to build `Principal.newInstance(...)` from
+> authenticated, server-controlled state (e.g. `SecurityContextHolder` /
+> `Authentication`) and never read identity or roles from parameters, headers, or bodies.
 
 ## What it covers
 
@@ -129,6 +135,23 @@ Or run the complete harness:
 ```bash
 ./scripts/smoke.sh
 ```
+
+### SQL logging
+
+`src/main/resources/application.yaml` ships with the Hibernate SQL loggers commented out:
+
+```yaml
+# org.hibernate.SQL: DEBUG
+# org.hibernate.orm.jdbc.bind: TRACE
+```
+
+Uncomment them locally to watch the SQL each authorization plan turns into. Keep them off
+anywhere logs are collected: the Cerbos planner constant-folds **principal** attributes
+(emails, departments, owner ids — potentially PII) into the plan constants, the adapter
+binds those constants as JDBC parameters, and `org.hibernate.orm.jdbc.bind: TRACE` prints
+every bind value verbatim on every authorized query (e.g.
+`binding parameter [1] as [VARCHAR] - [alice@corp.com]`). The adapter library itself logs
+nothing — this is purely a logging-configuration concern.
 
 The smoke script starts the PDP and app, checks the full scenario matrix, validates both
 pages and totals for a relation-based paginated query, and checks invalid page bounds return

@@ -11,7 +11,7 @@ public sealed interface Result<T> permits Result.AlwaysAllowed, Result.AlwaysDen
      * <ul>
      *   <li>{@link AlwaysAllowed} – {@code null} predicate; Spring Data's
      *       {@code SimpleJpaRepository} treats this as "no restriction" and omits the
-     *       {@code WHERE} clause entirely (matches {@link Specification#unrestricted()}).</li>
+     *       {@code WHERE} clause entirely (matches {@code Specification.unrestricted()}).</li>
      *   <li>{@link AlwaysDenied} – always-false predicate ({@code 1=0}).</li>
      *   <li>{@link Conditional} – the wrapped Specification. The lambda is invoked fresh
      *       for every query (including Spring Data's separate COUNT pass under
