@@ -1024,6 +1024,28 @@ resourcePolicy:
         match:
           expr: 'hasIntersection(R.attr.tagNames, ["public", null])'
 
+    # ==================== in(variable, variable) ====================
+    # Attribute-in-attribute membership: the planner emits in(variable, variable) VERBATIM,
+    # member first (PDP-verified). `owner` is the explicit-null scalar convention and
+    # `tagNames` projects tags.name with NULL names as explicit null elements, so the seeds
+    # exercise every check()-verified branch: match (a9/b4 "same"/"mirror"), no match, empty
+    # collection (`x in []` is false — negation allows), null scalar vs null element
+    # (e1: `null in [null]` is TRUE), and null scalar without a null element (a4/a8:
+    # false — negation allows).
+    - actions: ["in-var-var"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.owner in R.attr.tagNames'
+
+    - actions: ["in-var-var-neg"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(R.attr.owner in R.attr.tagNames)'
+
     # ==================== depth-3 nested collection macros ====================
     # Three macro levels (categories → subCategories → labels). Pins that the single-
     # subquery-per-polarity macro translation preserves tri-state semantics through deep
