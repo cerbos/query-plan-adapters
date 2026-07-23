@@ -1262,6 +1262,15 @@ describe("known-value collections (planner unroll cliff)", () => {
         .sort();
     };
 
+    // Supported PDPs are >= 0.54, where both macros unroll at <= 10 elements and
+    // ship the value-list lambda above that. Pin the wire shape so each leg
+    // provably exercises its side of the cliff — if a future planner moves the
+    // threshold, this fails loudly instead of silently testing one shape only.
+    const expectedShape: Record<string, { unrolled: string; macro: string }> = {
+      "principal-exists": { unrolled: "or", macro: "exists" },
+      "principal-all": { unrolled: "and", macro: "all" },
+    };
+
     describe.each([9, 10, 11])("with %i-element principal collection", (size) => {
       test.each(["principal-exists", "principal-all"])(
         "produces results matching checkResources for %s",
@@ -1278,6 +1287,13 @@ describe("known-value collections (planner unroll cliff)", () => {
           });
 
           expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+          const condition = (
+            queryPlan as { condition: PlanExpressionOperand }
+          ).condition;
+          const shape = expectedShape[action];
+          expect(
+            "operator" in condition ? condition.operator : undefined
+          ).toEqual(size <= 10 ? shape?.unrolled : shape?.macro);
 
           const result = queryPlanToDrizzle({ queryPlan, mapper });
           const ids = selectIds(ensureFilter(result));

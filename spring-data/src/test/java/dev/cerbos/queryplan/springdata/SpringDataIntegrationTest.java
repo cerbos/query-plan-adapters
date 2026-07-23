@@ -1562,9 +1562,27 @@ class SpringDataIntegrationTest {
                             teams.toArray(AttributeValue[]::new)));
         }
 
+        /**
+         * Pin the wire shape each leg exercises: supported PDPs are >= 0.54, where both
+         * macros unroll at <= 10 elements ({@code or}/{@code and} chain) and ship the
+         * value-list lambda ({@code exists}/{@code all}) above that. Without this, a
+         * planner that moves the threshold would silently leave one side of the cliff
+         * untested while the row assertions stay green.
+         */
+        private void assertPlanShape(int size, String action,
+                                     String unrolledOperator, String macroOperator) {
+            String operator = plan(principalWithTeams(size), action)
+                    .getCondition()
+                    .orElseThrow(() -> new AssertionError(action + " plan has no condition"))
+                    .getExpression()
+                    .getOperator();
+            assertEquals(size <= 10 ? unrolledOperator : macroOperator, operator);
+        }
+
         @ParameterizedTest
         @ValueSource(ints = {9, 10, 11})
         void principalExistsMatchesAnyTeam(int size) {
+            assertPlanShape(size, "principal-exists", "or", "exists");
             // r1 aString = "string", r3 aString = "anotherString" — both in the teams list.
             assertEquals(List.of("1", "3"),
                     runWithPrincipalAndMapping(principalWithTeams(size),
@@ -1574,6 +1592,7 @@ class SpringDataIntegrationTest {
         @ParameterizedTest
         @ValueSource(ints = {9, 10, 11})
         void principalAllExcludesEveryTeam(int size) {
+            assertPlanShape(size, "principal-all", "and", "all");
             // r2 aString = "amIAString?" — the only row matching none of the teams.
             assertEquals(List.of("2"),
                     runWithPrincipalAndMapping(principalWithTeams(size),

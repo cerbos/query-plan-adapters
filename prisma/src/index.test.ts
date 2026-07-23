@@ -8030,6 +8030,23 @@ describe("Known-Value Collections (planner unroll cliff)", () => {
       return teams;
     };
 
+    // Supported PDPs are >= 0.54, where both macros unroll at <= 10 elements and
+    // ship the value-list lambda above that. Pin the wire shape so each leg
+    // provably exercises its side of the cliff — if a future planner moves the
+    // threshold, this fails loudly instead of silently testing one shape only.
+    const expectShape = (
+      queryPlan: PlanResourcesResponse,
+      size: number,
+      unrolledOperator: string,
+      macroOperator: string
+    ): void => {
+      const condition = (queryPlan as PlanResourcesConditionalResponse)
+        .condition;
+      expect((condition as PlanExpression).operator).toEqual(
+        size <= 10 ? unrolledOperator : macroOperator
+      );
+    };
+
     describe.each([9, 10, 11])("with %i-element principal collection", (size) => {
       test("conditional - principal-exists", async () => {
         const teams = buildTeams(size);
@@ -8040,6 +8057,7 @@ describe("Known-Value Collections (planner unroll cliff)", () => {
         });
 
         expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+        expectShape(queryPlan, size, "or", "exists");
 
         const result = queryPlanToPrisma({
           queryPlan,
@@ -8072,6 +8090,7 @@ describe("Known-Value Collections (planner unroll cliff)", () => {
         });
 
         expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+        expectShape(queryPlan, size, "and", "all");
 
         const result = queryPlanToPrisma({
           queryPlan,
