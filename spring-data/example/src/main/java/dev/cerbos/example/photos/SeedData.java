@@ -3,6 +3,8 @@ package dev.cerbos.example.photos;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;
 
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Set;
 
@@ -60,6 +62,43 @@ public class SeedData implements CommandLineRunner {
                 new Photo("p9", "globex", "globex-user", "Confidential acquisition",
                         false, true, null, 2, new PhotoDetails(800, 600), Set.of("globex"))
                         .addGrant("globex", "view", null, "globex:finance")
+        ));
+
+        // Adversarial regression seeds — isolated in their own "edge" tenant so the
+        // tenant fence keeps them invisible to every scenario in scripts/smoke.sh.
+        // Each row exists to trigger a historical adapter bug end-to-end; the pinned
+        // expectations live in scripts/smoke-edge-cases.sh and the `edge-*` rules in
+        // policies/photo.yaml.
+        Instant oldEnough = Instant.now().minus(30, ChronoUnit.DAYS);   // outside 24h window
+        Instant tooRecent = Instant.now().minus(1, ChronoUnit.HOURS);   // inside 24h window
+        photoRepository.saveAll(List.of(
+                // e1: literal "[SEC]" title prefix — must MATCH edge-bracket-title (PR #285).
+                new Photo("e1", "edge", "edge-user", "[SEC] Quarterly report", true, false,
+                        null, 3, new PhotoDetails(1000, 800), Set.of())
+                        .withCreatedAt(oldEnough),
+                // e2: class-trap title — 'S' is in the T-SQL class [SEC]; an unescaped
+                // pattern would match it on SQL Server. Must NOT match edge-bracket-title.
+                new Photo("e2", "edge", "edge-user", "Secret launch plan", false, false,
+                        null, 3, new PhotoDetails(1000, 800), Set.of())
+                        .withCreatedAt(tooRecent),
+                // e3: score = -0.6 — the exact value the pre-#274 algebraic solve produced
+                // for `score + 0.7 == 0.1`; check() DENIES it (IEEE sum != 0.1).
+                new Photo("e3", "edge", "edge-user", "Precision probe", true, false,
+                        null, 3, new PhotoDetails(1000, 800), Set.of())
+                        .withScore(-0.6)
+                        .withCreatedAt(tooRecent),
+                // e4: unrelated non-null score; allowed by edge-ieee-ne alongside e3.
+                new Photo("e4", "edge", "edge-user", "Cold archive shot", false, false,
+                        null, 3, new PhotoDetails(1000, 800), Set.of())
+                        .withScore(2.5)
+                        .withCreatedAt(oldEnough),
+                // e5/e6: retention window rows — e5 old enough, e6 too recent (PR #279).
+                new Photo("e5", "edge", "edge-user", "Retention candidate", true, false,
+                        null, 3, new PhotoDetails(1000, 800), Set.of())
+                        .withCreatedAt(oldEnough),
+                new Photo("e6", "edge", "edge-user", "Fresh upload", true, false,
+                        null, 3, new PhotoDetails(1000, 800), Set.of())
+                        .withCreatedAt(tooRecent)
         ));
 
         albumRepository.saveAll(List.of(

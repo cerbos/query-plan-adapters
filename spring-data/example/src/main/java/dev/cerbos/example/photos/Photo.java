@@ -12,6 +12,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.Table;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -45,6 +46,23 @@ public class Photo {
 
     @Column(name = "rating", nullable = false)
     private int rating;
+
+    /**
+     * Nullable IEEE-double attribute used only by the {@code edge-ieee-*} regression
+     * scenarios (see scripts/smoke-edge-cases.sh). Kept nullable so the regular fixtures
+     * are unaffected: a NULL score is UNKNOWN under SQL three-valued logic and a missing
+     * attribute is a CEL evaluation error at check() time — both sides exclude the row.
+     */
+    @Column(name = "score")
+    private Double score;
+
+    /**
+     * Photo creation instant for the {@code edge-retention} time-window scenario. Mapped as
+     * {@link Instant} because the adapter's {@code timestamp()} support compares folded
+     * RFC-3339 plan constants against {@code Instant}/{@code OffsetDateTime} columns.
+     */
+    @Column(name = "created_at")
+    private Instant createdAt;
 
     @Embedded
     private PhotoDetails details;
@@ -90,6 +108,18 @@ public class Photo {
         return this;
     }
 
+    /** Fluent setter used only by the edge-case regression fixtures. */
+    public Photo withScore(Double score) {
+        this.score = score;
+        return this;
+    }
+
+    /** Fluent setter used only by the edge-case regression fixtures. */
+    public Photo withCreatedAt(Instant createdAt) {
+        this.createdAt = createdAt;
+        return this;
+    }
+
     public String getId() { return id; }
     public String getTenantId() { return tenantId; }
     public String getOwnerId() { return ownerId; }
@@ -98,6 +128,8 @@ public class Photo {
     public boolean isArchived() { return isArchived; }
     public String getLocation() { return location; }
     public int getRating() { return rating; }
+    public Double getScore() { return score; }
+    public Instant getCreatedAt() { return createdAt; }
     public PhotoDetails getDetails() { return details; }
     public Set<String> getTags() { return tags; }
     public Set<PhotoLabel> getLabels() { return labels; }

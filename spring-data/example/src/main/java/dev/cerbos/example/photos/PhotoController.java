@@ -4,6 +4,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -94,6 +96,39 @@ public class PhotoController {
         return service.listAllowed(
                         context(user, role, tenant, groups, interests), action, minRating, pageRequest)
                 .map(PhotoView::from);
+    }
+
+    /**
+     * DELETE /photos/bulk-unsafe?user=alice&action=comment
+     *
+     * <p><strong>Intentionally-failing demonstration of the adapter's bulk-delete guard —
+     * this endpoint is expected to return 409, not delete anything.</strong> It passes the
+     * Cerbos Specification to {@code JpaSpecificationExecutor.delete(Specification)}, which
+     * the adapter forbids whenever the plan touches a Relation mapping: Hibernate's
+     * multi-table bulk delete would first clear the collection tables the correlated EXISTS
+     * subquery references, silently destroying tag/label/grant rows while deleting zero
+     * photos (PR #273). The adapter detects the bulk-delete invocation context and throws
+     * {@link UnsupportedOperationException} before any SQL runs; this endpoint surfaces that
+     * as HTTP 409 with the guard's message. The smoke harness asserts the 409 and then
+     * proves the photo and collection rows are untouched. The correct deletion pattern is
+     * {@code findAll(spec)} then {@code deleteAllById(ids)}.
+     */
+    @DeleteMapping("/bulk-unsafe")
+    public ResponseEntity<String> bulkUnsafeDelete(@RequestParam String user,
+                                                   @RequestParam(defaultValue = "user") String role,
+                                                   @RequestParam(defaultValue = "comment") String action,
+                                                   @RequestParam(defaultValue = "acme") String tenant,
+                                                   @RequestParam(defaultValue = "") String groups,
+                                                   @RequestParam(defaultValue = "") String interests) {
+        try {
+            long deleted = service.unsafeBulkDelete(
+                    context(user, role, tenant, groups, interests), action);
+            // The guard failing to fire is itself a regression — make it loud.
+            return ResponseEntity.internalServerError()
+                    .body("bulk-delete guard did not fire; rows deleted: " + deleted);
+        } catch (UnsupportedOperationException e) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(e.getMessage());
+        }
     }
 
     private static AccessContext context(String user, String role, String tenant,

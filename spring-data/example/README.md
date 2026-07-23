@@ -82,6 +82,7 @@ example/
 ├── settings.gradle.kts          # composite-build include of the adapter source
 ├── build.gradle.kts             # Spring Boot 3.5, Spring Data JPA, H2
 ├── scripts/smoke.sh             # live PDP + Boot + HTTP assertions
+├── scripts/smoke-edge-cases.sh  # full-stack regression tripwire (see "Edge-case regression scenarios")
 └── src/main/
     ├── resources/application.yaml
     └── java/dev/cerbos/example/photos/
@@ -102,7 +103,7 @@ example/
         ├── WorkspaceController.java # GET /workspaces
         ├── AccessContext.java    # shared principal/tenant construction
         ├── CerbosClientConfig.java
-        ├── SeedData.java         # nine adversarial photos across two tenants
+        ├── SeedData.java         # nine adversarial photos across two tenants + edge-regression seeds
         └── PhotosApplication.java
 ```
 
@@ -247,3 +248,46 @@ observed resource-kind set must be exactly the three intended kinds. Readiness u
 unmapped route and creates no PDP traffic; after the rejected pagination/filter requests, a valid
 `audit-sentinel` request acts as an audit flush barrier and the complete delta must contain only
 that sentinel.
+
+## Edge-case regression scenarios
+
+`./scripts/smoke-edge-cases.sh` (run in CI after `smoke.sh`) is a full-stack regression
+tripwire rather than a tutorial. Each scenario re-creates, end to end — Spring Boot app,
+live PDP, real `JpaSpecificationExecutor` against H2 — a high-severity adapter bug that has
+been fixed on `main`. Every assertion passes today and would have failed (wrong row set, or
+an HTTP 500) immediately before the corresponding fix, so a regression in any of these code
+paths breaks this harness even if unit-level coverage is ever weakened.
+
+The scenarios are deliberately quarantined from the pedagogical demo: the `edge-*` actions
+live in a clearly-delimited section at the bottom of [`policies/photo.yaml`](policies/photo.yaml),
+their fixtures (`e1`–`e6`) sit in an isolated `edge` tenant so no `smoke.sh` expectation
+changes, and some expressions (`0.0 / 0.0`, `size(title) > 4294967296`) are intentionally
+pathological probes — not policy-writing guidance.
+
+| Scenario | Pins | Historical wrong behavior |
+|---|---|---|
+| `edge-ieee-eq` / `edge-ieee-ne` | [#274](https://github.com/cerbos/query-plan-adapters/pull/274) | `eq`/`ne` over `field + constant` solved algebraically (`0.1 - 0.7`); IEEE addition does not invert, so a PDP-denied row (`score = -0.6`) was included by `eq` and excluded by `ne` |
+| `edge-nan-ordering` | [#275](https://github.com/cerbos/query-plan-adapters/pull/275) | constant `NaN` ordering used `Double.compare`'s total order, so `NaN > 0.5` was true and non-public rows leaked through the ternary's else-arm |
+| `edge-retention` | [#279](https://github.com/cerbos/query-plan-adapters/pull/279) | `timestamp(createdAt) < now() - duration("24h")` — the most common compliance shape — threw for every query (each request a 500) instead of comparing the temporal column |
+| `edge-bracket-title` | [#285](https://github.com/cerbos/query-plan-adapters/pull/285) | LIKE escaping missed SQL Server's `[...]` character class; `startsWith("[SEC]")` matched rows starting with S/E/C and missed literal `[SEC]…` rows |
+| `edge-size-huge` | [#286](https://github.com/cerbos/query-plan-adapters/pull/286) | `size(title) > 4294967296` truncated the threshold with an `(int)` cast to `0`, returning every non-empty title instead of no rows |
+| `DELETE /photos/bulk-unsafe` | [#273](https://github.com/cerbos/query-plan-adapters/pull/273) | `delete(Specification)` with a Relation-mapped predicate deleted 0 photos while silently destroying their collection rows; the adapter now throws before any SQL runs — the endpoint surfaces the guard as HTTP 409 and the harness then proves all rows survived |
+
+`DELETE /photos/bulk-unsafe` is an intentionally-failing demonstration endpoint: a 409 with
+the guard's message is its correct, asserted behavior. The safe deletion pattern is
+`findAll(spec)` followed by `deleteAllById(ids)` — see the `Result` Javadoc in the adapter.
+
+### Dialect-sensitive findings
+
+Two further fixed findings only manifest on real MySQL/SQL Server and cannot be reproduced
+on this example's H2 database, so they are deliberately not contorted into this harness:
+
+- **Collation-blind string matching** ([#272](https://github.com/cerbos/query-plan-adapters/pull/272)):
+  case-/accent-insensitive default collations make SQL match rows the PDP denies. Covered by
+  the adapter's real-database CI legs (`test-database` in `.github/workflows/spring-data.yaml`),
+  which run the differential `check()` oracle on PostgreSQL and MySQL with case-sensitive
+  schema collation; see "Database collation requirements" in the adapter README.
+- **MySQL decimal-literal arithmetic** ([#284](https://github.com/cerbos/query-plan-adapters/pull/284)):
+  Connector/J's client-side prepared statements evaluated the adapter's IEEE double
+  arithmetic in exact decimal. The MySQL CI leg runs in both prepared-statement modes to pin
+  the fix; see "MySQL: keeping arithmetic IEEE-faithful" in the adapter README.
