@@ -373,6 +373,40 @@ three-valued logic, including the places where naive translations leak under `NO
   so `!(ternary...)` cannot flip a null-condition row to included.
 - `ne` against an unsolvable string concatenation reduces to `IS NOT NULL`, not `TRUE`.
 
+### `has(...)` over-grants at the planner level — write `!= null` instead
+
+This one is an **upstream Cerbos planner issue, not an adapter bug, and it affects every
+query-plan adapter equally** (no public cerbos/cerbos issue tracks it at the time of
+writing). The planner constant-folds an attribute-presence check like
+
+```
+has(R.attr.aOptionalString)
+```
+
+to `KIND_ALWAYS_ALLOWED` — a plan that admits **every row** — even though the `check()`
+API denies resources that lack the attribute. Any adapter that translates the plan
+faithfully (as this one does) turns a `has()`-based policy into a silent authorization
+over-grant: rows whose column is `NULL` come back from `findAll(spec)` although a
+per-resource `check()` call would deny them.
+`AdversarialConformanceTest#upstreamHasFoldOverGrantTripwire` pins both halves of the
+divergence against the live PDP and fails with re-inclusion instructions the moment an
+upstream image fixes the fold.
+
+**Workaround (PDP-verified):** express presence as a null comparison instead —
+
+```
+R.attr.aOptionalString != null
+```
+
+The planner emits a conditional `ne(variable, null)` plan, which this adapter translates
+to `a_optional_string IS NOT NULL`, and `check()` agrees on every case: attribute missing
+→ deny, explicitly `null` → deny, present → allow. Guarding an existing policy with
+`has(R.attr.x) && R.attr.x != null` produces the identical (correct) plan, so it is a
+safe drop-in edit. The only semantic difference from true `has()` is the
+explicitly-`null` attribute value, which `has()` treats as *present* — for column-backed
+attributes that distinction doesn't exist, because SQL `NULL` is the only representation
+of "not set".
+
 ### Division by a column is guarded with `NULLIF` — zero divisors deny
 
 CEL double division by zero yields ±Infinity (a defined result that a comparison could

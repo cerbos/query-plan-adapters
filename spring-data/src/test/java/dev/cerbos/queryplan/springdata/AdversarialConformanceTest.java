@@ -543,6 +543,9 @@ class AdversarialConformanceTest {
             // unsupportedShapesThrow below. Known divergences excluded from the oracle run:
             //   p-has            — planner folds has(unknown attr) to KIND_ALWAYS_ALLOWED, so the
             //                      adapter returns all rows while check() denies NULL rows.
+            //                      Pinned by upstreamHasFoldOverGrantTripwire below, which fails
+            //                      loudly (with re-inclusion instructions) once upstream fixes
+            //                      the fold — never delete this exclusion without that test.
             // p-double-frac is IN the run: the adapter forces IEEE double space (CAST columns,
             // double bind parameters), so 3*0.1 == 0.3 is false in SQL exactly as in CEL.
             "p-struct", "p-not-exists-empty", "p-not-ternary-null", "p-double-frac",
@@ -639,6 +642,83 @@ class AdversarialConformanceTest {
                         + "META-INF/services FunctionContributor entry intact?)"
                 : "cerbos_ieee_double must not be registered off-MySQL — H2/PostgreSQL "
                         + "keep the cb.toDouble cast path");
+    }
+
+    /**
+     * Tripwire pinning the known UPSTREAM planner over-grant on the {@code has(...)} macro.
+     *
+     * <p>The Cerbos query planner constant-folds {@code has(R.attr.aOptionalString)} (action
+     * {@code p-has}) to {@code KIND_ALWAYS_ALLOWED} — "return every row" — even though the
+     * {@code check()} API denies resources that lack the attribute. The fold happens at the
+     * PLANNER, so every query-plan adapter is affected equally; this adapter translates the
+     * always-allowed plan faithfully. That is why {@code p-has} is excluded from the
+     * {@code adapterMatchesCheckOracle} {@code @ValueSource}: the differential comparison
+     * cannot pass while the planner itself over-grants. (No public cerbos/cerbos issue tracks
+     * the fold at the time of writing — searched 2026-07.)
+     *
+     * <p>This test asserts BOTH halves of the divergence — the plan kind AND the check()
+     * denials — so that the moment an upstream image stops folding, the test fails with
+     * explicit re-inclusion instructions instead of the coverage hole silently becoming
+     * permanent (the suite tracks {@code cerbos:latest}, so the fix would otherwise flow in
+     * unnoticed with {@code p-has} still excluded).
+     *
+     * <p>README "Gotchas" documents the policy-author workaround:
+     * {@code R.attr.aOptionalString != null} plans as a conditional {@code ne(variable, null)}
+     * that this adapter translates to {@code IS NOT NULL} (PDP-verified).
+     */
+    @Test
+    void upstreamHasFoldOverGrantTripwire() {
+        PlanResourcesResult plan =
+                client.plan(principal(), Resource.newInstance("adversarial"), "p-has");
+        List<String> allIds = SEEDS.stream().map(Seed::id).sorted().toList();
+        List<String> oracle = oracleAllowedIds("p-has");
+
+        String upstreamChanged = String.format(
+                """
+
+                UPSTREAM CHANGE DETECTED: the Cerbos planner's has() -> KIND_ALWAYS_ALLOWED \
+                over-grant no longer reproduces on the image under test.
+
+                Until now, has(R.attr.aOptionalString) (action 'p-has') planned as \
+                KIND_ALWAYS_ALLOWED while check() denied rows without the attribute — a known \
+                upstream planner fold this adapter translated faithfully into "return all \
+                rows". 'p-has' is therefore EXCLUDED from the adapterMatchesCheckOracle \
+                @ValueSource. This tripwire exists to keep that exclusion honest.
+
+                The exclusion is no longer justified. Do ALL of the following:
+                  1. Add "p-has" to the adapterMatchesCheckOracle @ValueSource and delete its
+                     exclusion note in the comment above it — the differential oracle then owns
+                     has() semantics and will catch any mistranslation of the new residual
+                     plan shape mechanically.
+                  2. Run the oracle. If the adapter cannot translate the residual shape the
+                     planner now emits for has() (fetch it with: curl -s <pdp>/api/plan/resources
+                     -d '{"principal":{"id":"u1","roles":["USER"]},"resource":{"kind":
+                     "adversarial","attr":{}},"action":"p-has"}'), implement or fail-closed
+                     route that shape before re-including.
+                  3. Update the README "Gotchas" entry on has() (the over-grant caveat and the
+                     != null workaround) to reflect the fixed planner behaviour.
+                  4. Delete this tripwire test.
+
+                Observed on this run:
+                  plan kind for 'p-has': %s (pinned while broken: KIND_ALWAYS_ALLOWED)
+                  check() allowed %d of %d seeded rows: %s
+                """,
+                plan.getRaw().getFilter().getKind(), oracle.size(), allIds.size(), oracle);
+
+        // Pinned fact 1: the planner still folds has(...) to an unconditional allow-all plan.
+        assertTrue(plan.isAlwaysAllowed(), upstreamChanged);
+        // Pinned fact 2: the check() oracle diverges from that plan — at least one seeded row
+        // (a2/a4/a8/c2 hold NULL aOptionalString) is denied while the plan admits everything.
+        assertTrue(oracle.size() < allIds.size(), upstreamChanged);
+        assertTrue(oracle.contains("a1"),
+                "sanity: check() must still allow rows whose aOptionalString is set; oracle="
+                        + oracle);
+
+        // Executable record of the over-grant itself: the adapter translates the always-allowed
+        // plan faithfully, so the filtered set is EVERY row — including the ones check() denies.
+        assertEquals(allIds, adapterFilteredIds("p-has"),
+                "the adapter is expected to translate KIND_ALWAYS_ALLOWED faithfully into all "
+                        + "rows — if this fails the adapter started second-guessing plan kinds");
     }
 
     @Test
