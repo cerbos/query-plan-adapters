@@ -2214,6 +2214,16 @@ public final class SpringDataQueryPlanAdapter {
             Operand listOperand = operands.get(0);
             Operand lambdaOperand = operands.get(1);
 
+            // A literal value-list collection arrives when the planner could not unroll a
+            // macro over a known collection: at <= 10 elements it folds exists/all into an
+            // or/and chain itself (cerbos/cerbos#2570, #2817; maxItems = 10 in the planner's
+            // struct matcher), above that the lambda ships with the folded value list as its
+            // collection operand. Apply the same fold here instead of demanding a Relation
+            // mapping that cannot exist for a literal.
+            if (listOperand.getNodeCase() == Operand.NodeCase.VALUE) {
+                return handleKnownValueCollection(op, listOperand.getValue(), lambdaOperand, scope);
+            }
+
             if (listOperand.getNodeCase() != Operand.NodeCase.VARIABLE) {
                 throw new IllegalArgumentException(op + " first operand must be a variable");
             }
@@ -2262,6 +2272,129 @@ public final class SpringDataQueryPlanAdapter {
                         cb.equal(strictMatchCountSubquery(scope, ref, bodyBuilder), 1L);
                 default -> throw new IllegalArgumentException("Unsupported collection operator: " + op);
             });
+        }
+
+        /** Operators whose second operand is a lambda that binds an iteration variable. */
+        private static final Set<String> LAMBDA_BINDING_OPERATORS =
+                Set.of("exists", "exists_one", "all", "filter", "map", "except");
+
+        /**
+         * Fold a collection macro whose collection operand is a literal value list: substitute
+         * each element into the lambda body and combine the per-element expressions with
+         * {@code or} ({@code exists}) or {@code and} ({@code all}), then translate the combined
+         * expression through the normal {@link #traverse} path — the same fold the planner
+         * itself applies to known collections of 10 or fewer elements, so the translated
+         * filter does not depend on which side of that threshold the collection lands.
+         *
+         * <p>The empty collection keeps CEL identity semantics: {@code exists} over {@code []}
+         * is false, {@code all} over {@code []} is true. Element comparisons produced by the
+         * fold flow through the standard comparison translation, so NULL columns keep their
+         * SQL-UNKNOWN (row excluded under both polarities) behavior — matching how a
+         * planner-unrolled chain of the same comparisons translates.
+         */
+        private Predicate handleKnownValueCollection(String op, Value collectionValue,
+                                                     Operand lambdaOperand, Scope scope) {
+            if (!"exists".equals(op) && !"all".equals(op)) {
+                throw new IllegalArgumentException(op
+                        + " over a literal collection value is not supported. "
+                        + "Only exists() and all() can be folded into a flat filter.");
+            }
+            if (collectionValue.getKindCase() != Value.KindCase.LIST_VALUE) {
+                throw new IllegalArgumentException(op
+                        + " over a literal collection requires a list value");
+            }
+            ParsedLambda lambda = parseLambda(lambdaOperand,
+                    op + " second operand must be a lambda",
+                    op + " over a literal collection supports single-variable lambdas only",
+                    "lambda variable must be a variable operand");
+
+            List<Value> elements = collectionValue.getListValue().getValuesList();
+            if (elements.isEmpty()) {
+                return "exists".equals(op) ? cb.disjunction() : cb.conjunction();
+            }
+
+            PlanResourcesFilter.Expression.Builder combined = PlanResourcesFilter.Expression
+                    .newBuilder()
+                    .setOperator("exists".equals(op) ? "or" : "and");
+            for (Value element : elements) {
+                combined.addOperands(
+                        substituteLambdaVariable(lambda.body(), lambda.varName(), element));
+            }
+            return traverse(Operand.newBuilder().setExpression(combined).build(), scope);
+        }
+
+        /**
+         * Substitute a lambda iteration variable with a concrete collection element inside a
+         * lambda body. A bare reference to the variable becomes the element itself; a
+         * {@code variable.path.to.field} reference drills into the element (failing closed
+         * when the path is missing — the CEL evaluation of that element would error). A nested
+         * macro whose lambda rebinds the same variable name shadows the outer variable, so
+         * substitution only descends into its collection operand.
+         */
+        private static Operand substituteLambdaVariable(Operand operand, String varName,
+                                                        Value element) {
+            switch (operand.getNodeCase()) {
+                case VARIABLE -> {
+                    String name = operand.getVariable();
+                    if (name.equals(varName)) {
+                        return Operand.newBuilder().setValue(element).build();
+                    }
+                    if (name.startsWith(varName + ".")) {
+                        return Operand.newBuilder()
+                                .setValue(resolveElementPath(name,
+                                        name.substring(varName.length() + 1), element))
+                                .build();
+                    }
+                    return operand;
+                }
+                case EXPRESSION -> {
+                    PlanResourcesFilter.Expression expr = operand.getExpression();
+                    List<Operand> ops = expr.getOperandsList();
+                    PlanResourcesFilter.Expression.Builder rebuilt = expr.toBuilder();
+                    if (LAMBDA_BINDING_OPERATORS.contains(expr.getOperator()) && ops.size() == 2
+                            && shadowsVariable(ops.get(1), varName)) {
+                        // The nested lambda rebinds our variable: substitute only in the
+                        // collection operand.
+                        rebuilt.setOperands(0,
+                                substituteLambdaVariable(ops.get(0), varName, element));
+                        return Operand.newBuilder().setExpression(rebuilt).build();
+                    }
+                    for (int i = 0; i < ops.size(); i++) {
+                        rebuilt.setOperands(i,
+                                substituteLambdaVariable(ops.get(i), varName, element));
+                    }
+                    return Operand.newBuilder().setExpression(rebuilt).build();
+                }
+                default -> {
+                    return operand;
+                }
+            }
+        }
+
+        /** True when {@code lambdaOperand} is a lambda whose iteration variable is {@code varName}. */
+        private static boolean shadowsVariable(Operand lambdaOperand, String varName) {
+            if (lambdaOperand.getNodeCase() != Operand.NodeCase.EXPRESSION
+                    || !"lambda".equals(lambdaOperand.getExpression().getOperator())) {
+                return false;
+            }
+            List<Operand> ops = lambdaOperand.getExpression().getOperandsList();
+            return ops.size() == 2
+                    && ops.get(1).getNodeCase() == Operand.NodeCase.VARIABLE
+                    && varName.equals(ops.get(1).getVariable());
+        }
+
+        /** Drill a dotted path into a struct element, failing closed on a missing field. */
+        private static Value resolveElementPath(String fullRef, String path, Value element) {
+            Value current = element;
+            for (String segment : path.split("\\.")) {
+                if (current.getKindCase() != Value.KindCase.STRUCT_VALUE
+                        || !current.getStructValue().containsFields(segment)) {
+                    throw new IllegalArgumentException("Cannot resolve \"" + fullRef
+                            + "\": collection element has no field \"" + segment + "\"");
+                }
+                current = current.getStructValue().getFieldsOrThrow(segment);
+            }
+            return current;
         }
 
         /**

@@ -127,6 +127,164 @@ function assertDefined<T>(value: T | undefined, message: string): T {
   return value;
 }
 
+// Operators whose second operand is a lambda that binds an iteration variable.
+const LAMBDA_BINDING_OPERATORS = new Set([
+  "exists",
+  "exists_one",
+  "all",
+  "filter",
+  "map",
+  "except",
+]);
+
+/**
+ * Substitute a lambda iteration variable with a concrete collection element
+ * inside a lambda body. A bare reference to the variable becomes the element
+ * itself; a `variable.path.to.field` reference drills into the element. A
+ * nested collection macro whose lambda rebinds the same variable name shadows
+ * the outer variable, so substitution only descends into its collection
+ * operand.
+ */
+function substituteLambdaVariable(
+  operand: PlanExpressionOperand,
+  variableName: string,
+  element: Value
+): PlanExpressionOperand {
+  if (isNamedOperand(operand)) {
+    if (operand.name === variableName) {
+      return { value: element };
+    }
+    if (operand.name.startsWith(`${variableName}.`)) {
+      let current: Value = element;
+      for (const segment of operand.name
+        .slice(variableName.length + 1)
+        .split(".")) {
+        if (
+          current === null ||
+          typeof current !== "object" ||
+          Array.isArray(current) ||
+          !(segment in current)
+        ) {
+          throw new Error(
+            `Cannot resolve "${operand.name}": collection element has no field "${segment}"`
+          );
+        }
+        current = current[segment] as Value;
+      }
+      return { value: current };
+    }
+    return operand;
+  }
+
+  if (isOperatorOperand(operand)) {
+    if (
+      LAMBDA_BINDING_OPERATORS.has(operand.operator) &&
+      operand.operands.length === 2
+    ) {
+      const [nestedCollection, nestedLambda] = operand.operands;
+      if (
+        nestedCollection !== undefined &&
+        nestedLambda !== undefined &&
+        isOperatorOperand(nestedLambda) &&
+        nestedLambda.operator === "lambda"
+      ) {
+        const nestedVariable = nestedLambda.operands[1];
+        if (
+          nestedVariable !== undefined &&
+          isNamedOperand(nestedVariable) &&
+          nestedVariable.name === variableName
+        ) {
+          // The nested lambda shadows our variable: substitute only in the
+          // collection operand.
+          return {
+            operator: operand.operator,
+            operands: [
+              substituteLambdaVariable(nestedCollection, variableName, element),
+              nestedLambda,
+            ],
+          };
+        }
+      }
+    }
+    return {
+      operator: operand.operator,
+      operands: operand.operands.map((o) =>
+        substituteLambdaVariable(o, variableName, element)
+      ),
+    };
+  }
+
+  return operand;
+}
+
+/**
+ * Fold a collection macro whose collection operand is a literal value list.
+ *
+ * The planner emits this shape when a known-value collection (typically a
+ * folded principal attribute) has more than 10 elements — at 10 or fewer it
+ * unrolls `exists`/`all` into an or/and chain itself (cerbos/cerbos#2570,
+ * cerbos/cerbos#2817; `maxItems = 10` in the planner's struct matcher). Apply
+ * the same fold here so the translated filter does not depend on which side of
+ * that threshold the collection lands: substitute each element into the lambda
+ * body and combine the per-element filters with OR (`exists`) or AND (`all`).
+ *
+ * An empty list yields `{OR: []}` / `{AND: []}`, which Prisma evaluates to
+ * match-nothing / match-everything — exactly CEL's `exists`/`all` semantics
+ * over an empty collection.
+ */
+function handleKnownValueCollectionOperator(
+  operator: string,
+  collection: ValueOperand,
+  lambda: PlanExpressionOperand,
+  mapper: Mapper
+): PrismaFilter {
+  if (operator !== "exists" && operator !== "all") {
+    throw new Error(
+      `${operator} over a literal collection value is not supported. ` +
+        "Only exists() and all() can be folded into a flat filter."
+    );
+  }
+
+  const elements = collection.value;
+  if (!Array.isArray(elements)) {
+    throw new Error(
+      `${operator} over a literal collection requires a list value`
+    );
+  }
+
+  if (!isOperatorOperand(lambda) || lambda.operator !== "lambda") {
+    throw new Error(
+      `Second operand of ${operator} must be a lambda expression`
+    );
+  }
+  if (lambda.operands.length !== 2) {
+    throw new Error(
+      `${operator} over a literal collection supports single-variable lambdas only`
+    );
+  }
+
+  const body = assertDefined(
+    lambda.operands[0],
+    "Lambda expression must provide a condition"
+  );
+  const variable = assertDefined(
+    lambda.operands[1],
+    "Lambda variable must have a name"
+  );
+  if (!isNamedOperand(variable)) {
+    throw new Error("Lambda variable must have a name");
+  }
+
+  const filters = elements.map((element) =>
+    buildPrismaFilterFromCerbosExpression(
+      substituteLambdaVariable(body, variable.name, element),
+      mapper
+    )
+  );
+
+  return operator === "exists" ? { OR: filters } : { AND: filters };
+}
+
 function getLeafField(path: string[]): string {
   const fieldName = path[path.length - 1];
   if (!fieldName) {
@@ -1368,6 +1526,18 @@ function handleCollectionOperator(
     operands[1],
     `${operator} requires a lambda operand`
   );
+
+  // A literal value list arrives when the planner could not unroll a macro
+  // over a known collection (more than 10 elements) — fold it here instead of
+  // requiring a relation mapping that cannot exist for a literal.
+  if (isValueOperand(collection)) {
+    return handleKnownValueCollectionOperator(
+      operator,
+      collection,
+      lambda,
+      mapper
+    );
+  }
 
   if (!isNamedOperand(collection)) {
     throw new Error(

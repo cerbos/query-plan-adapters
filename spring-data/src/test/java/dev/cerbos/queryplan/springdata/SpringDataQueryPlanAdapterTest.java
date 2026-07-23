@@ -1381,6 +1381,132 @@ class SpringDataQueryPlanAdapterTest {
     // spelled out literally here (not via the adapter constant) so this suite compiles — and
     // demonstrably FAILS — against the pre-guard adapter.
 
+    /**
+     * exists/all whose collection operand is a literal value list — the wire shape the planner
+     * emits when a known collection (e.g. a folded principal attribute) exceeds the 10-element
+     * unroll cap of cerbos/cerbos#2570/#2817. The adapter folds the macro into the same or/and
+     * chain the planner produces below the cap, so the translated filter does not depend on
+     * which side of that threshold the collection lands.
+     */
+    @Nested
+    class KnownValueCollections {
+
+        private static Value structElement(String field, String value) {
+            return Value.newBuilder().setStructValue(
+                    Struct.newBuilder().putFields(field,
+                            Value.newBuilder().setStringValue(value).build())).build();
+        }
+
+        private static Operand structListOp(String field, String... values) {
+            ListValue.Builder list = ListValue.newBuilder();
+            for (String v : values) list.addValues(structElement(field, v));
+            return Operand.newBuilder().setValue(Value.newBuilder().setListValue(list)).build();
+        }
+
+        @Test
+        void existsOverValueListMatchesAnyElement() {
+            ResourceEntity r = new ResourceEntity("kvc-exists");
+            r.setaString("alpha");
+            withResource(r, () -> {
+                assertEquals(1, runCount(exprOp("exists", listOp("alpha", "beta"),
+                        lambda("t", exprOp("eq", var("request.resource.attr.aString"), var("t"))))));
+                assertEquals(0, runCount(exprOp("exists", listOp("x", "y"),
+                        lambda("t", exprOp("eq", var("request.resource.attr.aString"), var("t"))))));
+            });
+        }
+
+        @Test
+        void allOverValueListRequiresEveryElement() {
+            ResourceEntity r = new ResourceEntity("kvc-all");
+            r.setaString("alpha");
+            withResource(r, () -> {
+                assertEquals(1, runCount(exprOp("all", listOp("x", "y"),
+                        lambda("t", exprOp("ne", var("request.resource.attr.aString"), var("t"))))));
+                assertEquals(0, runCount(exprOp("all", listOp("alpha", "y"),
+                        lambda("t", exprOp("ne", var("request.resource.attr.aString"), var("t"))))));
+            });
+        }
+
+        @Test
+        void emptyValueListKeepsCelIdentitySemantics() {
+            ResourceEntity r = new ResourceEntity("kvc-empty");
+            r.setaString("alpha");
+            withResource(r, () -> {
+                // exists over [] is false; all over [] is true.
+                assertEquals(0, runCount(exprOp("exists", listOp(),
+                        lambda("t", exprOp("eq", var("request.resource.attr.aString"), var("t"))))));
+                assertEquals(1, runCount(exprOp("all", listOp(),
+                        lambda("t", exprOp("ne", var("request.resource.attr.aString"), var("t"))))));
+            });
+        }
+
+        @Test
+        void structElementPathSubstitution() {
+            ResourceEntity r = new ResourceEntity("kvc-struct");
+            r.setaString("alpha");
+            withResource(r, () -> {
+                assertEquals(1, runCount(exprOp("exists", structListOp("name", "alpha", "beta"),
+                        lambda("t", exprOp("eq",
+                                var("request.resource.attr.aString"), var("t.name"))))));
+                assertEquals(0, runCount(exprOp("exists", structListOp("name", "x"),
+                        lambda("t", exprOp("eq",
+                                var("request.resource.attr.aString"), var("t.name"))))));
+            });
+        }
+
+        /**
+         * NULL columns keep their SQL-UNKNOWN exclusion under the fold — parity with how the
+         * equivalent planner-unrolled comparison chain translates.
+         */
+        @Test
+        void nullColumnStaysExcludedUnderFold() {
+            ResourceEntity r = new ResourceEntity("kvc-null");
+            // aOptionalString stays NULL: NULL <> 'x' and NULL = 'x' are both UNKNOWN.
+            withResource(r, () -> {
+                assertEquals(0, runCount(exprOp("all", listOp("x"),
+                        lambda("t", exprOp("ne",
+                                var("request.resource.attr.aOptionalString"), var("t"))))));
+                assertEquals(0, runCount(exprOp("exists", listOp("x"),
+                        lambda("t", exprOp("eq",
+                                var("request.resource.attr.aOptionalString"), var("t"))))));
+            });
+        }
+
+        /**
+         * A nested lambda rebinding the variable shadows it: the inner {@code t.name} must stay
+         * symbolic. An incorrect substitution would try to drill {@code .name} into the outer
+         * string element and fail translation.
+         */
+        @Test
+        void nestedLambdaShadowsOuterVariable() {
+            assertEquals(0, runCount(exprOp("exists", listOp("outer1", "outer2"),
+                    lambda("t", exprOp("exists", var("request.resource.attr.tags"),
+                            lambda("t", exprOp("eq", var("t.name"), sval("public"))))))));
+        }
+
+        @Test
+        void existsOneOverValueListFailsClosed() {
+            assertConditionThrows(exprOp("exists_one", listOp("a"),
+                    lambda("t", exprOp("eq", var("request.resource.attr.aString"), var("t")))),
+                    "exists_one over a literal collection value is not supported");
+        }
+
+        @Test
+        void nonListCollectionValueFailsClosed() {
+            assertConditionThrows(exprOp("exists", sval("not-a-list"),
+                    lambda("t", exprOp("eq", var("request.resource.attr.aString"), var("t")))),
+                    "exists over a literal collection requires a list value");
+        }
+
+        @Test
+        void missingElementFieldFailsClosed() {
+            assertConditionThrows(exprOp("exists", structListOp("name", "alpha"),
+                    lambda("t", exprOp("eq",
+                            var("request.resource.attr.aString"), var("t.missing")))),
+                    "Cannot resolve \"t.missing\"", "has no field \"missing\"");
+        }
+    }
+
     @Nested
     class MacroDepthGuard {
 
