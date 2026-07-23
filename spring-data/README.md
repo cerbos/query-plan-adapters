@@ -235,6 +235,7 @@ SQL fragments), or wait for adapter support.
 | List indexing                                   | `R.attr.tags[0] == "x"`                           | JPA collections are unordered sets — no positional access. |
 | Type casts (`int(...)` / `double(...)` / `string(...)`) | `int(R.attr.aString) > 0`                 | No portable `CAST` in Criteria; override per-dialect. |
 | `eq(map(...), [...])`                           | `R.attr.tags.map(t, t.id) == ["tag1", "tag2"]`    | Use `hasIntersection(map(...), [...])` instead. |
+| `eq`/`ne` against a list constant               | `R.attr.tags == ["a", "b"]`                       | Whole-list equality has no scalar-column translation (the plan arrives as `eq(variable, value-list)` verbatim). Map the attribute as a Relation and use `in`/`hasIntersection`, or compare elements individually. |
 
 ## Gotchas
 
