@@ -757,25 +757,28 @@ class SpringDataIntegrationTest {
         @Test
         void threeLevelNestingIsCorrelatedNotCrossJoined() {
             // categories.exists(c, c.subCategories.exists(s, s.labels.exists(l, l.name == "important")))
-            // — three relation hops, each a correlated EXISTS one level deeper than the last. This pins
-            // the generated SQL shape: a cross/cartesian join would still return rows but would wrongly
-            // pair unrelated subcategories/labels, so we assert directly on the SQL, not just the result.
+            // — three relation hops, each a correlated scoring subquery one level deeper than the
+            // last. This pins the generated SQL shape: a cross/cartesian join would still return
+            // rows but would wrongly pair unrelated subcategories/labels, so we assert directly on
+            // the SQL, not just the result.
             SqlCapture.STATEMENTS.clear();
             assertEquals(List.of("1", "3"),
                     runWithMapping("deep-nested-category-label", CATEGORIES_MAP));
 
             String sql = SqlCapture.STATEMENTS.stream()
-                    .filter(s -> s.toLowerCase().contains("exists"))
+                    .filter(s -> s.toLowerCase().startsWith("select"))
                     .reduce("", (a, b) -> a.length() >= b.length() ? a : b)
                     .toLowerCase();
-            assertFalse(sql.isEmpty(), "expected a SELECT with EXISTS to be captured");
-            // At least one correlated EXISTS per relation hop (categories -> subCategories ->
-            // labels). The tri-state macro translation re-translates each hop's body inside its
-            // unknown-element COUNT subqueries, so the total EXISTS count exceeds three — the
-            // nesting guarantee is the lower bound plus the cross-join ban and the exact result
-            // rows asserted above.
-            assertTrue(countOccurrences(sql, "exists") >= 3,
-                    "expected at least three nested EXISTS subqueries, SQL was:\n" + sql);
+            assertFalse(sql.isEmpty(), "expected the filtered SELECT to be captured");
+            // One correlated aggregate subquery per macro polarity: a depth-3 exists chain emits
+            // at most 2^3 - 1 = 7 subqueries (8 SELECT keywords with the outer query). The lower
+            // bound pins that each relation hop still gets its own correlated subquery; the upper
+            // bound is the regression tripwire against the old per-macro multi-probe translation
+            // (which emitted 39 subqueries for this action).
+            int selects = countOccurrences(sql, "select");
+            assertTrue(selects >= 4 && selects <= 8,
+                    "expected 4..8 SELECTs (three nested correlated subquery levels, one "
+                            + "subquery per polarity), got " + selects + ", SQL was:\n" + sql);
             // Correlated subqueries must not collapse into a cartesian product.
             assertFalse(sql.contains("cross join"),
                     "nested correlation degraded into a cross join, SQL was:\n" + sql);

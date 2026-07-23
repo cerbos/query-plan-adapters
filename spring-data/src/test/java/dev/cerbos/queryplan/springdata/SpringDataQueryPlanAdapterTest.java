@@ -1338,6 +1338,131 @@ class SpringDataQueryPlanAdapterTest {
         }
     }
 
+    // -- collection-macro nesting depth guard --
+    // Each nesting level multiplies the correlated-subquery count of the translated filter, so
+    // plans nested beyond the configured limit must fail loudly at translation time instead of
+    // silently emitting a filter that times out on production-sized tables. The property name is
+    // spelled out literally here (not via the adapter constant) so this suite compiles — and
+    // demonstrably FAILS — against the pre-guard adapter.
+
+    @Nested
+    class MacroDepthGuard {
+
+        private static final String DEPTH_PROPERTY = "dev.cerbos.queryplan.springdata.maxMacroDepth";
+
+        // categories → subCategories → labels → subCategories → labels → subCategories: the
+        // bidirectional many-to-many pair gives arbitrarily deep legal join chains.
+        private static final Map<String, AttributeMapping> DEEP_MAPPER = Map.of(
+                "request.resource.attr.categories", AttributeMapping.relation("categories", Map.of(
+                        "name", AttributeMapping.field("name"),
+                        "subCategories", AttributeMapping.relation("subCategories", Map.of(
+                                "name", AttributeMapping.field("name"),
+                                "labels", AttributeMapping.relation("labels", Map.of(
+                                        "name", AttributeMapping.field("name"),
+                                        "subCategories", AttributeMapping.relation("subCategories", Map.of(
+                                                "name", AttributeMapping.field("name"),
+                                                "labels", AttributeMapping.relation("labels", Map.of(
+                                                        "name", AttributeMapping.field("name"),
+                                                        "subCategories", AttributeMapping.relation(
+                                                                "subCategories", Map.of(
+                                                                        "name", AttributeMapping.field("name")
+                                                                ))
+                                                ))
+                                        ))
+                                ))
+                        ))
+                )));
+
+        private static final String[] HOPS = {"subCategories", "labels", "subCategories",
+                "labels", "subCategories"};
+
+        /** {@code categories.exists(v1, v1.subCategories.exists(v2, ... vd.name == "x"))}. */
+        private Operand existsChain(int depth) {
+            return existsLevel(1, depth, "request.resource.attr.categories");
+        }
+
+        private Operand existsLevel(int level, int depth, String collection) {
+            String v = "v" + level;
+            Operand body = level == depth
+                    ? exprOp("eq", var(v + ".name"), sval("x"))
+                    : existsLevel(level + 1, depth, v + "." + HOPS[level - 1]);
+            return exprOp("exists", var(collection), lambda(v, body));
+        }
+
+        private int runDeep(Operand cond) {
+            return runCount(cond, DEEP_MAPPER, Map.of());
+        }
+
+        @Test
+        void depthAtDefaultLimitTranslates() {
+            assertEquals(0, runDeep(existsChain(5)));
+        }
+
+        @Test
+        void depthBeyondDefaultLimitThrowsNamedError() {
+            IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                    () -> runDeep(existsChain(6)));
+            assertTrue(ex.getMessage().contains("nesting depth 6 exceeds the maximum of 5")
+                            && ex.getMessage().contains("exists")
+                            && ex.getMessage().contains(DEPTH_PROPERTY),
+                    "unexpected message: " + ex.getMessage());
+        }
+
+        @Test
+        void propertyRaisesAndLowersTheLimit() {
+            System.setProperty(DEPTH_PROPERTY, "2");
+            try {
+                assertEquals(0, runDeep(existsChain(2)));
+                IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                        () -> runDeep(existsChain(3)));
+                assertTrue(ex.getMessage().contains("nesting depth 3 exceeds the maximum of 2"),
+                        "unexpected message: " + ex.getMessage());
+                System.setProperty(DEPTH_PROPERTY, "6");
+                assertEquals(0, runDeep(existsChain(6)));
+            } finally {
+                System.clearProperty(DEPTH_PROPERTY);
+            }
+        }
+
+        @Test
+        void sizeFilterCountsAsAMacroLevel() {
+            // size(categories.filter(v1, v1.subCategories.exists(v2, ...))) — the filter level
+            // plus the exists level is depth 2, over a limit of 1.
+            Operand filtered = exprOp("filter",
+                    var("request.resource.attr.categories"),
+                    lambda("v1", existsLevel(2, 2, "v1.subCategories")));
+            Operand cond = exprOp("gt", exprOp("size", filtered), nval(0));
+            System.setProperty(DEPTH_PROPERTY, "1");
+            try {
+                IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                        () -> runDeep(cond));
+                assertTrue(ex.getMessage().contains("nesting depth 2 exceeds the maximum of 1"),
+                        "unexpected message: " + ex.getMessage());
+            } finally {
+                System.clearProperty(DEPTH_PROPERTY);
+            }
+        }
+
+        @Test
+        void invalidPropertyValuesThrowNamedErrors() {
+            System.setProperty(DEPTH_PROPERTY, "not-a-number");
+            try {
+                IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                        () -> runDeep(existsChain(1)));
+                assertTrue(ex.getMessage().contains(DEPTH_PROPERTY)
+                                && ex.getMessage().contains("positive integer"),
+                        "unexpected message: " + ex.getMessage());
+                System.setProperty(DEPTH_PROPERTY, "0");
+                IllegalArgumentException zero = assertThrows(IllegalArgumentException.class,
+                        () -> runDeep(existsChain(1)));
+                assertTrue(zero.getMessage().contains("positive integer"),
+                        "unexpected message: " + zero.getMessage());
+            } finally {
+                System.clearProperty(DEPTH_PROPERTY);
+            }
+        }
+    }
+
     // -- NULL element columns under collection macros (three-valued lambda bodies) --
     // CEL semantics (cel-spec macro definitions; a NULL element column is a missing attribute,
     // so touching it is an evaluation error → deny):
