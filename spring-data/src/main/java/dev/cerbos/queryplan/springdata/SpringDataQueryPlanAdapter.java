@@ -1476,6 +1476,34 @@ public final class SpringDataQueryPlanAdapter {
                         // IS NOT NULL, never an unconditional 1=1. eq f excludes everything.
                         return fractionalCollapse ? cb.isNotNull(path) : cb.disjunction();
                     }
+                    // cb.length(...) is Expression<Integer>, so the threshold must fit in an
+                    // int. An unguarded narrowing cast wraps thresholds outside int range
+                    // (2147483648 → −2147483648, 4294967296 → 0), silently flipping the
+                    // filter — `size(s) > 4294967296` became `LENGTH(s) > 0` (always-true
+                    // over-inclusion while check() denies every row). No string's length
+                    // leaves int range, so these comparisons fold statically instead —
+                    // CEL-faithfully: the "vacuously true" arms still require IS NOT NULL
+                    // because a NULL column is a missing attribute → CEL error → deny.
+                    if (numValue > Integer.MAX_VALUE) {
+                        // LENGTH(s) < 2^31 for every present string: eq/gt/ge can never
+                        // hold; lt/le/ne always hold for a present string.
+                        return switch (cmpOp) {
+                            case "eq", "gt", "ge" -> cb.disjunction();
+                            case "lt", "le", "ne" -> cb.isNotNull(path);
+                            default -> throw new IllegalArgumentException(
+                                    "Unsupported size comparison operator: " + cmpOp);
+                        };
+                    }
+                    if (numValue < Integer.MIN_VALUE) {
+                        // LENGTH(s) >= 0 > any threshold below int range: gt/ge/ne always
+                        // hold for a present string; eq/lt/le can never hold.
+                        return switch (cmpOp) {
+                            case "gt", "ge", "ne" -> cb.isNotNull(path);
+                            case "eq", "lt", "le" -> cb.disjunction();
+                            default -> throw new IllegalArgumentException(
+                                    "Unsupported size comparison operator: " + cmpOp);
+                        };
+                    }
                     return compareCount(cb.length(path.as(String.class)), cmpOp, (int) numValue);
                 }
                 final Operand fBody = lambdaBody;

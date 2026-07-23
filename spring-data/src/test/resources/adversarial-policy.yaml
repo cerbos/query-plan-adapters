@@ -734,6 +734,29 @@ resourcePolicy:
         match:
           expr: 'size(R.attr.tags) >= 1.5'
 
+    # ==================== size(string) thresholds outside int range ====================
+    # The planner delivers giant integer constants verbatim (PDP-verified — not folded).
+    # cb.length is Expression<Integer>, so an unguarded (int) narrowing cast wrapped these
+    # (4294967296 → 0), turning `size(aString) > 4294967296` into LENGTH(a_string) > 0 —
+    # every non-empty row returned while check() denies ALL rows (no string has 2^32
+    # chars). The fixed adapter folds statically: gt huge → always-false.
+    - actions: ["size-huge-gt"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'size(R.attr.aString) > 4294967296'
+
+    # The mirror arm: lt huge is true for every PRESENT string (check() allows all seeds —
+    # every seed has aString set, including the empty a8), while the wrapped translation
+    # LENGTH(a_string) < 0 excluded everything.
+    - actions: ["size-huge-lt"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'size(R.attr.aString) < 4294967296'
+
     # ==================== constant NaN / ±Infinity ordering ====================
     # CEL/IEEE define every ordering comparison involving NaN as false. The planner does
     # NOT fold div(0,0): the else arm below arrives as an unfolded div(0,0) subtree, so

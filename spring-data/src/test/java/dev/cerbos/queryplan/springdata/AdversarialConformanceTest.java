@@ -537,6 +537,10 @@ class AdversarialConformanceTest {
             // arithmetic + size edges: zero column divisor (NaN → deny), fractional count
             // threshold (only ordering ops compile in CEL — int vs double eq/ne does not)
             "cr-div-zero", "cr-size-frac-ge",
+            // size(string) thresholds outside int range: giant constants arrive verbatim;
+            // the old (int) narrowing cast wrapped 4294967296 to 0, so gt returned every
+            // non-empty row (check() denies all) and lt returned nothing (check() allows all)
+            "size-huge-gt", "size-huge-lt",
             // constant NaN / ±Infinity ordering: unfolded div(0,0) → NaN; every NaN
             // ordering is false in CEL/IEEE, while ±Infinity orders normally
             "nan-ord-ternary", "nan-ord-ternary-vf", "nan-ord-le", "nan-ord-inf",

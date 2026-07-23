@@ -534,6 +534,117 @@ class SpringDataQueryPlanAdapterTest {
         }
     }
 
+    // -- size(string) thresholds outside int range: cb.length is Expression<Integer>, so an
+    // unguarded (int) narrowing cast wrapped them (2147483648 → −2147483648, 4294967296 → 0),
+    // silently flipping the filter: `size(s) > 4294967296` became `LENGTH(s) > 0` — always-true
+    // over-inclusion while check() denies every row. No string's length leaves int range, so
+    // these comparisons must fold statically: gt/ge/eq huge → always-false; lt/le/ne huge →
+    // true for a PRESENT string only (NULL column = missing attribute → CEL error → deny).
+
+    @Nested
+    class HugeStringSizeThresholds {
+
+        private static final double TWO_POW_31 = 2147483648.0; // Integer.MAX_VALUE + 1
+        private static final double TWO_POW_32 = 4294967296.0;
+
+        private Operand strSize(String op, double threshold) {
+            return exprOp(op,
+                    exprOp("size", var("request.resource.attr.aOptionalString")),
+                    nval(threshold));
+        }
+
+        private ResourceEntity present() {
+            ResourceEntity r = new ResourceEntity("size-huge-1");
+            r.setaOptionalString("abc");
+            return r;
+        }
+
+        private ResourceEntity emptyString() {
+            ResourceEntity r = new ResourceEntity("size-huge-2");
+            r.setaOptionalString("");
+            return r;
+        }
+
+        private ResourceEntity nullString() {
+            ResourceEntity r = new ResourceEntity("size-huge-3");
+            r.setaOptionalString(null);
+            return r;
+        }
+
+        @Test
+        void gtGeEqAboveIntMaxAreAlwaysFalse() {
+            // No string has >= 2^31 chars, so gt/ge/eq can never hold. The wrap made
+            // gt 2^32 into LENGTH > 0 (matched every non-empty row) and gt 2^31 into
+            // LENGTH > −2^31 (matched every present row).
+            withResource(present(), () -> {
+                assertEquals(0, runCount(strSize("gt", TWO_POW_32)));
+                assertEquals(0, runCount(strSize("gt", TWO_POW_31)));
+                assertEquals(0, runCount(strSize("ge", TWO_POW_32)));
+                assertEquals(0, runCount(strSize("ge", TWO_POW_31)));
+            });
+            // eq 2^32 wrapped to LENGTH = 0, wrongly matching the empty string.
+            withResource(emptyString(), () ->
+                    assertEquals(0, runCount(strSize("eq", TWO_POW_32))));
+        }
+
+        @Test
+        void ltLeAboveIntMaxIncludePresentAndExcludeNull() {
+            // Every present string satisfies lt/le a huge threshold — but a NULL column is
+            // a missing attribute → CEL error → deny. The wrap made lt 2^32 into
+            // LENGTH < 0 (excluded everything).
+            withResource(present(), () -> withResource(nullString(), () -> {
+                assertEquals(1, runCount(strSize("lt", TWO_POW_32)));
+                assertEquals(1, runCount(strSize("le", TWO_POW_32)));
+                assertEquals(1, runCount(strSize("lt", TWO_POW_31)));
+            }));
+        }
+
+        @Test
+        void neAboveIntMaxIncludesEmptyStringAndExcludesNull() {
+            // size("") != 2^32 is TRUE in CEL. The wrap made it LENGTH <> 0, wrongly
+            // excluding the empty string; NULL must stay excluded either way.
+            withResource(emptyString(), () -> withResource(nullString(), () ->
+                    assertEquals(1, runCount(strSize("ne", TWO_POW_32)))));
+        }
+
+        @Test
+        void belowIntMinThresholdsFoldMirrored() {
+            // LENGTH(s) >= 0 > any threshold below int range: gt/ge/ne always hold for a
+            // present string (incl. the empty string — the wrap made gt −2^32 into
+            // LENGTH > 0, wrongly excluding it); eq/lt/le can never hold.
+            withResource(emptyString(), () -> withResource(nullString(), () -> {
+                assertEquals(1, runCount(strSize("gt", -TWO_POW_32)));
+                assertEquals(1, runCount(strSize("ge", -TWO_POW_32)));
+                assertEquals(1, runCount(strSize("ne", -TWO_POW_32)));
+                assertEquals(0, runCount(strSize("lt", -TWO_POW_32)));
+                assertEquals(0, runCount(strSize("le", -TWO_POW_32)));
+                assertEquals(0, runCount(strSize("eq", -TWO_POW_32)));
+            }));
+        }
+
+        @Test
+        void fractionalHugeThresholdRoundsThenFolds() {
+            // ge 2^32 + 0.5 → ceil → 4294967297 → still above int range → always-false;
+            // le → floor → 4294967296 → present strings satisfy it.
+            withResource(present(), () -> {
+                assertEquals(0, runCount(strSize("ge", TWO_POW_32 + 0.5)));
+                assertEquals(1, runCount(strSize("le", TWO_POW_32 + 0.5)));
+            });
+        }
+
+        @Test
+        void boundaryIntegerMaxStillComparesExactly() {
+            // Integer.MAX_VALUE itself is in range and must keep producing a real LENGTH
+            // comparison, not a fold.
+            withResource(present(), () -> {
+                assertEquals(0, runCount(strSize("gt", 2147483647.0)));
+                assertEquals(1, runCount(strSize("lt", 2147483647.0)));
+                assertEquals(1, runCount(strSize("le", 2147483647.0)));
+                assertEquals(0, runCount(strSize("ge", 2147483647.0)));
+            });
+        }
+    }
+
     @Test
     void existsOnNestedRelation() {
         assertEquals(0, runCount(exprOp("exists",
