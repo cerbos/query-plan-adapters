@@ -168,7 +168,16 @@ class AdversarialConformanceTest {
             // ("xA_by" wrongly matches contains("a_b") under a CI collation).
             new Seed("c1", true, "One", 11, "Set",
                     List.of(new Tag("tc1", "Public")), List.of("Finance")),
-            new Seed("c2", false, "xA_by", 12, null, List.of(), List.of())
+            new Seed("c2", false, "xA_by", 12, null, List.of(), List.of()),
+            // SQL Server '[' escaping witnesses. d1 is the literal-bracket match: every
+            // generated pattern escapes '[' as '\[', which under ESCAPE '\' must STILL be a
+            // literal '[' on H2/PostgreSQL/MySQL (like-bracket startsWith, the f2f-* actions
+            // — its aOptionalString "[SEC]" is a bracket NEEDLE through the REPLACE chain —
+            // and hier-bracket via scopeFor). d2 is the character-class trap: on SQL Server
+            // an UNESCAPED '[SEC]%' would match "Secret" (one character from {S,E,C}); it
+            // must never match on any dialect.
+            new Seed("d1", true, "[SEC]ret", 13, "[SEC]", List.of(), List.of()),
+            new Seed("d2", false, "Secret", 14, "xSECy", List.of(), List.of())
     );
 
     /** Deterministic ISO instant per seed for the timestamp probe: split around 2025-01-01. */
@@ -251,6 +260,8 @@ class AdversarialConformanceTest {
             case "b6" -> "50%.a_b";
             case "c1" -> "Dept.Eng";
             case "c2" -> "dept.eng.";
+            case "d1" -> "[env]:prod:eu"; // literal-bracket descendant for hier-bracket
+            case "d2" -> "e:prod:eu"; // SQL Server char-class trap sibling for hier-bracket
             default -> null; // a7: NULL scope — a missing attribute on the check side
         };
     }
@@ -494,7 +505,7 @@ class AdversarialConformanceTest {
     @ValueSource(strings = {
             "vf-le", "vf-ge", "vf-ne",
             "in-single", "in-empty",
-            "like-percent", "like-underscore", "like-backslash",
+            "like-percent", "like-underscore", "like-backslash", "like-bracket",
             "unicode-eq", "empty-string-eq",
             // explicit case-sensitivity witness (c1/c2 seeds also discriminate in-single,
             // like-underscore, lambda-in-principal, and p-hasintersection-map on
@@ -549,6 +560,7 @@ class AdversarialConformanceTest {
             // paths — seeds are documented on scopeFor(...)
             "hier-ancestor-ff", "hier-ancestor-cf", "hier-descendent-ff", "hier-descendent-cf",
             "hier-overlaps-ff", "hier-overlaps-cf", "hier-meta-like", "hier-meta-in",
+            "hier-bracket",
             // timestamp(field) vs folded constant instants against the Instant column
             // (created_at). ts-window is the retention-cutoff shape (now()-duration folds
             // at plan time); ts-vf pins value-first MIRRORING (an inversion bug flips the

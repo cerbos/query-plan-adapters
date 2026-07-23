@@ -1616,6 +1616,20 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         @Test
+        void descendentOfBracketPrefixMatchesLiteralBracketPaths() {
+            // '[' in a path segment: the prefix pattern must escape it as '\[' because SQL
+            // Server LIKE treats '[...]' as a character class even under ESCAPE. On H2 the
+            // escaped pattern must keep matching the LITERAL '[env]:prod' descendants and
+            // must never match 'e:prod:eu' — the row an unescaped '[env]' class would match
+            // one character of on SQL Server. The equal path pins strictness.
+            Operand cond = exprOp("descendentOf",
+                    hierarchy(var("request.resource.attr.aString"), ":"),
+                    hierarchy(sval("[env]:prod"), ":"));
+            withScopeRows(List.of("[env]:prod:eu", "e:prod:eu", "[env]:prod"), () ->
+                    assertEquals(Set.of("[env]:prod:eu"), runIds(cond)));
+        }
+
+        @Test
         void overlapsSegmentedWithField() {
             // The policy shape: hierarchy("projects:123", ":").overlaps(hierarchy(["projects", R.id]))
             //   → segment-wise: const "projects" matches, then field == "123".
@@ -2519,6 +2533,27 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         @Test
+        void bracketInNeedleColumn() {
+            // The REPLACE chain rewrites '[' to '\[' (SQL Server character-class guard);
+            // with ESCAPE '\' declared that must still be a literal '[' on H2 — the literal
+            // match keeps working and 'Secret' (the row an unescaped '[SEC]' class would
+            // match on SQL Server) never matches.
+            withResource(row("f2f-like-10", "x[SEC]y", "[SEC]"), () -> {
+                assertEquals(1, count("contains"));
+                assertEquals(0, count("startsWith"));
+            });
+            withResource(row("f2f-like-11", "[SEC]ret", "[SEC]"), () -> {
+                assertEquals(1, count("startsWith"));
+                assertEquals(1, count("contains"));
+            });
+            withResource(row("f2f-like-12", "Secret", "[SEC]"), () -> {
+                assertEquals(0, count("contains"));
+                assertEquals(0, count("startsWith"));
+                assertEquals(0, count("endsWith"));
+            });
+        }
+
+        @Test
         void nullNeedleColumnExcludesRow() {
             // CEL: missing attribute → error → deny. Guarded explicitly because some
             // dialects' CONCAT treats NULL as '' which would turn the pattern into
@@ -2537,6 +2572,68 @@ class SpringDataQueryPlanAdapterTest {
                 assertEquals(1, count("contains"));
                 assertEquals(1, count("startsWith"));
                 assertEquals(1, count("endsWith"));
+            });
+        }
+    }
+
+    // -- SQL Server '[' LIKE escaping --
+    // T-SQL LIKE treats '[...]' as a character class EVEN WITH an ESCAPE clause declared, so
+    // every '[' in a generated pattern must arrive as '\['. On H2 (and PostgreSQL/MySQL —
+    // covered by the differential oracle legs) '[' is inert and '\[' under ESCAPE '\' is
+    // still a literal '[', so the escape is a semantic no-op there: the row-behavior tests
+    // below pin that no-op, while the pattern assertions pin the escape itself (they are the
+    // tests that FAIL when the '[' rewrite is removed — H2 row behavior cannot distinguish).
+
+    @Nested
+    class BracketLikeEscaping {
+
+        @Test
+        void escapeLikeEscapesOpeningBracket() {
+            // The pattern-level contract for the constant contains/startsWith/endsWith forms
+            // AND the hierarchy prefix LIKE (both build their patterns via escapeLike).
+            assertEquals("\\[SEC]", PlanValues.escapeLike("[SEC]"));
+            assertEquals("50\\%\\[a]\\_b", PlanValues.escapeLike("50%[a]_b"));
+            // Backslash is escaped FIRST, so a literal '\[' becomes '\\' + '\['.
+            assertEquals("\\\\\\[", PlanValues.escapeLike("\\["));
+            // ']' is intentionally unescaped: it is only special on SQL Server as the closer
+            // of a character class, and no class can open once every '[' is escaped.
+            assertEquals("]", PlanValues.escapeLike("]"));
+        }
+
+        private ResourceEntity row(String id, String aString) {
+            ResourceEntity r = new ResourceEntity(id);
+            r.setaString(aString);
+            return r;
+        }
+
+        @Test
+        void bracketConstantsMatchLiterallyOnH2() {
+            // '\[' + ESCAPE stays a literal '[': literal-bracket rows keep matching.
+            withResource(row("br-1", "[SEC]ret"), () -> {
+                assertEquals(1, runCount(exprOp("startsWith",
+                        var("request.resource.attr.aString"), sval("[SEC]"))));
+                assertEquals(1, runCount(exprOp("contains",
+                        var("request.resource.attr.aString"), sval("[SEC]"))));
+            });
+            withResource(row("br-2", "a[x]b"), () ->
+                    assertEquals(1, runCount(exprOp("contains",
+                            var("request.resource.attr.aString"), sval("[x]")))));
+            withResource(row("br-3", "tail[end]"), () ->
+                    assertEquals(1, runCount(exprOp("endsWith",
+                            var("request.resource.attr.aString"), sval("[end]")))));
+        }
+
+        @Test
+        void bracketConstantsDoNotMatchClassMembers() {
+            // The SQL Server over-match scenario: 'Secret' starts with a member of the
+            // {S,E,C} class an unescaped '[SEC]' pattern denotes. It must not match on any
+            // dialect (H2 here; PostgreSQL/MySQL via the oracle legs; SQL Server by the
+            // escaped pattern).
+            withResource(row("br-4", "Secret"), () -> {
+                assertEquals(0, runCount(exprOp("startsWith",
+                        var("request.resource.attr.aString"), sval("[SEC]"))));
+                assertEquals(0, runCount(exprOp("contains",
+                        var("request.resource.attr.aString"), sval("[SEC]"))));
             });
         }
     }

@@ -1114,8 +1114,12 @@ public final class SpringDataQueryPlanAdapter {
              * {@code haystackColumn LIKE wildcards(escape(needleColumn))} — the column-to-column
              * analogue of the constant LIKE path in {@link #defaultLeaf}. The needle is data, so its
              * LIKE metacharacters are escaped dynamically with nested {@code REPLACE} (portable:
-             * H2/Postgres/MySQL/Oracle/SQL Server): {@code \} first, then {@code %} and {@code _},
-             * mirroring {@link PlanValues#escapeLike} and the same explicit {@code '\'} escape char.
+             * H2/Postgres/MySQL/Oracle/SQL Server): {@code \} first, then {@code %}, {@code _},
+             * and {@code [}, mirroring {@link PlanValues#escapeLike} and the same explicit
+             * {@code '\'} escape char. {@code [} is escaped because SQL Server LIKE treats
+             * {@code [...]} as a character class even under an ESCAPE clause; {@code \[} is a
+             * literal {@code [} on every targeted dialect ({@code ]} needs no escaping once no
+             * {@code [} can open a class — see {@link PlanValues#escapeLike}).
              *
              * <p>The explicit {@code IS NOT NULL} guard on the needle matches CEL (a missing
              * attribute is an evaluation error → deny) and also defends against dialects whose
@@ -1133,6 +1137,8 @@ public final class SpringDataQueryPlanAdapter {
                         escaped, cb.literal("%"), cb.literal("\\%"));
                 escaped = cb.function("replace", String.class,
                         escaped, cb.literal("_"), cb.literal("\\_"));
+                escaped = cb.function("replace", String.class,
+                        escaped, cb.literal("["), cb.literal("\\["));
                 jakarta.persistence.criteria.Expression<String> pattern = escaped;
                 if (leadingWildcard) {
                     pattern = cb.concat(cb.literal("%"), pattern);
