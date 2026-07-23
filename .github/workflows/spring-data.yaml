@@ -34,3 +34,31 @@ jobs:
 
       - name: Build and test
         run: gradle build --no-daemon
+
+  # Runs the full suite with AdversarialConformanceTest (the differential check()-oracle)
+  # backed by a real database via Testcontainers instead of in-memory H2. Guards against
+  # dialect divergences H2 cannot surface — most importantly the collation over-grant
+  # documented in spring-data/README.md "Database collation requirements": the MySQL leg
+  # creates its schema with utf8mb4_0900_as_cs; the suite's mixed-case seeds fail the
+  # oracle comparison on MySQL's default case-insensitive collation.
+  test-database:
+    strategy:
+      matrix:
+        database: ["postgres", "mysql"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup JDK
+        uses: actions/setup-java@ad2b38190b15e4d6bdf0c97fb4fca8412226d287 # v5.3.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+
+      - name: Build and test (${{ matrix.database }})
+        run: gradle build --no-daemon
+        env:
+          ADAPTER_TEST_DB: ${{ matrix.database }}

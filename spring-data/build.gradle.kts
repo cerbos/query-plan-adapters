@@ -33,6 +33,12 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter")
     testImplementation("org.testcontainers:testcontainers:1.21.3")
     testImplementation("org.testcontainers:junit-jupiter:1.21.3")
+    // Real-database legs for AdversarialConformanceTest (selected via ADAPTER_TEST_DB /
+    // -Dadapter.test.db): PostgreSQL and MySQL containers + their JDBC drivers.
+    testImplementation("org.testcontainers:postgresql:1.21.3")
+    testImplementation("org.testcontainers:mysql:1.21.3")
+    testRuntimeOnly("org.postgresql:postgresql:42.7.7")
+    testRuntimeOnly("com.mysql:mysql-connector-j:9.3.0")
     testImplementation("org.hibernate.orm:hibernate-core:6.6.18.Final")
     testImplementation("com.h2database:h2:2.3.232")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
@@ -55,5 +61,19 @@ tasks.test {
     }
     if (cerbosPort != null) {
         environment("CERBOS_PORT", cerbosPort)
+    }
+    // Select the database backing AdversarialConformanceTest: h2 (default), postgres, or
+    // mysql. The MySQL leg creates its schema with a case-sensitive collation by default
+    // (utf8mb4_0900_as_cs); override adapter.test.mysql.collation to reproduce the
+    // over-grant on MySQL's default utf8mb4_0900_ai_ci — see the README
+    // "Database collation requirements" section.
+    val adapterTestDb = System.getProperty("adapter.test.db") ?: System.getenv("ADAPTER_TEST_DB")
+    if (adapterTestDb != null) {
+        systemProperty("adapter.test.db", adapterTestDb)
+    }
+    val mysqlCollation = System.getProperty("adapter.test.mysql.collation")
+        ?: System.getenv("ADAPTER_TEST_MYSQL_COLLATION")
+    if (mysqlCollation != null) {
+        systemProperty("adapter.test.mysql.collation", mysqlCollation)
     }
 }
