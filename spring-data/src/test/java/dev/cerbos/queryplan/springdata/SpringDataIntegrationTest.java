@@ -28,6 +28,8 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -1533,6 +1535,49 @@ class SpringDataIntegrationTest {
                 cleanup.getTransaction().commit();
                 cleanup.close();
             }
+        }
+    }
+
+    // -- known-value principal collections across the planner's 10-item unroll cliff --
+
+    /**
+     * {@code P.attr.teams} is folded to a known value at plan time, so the planner unrolls
+     * {@code principal-exists}/{@code principal-all} into an or/and chain at <= 10 elements
+     * (cerbos/cerbos#2570, #2817) and ships the lambda with a literal value-list collection
+     * above that. These tests straddle the cliff (9/10/11 elements) so both wire shapes stay
+     * exercised against the pinned PDP — and keep returning identical row sets.
+     */
+    @Nested
+    class KnownValuePrincipalCollections {
+
+        private Principal principalWithTeams(int size) {
+            List<AttributeValue> teams = new java.util.ArrayList<>(
+                    List.of(AttributeValue.stringValue("string"),
+                            AttributeValue.stringValue("anotherString")));
+            while (teams.size() < size) {
+                teams.add(AttributeValue.stringValue("filler-" + teams.size()));
+            }
+            return Principal.newInstance("user1", "USER")
+                    .withAttribute("teams", AttributeValue.listValue(
+                            teams.toArray(AttributeValue[]::new)));
+        }
+
+        @ParameterizedTest
+        @ValueSource(ints = {9, 10, 11})
+        void principalExistsMatchesAnyTeam(int size) {
+            // r1 aString = "string", r3 aString = "anotherString" — both in the teams list.
+            assertEquals(List.of("1", "3"),
+                    runWithPrincipalAndMapping(principalWithTeams(size),
+                            "principal-exists", FIELD_MAP));
+        }
+
+        @ParameterizedTest
+        @ValueSource(ints = {9, 10, 11})
+        void principalAllExcludesEveryTeam(int size) {
+            // r2 aString = "amIAString?" — the only row matching none of the teams.
+            assertEquals(List.of("2"),
+                    runWithPrincipalAndMapping(principalWithTeams(size),
+                            "principal-all", FIELD_MAP));
         }
     }
 }
