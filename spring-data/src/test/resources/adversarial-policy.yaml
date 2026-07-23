@@ -368,6 +368,36 @@ resourcePolicy:
         match:
           expr: 'R.attr.aNumber + 1.0 > R.attr.aNumber * 2.0'
 
+    # -- IEEE add-solve probes: eq/ne over field + FRACTIONAL constant. An algebraic solve
+    # computes 0.1 - 0.7 = exactly -0.6 in Java, but IEEE subtraction does not invert IEEE
+    # addition: check(aDouble=-0.6) DENIES eq because -0.6 + 0.7 == 0.09999999999999998 !=
+    # 0.1 (and ALLOWS ne). The a1 seed holds aDouble=-0.6 so a pre-solved `a_double = -0.6`
+    # filter diverges from the oracle in both directions; the adapter must lower these to
+    # SQL-side double arithmetic like the ordering operators.
+    - actions: ["arith-add-eq-frac"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aDouble + 0.7 == 0.1'
+
+    - actions: ["arith-add-ne-frac"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aDouble + 0.7 != 0.1'
+
+    # Exactly-representable witness: 0.25 + 0.5 == 0.75 IS exact in binary floating point,
+    # so the a2 seed (aDouble=0.25) must be INCLUDED — pins that the SQL lowering of eq is
+    # not just always-false.
+    - actions: ["arith-add-eq-frac-exact"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aDouble + 0.5 == 0.75'
+
     # ==================== clean-room probes (coverage gap hunt) ====================
 
     # -- GROUP A: compositions claimed-supported but unproven e2e --
