@@ -41,10 +41,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Unit tests that exercise the adapter without a live Cerbos PDP. They build protobuf operands
- * directly and verify the produced Specification by executing it against an empty H2 schema —
- * Hibernate translates to SQL, which catches mapping/type errors. We assert via empty result
- * lists (the schema is empty), so the tests really check that no exception is thrown and the
- * query compiles correctly.
+ * directly and verify the produced Specification by executing it against an H2 schema —
+ * Hibernate translates to SQL, which catches mapping/type errors. Tests whose names promise row
+ * semantics seed rows and assert row identities; the remainder run against an empty table and
+ * check that translation succeeds (or throws the pinned error).
  */
 class SpringDataQueryPlanAdapterTest {
 
@@ -1326,69 +1326,233 @@ class SpringDataQueryPlanAdapterTest {
             return exprOp("list", segs);
         }
 
+        /**
+         * The standard scope fixture, chosen so a correct translation and every plausible
+         * regression return DIFFERENT row sets:
+         * <ul>
+         *   <li>{@code "a:b"} — equal to the ancestor constant (strict-vs-inclusive
+         *       discriminator: strict operators must NOT match the equal path),</li>
+         *   <li>{@code "a:b:c"} — equal to the descendant constant (off-by-one strict-prefix
+         *       discriminator: an IN list wrongly including the full path would match it),</li>
+         *   <li>{@code "a:bb:c"} — shares the STRING prefix {@code "a:b"} but not the PATH
+         *       prefix (separator-mishandling discriminator: {@code LIKE 'a:b%'} without the
+         *       trailing delimiter would match it),</li>
+         *   <li>{@code "a:b:c:d"} — multi-level descendant,</li>
+         *   <li>{@code "x:y"} — unrelated control.</li>
+         * </ul>
+         * Verified against a live PDP (Cerbos 0.54.0): {@code check()} treats
+         * ancestorOf/descendentOf as STRICT (the equal path is denied) and overlaps as
+         * inclusive; sibling string prefixes are denied.
+         */
+        private static final List<String> SCOPES =
+                List.of("a", "a:b", "a:b:c", "a:b:c:d", "a:bb:c", "x:y");
+
+        /**
+         * Seed one row per path — the row's ID doubles as its {@code aString} scope path —
+         * run {@code body}, then delete the rows. Row-identity assertions then read
+         * naturally: the expected set IS the set of matching paths.
+         */
+        private void withScopeRows(List<String> paths, Runnable body) {
+            EntityManager em = emf.createEntityManager();
+            em.getTransaction().begin();
+            for (String path : paths) {
+                ResourceEntity r = new ResourceEntity(path);
+                r.setaString(path);
+                em.persist(r);
+            }
+            em.getTransaction().commit();
+            em.close();
+            try {
+                body.run();
+            } finally {
+                EntityManager cleanup = emf.createEntityManager();
+                cleanup.getTransaction().begin();
+                for (String path : paths) {
+                    ResourceEntity managed = cleanup.find(ResourceEntity.class, path);
+                    if (managed != null) {
+                        cleanup.remove(managed);
+                    }
+                }
+                cleanup.getTransaction().commit();
+                cleanup.close();
+            }
+        }
+
+        /** Translate {@code condition}, run it, and return the matched row IDs (= scope paths). */
+        private Set<String> runIds(Operand condition) {
+            PlanResourcesResponse resp =
+                    buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+            Result<ResourceEntity> result =
+                    SpringDataQueryPlanAdapter.toSpecification(resp, MAPPER, Map.of());
+            assertInstanceOf(Result.Conditional.class, result);
+            Specification<ResourceEntity> spec =
+                    ((Result.Conditional<ResourceEntity>) result).specification();
+            EntityManager em = emf.createEntityManager();
+            try {
+                CriteriaBuilder cb = em.getCriteriaBuilder();
+                CriteriaQuery<String> cq = cb.createQuery(String.class);
+                Root<ResourceEntity> root = cq.from(ResourceEntity.class);
+                cq.select(root.get("id"));
+                Predicate p = spec.toPredicate(root, cq, cb);
+                if (p != null) {
+                    cq.where(p);
+                }
+                return Set.copyOf(em.createQuery(cq).getResultList());
+            } finally {
+                em.close();
+            }
+        }
+
         @Test
         void ancestorOfConstantPrefixOfField() {
-            // ancestorOf(hierarchy("a:b", ":"), hierarchy(field, ":")) → field LIKE 'a:b:%'
+            // ancestorOf(hierarchy("a:b", ":"), hierarchy(field, ":")) → field LIKE 'a:b:%' —
+            // strict descendants only: NOT the equal path "a:b", NOT the string-prefix
+            // sibling "a:bb:c" (the trailing delimiter in the pattern excludes it).
             Operand cond = exprOp("ancestorOf",
                     hierarchy(sval("a:b"), ":"),
                     hierarchy(var("request.resource.attr.aString"), ":"));
-            assertEquals(0, runCount(cond));
+            withScopeRows(SCOPES, () ->
+                    assertEquals(Set.of("a:b:c", "a:b:c:d"), runIds(cond)));
         }
 
         @Test
         void ancestorOfFieldPrefixOfConstant() {
             // ancestorOf(hierarchy(field, ":"), hierarchy("a:b:c", ":")) → field IN ('a', 'a:b')
+            // — the strict-prefix IN list. An off-by-one regression including the full path
+            // would wrongly add the "a:b:c" row (a path is not its own strict ancestor).
             Operand cond = exprOp("ancestorOf",
                     hierarchy(var("request.resource.attr.aString"), ":"),
                     hierarchy(sval("a:b:c"), ":"));
-            assertEquals(0, runCount(cond));
+            withScopeRows(SCOPES, () ->
+                    assertEquals(Set.of("a", "a:b"), runIds(cond)));
         }
 
         @Test
         void descendentOfFieldUnderConstant() {
-            // descendentOf(hierarchy(field, ":"), hierarchy("a:b", ":")) → field LIKE 'a:b:%'
+            // descendentOf(hierarchy(field, ":"), hierarchy("a:b", ":")) → field LIKE 'a:b:%'.
+            // Same discriminators as ancestorOfConstantPrefixOfField (mirrored operator).
             Operand cond = exprOp("descendentOf",
                     hierarchy(var("request.resource.attr.aString"), ":"),
                     hierarchy(sval("a:b"), ":"));
-            assertEquals(0, runCount(cond));
+            withScopeRows(SCOPES, () ->
+                    assertEquals(Set.of("a:b:c", "a:b:c:d"), runIds(cond)));
+        }
+
+        @Test
+        void descendentOfConstantUnderField() {
+            // Constant-first operand order: descendentOf(hierarchy("a:b:c", ":"),
+            // hierarchy(field, ":")) — the FIELD is the ancestor side, routing to the
+            // strict-prefix IN-list branch: field IN ('a', 'a:b').
+            Operand cond = exprOp("descendentOf",
+                    hierarchy(sval("a:b:c"), ":"),
+                    hierarchy(var("request.resource.attr.aString"), ":"));
+            withScopeRows(SCOPES, () ->
+                    assertEquals(Set.of("a", "a:b"), runIds(cond)));
         }
 
         @Test
         void overlapsFieldHierarchyWithConstant() {
             // overlaps(hierarchy(field, ":"), hierarchy("a:b", ":"))
-            //   → field IN ('a') OR field = 'a:b' OR field LIKE 'a:b:%'
+            //   → field IN ('a') OR field = 'a:b' OR field LIKE 'a:b:%' — inclusive in both
+            // directions (ancestors, the equal path, and descendants), but never the
+            // string-prefix sibling "a:bb:c" or the unrelated "x:y".
             Operand cond = exprOp("overlaps",
                     hierarchy(var("request.resource.attr.aString"), ":"),
                     hierarchy(sval("a:b"), ":"));
-            assertEquals(0, runCount(cond));
+            withScopeRows(SCOPES, () ->
+                    assertEquals(Set.of("a", "a:b", "a:b:c", "a:b:c:d"), runIds(cond)));
+        }
+
+        @Test
+        void overlapsConstantHierarchyWithField() {
+            // Constant-first operand order: overlaps is symmetric, so the same union must
+            // come back with the operands mirrored.
+            Operand cond = exprOp("overlaps",
+                    hierarchy(sval("a:b"), ":"),
+                    hierarchy(var("request.resource.attr.aString"), ":"));
+            withScopeRows(SCOPES, () ->
+                    assertEquals(Set.of("a", "a:b", "a:b:c", "a:b:c:d"), runIds(cond)));
+        }
+
+        @Test
+        void ancestorOfSingleSegmentConstantMatchesNothing() {
+            // ancestorOf(field, "a") — a single-segment path has NO strict ancestors, so the
+            // translation is always-false: even the row whose scope is exactly "a" must not
+            // match (a path is not its own ancestor).
+            Operand cond = exprOp("ancestorOf",
+                    hierarchy(var("request.resource.attr.aString"), ":"),
+                    hierarchy(sval("a"), ":"));
+            withScopeRows(SCOPES, () ->
+                    assertEquals(Set.of(), runIds(cond)));
+        }
+
+        @Test
+        void descendentOfSingleSegmentConstant() {
+            // descendentOf(field, "a") → field LIKE 'a:%': every path under the root —
+            // including the sibling branch "a:bb:c" (a genuine descendant of "a") — but not
+            // the root itself and not "x:y".
+            Operand cond = exprOp("descendentOf",
+                    hierarchy(var("request.resource.attr.aString"), ":"),
+                    hierarchy(sval("a"), ":"));
+            withScopeRows(SCOPES, () ->
+                    assertEquals(Set.of("a:b", "a:b:c", "a:b:c:d", "a:bb:c"), runIds(cond)));
+        }
+
+        @Test
+        void ancestorOfMetacharacterSegments() {
+            // Field-first with LIKE metacharacters in the constant path: the strict-prefix
+            // IN list ('50%', '50%:a_b') compares by equality — no pattern matching, so the
+            // '50x'/'50_' rows must not match.
+            Operand cond = exprOp("ancestorOf",
+                    hierarchy(var("request.resource.attr.aString"), ":"),
+                    hierarchy(sval("50%:a_b:x"), ":"));
+            withScopeRows(List.of("50%", "50%:a_b", "50x", "50_", "50%:a_b:x"), () ->
+                    assertEquals(Set.of("50%", "50%:a_b"), runIds(cond)));
+        }
+
+        @Test
+        void descendentOfMetacharacterPrefixIsEscaped() {
+            // Constant-first LIKE branch: the prefix '50%:a_b:' must be escaped so '%' and
+            // '_' are literals. Unescaped, LIKE '50%:a_b:%' would match the '50x:a_b:y'
+            // (via %) and '50%:aXb:y' (via _) traps; the equal path '50%:a_b' pins strictness.
+            Operand cond = exprOp("descendentOf",
+                    hierarchy(var("request.resource.attr.aString"), ":"),
+                    hierarchy(sval("50%:a_b"), ":"));
+            withScopeRows(List.of("50%:a_b:y", "50x:a_b:y", "50%:aXb:y", "50%:a_b"), () ->
+                    assertEquals(Set.of("50%:a_b:y"), runIds(cond)));
         }
 
         @Test
         void overlapsSegmentedWithField() {
             // The policy shape: hierarchy("projects:123", ":").overlaps(hierarchy(["projects", R.id]))
-            //   → segment-wise: const "projects" matches, then field == "123"
+            //   → segment-wise: const "projects" matches, then field == "123".
             Operand cond = exprOp("overlaps",
                     hierarchy(sval("projects:123"), ":"),
                     hierarchy(segList(sval("projects"), var("request.resource.attr.aString"))));
-            assertEquals(0, runCount(cond));
+            withScopeRows(List.of("123", "456", "projects"), () ->
+                    assertEquals(Set.of("123"), runIds(cond)));
         }
 
         @Test
         void overlapsConstantsMatchingPrefixIsAlwaysTrue() {
-            // overlaps("a", "a:b") — "a" is a prefix of "a:b", all constant → unconditionally true.
+            // overlaps("a", "a:b") — "a" is a prefix of "a:b", all constant → unconditionally
+            // true: EVERY seeded row must come back (a regression to always-false returns none).
             Operand cond = exprOp("overlaps",
                     hierarchy(sval("a"), ":"),
                     hierarchy(sval("a:b"), ":"));
-            assertEquals(0, runCount(cond));
+            withScopeRows(SCOPES, () ->
+                    assertEquals(Set.copyOf(SCOPES), runIds(cond)));
         }
 
         @Test
         void ancestorOfConstantsSatisfied() {
-            // ancestorOf("a", "a:b") — satisfied by constants alone → unconditionally true.
+            // ancestorOf("a", "a:b") — satisfied by constants alone → unconditionally true:
+            // every seeded row comes back regardless of its own scope value.
             Operand cond = exprOp("ancestorOf",
                     hierarchy(sval("a"), ":"),
                     hierarchy(sval("a:b"), ":"));
-            assertEquals(0, runCount(cond));
+            withScopeRows(SCOPES, () ->
+                    assertEquals(Set.copyOf(SCOPES), runIds(cond)));
 
             // A trailing delimiter is a real (empty) segment: "a:b:" splits to ["a","b",""],
             // so "a:b" is still a strict prefix. If splitLiteral dropped trailing empties this
@@ -1396,7 +1560,8 @@ class SpringDataQueryPlanAdapterTest {
             Operand trailing = exprOp("ancestorOf",
                     hierarchy(sval("a:b"), ":"),
                     hierarchy(sval("a:b:"), ":"));
-            assertEquals(0, runCount(trailing));
+            withScopeRows(SCOPES, () ->
+                    assertEquals(Set.copyOf(SCOPES), runIds(trailing)));
         }
 
         @Test

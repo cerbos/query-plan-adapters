@@ -80,6 +80,8 @@ class AdversarialConformanceTest {
             Map.entry("request.resource.attr.aOptionalString", AttributeMapping.field("aOptionalString")),
             // ISO-date string column + flattened struct member for the p-* probes
             Map.entry("request.resource.attr.createdBy", AttributeMapping.field("createdBy")),
+            // Delimited hierarchy path column for the hier-* actions
+            Map.entry("request.resource.attr.scope", AttributeMapping.field("scope")),
             Map.entry("request.resource.attr.obj.inner", AttributeMapping.field("aString")),
             Map.entry("request.resource.attr.tags", AttributeMapping.relation("tags", Map.of(
                     "id", AttributeMapping.field("id"),
@@ -192,6 +194,40 @@ class AdversarialConformanceTest {
         };
     }
 
+    /**
+     * Deterministic hierarchy path per seed for the {@code hier-*} actions. The paths
+     * triangulate the translator's branches: strict-prefix IN lists (ancestor-side fields),
+     * prefix LIKE (descendant-side fields), the EQUAL path (ancestorOf/descendentOf are
+     * strict — verified against a live PDP — while overlaps is inclusive), sibling STRING
+     * prefixes that are not PATH prefixes ({@code "dept.engineering"},
+     * {@code "dept.eng.platform2"}), LIKE metacharacters in segments (b2 is the
+     * unescaped-{@code %} trap, b3 the unescaped-{@code _} trap, b4 the equal-path
+     * strictness trap for the colon-delimited metachar actions), a trailing-delimiter empty
+     * segment (c2), a case variant for the collation legs (c1), and a NULL (a7: missing
+     * attribute → CEL error → deny on the check side vs SQL NULL → excluded on the SQL side).
+     */
+    private static String scopeFor(Seed s) {
+        return switch (s.id()) {
+            case "a1" -> "dept";
+            case "a2" -> "dept.eng";
+            case "a3" -> "dept.eng.platform";
+            case "a4" -> "dept.eng.platform.obs";
+            case "a5" -> "dept.engineering";
+            case "a6" -> "dept.sales";
+            case "a8" -> "";
+            case "a9" -> "50%";
+            case "b1" -> "50%:a_b:x";
+            case "b2" -> "50x:a_b:y";
+            case "b3" -> "50%:aXb:y";
+            case "b4" -> "50%:a_b";
+            case "b5" -> "dept.eng.platform2";
+            case "b6" -> "50%.a_b";
+            case "c1" -> "Dept.Eng";
+            case "c2" -> "dept.eng.";
+            default -> null; // a7: NULL scope — a missing attribute on the check side
+        };
+    }
+
     private static GenericContainer<?> cerbos;
     private static CerbosBlockingClient client;
     private static EntityManagerFactory emf;
@@ -301,6 +337,7 @@ class AdversarialConformanceTest {
             r.setaDouble(doubleFor(s));
             r.setaOptionalString(s.aOptionalString());
             r.setCreatedBy(isoFor(s));
+            r.setScope(scopeFor(s));
             for (Tag tag : s.tags()) {
                 r.addTag(tag.id(), tag.name());
             }
@@ -356,6 +393,9 @@ class AdversarialConformanceTest {
         }
         if (doubleFor(s) != null) {
             r = r.withAttribute("aDouble", AttributeValue.doubleValue(doubleFor(s)));
+        }
+        if (scopeFor(s) != null) {
+            r = r.withAttribute("scope", AttributeValue.stringValue(scopeFor(s)));
         }
         // mainCategory mirrors the row's single category as ONE nested object (the seeder
         // creates at most one category per seed), so direct dotted-chain CEL expressions
@@ -470,6 +510,12 @@ class AdversarialConformanceTest {
             // multi-hop relation chains via DIRECT dotted syntax (W1) and a root relation
             // subquery anchored from inside a lambda body (W2)
             "w1-exists-chain", "w1-size-chain", "w1-in-chain", "w2-outer-relation",
+            // hierarchy operators: both operand orders per operator (field-first ancestorOf
+            // and constant-first descendentOf route to the strict-prefix IN-list branch;
+            // the mirrored orders route to the prefix-LIKE branch) plus LIKE-metacharacter
+            // paths — seeds are documented on scopeFor(...)
+            "hier-ancestor-ff", "hier-ancestor-cf", "hier-descendent-ff", "hier-descendent-cf",
+            "hier-overlaps-ff", "hier-overlaps-cf", "hier-meta-like", "hier-meta-in",
     })
     void adapterMatchesCheckOracle(String action) {
         List<String> oracle = oracleAllowedIds(action);
