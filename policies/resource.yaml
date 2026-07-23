@@ -457,6 +457,29 @@ resourcePolicy:
         match:
           expr: R.attr.tags.all(tag, tag.name == "public")
 
+    # Principal-collection macros: P.attr.* is always folded to a known value at plan
+    # time, so the planner unrolls these to or/and chains when the collection has <= 10
+    # elements (cerbos/cerbos#2570 exists, since 0.45; cerbos/cerbos#2817 all, since
+    # 0.54) and emits the lambda with a literal value-list collection when it has more.
+    # Adapter tests exercise both sides of that 10-item cliff (9/10/11 elements).
+    - actions:
+        - "principal-exists"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: P.attr.teams.exists(t, R.attr.aString == t)
+
+    - actions:
+        - "principal-all"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: P.attr.teams.all(t, R.attr.aString != t)
+
     - actions:
         - "filter"
       effect: EFFECT_ALLOW
