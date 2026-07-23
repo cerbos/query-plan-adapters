@@ -106,3 +106,10 @@ jobs:
 
       - name: Run smoke test
         run: ./example/scripts/smoke.sh
+
+      # Full-stack regression tripwire: every scenario pins a historical adapter bug
+      # (PRs #273, #274, #275, #279, #285, #286) that would have returned a different
+      # row set — or an HTTP 500 — before its fix. See "Edge-case regression
+      # scenarios" in example/README.md.
+      - name: Run edge-case regression smoke test
+        run: ./example/scripts/smoke-edge-cases.sh

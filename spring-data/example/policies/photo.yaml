@@ -193,3 +193,81 @@ resourcePolicy:
         - "no-group-grant-safe"
       effect: EFFECT_ALLOW
       roles: ["admin"]
+
+    # ------------------------------------------------------------------------
+    # Edge-case regression scenarios
+    #
+    # Each `edge-*` action below pins one historical adapter bug at the
+    # full-stack level (Spring Boot app + live PDP + real repository). They are
+    # exercised only by the dedicated "edge"-tenant fixtures in SeedData.java
+    # and asserted by scripts/smoke-edge-cases.sh — see "Edge-case regression
+    # scenarios" in the example README. Some expressions are deliberately
+    # pathological (labeled inline); they are probes, not policy-writing
+    # recommendations.
+    # ------------------------------------------------------------------------
+
+    # Pins PR #274: eq over (field + constant) used an algebraic solve
+    # (0.1 - 0.7 = -0.6) that IEEE addition does not invert. check() denies
+    # score = -0.6 (-0.6 + 0.7 == 0.09999999999999998, not 0.1) but the old
+    # adapter emitted `WHERE score = -0.6` and INCLUDED that row. No double
+    # satisfies this equation, so the correct result set is empty.
+    - actions: ["edge-ieee-eq"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          expr: request.resource.attr.score + 0.7 == 0.1
+
+    # Pins PR #274 (ne direction): the old solve emitted `WHERE score != -0.6`,
+    # wrongly EXCLUDING the score = -0.6 row that check() allows here.
+    - actions: ["edge-ieee-ne"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          expr: request.resource.attr.score + 0.7 != 0.1
+
+    # Pins PR #275: ordering against a constant NaN used Double.compare (a
+    # total order ranking NaN above every number), so the NaN else-arm of this
+    # ternary collapsed to always-true and non-public rows leaked through.
+    # CEL/IEEE define every NaN ordering as false. 0.0/0.0 is a deliberate
+    # NaN-producing probe.
+    - actions: ["edge-nan-ordering"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          expr: '(request.resource.attr.public ? 1.0 : 0.0 / 0.0) > 0.5'
+
+    # Pins PR #279: the most common compliance shape — a retention/time-window
+    # rule. The planner folds `now() - duration(...)` to a constant instant;
+    # before the fix the adapter threw for every query of this action (each
+    # request was a 500 instead of returning the older-than-24h rows).
+    - actions: ["edge-retention"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          expr: timestamp(request.resource.attr.createdAt) < now() - duration("24h")
+
+    # Pins PR #285: LIKE escaping must cover SQL Server's `[...]` character
+    # class. The escaped pattern must keep matching a literal "[SEC]" prefix
+    # (and never match the "Secret..." trap row, whose first character is in
+    # the class {S,E,C}).
+    - actions: ["edge-bracket-title"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          expr: request.resource.attr.title.startsWith("[SEC]")
+
+    # Pins PR #286: size() thresholds >= 2^31 were truncated by an (int) cast —
+    # 4294967296 wrapped to 0 and `LENGTH(title) > 0` returned every non-empty
+    # title. check() denies every row, so the correct result set is empty.
+    # 4294967296 is a deliberately pathological regression probe.
+    - actions: ["edge-size-huge"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          expr: size(request.resource.attr.title) > 4294967296

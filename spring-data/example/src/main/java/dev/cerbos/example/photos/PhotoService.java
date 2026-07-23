@@ -32,6 +32,11 @@ public class PhotoService {
             Map.entry("request.resource.attr.title", AttributeMapping.field("title")),
             Map.entry("request.resource.attr.location", AttributeMapping.field("location")),
             Map.entry("request.resource.attr.rating", AttributeMapping.field("rating")),
+            // Edge-case regression scenarios (scripts/smoke-edge-cases.sh): a nullable
+            // double for the IEEE arithmetic probes and an Instant column for the
+            // timestamp()/retention-window rule.
+            Map.entry("request.resource.attr.score", AttributeMapping.field("score")),
+            Map.entry("request.resource.attr.createdAt", AttributeMapping.field("createdAt")),
             Map.entry("request.resource.attr.metadata.width", AttributeMapping.field("details.pixelWidth")),
             Map.entry("request.resource.attr.tags", AttributeMapping.relation("tags")),
             Map.entry("request.resource.attr.labels", AttributeMapping.relation("labels", Map.of(
@@ -62,6 +67,22 @@ public class PhotoService {
     public Page<Photo> listAllowed(AccessContext context, String action, Integer minRating,
                                    Pageable pageable) {
         return repository.findAll(specification(context, action, minRating), pageable);
+    }
+
+    /**
+     * Deliberately passes the Cerbos Specification to
+     * {@code JpaSpecificationExecutor.delete(Specification)} — the one repository operation
+     * the adapter forbids. Whenever the plan touches a Relation mapping (tags, labels,
+     * grants), the adapter throws {@link UnsupportedOperationException} instead of letting
+     * Hibernate's multi-table bulk delete corrupt the collection tables (PR #273: the bulk
+     * delete first clears the @ElementCollection/join rows the correlated EXISTS references,
+     * so 0 entity rows were deleted while their collection rows were silently destroyed).
+     * Exists only so {@code DELETE /photos/bulk-unsafe} can demonstrate — and the smoke
+     * harness can pin — that guard. Production code should select ids with
+     * {@code findAll(spec)} and delete via {@code deleteAllById(ids)}.
+     */
+    public long unsafeBulkDelete(AccessContext context, String action) {
+        return repository.delete(specification(context, action, null));
     }
 
     private Specification<Photo> specification(AccessContext context, String action,
