@@ -521,10 +521,7 @@ resourcePolicy:
 
     # -- GROUP B: suspected-unsupported shapes; record throw vs silent-wrong --
 
-    # B11: timestamp comparison over an ISO-date STRING column (createdBy is seeded with ISO
-    # dates). Supported timestamp() comparisons require an Instant/OffsetDateTime column —
-    # a String column is ambiguous about the instant it stores, so this stays fail-closed
-    # with the named column-type error (see the ts-* actions for the supported shape).
+    # B11: timestamp comparison over an ISO-date string column (createdBy is seeded with ISO dates).
     - actions: ["p-timestamp"]
       effect: EFFECT_ALLOW
       roles: ["USER"]
@@ -776,6 +773,85 @@ resourcePolicy:
       condition:
         match:
           expr: '(R.attr.aBool ? 1.0/0.0 : -1.0/0.0) > 0.5'
+
+    # ==================== hierarchy operators (hier-*) ====================
+    # Both operand orders for each operator, plus LIKE-metacharacter path segments. The
+    # planner preserves source order (PDP-verified: hierarchy(...) wrappers survive to the
+    # plan verbatim in both orders), so field-first spellings put hierarchy(variable) FIRST:
+    # when the field lands on the ANCESTOR side the adapter emits a strict-prefix IN list,
+    # and when it lands on the DESCENDANT side an escaped prefix LIKE. ancestorOf and
+    # descendentOf are STRICT (a path is never its own ancestor/descendant — the a3/b4
+    # equal-path seeds pin this); overlaps is inclusive. The scope seeds also include
+    # sibling STRING prefixes that are not PATH prefixes ("dept.engineering",
+    # "dept.eng.platform2") and unescaped-wildcard traps (b2/b3) — see scopeFor(...) in
+    # AdversarialConformanceTest.
+
+    # field-first ancestorOf → scope IN ('dept', 'dept.eng') — the strict-prefix IN list.
+    - actions: ["hier-ancestor-ff"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'hierarchy(R.attr.scope).ancestorOf(hierarchy("dept.eng.platform"))'
+
+    # constant-first ancestorOf → scope LIKE 'dept.eng.%' (strict descendants only).
+    - actions: ["hier-ancestor-cf"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'hierarchy("dept.eng").ancestorOf(hierarchy(R.attr.scope))'
+
+    # field-first descendentOf → scope LIKE 'dept.eng.%'.
+    - actions: ["hier-descendent-ff"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'hierarchy(R.attr.scope).descendentOf(hierarchy("dept.eng"))'
+
+    # constant-first descendentOf → the FIELD is the ancestor → strict-prefix IN list.
+    - actions: ["hier-descendent-cf"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'hierarchy("dept.eng.platform").descendentOf(hierarchy(R.attr.scope))'
+
+    # field-first overlaps → IN ('dept') OR = 'dept.eng' OR LIKE 'dept.eng.%' (inclusive).
+    - actions: ["hier-overlaps-ff"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'hierarchy(R.attr.scope).overlaps(hierarchy("dept.eng"))'
+
+    # constant-first overlaps → the same union with the operands mirrored.
+    - actions: ["hier-overlaps-cf"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'hierarchy("dept.eng").overlaps(hierarchy(R.attr.scope))'
+
+    # metachar LIKE branch: the prefix '50%:a_b:' must be escaped ('%'/'_' literal). The
+    # b2 seed ("50x:a_b:y") is the unescaped-% trap, b3 ("50%:aXb:y") the unescaped-_ trap,
+    # and b4 ("50%:a_b") the equal-path strictness trap.
+    - actions: ["hier-meta-like"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'hierarchy(R.attr.scope, ":").descendentOf(hierarchy("50%:a_b", ":"))'
+
+    # metachar IN branch: strict prefixes ('50%', '50%.a_b') compared by equality — the
+    # a9/b6 seeds match; no pattern matching may occur.
+    - actions: ["hier-meta-in"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'hierarchy(R.attr.scope).ancestorOf(hierarchy("50%.a_b.x"))'
 
     # -- timestamp(field) vs constant-instant comparisons (ts-*) --
     # Wire shape (PDP-verified): the planner folds now()-duration arithmetic to a constant
