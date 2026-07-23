@@ -183,7 +183,7 @@ Map each `request.resource.attr.<name>` to a JPA path or a relation:
 | `eq` / `ne`                      | `cb.equal` / `cb.notEqual` (auto `isNull`/`isNotNull` for `null` RHS) |
 | `lt` / `gt` / `le` / `ge`        | `cb.lessThan` / `greaterThan` / `lessThanOrEqualTo` / `greaterThanOrEqualTo` |
 | `in`                             | `path.in(values)` or correlated `EXISTS` for collections            |
-| `contains` / `startsWith` / `endsWith` | `cb.like(...)` with proper `_`/`%`/`\` escaping — incl. the constant-receiver form (`"a,b".contains(R.attr.x)`: the constant is the haystack, the column the needle) |
+| `contains` / `startsWith` / `endsWith` | `cb.like(...)` with proper `_`/`%`/`\`/`[` escaping (`[` guards SQL Server character classes — see Gotchas) — incl. the constant-receiver form (`"a,b".contains(R.attr.x)`: the constant is the haystack, the column the needle) |
 | `isSet(field, true/false)`       | `cb.isNotNull` / `cb.isNull`                                        |
 | `hasIntersection(coll, [values])` | Correlated `EXISTS` with `IN`                                      |
 | `hasIntersection(coll.map(x, x.f), [values])` | Correlated `EXISTS` with projected `IN`             |
@@ -196,7 +196,7 @@ Map each `request.resource.attr.<name>` to a JPA path or a relation:
 | Ternary (`cond ? a : b`)         | Predicate rewrite: `(cond AND cmp(a, v)) OR (NOT cond AND cmp(b, v))` — nested, boolean-position, and value-first forms compose; constant residues fold (see Gotchas for `NULL` semantics) |
 | Arithmetic in comparisons (`add`/`sub`/`mult`/`div`) | `cb.sum`/`diff`/`prod`/`quot` in double space, compared via `eq`/`ne`/`lt`/`gt`/`le`/`ge`; nested and both-sides shapes compose (see Gotchas — CEL attribute arithmetic is double arithmetic) |
 | Timestamp comparisons (`timestamp(R.attr.createdAt) < now() - duration("24h")`) | Temporal column comparison for all of `eq`/`ne`/`lt`/`gt`/`le`/`ge`, both operand orders (value-first forms mirror). The planner folds `now()`/`now() - duration(...)` to a constant RFC-3339 instant at **plan time**, so the window is fixed per query — re-plan to refresh it. The mapped column must be `java.time.Instant` or `java.time.OffsetDateTime` (both denote an absolute instant; Hibernate 6 stores them UTC-normalized). `LocalDateTime`, `java.util.Date`, and `String` columns throw a named error — they are ambiguous about the absolute instant they store (see Gotchas). A `NULL` column value is excluded, matching `check()` denying on the missing attribute. |
-| Field-to-field `contains`/`startsWith`/`endsWith` | `cb.like` over a `REPLACE`-escaped column-derived pattern (`\`, `%`, `_`), with an `IS NOT NULL` needle guard |
+| Field-to-field `contains`/`startsWith`/`endsWith` | `cb.like` over a `REPLACE`-escaped column-derived pattern (`\`, `%`, `_`, `[`), with an `IS NOT NULL` needle guard |
 | Multi-hop relation chains (`R.attr.categories.subCategories`) | Correlated subquery joining through every hop; `exists`/`in`/`hasIntersection`/`size` all treat the chain as the flattened union of tail elements |
 | `exists(coll, lambda)`           | Correlated `EXISTS` with lambda body                                |
 | `exists_one(coll, lambda)`       | Correlated `(SELECT COUNT...) = 1`                                  |
@@ -352,7 +352,7 @@ duration arithmetic when the plan is produced, wrapping the result back in
 ### Field-to-field string matching builds its pattern with `REPLACE`
 
 `R.attr.a.contains(R.attr.b)` becomes `a LIKE CONCAT('%', <escaped b>, '%') ESCAPE '\'`
-where `b` is escaped via nested `REPLACE` calls (`\`, `%`, `_`) — chosen because
+where `b` is escaped via nested `REPLACE` calls (`\`, `%`, `_`, `[`) — chosen because
 `REPLACE` is available on H2, PostgreSQL, MySQL, Oracle, and SQL Server. A `NULL`
 needle column excludes the row (`IS NOT NULL` guard), which matches CEL
 missing-attribute → deny and also defends against dialects whose `CONCAT` treats
@@ -451,7 +451,7 @@ repository methods; don't cache the `Predicate` it returns.
 ### MySQL / MariaDB `LIKE` backslash escaping
 
 `contains` / `startsWith` / `endsWith` translate to `cb.like(path, pattern, '\\')` — the
-adapter escapes `%`, `_`, and `\` in the user value and declares `\` as the SQL escape
+adapter escapes `%`, `_`, `\`, and `[` in the user value and declares `\` as the SQL escape
 character (the three-arg `LIKE … ESCAPE '\'` form). On most databases this is exact and
 unambiguous.
 
@@ -466,6 +466,20 @@ backslashes and you target MySQL/MariaDB, either:
   the `LIKE` predicate with an escape character your dialect handles cleanly.
 
 Values without backslashes are unaffected.
+
+### SQL Server `LIKE` `[` character classes
+
+T-SQL `LIKE` treats `[...]` as a character class **even when an `ESCAPE` clause is
+declared**: an unescaped `'[SEC]%'` matches one character from `{S,E,C}` — returning rows
+the PDP denies — and does *not* match a literal `[SEC]` prefix. The adapter therefore
+escapes `[` as `\[` in every pattern it generates: the constant
+`contains`/`startsWith`/`endsWith` forms, the field-to-field `REPLACE` chain, and the
+hierarchy prefix `LIKE`. With the escape declared, `\[` denotes a literal `[` on every
+supported dialect — the differential oracle's H2, PostgreSQL, and MySQL legs verify the
+escape is a semantic no-op where `[` is inert.
+
+`]` is intentionally left unescaped: it is only special on SQL Server as the closer of a
+character class, and no class can open once every `[` is escaped.
 
 ## Build
 

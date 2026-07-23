@@ -153,8 +153,20 @@ final class PlanValues {
                 "add comparison type mismatch: " + comparisonValue.getClass() + " vs " + addConstant.getClass());
     }
 
-    /** Escape {@code LIKE} wildcards; pair with an explicit {@code '\\'} escape character. */
+    /**
+     * Escape {@code LIKE} wildcards; pair with an explicit {@code '\\'} escape character.
+     *
+     * <p>{@code [} is escaped because SQL Server / Sybase {@code LIKE} treats {@code [...]}
+     * as a character class even when an {@code ESCAPE} clause is declared — an unescaped
+     * {@code '[SEC]%'} matches one character from {@code {S,E,C}} instead of the literal
+     * prefix {@code [SEC]}. With the escape declared, {@code \[} means a literal {@code [}
+     * on every targeted dialect (verified empirically on H2, PostgreSQL, and MySQL, where
+     * {@code [} is otherwise inert — the escape is a semantic no-op there). {@code ]} needs
+     * no escaping: it is only special on SQL Server as the closer of a class, and no class
+     * can open once every {@code [} is escaped.
+     */
     static String escapeLike(String s) {
-        return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
+        return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                .replace("[", "\\[");
     }
 }

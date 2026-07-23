@@ -68,6 +68,18 @@ resourcePolicy:
         match:
           expr: R.attr.aString.endsWith("\\")
 
+    # '[' must be escaped: T-SQL LIKE treats '[...]' as a character class even under an
+    # ESCAPE clause (unescaped '[SEC]%' would match the d2 seed "Secret" and miss the d1
+    # seed "[SEC]ret" on SQL Server). On H2/PostgreSQL/MySQL — the three oracle legs —
+    # '\[' with ESCAPE must stay a literal '[': d1 in, d2 out, proving the escape is a
+    # semantic no-op on those dialects.
+    - actions: ["like-bracket"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aString.startsWith("[SEC]")
+
     # -- case sensitivity: CEL string equality is exact and case-sensitive, so the c1 seed
     # (aString "One") is DENIED here. A case-insensitive database collation (MySQL default
     # utf8mb4_0900_ai_ci, SQL Server *_CI_*) matches it anyway — the differential oracle
@@ -852,6 +864,17 @@ resourcePolicy:
       condition:
         match:
           expr: 'hierarchy(R.attr.scope).ancestorOf(hierarchy("50%.a_b.x"))'
+
+    # '[' in a path segment routes through the prefix-LIKE branch: the pattern must escape
+    # it as '\[' (SQL Server character classes ignore ESCAPE). The d1 scope
+    # ("[env]:prod:eu") is the literal-bracket descendant; d2 ("e:prod:eu") is the row an
+    # unescaped '[env]' class would match one character of on SQL Server.
+    - actions: ["hier-bracket"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'hierarchy(R.attr.scope, ":").descendentOf(hierarchy("[env]:prod", ":"))'
 
     # -- timestamp(field) vs constant-instant comparisons (ts-*) --
     # Wire shape (PDP-verified): the planner folds now()-duration arithmetic to a constant
