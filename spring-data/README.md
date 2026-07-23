@@ -87,6 +87,81 @@ Page<Contact> results = contactRepository.findAll(
     own.and(result.toSpecification()), pageable);
 ```
 
+> [!WARNING]
+> **The Specification is SELECT-only.** Never pass it to
+> `repository.delete(Specification)` or any other criteria bulk operation. Relation
+> mappings translate to correlated subqueries over collection/join tables, and
+> Hibernate's multi-table bulk delete first clears those `@ElementCollection`/join
+> tables using the same predicate — the pre-clear removes exactly the rows the
+> correlated subquery references, so the delete removes **0 entity rows while
+> silently destroying their collection rows** (e.g. all ownership entries). Under a
+> blocklist policy like `!(P.id in R.attr.ownedBy)`, the now-ownerless survivors
+> become visible to every principal. The adapter detects the bulk-delete invocation
+> context and throws `UnsupportedOperationException` before anything is deleted.
+> To delete policy-permitted rows, select ids first, then delete by id:
+>
+> ```java
+> List<Long> ids = contactRepository.findAll(result.toSpecification())
+>         .stream().map(Contact::getId).toList();
+> contactRepository.deleteAllById(ids);
+> ```
+
+## Database collation requirements
+
+> **⚠️ Hard requirement: every string column referenced by an `AttributeMapping` MUST use a
+> binary or case-sensitive collation.** On MySQL use `utf8mb4_bin` or `utf8mb4_0900_as_cs`;
+> on SQL Server use a `*_CS_AS` collation (e.g. `Latin1_General_100_CS_AS`). PostgreSQL,
+> H2, and Oracle are case-sensitive by default and are safe unless you opt into
+> case-insensitive behavior (PostgreSQL nondeterministic `ICU` collations, `citext`).
+
+**Why.** CEL string comparison at the PDP is exact and case-sensitive: with
+`R.attr.department == "finance"`, a `check()` call for a resource holding
+`department = "Finance"` returns **DENY**. But the adapter builds every string predicate
+with no collation control, so the database's column collation decides what matches. MySQL
+8's default collation, `utf8mb4_0900_ai_ci`, is case- **and** accent-insensitive, and SQL
+Server defaults to CI collations — on those defaults `WHERE department = 'finance'`
+matches the `'Finance'` row the PDP just denied. The plan-based filter silently returns
+rows the policy denies: **an authorization over-grant**, with no error or log line to
+notice. The same divergence applies to accent folding (`'résumé'` vs `'resume'`).
+
+**Every string predicate the adapter emits is affected:**
+
+- `eq` / `ne` (`cb.equal` / `cb.notEqual`)
+- string ordering: `lt` / `gt` / `le` / `ge`
+- the LIKE family: `contains` / `startsWith` / `endsWith`, including the constant-receiver
+  forms and the field-to-field variants built from `REPLACE`-escaped column patterns
+- `in` list membership (`path.in(...)`)
+- `hasIntersection` (both the direct-collection and `map(...)`-projection translations)
+- `hierarchy(...)` ancestor/descendant checks (prefix `LIKE` and ancestor-prefix `IN` lists)
+
+**`OperatorFunction` overrides are not a workaround for all of these.** In particular, the
+`hasIntersection` translation over a plain field (`path.in(values)`) is built before any
+override consultation, so a user-supplied `OperatorFunction` cannot intercept it. Fix the
+collation in the schema — that is the only route that covers every predicate site.
+
+Role and tenancy checks are the highest-risk shapes: `'admin'` vs `'Admin'` under
+`eq`/`in`/`hasIntersection`, and hierarchy descendant checks where `LIKE 'a:b:%'` matches
+`'A:B:x'`.
+
+**How this is enforced in CI.** The differential oracle suite
+(`AdversarialConformanceTest`) runs against real PostgreSQL and MySQL databases via
+Testcontainers, with mixed-case seed rows whose `check()` decisions differ from what a
+case-insensitive collation would match. The MySQL leg creates its schema with
+`utf8mb4_0900_as_cs`; running it against MySQL's default collation makes the suite fail,
+demonstrating the over-grant. Run the legs locally:
+
+```bash
+# PostgreSQL (case-sensitive by default — passes)
+ADAPTER_TEST_DB=postgres gradle test --tests AdversarialConformanceTest
+
+# MySQL with the required case-sensitive collation — passes
+ADAPTER_TEST_DB=mysql gradle test --tests AdversarialConformanceTest
+
+# MySQL with its DEFAULT collation — FAILS, reproducing the over-grant
+ADAPTER_TEST_DB=mysql ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_ai_ci \
+  gradle test --tests AdversarialConformanceTest
+```
+
 ## Field mapping
 
 Map each `request.resource.attr.<name>` to a JPA path or a relation:

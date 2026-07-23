@@ -6,6 +6,7 @@ import dev.cerbos.api.v1.response.Response.PlanResourcesResponse;
 import dev.cerbos.sdk.PlanResourcesResult;
 
 import jakarta.persistence.criteria.CriteriaBuilder;
+import jakarta.persistence.criteria.CriteriaQuery;
 import jakarta.persistence.criteria.From;
 import jakarta.persistence.criteria.Join;
 import jakarta.persistence.criteria.Path;
@@ -50,7 +51,8 @@ public final class SpringDataQueryPlanAdapter {
         Operand condition = planResult.getCondition()
                 .orElseThrow(() -> new IllegalArgumentException("Conditional plan has no condition"));
         return new Result.Conditional<>((root, query, cb) ->
-                new Translator(cb, overrides).traverse(condition, Scope.root(root, query, mapper)));
+                new Translator(cb, overrides, isSelectInvocation(root, query))
+                        .traverse(condition, Scope.root(root, query, mapper)));
     }
 
     // -- PlanResourcesResponse overloads --
@@ -74,7 +76,8 @@ public final class SpringDataQueryPlanAdapter {
                     throw new IllegalArgumentException("Conditional plan has no condition");
                 }
                 yield new Result.Conditional<T>((root, query, cb) ->
-                        new Translator(cb, overrides).traverse(cond, Scope.root(root, query, mapper)));
+                        new Translator(cb, overrides, isSelectInvocation(root, query))
+                                .traverse(cond, Scope.root(root, query, mapper)));
             }
             default -> throw new IllegalArgumentException("Unknown filter kind: " + filter.getKind());
         };
@@ -82,18 +85,34 @@ public final class SpringDataQueryPlanAdapter {
 
     // -- Internal translator --
 
+    /**
+     * Detects whether the Specification is being evaluated for the {@code SELECT} query it was
+     * handed: in every Spring Data SELECT path ({@code findAll}/{@code findOne}/{@code count}/
+     * {@code exists}/pagination) the {@code Root} is created via {@code query.from(...)}, so it is
+     * a member of {@code query.getRoots()}. In {@code SimpleJpaRepository.delete(Specification)}
+     * the {@code Root} comes from a {@code CriteriaDelete} while the {@code CriteriaQuery}
+     * argument is a fresh throwaway {@code createQuery(cls)} whose root set does not contain it
+     * (and newer Spring Data versions pass {@code null} for the query). Correlated subqueries are
+     * only sound in the first case — see {@code chainSubquery}.
+     */
+    private static boolean isSelectInvocation(Root<?> root, CriteriaQuery<?> query) {
+        return query != null && query.getRoots().contains(root);
+    }
+
     private static final class Translator {
         private final CriteriaBuilder cb;
         private final TriPredicate tri;
         private final Map<String, OperatorFunction> overrides;
         private final HierarchyTranslator hierarchy;
         private final ComparisonTranslator comparisons = new ComparisonTranslator();
+        private final boolean selectInvocation;
 
-        Translator(CriteriaBuilder cb, Map<String, OperatorFunction> overrides) {
+        Translator(CriteriaBuilder cb, Map<String, OperatorFunction> overrides, boolean selectInvocation) {
             this.cb = cb;
             this.tri = new TriPredicate(cb);
             this.overrides = overrides;
             this.hierarchy = new HierarchyTranslator(cb);
+            this.selectInvocation = selectInvocation;
         }
 
         Predicate traverse(Operand operand, Scope scope) {
@@ -506,8 +525,10 @@ public final class SpringDataQueryPlanAdapter {
 
                 /**
                  * {@code add(field, value)} / {@code add(value, field)} — solvable for the field
-                 * under eq/ne against a constant ({@link PlanValues#solveAdd}); every other
-                 * pairing lowers to SQL arithmetic.
+                 * under eq/ne against a constant ({@link PlanValues#solveAdd}) when the solve is
+                 * algebraically exact (string concatenation, in-range long/long integers); every
+                 * other pairing — including fractional doubles, which IEEE subtraction cannot
+                 * invert — lowers to SQL arithmetic.
                  */
                 record FieldPlusConstant(String fieldVariable, Operand constant, boolean fieldIsLeft)
                         implements Resolved {}
@@ -633,11 +654,19 @@ public final class SpringDataQueryPlanAdapter {
                     if (left instanceof Resolved.Field f && right instanceof Resolved.ConstantAdd ca) {
                         return applyLeaf(op, scope.resolvePath(f.variable()), ca.fold());
                     }
-                    // Solve: `add(field, const) eq/ne constant` — string concat/numeric solve for
-                    // the field side (same algorithm as the Prisma adapter).
+                    // Solve: `add(field, const) eq/ne constant` — for the ALGEBRAICALLY EXACT
+                    // shapes only (string concatenation, in-range long/long integers).
+                    // Fractional/oversized numeric pairs fall through to numericComparison:
+                    // IEEE subtraction does not invert IEEE addition (fl(fl(t-c)+c) != t), so
+                    // a Java-side solve would return rows the PDP's check() denies — the SQL
+                    // side must compute fl(field + const) and compare it to the target in
+                    // double space, sharing IEEE semantics with the ordering operators.
                     if (("eq".equals(op) || "ne".equals(op))
                             && left instanceof Resolved.FieldPlusConstant fpc
-                            && right instanceof Resolved.Constant other) {
+                            && right instanceof Resolved.Constant other
+                            && !PlanValues.requiresSqlLowering(
+                                    other.value(),
+                                    PlanValues.protoValueToJava(fpc.constant().getValue()))) {
                         return solveAddComparison(op, fpc, other, scope);
                     }
                     // Everything else arithmetic-rooted lowers to SQL-side double-space arithmetic.
@@ -689,10 +718,13 @@ public final class SpringDataQueryPlanAdapter {
             }
 
             /**
-             * Solve {@code add(field, const) eq/ne constant} for the field. When no solution
-             * exists (e.g. {@code "projects:123" == "users:" + R.id} can never be true), eq is
-             * always-false; ne is NOT always-true — a missing attribute makes the concatenation a
-             * CEL evaluation error ({@code "users:" + null}) → deny, so NULL rows must stay
+             * Solve {@code add(field, const) eq/ne constant} for the field — only reached for
+             * algebraically exact solves (string concatenation, in-range long/long integers;
+             * {@link #dispatch} routes fractional doubles to {@link #numericComparison} because
+             * IEEE subtraction does not invert IEEE addition). When no solution exists (e.g.
+             * {@code "projects:123" == "users:" + R.id} can never be true), eq is always-false;
+             * ne is NOT always-true — a missing attribute makes the concatenation a CEL
+             * evaluation error ({@code "users:" + null}) → deny, so NULL rows must stay
              * excluded: IS NOT NULL, never an unconditional {@code 1=1} (which would leak exactly
              * the rows the PDP denies).
              */
@@ -1702,6 +1734,20 @@ public final class SpringDataQueryPlanAdapter {
          */
         private <T> ChainSubquery<T> chainSubquery(Class<T> resultType, Scope scope,
                                                    Scope.ResolvedRelation ref) {
+            if (!selectInvocation) {
+                String chain = ref.chain().stream()
+                        .map(AttributeMapping.Relation::joinAttribute)
+                        .collect(java.util.stream.Collectors.joining("."));
+                throw new UnsupportedOperationException(
+                        "Relation '" + chain + "' requires a correlated subquery, but this Specification "
+                        + "is being evaluated outside its own SELECT query — e.g. via "
+                        + "repository.delete(Specification) or a criteria bulk delete/update. "
+                        + "Hibernate's multi-table bulk delete first clears @ElementCollection/join "
+                        + "tables using this same predicate, which self-invalidates the correlated "
+                        + "subquery: 0 entity rows are deleted while their collection rows are "
+                        + "silently destroyed. The Cerbos Specification is SELECT-only; fetch the "
+                        + "matching ids with findAll(spec) and delete them with deleteAllById(ids).");
+            }
             Subquery<T> sub = scope.parentQuery().subquery(resultType);
             From<?, ?> correlated = correlate(sub, ref.owner().from());
             Join<?, ?> join = correlated.join(ref.chain().get(0).joinAttribute());

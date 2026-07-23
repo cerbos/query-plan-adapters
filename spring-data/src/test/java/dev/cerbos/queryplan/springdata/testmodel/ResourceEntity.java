@@ -37,6 +37,11 @@ public class ResourceEntity {
     @Column(name = "a_number")
     private Integer aNumber;
 
+    // Fractional-value column for the IEEE add-solve probes: the -0.6 reproduction needs a
+    // stored double, which the Integer aNumber column cannot hold.
+    @Column(name = "a_double")
+    private Double aDouble;
+
     @Column(name = "a_optional_string")
     private String aOptionalString;
 
@@ -88,6 +93,8 @@ public class ResourceEntity {
     public void setaString(String aString) { this.aString = aString; }
     public Integer getaNumber() { return aNumber; }
     public void setaNumber(Integer aNumber) { this.aNumber = aNumber; }
+    public Double getaDouble() { return aDouble; }
+    public void setaDouble(Double aDouble) { this.aDouble = aDouble; }
     public String getaOptionalString() { return aOptionalString; }
     public void setaOptionalString(String aOptionalString) { this.aOptionalString = aOptionalString; }
     public String getCreatedBy() { return createdBy; }

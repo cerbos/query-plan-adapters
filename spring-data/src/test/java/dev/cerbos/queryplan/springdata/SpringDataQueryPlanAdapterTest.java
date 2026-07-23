@@ -15,6 +15,7 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityManagerFactory;
 import jakarta.persistence.Persistence;
 import jakarta.persistence.criteria.CriteriaBuilder;
+import jakarta.persistence.criteria.CriteriaDelete;
 import jakarta.persistence.criteria.CriteriaQuery;
 import jakarta.persistence.criteria.Predicate;
 import jakarta.persistence.criteria.Root;
@@ -24,10 +25,12 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.jpa.domain.Specification;
+import org.springframework.data.jpa.repository.support.SimpleJpaRepository;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -49,6 +52,7 @@ class SpringDataQueryPlanAdapterTest {
             Map.entry("request.resource.attr.aBool", AttributeMapping.field("aBool")),
             Map.entry("request.resource.attr.aString", AttributeMapping.field("aString")),
             Map.entry("request.resource.attr.aNumber", AttributeMapping.field("aNumber")),
+            Map.entry("request.resource.attr.aDouble", AttributeMapping.field("aDouble")),
             Map.entry("request.resource.attr.aOptionalString", AttributeMapping.field("aOptionalString")),
             Map.entry("request.resource.attr.createdBy", AttributeMapping.field("createdBy")),
             Map.entry("request.resource.attr.ownedBy", AttributeMapping.relation("ownedBy")),
@@ -696,6 +700,14 @@ class SpringDataQueryPlanAdapterTest {
                 sval("projects:123"),
                 exprOp("add", sval("projects:"), var("request.resource.attr.aString")));
         assertEquals(0, runCount(cond));
+
+        // Concatenation is exact — the solve path must keep working: aString="123" row in,
+        // aString="456" row out.
+        ResourceEntity match = new ResourceEntity("add-str-1");
+        match.setaString("123");
+        ResourceEntity miss = new ResourceEntity("add-str-2");
+        miss.setaString("456");
+        withResource(match, () -> withResource(miss, () -> assertEquals(1, runCount(cond))));
     }
 
     @Test
@@ -711,11 +723,75 @@ class SpringDataQueryPlanAdapterTest {
 
     @Test
     void addSolveNumeric() {
-        // eq(10, add(3, R.attr.aNumber))  →  aNumber == 7
+        // eq(10, add(3, R.attr.aNumber))  →  aNumber == 7. Long/long solves within ±2^53 are
+        // algebraically exact and must keep solving in Java: seeded rows prove the filter
+        // keeps the aNumber=7 row and drops the aNumber=8 row.
         Operand cond = exprOp("eq",
                 nval(10),
                 exprOp("add", nval(3), var("request.resource.attr.aNumber")));
         assertEquals(0, runCount(cond));
+
+        ResourceEntity match = new ResourceEntity("add-long-1");
+        match.setaNumber(7);
+        ResourceEntity miss = new ResourceEntity("add-long-2");
+        miss.setaNumber(8);
+        withResource(match, () -> withResource(miss, () -> assertEquals(1, runCount(cond))));
+    }
+
+    @Test
+    void addSolveFractionalEqIsIeeeFaithful() {
+        // Policy `R.attr.aDouble + 0.7 == 0.1` arrives as eq(add(variable, 0.7), 0.1) —
+        // wire shape verified against a live PDP. The old algebraic solve computed
+        // 0.1 - 0.7 = exactly -0.6 in Java and emitted `WHERE a_double = -0.6`, but IEEE
+        // subtraction does not invert IEEE addition: check(aDouble=-0.6) DENIES because
+        // -0.6 + 0.7 == 0.09999999999999998 != 0.1 (verified against a live PDP). The row
+        // must be EXCLUDED for eq (over-inclusion = authz bypass) and INCLUDED for ne
+        // (the mirror under-inclusion). The fix lowers the comparison to SQL-side
+        // fl(a_double + 0.7) == 0.1 in double space.
+        Operand eqCond = exprOp("eq",
+                exprOp("add", var("request.resource.attr.aDouble"), nval(0.7)),
+                nval(0.1));
+        Operand neCond = exprOp("ne",
+                exprOp("add", var("request.resource.attr.aDouble"), nval(0.7)),
+                nval(0.1));
+
+        ResourceEntity trap = new ResourceEntity("add-frac-1");
+        trap.setaDouble(-0.6);
+        withResource(trap, () -> {
+            assertEquals(0, runCount(eqCond), "aDouble=-0.6 must be excluded for eq: "
+                    + "-0.6 + 0.7 != 0.1 in IEEE double space, the PDP denies it");
+            assertEquals(1, runCount(neCond), "aDouble=-0.6 must be included for ne: "
+                    + "-0.6 + 0.7 != 0.1 holds, the PDP allows it");
+        });
+    }
+
+    @Test
+    void addSolveFractionalEqKeepsExactlySatisfiedRow() {
+        // 0.25 + 0.5 == 0.75 is EXACT in binary floating point, so the SQL lowering must not
+        // degenerate to always-false: the aDouble=0.25 row stays in (PDP-verified ALLOW).
+        Operand cond = exprOp("eq",
+                exprOp("add", var("request.resource.attr.aDouble"), nval(0.5)),
+                nval(0.75));
+
+        ResourceEntity match = new ResourceEntity("add-frac-2");
+        match.setaDouble(0.25);
+        ResourceEntity miss = new ResourceEntity("add-frac-3");
+        miss.setaDouble(-0.6);
+        withResource(match, () -> withResource(miss, () -> assertEquals(1, runCount(cond))));
+    }
+
+    @Test
+    void addSolveOversizedLongRoutesToSqlArithmetic() {
+        // 2^54 is outside the ±2^53 exactly-representable range: the check-time double
+        // arithmetic has gaps there, so the long-space solve must NOT fire — the shape
+        // routes through SQL double arithmetic instead (and must not throw).
+        Operand cond = exprOp("eq",
+                exprOp("add", var("request.resource.attr.aNumber"), nval(1)),
+                nval(0x1p54));
+
+        ResourceEntity row = new ResourceEntity("add-big-1");
+        row.setaNumber(5);
+        withResource(row, () -> assertEquals(0, runCount(cond)));
     }
 
     @Test
@@ -2603,6 +2679,159 @@ class SpringDataQueryPlanAdapterTest {
             ResourceEntity denied = new ResourceEntity("nan-tern-2");
             denied.setaBool(false);
             withResource(denied, () -> assertEquals(0, runCount(plan)));
+        }
+    }
+
+    /**
+     * {@code repository.delete(Specification)} guard. Relation-mapped operators translate to
+     * correlated subqueries over collection tables; Hibernate's multi-table bulk delete first
+     * clears {@code @ElementCollection}/join tables with the same predicate, which
+     * self-invalidates the correlated subquery — empirically (Hibernate 6.6.18/H2, plan
+     * {@code in(value "user1", variable ownedBy)}): SELECT returns the row, {@code delete()}
+     * returns 0, the entity survives, and ALL its {@code resource_owned_by} collection rows are
+     * destroyed. The adapter now detects the bulk-delete invocation context (the {@code Root}
+     * comes from a {@code CriteriaDelete} and is not a member of the throwaway
+     * {@code CriteriaQuery}'s root set) and throws {@link UnsupportedOperationException} from
+     * {@code toPredicate} — i.e. BEFORE any statement executes.
+     */
+    @Nested
+    class BulkDeleteGuard {
+
+        /**
+         * Exact wire shape the PDP emits for policy {@code P.id in request.resource.attr.ownedBy}
+         * (operand order is source order, so the constant-folded principal id comes first).
+         */
+        private final Operand ownedByUser1 =
+                exprOp("in", sval("user1"), var("request.resource.attr.ownedBy"));
+
+        private Specification<ResourceEntity> spec(Operand condition) {
+            PlanResourcesResponse resp =
+                    buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+            Result<ResourceEntity> result =
+                    SpringDataQueryPlanAdapter.toSpecification(resp, MAPPER, Map.of());
+            return ((Result.Conditional<ResourceEntity>) result).specification();
+        }
+
+        @Test
+        void deleteWithRelationSpecThrowsBeforeAnyDeletion() {
+            ResourceEntity r = new ResourceEntity("bulk-del-1");
+            r.setOwnedBy(new ArrayList<>(List.of("user1", "user2")));
+            withResource(r, () -> {
+                Specification<ResourceEntity> spec = spec(ownedByUser1);
+                EntityManager em = emf.createEntityManager();
+                try {
+                    SimpleJpaRepository<ResourceEntity, String> repository =
+                            new SimpleJpaRepository<>(ResourceEntity.class, em);
+
+                    // SELECT paths through the real Spring Data repository are unaffected.
+                    assertEquals(1, repository.findAll(spec).size());
+                    assertEquals(1, repository.count(spec));
+
+                    em.getTransaction().begin();
+                    try {
+                        UnsupportedOperationException ex = assertThrows(
+                                UnsupportedOperationException.class,
+                                () -> repository.delete(spec));
+                        assertTrue(ex.getMessage().contains("ownedBy"),
+                                "message should name the relation, was: " + ex.getMessage());
+                        assertTrue(ex.getMessage().contains("SELECT"),
+                                "message should state the SELECT-only contract, was: " + ex.getMessage());
+                        assertTrue(ex.getMessage().contains("deleteAllById"),
+                                "message should point at the safe alternative, was: " + ex.getMessage());
+                    } finally {
+                        em.getTransaction().rollback();
+                    }
+                } finally {
+                    em.close();
+                }
+
+                // The guard fired inside toPredicate, before Hibernate built or ran any DELETE:
+                // the entity row AND every one of its collection rows survive. (Without the
+                // guard: entity survives but resource_owned_by is emptied — data corruption.)
+                EntityManager check = emf.createEntityManager();
+                try {
+                    ResourceEntity reloaded = check.find(ResourceEntity.class, "bulk-del-1");
+                    assertNotNull(reloaded, "entity row must survive");
+                    assertEquals(Set.of("user1", "user2"), Set.copyOf(reloaded.getOwnedBy()),
+                            "collection rows must survive untouched");
+                } finally {
+                    check.close();
+                }
+            });
+        }
+
+        @Test
+        void deleteWithFieldOnlySpecStillDeletes() {
+            // Field-only predicates involve no correlated subquery and no collection-table
+            // pre-clear hazard — the guard must not block them.
+            ResourceEntity r = new ResourceEntity("bulk-del-2");
+            r.setCreatedBy("alice");
+            withResource(r, () -> {
+                Specification<ResourceEntity> spec =
+                        spec(exprOp("eq", var("request.resource.attr.createdBy"), sval("alice")));
+                EntityManager em = emf.createEntityManager();
+                try {
+                    SimpleJpaRepository<ResourceEntity, String> repository =
+                            new SimpleJpaRepository<>(ResourceEntity.class, em);
+                    em.getTransaction().begin();
+                    long deleted = repository.delete(spec);
+                    em.getTransaction().commit();
+                    assertEquals(1, deleted);
+                } finally {
+                    em.close();
+                }
+                EntityManager check = emf.createEntityManager();
+                try {
+                    assertNull(check.find(ResourceEntity.class, "bulk-del-2"),
+                            "field-only delete(Specification) must still work");
+                } finally {
+                    check.close();
+                }
+            });
+        }
+
+        @Test
+        void criteriaDeleteInvocationContextIsDetected() {
+            // Pins the detection mechanism itself, independent of the Spring Data version:
+            // SimpleJpaRepository.delete(Specification) calls
+            // spec.toPredicate(delete.from(cls), builder.createQuery(cls), builder) — a Root
+            // created on a CriteriaDelete plus a throwaway CriteriaQuery whose root set does
+            // not contain it. Every Spring Data SELECT path creates the Root via
+            // query.from(...), so membership in query.getRoots() distinguishes the two.
+            Specification<ResourceEntity> spec = spec(ownedByUser1);
+            EntityManager em = emf.createEntityManager();
+            try {
+                CriteriaBuilder cb = em.getCriteriaBuilder();
+                CriteriaDelete<ResourceEntity> delete = cb.createCriteriaDelete(ResourceEntity.class);
+                Root<ResourceEntity> deleteRoot = delete.from(ResourceEntity.class);
+                assertThrows(UnsupportedOperationException.class,
+                        () -> spec.toPredicate(deleteRoot, cb.createQuery(ResourceEntity.class), cb));
+            } finally {
+                em.close();
+            }
+        }
+
+        @Test
+        void hasIntersectionAndSizeAreGuardedToo() {
+            // All correlated-subquery construction funnels through the same choke point
+            // (chainSubquery) — spot-check two more Relation-mapped operator families.
+            Operand hasIntersection = exprOp("hasIntersection",
+                    var("request.resource.attr.ownedBy"), listOp("user1", "user2"));
+            Operand sizeGt = exprOp("gt",
+                    exprOp("size", var("request.resource.attr.ownedBy")), nval(1));
+            EntityManager em = emf.createEntityManager();
+            try {
+                CriteriaBuilder cb = em.getCriteriaBuilder();
+                for (Operand cond : List.of(hasIntersection, sizeGt)) {
+                    Specification<ResourceEntity> spec = spec(cond);
+                    CriteriaDelete<ResourceEntity> delete = cb.createCriteriaDelete(ResourceEntity.class);
+                    Root<ResourceEntity> deleteRoot = delete.from(ResourceEntity.class);
+                    assertThrows(UnsupportedOperationException.class,
+                            () -> spec.toPredicate(deleteRoot, cb.createQuery(ResourceEntity.class), cb));
+                }
+            } finally {
+                em.close();
+            }
         }
     }
 }

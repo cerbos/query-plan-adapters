@@ -28,6 +28,9 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.jpa.domain.Specification;
 import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.containers.JdbcDatabaseContainer;
+import org.testcontainers.containers.MySQLContainer;
+import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.images.builder.Transferable;
@@ -56,6 +59,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * negative numbers — and the policies use planner shapes the conformance policies don't
  * (value-first comparisons, empty {@code in} lists, fractional thresholds against integer
  * columns, outer attribute references two lambda levels deep).
+ *
+ * <p><strong>Database selection.</strong> By default the suite runs on in-memory H2. Set the
+ * {@code adapter.test.db} system property (forwarded from the {@code ADAPTER_TEST_DB} env var
+ * by the Gradle build) to {@code postgres} or {@code mysql} to run the same differential oracle
+ * against a real database started via Testcontainers — the same pattern used for the Cerbos PDP
+ * container above. The MySQL leg creates its schema with the case-sensitive
+ * {@code utf8mb4_0900_as_cs} collation the README requires; running it with MySQL's default
+ * case/accent-insensitive collation ({@code -Dadapter.test.mysql.collation=utf8mb4_0900_ai_ci})
+ * makes the mixed-case seeds (c1/c2) fail the oracle comparison, reproducing the silent
+ * authorization over-grant documented in the README's "Database collation requirements" section.
  */
 class AdversarialConformanceTest {
 
@@ -63,6 +76,7 @@ class AdversarialConformanceTest {
             Map.entry("request.resource.attr.aBool", AttributeMapping.field("aBool")),
             Map.entry("request.resource.attr.aString", AttributeMapping.field("aString")),
             Map.entry("request.resource.attr.aNumber", AttributeMapping.field("aNumber")),
+            Map.entry("request.resource.attr.aDouble", AttributeMapping.field("aDouble")),
             Map.entry("request.resource.attr.aOptionalString", AttributeMapping.field("aOptionalString")),
             // ISO-date string column + flattened struct member for the p-* probes
             Map.entry("request.resource.attr.createdBy", AttributeMapping.field("createdBy")),
@@ -138,7 +152,19 @@ class AdversarialConformanceTest {
             new Seed("b5", true, "nulltag", 9, "nt",
                     List.of(new Tag("t10a", null)), List.of()),
             new Seed("b6", false, "mixed", 10, "mx",
-                    List.of(new Tag("t11a", null), new Tag("t11b", "public")), List.of())
+                    List.of(new Tag("t11a", null), new Tag("t11b", "public")), List.of()),
+            // Mixed-case collation witnesses: CEL string comparison at the PDP is exact and
+            // case-sensitive, so check() DENIES these rows for the lowercase constants the
+            // policies use ("one", "public", "finance", "a_b") — but a case-insensitive
+            // database collation (MySQL default utf8mb4_0900_ai_ci, SQL Server *_CI_*)
+            // matches them anyway, and the differential oracle catches the over-grant.
+            // c1 discriminates eq/in ("One" vs "one"), relation membership and
+            // hasIntersection ("Public" vs the principal's "public"), and nested-relation
+            // equality ("Finance" vs "finance"); c2 discriminates the LIKE family
+            // ("xA_by" wrongly matches contains("a_b") under a CI collation).
+            new Seed("c1", true, "One", 11, "Set",
+                    List.of(new Tag("tc1", "Public")), List.of("Finance")),
+            new Seed("c2", false, "xA_by", 12, null, List.of(), List.of())
     );
 
     /** Deterministic ISO instant per seed for the timestamp probe: split around 2025-01-01. */
@@ -146,9 +172,31 @@ class AdversarialConformanceTest {
         return s.aNumber() >= 2 ? "2024-06-01T00:00:00Z" : "2026-06-01T00:00:00Z";
     }
 
+    /**
+     * Deterministic fractional double per seed for the IEEE add-solve probes
+     * ({@code arith-add-*-frac*}). a1 carries the algebraic-solve trap: {@code -0.6} is
+     * EXACTLY what solving {@code aDouble + 0.7 == 0.1} yields in Java double space, yet
+     * {@code check()} denies it ({@code -0.6 + 0.7 == 0.09999999999999998 != 0.1}) — so a
+     * pre-solved filter diverges from the oracle on this row. a2 is the exact-arithmetic
+     * agreement witness ({@code 0.25 + 0.5 == 0.75} holds bit-for-bit: both filter and
+     * oracle INCLUDE it). a3 has NO aDouble (missing attribute → CEL error → deny; SQL NULL
+     * arithmetic → UNKNOWN → excluded). The rest get an unremarkable fractional value both
+     * sides agree to exclude.
+     */
+    private static Double doubleFor(Seed s) {
+        return switch (s.id()) {
+            case "a1" -> -0.6;
+            case "a2" -> 0.25;
+            case "a3" -> null;
+            default -> s.aNumber() + 0.3;
+        };
+    }
+
     private static GenericContainer<?> cerbos;
     private static CerbosBlockingClient client;
     private static EntityManagerFactory emf;
+    /** Non-null only when {@code adapter.test.db} selects a real database. */
+    private static JdbcDatabaseContainer<?> database;
 
     @BeforeAll
     static void setUp() throws Exception {
@@ -169,13 +217,72 @@ class AdversarialConformanceTest {
         client = new CerbosClientBuilder(cerbos.getHost() + ":" + cerbos.getMappedPort(3593))
                 .withPlaintext().buildBlockingClient();
 
-        emf = Persistence.createEntityManagerFactory("adversarial-pu");
+        emf = createEntityManagerFactory();
         seed();
+    }
+
+    /**
+     * Builds the EntityManagerFactory for the database selected by {@code adapter.test.db}:
+     * the H2-backed persistence unit as-is (default), or the same unit with its JDBC
+     * connection properties overridden to point at a Testcontainers-managed PostgreSQL or
+     * MySQL instance.
+     */
+    private static EntityManagerFactory createEntityManagerFactory() {
+        String db = System.getProperty("adapter.test.db", "h2");
+        switch (db) {
+            case "h2":
+                return Persistence.createEntityManagerFactory("adversarial-pu");
+            case "postgres": {
+                PostgreSQLContainer<?> pg = new PostgreSQLContainer<>("postgres:16");
+                pg.start();
+                database = pg;
+                return Persistence.createEntityManagerFactory(
+                        "adversarial-pu", jdbcOverrides(pg, "org.hibernate.dialect.PostgreSQLDialect"));
+            }
+            case "mysql": {
+                // Case-sensitive server collation by default, per the README's
+                // "Database collation requirements" section. Overriding this with MySQL's
+                // default utf8mb4_0900_ai_ci reproduces the collation over-grant: the
+                // mixed-case seeds (c1/c2) then diverge from the check() oracle.
+                String collation = System.getProperty(
+                        "adapter.test.mysql.collation", "utf8mb4_0900_as_cs");
+                MySQLContainer<?> my = new MySQLContainer<>("mysql:8.4")
+                        .withCommand("--character-set-server=utf8mb4",
+                                "--collation-server=" + collation)
+                        // Server-side prepared statements so JDBC double binds keep their
+                        // type. Connector/J's default client-side prepared statements
+                        // interpolate double parameters as DECIMAL literals, and Hibernate's
+                        // MySQLDialect renders the adapter's to-double casts as
+                        // decimal(53,20) — together that evaluates the adapter's double-space
+                        // arithmetic in exact decimal (3 * 0.1 == 0.3 becomes TRUE, diverging
+                        // from CEL IEEE semantics; p-double-frac is the witness). With typed
+                        // double binds the decimal*double product promotes to double and the
+                        // oracle agrees. Verified empirically on MySQL 8.4.
+                        .withUrlParam("useServerPrepStmts", "true");
+                my.start();
+                database = my;
+                return Persistence.createEntityManagerFactory(
+                        "adversarial-pu", jdbcOverrides(my, "org.hibernate.dialect.MySQLDialect"));
+            }
+            default:
+                throw new IllegalArgumentException(
+                        "Unknown adapter.test.db '" + db + "' (expected h2, postgres, or mysql)");
+        }
+    }
+
+    private static Map<String, Object> jdbcOverrides(JdbcDatabaseContainer<?> c, String dialect) {
+        return Map.of(
+                "jakarta.persistence.jdbc.url", c.getJdbcUrl(),
+                "jakarta.persistence.jdbc.driver", c.getDriverClassName(),
+                "jakarta.persistence.jdbc.user", c.getUsername(),
+                "jakarta.persistence.jdbc.password", c.getPassword(),
+                "hibernate.dialect", dialect);
     }
 
     @AfterAll
     static void tearDown() {
         if (emf != null) emf.close();
+        if (database != null) database.stop();
         if (cerbos != null) cerbos.stop();
     }
 
@@ -191,6 +298,7 @@ class AdversarialConformanceTest {
             r.setaBool(s.aBool());
             r.setaString(s.aString());
             r.setaNumber(s.aNumber());
+            r.setaDouble(doubleFor(s));
             r.setaOptionalString(s.aOptionalString());
             r.setCreatedBy(isoFor(s));
             for (Tag tag : s.tags()) {
@@ -245,6 +353,9 @@ class AdversarialConformanceTest {
         // deny (CEL error), matching SQL three-valued logic excluding the row.
         if (s.aOptionalString() != null) {
             r = r.withAttribute("aOptionalString", AttributeValue.stringValue(s.aOptionalString()));
+        }
+        if (doubleFor(s) != null) {
+            r = r.withAttribute("aDouble", AttributeValue.doubleValue(doubleFor(s)));
         }
         // mainCategory mirrors the row's single category as ONE nested object (the seeder
         // creates at most one category per seed), so direct dotted-chain CEL expressions
@@ -312,6 +423,10 @@ class AdversarialConformanceTest {
             "in-single", "in-empty",
             "like-percent", "like-underscore", "like-backslash",
             "unicode-eq", "empty-string-eq",
+            // explicit case-sensitivity witness (c1/c2 seeds also discriminate in-single,
+            // like-underscore, lambda-in-principal, and p-hasintersection-map on
+            // case-insensitive database collations — see the README collation section)
+            "cs-eq",
             "neg-number", "double-threshold",
             "all-on-empty", "exists-on-empty", "exists-one-multi", "not-exists",
             "outer-attr-depth2", "lambda-in-principal",
@@ -324,6 +439,10 @@ class AdversarialConformanceTest {
             "f2f-contains", "f2f-startswith", "f2f-endswith",
             "arith-add", "arith-vf", "arith-sub", "arith-mult-neg",
             "arith-div", "arith-div-frac", "arith-both",
+            // IEEE add-solve probes: fractional eq/ne must lower to SQL double arithmetic,
+            // never to a Java-side algebraic solve (a1 aDouble=-0.6 is the divergence
+            // witness; a2 aDouble=0.25 pins the exact-arithmetic inclusion).
+            "arith-add-eq-frac", "arith-add-ne-frac", "arith-add-eq-frac-exact",
             // clean-room probes (GROUP A)
             "p-ternary-in-exists", "p-arith-in-lambda", "p-lambda-inner-f2f",
             "p-lambda-f2f-like", "p-size-nested",
