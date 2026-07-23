@@ -6,6 +6,7 @@ import dev.cerbos.api.v1.response.Response.PlanResourcesResponse;
 import dev.cerbos.sdk.PlanResourcesResult;
 
 import jakarta.persistence.criteria.CriteriaBuilder;
+import jakarta.persistence.criteria.CriteriaQuery;
 import jakarta.persistence.criteria.From;
 import jakarta.persistence.criteria.Join;
 import jakarta.persistence.criteria.Path;
@@ -50,7 +51,8 @@ public final class SpringDataQueryPlanAdapter {
         Operand condition = planResult.getCondition()
                 .orElseThrow(() -> new IllegalArgumentException("Conditional plan has no condition"));
         return new Result.Conditional<>((root, query, cb) ->
-                new Translator(cb, overrides).traverse(condition, Scope.root(root, query, mapper)));
+                new Translator(cb, overrides, isSelectInvocation(root, query))
+                        .traverse(condition, Scope.root(root, query, mapper)));
     }
 
     // -- PlanResourcesResponse overloads --
@@ -74,7 +76,8 @@ public final class SpringDataQueryPlanAdapter {
                     throw new IllegalArgumentException("Conditional plan has no condition");
                 }
                 yield new Result.Conditional<T>((root, query, cb) ->
-                        new Translator(cb, overrides).traverse(cond, Scope.root(root, query, mapper)));
+                        new Translator(cb, overrides, isSelectInvocation(root, query))
+                                .traverse(cond, Scope.root(root, query, mapper)));
             }
             default -> throw new IllegalArgumentException("Unknown filter kind: " + filter.getKind());
         };
@@ -82,18 +85,34 @@ public final class SpringDataQueryPlanAdapter {
 
     // -- Internal translator --
 
+    /**
+     * Detects whether the Specification is being evaluated for the {@code SELECT} query it was
+     * handed: in every Spring Data SELECT path ({@code findAll}/{@code findOne}/{@code count}/
+     * {@code exists}/pagination) the {@code Root} is created via {@code query.from(...)}, so it is
+     * a member of {@code query.getRoots()}. In {@code SimpleJpaRepository.delete(Specification)}
+     * the {@code Root} comes from a {@code CriteriaDelete} while the {@code CriteriaQuery}
+     * argument is a fresh throwaway {@code createQuery(cls)} whose root set does not contain it
+     * (and newer Spring Data versions pass {@code null} for the query). Correlated subqueries are
+     * only sound in the first case — see {@code chainSubquery}.
+     */
+    private static boolean isSelectInvocation(Root<?> root, CriteriaQuery<?> query) {
+        return query != null && query.getRoots().contains(root);
+    }
+
     private static final class Translator {
         private final CriteriaBuilder cb;
         private final TriPredicate tri;
         private final Map<String, OperatorFunction> overrides;
         private final HierarchyTranslator hierarchy;
         private final ComparisonTranslator comparisons = new ComparisonTranslator();
+        private final boolean selectInvocation;
 
-        Translator(CriteriaBuilder cb, Map<String, OperatorFunction> overrides) {
+        Translator(CriteriaBuilder cb, Map<String, OperatorFunction> overrides, boolean selectInvocation) {
             this.cb = cb;
             this.tri = new TriPredicate(cb);
             this.overrides = overrides;
             this.hierarchy = new HierarchyTranslator(cb);
+            this.selectInvocation = selectInvocation;
         }
 
         Predicate traverse(Operand operand, Scope scope) {
@@ -1688,6 +1707,20 @@ public final class SpringDataQueryPlanAdapter {
          */
         private <T> ChainSubquery<T> chainSubquery(Class<T> resultType, Scope scope,
                                                    Scope.ResolvedRelation ref) {
+            if (!selectInvocation) {
+                String chain = ref.chain().stream()
+                        .map(AttributeMapping.Relation::joinAttribute)
+                        .collect(java.util.stream.Collectors.joining("."));
+                throw new UnsupportedOperationException(
+                        "Relation '" + chain + "' requires a correlated subquery, but this Specification "
+                        + "is being evaluated outside its own SELECT query — e.g. via "
+                        + "repository.delete(Specification) or a criteria bulk delete/update. "
+                        + "Hibernate's multi-table bulk delete first clears @ElementCollection/join "
+                        + "tables using this same predicate, which self-invalidates the correlated "
+                        + "subquery: 0 entity rows are deleted while their collection rows are "
+                        + "silently destroyed. The Cerbos Specification is SELECT-only; fetch the "
+                        + "matching ids with findAll(spec) and delete them with deleteAllById(ids).");
+            }
             Subquery<T> sub = scope.parentQuery().subquery(resultType);
             From<?, ?> correlated = correlate(sub, ref.owner().from());
             Join<?, ?> join = correlated.join(ref.chain().get(0).joinAttribute());
