@@ -85,6 +85,14 @@ class AdversarialConformanceTest {
             // Instant column for the ts-* timestamp() comparison actions
             Map.entry("request.resource.attr.createdAt", AttributeMapping.field("createdAt")),
             Map.entry("request.resource.attr.obj.inner", AttributeMapping.field("aString")),
+            // in-null-elem-*: same column as aOptionalString, but the oracle sends an
+            // EXPLICIT null attribute for NULL columns (aOptionalString is OMITTED instead)
+            // — pinning the adapter's convention that a DB NULL is the explicitly-null
+            // attribute (eq-null → IS NULL, and `x in [..., null]` → OR IS NULL).
+            Map.entry("request.resource.attr.owner", AttributeMapping.field("aOptionalString")),
+            // Scalar projection of tags (defaultMemberField=name) for `null in R.attr.tagNames`;
+            // NULL name columns become explicit null list elements on the check side.
+            Map.entry("request.resource.attr.tagNames", AttributeMapping.relation("tags", "name")),
             Map.entry("request.resource.attr.tags", AttributeMapping.relation("tags", Map.of(
                     "id", AttributeMapping.field("id"),
                     "name", AttributeMapping.field("name")
@@ -436,6 +444,23 @@ class AdversarialConformanceTest {
         if (s.aOptionalString() != null) {
             r = r.withAttribute("aOptionalString", AttributeValue.stringValue(s.aOptionalString()));
         }
+        // `owner` reads the SAME column under the OTHER null convention: a DB NULL is the
+        // EXPLICITLY-null attribute. This is the convention the adapter's null translations
+        // implement (eq-null → IS NULL; a null in-list element → OR IS NULL), and the two
+        // check() verdicts genuinely differ: `null in ["x", null]` is TRUE (allow) while a
+        // MISSING owner is a CEL error (deny). SQL cannot distinguish the two — the adapter
+        // follows the planner, which itself folds `x in [null]` to eq(x, null).
+        r = r.withAttribute("owner", s.aOptionalString() != null
+                ? AttributeValue.stringValue(s.aOptionalString())
+                : nullAttributeValue());
+        // tagNames: the scalar name projection of tags, with NULL name columns as explicit
+        // null elements — the representation under which `null in R.attr.tagNames` is TRUE
+        // exactly when a related row's member column IS NULL.
+        r = r.withAttribute("tagNames", AttributeValue.listValue(s.tags().stream()
+                .map(t -> t.name() != null
+                        ? AttributeValue.stringValue(t.name())
+                        : nullAttributeValue())
+                .toList()));
         if (doubleFor(s) != null) {
             r = r.withAttribute("aDouble", AttributeValue.doubleValue(doubleFor(s)));
         }
@@ -463,6 +488,24 @@ class AdversarialConformanceTest {
                             .toList()))));
         }
         return r;
+    }
+
+    /**
+     * An explicit protobuf NULL attribute value. The SDK's {@link AttributeValue} exposes no
+     * null factory (string/double/bool/list/map only), so the private constructor is reached
+     * reflectively — the null attribute is exactly what the in-null-elem-* actions exist to
+     * exercise, and check() verdicts differ between an explicit null and a missing attribute.
+     */
+    private static AttributeValue nullAttributeValue() {
+        try {
+            var ctor = AttributeValue.class.getDeclaredConstructor(com.google.protobuf.Value.class);
+            ctor.setAccessible(true);
+            return ctor.newInstance(com.google.protobuf.Value.newBuilder()
+                    .setNullValue(com.google.protobuf.NullValue.NULL_VALUE).build());
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException(
+                    "cerbos-sdk-java AttributeValue no longer has a (Value) constructor", e);
+        }
     }
 
     /** A NULL tag name in the DB is a missing element attribute on the check side. */
@@ -578,6 +621,16 @@ class AdversarialConformanceTest {
             // normalization; ts-ne pins NULL exclusion (a3 has no created_at: check()
             // denies on the missing attribute AND SQL excludes the NULL row).
             "ts-window", "ts-vf", "ts-eq", "ts-eq-offset", "ts-ne",
+            // in-lists containing null: the null element arrives VERBATIM and check()
+            // allows an explicitly-null `owner` (`null in [..., null]` is true) — the
+            // translation must be IN (nonNulls) OR IS NULL, with three-valued-safe
+            // negation; `in [null]` is planner-folded to eq-null; the rel variants pin
+            // EXISTS(member IS NULL); hasint pins the same null-element semantics through
+            // the shared intersection translation.
+            "in-null-elem-mixed", "in-null-elem-neg",
+            "in-null-elem-only", "in-null-elem-only-neg",
+            "in-null-elem-rel", "in-null-elem-rel-neg",
+            "in-null-elem-hasint",
     })
     void adapterMatchesCheckOracle(String action) {
         List<String> oracle = oracleAllowedIds(action);

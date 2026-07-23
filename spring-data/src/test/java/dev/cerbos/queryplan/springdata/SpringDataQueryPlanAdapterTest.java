@@ -64,7 +64,10 @@ class SpringDataQueryPlanAdapterTest {
             Map.entry("request.resource.attr.tags", AttributeMapping.relation("tags", Map.of(
                     "id", AttributeMapping.field("id"),
                     "name", AttributeMapping.field("name")
-            )))
+            ))),
+            // Scalar projection of the tags relation (defaultMemberField) for the
+            // null-element membership tests: `null in R.attr.tagNames`.
+            Map.entry("request.resource.attr.tagNames", AttributeMapping.relation("tags", "name"))
     );
 
     private static EntityManagerFactory emf;
@@ -114,6 +117,19 @@ class SpringDataQueryPlanAdapterTest {
     private static Operand listOp(String... values) {
         ListValue.Builder list = ListValue.newBuilder();
         for (String v : values) list.addValues(Value.newBuilder().setStringValue(v));
+        return Operand.newBuilder().setValue(Value.newBuilder().setListValue(list)).build();
+    }
+
+    /** Like {@link #listOp} but {@code null} entries become protobuf NULL_VALUE elements. */
+    private static Operand listOpNullable(String... values) {
+        ListValue.Builder list = ListValue.newBuilder();
+        for (String v : values) {
+            if (v == null) {
+                list.addValues(Value.newBuilder().setNullValue(NullValue.NULL_VALUE));
+            } else {
+                list.addValues(Value.newBuilder().setStringValue(v));
+            }
+        }
         return Operand.newBuilder().setValue(Value.newBuilder().setListValue(list)).build();
     }
 
@@ -1511,6 +1527,178 @@ class SpringDataQueryPlanAdapterTest {
                 assertEquals(1, runCount(mapNames));
                 assertEquals(0, runCount(exprOp("not", mapNames)));
             });
+        }
+    }
+
+    /**
+     * {@code in}-lists containing {@code null} — PDP-verified wire facts (Cerbos latest,
+     * 2026-07): {@code R.attr.owner in ["a", null]} compiles and the planner emits
+     * {@code in(variable, value ["a", null])} VERBATIM, and {@code check()} ALLOWS an
+     * explicitly-null attribute (CEL {@code null in ["a", null]} is true). The planner itself
+     * folds the degenerate {@code x in [null]} to {@code eq(x, null)} — which this adapter
+     * already translates as IS NULL — so a null list element must become an IS NULL disjunct:
+     * {@code path IN (nonNulls) OR path IS NULL}. Passing the raw null-bearing list to
+     * {@code path.in} instead produces SQL {@code IN ('a', NULL)}, whose three-valued
+     * semantics silently EXCLUDE null rows check() allows (under-return), and whose negation
+     * is UNKNOWN for every non-matching row (the negated filter returns nothing at all).
+     * The Relation side mirrors this: a null element of a mapped collection is a related row
+     * whose member column IS NULL, so the null needle/element becomes an IS NULL disjunct
+     * inside the membership EXISTS.
+     */
+    @Nested
+    class InListNullElements {
+
+        /** Seed three rows keyed by aOptionalString content: "a", "b", and NULL. */
+        private void withOwnerRows(Runnable body) {
+            ResourceEntity a = new ResourceEntity("in-null-a");
+            a.setaOptionalString("a");
+            ResourceEntity b = new ResourceEntity("in-null-b");
+            b.setaOptionalString("b");
+            ResourceEntity nul = new ResourceEntity("in-null-nul");
+            nul.setaOptionalString(null);
+            withResource(a, () -> withResource(b, () -> withResource(nul, body)));
+        }
+
+        /** Seed rows with tag collections: a null-name member, an "x" member, and no tags. */
+        private void withTagRows(Runnable body) {
+            ResourceEntity withX = new ResourceEntity("in-null-tag-x");
+            withX.addTag("int1", "x");
+            ResourceEntity withNullName = new ResourceEntity("in-null-tag-nul");
+            withNullName.addTag("int2", null);
+            ResourceEntity noTags = new ResourceEntity("in-null-tag-none");
+            withResource(withX, () -> withResource(withNullName, () -> withResource(noTags, body)));
+        }
+
+        /** Translate {@code condition}, run it, and return the matched row IDs. */
+        private Set<String> runIds(Operand condition) {
+            PlanResourcesResponse resp =
+                    buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+            Result<ResourceEntity> result =
+                    SpringDataQueryPlanAdapter.toSpecification(resp, MAPPER, Map.of());
+            assertInstanceOf(Result.Conditional.class, result);
+            Specification<ResourceEntity> spec =
+                    ((Result.Conditional<ResourceEntity>) result).specification();
+            EntityManager em = emf.createEntityManager();
+            try {
+                CriteriaBuilder cb = em.getCriteriaBuilder();
+                CriteriaQuery<String> cq = cb.createQuery(String.class);
+                Root<ResourceEntity> root = cq.from(ResourceEntity.class);
+                cq.select(root.get("id")).distinct(true);
+                Predicate p = spec.toPredicate(root, cq, cb);
+                if (p != null) {
+                    cq.where(p);
+                }
+                return Set.copyOf(em.createQuery(cq).getResultList());
+            } finally {
+                em.close();
+            }
+        }
+
+        @Test
+        void inListWithNullElementIncludesNullRow() {
+            // check() verdicts (scratch PDP): "a" ALLOW, null ALLOW, "b" DENY.
+            Operand cond = exprOp("in",
+                    var("request.resource.attr.aOptionalString"), listOpNullable("a", null));
+            withOwnerRows(() ->
+                    assertEquals(Set.of("in-null-a", "in-null-nul"), runIds(cond)));
+        }
+
+        @Test
+        void notInListWithNullElementReturnsOnlyNonMatchingRows() {
+            // check() verdicts: "b" ALLOW; "a" and null DENY. Three-valued trap: over the old
+            // IN ('a', NULL) the negation was UNKNOWN for "b" too — nothing came back.
+            Operand cond = exprOp("not", exprOp("in",
+                    var("request.resource.attr.aOptionalString"), listOpNullable("a", null)));
+            withOwnerRows(() ->
+                    assertEquals(Set.of("in-null-b"), runIds(cond)));
+        }
+
+        @Test
+        void inAllNullListIsPureIsNull() {
+            // The planner folds `x in [null]` to eq(x, null) in real plans; the unfolded
+            // shape must translate identically (pure IS NULL) for hand-built plans.
+            Operand cond = exprOp("in",
+                    var("request.resource.attr.aOptionalString"), listOpNullable((String) null));
+            withOwnerRows(() -> {
+                assertEquals(Set.of("in-null-nul"), runIds(cond));
+                assertEquals(Set.of("in-null-a", "in-null-b"), runIds(exprOp("not", exprOp("in",
+                        var("request.resource.attr.aOptionalString"),
+                        listOpNullable((String) null)))));
+            });
+        }
+
+        @Test
+        void nullNeedleAgainstScalarFieldIsIsNull() {
+            // `null in R.attr.x` over a Field mapping: scalar membership is equality, and
+            // equality against the null constant is IS NULL (mirrors the eq-null leaf).
+            Operand cond = exprOp("in",
+                    nullVal(), var("request.resource.attr.aOptionalString"));
+            withOwnerRows(() ->
+                    assertEquals(Set.of("in-null-nul"), runIds(cond)));
+        }
+
+        @Test
+        void nullNeedleAgainstRelationMatchesNullMemberRow() {
+            // `null in R.attr.tagNames`: CEL is true iff the collection holds a null element
+            // (PDP-verified: items=["a", null] → ALLOW; ["a"], [] → DENY). A related row with
+            // a NULL member column is exactly such an element → EXISTS(member IS NULL).
+            Operand cond = exprOp("in", nullVal(), var("request.resource.attr.tagNames"));
+            withTagRows(() ->
+                    assertEquals(Set.of("in-null-tag-nul"), runIds(cond)));
+        }
+
+        @Test
+        void notNullNeedleAgainstRelationExcludesNullMemberRow() {
+            // check() verdicts: ["a"] ALLOW, [] ALLOW, ["a", null] DENY.
+            Operand cond = exprOp("not",
+                    exprOp("in", nullVal(), var("request.resource.attr.tagNames")));
+            withTagRows(() ->
+                    assertEquals(Set.of("in-null-tag-x", "in-null-tag-none"), runIds(cond)));
+        }
+
+        @Test
+        void hasIntersectionWithNullElementMatchesNullMemberRow() {
+            // hasIntersection shares collectionContainsAny with `in`, and check() agrees:
+            // hasIntersection(R.attr.xs, ["x", null]) ALLOWS xs=[null] (PDP-verified). A
+            // null element in the constant list intersects exactly the collections holding
+            // a null member.
+            Operand cond = exprOp("hasIntersection",
+                    var("request.resource.attr.tagNames"), listOpNullable("x", null));
+            withTagRows(() -> {
+                assertEquals(Set.of("in-null-tag-x", "in-null-tag-nul"), runIds(cond));
+                assertEquals(Set.of("in-null-tag-none"), runIds(exprOp("not",
+                        exprOp("hasIntersection",
+                                var("request.resource.attr.tagNames"),
+                                listOpNullable("x", null)))));
+            });
+        }
+
+        @Test
+        void mapIntersectionNullElementIsInertAndNullProjectionStaysUnknown() {
+            // For map(t, t.name) member ACCESS — unlike the scalar tagNames projection — a
+            // NULL member column is a MISSING element attribute (CEL error): check() denies
+            // tags=[{}] under BOTH polarities even with a null element in the constant list
+            // (PDP-verified), and only an explicitly-null projection (unrepresentable in the
+            // column model) could match that element. The null element must be inert and the
+            // NULL-projection row must stay UNKNOWN.
+            java.util.function.Supplier<Operand> cond = () -> exprOp("hasIntersection",
+                    exprOp("map", var("request.resource.attr.tags"),
+                            lambda("t", var("t.name"))),
+                    listOpNullable("x", null));
+            withTagRows(() -> {
+                assertEquals(Set.of("in-null-tag-x"), runIds(cond.get()));
+                assertEquals(Set.of("in-null-tag-none"),
+                        runIds(exprOp("not", cond.get())));
+            });
+        }
+
+        @Test
+        void overrideStillOwnsInWithNullElement() {
+            // A registered override must keep receiving the RAW list (nulls included).
+            Operand cond = exprOp("in",
+                    var("request.resource.attr.aOptionalString"), listOpNullable("a", null));
+            assertThrows(OverrideInvoked.class,
+                    () -> runCount(cond, Map.of("in", THROWING_OVERRIDE)));
         }
     }
 
