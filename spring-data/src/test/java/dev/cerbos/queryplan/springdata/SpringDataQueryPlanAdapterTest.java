@@ -15,6 +15,7 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityManagerFactory;
 import jakarta.persistence.Persistence;
 import jakarta.persistence.criteria.CriteriaBuilder;
+import jakarta.persistence.criteria.CriteriaDelete;
 import jakarta.persistence.criteria.CriteriaQuery;
 import jakarta.persistence.criteria.Predicate;
 import jakarta.persistence.criteria.Root;
@@ -24,10 +25,12 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.jpa.domain.Specification;
+import org.springframework.data.jpa.repository.support.SimpleJpaRepository;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -2496,6 +2499,159 @@ class SpringDataQueryPlanAdapterTest {
                             exprOp("add", var("request.resource.attr.aString"), sval("x")),
                             sval("z")),
                     "numeric");
+        }
+    }
+
+    /**
+     * {@code repository.delete(Specification)} guard. Relation-mapped operators translate to
+     * correlated subqueries over collection tables; Hibernate's multi-table bulk delete first
+     * clears {@code @ElementCollection}/join tables with the same predicate, which
+     * self-invalidates the correlated subquery — empirically (Hibernate 6.6.18/H2, plan
+     * {@code in(value "user1", variable ownedBy)}): SELECT returns the row, {@code delete()}
+     * returns 0, the entity survives, and ALL its {@code resource_owned_by} collection rows are
+     * destroyed. The adapter now detects the bulk-delete invocation context (the {@code Root}
+     * comes from a {@code CriteriaDelete} and is not a member of the throwaway
+     * {@code CriteriaQuery}'s root set) and throws {@link UnsupportedOperationException} from
+     * {@code toPredicate} — i.e. BEFORE any statement executes.
+     */
+    @Nested
+    class BulkDeleteGuard {
+
+        /**
+         * Exact wire shape the PDP emits for policy {@code P.id in request.resource.attr.ownedBy}
+         * (operand order is source order, so the constant-folded principal id comes first).
+         */
+        private final Operand ownedByUser1 =
+                exprOp("in", sval("user1"), var("request.resource.attr.ownedBy"));
+
+        private Specification<ResourceEntity> spec(Operand condition) {
+            PlanResourcesResponse resp =
+                    buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+            Result<ResourceEntity> result =
+                    SpringDataQueryPlanAdapter.toSpecification(resp, MAPPER, Map.of());
+            return ((Result.Conditional<ResourceEntity>) result).specification();
+        }
+
+        @Test
+        void deleteWithRelationSpecThrowsBeforeAnyDeletion() {
+            ResourceEntity r = new ResourceEntity("bulk-del-1");
+            r.setOwnedBy(new ArrayList<>(List.of("user1", "user2")));
+            withResource(r, () -> {
+                Specification<ResourceEntity> spec = spec(ownedByUser1);
+                EntityManager em = emf.createEntityManager();
+                try {
+                    SimpleJpaRepository<ResourceEntity, String> repository =
+                            new SimpleJpaRepository<>(ResourceEntity.class, em);
+
+                    // SELECT paths through the real Spring Data repository are unaffected.
+                    assertEquals(1, repository.findAll(spec).size());
+                    assertEquals(1, repository.count(spec));
+
+                    em.getTransaction().begin();
+                    try {
+                        UnsupportedOperationException ex = assertThrows(
+                                UnsupportedOperationException.class,
+                                () -> repository.delete(spec));
+                        assertTrue(ex.getMessage().contains("ownedBy"),
+                                "message should name the relation, was: " + ex.getMessage());
+                        assertTrue(ex.getMessage().contains("SELECT"),
+                                "message should state the SELECT-only contract, was: " + ex.getMessage());
+                        assertTrue(ex.getMessage().contains("deleteAllById"),
+                                "message should point at the safe alternative, was: " + ex.getMessage());
+                    } finally {
+                        em.getTransaction().rollback();
+                    }
+                } finally {
+                    em.close();
+                }
+
+                // The guard fired inside toPredicate, before Hibernate built or ran any DELETE:
+                // the entity row AND every one of its collection rows survive. (Without the
+                // guard: entity survives but resource_owned_by is emptied — data corruption.)
+                EntityManager check = emf.createEntityManager();
+                try {
+                    ResourceEntity reloaded = check.find(ResourceEntity.class, "bulk-del-1");
+                    assertNotNull(reloaded, "entity row must survive");
+                    assertEquals(Set.of("user1", "user2"), Set.copyOf(reloaded.getOwnedBy()),
+                            "collection rows must survive untouched");
+                } finally {
+                    check.close();
+                }
+            });
+        }
+
+        @Test
+        void deleteWithFieldOnlySpecStillDeletes() {
+            // Field-only predicates involve no correlated subquery and no collection-table
+            // pre-clear hazard — the guard must not block them.
+            ResourceEntity r = new ResourceEntity("bulk-del-2");
+            r.setCreatedBy("alice");
+            withResource(r, () -> {
+                Specification<ResourceEntity> spec =
+                        spec(exprOp("eq", var("request.resource.attr.createdBy"), sval("alice")));
+                EntityManager em = emf.createEntityManager();
+                try {
+                    SimpleJpaRepository<ResourceEntity, String> repository =
+                            new SimpleJpaRepository<>(ResourceEntity.class, em);
+                    em.getTransaction().begin();
+                    long deleted = repository.delete(spec);
+                    em.getTransaction().commit();
+                    assertEquals(1, deleted);
+                } finally {
+                    em.close();
+                }
+                EntityManager check = emf.createEntityManager();
+                try {
+                    assertNull(check.find(ResourceEntity.class, "bulk-del-2"),
+                            "field-only delete(Specification) must still work");
+                } finally {
+                    check.close();
+                }
+            });
+        }
+
+        @Test
+        void criteriaDeleteInvocationContextIsDetected() {
+            // Pins the detection mechanism itself, independent of the Spring Data version:
+            // SimpleJpaRepository.delete(Specification) calls
+            // spec.toPredicate(delete.from(cls), builder.createQuery(cls), builder) — a Root
+            // created on a CriteriaDelete plus a throwaway CriteriaQuery whose root set does
+            // not contain it. Every Spring Data SELECT path creates the Root via
+            // query.from(...), so membership in query.getRoots() distinguishes the two.
+            Specification<ResourceEntity> spec = spec(ownedByUser1);
+            EntityManager em = emf.createEntityManager();
+            try {
+                CriteriaBuilder cb = em.getCriteriaBuilder();
+                CriteriaDelete<ResourceEntity> delete = cb.createCriteriaDelete(ResourceEntity.class);
+                Root<ResourceEntity> deleteRoot = delete.from(ResourceEntity.class);
+                assertThrows(UnsupportedOperationException.class,
+                        () -> spec.toPredicate(deleteRoot, cb.createQuery(ResourceEntity.class), cb));
+            } finally {
+                em.close();
+            }
+        }
+
+        @Test
+        void hasIntersectionAndSizeAreGuardedToo() {
+            // All correlated-subquery construction funnels through the same choke point
+            // (chainSubquery) — spot-check two more Relation-mapped operator families.
+            Operand hasIntersection = exprOp("hasIntersection",
+                    var("request.resource.attr.ownedBy"), listOp("user1", "user2"));
+            Operand sizeGt = exprOp("gt",
+                    exprOp("size", var("request.resource.attr.ownedBy")), nval(1));
+            EntityManager em = emf.createEntityManager();
+            try {
+                CriteriaBuilder cb = em.getCriteriaBuilder();
+                for (Operand cond : List.of(hasIntersection, sizeGt)) {
+                    Specification<ResourceEntity> spec = spec(cond);
+                    CriteriaDelete<ResourceEntity> delete = cb.createCriteriaDelete(ResourceEntity.class);
+                    Root<ResourceEntity> deleteRoot = delete.from(ResourceEntity.class);
+                    assertThrows(UnsupportedOperationException.class,
+                            () -> spec.toPredicate(deleteRoot, cb.createQuery(ResourceEntity.class), cb));
+                }
+            } finally {
+                em.close();
+            }
         }
     }
 }

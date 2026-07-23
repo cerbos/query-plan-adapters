@@ -87,6 +87,25 @@ Page<Contact> results = contactRepository.findAll(
     own.and(result.toSpecification()), pageable);
 ```
 
+> [!WARNING]
+> **The Specification is SELECT-only.** Never pass it to
+> `repository.delete(Specification)` or any other criteria bulk operation. Relation
+> mappings translate to correlated subqueries over collection/join tables, and
+> Hibernate's multi-table bulk delete first clears those `@ElementCollection`/join
+> tables using the same predicate — the pre-clear removes exactly the rows the
+> correlated subquery references, so the delete removes **0 entity rows while
+> silently destroying their collection rows** (e.g. all ownership entries). Under a
+> blocklist policy like `!(P.id in R.attr.ownedBy)`, the now-ownerless survivors
+> become visible to every principal. The adapter detects the bulk-delete invocation
+> context and throws `UnsupportedOperationException` before anything is deleted.
+> To delete policy-permitted rows, select ids first, then delete by id:
+>
+> ```java
+> List<Long> ids = contactRepository.findAll(result.toSpecification())
+>         .stream().map(Contact::getId).toList();
+> contactRepository.deleteAllById(ids);
+> ```
+
 ## Field mapping
 
 Map each `request.resource.attr.<name>` to a JPA path or a relation:
