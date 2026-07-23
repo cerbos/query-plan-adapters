@@ -28,7 +28,11 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
+import org.springframework.data.jpa.repository.support.SimpleJpaRepository;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
 import org.testcontainers.containers.wait.strategy.Wait;
@@ -41,6 +45,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -1224,6 +1230,304 @@ class SpringDataIntegrationTest {
                     .withAttribute("scope", AttributeValue.stringValue("a.b"));
             assertEquals(List.of("1"), runWithPrincipalAndMapping(
                     principal, "hierarchy-descendent-of", HIERARCHY_MAP));
+        }
+    }
+
+    // -- Published repository surface: JpaSpecificationExecutor via SimpleJpaRepository --
+    //
+    // Every other suite hand-rolls a CriteriaQuery with `cq.select(root.get("id")).distinct(true)`
+    // and calls spec.toPredicate exactly once. That harness can never observe the documented
+    // integration contract: `findAll(spec, Pageable)` invokes toPredicate TWICE on ONE
+    // Specification instance (content query + count query — the re-invocation contract
+    // Result.java documents and the README promises), and the manual distinct(true) id-projection
+    // would silently dedupe any duplicate-root-row regression that a real repository caller would
+    // see as duplicated entities and broken page math. These tests run live-PDP plans through the
+    // real Spring Data glue and assert entity IDENTITIES and page totals — never bare counts and
+    // never with a distinct() safety net.
+    @Nested
+    class RepositorySurface {
+
+        /** Ids of {@code entities}, sorted — identity assertions independent of row order. */
+        private List<String> sortedIds(List<ResourceEntity> entities) {
+            return entities.stream().map(ResourceEntity::getId).sorted().toList();
+        }
+
+        /** Ids of {@code entities} in encounter order — for assertions on explicit Sort. */
+        private List<String> idsInOrder(List<ResourceEntity> entities) {
+            return entities.stream().map(ResourceEntity::getId).toList();
+        }
+
+        /** Fetch a live plan for {@code action} and translate it to a Specification. */
+        private Specification<ResourceEntity> specFor(String action,
+                                                      Map<String, AttributeMapping> mapping) {
+            PlanResourcesResult planResult = plan(action);
+            return SpringDataQueryPlanAdapter
+                    .<ResourceEntity>toSpecification(planResult, mapping)
+                    .toSpecification();
+        }
+
+        /**
+         * Wraps a Specification and counts toPredicate invocations, so a test can prove that
+         * Spring Data really re-invokes ONE Specification instance once per query execution
+         * (e.g. content query + count query under {@code findAll(spec, Pageable)}).
+         */
+        private static final class CountingSpecification implements Specification<ResourceEntity> {
+            private final Specification<ResourceEntity> delegate;
+            final AtomicInteger invocations = new AtomicInteger();
+
+            CountingSpecification(Specification<ResourceEntity> delegate) {
+                this.delegate = delegate;
+            }
+
+            @Override
+            public Predicate toPredicate(Root<ResourceEntity> root, CriteriaQuery<?> query,
+                                         CriteriaBuilder criteriaBuilder) {
+                invocations.incrementAndGet();
+                return delegate.toPredicate(root, query, criteriaBuilder);
+            }
+        }
+
+        /**
+         * Assert the full repository contract for ONE Specification instance: findAll(spec)
+         * returns exactly {@code expectedIds} with no duplicates, count(spec) agrees, and a
+         * single full page returns the same identities with getTotalElements matching the
+         * content. Reusing the same instance across all four executions also exercises the
+         * re-invocation contract (a cached Predicate would make Hibernate 6 throw
+         * SqlTreeCreationException on the second query).
+         */
+        private void assertRepositorySurface(Specification<ResourceEntity> spec,
+                                             List<String> expectedIds) {
+            EntityManager em = emf.createEntityManager();
+            try {
+                SimpleJpaRepository<ResourceEntity, String> repository =
+                        new SimpleJpaRepository<>(ResourceEntity.class, em);
+
+                List<ResourceEntity> found = repository.findAll(spec);
+                assertEquals(expectedIds.size(), found.size(),
+                        "findAll(spec) must return one row per matching entity (no duplicates)");
+                assertEquals(expectedIds, sortedIds(found), "findAll(spec) row identities");
+
+                assertEquals(expectedIds.size(), repository.count(spec), "count(spec)");
+
+                // Page size == expected size, so the page is exactly full and Spring Data must
+                // fire the separate COUNT query to compute the total.
+                Page<ResourceEntity> page = repository.findAll(spec,
+                        PageRequest.of(0, expectedIds.size(), Sort.by("id")));
+                assertEquals(expectedIds, idsInOrder(page.getContent()),
+                        "page content identities (sorted by id)");
+                assertEquals(expectedIds.size(), page.getTotalElements(),
+                        "getTotalElements must agree with the page content");
+                assertEquals(1, page.getTotalPages(), "everything fits on one page");
+
+                List<ResourceEntity> sorted = repository.findAll(spec, Sort.by("id"));
+                assertEquals(expectedIds, idsInOrder(sorted), "findAll(spec, Sort) identities");
+            } finally {
+                em.close();
+            }
+        }
+
+        // -- one representative per operator family, all through the real repository glue --
+
+        @Test
+        void fieldOnlyPredicate() {
+            // equal: R.attr.aBool == true → r1, r3.
+            assertRepositorySurface(specFor("equal", FIELD_MAP), List.of("1", "3"));
+        }
+
+        @Test
+        void relationMembershipPredicate() {
+            // relation-some: P.id ("user1") in R.attr.ownedBy (@ElementCollection Relation)
+            // → correlated EXISTS → r1 [user1,user2], r3 [user1].
+            assertRepositorySurface(specFor("relation-some", FIELD_MAP), List.of("1", "3"));
+        }
+
+        @Test
+        void lambdaExistsPredicate() {
+            // exists: R.attr.tags.exists(tag, tag.name == "public") over the @OneToMany
+            // TagEntity relation → r1 (tag1:public), r3 (tag1:public).
+            assertRepositorySurface(specFor("exists", NESTED_FIELD_MAP), List.of("1", "3"));
+        }
+
+        @Test
+        void sizeCountPredicate() {
+            // size-count-threshold: size(R.attr.ownedBy) >= 2 → correlated COUNT → only r1.
+            assertRepositorySurface(specFor("size-count-threshold", FIELD_MAP), List.of("1"));
+        }
+
+        @Test
+        void hasIntersectionPredicate() {
+            // map-collection: hasIntersection(R.attr.tags.map(t, t.name), ["public","private"])
+            // → all three resources match (r1 via BOTH tags — see the duplicate-row test below).
+            assertRepositorySurface(specFor("map-collection", NESTED_FIELD_MAP),
+                    List.of("1", "2", "3"));
+        }
+
+        // -- the double-invocation contract --
+
+        @Test
+        void pageableFindAllInvokesToPredicateTwiceOnOneSpecification() {
+            // Result.java documents that findAll(spec, Pageable) fires a separate COUNT query
+            // and re-invokes the SAME Specification instance for it — the reason the adapter
+            // rebuilds the whole predicate tree from the Root/CriteriaQuery on every call
+            // (Hibernate 6 rejects a Predicate cached across queries with
+            // SqlTreeCreationException). No previous test ever executed that path.
+            CountingSpecification spec =
+                    new CountingSpecification(specFor("map-collection", NESTED_FIELD_MAP));
+
+            EntityManager em = emf.createEntityManager();
+            try {
+                SimpleJpaRepository<ResourceEntity, String> repository =
+                        new SimpleJpaRepository<>(ResourceEntity.class, em);
+
+                // 3 matching rows, page size 2 → page 0 comes back full, so Spring Data MUST
+                // run the separate COUNT query: exactly two toPredicate invocations.
+                Page<ResourceEntity> page0 =
+                        repository.findAll(spec, PageRequest.of(0, 2, Sort.by("id")));
+                assertEquals(List.of("1", "2"), idsInOrder(page0.getContent()));
+                assertEquals(3, page0.getTotalElements());
+                assertEquals(2, page0.getTotalPages());
+                assertEquals(2, spec.invocations.get(),
+                        "findAll(spec, Pageable) with a full page must invoke toPredicate "
+                                + "exactly twice (content query + count query) on one instance");
+
+                // Same instance again for the last page: content query only — Spring Data
+                // derives the total from offset + content size without a COUNT.
+                Page<ResourceEntity> page1 =
+                        repository.findAll(spec, PageRequest.of(1, 2, Sort.by("id")));
+                assertEquals(List.of("3"), idsInOrder(page1.getContent()));
+                assertEquals(3, page1.getTotalElements(),
+                        "page totals must stay consistent across pages");
+                assertEquals(3, spec.invocations.get(),
+                        "the same Specification instance is re-invoked for every execution");
+            } finally {
+                em.close();
+            }
+        }
+
+        @Test
+        void pageTotalsAgreeWithContentAcrossAllPages() {
+            // Walk relation-some ([1, 3]) page by page with size 1: every page must report the
+            // same total, and the union of page contents must be exactly the matching set.
+            Specification<ResourceEntity> spec = specFor("relation-some", FIELD_MAP);
+            EntityManager em = emf.createEntityManager();
+            try {
+                SimpleJpaRepository<ResourceEntity, String> repository =
+                        new SimpleJpaRepository<>(ResourceEntity.class, em);
+
+                Page<ResourceEntity> page0 =
+                        repository.findAll(spec, PageRequest.of(0, 1, Sort.by("id")));
+                Page<ResourceEntity> page1 =
+                        repository.findAll(spec, PageRequest.of(1, 1, Sort.by("id")));
+                assertEquals(List.of("1"), idsInOrder(page0.getContent()));
+                assertEquals(List.of("3"), idsInOrder(page1.getContent()));
+                assertEquals(2, page0.getTotalElements());
+                assertEquals(2, page1.getTotalElements());
+                assertEquals(2, page0.getTotalPages());
+                assertFalse(page1.hasNext(), "two matching rows fill exactly two size-1 pages");
+            } finally {
+                em.close();
+            }
+        }
+
+        // -- duplicate-row pinning: correlated EXISTS, not root joins --
+
+        @Test
+        void multiElementRelationMatchDoesNotDuplicateEntities() {
+            // r1 has TWO TagEntity elements matching map-collection's ["public", "private"]
+            // list (tag1:public AND tag2:private). This pins the correlated-EXISTS (not join)
+            // translation strategy: a regression to a root join would return r1 once per
+            // matching element — findAll(spec) would yield 4 entities for 3 matches and
+            // getTotalElements would disagree with the de-duplicated content, breaking page
+            // math. The manual distinct(true) harness used by every other suite would silently
+            // mask exactly this.
+            Specification<ResourceEntity> spec = specFor("map-collection", NESTED_FIELD_MAP);
+            EntityManager em = emf.createEntityManager();
+            try {
+                SimpleJpaRepository<ResourceEntity, String> repository =
+                        new SimpleJpaRepository<>(ResourceEntity.class, em);
+
+                List<ResourceEntity> found = repository.findAll(spec);
+                assertEquals(3, found.size(),
+                        "an entity with several matching collection elements must come back once");
+                assertEquals(List.of("1", "2", "3"), sortedIds(found));
+                assertEquals(3, Set.copyOf(sortedIds(found)).size(), "no duplicate identities");
+
+                Page<ResourceEntity> page = repository.findAll(spec,
+                        PageRequest.of(0, 10, Sort.by("id")));
+                assertEquals(List.of("1", "2", "3"), idsInOrder(page.getContent()));
+                assertEquals(3, page.getTotalElements(),
+                        "page totals must count entities, not matching collection elements");
+            } finally {
+                em.close();
+            }
+        }
+
+        @Test
+        void multiElementElementCollectionMatchDoesNotDuplicateEntities() {
+            // Same pinning for a flat @ElementCollection: seed a resource whose tagNames
+            // BOTH match has-intersection-direct's ["public", "draft"] list. A join-based
+            // translation would duplicate it in findAll and inflate getTotalElements to 4.
+            ResourceEntity extra = new ResourceEntity("z-repo-surface-dup");
+            extra.setTagNames(new java.util.ArrayList<>(List.of("public", "draft")));
+            withTemporaryResource(extra, () -> {
+                Specification<ResourceEntity> spec = specFor("has-intersection-direct", FIELD_MAP);
+                EntityManager em = emf.createEntityManager();
+                try {
+                    SimpleJpaRepository<ResourceEntity, String> repository =
+                            new SimpleJpaRepository<>(ResourceEntity.class, em);
+
+                    // r1 [public, featured] and r3 [public] match via one element each; the
+                    // seeded row matches via two.
+                    List<ResourceEntity> found = repository.findAll(spec);
+                    assertEquals(List.of("1", "3", "z-repo-surface-dup"), sortedIds(found));
+                    assertEquals(3, found.size(), "no duplicate entities");
+
+                    Page<ResourceEntity> page = repository.findAll(spec,
+                            PageRequest.of(0, 2, Sort.by("id")));
+                    assertEquals(List.of("1", "3"), idsInOrder(page.getContent()));
+                    assertEquals(3, page.getTotalElements(),
+                            "count query must count entities, not collection rows");
+                    assertEquals(2, page.getTotalPages());
+                } finally {
+                    em.close();
+                }
+            });
+        }
+
+        // -- composition with caller Specifications --
+
+        @Test
+        void composesWithCallerSpecification() {
+            // README promises the returned Specification composes with the caller's own via
+            // .and(...). Narrow relation-some ([1, 3]) with a caller predicate that only r1
+            // satisfies — in both composition orders.
+            Specification<ResourceEntity> cerbosSpec = specFor("relation-some", FIELD_MAP);
+            Specification<ResourceEntity> callerSpec =
+                    (root, query, cb) -> cb.equal(root.get("createdBy"), "user1");
+
+            assertRepositorySurface(cerbosSpec.and(callerSpec), List.of("1"));
+            assertRepositorySurface(callerSpec.and(cerbosSpec), List.of("1"));
+        }
+
+        /** Persist {@code entity}, run {@code body}, then always delete the row again. */
+        private void withTemporaryResource(ResourceEntity entity, Runnable body) {
+            EntityManager em = emf.createEntityManager();
+            em.getTransaction().begin();
+            em.persist(entity);
+            em.getTransaction().commit();
+            em.close();
+            try {
+                body.run();
+            } finally {
+                EntityManager cleanup = emf.createEntityManager();
+                cleanup.getTransaction().begin();
+                ResourceEntity managed = cleanup.find(ResourceEntity.class, entity.getId());
+                if (managed != null) {
+                    cleanup.remove(managed);
+                }
+                cleanup.getTransaction().commit();
+                cleanup.close();
+            }
         }
     }
 }
