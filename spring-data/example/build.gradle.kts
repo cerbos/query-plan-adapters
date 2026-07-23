@@ -7,9 +7,10 @@ plugins {
 group = "dev.cerbos.example"
 version = "0.0.1"
 
-java {
-    sourceCompatibility = JavaVersion.VERSION_17
-    targetCompatibility = JavaVersion.VERSION_17
+// Match the adapter build: `options.release` pins the Java 17 API surface as well as the
+// language level, so newer compile JDKs can't leak post-17 APIs into the bytecode.
+tasks.withType<JavaCompile> {
+    options.release = 17
 }
 
 repositories {

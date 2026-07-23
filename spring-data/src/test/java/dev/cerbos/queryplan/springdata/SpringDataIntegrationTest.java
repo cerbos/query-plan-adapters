@@ -58,8 +58,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>Two modes:
  * <ul>
- *   <li><b>Self-managed (default)</b>: a {@code ghcr.io/cerbos/cerbos:dev} container is started
- *       by Testcontainers, with the shared {@code /policies/resource.yaml} mounted in.</li>
+ *   <li><b>Self-managed (default)</b>: a Cerbos container (the pinned image in
+ *       {@link CerbosTestImage}) is started by Testcontainers, with the shared
+ *       {@code /policies/resource.yaml} mounted in.</li>
  *   <li><b>External (Prisma-style sidecar)</b>: if {@code CERBOS_HOST} and {@code CERBOS_PORT}
  *       are set in the environment, the suite skips Testcontainers and connects to an
  *       externally-managed PDP. See {@code docker-compose.yml} and {@code scripts/run-e2e.sh}.</li>
@@ -143,7 +144,8 @@ class SpringDataIntegrationTest {
     );
 
     private static GenericContainer<?> createCerbosContainer() {
-        GenericContainer<?> container = new GenericContainer<>("ghcr.io/cerbos/cerbos:latest")
+        // Pinned PDP image — see CerbosTestImage for the pin rationale and bump policy.
+        GenericContainer<?> container = new GenericContainer<>(CerbosTestImage.IMAGE)
                 .withExposedPorts(3593)
                 .withCommand("server",
                         "--set=storage.disk.directory=/policies",
@@ -184,8 +186,8 @@ class SpringDataIntegrationTest {
             host = cerbos.getHost();
             port = cerbos.getMappedPort(3593);
             System.out.printf(
-                    "==> Started Testcontainers-managed Cerbos PDP (ghcr.io/cerbos/cerbos:latest) at %s:%d%n",
-                    host, port);
+                    "==> Started Testcontainers-managed Cerbos PDP (%s, digest %s) at %s:%d%n",
+                    CerbosTestImage.IMAGE, CerbosTestImage.resolvedDigest(cerbos), host, port);
         }
 
         cerbosClient = new CerbosClientBuilder(host + ":" + port)

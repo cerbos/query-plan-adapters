@@ -47,9 +47,15 @@ public class PhotoController {
     /**
      * GET /photos?user=alice&role=user&action=view
      *
-     * <p>Identity, tenant, and groups are request parameters only to make authorization cases
-     * reproducible in this local harness. Production code must derive them from authenticated,
-     * server-side state.
+     * <p><strong>DEMO ONLY — never copy this identity handling.</strong> Identity, role,
+     * tenant, and groups arrive as unauthenticated query parameters purely so the curl/smoke
+     * harness can switch principals per request. In production, derive the principal from
+     * your authentication layer — Spring Security's {@code Authentication} /
+     * {@code SecurityContextHolder}, a verified JWT/OIDC token, or equivalent — never from
+     * request input (parameters, headers, or bodies). As written, any caller can assert
+     * {@code role=admin} (hitting the unconditional-ALLOW rule in {@code photo.yaml}) or
+     * pick another tenant; an authorization filter built from a caller-asserted principal
+     * authorizes nothing. See the "Demo identity only" warning in the example README.
      */
     @GetMapping
     public List<PhotoView> list(@RequestParam String user,
@@ -66,7 +72,13 @@ public class PhotoController {
                 .toList();
     }
 
-    /** GET /photos/page?user=alice&action=needs-moderation&page=0&size=1 */
+    /**
+     * GET /photos/page?user=alice&action=needs-moderation&page=0&size=1
+     *
+     * <p><strong>DEMO ONLY:</strong> same caveat as {@link #list} — the principal comes from
+     * query parameters for harness reproducibility; production code must derive it from the
+     * authentication layer, never from request input.
+     */
     @GetMapping("/page")
     public Page<PhotoView> page(@RequestParam String user,
                                 @RequestParam(defaultValue = "user") String role,

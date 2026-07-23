@@ -5,9 +5,12 @@ plugins {
 group = "dev.cerbos"
 version = "0.1.0-alpha.1"
 
-java {
-    sourceCompatibility = JavaVersion.VERSION_17
-    targetCompatibility = JavaVersion.VERSION_17
+// `options.release` (unlike source/targetCompatibility) also constrains the JDK API
+// surface: compiling on JDK 21/25 still resolves against the Java 17 class library, so a
+// stray post-17 API reference fails at compile time instead of with NoSuchMethodError on
+// a JDK 17 runtime.
+tasks.withType<JavaCompile> {
+    options.release = 17
 }
 
 repositories {

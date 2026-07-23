@@ -54,11 +54,58 @@ public final class SpringDataQueryPlanAdapter {
 
     // -- PlanResourcesResult overloads --
 
+    /**
+     * Translates a Cerbos query plan (as returned by the Java SDK's
+     * {@code CerbosBlockingClient.plan(...)}) into a {@link Result} wrapping a Spring Data
+     * JPA Specification, using the default operator translations.
+     *
+     * <p>Equivalent to {@link #toSpecification(PlanResourcesResult, Map, Map)} with no
+     * operator overrides.
+     *
+     * @param <T> the entity type the Specification will be executed against
+     * @param planResult the SDK plan result ({@code KIND_ALWAYS_ALLOWED},
+     *        {@code KIND_ALWAYS_DENIED}, or a conditional plan)
+     * @param mapper maps each plan variable ({@code request.resource.attr.<name>},
+     *        {@code request.resource.id}) to a JPA path or relation — see
+     *        {@link AttributeMapping}
+     * @return {@link Result.AlwaysAllowed}, {@link Result.AlwaysDenied}, or a
+     *         {@link Result.Conditional} wrapping the translated Specification
+     * @throws IllegalArgumentException if the conditional plan carries no condition.
+     *         Translation of the condition itself is deferred: unsupported operators,
+     *         unmapped attributes, and unresolvable paths throw
+     *         {@code IllegalArgumentException} (fail closed) when the Specification is first
+     *         evaluated by the repository, not from this call.
+     */
     public static <T> Result<T> toSpecification(
             PlanResourcesResult planResult, Map<String, AttributeMapping> mapper) {
         return toSpecification(planResult, mapper, Map.of());
     }
 
+    /**
+     * Translates a Cerbos query plan (as returned by the Java SDK's
+     * {@code CerbosBlockingClient.plan(...)}) into a {@link Result} wrapping a Spring Data
+     * JPA Specification, consulting {@code overrides} for scalar leaf translations.
+     *
+     * <p>Prefer this {@link PlanResourcesResult} entry point when using the Cerbos Java SDK
+     * client. The {@link #toSpecification(PlanResourcesResponse, Map, Map)} overloads accept
+     * the raw protobuf response instead — useful when the response was obtained without the
+     * SDK client wrapper (e.g. deserialized, proxied, or hand-built in tests, since
+     * {@code PlanResourcesResult} cannot be constructed outside the SDK package).
+     *
+     * @param <T> the entity type the Specification will be executed against
+     * @param planResult the SDK plan result
+     * @param mapper maps each plan variable to a JPA path or relation — see
+     *        {@link AttributeMapping}
+     * @param overrides per-operator replacement translations, keyed by Cerbos operator name;
+     *        consulted only for resolved scalar (field, value) leaves — see
+     *        {@link OperatorFunction} for exactly which translation sites are (and are not)
+     *        overridable
+     * @return {@link Result.AlwaysAllowed}, {@link Result.AlwaysDenied}, or a
+     *         {@link Result.Conditional} wrapping the translated Specification
+     * @throws IllegalArgumentException if the conditional plan carries no condition; see
+     *         {@link #toSpecification(PlanResourcesResult, Map)} for the deferred
+     *         fail-closed contract covering the translation itself
+     */
     public static <T> Result<T> toSpecification(
             PlanResourcesResult planResult,
             Map<String, AttributeMapping> mapper,
@@ -78,11 +125,50 @@ public final class SpringDataQueryPlanAdapter {
 
     // -- PlanResourcesResponse overloads --
 
+    /**
+     * Translates a raw {@link PlanResourcesResponse} protobuf into a {@link Result} wrapping
+     * a Spring Data JPA Specification, using the default operator translations.
+     *
+     * <p>Equivalent to {@link #toSpecification(PlanResourcesResponse, Map, Map)} with no
+     * operator overrides. Accepts the wire-level protobuf directly, so it works with
+     * responses obtained without the SDK client wrapper; when calling the PDP through the
+     * Cerbos Java SDK, the {@link #toSpecification(PlanResourcesResult, Map)} overloads are
+     * the natural fit.
+     *
+     * @param <T> the entity type the Specification will be executed against
+     * @param response the raw {@code PlanResources} RPC response
+     * @param mapper maps each plan variable to a JPA path or relation — see
+     *        {@link AttributeMapping}
+     * @return {@link Result.AlwaysAllowed}, {@link Result.AlwaysDenied}, or a
+     *         {@link Result.Conditional} wrapping the translated Specification
+     * @throws IllegalArgumentException if the filter kind is unknown or a conditional filter
+     *         carries no condition; see {@link #toSpecification(PlanResourcesResult, Map)}
+     *         for the deferred fail-closed contract covering the translation itself
+     */
     public static <T> Result<T> toSpecification(
             PlanResourcesResponse response, Map<String, AttributeMapping> mapper) {
         return toSpecification(response, mapper, Map.of());
     }
 
+    /**
+     * Translates a raw {@link PlanResourcesResponse} protobuf into a {@link Result} wrapping
+     * a Spring Data JPA Specification, consulting {@code overrides} for scalar leaf
+     * translations.
+     *
+     * @param <T> the entity type the Specification will be executed against
+     * @param response the raw {@code PlanResources} RPC response
+     * @param mapper maps each plan variable to a JPA path or relation — see
+     *        {@link AttributeMapping}
+     * @param overrides per-operator replacement translations, keyed by Cerbos operator name;
+     *        consulted only for resolved scalar (field, value) leaves — see
+     *        {@link OperatorFunction} for exactly which translation sites are (and are not)
+     *        overridable
+     * @return {@link Result.AlwaysAllowed}, {@link Result.AlwaysDenied}, or a
+     *         {@link Result.Conditional} wrapping the translated Specification
+     * @throws IllegalArgumentException if the filter kind is unknown or a conditional filter
+     *         carries no condition; see {@link #toSpecification(PlanResourcesResult, Map)}
+     *         for the deferred fail-closed contract covering the translation itself
+     */
     public static <T> Result<T> toSpecification(
             PlanResourcesResponse response,
             Map<String, AttributeMapping> mapper,
