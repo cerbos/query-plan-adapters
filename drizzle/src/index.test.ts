@@ -12,7 +12,7 @@ import {
   PlanResourcesResponse,
 } from "@cerbos/core";
 import { GRPC as Cerbos } from "@cerbos/grpc";
-import type { ValidationError } from "@cerbos/core";
+import type { ValidationError, Value } from "@cerbos/core";
 import Database from "better-sqlite3";
 import { eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/better-sqlite3";
@@ -1227,5 +1227,214 @@ describe("queryPlanToDrizzle", () => {
         mapper,
       })
     ).toThrow(/No mapping/);
+  });
+});
+
+describe("known-value collections (planner unroll cliff)", () => {
+  // The planner unrolls exists/all over a known collection (e.g. a folded
+  // principal attribute) into an or/and chain at <= 10 elements
+  // (cerbos/cerbos#2570, #2817) and emits the lambda with a literal value-list
+  // collection above that. These tests straddle the 10-item cliff so both wire
+  // shapes stay exercised regardless of the PDP version behind the sidecar.
+  describe("live plans across the 10-item threshold", () => {
+    const buildTeams = (size: number): string[] => {
+      const teams = ["string", "string3"];
+      while (teams.length < size) {
+        teams.push(`filler-${teams.length}`);
+      }
+      return teams;
+    };
+
+    const allowedIdsForPrincipal = async (
+      action: string,
+      principal: { id: string; roles: string[]; attr: Record<string, Value> }
+    ): Promise<string[]> => {
+      const response = await cerbos.checkResources({
+        principal,
+        resources: resourceAttributes.map((resource) => ({
+          resource: { kind: "resource", id: resource.id, attr: resource },
+          actions: [action],
+        })),
+      });
+      return response.results
+        .filter((result) => result.isAllowed(action) === true)
+        .map((result) => result.resource.id)
+        .sort();
+    };
+
+    describe.each([9, 10, 11])("with %i-element principal collection", (size) => {
+      test.each(["principal-exists", "principal-all"])(
+        "produces results matching checkResources for %s",
+        async (action) => {
+          const principal = {
+            id: "user1",
+            roles: ["USER"],
+            attr: { teams: buildTeams(size) },
+          };
+          const queryPlan = await cerbos.planResources({
+            principal,
+            resource: { kind: "resource" },
+            action,
+          });
+
+          expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+
+          const result = queryPlanToDrizzle({ queryPlan, mapper });
+          const ids = selectIds(ensureFilter(result));
+          expect(ids).toEqual(await allowedIdsForPrincipal(action, principal));
+          // Sanity-check the oracle itself matched the intended rows.
+          const teams = buildTeams(size);
+          const expected = resourceAttributes
+            .filter((r) =>
+              action === "principal-exists"
+                ? teams.includes(r.aString)
+                : !teams.includes(r.aString)
+            )
+            .map((r) => r.id)
+            .sort();
+          expect(ids).toEqual(expected);
+        }
+      );
+    });
+  });
+
+  describe("value-list lambda fold", () => {
+    const valueListPlan = (
+      operator: string,
+      elements: unknown[],
+      body: PlanExpressionOperand,
+      variable = "t"
+    ): PlanResourcesResponse =>
+      buildPlan({
+        operator,
+        operands: [
+          { value: elements },
+          { operator: "lambda", operands: [body, { name: variable }] },
+        ],
+      } as PlanExpressionOperand);
+
+    test("exists over a value list matches any element", () => {
+      const result = queryPlanToDrizzle({
+        queryPlan: valueListPlan("exists", ["string", "string3"], {
+          operator: "eq",
+          operands: [{ name: "request.resource.attr.aString" }, { name: "t" }],
+        }),
+        mapper,
+      });
+      expect(selectIds(ensureFilter(result))).toEqual([
+        "resource1",
+        "resource3",
+      ]);
+    });
+
+    test("all over a value list requires every element", () => {
+      const result = queryPlanToDrizzle({
+        queryPlan: valueListPlan("all", ["string2"], {
+          operator: "ne",
+          operands: [{ name: "request.resource.attr.aString" }, { name: "t" }],
+        }),
+        mapper,
+      });
+      expect(selectIds(ensureFilter(result))).toEqual([
+        "resource1",
+        "resource3",
+      ]);
+    });
+
+    test("empty value list keeps CEL identity semantics", () => {
+      const body: PlanExpressionOperand = {
+        operator: "eq",
+        operands: [{ name: "request.resource.attr.aString" }, { name: "t" }],
+      };
+
+      // exists over [] is false; all over [] is true.
+      expect(
+        selectIds(
+          ensureFilter(
+            queryPlanToDrizzle({ queryPlan: valueListPlan("exists", [], body), mapper })
+          )
+        )
+      ).toEqual([]);
+      expect(
+        selectIds(
+          ensureFilter(
+            queryPlanToDrizzle({ queryPlan: valueListPlan("all", [], body), mapper })
+          )
+        )
+      ).toEqual(allResourceIds);
+    });
+
+    test("substitutes variable path references into element fields", () => {
+      const result = queryPlanToDrizzle({
+        queryPlan: valueListPlan(
+          "exists",
+          [{ name: "string" }, { name: "string3" }],
+          {
+            operator: "eq",
+            operands: [
+              { name: "request.resource.attr.aString" },
+              { name: "t.name" },
+            ],
+          }
+        ),
+        mapper,
+      });
+      expect(selectIds(ensureFilter(result))).toEqual([
+        "resource1",
+        "resource3",
+      ]);
+    });
+
+    test("throws when a variable path is missing on an element", () => {
+      expect(() =>
+        queryPlanToDrizzle({
+          queryPlan: valueListPlan("exists", [{ name: "alpha" }], {
+            operator: "eq",
+            operands: [
+              { name: "request.resource.attr.aString" },
+              { name: "t.missing" },
+            ],
+          }),
+          mapper,
+        })
+      ).toThrow('Cannot resolve "t.missing"');
+    });
+
+    test("throws for exists_one over a value list", () => {
+      expect(() =>
+        queryPlanToDrizzle({
+          queryPlan: valueListPlan("exists_one", ["a"], {
+            operator: "eq",
+            operands: [{ name: "request.resource.attr.aString" }, { name: "t" }],
+          }),
+          mapper,
+        })
+      ).toThrow("'exists_one' over a literal collection value is not supported");
+    });
+
+    test("throws for a non-list collection value", () => {
+      const plan = buildPlan({
+        operator: "exists",
+        operands: [
+          { value: "not-a-list" },
+          {
+            operator: "lambda",
+            operands: [
+              {
+                operator: "eq",
+                operands: [
+                  { name: "request.resource.attr.aString" },
+                  { name: "t" },
+                ],
+              },
+              { name: "t" },
+            ],
+          },
+        ],
+      } as PlanExpressionOperand);
+      expect(() => queryPlanToDrizzle({ queryPlan: plan, mapper })).toThrow(
+        "'exists' over a literal collection requires a list value"
+      );
+    });
   });
 });
