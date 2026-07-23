@@ -190,7 +190,15 @@ class AdversarialConformanceTest {
             // an UNESCAPED '[SEC]%' would match "Secret" (one character from {S,E,C}); it
             // must never match on any dialect.
             new Seed("d1", true, "[SEC]ret", 13, "[SEC]", List.of(), List.of()),
-            new Seed("d2", false, "Secret", 14, "xSECy", List.of(), List.of())
+            new Seed("d2", false, "Secret", 14, "xSECy", List.of(), List.of()),
+            // in(variable, variable) null-null witness: owner (aOptionalString) is NULL —
+            // an EXPLICIT null on the check side — and the single tag's name column is NULL,
+            // an explicit null element of tagNames. CEL `null in [null]` is TRUE, so the
+            // in-var-var action must INCLUDE this row (EXISTS(member IS NULL AND scalar
+            // IS NULL)); like b5 it also exercises the macro error convention (a NULL tag
+            // name is a missing element attribute for lambda bodies).
+            new Seed("e1", true, "nullowner", 15, null,
+                    List.of(new Tag("te1", null)), List.of())
     );
 
     /**
@@ -689,6 +697,11 @@ class AdversarialConformanceTest {
             "in-null-elem-only", "in-null-elem-only-neg",
             "in-null-elem-rel", "in-null-elem-rel-neg",
             "in-null-elem-hasint",
+            // in(variable, variable): attribute-in-attribute membership via correlated
+            // EXISTS (member column = outer scalar column, NULL-null matching). Witnesses:
+            // a9/b4 match, e1 null-in-[null] (allow), a4/a8 null scalar vs non-null
+            // elements (deny; the negation allows), empty collections under the negation.
+            "in-var-var", "in-var-var-neg",
     })
     void adapterMatchesCheckOracle(String action) {
         List<String> oracle = oracleAllowedIds(action);

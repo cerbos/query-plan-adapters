@@ -1,6 +1,7 @@
 package dev.cerbos.queryplan.springdata;
 
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Maps one Cerbos attribute reference (the {@code variable} name in a query plan, e.g.
@@ -130,7 +131,11 @@ public sealed interface AttributeMapping permits AttributeMapping.Field, Attribu
      * {@code @Embedded}/to-one path, resolved via {@code Path.get(...)} at translation time.
      * Create via {@link #field(String)}.
      */
-    record Field(String jpaPath) implements AttributeMapping {}
+    record Field(String jpaPath) implements AttributeMapping {
+        public Field {
+            Objects.requireNonNull(jpaPath, "jpaPath");
+        }
+    }
 
     /**
      * Collection mapping: {@code joinAttribute} names the entity's collection property;
@@ -138,7 +143,16 @@ public sealed interface AttributeMapping permits AttributeMapping.Field, Attribu
      * the collection as bare values; {@code fields} maps policy-facing member field names
      * used inside lambda bodies. Create via the {@code relation(...)} factory methods, whose
      * Javadoc describes when each combination applies.
+     *
+     * <p>The {@code fields} map is defensively copied, so later mutation of the caller's map
+     * cannot silently change which columns the authorization filter resolves.
      */
     record Relation(String joinAttribute, String defaultMemberField, Map<String, AttributeMapping> fields)
-            implements AttributeMapping {}
+            implements AttributeMapping {
+        public Relation {
+            Objects.requireNonNull(joinAttribute, "joinAttribute");
+            Objects.requireNonNull(fields, "fields");
+            fields = Map.copyOf(fields);
+        }
+    }
 }
