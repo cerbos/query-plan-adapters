@@ -16,6 +16,10 @@ import jakarta.persistence.criteria.Subquery;
 
 import com.google.protobuf.Value;
 
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -287,22 +291,23 @@ public final class SpringDataQueryPlanAdapter {
          * caller-knows-best coupling the seam exists to remove. The chosen shape classifies
          * structurally and converts lazily at the dispatch site that consumes the operand.
          *
-         * <p><b>Extension recipe — adding a new comparison-operand type</b>, worked example
-         * {@code timestamp("2024-01-01T00:00:00Z")} appearing as a comparison operand:
+         * <p><b>Extension recipe — adding a new comparison-operand type</b>. The
+         * {@code timestamp()} support is the worked example, implemented exactly this way:
          * <ol>
-         *   <li>Add a {@code Resolved} case: {@code record Timestamp(Operand arg)} with a lazy
-         *       accessor that parses the argument (its errors are then part of the contract);</li>
-         *   <li>Classify it in {@link #resolve}'s EXPRESSION arm (before the {@code Opaque}
-         *       fallback): {@code "timestamp".equals(exprOp) -> new Resolved.Timestamp(...)};
-         *       a pure-constant argument folds HERE, in the accessor — never in dispatch;</li>
+         *   <li>Add {@code Resolved} cases: {@link Resolved.TimestampField} /
+         *       {@link Resolved.TimestampConstant}, the latter with a lazy accessor that
+         *       parses the argument (its errors are then part of the contract);</li>
+         *   <li>Classify them in {@link #resolve}'s EXPRESSION arm (before the {@code Opaque}
+         *       fallback); a pure-constant argument folds in the accessor — never in
+         *       dispatch;</li>
          *   <li>Handle the new pairings in {@link #dispatch} next to the existing typed cases
-         *       (e.g. {@code Field vs Timestamp} → compare the column against the parsed
-         *       instant via {@link #applyLeaf} so {@link OperatorFunction} overrides keep
+         *       ({@link #timestampLeaf} compares the column against the parsed instant via
+         *       {@link #withOverride} so {@link OperatorFunction} overrides keep
          *       working).</li>
          * </ol>
          * Nothing else changes: no new probe, no re-scan, no ordering decision — unmatched
          * pairings still fall through to {@link #leafOperandError}, whose "Unexpected
-         * timestamp() expression in leaf operand of X" message is the pinned behavior today.
+         * X() expression in leaf operand of Y" message stays the pinned fail-closed behavior.
          */
         private final class ComparisonTranslator {
 
@@ -541,10 +546,48 @@ public final class SpringDataQueryPlanAdapter {
                 record Arithmetic(String operator) implements Resolved {}
 
                 /**
-                 * An operand no leaf comparison understands ({@code timestamp()}, {@code map()},
-                 * {@code lambda}, an unset node...). Dispatch routes these to
-                 * {@link #leafOperandError}, which reports from the RAW operands so each shape
-                 * keeps its exact message.
+                 * {@code timestamp(variable)} — a temporal column wrapped in the CEL
+                 * {@code timestamp()} cast. The path resolves at the consuming dispatch site
+                 * ({@link #timestampLeaf}), which also owns the column-type contract.
+                 */
+                record TimestampField(String variable) implements Resolved {}
+
+                /**
+                 * {@code timestamp(value)} — a constant instant. The planner constant-folds
+                 * {@code now()}/{@code now() - duration(...)} arithmetic and re-wraps the result
+                 * in {@code timestamp("<RFC-3339>")} on the wire (PDP-verified), so both policy
+                 * literals and folded relative windows arrive in this shape. {@link #instant()}
+                 * parses lazily: {@link Instant#parse} first, {@link OffsetDateTime#parse} as
+                 * the fallback for non-UTC offsets (Cerbos emits literals verbatim, including
+                 * offsets and nanosecond precision) — normalizing to the absolute instant,
+                 * matching CEL timestamp equality across offsets.
+                 */
+                record TimestampConstant(Operand operand) implements Resolved {
+                    Instant instant() {
+                        Object raw = PlanValues.protoValueToJava(operand.getValue());
+                        if (!(raw instanceof String s)) {
+                            throw new IllegalArgumentException(
+                                    "timestamp() constant must be an RFC-3339 string, got "
+                                            + (raw == null ? "null" : raw.getClass().getSimpleName()));
+                        }
+                        try {
+                            return Instant.parse(s);
+                        } catch (DateTimeParseException e) {
+                            try {
+                                return OffsetDateTime.parse(s).toInstant();
+                            } catch (DateTimeParseException e2) {
+                                throw new IllegalArgumentException(
+                                        "timestamp() constant could not be parsed as an RFC-3339 instant", e2);
+                            }
+                        }
+                    }
+                }
+
+                /**
+                 * An operand no leaf comparison understands ({@code map()}, {@code lambda},
+                 * {@code timestamp()} over a nested expression, an unset node...). Dispatch
+                 * routes these to {@link #leafOperandError}, which reports from the RAW operands
+                 * so each shape keeps its exact message.
                  */
                 record Opaque() implements Resolved {}
             }
@@ -560,6 +603,21 @@ public final class SpringDataQueryPlanAdapter {
                     case EXPRESSION -> {
                         PlanResourcesFilter.Expression e = o.getExpression();
                         String exprOp = e.getOperator();
+                        // timestamp(variable) / timestamp(value) — the only shapes the planner
+                        // emits for temporal comparisons (PDP-verified: the folded now()-duration
+                        // constant is re-wrapped in timestamp(), never a bare string). A nested
+                        // expression inside timestamp() has no verified translation and stays
+                        // Opaque → leafOperandError.
+                        if ("timestamp".equals(exprOp) && e.getOperandsCount() == 1) {
+                            Operand arg = e.getOperands(0);
+                            if (arg.getNodeCase() == Operand.NodeCase.VARIABLE) {
+                                yield new Resolved.TimestampField(arg.getVariable());
+                            }
+                            if (arg.getNodeCase() == Operand.NodeCase.VALUE) {
+                                yield new Resolved.TimestampConstant(arg);
+                            }
+                            yield new Resolved.Opaque();
+                        }
                         if (!ARITHMETIC_OPS.contains(exprOp)) {
                             yield new Resolved.Opaque();
                         }
@@ -648,6 +706,26 @@ public final class SpringDataQueryPlanAdapter {
                 }
 
                 if (COMPARISON_OPS.contains(op)) {
+                    // timestamp(field) vs timestamp(constant) — the wire shape of every
+                    // time-window / retention-cutoff policy (`timestamp(R.attr.createdAt) <
+                    // now() - duration("24h")` folds its RHS to timestamp("<instant>")).
+                    // NormalizedBinary cannot reorder these (both operands are EXPRESSION
+                    // nodes, equal rank), so the value-first form is MIRRORED here — never
+                    // inverted: the planner preserves policy source order.
+                    if (left instanceof Resolved.TimestampField tsField
+                            && right instanceof Resolved.TimestampConstant tsConst) {
+                        return timestampLeaf(op, tsField, tsConst, scope);
+                    }
+                    if (left instanceof Resolved.TimestampConstant tsConst
+                            && right instanceof Resolved.TimestampField tsField) {
+                        return timestampLeaf(NormalizedBinary.mirror(op), tsField, tsConst, scope);
+                    }
+                    // Two constant instants — reachable through ternary substitution, like the
+                    // numeric constant-vs-constant fold above; instant comparison is exact.
+                    if (left instanceof Resolved.TimestampConstant lts
+                            && right instanceof Resolved.TimestampConstant rts) {
+                        return timestampConstantComparison(op, lts.instant(), rts.instant());
+                    }
                     // Fold: `field op add(value, value)` — the folded constant compares like any
                     // plan constant (normalization guarantees the field arrives first). Strings
                     // concatenate here, matching CEL — this shape never enters double space.
@@ -702,6 +780,28 @@ public final class SpringDataQueryPlanAdapter {
             private Predicate leafFieldValue(String op, Resolved.Field field,
                                              Resolved.Constant constant, Scope scope) {
                 Object value = constant.value();
+
+                // A structured constant — a CEL list literal (`R.attr.tags == ["a", "b"]`
+                // arrives as eq(variable, value-list) verbatim; PDP-verified in both operand
+                // orders) or, defensively, a struct VALUE (protoValueToJava can produce a Map,
+                // though the planner emits map literals as struct() expressions, which
+                // leafOperandError already names). No scalar-column comparison exists for
+                // these: letting the value through dies inside Hibernate with a raw coercion
+                // error ("Could not convert ... ListN to java.lang.String") instead of the
+                // adapter's named-IllegalArgumentException contract. Checked BEFORE path
+                // resolution so a Relation-mapped attribute reports this shape too, not the
+                // generic "is a Relation" resolution error. Reports the shape only — element
+                // values never leak into the message.
+                if (value instanceof List<?> || value instanceof Map<?, ?>) {
+                    throw new IllegalArgumentException(
+                            op + " comparison against a " + constantShape(value)
+                                    + " constant is not supported for attribute "
+                                    + field.variable() + ". Whole-" + kindWord(value)
+                                    + " equality is not translatable to a scalar column"
+                                    + " comparison; map the attribute as a Relation and use"
+                                    + " in/hasIntersection, or compare elements individually.");
+                }
+
                 Path<?> path = scope.resolvePath(field.variable());
 
                 if (value == null) {
@@ -715,6 +815,96 @@ public final class SpringDataQueryPlanAdapter {
                 }
 
                 return applyLeaf(op, path, value);
+            }
+
+            /**
+             * {@code timestamp(field) op timestamp(constant)}: compare a temporal column against
+             * a parsed constant instant. {@code op} is already field-first (the dispatch mirrors
+             * value-first forms before calling here).
+             *
+             * <p><b>Column-type contract.</b> Only column types that unambiguously denote an
+             * absolute instant are translated:
+             * <ul>
+             *   <li>{@link Instant} — bound as-is;</li>
+             *   <li>{@link OffsetDateTime} — bound as the instant at UTC. Hibernate 6 stores
+             *       both with {@code SqlTypes.TIMESTAMP_UTC} (normalized to UTC before
+             *       binding), so the database comparison is an instant comparison regardless
+             *       of the bound offset.</li>
+             * </ul>
+             * {@code LocalDateTime} (no zone — the stored wall-clock time could mean any
+             * instant), {@code java.util.Date} (JDBC binding routes through zone conversions),
+             * {@code String} (format- and offset-dependent lexicographic order) and everything
+             * else throw a NAMED error instead of guessing: a wrong zone assumption here would
+             * silently include rows the PDP's {@code check()} denies (or vice versa) — an
+             * authorization-relevant divergence, so the adapter fails closed. A registered
+             * {@link OperatorFunction} override is consulted FIRST (with the parsed
+             * {@link Instant} as the value), so callers who know their column's zone semantics
+             * can translate those types themselves.
+             *
+             * <p>A NULL column value makes every comparison UNKNOWN under SQL three-valued
+             * logic → the row is excluded, matching CEL: a missing attribute is an evaluation
+             * error and {@code check()} denies (PDP-verified for eq/ne/lt and mirrored forms).
+             */
+            private Predicate timestampLeaf(String op, Resolved.TimestampField field,
+                                            Resolved.TimestampConstant constant, Scope scope) {
+                Instant instant = constant.instant();
+                Path<?> path = scope.resolvePath(field.variable());
+                return withOverride(op, path, instant, () -> {
+                    Class<?> javaType = path.getJavaType();
+                    Object bound;
+                    if (Instant.class.equals(javaType)) {
+                        bound = instant;
+                    } else if (OffsetDateTime.class.equals(javaType)) {
+                        bound = instant.atOffset(ZoneOffset.UTC);
+                    } else {
+                        throw new IllegalArgumentException(
+                                "timestamp() comparison requires a column mapped to java.time.Instant "
+                                        + "or java.time.OffsetDateTime, but '" + field.variable()
+                                        + "' maps to " + javaType.getSimpleName()
+                                        + ". Other temporal representations (LocalDateTime, "
+                                        + "java.util.Date, String) are ambiguous about the absolute "
+                                        + "instant they store; remap the column or register an "
+                                        + "OperatorFunction override for '" + op + "'.");
+                    }
+                    return defaultLeaf(op, path, bound);
+                });
+            }
+
+            /**
+             * Statically evaluate a comparison between two constant instants — reachable via
+             * ternary substitution, mirroring {@link #constantComparison}. Instant comparison
+             * is total and exact, so the collapse is oracle-faithful.
+             */
+            private Predicate timestampConstantComparison(String op, Instant left, Instant right) {
+                int cmp = left.compareTo(right);
+                boolean result = switch (op) {
+                    case "eq" -> cmp == 0;
+                    case "ne" -> cmp != 0;
+                    case "lt" -> cmp < 0;
+                    case "gt" -> cmp > 0;
+                    case "le" -> cmp <= 0;
+                    case "ge" -> cmp >= 0;
+                    default -> throw new IllegalArgumentException(
+                            "Unsupported constant timestamp comparison operator: " + op);
+                };
+                return result ? cb.conjunction() : cb.disjunction();
+            }
+
+            /**
+             * Shape description for a structured constant in an error message: size and kind
+             * only — never element values, matching the adapter's no-value-leak discipline
+             * (see {@link #typeName}).
+             */
+            private static String constantShape(Object value) {
+                if (value instanceof List<?> l) {
+                    return "list of " + l.size() + " element" + (l.size() == 1 ? "" : "s");
+                }
+                Map<?, ?> m = (Map<?, ?>) value;
+                return "map of " + m.size() + " entr" + (m.size() == 1 ? "y" : "ies");
+            }
+
+            private static String kindWord(Object value) {
+                return value instanceof List<?> ? "list" : "map";
             }
 
             /**

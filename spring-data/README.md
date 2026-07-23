@@ -195,6 +195,7 @@ Map each `request.resource.attr.<name>` to a JPA path or a relation:
 | Field-to-field (`R.attr.a == R.attr.b`) | `cb.equal(pathA, pathB)` and friends for `eq`/`ne`/`lt`/`gt`/`le`/`ge`, incl. inside lambdas |
 | Ternary (`cond ? a : b`)         | Predicate rewrite: `(cond AND cmp(a, v)) OR (NOT cond AND cmp(b, v))` — nested, boolean-position, and value-first forms compose; constant residues fold (see Gotchas for `NULL` semantics) |
 | Arithmetic in comparisons (`add`/`sub`/`mult`/`div`) | `cb.sum`/`diff`/`prod`/`quot` in double space, compared via `eq`/`ne`/`lt`/`gt`/`le`/`ge`; nested and both-sides shapes compose (see Gotchas — CEL attribute arithmetic is double arithmetic) |
+| Timestamp comparisons (`timestamp(R.attr.createdAt) < now() - duration("24h")`) | Temporal column comparison for all of `eq`/`ne`/`lt`/`gt`/`le`/`ge`, both operand orders (value-first forms mirror). The planner folds `now()`/`now() - duration(...)` to a constant RFC-3339 instant at **plan time**, so the window is fixed per query — re-plan to refresh it. The mapped column must be `java.time.Instant` or `java.time.OffsetDateTime` (both denote an absolute instant; Hibernate 6 stores them UTC-normalized). `LocalDateTime`, `java.util.Date`, and `String` columns throw a named error — they are ambiguous about the absolute instant they store (see Gotchas). A `NULL` column value is excluded, matching `check()` denying on the missing attribute. |
 | Field-to-field `contains`/`startsWith`/`endsWith` | `cb.like` over a `REPLACE`-escaped column-derived pattern (`\`, `%`, `_`), with an `IS NOT NULL` needle guard |
 | Multi-hop relation chains (`R.attr.categories.subCategories`) | Correlated subquery joining through every hop; `exists`/`in`/`hasIntersection`/`size` all treat the chain as the flattened union of tail elements |
 | `exists(coll, lambda)`           | Correlated `EXISTS` with lambda body                                |
@@ -208,7 +209,8 @@ Map each `request.resource.attr.<name>` to a JPA path or a relation:
 | `hierarchy(...).overlaps / ancestorOf / descendentOf` | Segment/prefix predicates (`IN` over ancestor prefixes, `LIKE 'a:b:%'` for descendants), mirroring the Prisma adapter |
 | Value-first comparisons (`5 < R.attr.x`) | Normalized field-first with the operator mirrored (`x > 5`) |
 
-Unsupported operators raise `IllegalArgumentException` — override them with `OperatorFunction`:
+Unsupported constructs raise `IllegalArgumentException`. Some — but not all — can be
+overridden with an `OperatorFunction`:
 
 ```java
 Map<String, OperatorFunction> overrides = Map.of(
@@ -220,21 +222,34 @@ Result<Contact> result =
     SpringDataQueryPlanAdapter.toSpecification(planResult, MAPPING, overrides);
 ```
 
+An override is consulted only where the adapter has already resolved a `(field, value)`
+pair for a top-level operator — the plain comparisons (`eq`/`ne`/`lt`/`gt`/`le`/`ge`,
+consulted under the mirrored name for value-first forms), the LIKE family, unknown
+top-level leaf operators such as `matches`, and timestamp comparisons (the override
+receives the parsed `java.time.Instant` as the value, including for column types the
+default translation rejects). Constructs rejected **while resolving an operand** — `mod`,
+`int()`/type casts, list indexing — throw before any override lookup and **cannot be
+intercepted**; the "Not yet supported" table below marks each row.
+
 ## Not yet supported
 
 The Criteria-based predicate builder has no shape for these CEL constructs; they
-throw `IllegalArgumentException` with a message naming the operator. Override
-via `OperatorFunction` when the runtime can express them (e.g. database-specific
-SQL fragments), or wait for adapter support.
+throw `IllegalArgumentException` with a message naming the operator. The
+"Overridable" column says whether a registered `OperatorFunction` can intercept
+the construct: rows marked **no** are rejected while resolving an operand,
+*before* any override consultation, so an override genuinely cannot fire for them.
 
-| Construct                                       | Example CEL                                       | Notes |
-|-------------------------------------------------|---------------------------------------------------|-------|
-| `mod`                                           | `R.attr.aNumber % 2 == 0`                         | CEL `%` is int-only and Cerbos attribute numbers are doubles, so `%` on an attribute always errors → the check API denies every row; translating to SQL `MOD` would fabricate matches. |
-| Arithmetic on non-numeric operands              | `R.attr.aString + "x" < "y"`                      | Ordering through string concatenation is not translated; `add` string folding remains `eq`/`ne`-only. |
-| Regex match                                     | `R.attr.aString.matches("^foo.*")`                | JPA has no portable regex predicate; override per-dialect (`regexp_like`, `~`, `REGEXP`). |
-| List indexing                                   | `R.attr.tags[0] == "x"`                           | JPA collections are unordered sets — no positional access. |
-| Type casts (`int(...)` / `double(...)` / `string(...)`) | `int(R.attr.aString) > 0`                 | No portable `CAST` in Criteria; override per-dialect. |
-| `eq(map(...), [...])`                           | `R.attr.tags.map(t, t.id) == ["tag1", "tag2"]`    | Use `hasIntersection(map(...), [...])` instead. |
+| Construct                                       | Example CEL                                       | Overridable | Notes |
+|-------------------------------------------------|---------------------------------------------------|-------------|-------|
+| `mod`                                           | `R.attr.aNumber % 2 == 0`                         | no          | CEL `%` is int-only and Cerbos attribute numbers are doubles, so `%` on an attribute always errors → the check API denies every row; translating to SQL `MOD` would fabricate matches. |
+| Arithmetic on non-numeric operands              | `R.attr.aString + "x" < "y"`                      | no          | Ordering through string concatenation is not translated; `add` string folding remains `eq`/`ne`-only. |
+| Regex match                                     | `R.attr.aString.matches("^foo.*")`                | yes (`matches`) | JPA has no portable regex predicate; override per-dialect (`regexp_like`, `~`, `REGEXP`). |
+| List indexing                                   | `R.attr.tags[0] == "x"`                           | no          | JPA collections are unordered sets — no positional access. |
+| Type casts (`int(...)` / `double(...)` / `string(...)`) | `int(R.attr.aString) > 0`                 | no          | No portable `CAST` in Criteria. |
+| `eq(map(...), [...])`                           | `R.attr.tags.map(t, t.id) == ["tag1", "tag2"]`    | no          | Use `hasIntersection(map(...), [...])` instead. |
+| Timestamp comparison on an ambiguous column type | `timestamp(R.attr.createdAt) < now() - duration("24h")` with `createdAt` mapped to `LocalDateTime`/`java.util.Date`/`String` | yes (the comparison operator) | The supported shape (see table above) requires an `Instant` or `OffsetDateTime` column. Other types don't pin the absolute instant they store — a wrong zone/format assumption would silently diverge from `check()`. The override receives the parsed `Instant` and can apply schema-specific knowledge. |
+| Timestamp shapes beyond `timestamp(field) vs constant` | `timestamp(R.attr.a) < timestamp(R.attr.b)`, `timestamp(...)` inside arithmetic | no | Only the leaf comparison shape the planner emits for time-window policies is translated; nested/derived shapes keep their named errors. |
+| `eq`/`ne` against a list constant               | `R.attr.tags == ["a", "b"]`                       | no          | Whole-list equality has no scalar-column translation (the plan arrives as `eq(variable, value-list)` verbatim); rejected before path resolution. Map the attribute as a Relation and use `in`/`hasIntersection`, or compare elements individually. |
 
 ## Gotchas
 
@@ -262,6 +277,30 @@ forms produce an identical wire plan), so the adapter translates the double read
 the only satisfiable one: `/` is true double division (`5 / 2.0 == 2.5`), never
 integer truncation. Write double literals (`1.0`, `2.0`) in policy arithmetic over
 attributes, or the plan-based filter and per-resource `check` calls will disagree.
+
+### Timestamp comparisons: plan-time `now()`, and only unambiguous column types
+
+`timestamp(R.attr.createdAt) < now() - duration("24h")` reaches the adapter as a
+comparison against a **constant** instant: the planner evaluates `now()` and folds the
+duration arithmetic when the plan is produced, wrapping the result back in
+`timestamp("<RFC-3339>")`. Two consequences:
+
+- The cutoff is frozen at plan time. A cached `Specification` keeps filtering against the
+  old instant — call `plan` (and re-translate) per request if the window must track wall
+  clock.
+- The mapped column must be `java.time.Instant` or `java.time.OffsetDateTime`. Both
+  unambiguously denote an absolute instant, and Hibernate 6 binds them UTC-normalized
+  (`TIMESTAMP_UTC`), so the database comparison is an instant comparison on H2,
+  PostgreSQL, and MySQL alike (the differential oracle runs all three). `LocalDateTime`
+  has no zone, `java.util.Date` binding routes through zone conversions, and `String`
+  ordering depends on format and offset — the adapter throws a named error for those
+  rather than guessing an assumption that could silently diverge from `check()`. If you
+  know your schema's zone semantics, register an `OperatorFunction` override for the
+  comparison operator: it receives the parsed `Instant` as the value.
+
+  On MySQL, Hibernate maps these columns to `TIMESTAMP`, whose range ends at
+  2038-01-19 — instants beyond that need a schema-controlled `DATETIME(6)` column
+  (still UTC-normalized by Hibernate).
 
 ### Field-to-field string matching builds its pattern with `REPLACE`
 

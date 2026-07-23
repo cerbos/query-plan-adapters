@@ -82,6 +82,8 @@ class AdversarialConformanceTest {
             Map.entry("request.resource.attr.createdBy", AttributeMapping.field("createdBy")),
             // Delimited hierarchy path column for the hier-* actions
             Map.entry("request.resource.attr.scope", AttributeMapping.field("scope")),
+            // Instant column for the ts-* timestamp() comparison actions
+            Map.entry("request.resource.attr.createdAt", AttributeMapping.field("createdAt")),
             Map.entry("request.resource.attr.obj.inner", AttributeMapping.field("aString")),
             Map.entry("request.resource.attr.tags", AttributeMapping.relation("tags", Map.of(
                     "id", AttributeMapping.field("id"),
@@ -172,6 +174,31 @@ class AdversarialConformanceTest {
     /** Deterministic ISO instant per seed for the timestamp probe: split around 2025-01-01. */
     private static String isoFor(Seed s) {
         return s.aNumber() >= 2 ? "2024-06-01T00:00:00Z" : "2026-06-01T00:00:00Z";
+    }
+
+    /**
+     * Deterministic {@link Instant} per seed for the {@code ts-*} timestamp() comparison
+     * actions. The split matters: a1/a5 and the {@code aNumber < 2} seeds are firmly in the
+     * past (the {@code ts-window} retention cutoff, {@code now() - 24h}, must include them),
+     * a2 and the {@code aNumber >= 2} seeds are far enough in the future to stay AFTER any
+     * plan-time {@code now()} yet inside MySQL's {@code TIMESTAMP} range (which ends
+     * 2038-01-19 — the CI MySQL leg stores Instant as {@code timestamp}), a3 is NULL
+     * (missing attribute → CEL error → {@code check()} denies; SQL NULL comparison →
+     * UNKNOWN → excluded — both sides must agree), a4 is the {@code ts-eq} witness, and a5
+     * carries sub-second (microsecond) precision — exactly representable on H2, PostgreSQL,
+     * and MySQL {@code timestamp(6)} columns.
+     */
+    private static java.time.Instant tsFor(Seed s) {
+        return switch (s.id()) {
+            case "a1" -> java.time.Instant.parse("2020-03-15T10:30:00Z");
+            case "a2" -> java.time.Instant.parse("2037-01-01T00:00:00Z");
+            case "a3" -> null;
+            case "a4" -> java.time.Instant.parse("2024-06-01T00:00:00Z");
+            case "a5" -> java.time.Instant.parse("2020-03-15T10:30:00.123456Z");
+            default -> s.aNumber() >= 2
+                    ? java.time.Instant.parse("2036-06-06T06:06:06Z")
+                    : java.time.Instant.parse("2021-05-05T05:05:05Z");
+        };
     }
 
     /**
@@ -338,6 +365,7 @@ class AdversarialConformanceTest {
             r.setaOptionalString(s.aOptionalString());
             r.setCreatedBy(isoFor(s));
             r.setScope(scopeFor(s));
+            r.setCreatedAt(tsFor(s));
             for (Tag tag : s.tags()) {
                 r.addTag(tag.id(), tag.name());
             }
@@ -396,6 +424,11 @@ class AdversarialConformanceTest {
         }
         if (scopeFor(s) != null) {
             r = r.withAttribute("scope", AttributeValue.stringValue(scopeFor(s)));
+        }
+        // A NULL created_at column is a missing attribute on the check side: timestamp()
+        // over it is a CEL evaluation error → deny, matching SQL NULL exclusion.
+        if (tsFor(s) != null) {
+            r = r.withAttribute("createdAt", AttributeValue.stringValue(tsFor(s).toString()));
         }
         // mainCategory mirrors the row's single category as ONE nested object (the seeder
         // creates at most one category per seed), so direct dotted-chain CEL expressions
@@ -516,6 +549,13 @@ class AdversarialConformanceTest {
             // paths — seeds are documented on scopeFor(...)
             "hier-ancestor-ff", "hier-ancestor-cf", "hier-descendent-ff", "hier-descendent-cf",
             "hier-overlaps-ff", "hier-overlaps-cf", "hier-meta-like", "hier-meta-in",
+            // timestamp(field) vs folded constant instants against the Instant column
+            // (created_at). ts-window is the retention-cutoff shape (now()-duration folds
+            // at plan time); ts-vf pins value-first MIRRORING (an inversion bug flips the
+            // included set); ts-eq/ts-eq-offset pin instant equality incl. non-UTC offset
+            // normalization; ts-ne pins NULL exclusion (a3 has no created_at: check()
+            // denies on the missing attribute AND SQL excludes the NULL row).
+            "ts-window", "ts-vf", "ts-eq", "ts-eq-offset", "ts-ne",
     })
     void adapterMatchesCheckOracle(String action) {
         List<String> oracle = oracleAllowedIds(action);
@@ -530,7 +570,6 @@ class AdversarialConformanceTest {
      */
     @ParameterizedTest(name = "{0}")
     @CsvSource({
-            "p-timestamp, Unexpected timestamp() expression in leaf operand of lt",
             "p-matches, Unsupported operator: matches",
             "p-index, Unexpected get-field() expression in leaf operand of eq",
     })
@@ -538,6 +577,22 @@ class AdversarialConformanceTest {
         IllegalArgumentException ex = assertThrows(
                 IllegalArgumentException.class, () -> adapterFilteredIds(action));
         assertEquals(expectedMessage, ex.getMessage());
+    }
+
+    /**
+     * {@code p-timestamp} compares {@code timestamp(R.attr.createdBy)} where {@code createdBy}
+     * maps to a STRING column: timestamp() comparisons are supported only on columns that
+     * unambiguously denote an absolute instant (Instant / OffsetDateTime), so this must keep
+     * failing closed — with the column-type error, not the old pre-support operand error.
+     */
+    @Test
+    void timestampOnNonTemporalColumnThrowsNamedError() {
+        IllegalArgumentException ex = assertThrows(
+                IllegalArgumentException.class, () -> adapterFilteredIds("p-timestamp"));
+        assertTrue(ex.getMessage().contains("timestamp() comparison requires a column mapped to")
+                        && ex.getMessage().contains("String")
+                        && ex.getMessage().contains("request.resource.attr.createdBy"),
+                "unexpected message: " + ex.getMessage());
     }
 
     @Test

@@ -14,6 +14,9 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.Table;
 
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -47,6 +50,18 @@ public class ResourceEntity {
 
     @Column(name = "created_by")
     private String createdBy;
+
+    // Temporal columns for the timestamp() comparison support: Instant and OffsetDateTime are
+    // the two column types the adapter translates (both unambiguously denote an absolute
+    // instant); localCreatedAt exists to pin the named error for ambiguous temporal types.
+    @Column(name = "created_at")
+    private Instant createdAt;
+
+    @Column(name = "updated_at")
+    private OffsetDateTime updatedAt;
+
+    @Column(name = "local_created_at")
+    private LocalDateTime localCreatedAt;
 
     @Column(name = "scope")
     private String scope;
@@ -99,6 +114,12 @@ public class ResourceEntity {
     public void setaOptionalString(String aOptionalString) { this.aOptionalString = aOptionalString; }
     public String getCreatedBy() { return createdBy; }
     public void setCreatedBy(String createdBy) { this.createdBy = createdBy; }
+    public Instant getCreatedAt() { return createdAt; }
+    public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
+    public OffsetDateTime getUpdatedAt() { return updatedAt; }
+    public void setUpdatedAt(OffsetDateTime updatedAt) { this.updatedAt = updatedAt; }
+    public LocalDateTime getLocalCreatedAt() { return localCreatedAt; }
+    public void setLocalCreatedAt(LocalDateTime localCreatedAt) { this.localCreatedAt = localCreatedAt; }
     public String getScope() { return scope; }
     public void setScope(String scope) { this.scope = scope; }
     public List<String> getOwnedBy() { return ownedBy; }

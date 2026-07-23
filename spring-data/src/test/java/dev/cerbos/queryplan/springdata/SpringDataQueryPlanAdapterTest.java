@@ -2,6 +2,7 @@ package dev.cerbos.queryplan.springdata;
 
 import com.google.protobuf.ListValue;
 import com.google.protobuf.NullValue;
+import com.google.protobuf.Struct;
 import com.google.protobuf.Value;
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter;
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression;
@@ -33,6 +34,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -55,6 +57,9 @@ class SpringDataQueryPlanAdapterTest {
             Map.entry("request.resource.attr.aDouble", AttributeMapping.field("aDouble")),
             Map.entry("request.resource.attr.aOptionalString", AttributeMapping.field("aOptionalString")),
             Map.entry("request.resource.attr.createdBy", AttributeMapping.field("createdBy")),
+            Map.entry("request.resource.attr.createdAt", AttributeMapping.field("createdAt")),
+            Map.entry("request.resource.attr.updatedAt", AttributeMapping.field("updatedAt")),
+            Map.entry("request.resource.attr.localCreatedAt", AttributeMapping.field("localCreatedAt")),
             Map.entry("request.resource.attr.ownedBy", AttributeMapping.relation("ownedBy")),
             Map.entry("request.resource.attr.tags", AttributeMapping.relation("tags", Map.of(
                     "id", AttributeMapping.field("id"),
@@ -678,6 +683,94 @@ class SpringDataQueryPlanAdapterTest {
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
                 () -> runCount(cond));
         assertTrue(ex.getMessage().contains("Unsupported operator"));
+    }
+
+    // -- eq/ne against a structured (list/map) constant: named error, not a raw Hibernate one --
+
+    /**
+     * PDP-verified wire shapes (Cerbos {@code :latest}, 2026-07-23): {@code R.attr.tags ==
+     * ["a", "b"]} arrives as {@code eq(variable, value-list)} verbatim — in BOTH operand
+     * orders — and {@code ne} likewise. Without the guard, {@code cb.equal(stringPath, List)}
+     * dies inside Hibernate with a raw coercion error ("Could not convert
+     * java.util.ImmutableCollections$ListN to java.lang.String"), violating the README's
+     * contract that unsupported constructs throw {@link IllegalArgumentException} naming the
+     * operator. These tests pin the named error AND that no element values leak into it.
+     */
+    @Nested
+    class StructuredConstantComparison {
+
+        /** Distinctive element values so the no-leak assertions cannot false-negative. */
+        private static final String ELEM_A = "leak-canary-alpha";
+        private static final String ELEM_B = "leak-canary-beta";
+
+        private static IllegalArgumentException assertNamedError(Operand cond, String op,
+                                                                 String attribute, String shape) {
+            IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                    () -> runCount(cond));
+            String msg = ex.getMessage();
+            assertTrue(msg.contains(op), "expected operator '" + op + "' in: " + msg);
+            assertTrue(msg.contains(attribute), "expected attribute '" + attribute + "' in: " + msg);
+            assertTrue(msg.contains(shape), "expected shape '" + shape + "' in: " + msg);
+            assertTrue(msg.contains("hasIntersection"),
+                    "expected the supported alternative in: " + msg);
+            assertFalse(msg.contains(ELEM_A), "element value leaked into: " + msg);
+            assertFalse(msg.contains(ELEM_B), "element value leaked into: " + msg);
+            return ex;
+        }
+
+        @Test
+        void eqFieldAgainstListConstantThrowsNamedError() {
+            assertNamedError(
+                    exprOp("eq", var("request.resource.attr.aString"), listOp(ELEM_A, ELEM_B)),
+                    "eq", "request.resource.attr.aString", "list of 2 elements");
+        }
+
+        @Test
+        void neFieldAgainstListConstantThrowsNamedError() {
+            assertNamedError(
+                    exprOp("ne", var("request.resource.attr.aString"), listOp(ELEM_A, ELEM_B)),
+                    "ne", "request.resource.attr.aString", "list of 2 elements");
+        }
+
+        @Test
+        void eqValueFirstListConstantThrowsNamedError() {
+            // ["a", "b"] == R.attr.x — source order is preserved on the wire; NormalizedBinary
+            // mirrors it back to field-first, so the same named error must surface.
+            assertNamedError(
+                    exprOp("eq", listOp(ELEM_A), var("request.resource.attr.aString")),
+                    "eq", "request.resource.attr.aString", "list of 1 element");
+        }
+
+        @Test
+        void neValueFirstListConstantThrowsNamedError() {
+            assertNamedError(
+                    exprOp("ne", listOp(ELEM_A, ELEM_B), var("request.resource.attr.aString")),
+                    "ne", "request.resource.attr.aString", "list of 2 elements");
+        }
+
+        @Test
+        void eqRelationAgainstListConstantThrowsNamedError() {
+            // Relation-mapped attribute: previously surfaced the generic "is a Relation;
+            // cannot resolve as a scalar path" — the structured-constant guard runs before
+            // path resolution so this shape gets the same actionable message.
+            assertNamedError(
+                    exprOp("eq", var("request.resource.attr.tags"), listOp(ELEM_A, ELEM_B)),
+                    "eq", "request.resource.attr.tags", "list of 2 elements");
+        }
+
+        @Test
+        void eqFieldAgainstStructConstantThrowsNamedError() {
+            // Defensive: the planner emits map literals as struct() expressions (which throw a
+            // named error via leafOperandError), but protoValueToJava can produce a Map from a
+            // STRUCT_VALUE — pin the same contract for that shape.
+            Operand structConstant = Operand.newBuilder()
+                    .setValue(Value.newBuilder().setStructValue(Struct.newBuilder()
+                            .putFields("k", Value.newBuilder().setStringValue(ELEM_A).build())))
+                    .build();
+            assertNamedError(
+                    exprOp("eq", var("request.resource.attr.aString"), structConstant),
+                    "eq", "request.resource.attr.aString", "map of 1 entry");
+        }
     }
 
     // -- add operator --
@@ -2997,6 +3090,232 @@ class SpringDataQueryPlanAdapterTest {
             } finally {
                 em.close();
             }
+        }
+    }
+
+    // -- timestamp(field) vs timestamp(constant) comparisons --
+    // Wire shape (PDP-verified): `timestamp(R.attr.createdAt) < now() - duration("24h")`
+    // arrives as lt(timestamp(variable), timestamp(value "<RFC-3339>")) — the planner folds
+    // now()-duration to a constant instant and RE-WRAPS it in timestamp(); a bare string
+    // constant never appears. Value-first policies keep source order (both operands are
+    // EXPRESSION nodes, so NormalizedBinary cannot reorder them) and must be MIRRORED.
+
+    @Nested
+    class TimestampComparisons {
+
+        private static final String CONST = "2025-01-01T00:00:00Z";
+
+        private Operand tsVar(String attr) {
+            return exprOp("timestamp", var("request.resource.attr." + attr));
+        }
+
+        private Operand tsVal(String iso) {
+            return exprOp("timestamp", sval(iso));
+        }
+
+        /** Seed rows: two before {@link #CONST}, one exactly at it, one after, one NULL. */
+        private void withTimestampRows(Runnable body) {
+            ResourceEntity old1 = new ResourceEntity("ts-old1");
+            old1.setCreatedAt(java.time.Instant.parse("2024-03-01T00:00:00Z"));
+            old1.setUpdatedAt(java.time.OffsetDateTime.parse("2024-03-01T00:00:00Z"));
+            old1.setaBool(true);
+            ResourceEntity old2 = new ResourceEntity("ts-old2");
+            old2.setCreatedAt(java.time.Instant.parse("2024-06-01T00:00:00.123456Z"));
+            old2.setUpdatedAt(java.time.OffsetDateTime.parse("2024-06-01T00:00:00.123456Z"));
+            old2.setaBool(false);
+            ResourceEntity exact = new ResourceEntity("ts-exact");
+            exact.setCreatedAt(java.time.Instant.parse(CONST));
+            exact.setUpdatedAt(java.time.OffsetDateTime.parse(CONST));
+            exact.setaBool(false);
+            ResourceEntity newer = new ResourceEntity("ts-new");
+            newer.setCreatedAt(java.time.Instant.parse("2026-02-01T00:00:00Z"));
+            newer.setUpdatedAt(java.time.OffsetDateTime.parse("2026-02-01T00:00:00Z"));
+            newer.setaBool(false);
+            ResourceEntity nul = new ResourceEntity("ts-null"); // createdAt/updatedAt NULL
+            nul.setaBool(false);
+            withResource(old1, () -> withResource(old2, () -> withResource(exact,
+                    () -> withResource(newer, () -> withResource(nul, body)))));
+        }
+
+        @Test
+        void allSixOperatorsFieldFirstOnInstantColumn() {
+            withTimestampRows(() -> {
+                // Row set: old1, old2 < CONST; exact == CONST; new > CONST; null excluded
+                // everywhere (SQL three-valued logic == CEL missing-attribute deny).
+                assertEquals(2, runCount(exprOp("lt", tsVar("createdAt"), tsVal(CONST))));
+                assertEquals(3, runCount(exprOp("le", tsVar("createdAt"), tsVal(CONST))));
+                assertEquals(1, runCount(exprOp("gt", tsVar("createdAt"), tsVal(CONST))));
+                assertEquals(2, runCount(exprOp("ge", tsVar("createdAt"), tsVal(CONST))));
+                assertEquals(1, runCount(exprOp("eq", tsVar("createdAt"), tsVal(CONST))));
+                assertEquals(3, runCount(exprOp("ne", tsVar("createdAt"), tsVal(CONST))));
+            });
+        }
+
+        @Test
+        void allSixOperatorsValueFirstAreMirroredNotInverted() {
+            withTimestampRows(() -> {
+                // `CONST < field` selects rows AFTER the instant (1 row) — an inversion bug
+                // (treating it as `field < CONST`) would return the 2 older rows instead.
+                assertEquals(1, runCount(exprOp("lt", tsVal(CONST), tsVar("createdAt"))));
+                assertEquals(2, runCount(exprOp("le", tsVal(CONST), tsVar("createdAt"))));
+                assertEquals(2, runCount(exprOp("gt", tsVal(CONST), tsVar("createdAt"))));
+                assertEquals(3, runCount(exprOp("ge", tsVal(CONST), tsVar("createdAt"))));
+                assertEquals(1, runCount(exprOp("eq", tsVal(CONST), tsVar("createdAt"))));
+                assertEquals(3, runCount(exprOp("ne", tsVal(CONST), tsVar("createdAt"))));
+            });
+        }
+
+        @Test
+        void offsetDateTimeColumnSupportsAllSixOperators() {
+            withTimestampRows(() -> {
+                assertEquals(2, runCount(exprOp("lt", tsVar("updatedAt"), tsVal(CONST))));
+                assertEquals(3, runCount(exprOp("le", tsVar("updatedAt"), tsVal(CONST))));
+                assertEquals(1, runCount(exprOp("gt", tsVar("updatedAt"), tsVal(CONST))));
+                assertEquals(2, runCount(exprOp("ge", tsVar("updatedAt"), tsVal(CONST))));
+                assertEquals(1, runCount(exprOp("eq", tsVar("updatedAt"), tsVal(CONST))));
+                assertEquals(3, runCount(exprOp("ne", tsVar("updatedAt"), tsVal(CONST))));
+                // Value-first mirror on the OffsetDateTime column too.
+                assertEquals(1, runCount(exprOp("lt", tsVal(CONST), tsVar("updatedAt"))));
+            });
+        }
+
+        @Test
+        void nonUtcOffsetConstantNormalizesToTheSameInstant() {
+            // 2025-01-01T02:00:00+02:00 IS 2025-01-01T00:00:00Z: eq must match the `exact`
+            // row (CEL timestamp equality is instant equality — PDP-verified), and lt must
+            // select the same two older rows as the Z-offset constant.
+            withTimestampRows(() -> {
+                assertEquals(1, runCount(exprOp("eq",
+                        tsVar("createdAt"), tsVal("2025-01-01T02:00:00+02:00"))));
+                assertEquals(2, runCount(exprOp("lt",
+                        tsVar("createdAt"), tsVal("2025-01-01T02:00:00+02:00"))));
+            });
+        }
+
+        @Test
+        void subSecondPrecisionConstantDiscriminates() {
+            // The folded now()-duration constant carries nanosecond precision on the wire.
+            // A threshold BETWEEN old2 (…00.123456Z) and its whole second must split them.
+            withTimestampRows(() -> {
+                assertEquals(1, runCount(exprOp("le",
+                        tsVar("createdAt"), tsVal("2024-06-01T00:00:00.000001Z"))));
+                assertEquals(2, runCount(exprOp("le",
+                        tsVar("createdAt"), tsVal("2024-06-01T00:00:00.123456Z"))));
+            });
+        }
+
+        @Test
+        void nullColumnIsExcludedByEveryOperator() {
+            // Only the NULL row seeded: every comparison is UNKNOWN → zero rows, matching
+            // check() denying on the missing attribute (PDP-verified).
+            ResourceEntity nul = new ResourceEntity("ts-only-null");
+            withResource(nul, () -> {
+                for (String op : List.of("lt", "le", "gt", "ge", "eq", "ne")) {
+                    assertEquals(0, runCount(exprOp(op, tsVar("createdAt"), tsVal(CONST))),
+                            "NULL column must be excluded for " + op);
+                    assertEquals(0, runCount(exprOp(op, tsVal(CONST), tsVar("createdAt"))),
+                            "NULL column must be excluded for value-first " + op);
+                }
+            });
+        }
+
+        @Test
+        void constantVsConstantFoldsViaTernarySubstitution() {
+            // (aBool ? timestamp(A) : timestamp(B)) == timestamp(A) — substitution yields
+            // timestamp-constant vs timestamp-constant comparisons; the fold must select
+            // exactly the aBool=true row (old1).
+            withTimestampRows(() -> assertEquals(1, runCount(exprOp("eq",
+                    exprOp("if",
+                            var("request.resource.attr.aBool"),
+                            tsVal("2024-01-01T00:00:00Z"),
+                            tsVal("2030-01-01T00:00:00Z")),
+                    tsVal("2024-01-01T00:00:00Z")))));
+        }
+
+        @Test
+        void localDateTimeColumnThrowsNamedError() {
+            // LocalDateTime has no zone: the stored wall-clock could denote any instant, and
+            // guessing UTC could silently include rows check() denies. Fail closed, by name.
+            assertConditionThrows(
+                    exprOp("lt", tsVar("localCreatedAt"), tsVal(CONST)),
+                    "timestamp() comparison", "LocalDateTime", "localCreatedAt");
+        }
+
+        @Test
+        void stringColumnThrowsNamedError() {
+            assertConditionThrows(
+                    exprOp("lt", tsVar("createdBy"), tsVal(CONST)),
+                    "timestamp() comparison", "String", "createdBy");
+        }
+
+        @Test
+        void overrideIsConsultedBeforeColumnTypeCheck() {
+            // The README's OperatorFunction escape hatch must be REACHABLE for timestamp
+            // comparisons — including on column types the default translation rejects.
+            assertThrows(OverrideInvoked.class, () -> runCount(
+                    exprOp("lt", tsVar("localCreatedAt"), tsVal(CONST)),
+                    Map.of("lt", THROWING_OVERRIDE)));
+        }
+
+        @Test
+        void valueFirstOverrideIsConsultedUnderTheMirroredOperator() {
+            // Same contract as NormalizedBinary: a value-first lt is looked up as gt.
+            assertThrows(OverrideInvoked.class, () -> runCount(
+                    exprOp("lt", tsVal(CONST), tsVar("createdAt")),
+                    Map.of("gt", THROWING_OVERRIDE)));
+        }
+
+        @Test
+        void bareStringConstantStillThrows() {
+            // The PDP never emits timestamp(variable) vs a bare string (verified against a
+            // live PDP: even folded now()-duration constants are re-wrapped in timestamp()).
+            // Unverifiable shape → keep failing closed.
+            assertConditionThrows(
+                    exprOp("lt", tsVar("createdAt"), sval(CONST)),
+                    "Unexpected timestamp() expression in leaf operand of lt");
+        }
+
+        @Test
+        void numberConstantAgainstTimestampFieldThrows() {
+            assertConditionThrows(
+                    exprOp("gt", tsVar("createdAt"), nval(5)),
+                    "Unexpected timestamp() expression in leaf operand of gt");
+        }
+
+        @Test
+        void timestampOverNestedExpressionThrows() {
+            // timestamp(<expression>) has no verified wire shape → Opaque → named error.
+            assertConditionThrows(
+                    exprOp("lt",
+                            exprOp("timestamp", exprOp("add", sval("a"), sval("b"))),
+                            tsVal(CONST)),
+                    "Unexpected timestamp() expression in leaf operand of lt");
+        }
+
+        @Test
+        void timestampInsideArithmeticStillThrows() {
+            // Nested shapes the numeric machinery routes through resolveNumericOperand keep
+            // their named error — no partial support for shapes the oracle cannot verify.
+            assertConditionThrows(
+                    exprOp("lt",
+                            exprOp("add", tsVar("createdAt"), nval(1)),
+                            nval(5)),
+                    "timestamp() expression inside an arithmetic");
+        }
+
+        @Test
+        void malformedConstantThrowsNamedError() {
+            assertConditionThrows(
+                    exprOp("lt", tsVar("createdAt"), tsVal("not-a-timestamp")),
+                    "timestamp() constant could not be parsed");
+        }
+
+        @Test
+        void nonStringConstantInsideTimestampThrows() {
+            assertConditionThrows(
+                    exprOp("lt", tsVar("createdAt"),
+                            exprOp("timestamp", nval(1735689600))),
+                    "timestamp() constant must be an RFC-3339 string");
         }
     }
 }
