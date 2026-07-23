@@ -68,6 +68,18 @@ resourcePolicy:
         match:
           expr: R.attr.aString.endsWith("\\")
 
+    # -- case sensitivity: CEL string equality is exact and case-sensitive, so the c1 seed
+    # (aString "One") is DENIED here. A case-insensitive database collation (MySQL default
+    # utf8mb4_0900_ai_ci, SQL Server *_CI_*) matches it anyway — the differential oracle
+    # turns that into a test failure, proving the over-grant. See the README's
+    # "Database collation requirements" section.
+    - actions: ["cs-eq"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aString == "one"
+
     # -- string edge values --
     - actions: ["unicode-eq"]
       effect: EFFECT_ALLOW
