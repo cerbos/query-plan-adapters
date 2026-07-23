@@ -37,17 +37,18 @@ An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanRe
 - Collection mapping and filtering
 - Complex condition combinations
 - Type-safe field mappings
+- Application-defined expression mappings for provider- or schema-specific filters
 
 ## Requirements
 
 - Cerbos > v0.40
 - `@cerbos/http` or `@cerbos/grpc` client
-- Prisma >= v6.0 (v7 supported)
+- Prisma >= v5.0 (v6 and v7 supported)
 
 ## System Requirements
 
 - Node.js >= 20.0.
-- Prisma CLI & Client >= 6.0 (v7 supported)
+- Prisma CLI & Client >= 5.0 (v6 and v7 supported)
 - A database supported by Prisma (SQLite/PostgreSQL/MySQL/etc.) so the Prisma client can communicate with stored data
 
 ## Installation
@@ -293,6 +294,60 @@ When using relations, fields are automatically inferred from the path unless exp
 - Arrays remain `{ field: { in: [...] } }`.
 - Relation-backed fields retain their relation structure while still applying the appropriate equality or `in` operator at the leaf.
 
+### Mapping Provider- or Schema-Specific Expressions
+
+Prisma 5, 6, and 7 do not expose a portable `where` representation for
+computed arithmetic, regular expressions, casts, positional indexing, or
+scalar string length. `queryPlanToPrisma` continues to throw for expressions
+that it cannot translate faithfully.
+
+Use `expressionMapper` to provide an application-specific Prisma filter when
+your schema or database gives you an exact equivalent. The mapper receives the
+complete predicate before the built-in translator. Return `undefined` to use
+the built-in behavior. It is called for supported expressions too, allowing a
+complete comparison containing an unsupported value expression to be replaced:
+
+```ts
+const result = queryPlanToPrisma({
+  queryPlan,
+  mapper,
+  expressionMapper: ({ expression }) => {
+    if (!("operator" in expression) || expression.operator !== "matches") {
+      return undefined;
+    }
+
+    // This application guarantees that the CEL pattern and database collation
+    // make this startsWith filter semantically equivalent.
+    return { slug: { startsWith: "docs-" } };
+  },
+});
+```
+
+Mappings compose inside `and`, `or`, `not`, and relation-lambda predicates.
+They must return an ordinary Prisma filter object, so they work across the
+supported Prisma versions and remain composable with `findMany({ where })`.
+The `mapper` argument is scoped to the current expression; inside a relation
+lambda it resolves the lambda variable's fields rather than root resource
+fields.
+
+The application is responsible for proving that a mapped filter has the same
+semantics as the Cerbos expression. In particular:
+
+- `matches` uses CEL/RE2 semantics, which may differ from database collation or
+  provider-specific regular expressions.
+- Arithmetic and casts depend on the source field's numeric type, overflow,
+  rounding, and conversion behavior.
+- A to-many relation has no positional `index` unless the data model stores an
+  explicit position.
+- General scalar string `size` comparisons need a materialized length or a
+  provider-specific query; comparing with an empty string is not portable
+  across all supported databases.
+
+Do not return a broader approximation from `expressionMapper`: doing so can
+admit resources that the Cerbos condition denies. Prisma raw SQL fragments
+cannot be embedded in a normal `where` object; use a separate provider-specific
+query path if an exact ordinary Prisma filter does not exist.
+
 ### Complex Example with Multiple Relations and Direct Fields
 
 ```ts
@@ -443,6 +498,15 @@ type MapperConfig = {
 };
 
 type Mapper = { [key: string]: MapperConfig } | ((key: string) => MapperConfig);
+```
+
+`expressionMapper` has the following type:
+
+```ts
+type ExpressionMapper = (args: {
+  expression: PlanExpressionOperand;
+  mapper: Mapper;
+}) => PrismaFilter | undefined;
 ```
 
 ## Full Example

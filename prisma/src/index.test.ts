@@ -1,4 +1,10 @@
-import { queryPlanToPrisma, PlanKind, QueryPlanToPrismaResult } from ".";
+import {
+  type ExpressionMapperArgs,
+  type Mapper,
+  queryPlanToPrisma,
+  PlanKind,
+  QueryPlanToPrismaResult,
+} from ".";
 import {
   beforeAll,
   beforeEach,
@@ -6311,6 +6317,343 @@ describe("Return Types", () => {
   });
 });
 
+describe("Expression Mapper", () => {
+  const unsupportedPredicates: [string, PlanExpressionOperand][] = [
+    [
+      "arithmetic",
+      {
+        operator: "gt",
+        operands: [
+          {
+            operator: "add",
+            operands: [
+              { name: "request.resource.attr.aNumber" },
+              { value: 1 },
+            ],
+          },
+          { value: 2 },
+        ],
+      },
+    ],
+    [
+      "regex",
+      {
+        operator: "matches",
+        operands: [
+          { name: "request.resource.attr.aString" },
+          { value: "^str.*" },
+        ],
+      },
+    ],
+    [
+      "string cast",
+      {
+        operator: "eq",
+        operands: [
+          {
+            operator: "string",
+            operands: [{ name: "request.resource.attr.aNumber" }],
+          },
+          { value: "1" },
+        ],
+      },
+    ],
+    [
+      "double cast",
+      {
+        operator: "gt",
+        operands: [
+          {
+            operator: "double",
+            operands: [{ name: "request.resource.attr.aNumber" }],
+          },
+          { value: 1.5 },
+        ],
+      },
+    ],
+    [
+      "int cast",
+      {
+        operator: "gt",
+        operands: [
+          {
+            operator: "int",
+            operands: [{ name: "request.resource.attr.aString" }],
+          },
+          { value: 0 },
+        ],
+      },
+    ],
+    [
+      "list index",
+      {
+        operator: "eq",
+        operands: [
+          {
+            operator: "index",
+            operands: [
+              { name: "request.resource.attr.ownedBy" },
+              { value: 0 },
+            ],
+          },
+          { value: "user1" },
+        ],
+      },
+    ],
+    [
+      "scalar string size",
+      {
+        operator: "gt",
+        operands: [
+          {
+            operator: "size",
+            operands: [{ name: "request.resource.attr.aString" }],
+          },
+          { value: 0 },
+        ],
+      },
+    ],
+  ];
+
+  test.each(unsupportedPredicates)(
+    "maps an unsupported %s predicate as a complete expression",
+    (_name, expression) => {
+      const mapper: Mapper = {
+        "request.resource.attr.aNumber": { field: "aNumber" },
+        "request.resource.attr.aString": { field: "aString" },
+        "request.resource.attr.ownedBy": {
+          relation: { name: "ownedBy", type: "many", field: "id" },
+        },
+      };
+      const calls: ExpressionMapperArgs[] = [];
+
+      const result = queryPlanToPrisma({
+        queryPlan: createConditionalPlan(expression),
+        mapper,
+        expressionMapper: (args) => {
+          calls.push(args);
+          return { id: { equals: "resource1" } };
+        },
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: { id: { equals: "resource1" } },
+      });
+      expect(calls).toStrictEqual([{ expression, mapper }]);
+    }
+  );
+
+  test("falls back to the built-in translator when the mapper declines", () => {
+    const plan = createConditionalPlan({
+      operator: "eq",
+      operands: [
+        { name: "request.resource.attr.aNumber" },
+        { value: 1 },
+      ],
+    });
+
+    const result = queryPlanToPrisma({
+      queryPlan: plan,
+      mapper: {
+        "request.resource.attr.aNumber": { field: "aNumber" },
+      },
+      expressionMapper: () => undefined,
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { aNumber: { equals: 1 } },
+    });
+  });
+
+  test("composes a mapped predicate with built-in predicates", async () => {
+    const matchesExpression: PlanExpressionOperand = {
+      operator: "matches",
+      operands: [
+        { name: "request.resource.attr.aString" },
+        { value: "^str.*" },
+      ],
+    };
+    const plan = createConditionalPlan({
+      operator: "and",
+      operands: [
+        matchesExpression,
+        {
+          operator: "eq",
+          operands: [
+            { name: "request.resource.attr.aNumber" },
+            { value: 1 },
+          ],
+        },
+      ],
+    });
+
+    const result = queryPlanToPrisma({
+      queryPlan: plan,
+      mapper: {
+        "request.resource.attr.aString": { field: "aString" },
+        "request.resource.attr.aNumber": { field: "aNumber" },
+      },
+      expressionMapper: ({ expression }) =>
+        expression === matchesExpression
+          ? { aString: { startsWith: "str" } }
+          : undefined,
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        AND: [
+          { aString: { startsWith: "str" } },
+          { aNumber: { equals: 1 } },
+        ],
+      },
+    });
+
+    if (result.kind !== PlanKind.CONDITIONAL) {
+      throw new Error("Expected CONDITIONAL result");
+    }
+
+    const query = await prisma.resource.findMany({ where: result.filters });
+    expect(query.map(({ id }) => id)).toEqual(["resource1"]);
+  });
+
+  test.each([
+    [
+      "or",
+      {
+        operator: "or",
+        operands: [
+          {
+            operator: "eq",
+            operands: [
+              { name: "request.resource.attr.aNumber" },
+              { value: 999 },
+            ],
+          },
+          {
+            operator: "matches",
+            operands: [
+              { name: "request.resource.attr.aString" },
+              { value: "^str.*" },
+            ],
+          },
+        ],
+      },
+      {
+        OR: [
+          { aNumber: { equals: 999 } },
+          { aString: { startsWith: "str" } },
+        ],
+      },
+    ],
+    [
+      "not",
+      {
+        operator: "not",
+        operands: [
+          {
+            operator: "matches",
+            operands: [
+              { name: "request.resource.attr.aString" },
+              { value: "^str.*" },
+            ],
+          },
+        ],
+      },
+      { NOT: { aString: { startsWith: "str" } } },
+    ],
+  ] satisfies [string, PlanExpressionOperand, Record<string, unknown>][]) (
+    "composes a mapped predicate inside %s",
+    (_name, expression, expectedFilter) => {
+      const result = queryPlanToPrisma({
+        queryPlan: createConditionalPlan(expression),
+        mapper: {
+          "request.resource.attr.aString": { field: "aString" },
+          "request.resource.attr.aNumber": { field: "aNumber" },
+        },
+        expressionMapper: ({ expression: currentExpression }) =>
+          "operator" in currentExpression &&
+          currentExpression.operator === "matches"
+            ? { aString: { startsWith: "str" } }
+            : undefined,
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: expectedFilter,
+      });
+    }
+  );
+
+  test("maps unsupported predicates inside relation lambdas", async () => {
+    const matchesExpression: PlanExpressionOperand = {
+      operator: "matches",
+      operands: [{ name: "tag.name" }, { value: "^pub.*" }],
+    };
+    const plan = createConditionalPlan({
+      operator: "exists",
+      operands: [
+        { name: "request.resource.attr.tags" },
+        {
+          operator: "lambda",
+          operands: [matchesExpression, { name: "tag" }],
+        },
+      ],
+    });
+
+    let scopedMapper: Mapper | undefined;
+    const result = queryPlanToPrisma({
+      queryPlan: plan,
+      mapper: {
+        "request.resource.attr.tags": {
+          relation: {
+            name: "tags",
+            type: "many",
+            fields: { name: { field: "name" } },
+          },
+        },
+      },
+      expressionMapper: ({ expression, mapper }) => {
+        if (expression !== matchesExpression) {
+          return undefined;
+        }
+
+        scopedMapper = mapper;
+        return {
+          name: { startsWith: "pub" },
+          id: { equals: "tag2" },
+        };
+      },
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        tags: {
+          some: {
+            name: { startsWith: "pub" },
+            id: { equals: "tag2" },
+          },
+        },
+      },
+    });
+
+    if (typeof scopedMapper !== "function") {
+      throw new Error("Expected a relation-scoped mapper");
+    }
+    expect(scopedMapper("tag.name")).toStrictEqual({ field: "name" });
+
+    if (result.kind !== PlanKind.CONDITIONAL) {
+      throw new Error("Expected CONDITIONAL result");
+    }
+
+    const query = await prisma.resource.findMany({ where: result.filters });
+    expect(query).toEqual([]);
+  });
+});
+
 // Issue #156: add operator (string concatenation)
 describe("Add Operator", () => {
   test("add with two values (constant folding)", () => {
@@ -6580,7 +6923,11 @@ describe("Arithmetic Operators", () => {
     });
 
     expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
-    expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+    if (queryPlan.kind !== PlanKind.CONDITIONAL) {
+      throw new Error("Expected CONDITIONAL query plan");
+    }
+    const condition = queryPlan.condition;
+    expect(condition).toEqual({
       operator: "gt",
       operands: [
         {
@@ -6604,6 +6951,28 @@ describe("Arithmetic Operators", () => {
     ).toThrow(
       "Operator gt is not supported with add and field references"
     );
+
+    const result = queryPlanToPrisma({
+      queryPlan,
+      mapper: {
+        "request.resource.attr.aNumber": { field: "aNumber" },
+      },
+      expressionMapper: ({ expression }) =>
+        expression === condition ? { aNumber: { gt: 1 } } : undefined,
+    });
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { aNumber: { gt: 1 } },
+    });
+
+    if (result.kind !== PlanKind.CONDITIONAL) {
+      throw new Error("Expected CONDITIONAL result");
+    }
+    const query = await prisma.resource.findMany({ where: result.filters });
+    expect(query.map(({ id }) => id).sort()).toEqual([
+      "resource2",
+      "resource3",
+    ]);
   });
 
   test("arith-sub is unsupported", async () => {
@@ -6614,7 +6983,11 @@ describe("Arithmetic Operators", () => {
     });
 
     expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
-    expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+    if (queryPlan.kind !== PlanKind.CONDITIONAL) {
+      throw new Error("Expected CONDITIONAL query plan");
+    }
+    const condition = queryPlan.condition;
+    expect(condition).toEqual({
       operator: "lt",
       operands: [
         {
@@ -6646,7 +7019,11 @@ describe("Arithmetic Operators", () => {
     });
 
     expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
-    expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+    if (queryPlan.kind !== PlanKind.CONDITIONAL) {
+      throw new Error("Expected CONDITIONAL query plan");
+    }
+    const condition = queryPlan.condition;
+    expect(condition).toEqual({
       operator: "gt",
       operands: [
         {
@@ -6747,7 +7124,11 @@ describe("Regex Operator", () => {
     });
 
     expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
-    expect((queryPlan as PlanResourcesConditionalResponse).condition).toEqual({
+    if (queryPlan.kind !== PlanKind.CONDITIONAL) {
+      throw new Error("Expected CONDITIONAL query plan");
+    }
+    const condition = queryPlan.condition;
+    expect(condition).toEqual({
       operator: "matches",
       operands: [
         { name: "request.resource.attr.aString" },
@@ -6763,6 +7144,31 @@ describe("Regex Operator", () => {
         },
       })
     ).toThrow("Unsupported operator: matches");
+
+    const result = queryPlanToPrisma({
+      queryPlan,
+      mapper: {
+        "request.resource.attr.aString": { field: "aString" },
+      },
+      expressionMapper: ({ expression }) =>
+        expression === condition
+          ? { aString: { startsWith: "str" } }
+          : undefined,
+    });
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { aString: { startsWith: "str" } },
+    });
+
+    if (result.kind !== PlanKind.CONDITIONAL) {
+      throw new Error("Expected CONDITIONAL result");
+    }
+    const query = await prisma.resource.findMany({ where: result.filters });
+    expect(query.map(({ id }) => id).sort()).toEqual([
+      "resource1",
+      "resource2",
+      "resource3",
+    ]);
   });
 });
 
