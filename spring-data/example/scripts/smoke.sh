@@ -17,9 +17,20 @@ fail() { printf "${RED}FAIL${NC} %s\n" "$*" >&2; exit 1; }
 ok()   { printf "${GREEN}OK${NC}   %s\n" "$*"; }
 
 cleanup() {
+    local status=$?
     if [[ -n "${APP_PID:-}" ]]; then
         kill "$APP_PID" 2>/dev/null || true
         wait "$APP_PID" 2>/dev/null || true
+    fi
+    # On failure, dump diagnostics BEFORE `compose down` discards the container —
+    # this is what CI (and anyone running headless) gets to debug with.
+    if (( status != 0 )); then
+        echo "==> smoke test failed (exit $status): Cerbos container logs" >&2
+        docker compose logs --no-color cerbos >&2 || true
+        if [[ -f build/smoke/app.log ]]; then
+            echo "==> smoke test failed (exit $status): last 200 lines of Spring Boot log" >&2
+            tail -n 200 build/smoke/app.log >&2 || true
+        fi
     fi
     docker compose down --remove-orphans >/dev/null 2>&1 || true
 }
