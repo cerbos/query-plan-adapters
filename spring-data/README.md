@@ -278,6 +278,53 @@ the only satisfiable one: `/` is true double division (`5 / 2.0 == 2.5`), never
 integer truncation. Write double literals (`1.0`, `2.0`) in policy arithmetic over
 attributes, or the plan-based filter and per-resource `check` calls will disagree.
 
+### MySQL: keeping arithmetic IEEE-faithful
+
+Affects only policies with **arithmetic inside a comparison** (`R.attr.aNumber * 0.1 ==
+0.3`, `R.attr.aDouble + 0.7 != 0.1`, …). Plain comparisons, `in`, LIKE, and collection
+shapes are not involved.
+
+Two MySQL defaults each pull the adapter's deliberately-IEEE double arithmetic into
+**exact decimal** evaluation:
+
+- Hibernate's `MySQLDialect` renders to-double casts as `cast(col as decimal(53,20))` —
+  its cast mapping predates MySQL 8.0.17, which added `CAST(... AS DOUBLE)`.
+- MySQL Connector/J's default **client-side** prepared statements
+  (`useServerPrepStmts=false`) interpolate double bind parameters into the statement
+  text, where MySQL parses them as exact `DECIMAL` literals.
+
+Decimal arithmetic is not IEEE double arithmetic: `3 * 0.1 == 0.3` is TRUE in decimal
+but FALSE in CEL (`0.30000000000000004`), so on those defaults the SQL filter returns
+rows the PDP's `check()` API **denies** — a silent over-grant (verified on MySQL 8.4:
+`CAST(3 AS DECIMAL(53,20)) * 0.1 = 0.3` → 1, `CAST(3 AS DOUBLE) * 0.1 = 0.3` → 0).
+
+**What the adapter does about it.** The library ships a Hibernate `FunctionContributor`
+(`MySqlDoubleCastFunctionContributor`, discovered automatically via
+`META-INF/services`) that, on MySQL 8.0.17+, registers a cast function rendering
+`cast(col as double)`; every column entering arithmetic goes through it. Because MySQL
+promotes any expression with an approximate (DOUBLE) operand to double, the
+interpolated decimal literals stop mattering — client- and server-side prepared
+statements both agree with `check()`, with **no JDBC URL settings required**. H2 and
+PostgreSQL already render IEEE-correct casts; the contributor registers nothing there
+and their SQL is unchanged.
+
+**When you still need `useServerPrepStmts=true`** (typed double binds restore IEEE
+semantics even under the decimal cast) — set it in the JDBC URL if any of these apply:
+
+- MySQL older than 8.0.17 (no `CAST(... AS DOUBLE)`).
+- MariaDB (own dialect lineage and driver; not covered by the contributor).
+- A non-Hibernate JPA provider (the contributor is Hibernate-only; the adapter then
+  falls back to the portable `cast(col as float(53))`, which MySQL would need typed
+  binds to keep in double space).
+- Hibernate configured with `hibernate.boot.allow_jdbc_metadata_access=false` and only
+  `hibernate.dialect` set: the dialect then reports its minimum supported version and
+  the version-gated registration is skipped.
+
+The differential oracle's MySQL CI leg runs with Connector/J's default client-side
+prepared statements precisely so this stays pinned (`p-double-frac` fails within
+seconds if the cast regresses to decimal); set `ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS=true`
+to run the same leg in server-side mode — both must pass.
+
 ### Timestamp comparisons: plan-time `now()`, and only unambiguous column types
 
 `timestamp(R.attr.createdAt) < now() - duration("24h")` reaches the adapter as a

@@ -41,10 +41,21 @@ jobs:
   # documented in spring-data/README.md "Database collation requirements": the MySQL leg
   # creates its schema with utf8mb4_0900_as_cs; the suite's mixed-case seeds fail the
   # oracle comparison on MySQL's default case-insensitive collation.
+  #
+  # The MySQL leg runs TWICE: once with Connector/J's default client-side prepared
+  # statements (pins the adapter's `cast(... as double)` rendering — under the
+  # MySQLDialect decimal(53,20) cast, interpolated DECIMAL literals would evaluate the
+  # adapter's IEEE double arithmetic exactly and p-double-frac would fail; see the README
+  # "MySQL: keeping arithmetic IEEE-faithful" gotcha) and once with
+  # useServerPrepStmts=true (typed binds — the mode customers may opt into).
   test-database:
     strategy:
       matrix:
-        database: ["postgres", "mysql"]
+        include:
+          - database: postgres
+          - database: mysql
+          - database: mysql
+            server-prep-stmts: "true"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -62,6 +73,7 @@ jobs:
         run: gradle build --no-daemon
         env:
           ADAPTER_TEST_DB: ${{ matrix.database }}
+          ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS: ${{ matrix.server-prep-stmts || '' }}
 
   # Compiles the standalone example app (a composite build over the adapter source — building
   # the adapter alone never compiles it) and runs example/scripts/smoke.sh end-to-end: a live

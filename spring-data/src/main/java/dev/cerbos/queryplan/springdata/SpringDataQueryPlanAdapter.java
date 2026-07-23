@@ -1254,11 +1254,20 @@ public final class SpringDataQueryPlanAdapter {
              * marker only) and {@code cb.toDouble(literal)} elides the cast on a node already
              * Double-typed, both leaving the arithmetic decimal. Therefore:
              * <ul>
-             *   <li>columns go through {@code cb.toDouble} (renders {@code cast(col as float(53))});</li>
+             *   <li>columns go through {@link #toIeeeDouble}: {@code cb.toDouble} (renders
+             *       {@code cast(col as float(53))}) — except on MySQL, where Hibernate's
+             *       {@code MySQLDialect} renders that cast as exact {@code decimal(53,20)} and
+             *       the adapter instead emits the {@code cerbos_ieee_double} function
+             *       ({@code cast(col as double)}) registered by
+             *       {@link MySqlDoubleCastFunctionContributor};</li>
              *   <li>constant subtrees fold in Java ({@link NumericOperand.Constant});</li>
              *   <li>constants mixed into SQL arithmetic bind through the plain-{@code Number}
              *       CriteriaBuilder overloads, which emit genuine double-typed bind parameters
-             *       instead of decimal literals.</li>
+             *       instead of decimal literals. (MySQL Connector/J's default client-side
+             *       prepared statements still interpolate those binds as DECIMAL literals in
+             *       the statement text — harmless once every column cast is a true DOUBLE,
+             *       because MySQL promotes arithmetic and comparisons with an approximate
+             *       operand to double space; see {@link MySqlDoubleCastFunctionContributor}.)</li>
              * </ul>
              *
              * <p>Division guard: SQL raises an error on a zero divisor — a data-dependent runtime
@@ -1279,7 +1288,7 @@ public final class SpringDataQueryPlanAdapter {
                         jakarta.persistence.criteria.Expression<? extends Number> path =
                                 (jakarta.persistence.criteria.Expression<? extends Number>)
                                         scope.resolvePath(operand.getVariable());
-                        return new NumericOperand.Sql(cb.toDouble(path));
+                        return new NumericOperand.Sql(toIeeeDouble(path));
                     }
                     case VALUE -> {
                         Object v = PlanValues.protoValueToJava(operand.getValue());
@@ -1326,6 +1335,26 @@ public final class SpringDataQueryPlanAdapter {
                             "Unexpected operand type in arithmetic comparison: "
                                     + operand.getNodeCase());
                 }
+            }
+
+            /**
+             * Force a column into IEEE double space for arithmetic (see
+             * {@link #resolveNumericOperand}). Renders {@code cb.toDouble} everywhere except
+             * when {@link MySqlDoubleCastFunctionContributor} has registered the
+             * {@code cerbos_ieee_double} function (Hibernate on MySQL 8.0.17+), which renders
+             * {@code cast(col as double)} instead of the {@code MySQLDialect}'s exact-decimal
+             * {@code decimal(53,20)} cast. Keyed off the ACTUAL function registration — not
+             * dialect name sniffing — so H2/PostgreSQL SQL stays byte-identical and a missing
+             * registration (non-Hibernate provider, old MySQL, contributor not discovered)
+             * degrades to the previous behavior, never to an unknown-function SQL error.
+             */
+            private jakarta.persistence.criteria.Expression<Double> toIeeeDouble(
+                    jakarta.persistence.criteria.Expression<? extends Number> path) {
+                if (IeeeDoubleCast.isRegistered(cb)) {
+                    return cb.function(
+                            MySqlDoubleCastFunctionContributor.FUNCTION_NAME, Double.class, path);
+                }
+                return cb.toDouble(path);
             }
 
             /**
@@ -1961,6 +1990,43 @@ public final class SpringDataQueryPlanAdapter {
             cs.sub().select(cb.literal(1));
             cs.sub().where(bodyBuilder.build(cs.sub(), cs.tailJoin(), cs.rebasedOuter()));
             return cb.exists(cs.sub());
+        }
+    }
+
+    /**
+     * Classpath-guarded probe for the {@code cerbos_ieee_double} MySQL cast function
+     * registered by {@link MySqlDoubleCastFunctionContributor}. The adapter itself depends
+     * only on Jakarta Persistence; everything that touches Hibernate types lives in the
+     * nested {@link Probe} class, which is only loaded after {@code hibernate-core} has been
+     * confirmed present — on non-Hibernate providers {@link #isRegistered} is a constant
+     * {@code false} and the caller keeps the portable {@code cb.toDouble} path.
+     */
+    private static final class IeeeDoubleCast {
+
+        private static final boolean HIBERNATE_PRESENT = detectHibernate();
+
+        private static boolean detectHibernate() {
+            try {
+                Class.forName("org.hibernate.query.sqm.NodeBuilder", false,
+                        IeeeDoubleCast.class.getClassLoader());
+                return true;
+            } catch (ClassNotFoundException | LinkageError e) {
+                return false;
+            }
+        }
+
+        /** True when the current CriteriaBuilder's session factory has the function registered. */
+        static boolean isRegistered(CriteriaBuilder cb) {
+            return HIBERNATE_PRESENT && Probe.isRegistered(cb);
+        }
+
+        /** The only code that references Hibernate types; never loaded without hibernate-core. */
+        private static final class Probe {
+            static boolean isRegistered(CriteriaBuilder cb) {
+                return cb instanceof org.hibernate.query.sqm.NodeBuilder nb
+                        && nb.getQueryEngine().getSqmFunctionRegistry().findFunctionDescriptor(
+                                MySqlDoubleCastFunctionContributor.FUNCTION_NAME) != null;
+            }
         }
     }
 }

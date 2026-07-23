@@ -311,17 +311,23 @@ class AdversarialConformanceTest {
                         "adapter.test.mysql.collation", "utf8mb4_0900_as_cs");
                 MySQLContainer<?> my = new MySQLContainer<>("mysql:8.4")
                         .withCommand("--character-set-server=utf8mb4",
-                                "--collation-server=" + collation)
-                        // Server-side prepared statements so JDBC double binds keep their
-                        // type. Connector/J's default client-side prepared statements
-                        // interpolate double parameters as DECIMAL literals, and Hibernate's
-                        // MySQLDialect renders the adapter's to-double casts as
-                        // decimal(53,20) — together that evaluates the adapter's double-space
-                        // arithmetic in exact decimal (3 * 0.1 == 0.3 becomes TRUE, diverging
-                        // from CEL IEEE semantics; p-double-frac is the witness). With typed
-                        // double binds the decimal*double product promotes to double and the
-                        // oracle agrees. Verified empirically on MySQL 8.4.
-                        .withUrlParam("useServerPrepStmts", "true");
+                                "--collation-server=" + collation);
+                // The leg runs with Connector/J's DEFAULT client-side prepared statements,
+                // which interpolate double bind parameters as DECIMAL literals. Hibernate's
+                // MySQLDialect renders to-double casts as decimal(53,20), so without the
+                // adapter's own `cast(... as double)` rendering (registered by
+                // MySqlDoubleCastFunctionContributor) the double-space arithmetic would
+                // evaluate in exact decimal — 3 * 0.1 == 0.3 becomes TRUE, diverging from
+                // CEL IEEE semantics; p-double-frac is the witness. Running client-side by
+                // default makes the oracle pin the DOUBLE-cast fix; set
+                // -Dadapter.test.mysql.serverPrepStmts=true (env var
+                // ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS) to verify the server-side prepared
+                // statement mode too — both
+                // modes must agree with the check() oracle. Verified empirically on
+                // MySQL 8.4.
+                if (Boolean.getBoolean("adapter.test.mysql.serverPrepStmts")) {
+                    my.withUrlParam("useServerPrepStmts", "true");
+                }
                 my.start();
                 database = my;
                 return Persistence.createEntityManagerFactory(
@@ -593,6 +599,30 @@ class AdversarialConformanceTest {
                         && ex.getMessage().contains("String")
                         && ex.getMessage().contains("request.resource.attr.createdBy"),
                 "unexpected message: " + ex.getMessage());
+    }
+
+    /**
+     * Pins the MySQL IEEE double-cast wiring. On the MySQL leg the ServiceLoader-discovered
+     * {@link MySqlDoubleCastFunctionContributor} must have registered the
+     * {@code cerbos_ieee_double} function — without it the adapter's arithmetic silently
+     * evaluates in exact decimal under Connector/J's default client-side prepared statements
+     * ({@code p-double-frac} catches the semantics; this test names the mechanism when it
+     * breaks, e.g. the META-INF/services entry going missing). On H2/PostgreSQL the function
+     * must NOT be registered: those dialects render IEEE-correct casts already, and the
+     * adapter must keep their SQL on the untouched {@code cb.toDouble} path.
+     */
+    @Test
+    void ieeeDoubleCastRegistrationMatchesDatabase() {
+        org.hibernate.query.sqm.NodeBuilder nb =
+                (org.hibernate.query.sqm.NodeBuilder) emf.getCriteriaBuilder();
+        boolean registered = nb.getQueryEngine().getSqmFunctionRegistry()
+                .findFunctionDescriptor(MySqlDoubleCastFunctionContributor.FUNCTION_NAME) != null;
+        boolean mysqlLeg = "mysql".equals(System.getProperty("adapter.test.db", "h2"));
+        assertEquals(mysqlLeg, registered, mysqlLeg
+                ? "cerbos_ieee_double must be registered on MySQL (is the "
+                        + "META-INF/services FunctionContributor entry intact?)"
+                : "cerbos_ieee_double must not be registered off-MySQL — H2/PostgreSQL "
+                        + "keep the cb.toDouble cast path");
     }
 
     @Test
