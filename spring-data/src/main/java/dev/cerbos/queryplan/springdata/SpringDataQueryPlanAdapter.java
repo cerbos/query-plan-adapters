@@ -525,8 +525,10 @@ public final class SpringDataQueryPlanAdapter {
 
                 /**
                  * {@code add(field, value)} / {@code add(value, field)} — solvable for the field
-                 * under eq/ne against a constant ({@link PlanValues#solveAdd}); every other
-                 * pairing lowers to SQL arithmetic.
+                 * under eq/ne against a constant ({@link PlanValues#solveAdd}) when the solve is
+                 * algebraically exact (string concatenation, in-range long/long integers); every
+                 * other pairing — including fractional doubles, which IEEE subtraction cannot
+                 * invert — lowers to SQL arithmetic.
                  */
                 record FieldPlusConstant(String fieldVariable, Operand constant, boolean fieldIsLeft)
                         implements Resolved {}
@@ -652,11 +654,19 @@ public final class SpringDataQueryPlanAdapter {
                     if (left instanceof Resolved.Field f && right instanceof Resolved.ConstantAdd ca) {
                         return applyLeaf(op, scope.resolvePath(f.variable()), ca.fold());
                     }
-                    // Solve: `add(field, const) eq/ne constant` — string concat/numeric solve for
-                    // the field side (same algorithm as the Prisma adapter).
+                    // Solve: `add(field, const) eq/ne constant` — for the ALGEBRAICALLY EXACT
+                    // shapes only (string concatenation, in-range long/long integers).
+                    // Fractional/oversized numeric pairs fall through to numericComparison:
+                    // IEEE subtraction does not invert IEEE addition (fl(fl(t-c)+c) != t), so
+                    // a Java-side solve would return rows the PDP's check() denies — the SQL
+                    // side must compute fl(field + const) and compare it to the target in
+                    // double space, sharing IEEE semantics with the ordering operators.
                     if (("eq".equals(op) || "ne".equals(op))
                             && left instanceof Resolved.FieldPlusConstant fpc
-                            && right instanceof Resolved.Constant other) {
+                            && right instanceof Resolved.Constant other
+                            && !PlanValues.requiresSqlLowering(
+                                    other.value(),
+                                    PlanValues.protoValueToJava(fpc.constant().getValue()))) {
                         return solveAddComparison(op, fpc, other, scope);
                     }
                     // Everything else arithmetic-rooted lowers to SQL-side double-space arithmetic.
@@ -708,10 +718,13 @@ public final class SpringDataQueryPlanAdapter {
             }
 
             /**
-             * Solve {@code add(field, const) eq/ne constant} for the field. When no solution
-             * exists (e.g. {@code "projects:123" == "users:" + R.id} can never be true), eq is
-             * always-false; ne is NOT always-true — a missing attribute makes the concatenation a
-             * CEL evaluation error ({@code "users:" + null}) → deny, so NULL rows must stay
+             * Solve {@code add(field, const) eq/ne constant} for the field — only reached for
+             * algebraically exact solves (string concatenation, in-range long/long integers;
+             * {@link #dispatch} routes fractional doubles to {@link #numericComparison} because
+             * IEEE subtraction does not invert IEEE addition). When no solution exists (e.g.
+             * {@code "projects:123" == "users:" + R.id} can never be true), eq is always-false;
+             * ne is NOT always-true — a missing attribute makes the concatenation a CEL
+             * evaluation error ({@code "users:" + null}) → deny, so NULL rows must stay
              * excluded: IS NOT NULL, never an unconditional {@code 1=1} (which would leak exactly
              * the rows the PDP denies).
              */

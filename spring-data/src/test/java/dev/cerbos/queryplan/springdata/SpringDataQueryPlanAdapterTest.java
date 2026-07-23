@@ -52,6 +52,7 @@ class SpringDataQueryPlanAdapterTest {
             Map.entry("request.resource.attr.aBool", AttributeMapping.field("aBool")),
             Map.entry("request.resource.attr.aString", AttributeMapping.field("aString")),
             Map.entry("request.resource.attr.aNumber", AttributeMapping.field("aNumber")),
+            Map.entry("request.resource.attr.aDouble", AttributeMapping.field("aDouble")),
             Map.entry("request.resource.attr.aOptionalString", AttributeMapping.field("aOptionalString")),
             Map.entry("request.resource.attr.createdBy", AttributeMapping.field("createdBy")),
             Map.entry("request.resource.attr.ownedBy", AttributeMapping.relation("ownedBy")),
@@ -699,6 +700,14 @@ class SpringDataQueryPlanAdapterTest {
                 sval("projects:123"),
                 exprOp("add", sval("projects:"), var("request.resource.attr.aString")));
         assertEquals(0, runCount(cond));
+
+        // Concatenation is exact — the solve path must keep working: aString="123" row in,
+        // aString="456" row out.
+        ResourceEntity match = new ResourceEntity("add-str-1");
+        match.setaString("123");
+        ResourceEntity miss = new ResourceEntity("add-str-2");
+        miss.setaString("456");
+        withResource(match, () -> withResource(miss, () -> assertEquals(1, runCount(cond))));
     }
 
     @Test
@@ -714,11 +723,75 @@ class SpringDataQueryPlanAdapterTest {
 
     @Test
     void addSolveNumeric() {
-        // eq(10, add(3, R.attr.aNumber))  →  aNumber == 7
+        // eq(10, add(3, R.attr.aNumber))  →  aNumber == 7. Long/long solves within ±2^53 are
+        // algebraically exact and must keep solving in Java: seeded rows prove the filter
+        // keeps the aNumber=7 row and drops the aNumber=8 row.
         Operand cond = exprOp("eq",
                 nval(10),
                 exprOp("add", nval(3), var("request.resource.attr.aNumber")));
         assertEquals(0, runCount(cond));
+
+        ResourceEntity match = new ResourceEntity("add-long-1");
+        match.setaNumber(7);
+        ResourceEntity miss = new ResourceEntity("add-long-2");
+        miss.setaNumber(8);
+        withResource(match, () -> withResource(miss, () -> assertEquals(1, runCount(cond))));
+    }
+
+    @Test
+    void addSolveFractionalEqIsIeeeFaithful() {
+        // Policy `R.attr.aDouble + 0.7 == 0.1` arrives as eq(add(variable, 0.7), 0.1) —
+        // wire shape verified against a live PDP. The old algebraic solve computed
+        // 0.1 - 0.7 = exactly -0.6 in Java and emitted `WHERE a_double = -0.6`, but IEEE
+        // subtraction does not invert IEEE addition: check(aDouble=-0.6) DENIES because
+        // -0.6 + 0.7 == 0.09999999999999998 != 0.1 (verified against a live PDP). The row
+        // must be EXCLUDED for eq (over-inclusion = authz bypass) and INCLUDED for ne
+        // (the mirror under-inclusion). The fix lowers the comparison to SQL-side
+        // fl(a_double + 0.7) == 0.1 in double space.
+        Operand eqCond = exprOp("eq",
+                exprOp("add", var("request.resource.attr.aDouble"), nval(0.7)),
+                nval(0.1));
+        Operand neCond = exprOp("ne",
+                exprOp("add", var("request.resource.attr.aDouble"), nval(0.7)),
+                nval(0.1));
+
+        ResourceEntity trap = new ResourceEntity("add-frac-1");
+        trap.setaDouble(-0.6);
+        withResource(trap, () -> {
+            assertEquals(0, runCount(eqCond), "aDouble=-0.6 must be excluded for eq: "
+                    + "-0.6 + 0.7 != 0.1 in IEEE double space, the PDP denies it");
+            assertEquals(1, runCount(neCond), "aDouble=-0.6 must be included for ne: "
+                    + "-0.6 + 0.7 != 0.1 holds, the PDP allows it");
+        });
+    }
+
+    @Test
+    void addSolveFractionalEqKeepsExactlySatisfiedRow() {
+        // 0.25 + 0.5 == 0.75 is EXACT in binary floating point, so the SQL lowering must not
+        // degenerate to always-false: the aDouble=0.25 row stays in (PDP-verified ALLOW).
+        Operand cond = exprOp("eq",
+                exprOp("add", var("request.resource.attr.aDouble"), nval(0.5)),
+                nval(0.75));
+
+        ResourceEntity match = new ResourceEntity("add-frac-2");
+        match.setaDouble(0.25);
+        ResourceEntity miss = new ResourceEntity("add-frac-3");
+        miss.setaDouble(-0.6);
+        withResource(match, () -> withResource(miss, () -> assertEquals(1, runCount(cond))));
+    }
+
+    @Test
+    void addSolveOversizedLongRoutesToSqlArithmetic() {
+        // 2^54 is outside the ±2^53 exactly-representable range: the check-time double
+        // arithmetic has gaps there, so the long-space solve must NOT fire — the shape
+        // routes through SQL double arithmetic instead (and must not throw).
+        Operand cond = exprOp("eq",
+                exprOp("add", var("request.resource.attr.aNumber"), nval(1)),
+                nval(0x1p54));
+
+        ResourceEntity row = new ResourceEntity("add-big-1");
+        row.setaNumber(5);
+        withResource(row, () -> assertEquals(0, runCount(cond)));
     }
 
     @Test

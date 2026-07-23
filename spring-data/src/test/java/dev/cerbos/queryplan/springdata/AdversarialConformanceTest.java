@@ -76,6 +76,7 @@ class AdversarialConformanceTest {
             Map.entry("request.resource.attr.aBool", AttributeMapping.field("aBool")),
             Map.entry("request.resource.attr.aString", AttributeMapping.field("aString")),
             Map.entry("request.resource.attr.aNumber", AttributeMapping.field("aNumber")),
+            Map.entry("request.resource.attr.aDouble", AttributeMapping.field("aDouble")),
             Map.entry("request.resource.attr.aOptionalString", AttributeMapping.field("aOptionalString")),
             // ISO-date string column + flattened struct member for the p-* probes
             Map.entry("request.resource.attr.createdBy", AttributeMapping.field("createdBy")),
@@ -169,6 +170,26 @@ class AdversarialConformanceTest {
     /** Deterministic ISO instant per seed for the timestamp probe: split around 2025-01-01. */
     private static String isoFor(Seed s) {
         return s.aNumber() >= 2 ? "2024-06-01T00:00:00Z" : "2026-06-01T00:00:00Z";
+    }
+
+    /**
+     * Deterministic fractional double per seed for the IEEE add-solve probes
+     * ({@code arith-add-*-frac*}). a1 carries the algebraic-solve trap: {@code -0.6} is
+     * EXACTLY what solving {@code aDouble + 0.7 == 0.1} yields in Java double space, yet
+     * {@code check()} denies it ({@code -0.6 + 0.7 == 0.09999999999999998 != 0.1}) — so a
+     * pre-solved filter diverges from the oracle on this row. a2 is the exact-arithmetic
+     * agreement witness ({@code 0.25 + 0.5 == 0.75} holds bit-for-bit: both filter and
+     * oracle INCLUDE it). a3 has NO aDouble (missing attribute → CEL error → deny; SQL NULL
+     * arithmetic → UNKNOWN → excluded). The rest get an unremarkable fractional value both
+     * sides agree to exclude.
+     */
+    private static Double doubleFor(Seed s) {
+        return switch (s.id()) {
+            case "a1" -> -0.6;
+            case "a2" -> 0.25;
+            case "a3" -> null;
+            default -> s.aNumber() + 0.3;
+        };
     }
 
     private static GenericContainer<?> cerbos;
@@ -277,6 +298,7 @@ class AdversarialConformanceTest {
             r.setaBool(s.aBool());
             r.setaString(s.aString());
             r.setaNumber(s.aNumber());
+            r.setaDouble(doubleFor(s));
             r.setaOptionalString(s.aOptionalString());
             r.setCreatedBy(isoFor(s));
             for (Tag tag : s.tags()) {
@@ -331,6 +353,9 @@ class AdversarialConformanceTest {
         // deny (CEL error), matching SQL three-valued logic excluding the row.
         if (s.aOptionalString() != null) {
             r = r.withAttribute("aOptionalString", AttributeValue.stringValue(s.aOptionalString()));
+        }
+        if (doubleFor(s) != null) {
+            r = r.withAttribute("aDouble", AttributeValue.doubleValue(doubleFor(s)));
         }
         // mainCategory mirrors the row's single category as ONE nested object (the seeder
         // creates at most one category per seed), so direct dotted-chain CEL expressions
@@ -414,6 +439,10 @@ class AdversarialConformanceTest {
             "f2f-contains", "f2f-startswith", "f2f-endswith",
             "arith-add", "arith-vf", "arith-sub", "arith-mult-neg",
             "arith-div", "arith-div-frac", "arith-both",
+            // IEEE add-solve probes: fractional eq/ne must lower to SQL double arithmetic,
+            // never to a Java-side algebraic solve (a1 aDouble=-0.6 is the divergence
+            // witness; a2 aDouble=0.25 pins the exact-arithmetic inclusion).
+            "arith-add-eq-frac", "arith-add-ne-frac", "arith-add-eq-frac-exact",
             // clean-room probes (GROUP A)
             "p-ternary-in-exists", "p-arith-in-lambda", "p-lambda-inner-f2f",
             "p-lambda-f2f-like", "p-size-nested",

@@ -73,10 +73,60 @@ final class PlanValues {
     }
 
     /**
+     * Largest magnitude at which every long is exactly representable as an IEEE double
+     * (2<sup>53</sup>). CEL attribute arithmetic is always double-typed at check time, so
+     * beyond this bound the check-time arithmetic has gaps between representable integers
+     * and an algebraic long-space solve could disagree with what the PDP evaluates.
+     */
+    private static final long MAX_EXACT_DOUBLE_LONG = 1L << 53;
+
+    /**
+     * Whether {@code field + addConstant eq/ne comparisonValue} must be lowered to SQL-side
+     * double arithmetic instead of solved algebraically in Java.
+     *
+     * <p>IEEE subtraction does not invert IEEE addition: {@code fl(fl(t - c) + c) != t} for
+     * many double pairs — e.g. {@code t = 0.1, c = 0.7}: the algebraic solve yields exactly
+     * {@code -0.6}, yet {@code -0.6 + 0.7 == 0.09999999999999998 != 0.1}, so a pre-solved
+     * {@code field = -0.6} filter returns rows the PDP's {@code check()} denies (and the
+     * {@code ne} mirror hides rows it allows). Only long/long pairs where every value —
+     * including the solution — stays within ±2<sup>53</sup> remain on the solve path: there
+     * both the Java solve and the check-time double arithmetic are exact. Non-numeric
+     * pairings return {@code false} so {@link #solveAdd} keeps owning their translation
+     * (string concatenation) and their type-mismatch error messages.
+     */
+    static boolean requiresSqlLowering(Object comparisonValue, Object addConstant) {
+        if (!(comparisonValue instanceof Number) || !(addConstant instanceof Number)) {
+            return false;
+        }
+        return !(comparisonValue instanceof Long t && addConstant instanceof Long c
+                && isExactLongSolve(t, c));
+    }
+
+    /**
+     * True when {@code t - c} is exact in both long and double space: {@code t}, {@code c},
+     * and the solution all within ±2<sup>53</sup>. The bounds on {@code t} and {@code c} are
+     * checked first, capping {@code |t - c|} at 2<sup>54</sup> — so the subtraction cannot
+     * overflow before its own range check runs.
+     */
+    private static boolean isExactLongSolve(long t, long c) {
+        return withinExactDoubleRange(t) && withinExactDoubleRange(c)
+                && withinExactDoubleRange(t - c);
+    }
+
+    /** {@code Math.abs}-free range check: safe for {@code Long.MIN_VALUE}. */
+    private static boolean withinExactDoubleRange(long v) {
+        return -MAX_EXACT_DOUBLE_LONG <= v && v <= MAX_EXACT_DOUBLE_LONG;
+    }
+
+    /**
      * Solve {@code field + addConstant == comparisonValue} (or with operands swapped if
-     * {@code !fieldIsLeft}). For strings: strip the prefix/suffix and return what the field must
-     * equal; return {@code null} if the comparison value doesn't match the constant's
-     * shape (which means no field value can satisfy the equation). For numbers: subtract.
+     * {@code !fieldIsLeft}) — for the ALGEBRAICALLY EXACT shapes only. For strings: strip the
+     * prefix/suffix and return what the field must equal; return {@code null} if the
+     * comparison value doesn't match the constant's shape (which means no field value can
+     * satisfy the equation). For numbers: subtract, but only in-range long/long pairs —
+     * fractional or oversized numbers are not invertible in IEEE double space and must be
+     * lowered to SQL-side double arithmetic by the caller (see {@link #requiresSqlLowering});
+     * reaching that case here is an adapter routing bug.
      */
     static Object solveAdd(Object comparisonValue, Object addConstant, boolean fieldIsLeft) {
         if (comparisonValue instanceof String compStr && addConstant instanceof String constStr) {
@@ -89,12 +139,15 @@ final class PlanValues {
             if (!compStr.startsWith(constStr)) return null;
             return compStr.substring(constStr.length());
         }
-        if (comparisonValue instanceof Number compNum && addConstant instanceof Number constNum) {
+        if (comparisonValue instanceof Number && addConstant instanceof Number) {
             // Both orderings of numeric addition produce the same equation: field = comp - const
-            if (comparisonValue instanceof Long && addConstant instanceof Long) {
-                return compNum.longValue() - constNum.longValue();
+            if (comparisonValue instanceof Long t && addConstant instanceof Long c
+                    && isExactLongSolve(t, c)) {
+                return t - c;
             }
-            return compNum.doubleValue() - constNum.doubleValue();
+            throw new IllegalArgumentException(
+                    "Numeric add-solve is only exact for integer constants within ±2^53; "
+                            + "this shape must be lowered to SQL double arithmetic instead");
         }
         throw new IllegalArgumentException(
                 "add comparison type mismatch: " + comparisonValue.getClass() + " vs " + addConstant.getClass());
