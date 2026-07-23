@@ -1,0 +1,43 @@
+{
+  "action": "ternary-expr-cond",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "ge",
+        "operands": [
+          {
+            "expression": {
+              "operator": "if",
+              "operands": [
+                {
+                  "expression": {
+                    "operator": "startsWith",
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aString"
+                      },
+                      {
+                        "value": "100"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": -1
+                }
+              ]
+            }
+          },
+          {
+            "value": 0
+          }
+        ]
+      }
+    }
+  }
+}

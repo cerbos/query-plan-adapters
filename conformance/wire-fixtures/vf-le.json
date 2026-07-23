@@ -1,0 +1,20 @@
+{
+  "action": "vf-le",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "le",
+        "operands": [
+          {
+            "value": 3
+          },
+          {
+            "variable": "request.resource.attr.aNumber"
+          }
+        ]
+      }
+    }
+  }
+}

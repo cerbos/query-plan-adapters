@@ -35,6 +35,9 @@ dependencies {
     testImplementation("org.testcontainers:junit-jupiter:1.21.3")
     testImplementation("org.hibernate.orm:hibernate-core:6.6.18.Final")
     testImplementation("com.h2database:h2:2.3.232")
+    // Parses seeds.json/actions.json from the shared ../conformance/ corpus (see
+    // AdversarialConformanceTest and conformance/README.md).
+    testImplementation("com.fasterxml.jackson.core:jackson-databind:2.18.2")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     testRuntimeOnly("org.slf4j:slf4j-simple:2.0.17")
 }

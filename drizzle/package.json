@@ -40,7 +40,8 @@
     "prepare": "npm run build",
     "prepublishOnly": "npm test",
     "version": "git add -A src",
-    "test": "cerbos run --log-level=error --set=storage.disk.directory=../policies --set=telemetry.disabled=true -- jest src/**.test.ts",
+    "test": "cerbos run --log-level=error --set=storage.disk.directory=../policies --set=telemetry.disabled=true -- jest src/index.test.ts",
+    "test:adversarial": "cerbos run --log-level=error --set=server.grpcListenAddr=:3621 --set=server.httpListenAddr=:3620 --set=storage.disk.directory=../conformance/policies --set=telemetry.disabled=true -- jest --config jest.adversarial.config.js",
     "cerbos": "cerbos server --config=./cerbos-config.yaml"
   },
   "engines": {

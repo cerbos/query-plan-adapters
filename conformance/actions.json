@@ -1,0 +1,67 @@
+{
+  "description": "Every action defined in policies/adversarial.yaml, grouped the same way as the reference (spring-data) harness. 'conformance' actions are expected to produce an oracle-matching filtered id set: adapterFilteredIds(action) == oracleAllowedIds(action) (see README.md). 'adapterUnsupported' lists, per adapter, conformance actions that adapter's query language genuinely cannot express -- the adapter must fail loudly (throw) for these, never emit a silently-wrong filter, and its harness asserts the throw instead of the oracle match. 'expectedUnsupported' actions are planner shapes NO adapter is expected to translate; every harness asserts a loud failure -- the 'message' field is spring-data's pinned wording and is illustrative only, not required verbatim in other languages. 'knownDivergences' lists action/adapter pairs where the reference implementation is intentionally excluded from the oracle run, with the reason; a new adapter should either match the oracle or add itself here with a linked follow-up issue.",
+  "conformance": [
+    "vf-le", "vf-ge", "vf-ne",
+    "in-single", "in-empty",
+    "like-percent", "like-underscore", "like-backslash",
+    "unicode-eq", "empty-string-eq",
+    "neg-number", "double-threshold",
+    "all-on-empty", "exists-on-empty", "exists-one-multi", "not-exists",
+    "outer-attr-depth2", "lambda-in-principal",
+    "nary-and", "double-negation", "triple-negation", "not-empty",
+    "optional-ne",
+    "lambda-field-to-field", "field-to-field",
+    "size-threshold", "size-filter-count", "string-size",
+    "ternary-cmp", "ternary-expr-cond", "ternary-nested", "ternary-negated",
+    "ternary-bare", "ternary-value-first", "ternary-null-cond",
+    "f2f-contains", "f2f-startswith", "f2f-endswith",
+    "arith-add", "arith-vf", "arith-sub", "arith-mult-neg",
+    "arith-div", "arith-div-frac", "arith-both",
+    "p-ternary-in-exists", "p-arith-in-lambda", "p-lambda-inner-f2f",
+    "p-lambda-f2f-like", "p-size-nested",
+    "p-ternary-of-ternaries", "p-ternary-vs-ternary", "p-ternary-under-all",
+    "p-hasintersection-map", "p-deep-nest",
+    "p-in-null-single", "p-in-null-multi", "p-startswith-concat",
+    "p-struct", "p-not-exists-empty", "p-not-ternary-null", "p-double-frac",
+    "n-not-exists-one-null", "n-all-mixed-null", "n-not-all-null", "n-not-all-absorb",
+    "cr-contains", "cr-startswith", "cr-endswith", "cr-startswith-concat",
+    "cr-div-zero", "cr-size-frac-ge",
+    "w1-exists-chain", "w1-size-chain", "w1-in-chain", "w2-outer-relation"
+  ],
+  "adapterUnsupported": {
+    "prisma": [
+      { "action": "like-percent", "reason": "Prisma emits LIKE without an ESCAPE clause and does not escape wildcards, so a needle containing % or _ cannot be matched literally; the adapter throws instead of filtering wrong" },
+      { "action": "like-underscore", "reason": "Same LIKE-wildcard limitation as like-percent" },
+      { "action": "p-startswith-concat", "reason": "The folded needle is '100%', hitting the same LIKE-wildcard limitation as like-percent" },
+      { "action": "f2f-contains", "reason": "A column-valued needle would need per-row LIKE escaping, which Prisma filters cannot express; the adapter throws" },
+      { "action": "f2f-startswith", "reason": "Same column-needle LIKE limitation as f2f-contains" },
+      { "action": "f2f-endswith", "reason": "Same column-needle LIKE limitation as f2f-contains" },
+      { "action": "lambda-field-to-field", "reason": "Prisma field references only work between fields of the same model; comparing an element column with an outer column is cross-model, so the adapter throws" },
+      { "action": "p-lambda-f2f-like", "reason": "Cross-model comparison plus the column-needle LIKE limitation" },
+      { "action": "p-deep-nest", "reason": "Contains a cross-model element-vs-outer column comparison (t.name == R.attr.aString)" },
+      { "action": "arith-both", "reason": "Arithmetic on both sides of a comparison cannot be solved to a plain column filter; Prisma filters cannot express column arithmetic" },
+      { "action": "cr-div-zero", "reason": "Division by a column cannot be solved to a plain column filter" },
+      { "action": "size-threshold", "reason": "Prisma where-filters cannot express relation-count thresholds (only empty/non-empty via none/some)" },
+      { "action": "size-filter-count", "reason": "Same relation-count limitation as size-threshold" },
+      { "action": "string-size", "reason": "Prisma has no string-length filter" },
+      { "action": "p-size-nested", "reason": "Same relation-count limitation as size-threshold" },
+      { "action": "cr-size-frac-ge", "reason": "Same relation-count limitation as size-threshold" },
+      { "action": "w2-outer-relation", "reason": "Embeds a size(...) == 1 count threshold; same limitation as size-threshold" },
+      { "action": "exists-one-multi", "reason": "exists_one requires counting matching elements, which Prisma where-filters cannot express; the adapter throws instead of silently degrading to exists" },
+      { "action": "n-not-exists-one-null", "reason": "Same exists_one counting limitation" }
+    ]
+  },
+  "expectedUnsupported": [
+    { "action": "p-timestamp", "shape": "timestamp() comparison over an ISO-date string column", "springDataMessage": "Unexpected timestamp() expression in leaf operand of lt" },
+    { "action": "p-matches",   "shape": "matches() regex", "springDataMessage": "Unsupported operator: matches" },
+    { "action": "p-index",     "shape": "list indexing (tags[0].name)", "springDataMessage": "Unexpected get-field() expression in leaf operand of eq" }
+  ],
+  "knownDivergences": [
+    {
+      "action": "p-has",
+      "adapter": "spring-data",
+      "reason": "The planner folds has(unknown attr) to KIND_ALWAYS_ALLOWED (a Cerbos planner bug, not an adapter bug), so the adapter returns all rows while check() denies rows where the attribute is missing. Excluded from the oracle run rather than asserted against.",
+      "relatedIssue": null
+    }
+  ]
+}

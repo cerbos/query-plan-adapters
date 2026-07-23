@@ -1,0 +1,20 @@
+{
+  "action": "p-matches",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "matches",
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "^h"
+          }
+        ]
+      }
+    }
+  }
+}

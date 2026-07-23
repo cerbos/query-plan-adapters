@@ -57,9 +57,23 @@ export type PrismaFilter = Record<string, any>;
 
 export type MapperConfig = {
   field?: string;
+  /**
+   * Marks the mapped column as nullable in the database. Cerbos treats a missing attribute as
+   * an evaluation error (deny), which matches SQL three-valued logic for simple predicates —
+   * but relation subqueries (some/every/none) collapse UNKNOWN to false at the EXISTS boundary,
+   * so collection macros over elements with NULL fields need an explicit guard to stay
+   * deny-aligned. Declaring nullability here enables those guards.
+   */
+  nullable?: boolean;
   relation?: {
     name: string;
     type: "one" | "many";
+    /**
+     * The Prisma model name of the related record (e.g. "Tag"). Required only for
+     * field-to-field comparisons between two columns of the related model, which compile to
+     * Prisma field references and need the model name as their container.
+     */
+    model?: string;
     field?: string;
     fields?: Record<string, MapperConfig>;
   };
@@ -72,6 +86,12 @@ export type Mapper =
 export interface QueryPlanToPrismaArgs {
   queryPlan: PlanResourcesResponse;
   mapper?: Mapper;
+  /**
+   * The Prisma model name the generated filter targets (e.g. "Resource"). Required only for
+   * field-to-field comparisons between two root columns, which compile to Prisma field
+   * references and need the model name as their container.
+   */
+  model?: string;
 }
 
 export type QueryPlanToPrismaResult =
@@ -147,6 +167,7 @@ function getFilterEntry(filter: Record<string, unknown>): [string, unknown] {
 type RelationConfig = {
   name: string;
   type: "one" | "many";
+  model?: string;
   field?: string;
   nestedMapper?: Record<string, MapperConfig>;
 };
@@ -252,28 +273,408 @@ type TernaryBranchPredicate =
   | { kind: "constant"; value: boolean }
   | { kind: "filter"; filter: PrismaFilter };
 
+// Translation-scoped context. Set at queryPlanToPrisma entry; the lambda stack tracks which
+// collection variable (and related Prisma model) encloses the expression currently being built,
+// so leaf handlers can distinguish element columns from outer columns and collect nullable
+// element fields for three-valued-logic guards. Translation is synchronous, so module scope is
+// safe.
+type LambdaScope = {
+  variableName: string;
+  relationModel: string | undefined;
+  nullableFields: Set<string>;
+};
+let lambdaScopes: LambdaScope[] = [];
+let rootModelName: string | undefined;
+
 /**
  * Converts a Cerbos query plan to a Prisma filter.
  */
 export function queryPlanToPrisma({
   queryPlan,
   mapper = {},
+  model,
 }: QueryPlanToPrismaArgs): QueryPlanToPrismaResult {
   switch (queryPlan.kind) {
     case PlanKind.ALWAYS_ALLOWED:
       return { kind: PlanKind.ALWAYS_ALLOWED };
     case PlanKind.ALWAYS_DENIED:
       return { kind: PlanKind.ALWAYS_DENIED };
-    case PlanKind.CONDITIONAL:
+    case PlanKind.CONDITIONAL: {
+      lambdaScopes = [];
+      rootModelName = model;
+      const condition = constantFoldExpression(
+        hoistOuterScopeReferences(queryPlan.condition, [])
+      );
+      if (isValueOperand(condition)) {
+        // Real PDP plans fold constant conditions to ALWAYS_ALLOWED/ALWAYS_DENIED before
+        // they reach the adapter; this can only surface with hand-crafted plans.
+        if (condition.value === true) {
+          return { kind: PlanKind.CONDITIONAL, filters: {} };
+        }
+        // Prisma has no model-agnostic always-false `where` shape: empty logical arrays
+        // are ignored.
+        throw new Error(
+          "A constant-false conditional predicate must be folded by the Cerbos planner"
+        );
+      }
       return {
         kind: PlanKind.CONDITIONAL,
-        filters: buildPrismaFilterFromCerbosExpression(
-          queryPlan.condition,
-          mapper
-        ),
+        filters: buildPrismaFilterFromCerbosExpression(condition, mapper),
       };
+    }
     default:
       throw Error(`Invalid query plan.`);
+  }
+}
+
+const COLLECTION_OPERATORS = new Set([
+  "exists",
+  "exists_one",
+  "all",
+  "except",
+  "filter",
+]);
+
+function mentionsVariable(
+  expr: PlanExpressionOperand,
+  variableName: string
+): boolean {
+  if (isNamedOperand(expr)) {
+    return (
+      expr.name === variableName || expr.name.startsWith(variableName + ".")
+    );
+  }
+  if (isOperatorOperand(expr)) {
+    return expr.operands.some((operand) =>
+      mentionsVariable(operand, variableName)
+    );
+  }
+  return false;
+}
+
+function isOuterScopeName(name: string, enclosingVariables: string[]): boolean {
+  return !enclosingVariables.some(
+    (variable) => name === variable || name.startsWith(variable + ".")
+  );
+}
+
+/** Replaces every occurrence of the bare named operand `name` with a boolean constant. */
+function substituteNamedOperand(
+  expr: PlanExpressionOperand,
+  name: string,
+  value: boolean
+): PlanExpressionOperand {
+  if (isNamedOperand(expr)) {
+    return expr.name === name ? { value } : expr;
+  }
+  if (isOperatorOperand(expr)) {
+    return {
+      operator: expr.operator,
+      operands: expr.operands.map((operand) =>
+        substituteNamedOperand(operand, name, value)
+      ),
+    };
+  }
+  return expr;
+}
+
+/**
+ * Finds a bare boolean reference to an OUTER column (root or enclosing lambda scope) in a
+ * boolean position of a lambda body: a direct operand of and/or/not, a ternary condition, or
+ * the body itself.
+ */
+function findOuterBooleanReference(
+  expr: PlanExpressionOperand,
+  enclosingVariables: string[]
+): string | undefined {
+  if (isNamedOperand(expr)) {
+    return isOuterScopeName(expr.name, enclosingVariables)
+      ? expr.name
+      : undefined;
+  }
+  if (!isOperatorOperand(expr)) {
+    return undefined;
+  }
+  const booleanPositions: PlanExpressionOperand[] = [];
+  switch (expr.operator) {
+    case "and":
+    case "or":
+    case "not":
+      booleanPositions.push(...expr.operands);
+      break;
+    case "if":
+      booleanPositions.push(...expr.operands);
+      break;
+    default:
+      // Comparisons wrapping a ternary keep the outer reference in the ternary condition.
+      booleanPositions.push(
+        ...expr.operands.filter(
+          (operand) =>
+            isOperatorOperand(operand) &&
+            (operand.operator === "if" ||
+              operand.operator === "and" ||
+              operand.operator === "or" ||
+              operand.operator === "not")
+        )
+      );
+      break;
+  }
+  for (const operand of booleanPositions) {
+    const found = findOuterBooleanReference(operand, enclosingVariables);
+    if (found !== undefined) {
+      return found;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Rewrites lambda bodies that reference columns of an ENCLOSING scope (the root row, or an
+ * outer lambda's element) so that every filter lands on the model it belongs to. Without this,
+ * an outer column referenced inside `tags.exists(t, ...)` would be emitted as a field of the
+ * tag model. Two sound transforms, applied bottom-up:
+ *
+ * - Conjunct hoisting (exists only): `exists(c, P(c) && Q)` with row-constant Q becomes
+ *   `exists(c, P(c)) && Q`. Valid in three-valued logic (AND distributes over the per-element
+ *   OR), including the empty-collection case (both sides are FALSE).
+ * - Case split (any collection op): a bare outer boolean reference Q in a boolean position
+ *   becomes `(Q && op[Q:=true]) || (!Q && op[Q:=false]) || (Q && !Q)`. The contradiction arm
+ *   keeps the whole expression UNKNOWN (not FALSE) when Q is NULL-derived, mirroring the
+ *   guarded-ternary encoding.
+ */
+function hoistOuterScopeReferences(
+  expr: PlanExpressionOperand,
+  enclosingVariables: string[]
+): PlanExpressionOperand {
+  if (!isOperatorOperand(expr)) {
+    return expr;
+  }
+
+  if (COLLECTION_OPERATORS.has(expr.operator) && expr.operands.length === 2) {
+    const [collection, lambda] = expr.operands;
+    if (
+      collection !== undefined &&
+      lambda !== undefined &&
+      isOperatorOperand(lambda) &&
+      lambda.operator === "lambda" &&
+      lambda.operands.length === 2 &&
+      lambda.operands[1] !== undefined &&
+      isNamedOperand(lambda.operands[1])
+    ) {
+      const variable = lambda.operands[1];
+      const body = hoistOuterScopeReferences(
+        assertDefined(lambda.operands[0], "Lambda requires a condition"),
+        [...enclosingVariables, variable.name]
+      );
+
+      const rebuild = (newBody: PlanExpressionOperand): OperatorOperand => ({
+        operator: expr.operator,
+        operands: [
+          collection,
+          { operator: "lambda", operands: [newBody, variable] },
+        ],
+      });
+
+      // Conjunct hoisting out of exists().
+      if (
+        expr.operator === "exists" &&
+        isOperatorOperand(body) &&
+        body.operator === "and"
+      ) {
+        const elementConjuncts = body.operands.filter((operand) =>
+          mentionsVariable(operand, variable.name)
+        );
+        const outerConjuncts = body.operands.filter(
+          (operand) => !mentionsVariable(operand, variable.name)
+        );
+        if (outerConjuncts.length > 0 && elementConjuncts.length > 0) {
+          const innerBody =
+            elementConjuncts.length === 1
+              ? elementConjuncts[0]!
+              : { operator: "and", operands: elementConjuncts };
+          return {
+            operator: "and",
+            operands: [rebuild(innerBody), ...outerConjuncts],
+          };
+        }
+      }
+
+      // Case split on a bare outer boolean reference.
+      const outerRef = findOuterBooleanReference(body, [
+        ...enclosingVariables,
+        variable.name,
+      ]);
+      if (outerRef !== undefined) {
+        const q: PlanExpressionOperand = { name: outerRef };
+        const notQ: PlanExpressionOperand = { operator: "not", operands: [q] };
+        return {
+          operator: "or",
+          operands: [
+            {
+              operator: "and",
+              operands: [
+                q,
+                rebuild(substituteNamedOperand(body, outerRef, true)),
+              ],
+            },
+            {
+              operator: "and",
+              operands: [
+                notQ,
+                rebuild(substituteNamedOperand(body, outerRef, false)),
+              ],
+            },
+            // Contradiction arm: UNKNOWN when the reference is NULL-derived, never TRUE.
+            { operator: "and", operands: [q, notQ] },
+          ],
+        };
+      }
+
+      return rebuild(body);
+    }
+  }
+
+  return {
+    operator: expr.operator,
+    operands: expr.operands.map((operand) =>
+      hoistOuterScopeReferences(operand, enclosingVariables)
+    ),
+  };
+}
+
+const FOLDABLE_COMPARISON_OPERATORS = new Set([
+  "eq",
+  "ne",
+  "lt",
+  "le",
+  "gt",
+  "ge",
+]);
+
+/**
+ * Bottom-up constant folding over the plan AST. Only shapes the case-split transform can
+ * produce need folding (constant ternary conditions, comparisons between two constants,
+ * logical operators with constant operands, collection macros with constant bodies); real
+ * planner output arrives pre-folded.
+ */
+function constantFoldExpression(
+  expr: PlanExpressionOperand
+): PlanExpressionOperand {
+  if (!isOperatorOperand(expr)) {
+    return expr;
+  }
+  const operands = expr.operands.map(constantFoldExpression);
+  const folded: OperatorOperand = { operator: expr.operator, operands };
+
+  switch (expr.operator) {
+    case "if": {
+      const [condition, thenBranch, elseBranch] = operands;
+      if (condition !== undefined && isValueOperand(condition)) {
+        if (typeof condition.value !== "boolean") {
+          throw new Error("if (ternary) condition must be a boolean expression");
+        }
+        return assertDefined(
+          condition.value ? thenBranch : elseBranch,
+          "if (ternary) requires branch operands"
+        );
+      }
+      return folded;
+    }
+    case "and": {
+      if (operands.some((o) => isValueOperand(o) && o.value === false)) {
+        return { value: false };
+      }
+      const remaining = operands.filter((o) => !isValueOperand(o));
+      if (remaining.length === 0) return { value: true };
+      if (remaining.length === 1) return remaining[0]!;
+      return { operator: "and", operands: remaining };
+    }
+    case "or": {
+      if (operands.some((o) => isValueOperand(o) && o.value === true)) {
+        return { value: true };
+      }
+      const remaining = operands.filter((o) => !isValueOperand(o));
+      if (remaining.length === 0) return { value: false };
+      if (remaining.length === 1) return remaining[0]!;
+      return { operator: "or", operands: remaining };
+    }
+    case "not": {
+      const operand = operands[0];
+      if (operand !== undefined && isValueOperand(operand)) {
+        return { value: operand.value !== true };
+      }
+      return folded;
+    }
+    case "contains":
+    case "startsWith":
+    case "endsWith": {
+      const [receiver, needle] = operands;
+      if (
+        receiver !== undefined &&
+        needle !== undefined &&
+        isValueOperand(receiver) &&
+        isValueOperand(needle) &&
+        typeof receiver.value === "string" &&
+        typeof needle.value === "string"
+      ) {
+        const r = receiver.value;
+        const n = needle.value;
+        return {
+          value:
+            expr.operator === "contains"
+              ? r.includes(n)
+              : expr.operator === "startsWith"
+                ? r.startsWith(n)
+                : r.endsWith(n),
+        };
+      }
+      return folded;
+    }
+    case "exists":
+    case "all": {
+      const [collection, lambda] = operands;
+      if (
+        collection !== undefined &&
+        lambda !== undefined &&
+        isOperatorOperand(lambda) &&
+        lambda.operator === "lambda" &&
+        lambda.operands[0] !== undefined &&
+        isValueOperand(lambda.operands[0])
+      ) {
+        const bodyValue = lambda.operands[0].value === true;
+        if (expr.operator === "exists" && !bodyValue) return { value: false };
+        if (expr.operator === "all" && bodyValue) return { value: true };
+        const sizeExpr: PlanExpressionOperand = {
+          operator: "size",
+          operands: [collection],
+        };
+        // exists(c, true) is "collection is non-empty"; all(c, false) is "collection is empty".
+        return expr.operator === "exists"
+          ? { operator: "gt", operands: [sizeExpr, { value: 0 }] }
+          : { operator: "eq", operands: [sizeExpr, { value: 0 }] };
+      }
+      return folded;
+    }
+    default: {
+      if (FOLDABLE_COMPARISON_OPERATORS.has(expr.operator)) {
+        const [left, right] = operands;
+        if (
+          left !== undefined &&
+          right !== undefined &&
+          isValueOperand(left) &&
+          isValueOperand(right)
+        ) {
+          return {
+            value: evaluateConstantComparison(
+              expr.operator,
+              left.value,
+              right.value
+            ),
+          };
+        }
+      }
+      return folded;
+    }
   }
 }
 
@@ -321,6 +722,7 @@ function resolveFieldReference(
       {
         name,
         type,
+        model: activeConfig.relation.model,
         field: activeConfig.relation.field,
         nestedMapper: fields,
       },
@@ -346,6 +748,7 @@ function resolveFieldReference(
           relations.push({
             name: nextConfig.relation.name,
             type: nextConfig.relation.type,
+            model: nextConfig.relation.model,
             field: nextConfig.relation.field,
             nestedMapper: nextConfig.relation.fields,
           });
@@ -439,7 +842,7 @@ function tryFoldValueExpression(
   expr: OperatorOperand,
   mapper: Mapper
 ): Value | null {
-  if (expr.operator !== "add") return null;
+  if (!ARITHMETIC_OPERATORS.has(expr.operator)) return null;
   const leftOp = expr.operands[0];
   const rightOp = expr.operands[1];
   if (!leftOp || !rightOp) return null;
@@ -450,10 +853,25 @@ function tryFoldValueExpression(
   if (!isResolvedValue(right)) return null;
 
   try {
-    return foldAdd(left.value, right.value);
+    return foldArithmetic(expr.operator, left.value, right.value);
   } catch {
     return null;
   }
+}
+
+/**
+ * Records that the lambda body being built touches a nullable element column, so the
+ * enclosing collection operator can add its three-valued-logic guard.
+ */
+function recordNullableElementField(
+  config: MapperConfig,
+  defaultField: string
+): void {
+  if (!config.nullable) {
+    return;
+  }
+  const scope = lambdaScopes[lambdaScopes.length - 1];
+  scope?.nullableFields.add(config.field || defaultField);
 }
 
 /**
@@ -507,7 +925,9 @@ function createScopedMapper(
         }
 
         // Return the field config if it exists, otherwise create a default one
-        return currentConfig[field] || { field };
+        const fieldConfig = currentConfig[field] || { field };
+        recordNullableElementField(fieldConfig, field);
+        return fieldConfig;
       }
       return { field: strippedKey };
     }
@@ -560,18 +980,7 @@ function buildPrismaFilterFromCerbosExpression(
       if (!operand) {
         throw new Error("not operator requires an operand");
       }
-      if (isNamedOperand(operand)) {
-        const { relations, ...fieldRef } = resolveFieldReference(
-          operand.name,
-          mapper
-        );
-        if (!relations || relations.length === 0) {
-          return buildFieldEqualsFilter(fieldRef, false);
-        }
-      }
-      return {
-        NOT: buildPrismaFilterFromCerbosExpression(operand, mapper),
-      };
+      return buildNegatedFilter(operand, mapper);
     }
 
     case "if": {
@@ -636,6 +1045,84 @@ function buildPrismaFilterFromCerbosExpression(
     default:
       throw new Error(`Unsupported operator: ${operator}`);
   }
+}
+
+function containsCollectionOperator(expr: PlanExpressionOperand): boolean {
+  if (!isOperatorOperand(expr)) {
+    return false;
+  }
+  if (COLLECTION_OPERATORS.has(expr.operator)) {
+    return true;
+  }
+  return expr.operands.some(containsCollectionOperator);
+}
+
+/**
+ * Builds the filter for `!expr`. Plain field predicates negate correctly with Prisma's NOT
+ * (SQL three-valued logic keeps NULL rows excluded under both polarities), but relation
+ * subqueries collapse UNKNOWN to false at the EXISTS boundary, so `NOT(some(P))` would
+ * wrongly include rows whose elements make P UNKNOWN (a NULL element column is a missing
+ * attribute — a CEL error — on the check side, which Cerbos treats as deny). Negation is
+ * therefore pushed down to the collection operators, which encode CEL's exact error
+ * semantics:
+ *
+ * - exists(c,P) is TRUE with a true witness, FALSE if every element is definitively false,
+ *   and an ERROR otherwise — so `!exists` admits only rows with no P-match AND no
+ *   UNKNOWN-element (the nullable-field guard).
+ * - all(c,P) is FALSE only with a definitive false witness (a false witness absorbs error
+ *   elements) — so `!all` is `some(NOT P)`, which SQL already evaluates definitively.
+ */
+function buildNegatedFilter(
+  operand: PlanExpressionOperand,
+  mapper: Mapper
+): PrismaFilter {
+  if (isNamedOperand(operand)) {
+    const { relations, ...fieldRef } = resolveFieldReference(
+      operand.name,
+      mapper
+    );
+    if (!relations || relations.length === 0) {
+      return buildFieldEqualsFilter(fieldRef, false);
+    }
+    return {
+      NOT: buildPrismaFilterFromCerbosExpression(operand, mapper),
+    };
+  }
+
+  if (isOperatorOperand(operand) && containsCollectionOperator(operand)) {
+    switch (operand.operator) {
+      case "and":
+        return {
+          OR: operand.operands.map((o) => buildNegatedFilter(o, mapper)),
+        };
+      case "or":
+        return {
+          AND: operand.operands.map((o) => buildNegatedFilter(o, mapper)),
+        };
+      case "not":
+        return buildPrismaFilterFromCerbosExpression(
+          assertDefined(
+            operand.operands[0],
+            "not operator requires an operand"
+          ),
+          mapper
+        );
+      case "exists":
+      case "all":
+      case "except":
+      case "exists_one":
+      case "filter":
+        return buildNegatedCollectionFilter(
+          operand.operator,
+          operand.operands,
+          mapper
+        );
+    }
+  }
+
+  return {
+    NOT: buildPrismaFilterFromCerbosExpression(operand, mapper),
+  };
 }
 
 function getTernaryOperands(operands: PlanExpressionOperand[]): {
@@ -1104,14 +1591,20 @@ function handleRelationalOperator(
     return handleSizeComparison(operator, leftOperand, rightOperand, mapper);
   }
 
-  const addOperand = [leftOperand, rightOperand].find(
+  const arithOperand = [leftOperand, rightOperand].find(
     (o): o is OperatorOperand =>
-      isOperatorOperand(o) && o.operator === "add"
+      isOperatorOperand(o) && ARITHMETIC_OPERATORS.has(o.operator)
   );
-  if (addOperand) {
+  if (arithOperand) {
     const otherOperand =
-      addOperand === leftOperand ? rightOperand : leftOperand;
-    return handleAddComparison(operator, addOperand, otherOperand, mapper);
+      arithOperand === leftOperand ? rightOperand : leftOperand;
+    return handleArithmeticComparison(
+      operator,
+      arithOperand,
+      otherOperand,
+      arithOperand === leftOperand,
+      mapper
+    );
   }
 
   const mapOperand = [leftOperand, rightOperand].find(
@@ -1126,16 +1619,165 @@ function handleRelationalOperator(
   }
 
   const left = resolveOperand(leftOperand, mapper);
-  const right = requireResolvedValue(
-    resolveOperand(rightOperand, mapper),
+  const right = resolveOperand(rightOperand, mapper);
+
+  if (isResolvedFieldReference(left) && isResolvedFieldReference(right)) {
+    return buildFieldToFieldFilter(
+      operator,
+      leftOperand,
+      left,
+      rightOperand,
+      right
+    );
+  }
+
+  const rightValue = requireResolvedValue(
+    right,
     "Right operand must be a value"
   );
 
   if (isResolvedFieldReference(left)) {
-    return buildFieldFilter(left, prismaOperator, right.value);
+    return buildComparisonFilter(left, operator, rightValue.value);
   }
 
-  return { [prismaOperator]: right.value };
+  return { [prismaOperator]: rightValue.value };
+}
+
+/**
+ * Builds a field-vs-constant comparison. Fractional constants against ordering (and
+ * equality) operators are emitted as a two-clause bracket because Prisma coerces filter
+ * values to the column's type: on an Int column, `gte: 1.5` is silently bound as `gte: 1`,
+ * inverting rows like aNumber == 1. Each bracket pairs the exact constant with its integer
+ * neighbor so the combination is correct BOTH for Float columns (the extra clause is
+ * redundant) and Int columns (whichever way Prisma truncates or floors the fraction).
+ */
+function buildComparisonFilter(
+  fieldRef: ResolvedFieldReference,
+  operator: string,
+  value: Value
+): PrismaFilter {
+  const prismaOperator = assertDefined(
+    CERBOS_TO_PRISMA_OPERATOR[operator],
+    `Unsupported operator: ${operator}`
+  );
+
+  if (typeof value === "number" && !Number.isInteger(value)) {
+    const fieldName = getLeafField(fieldRef.path);
+    const lower = Math.floor(value);
+    const upper = Math.ceil(value);
+    const equalsBracket = {
+      AND: [
+        { [fieldName]: { equals: value } },
+        { [fieldName]: { gt: lower } },
+        { [fieldName]: { lt: upper } },
+      ],
+    };
+    let bracket: PrismaFilter | undefined;
+    switch (operator) {
+      case "gt":
+        bracket = {
+          OR: [{ [fieldName]: { gt: value } }, { [fieldName]: { gte: upper } }],
+        };
+        break;
+      case "ge":
+        bracket = {
+          AND: [{ [fieldName]: { gte: value } }, { [fieldName]: { gt: lower } }],
+        };
+        break;
+      case "lt":
+        bracket = {
+          OR: [{ [fieldName]: { lt: value } }, { [fieldName]: { lte: lower } }],
+        };
+        break;
+      case "le":
+        bracket = {
+          AND: [{ [fieldName]: { lte: value } }, { [fieldName]: { lt: upper } }],
+        };
+        break;
+      case "eq":
+        bracket = equalsBracket;
+        break;
+      case "ne":
+        bracket = { NOT: equalsBracket };
+        break;
+    }
+    if (bracket) {
+      return wrapRelations(fieldRef.relations, bracket);
+    }
+  }
+
+  return buildFieldFilter(fieldRef, prismaOperator, value);
+}
+
+/**
+ * Builds a column-vs-column comparison as a Prisma field reference. Prisma only supports
+ * references between fields of the SAME model, so the container is the root model for
+ * root-level comparisons and the relation's model inside a lambda; mixed-scope comparisons
+ * (an element column against an outer column) are cross-model and must fail loudly.
+ */
+function buildFieldToFieldFilter(
+  operator: string,
+  leftOperand: PlanExpressionOperand,
+  left: ResolvedFieldReference,
+  rightOperand: PlanExpressionOperand,
+  right: ResolvedFieldReference
+): PrismaFilter {
+  const prismaOperator = assertDefined(
+    CERBOS_TO_PRISMA_OPERATOR[operator],
+    `Unsupported operator: ${operator}`
+  );
+
+  if (!isNamedOperand(leftOperand) || !isNamedOperand(rightOperand)) {
+    throw new Error("Field-to-field comparison requires two named operands");
+  }
+
+  const scope = lambdaScopes[lambdaScopes.length - 1];
+  let container: string | undefined;
+
+  if (scope) {
+    const prefix = scope.variableName + ".";
+    const leftInScope = leftOperand.name.startsWith(prefix);
+    const rightInScope = rightOperand.name.startsWith(prefix);
+    if (leftInScope !== rightInScope) {
+      throw new Error(
+        `Cannot compare a collection element column with an outer column (${leftOperand.name} vs ${rightOperand.name}): ` +
+          "Prisma field references only work between fields of the same model"
+      );
+    }
+    if (leftInScope) {
+      container = scope.relationModel;
+      if (!container) {
+        throw new Error(
+          "Field-to-field comparison inside a collection requires `relation.model` in the mapper"
+        );
+      }
+    }
+  }
+
+  if (container === undefined) {
+    if (
+      (left.relations && left.relations.length > 0) ||
+      (right.relations && right.relations.length > 0)
+    ) {
+      throw new Error(
+        "Cannot compare columns across relations: Prisma field references only work between fields of the same model"
+      );
+    }
+    container = rootModelName;
+    if (!container) {
+      throw new Error(
+        "Field-to-field comparison requires the `model` option (the Prisma model name) to build a field reference"
+      );
+    }
+  }
+
+  const leftField = getLeafField(left.path);
+  const rightField = getLeafField(right.path);
+  return {
+    [leftField]: {
+      [prismaOperator]: { _ref: rightField, _container: container },
+    },
+  };
 }
 
 /**
@@ -1159,32 +1801,102 @@ function handleInOperator(
   return buildFieldDirectOrInFilter(fieldRef, values);
 }
 
+// Upper bound on the IN-list produced when enumerating a constant receiver's substrings.
+const MAX_ENUMERATED_NEEDLES = 1000;
+
 /**
- * Helper function to handle string operators (contains, startsWith, endsWith)
+ * Helper function to handle string operators (contains, startsWith, endsWith).
+ *
+ * These operators are receiver-sensitive and the planner preserves policy source order:
+ * operand 0 is the receiver (haystack), operand 1 the needle. Swapping them silently
+ * inverts the match direction, so unlike symmetric comparisons they are never normalized.
  */
 function handleStringOperator(
   operator: string,
   operands: PlanExpressionOperand[],
   mapper: Mapper
 ): PrismaFilter {
-  const nameOperand = getNamedOperand(operands, "Name operand is undefined");
-  const valueOperand = getValueOperand(operands, "Value operand is undefined");
-  const fieldRef = requireResolvedFieldReference(
-    resolveOperand(nameOperand, mapper),
-    "Name operand must resolve to a field reference"
+  if (operands.length !== 2) {
+    throw new Error(`${operator} requires exactly two operands`);
+  }
+  const receiver = resolveOperand(
+    assertDefined(operands[0], `${operator} requires a receiver operand`),
+    mapper
   );
-  const { value } = requireResolvedValue(
-    resolveOperand(valueOperand, mapper),
-    "Value operand must resolve to a value"
+  const needle = resolveOperand(
+    assertDefined(operands[1], `${operator} requires a needle operand`),
+    mapper
   );
-  if (typeof value !== "string") {
-    throw new Error(`${operator} operator requires string value`);
+
+  // Column receiver, constant needle: Prisma's LIKE-based filter.
+  if (isResolvedFieldReference(receiver) && isResolvedValue(needle)) {
+    const { value } = needle;
+    if (typeof value !== "string") {
+      throw new Error(`${operator} operator requires string value`);
+    }
+    // Prisma emits LIKE without an ESCAPE clause and does not escape wildcard characters,
+    // so a needle containing % or _ would match as a pattern instead of literally (e.g.
+    // startsWith("100%") wrongly matches "100xdone"). Fail loudly rather than filter wrong.
+    if (/[%_]/.test(value)) {
+      throw new Error(
+        `Cannot translate ${operator} with a needle containing LIKE metacharacters (% or _): ` +
+          "Prisma does not escape wildcards in string filters"
+      );
+    }
+    const fieldName = getLeafField(receiver.path);
+    return wrapRelations(receiver.relations, {
+      [fieldName]: { [operator]: value },
+    });
   }
 
-  const fieldName = getLeafField(fieldRef.path);
-  return wrapRelations(fieldRef.relations, {
-    [fieldName]: { [operator]: value },
-  });
+  // Constant receiver, column needle (e.g. `"a-b-c".contains(R.attr.x)`): enumerate every
+  // candidate needle the constant admits — prefixes for startsWith, suffixes for endsWith,
+  // substrings for contains — into an exact IN filter. No LIKE, so no escaping hazards; a
+  // NULL needle column stays excluded (CEL missing-attribute deny).
+  if (isResolvedValue(receiver) && isResolvedFieldReference(needle)) {
+    if (typeof receiver.value !== "string") {
+      throw new Error(`${operator} operator requires a string receiver`);
+    }
+    const haystack = receiver.value;
+    const candidates = new Set<string>([""]);
+    if (operator === "startsWith") {
+      for (let i = 1; i <= haystack.length; i++) {
+        candidates.add(haystack.slice(0, i));
+      }
+    } else if (operator === "endsWith") {
+      for (let i = 0; i < haystack.length; i++) {
+        candidates.add(haystack.slice(i));
+      }
+    } else {
+      for (let start = 0; start < haystack.length; start++) {
+        for (let end = start + 1; end <= haystack.length; end++) {
+          candidates.add(haystack.slice(start, end));
+        }
+      }
+    }
+    if (candidates.size > MAX_ENUMERATED_NEEDLES) {
+      throw new Error(
+        `Cannot translate ${operator} with a constant receiver of this length: ` +
+          `enumerating its ${candidates.size} candidate needles exceeds the ${MAX_ENUMERATED_NEEDLES}-entry limit`
+      );
+    }
+    const fieldName = getLeafField(needle.path);
+    return wrapRelations(needle.relations, {
+      [fieldName]: { in: [...candidates] },
+    });
+  }
+
+  if (isResolvedFieldReference(receiver) && isResolvedFieldReference(needle)) {
+    // A column-valued needle would need its LIKE metacharacters escaped per row, which
+    // Prisma's filters cannot do (and Prisma leaks wildcards from field references).
+    throw new Error(
+      `Cannot translate ${operator} between two columns: Prisma cannot escape LIKE wildcards held in a column`
+    );
+  }
+
+  throw new Error(
+    `${operator} between two constants must be folded by the Cerbos planner`
+  );
 }
 
 /**
@@ -1288,13 +2000,41 @@ function handleHasIntersectionOperator(
       throw new Error("Invalid map lambda expression structure");
     }
 
-    // Use scoped mapper for resolving the projection
-    const resolved = resolveFieldReference(projection.name, scopedMapper);
+    // Use scoped mapper for resolving the projection, collecting nullable element columns.
+    const scope: LambdaScope = {
+      variableName: variable.name,
+      relationModel: relations[relations.length - 1]?.model,
+      nullableFields: new Set(),
+    };
+    lambdaScopes.push(scope);
+    let resolved: ResolvedFieldReference;
+    try {
+      resolved = resolveFieldReference(projection.name, scopedMapper);
+    } finally {
+      lambdaScopes.pop();
+    }
     const fieldName = getLeafField(resolved.path);
 
-    return buildNestedRelationFilter(relations, {
+    const base = buildNestedRelationFilter(relations, {
       [fieldName]: { in: rightOperand.value },
     });
+    if (scope.nullableFields.size === 0) {
+      return base;
+    }
+    // CEL map() errors if ANY element is missing the projected attribute — even alongside a
+    // matching element — and Cerbos treats that error as deny. Exclude rows holding an
+    // element whose projected (nullable) column is NULL.
+    return {
+      AND: [
+        base,
+        {
+          NOT: buildNestedRelationFilter(
+            relations,
+            buildNullWitnessFilter(scope.nullableFields)
+          ),
+        },
+      ],
+    };
   }
 
   // Handle regular field reference
@@ -1348,14 +2088,20 @@ function handleLambdaOperator(operands: PlanExpressionOperand[]): PrismaFilter {
   }));
 }
 
-/**
- * Helper function to handle collection operators (exists, all, except, filter)
- */
-function handleCollectionOperator(
+type CollectionLambdaParts = {
+  head: RelationConfig;
+  restRelations: RelationConfig[];
+  /** Element predicate, already wrapped through any relations beyond the first. */
+  filterValue: PrismaFilter;
+  /** Nullable element columns referenced by the lambda body (for 3VL guards). */
+  nullableFields: Set<string>;
+};
+
+function buildCollectionLambdaParts(
   operator: string,
   operands: PlanExpressionOperand[],
   mapper: Mapper
-): PrismaFilter {
+): CollectionLambdaParts {
   if (operands.length !== 2) {
     throw new Error(`${operator} requires exactly two operands`);
   }
@@ -1402,23 +2148,45 @@ function handleCollectionOperator(
     throw new Error(`${operator} operator requires a relation mapping`);
   }
 
+  const head = assertDefined(
+    relations[0],
+    `${operator} operator requires a relation mapping`
+  );
+  const restRelations = relations.slice(1);
+  const deepest = assertDefined(
+    relations[relations.length - 1],
+    `${operator} operator requires a relation mapping`
+  );
+
   const lambdaConditionOperand = assertDefined(
     lambda.operands[0],
     "Lambda expression must provide a condition"
   );
-  const lambdaCondition = buildPrismaFilterFromCerbosExpression(
-    lambdaConditionOperand, // Use the condition part of the lambda
-    scopedMapper
-  );
 
-  const relation = assertDefined(
-    relations[0],
-    `${operator} operator requires a relation mapping`
-  );
+  const scope: LambdaScope = {
+    variableName: variable.name,
+    relationModel: deepest.model,
+    nullableFields: new Set(),
+  };
+  lambdaScopes.push(scope);
+  let lambdaCondition: PrismaFilter;
+  try {
+    lambdaCondition = buildPrismaFilterFromCerbosExpression(
+      lambdaConditionOperand, // Use the condition part of the lambda
+      scopedMapper
+    );
+  } finally {
+    lambdaScopes.pop();
+  }
+
   let filterValue = lambdaCondition;
 
-  // If the lambda condition already has a relation structure, merge it
-  if (lambdaCondition["AND"] || lambdaCondition["OR"]) {
+  if (restRelations.length > 0) {
+    // Chained collection reference (e.g. R.attr.a.b): the lambda's elements live at the END
+    // of the chain, so the element predicate must join through every intermediate hop.
+    filterValue = buildNestedRelationFilter(restRelations, lambdaCondition);
+  } else if (lambdaCondition["AND"] || lambdaCondition["OR"]) {
+    // If the lambda condition already has a logical structure, use it as-is
     filterValue = lambdaCondition;
   } else {
     const lambdaKeys = Object.keys(lambdaCondition);
@@ -1430,40 +2198,155 @@ function handleCollectionOperator(
     if (lambdaFieldValue === undefined) {
       throw new Error("Lambda condition field value cannot be undefined");
     }
-    const filterField = relation.field || defaultKey;
+    const filterField = head.field || defaultKey;
     filterValue = {
       [filterField]: lambdaFieldValue,
     };
   }
 
+  return {
+    head,
+    restRelations,
+    filterValue,
+    nullableFields: scope.nullableFields,
+  };
+}
+
+/** OR of `field IS NULL` checks for every nullable element column the lambda touched. */
+function buildNullWitnessFilter(nullableFields: Set<string>): PrismaFilter {
+  const checks = [...nullableFields].map((field) => ({ [field]: null }));
+  if (checks.length === 1) {
+    return checks[0]!;
+  }
+  return { OR: checks };
+}
+
+/** Wraps an element-level filter through the full relation chain (head + rest). */
+function wrapCollectionElementFilter(
+  parts: CollectionLambdaParts,
+  elementFilter: PrismaFilter
+): PrismaFilter {
+  const inner =
+    parts.restRelations.length > 0
+      ? buildNestedRelationFilter(parts.restRelations, elementFilter)
+      : elementFilter;
+  return { [parts.head.name]: { some: inner } };
+}
+
+function throwUnsupportedCollectionOperator(operator: string): never {
+  if (operator === "exists_one") {
+    throw new Error(
+      "exists_one requires counting matching elements, which Prisma where-filters cannot express"
+    );
+  }
+  throw new Error(
+    "The filter() collection operator returns a list, not a boolean. " +
+      "It cannot be used as a standalone condition. " +
+      "Use exists() or combine filter() with size() instead."
+  );
+}
+
+/**
+ * Helper function to handle collection operators (exists, all, except, filter)
+ */
+function handleCollectionOperator(
+  operator: string,
+  operands: PlanExpressionOperand[],
+  mapper: Mapper
+): PrismaFilter {
+  if (operator === "exists_one" || operator === "filter") {
+    throwUnsupportedCollectionOperator(operator);
+  }
+
+  const parts = buildCollectionLambdaParts(operator, operands, mapper);
+  const { head, filterValue, nullableFields } = parts;
+
   switch (operator) {
     case "exists":
-      return { [relation.name]: { some: filterValue } };
-    case "filter":
-      throw new Error(
-        "The filter() collection operator returns a list, not a boolean. " +
-          "It cannot be used as a standalone condition. " +
-          "Use exists() or combine filter() with size() instead."
-      );
+      // A NULL element keeps the per-element predicate UNKNOWN, so it can never create a
+      // false positive here; a CEL error (deny) coincides with "no match" — no guard needed.
+      return { [head.name]: { some: filterValue } };
     case "except":
-      return { [relation.name]: { some: { NOT: filterValue } } };
-    case "exists_one":
+      return { [head.name]: { some: { NOT: filterValue } } };
+    case "all": {
+      if (parts.restRelations.length > 0) {
+        throw new Error(
+          "all() over a multi-hop relation chain is not supported"
+        );
+      }
+      const base = { [head.name]: { every: filterValue } };
+      if (nullableFields.size === 0) {
+        return base;
+      }
+      // CEL all() errors when any element evaluation errors without a false witness; SQL
+      // `every` would treat those elements as vacuously passing. Exclude rows holding any
+      // element whose referenced nullable column is NULL. (`every` already rejects rows
+      // with a definitive false witness, matching error absorption.)
       return {
-        [relation.name]: {
-          some: filterValue,
-        },
         AND: [
+          base,
+          { [head.name]: { none: buildNullWitnessFilter(nullableFields) } },
+        ],
+      };
+    }
+    default:
+      throw new Error(`Unexpected operator: ${operator}`);
+  }
+}
+
+/**
+ * Builds the filter for a NEGATED collection operator, encoding CEL's error semantics (see
+ * buildNegatedFilter).
+ */
+function buildNegatedCollectionFilter(
+  operator: string,
+  operands: PlanExpressionOperand[],
+  mapper: Mapper
+): PrismaFilter {
+  if (operator === "exists_one" || operator === "filter") {
+    throwUnsupportedCollectionOperator(operator);
+  }
+
+  const parts = buildCollectionLambdaParts(operator, operands, mapper);
+  const { head, filterValue, nullableFields } = parts;
+
+  switch (operator) {
+    case "exists": {
+      const base = { NOT: { [head.name]: { some: filterValue } } };
+      if (nullableFields.size === 0) {
+        return base;
+      }
+      // !exists is TRUE only when every element is definitively false: no P-match AND no
+      // element whose evaluation is UNKNOWN (NULL column = missing attribute = CEL error).
+      return {
+        AND: [
+          base,
           {
-            [relation.name]: {
-              every: {
-                OR: [filterValue, { NOT: filterValue }],
-              },
-            },
+            NOT: wrapCollectionElementFilter(
+              parts,
+              buildNullWitnessFilter(nullableFields)
+            ),
           },
         ],
       };
+    }
     case "all":
-      return { [relation.name]: { every: filterValue } };
+      // !all is TRUE only with a definitive false witness, which also absorbs error
+      // elements — exactly `some(NOT P)` in SQL (NULL columns keep NOT P UNKNOWN).
+      return { [head.name]: { some: { NOT: filterValue } } };
+    case "except": {
+      // !except(c,P) = every element definitively matches P.
+      const base = { [head.name]: { none: { NOT: filterValue } } };
+      if (nullableFields.size === 0) {
+        return base;
+      }
+      return {
+        AND: [
+          base,
+          { [head.name]: { none: buildNullWitnessFilter(nullableFields) } },
+        ],
+      };
+    }
     default:
       throw new Error(`Unexpected operator: ${operator}`);
   }
@@ -1541,83 +2424,188 @@ function buildImpossibleFilter(fieldRef: ResolvedFieldReference): PrismaFilter {
   return buildFieldFilter(fieldRef, "in", []);
 }
 
-function handleAddComparison(
+const ARITHMETIC_OPERATORS = new Set(["add", "sub", "mult", "div"]);
+
+/**
+ * Translates `column ⊕ constant  CMP  value` (and its mirrored forms) by solving for the
+ * column: Prisma where-filters cannot express column arithmetic, but linear arithmetic with
+ * one constant side always rewrites to a plain comparison. Multiplying/dividing by a
+ * negative constant mirrors directional operators. The rewrite happens in IEEE double space,
+ * matching CEL: Cerbos attribute numbers are doubles, so this preserves check-time semantics
+ * (e.g. `n * 0.1 == 0.3` solves to an unrepresentable fraction and matches no integer row,
+ * exactly as CEL evaluates it).
+ */
+function handleArithmeticComparison(
   operator: string,
-  addExpr: OperatorOperand,
+  arithExpr: OperatorOperand,
   otherOperand: PlanExpressionOperand,
+  arithIsLeft: boolean,
   mapper: Mapper
 ): PrismaFilter {
-  const addLeftOp = assertDefined(
-    addExpr.operands[0],
-    "add operator requires a left operand"
+  const arithOp = arithExpr.operator;
+  const arithLeftOp = assertDefined(
+    arithExpr.operands[0],
+    `${arithOp} operator requires a left operand`
   );
-  const addRightOp = assertDefined(
-    addExpr.operands[1],
-    "add operator requires a right operand"
+  const arithRightOp = assertDefined(
+    arithExpr.operands[1],
+    `${arithOp} operator requires a right operand`
   );
 
-  const addLeft = resolveOperand(addLeftOp, mapper);
-  const addRight = resolveOperand(addRightOp, mapper);
+  if (
+    isOperatorOperand(otherOperand) &&
+    ARITHMETIC_OPERATORS.has(otherOperand.operator) &&
+    tryFoldValueExpression(otherOperand, mapper) === null
+  ) {
+    throw new Error(
+      "Arithmetic on both sides of a comparison is not supported: the expression cannot be solved to a plain column filter"
+    );
+  }
+
+  const arithLeft = resolveOperand(arithLeftOp, mapper);
+  const arithRight = resolveOperand(arithRightOp, mapper);
   const other = resolveOperand(otherOperand, mapper);
 
-  if (isResolvedValue(addLeft) && isResolvedValue(addRight)) {
-    const folded = foldAdd(addLeft.value, addRight.value);
-    const prismaOp = CERBOS_TO_PRISMA_OPERATOR[operator];
-    if (!prismaOp) throw new Error(`Unsupported operator: ${operator}`);
-
-    if (isResolvedFieldReference(other)) {
-      return buildFieldFilter(other, prismaOp, folded);
+  // Fully constant arithmetic: fold and compare the other side against the result. The
+  // arithmetic side keeps its source position, so when the folded constant was written
+  // FIRST (`1 + 2 < f`), directional operators mirror to keep the field on the left.
+  if (isResolvedValue(arithLeft) && isResolvedValue(arithRight)) {
+    const folded = foldArithmetic(arithOp, arithLeft.value, arithRight.value);
+    if (!isResolvedFieldReference(other)) {
+      throw new Error(
+        `${arithOp} with two values requires a field reference on the other side`
+      );
     }
-    throw new Error("add with two values requires a field reference on the other side");
+    const effectiveOperator = arithIsLeft
+      ? (MIRRORED_OPERATOR[operator] ?? operator)
+      : operator;
+    return buildComparisonFilter(other, effectiveOperator, folded);
   }
 
   if (!isResolvedValue(other)) {
     throw new Error(
-      "add operator with field references requires a value on the other side of the comparison"
+      `${arithOp} operator with field references requires a value on the other side of the comparison`
     );
   }
 
   let fieldRef: ResolvedFieldReference;
-  let addValue: Value;
+  let constant: Value;
   let fieldIsLeft: boolean;
 
-  if (isResolvedFieldReference(addLeft) && isResolvedValue(addRight)) {
-    fieldRef = addLeft;
-    addValue = addRight.value;
+  if (isResolvedFieldReference(arithLeft) && isResolvedValue(arithRight)) {
+    fieldRef = arithLeft;
+    constant = arithRight.value;
     fieldIsLeft = true;
-  } else if (isResolvedValue(addLeft) && isResolvedFieldReference(addRight)) {
-    fieldRef = addRight;
-    addValue = addLeft.value;
+  } else if (
+    isResolvedValue(arithLeft) &&
+    isResolvedFieldReference(arithRight)
+  ) {
+    fieldRef = arithRight;
+    constant = arithLeft.value;
     fieldIsLeft = false;
   } else {
     throw new Error(
-      "add operator requires exactly one field reference and one value, or two values"
+      `${arithOp} operator requires exactly one field reference and one value, or two values`
     );
   }
 
-  if (operator !== "eq" && operator !== "ne") {
-    throw new Error(
-      `Operator ${operator} is not supported with add and field references`
-    );
+  // The comparison operator was normalized arithmetic-side-first by the caller; if the
+  // arithmetic was written on the RIGHT of the comparison, direction was already mirrored.
+  let effectiveOperator = arithIsLeft
+    ? operator
+    : (MIRRORED_OPERATOR[operator] ?? operator);
+
+  // String concatenation solving (eq/ne only).
+  if (arithOp === "add" && typeof constant === "string") {
+    if (effectiveOperator !== "eq" && effectiveOperator !== "ne") {
+      throw new Error(
+        `Operator ${effectiveOperator} is not supported with string concatenation`
+      );
+    }
+    const solvedValue = solveAdd(other.value, constant, fieldIsLeft);
+    if (solvedValue === null) {
+      if (effectiveOperator === "eq") return buildImpossibleFilter(fieldRef);
+      return {};
+    }
+    return buildComparisonFilter(fieldRef, effectiveOperator, solvedValue);
   }
 
-  const solvedValue = solveAdd(other.value, addValue, fieldIsLeft);
-  if (solvedValue === null) {
-    if (operator === "eq") return buildImpossibleFilter(fieldRef);
-    return {};
+  if (typeof constant !== "number" || typeof other.value !== "number") {
+    throw new Error(`${arithOp} comparison requires numeric operands`);
   }
 
-  return buildFieldFilter(fieldRef, CERBOS_TO_PRISMA_OPERATOR[operator]!, solvedValue);
+  let solved: number;
+  switch (arithOp) {
+    case "add":
+      solved = other.value - constant;
+      break;
+    case "sub":
+      if (fieldIsLeft) {
+        // f - c CMP v  ⇔  f CMP v + c
+        solved = other.value + constant;
+      } else {
+        // c - f CMP v  ⇔  -f CMP v - c  ⇔  f mirror(CMP) c - v
+        solved = constant - other.value;
+        effectiveOperator =
+          MIRRORED_OPERATOR[effectiveOperator] ?? effectiveOperator;
+      }
+      break;
+    case "mult":
+      if (constant === 0) {
+        throw new Error(
+          "Multiplication by a constant zero must be folded by the Cerbos planner"
+        );
+      }
+      solved = other.value / constant;
+      if (constant < 0) {
+        effectiveOperator =
+          MIRRORED_OPERATOR[effectiveOperator] ?? effectiveOperator;
+      }
+      break;
+    case "div":
+      if (!fieldIsLeft) {
+        throw new Error(
+          "Division by a column is not supported: the comparison cannot be solved to a plain column filter"
+        );
+      }
+      if (constant === 0) {
+        throw new Error("Division by a constant zero is not supported");
+      }
+      solved = other.value * constant;
+      if (constant < 0) {
+        effectiveOperator =
+          MIRRORED_OPERATOR[effectiveOperator] ?? effectiveOperator;
+      }
+      break;
+    default:
+      throw new Error(`Unsupported operator: ${arithOp}`);
+  }
+
+  return buildComparisonFilter(fieldRef, effectiveOperator, solved);
 }
 
-function foldAdd(left: Value, right: Value): Value {
-  if (typeof left === "string" || typeof right === "string") {
+function foldArithmetic(operator: string, left: Value, right: Value): Value {
+  if (
+    operator === "add" &&
+    (typeof left === "string" || typeof right === "string")
+  ) {
     return String(left) + String(right);
   }
-  if (typeof left === "number" && typeof right === "number") {
-    return left + right;
+  if (typeof left !== "number" || typeof right !== "number") {
+    throw new Error(`${operator} operator requires string or number operands`);
   }
-  throw new Error("add operator requires string or number operands");
+  switch (operator) {
+    case "add":
+      return left + right;
+    case "sub":
+      return left - right;
+    case "mult":
+      return left * right;
+    case "div":
+      return left / right;
+    default:
+      throw new Error(`Unsupported operator: ${operator}`);
+  }
 }
 
 function solveAdd(

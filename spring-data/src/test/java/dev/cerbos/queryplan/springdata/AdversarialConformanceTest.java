@@ -1,5 +1,8 @@
 package dev.cerbos.queryplan.springdata;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import dev.cerbos.queryplan.springdata.testmodel.CategoryEntity;
 import dev.cerbos.queryplan.springdata.testmodel.ResourceEntity;
 import dev.cerbos.queryplan.springdata.testmodel.SubCategoryEntity;
@@ -23,8 +26,8 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.jpa.domain.Specification;
 import org.testcontainers.containers.GenericContainer;
@@ -34,28 +37,35 @@ import org.testcontainers.images.builder.Transferable;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Adversarial differential suite: every action in {@code adversarial-policy.yaml} is planned
- * against a REAL Cerbos PDP, translated by the adapter, and executed against seeded rows — then
- * the filtered id set is compared against an <em>oracle</em> computed by calling the PDP's
- * check API for each row with attributes mirroring that row exactly.
+ * Adversarial differential suite: every action in the shared {@code ../conformance/} corpus is
+ * planned against a REAL Cerbos PDP, translated by the adapter, and executed against seeded rows
+ * — then the filtered id set is compared against an <em>oracle</em> computed by calling the check
+ * API for each row with attributes mirroring that row exactly.
  *
  * <p>No hand-computed expectations: if the adapter's SQL semantics diverge from Cerbos's own
- * evaluation for any row, the mismatch surfaces mechanically. Seed rows deliberately hold
- * hostile data — empty collections, LIKE metacharacters ({@code % _ \}), unicode, empty strings,
- * negative numbers — and the policies use planner shapes the conformance policies don't
- * (value-first comparisons, empty {@code in} lists, fractional thresholds against integer
- * columns, outer attribute references two lambda levels deep).
+ * evaluation for any row, the mismatch surfaces mechanically. Seed rows deliberately hold hostile
+ * data — empty collections, LIKE metacharacters ({@code % _ \}), unicode, empty strings, negative
+ * numbers — and the policies use planner shapes the conformance policies don't (value-first
+ * comparisons, empty {@code in} lists, fractional thresholds against integer columns, outer
+ * attribute references two lambda levels deep).
+ *
+ * <p>The policy, seed data, and action list are NOT owned by this module — they live in the
+ * repo-level {@code conformance/} corpus (see {@code conformance/README.md}) so prisma and
+ * sqlalchemy can run the same hostile shapes against their own oracle harnesses. Only the
+ * JPA-specific translation (seeding entities, executing the {@link Specification}) belongs here.
  */
 class AdversarialConformanceTest {
 
@@ -93,53 +103,45 @@ class AdversarialConformanceTest {
             )))
     );
 
+    // -- shared corpus (../conformance/): policy, seed data, and action list are read from disk
+    // rather than duplicated here. See conformance/README.md for the recipe these implement.
+
+    private static Path conformanceDir() {
+        return Path.of(System.getProperty("user.dir"), "..", "conformance").normalize();
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
     private record Tag(String id, String name) {}
 
     /** One seeded row; the single source of truth for BOTH the DB entity and the oracle attributes. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
     private record Seed(String id, boolean aBool, String aString, int aNumber,
                         String aOptionalString, List<Tag> tags, List<String> subCategoryNames) {}
 
-    private static final List<Seed> SEEDS = List.of(
-            new Seed("a1", true, "one", 5, "set",
-                    List.of(new Tag("t1a", "public")), List.of("finance")),
-            new Seed("a2", false, "100%_done", -2, null,
-                    List.of(), List.of()),
-            new Seed("a3", true, "100xdone", 2, "x",
-                    List.of(new Tag("t3a", "public"), new Tag("t3b", "public")), List.of()),
-            new Seed("a4", true, "xa_by", 1, null,
-                    List.of(new Tag("t4a", "private")), List.of()),
-            new Seed("a5", false, "xaXby", -5, "y",
-                    List.of(new Tag("t5a", "public")), List.of()),
-            new Seed("a6", true, "héllo🚀", 3, "",
-                    List.of(new Tag("t6a", "public"), new Tag("t6b", "private")), List.of("finance")),
-            new Seed("a7", true, "tail\\", 0, "z",
-                    List.of(new Tag("t7a", "other")), List.of()),
-            new Seed("a8", true, "", 2, null,
-                    List.of(new Tag("t8a", "public")), List.of("tech")),
-            // Field-to-field witness: aString == aOptionalString == a tag name, so the
-            // field-to-field and lambda-field-to-field oracles are non-degenerate.
-            new Seed("a9", true, "same", 4, "same",
-                    List.of(new Tag("t9a", "same")), List.of()),
-            // Field-to-field LIKE witnesses: the NEEDLE column (aOptionalString) holds LIKE
-            // metacharacters. b1 discriminates escaping for all three ops ("oneXtwo" does not
-            // literally contain "one_two", but an unescaped '_' wildcard would match the 'X');
-            // b2/b3 are literal % and \ matches that only work when the escape is correct.
-            new Seed("b1", true, "oneXtwo", 7, "one_two", List.of(), List.of()),
-            new Seed("b2", false, "50%_off", 6, "%_o", List.of(), List.of()),
-            new Seed("b3", true, "back\\slash", -4, "k\\s", List.of(), List.of()),
-            // Probe witness: a tag whose id equals its name (lambda-inner field-to-field).
-            new Seed("b4", false, "mirror", 8, "mirror",
-                    List.of(new Tag("mirror", "mirror")), List.of()),
-            // NULL element columns: a NULL tag name is a missing element attribute on the
-            // check side, so lambda bodies touching it are CEL evaluation errors. b5 holds
-            // ONLY a NULL-name tag (no true/false witness → macro errors); b6 mixes a
-            // NULL-name tag with a "public" one (exists absorbs the error, all/exists_one
-            // and map() do not).
-            new Seed("b5", true, "nulltag", 9, "nt",
-                    List.of(new Tag("t10a", null)), List.of()),
-            new Seed("b6", false, "mixed", 10, "mx",
-                    List.of(new Tag("t11a", null), new Tag("t11b", "public")), List.of())
-    );
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record PrincipalSpec(String id, List<String> roles, Map<String, List<String>> attr) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record SeedsFile(PrincipalSpec principal, String resourceKind, List<Seed> seeds) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record UnsupportedShape(String action, String shape, String springDataMessage) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record ActionsFile(List<String> conformance, List<UnsupportedShape> expectedUnsupported) {}
+
+    private static SeedsFile seedsFile;
+    private static ActionsFile actionsFile;
+    private static List<Seed> SEEDS;
+
+    static Stream<String> conformanceActions() {
+        return actionsFile.conformance().stream();
+    }
+
+    static Stream<Arguments> unsupportedShapes() {
+        return actionsFile.expectedUnsupported().stream()
+                .map(u -> Arguments.of(u.action(), u.springDataMessage()));
+    }
 
     /** Deterministic ISO instant per seed for the timestamp probe: split around 2025-01-01. */
     private static String isoFor(Seed s) {
@@ -152,16 +154,22 @@ class AdversarialConformanceTest {
 
     @BeforeAll
     static void setUp() throws Exception {
-        cerbos = new GenericContainer<>("ghcr.io/cerbos/cerbos:latest")
+        ObjectMapper mapper = new ObjectMapper();
+        Path conformance = conformanceDir();
+        seedsFile = mapper.readValue(conformance.resolve("seeds.json").toFile(), SeedsFile.class);
+        actionsFile = mapper.readValue(conformance.resolve("actions.json").toFile(), ActionsFile.class);
+        SEEDS = seedsFile.seeds();
+        String cerbosVersion = Files.readString(conformance.resolve("CERBOS_VERSION")).strip();
+
+        cerbos = new GenericContainer<>("ghcr.io/cerbos/cerbos:" + cerbosVersion)
                 .withExposedPorts(3593)
                 .withCommand("server", "--set=storage.disk.directory=/policies")
                 .withEnv("CERBOS_NO_TELEMETRY", "1")
                 .withLogConsumer(new Slf4jLogConsumer(LoggerFactory.getLogger("cerbos-adversarial-pdp")))
                 .waitingFor(Wait.forLogMessage(".*Starting gRPC server.*", 1));
-        try (InputStream policy = AdversarialConformanceTest.class
-                .getResourceAsStream("/adversarial-policy.yaml")) {
-            cerbos.withCopyToContainer(
-                    Transferable.of(policy.readAllBytes()), "/policies/adversarial.yaml");
+        try {
+            byte[] policy = Files.readAllBytes(conformance.resolve("policies").resolve("adversarial.yaml"));
+            cerbos.withCopyToContainer(Transferable.of(policy), "/policies/adversarial.yaml");
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
@@ -216,15 +224,19 @@ class AdversarialConformanceTest {
     // -- oracle: ask the PDP itself, row by row --
 
     private static Principal principal() {
-        return Principal.newInstance("u1", "USER")
-                .withAttribute("allowedTags", AttributeValue.listValue(
-                        AttributeValue.stringValue("public"),
-                        AttributeValue.stringValue("special")));
+        PrincipalSpec spec = seedsFile.principal();
+        Principal p = Principal.newInstance(spec.id(), spec.roles().toArray(new String[0]));
+        for (Map.Entry<String, List<String>> attr : spec.attr().entrySet()) {
+            p = p.withAttribute(attr.getKey(), AttributeValue.listValue(attr.getValue().stream()
+                    .map(AttributeValue::stringValue)
+                    .toArray(AttributeValue[]::new)));
+        }
+        return p;
     }
 
     /** Cerbos attributes mirroring exactly what the seeded DB row holds. */
     private static Resource asCheckResource(Seed s) {
-        Resource r = Resource.newInstance("adversarial", s.id())
+        Resource r = Resource.newInstance(seedsFile.resourceKind(), s.id())
                 .withAttribute("aBool", AttributeValue.boolValue(s.aBool()))
                 .withAttribute("aString", AttributeValue.stringValue(s.aString()))
                 .withAttribute("aNumber", AttributeValue.doubleValue(s.aNumber()))
@@ -285,7 +297,8 @@ class AdversarialConformanceTest {
     // -- adapter execution through the public Specification path --
 
     private static List<String> adapterFilteredIds(String action) {
-        PlanResourcesResult plan = client.plan(principal(), Resource.newInstance("adversarial"), action);
+        PlanResourcesResult plan = client.plan(
+                principal(), Resource.newInstance(seedsFile.resourceKind()), action);
         Specification<ResourceEntity> spec =
                 SpringDataQueryPlanAdapter.<ResourceEntity>toSpecification(plan, MAPPING).toSpecification();
 
@@ -307,48 +320,7 @@ class AdversarialConformanceTest {
     }
 
     @ParameterizedTest(name = "{0}")
-    @ValueSource(strings = {
-            "vf-le", "vf-ge", "vf-ne",
-            "in-single", "in-empty",
-            "like-percent", "like-underscore", "like-backslash",
-            "unicode-eq", "empty-string-eq",
-            "neg-number", "double-threshold",
-            "all-on-empty", "exists-on-empty", "exists-one-multi", "not-exists",
-            "outer-attr-depth2", "lambda-in-principal",
-            "nary-and", "double-negation", "triple-negation", "not-empty",
-            "optional-ne",
-            "lambda-field-to-field", "field-to-field",
-            "size-threshold", "size-filter-count", "string-size",
-            "ternary-cmp", "ternary-expr-cond", "ternary-nested", "ternary-negated",
-            "ternary-bare", "ternary-value-first", "ternary-null-cond",
-            "f2f-contains", "f2f-startswith", "f2f-endswith",
-            "arith-add", "arith-vf", "arith-sub", "arith-mult-neg",
-            "arith-div", "arith-div-frac", "arith-both",
-            // clean-room probes (GROUP A)
-            "p-ternary-in-exists", "p-arith-in-lambda", "p-lambda-inner-f2f",
-            "p-lambda-f2f-like", "p-size-nested",
-            "p-ternary-of-ternaries", "p-ternary-vs-ternary", "p-ternary-under-all",
-            "p-hasintersection-map", "p-deep-nest",
-            "p-in-null-single", "p-in-null-multi", "p-startswith-concat",
-            // clean-room probes (GROUP B). Shapes that THROW are covered by
-            // unsupportedShapesThrow below. Known divergences excluded from the oracle run:
-            //   p-has            — planner folds has(unknown attr) to KIND_ALWAYS_ALLOWED, so the
-            //                      adapter returns all rows while check() denies NULL rows.
-            // p-double-frac is IN the run: the adapter forces IEEE double space (CAST columns,
-            // double bind parameters), so 3*0.1 == 0.3 is false in SQL exactly as in CEL.
-            "p-struct", "p-not-exists-empty", "p-not-ternary-null", "p-double-frac",
-            // NULL element columns under collection macros (b5/b6 witnesses)
-            "n-not-exists-one-null", "n-all-mixed-null", "n-not-all-null", "n-not-all-absorb",
-            // constant-receiver string matches (the constant is the haystack; escaping
-            // discriminators live in the a2/a4/a7 seeds)
-            "cr-contains", "cr-startswith", "cr-endswith", "cr-startswith-concat",
-            // arithmetic + size edges: zero column divisor (NaN → deny), fractional count
-            // threshold (only ordering ops compile in CEL — int vs double eq/ne does not)
-            "cr-div-zero", "cr-size-frac-ge",
-            // multi-hop relation chains via DIRECT dotted syntax (W1) and a root relation
-            // subquery anchored from inside a lambda body (W2)
-            "w1-exists-chain", "w1-size-chain", "w1-in-chain", "w2-outer-relation",
-    })
+    @MethodSource("conformanceActions")
     void adapterMatchesCheckOracle(String action) {
         List<String> oracle = oracleAllowedIds(action);
         List<String> filtered = adapterFilteredIds(action);
@@ -361,11 +333,7 @@ class AdversarialConformanceTest {
      * silently-wrong filter). Messages pinned so a regression to silent acceptance is caught.
      */
     @ParameterizedTest(name = "{0}")
-    @CsvSource({
-            "p-timestamp, Unexpected timestamp() expression in leaf operand of lt",
-            "p-matches, Unsupported operator: matches",
-            "p-index, Unexpected get-field() expression in leaf operand of eq",
-    })
+    @MethodSource("unsupportedShapes")
     void unsupportedShapesThrow(String action, String expectedMessage) {
         IllegalArgumentException ex = assertThrows(
                 IllegalArgumentException.class, () -> adapterFilteredIds(action));

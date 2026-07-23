@@ -1,0 +1,44 @@
+{
+  "action": "p-hasintersection-map",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "hasIntersection",
+        "operands": [
+          {
+            "expression": {
+              "operator": "map",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.tags"
+                },
+                {
+                  "expression": {
+                    "operator": "lambda",
+                    "operands": [
+                      {
+                        "variable": "t.name"
+                      },
+                      {
+                        "variable": "t"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "value": [
+              "public",
+              "héllo🚀",
+              "100%_x"
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

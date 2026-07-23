@@ -763,6 +763,10 @@ const conditionalActions = [
   "or-leaf-exists",
   // Issue #232: collection macro composition.
   "all-nested",
+  // #263: field-to-field equality and size(filter(...)) now translate (previously threw);
+  // verified here against the check() oracle like every other supported shape.
+  "equal-field-to-field",
+  "filter-count-gt",
 ];
 
 beforeAll(() => {
@@ -1160,18 +1164,6 @@ describe("queryPlanToDrizzle", () => {
   // and the dispatch in buildFilterFromExpression requires one value operand.
   // If/when the adapter learns to compare two columns, replace this with a
   // data-driven assertion against the conditionalActions loop.
-  test("throws for equal-field-to-field (field-to-field equality)", async () => {
-    const queryPlan = await cerbos.planResources({
-      principal: { id: "user1", roles: ["USER"] },
-      resource: { kind: "resource" },
-      action: "equal-field-to-field",
-    });
-
-    expect(() =>
-      queryPlanToDrizzle({ queryPlan, mapper })
-    ).toThrow(/value operand/i);
-  });
-
   test("throws for index-list (array indexing on a relation)", async () => {
     // ownedBy is modelled as a join table — there is no scalar index column,
     // so R.attr.ownedBy[0] cannot be translated into a deterministic SQL fragment.
@@ -1194,19 +1186,6 @@ describe("queryPlanToDrizzle", () => {
       principal: { id: "user1", roles: ["USER"] },
       resource: { kind: "resource" },
       action: "map-compared",
-    });
-
-    expect(() => queryPlanToDrizzle({ queryPlan, mapper })).toThrow();
-  });
-
-  // TODO(#232): drizzle adapter handles size(R.attr.collection) > N via a
-  // correlated COUNT subquery but does not unwrap size(filter(coll, lambda))
-  // — the inner filter() lambda is not pushed into the count predicate.
-  test("throws for filter-count-gt (size(filter(...)) > 0)", async () => {
-    const queryPlan = await cerbos.planResources({
-      principal: { id: "user1", roles: ["USER"] },
-      resource: { kind: "resource" },
-      action: "filter-count-gt",
     });
 
     expect(() => queryPlanToDrizzle({ queryPlan, mapper })).toThrow();

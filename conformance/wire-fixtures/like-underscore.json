@@ -1,0 +1,20 @@
+{
+  "action": "like-underscore",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "contains",
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "a_b"
+          }
+        ]
+      }
+    }
+  }
+}
