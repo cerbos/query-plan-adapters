@@ -33,6 +33,23 @@ import java.util.function.Supplier;
  */
 public final class SpringDataQueryPlanAdapter {
 
+    /**
+     * System property bounding collection-macro nesting depth
+     * ({@code exists}/{@code exists_one}/{@code all}/{@code filter}/{@code except}/
+     * {@code size(filter(...))}) accepted by the translator. Each nesting level multiplies the
+     * number of correlated subqueries in the translated filter (×2 for the {@code exists} family,
+     * ×3 for {@code exists_one}/{@code size(filter(...))} — see the collection-macro Javadoc in
+     * the translator), so unbounded nesting can silently degrade query latency on large tables.
+     * Plans nested deeper than the limit throw {@link IllegalArgumentException} at translation
+     * time (fail closed). Defaults to {@value #DEFAULT_MAX_MACRO_DEPTH}; set the property to a
+     * positive integer to raise or lower the limit.
+     */
+    public static final String MAX_MACRO_DEPTH_PROPERTY =
+            "dev.cerbos.queryplan.springdata.maxMacroDepth";
+
+    /** Default value of {@link #MAX_MACRO_DEPTH_PROPERTY}. */
+    public static final int DEFAULT_MAX_MACRO_DEPTH = 5;
+
     private SpringDataQueryPlanAdapter() {}
 
     // -- PlanResourcesResult overloads --
@@ -110,6 +127,9 @@ public final class SpringDataQueryPlanAdapter {
         private final HierarchyTranslator hierarchy;
         private final ComparisonTranslator comparisons = new ComparisonTranslator();
         private final boolean selectInvocation;
+        private final int maxMacroDepth = readMaxMacroDepth();
+        /** Current collection-macro nesting depth; maintained by {@link #enterMacro}. */
+        private int macroDepth;
 
         Translator(CriteriaBuilder cb, Map<String, OperatorFunction> overrides, boolean selectInvocation) {
             this.cb = cb;
@@ -117,6 +137,50 @@ public final class SpringDataQueryPlanAdapter {
             this.overrides = overrides;
             this.hierarchy = new HierarchyTranslator(cb);
             this.selectInvocation = selectInvocation;
+        }
+
+        private static int readMaxMacroDepth() {
+            String raw = System.getProperty(MAX_MACRO_DEPTH_PROPERTY);
+            if (raw == null) {
+                return DEFAULT_MAX_MACRO_DEPTH;
+            }
+            int value;
+            try {
+                value = Integer.parseInt(raw.trim());
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException(
+                        MAX_MACRO_DEPTH_PROPERTY + " must be a positive integer, got '" + raw + "'", e);
+            }
+            if (value < 1) {
+                throw new IllegalArgumentException(
+                        MAX_MACRO_DEPTH_PROPERTY + " must be a positive integer, got " + value);
+            }
+            return value;
+        }
+
+        /**
+         * Track one collection-macro nesting level around {@code body}, failing closed when the
+         * plan nests deeper than {@link #MAX_MACRO_DEPTH_PROPERTY} allows. Each macro level
+         * multiplies the correlated-subquery count of the translated filter (one subquery per
+         * body polarity), so a runaway-deep policy must throw a clear error at translation time
+         * instead of silently emitting a filter that times out on production-sized tables.
+         */
+        private Predicate enterMacro(String op, Supplier<Predicate> body) {
+            macroDepth++;
+            try {
+                if (macroDepth > maxMacroDepth) {
+                    throw new IllegalArgumentException(
+                            "Collection-macro nesting depth " + macroDepth + " exceeds the maximum of "
+                            + maxMacroDepth + " (reached via operator '" + op + "'). Each nesting "
+                            + "level multiplies the number of correlated subqueries in the "
+                            + "translated filter, so deeply nested macros degrade query latency "
+                            + "sharply. If the policy shape is intentional, raise the limit via "
+                            + "the '" + MAX_MACRO_DEPTH_PROPERTY + "' system property.");
+                }
+                return body.get();
+            } finally {
+                macroDepth--;
+            }
         }
 
         Predicate traverse(Operand operand, Scope scope) {
@@ -1543,50 +1607,54 @@ public final class SpringDataQueryPlanAdapter {
                 }
                 final Operand fBody = lambdaBody;
                 final String fVar = lambdaVarName;
-                SubqueryBodyBuilder bodyBuilder = (sub, tailJoin, rebased) ->
-                        fBody == null ? cb.conjunction()
-                                : traverse(fBody, Scope.lambda(tailJoin, sub, ref.tail(), fVar, rebased));
-
-                Predicate base;
-                if (fractionalCollapse != null) {
-                    // A Relation count is always defined (an empty join is count 0), so the
-                    // fractional eq/ne collapse is unconditional here. Falls through to the
-                    // size(filter(...)) unknown-element guard below so an erroring lambda body
-                    // still denies the row.
-                    base = fractionalCollapse ? cb.conjunction() : cb.disjunction();
-                } else {
+                if (fBody == null) {
+                    // size(collection) counts rows without evaluating a lambda — no element can
+                    // be UNKNOWN, so the plain EXISTS/COUNT comparisons are already exact.
+                    if (fractionalCollapse != null) {
+                        // A Relation count is always defined (an empty join is count 0), so the
+                        // fractional eq/ne collapse is unconditional here.
+                        return fractionalCollapse ? cb.conjunction() : cb.disjunction();
+                    }
                     boolean nonEmpty = ("gt".equals(cmpOp) && numValue == 0L)
                             || ("ge".equals(cmpOp) && numValue == 1L);
                     boolean empty = ("eq".equals(cmpOp) && numValue == 0L)
                             || ("le".equals(cmpOp) && numValue == 0L)
                             || ("lt".equals(cmpOp) && numValue == 1L);
                     if (nonEmpty) {
-                        base = existsSubquery(scope, ref, bodyBuilder);
-                    } else if (empty) {
-                        base = tri.not(existsSubquery(scope, ref, bodyBuilder));
-                    } else {
-                        // Arbitrary N → correlated (SELECT COUNT(...)) <op> N, same shape as
-                        // exists_one. For a multi-hop chain the COUNT joins through every hop, so it
-                        // counts the FLATTENED tail elements — the same element set the EXISTS
-                        // shortcuts range over.
-                        ChainSubquery<Long> cs = countSubquery(scope, ref);
-                        if (fBody != null) {
-                            cs.sub().where(bodyBuilder.build(cs.sub(), cs.tailJoin(), cs.rebasedOuter()));
-                        }
-                        base = compareCount(cs.sub(), cmpOp, numValue);
+                        return existsSubquery(scope, ref, (sub, tailJoin, rebased) -> cb.conjunction());
                     }
+                    if (empty) {
+                        return tri.not(existsSubquery(scope, ref,
+                                (sub, tailJoin, rebased) -> cb.conjunction()));
+                    }
+                    // Arbitrary N → correlated (SELECT COUNT(...)) <op> N. For a multi-hop chain
+                    // the COUNT joins through every hop, so it counts the FLATTENED tail
+                    // elements — the same element set the EXISTS shortcuts range over.
+                    return compareCount(countSubquery(scope, ref).sub(), cmpOp, numValue);
                 }
-                if (fBody == null) {
-                    // size(collection) counts rows without evaluating a lambda — no element can be
-                    // UNKNOWN, so the plain comparison is already exact.
-                    return base;
-                }
-                // size(coll.filter(x, pred)): CEL filter has NO error absorption — any element whose
-                // predicate errors (NULL-derived UNKNOWN body) errors the whole expression (deny),
-                // even when the count comparison would otherwise hold. Same strict table as
-                // exists_one: TriPredicate.baseUnlessUnknown.
-                return tri.baseUnlessUnknown(base,
-                        () -> unknownElementExists(scope, ref, bodyBuilder));
+                // size(coll.filter(x, pred)): CEL filter has NO error absorption — any element
+                // whose predicate errors (NULL-derived UNKNOWN body) errors the whole expression
+                // (deny), even when the count comparison would otherwise hold. Same strict table
+                // as exists_one: strictMatchCount yields SQL NULL whenever any element body is
+                // UNKNOWN, so every comparison against it goes UNKNOWN and the row stays excluded
+                // under both polarities.
+                SubqueryBodyBuilder bodyBuilder = (sub, tailJoin, rebased) ->
+                        traverse(fBody, Scope.lambda(tailJoin, sub, ref.tail(), fVar, rebased));
+                final String finalCmpOp = cmpOp;
+                final long finalNumValue = numValue;
+                final Boolean finalCollapse = fractionalCollapse;
+                return enterMacro("size(filter(...))", () -> {
+                    if (finalCollapse != null) {
+                        // The count comparison itself is statically decided (a COUNT is never
+                        // fractional), but an erroring lambda body must still deny the row: the
+                        // poison term is 0 when every element body is determined and SQL NULL
+                        // otherwise, making the collapse UNKNOWN exactly when CEL errors.
+                        Subquery<Long> poison = undeterminedPoisonSubquery(scope, ref, bodyBuilder);
+                        return finalCollapse ? cb.equal(poison, 0L) : cb.notEqual(poison, 0L);
+                    }
+                    return compareCount(strictMatchCountSubquery(scope, ref, bodyBuilder),
+                            finalCmpOp, finalNumValue);
+                });
             }
 
             /** Compare a numeric size expression (COUNT subquery or LENGTH) against a constant. */
@@ -1830,18 +1898,25 @@ public final class SpringDataQueryPlanAdapter {
          * ERROR maps to SQL UNKNOWN so the row stays excluded under BOTH polarities
          * ({@code NOT(UNKNOWN) = UNKNOWN}). A plain EXISTS is not enough: an element whose body
          * is UNKNOWN silently fails to match, collapsing the error case to FALSE — which
-         * {@code not(...)} flips to TRUE, an authorization leak. Building blocks:
-         * {@code EXISTS(elem WHERE body)} (true witness), {@code EXISTS(elem WHERE NOT body)}
-         * (false witness) and {@link #unknownElementExists} (any UNKNOWN-body element); the
-         * truth tables composing them live in {@link TriPredicate}.
+         * {@code not(...)} flips to TRUE, an authorization leak. Each macro is a SINGLE
+         * correlated aggregate subquery that scores every element into determined-true /
+         * determined-false / undetermined and folds the scores into one value whose comparison
+         * is TRUE, FALSE, or SQL UNKNOWN exactly per the CEL truth table — see
+         * {@link #macroScoreSubquery} (exists/all/filter/except) and
+         * {@link #strictMatchCountSubquery} (exists_one).
          *
          * <p>{@code filter}/{@code except} in boolean position are kept consistent with the
-         * {@code exists} family. Cost note: the unknown machinery is always emitted — each
-         * {@link #unknownElementExists} probe is two correlated COUNT subqueries, and
-         * {@code exists_one} (like the arbitrary-N {@code size(filter(...))} shape) emits the
-         * probe twice, i.e. five correlated subqueries including the base COUNT — the attribute
-         * mapping carries no column-nullability metadata, so a NULL-free lambda body cannot be
-         * detected statically.
+         * {@code exists} family. Cost note: the unknown machinery is always emitted — the
+         * attribute mapping carries no column-nullability metadata, so a NULL-free lambda body
+         * cannot be detected statically. The lambda body is translated once per polarity
+         * (positive and negated — Hibernate 6 negation is stateful, see {@link TriPredicate},
+         * so a Predicate tree cannot be shared between polarities): twice for the
+         * {@code exists} family, three times for {@code exists_one} (which also needs the
+         * positive body inside its match counter). Nested macros therefore multiply — a
+         * depth-d exists chain emits {@code 2^d - 1} correlated subqueries (an exists_one
+         * chain up to {@code (3^d - 1) / 2}) — which is why {@link #enterMacro} bounds the
+         * nesting depth ({@link #MAX_MACRO_DEPTH_PROPERTY}, default
+         * {@value #DEFAULT_MAX_MACRO_DEPTH}).
          */
         private Predicate handleCollectionOperator(String op, List<Operand> operands, Scope scope) {
             if (operands.size() != 2) {
@@ -1879,58 +1954,124 @@ public final class SpringDataQueryPlanAdapter {
             // tree (Hibernate 6 negation is stateful — see TriPredicate.not()).
             SubqueryBodyBuilder bodyBuilder = (sub, tailJoin, rebased) -> traverse(body,
                     Scope.lambda(tailJoin, sub, ref.tail(), lambdaVarName, rebased));
-            SubqueryBodyBuilder negatedBodyBuilder = (sub, tailJoin, rebased) ->
-                    tri.not(bodyBuilder.build(sub, tailJoin, rebased));
 
-            return switch (op) {
-                // exists (and filter): OR with error absorption — TriPredicate.anyTrueOrUnknown.
-                case "exists", "filter" -> tri.anyTrueOrUnknown(
-                        existsSubquery(scope, ref, bodyBuilder),
-                        unknownElementExists(scope, ref, bodyBuilder));
+            return enterMacro(op, () -> switch (op) {
+                // exists (and filter): OR with error absorption — TRUE iff any element is
+                // determined-true (max score 2); UNKNOWN iff none is true but at least one is
+                // undetermined (max score 1 → NULLIF yields SQL NULL); FALSE otherwise.
+                case "exists", "filter" ->
+                        cb.equal(macroScoreSubquery(scope, ref, bodyBuilder, 2, 0), 2);
                 // except is "some element fails the body" — the exists table with the false
-                // witness in the true-witness seat; an UNKNOWN body is UNKNOWN under NOT too.
-                case "except" -> tri.anyTrueOrUnknown(
-                        existsSubquery(scope, ref, negatedBodyBuilder),
-                        unknownElementExists(scope, ref, bodyBuilder));
-                // all: AND with error absorption — TriPredicate.allTrueOrUnknown, with the
-                // false witness EXISTS(elem WHERE NOT body).
-                case "all" -> tri.allTrueOrUnknown(
-                        existsSubquery(scope, ref, negatedBodyBuilder),
-                        unknownElementExists(scope, ref, bodyBuilder));
-                // exists_one: strict — any UNKNOWN element denies, else COUNT(body) = 1 —
-                // TriPredicate.baseUnlessUnknown.
-                case "exists_one" -> {
-                    ChainSubquery<Long> cs = countSubquery(scope, ref);
-                    cs.sub().where(bodyBuilder.build(cs.sub(), cs.tailJoin(), cs.rebasedOuter()));
-                    yield tri.baseUnlessUnknown(cb.equal(cs.sub(), 1L),
-                            () -> unknownElementExists(scope, ref, bodyBuilder));
-                }
+                // witness in the true seat; an UNKNOWN body is UNKNOWN under NOT too.
+                case "except" ->
+                        cb.equal(macroScoreSubquery(scope, ref, bodyBuilder, 0, 2), 2);
+                // all: AND with error absorption — FALSE iff any element is determined-false
+                // (max score 2 absorbs undetermined siblings); UNKNOWN iff none is false but at
+                // least one is undetermined; TRUE otherwise (including the empty collection).
+                case "all" ->
+                        cb.equal(macroScoreSubquery(scope, ref, bodyBuilder, 0, 2), 0);
+                // exists_one: strict — any UNKNOWN element denies, else COUNT(body) = 1. The
+                // strict counter goes SQL NULL when any element is undetermined, so the equality
+                // is UNKNOWN and the row stays excluded under both polarities.
+                case "exists_one" ->
+                        cb.equal(strictMatchCountSubquery(scope, ref, bodyBuilder), 1L);
                 default -> throw new IllegalArgumentException("Unsupported collection operator: " + op);
-            };
+            });
         }
 
         /**
-         * TRUE iff the relation holds at least one element whose lambda body evaluates to SQL
-         * UNKNOWN (NULL-derived). Not expressible as a single EXISTS: inside a subquery WHERE an
-         * UNKNOWN body simply fails to match, so {@code EXISTS(body)} and {@code EXISTS(NOT body)}
-         * both skip exactly the rows to be detected. Counting closes the gap — an element is
-         * <em>determined</em> iff {@code body OR NOT body} matches it, therefore
-         * {@code COUNT(elem) > COUNT(elem WHERE body OR NOT body)} holds iff at least one element
-         * is UNKNOWN, including mixed collections where sibling elements are determined
-         * true/false. Both COUNTs never yield NULL, so the comparison itself is two-valued and
-         * safe to negate through {@link TriPredicate#not}. The body is supplied to
-         * {@link TriPredicate#determined} as a Supplier and translated fresh per occurrence
-         * (stateful negation — see {@link TriPredicate#not}).
+         * The single-subquery scoring translation shared by {@code exists}/{@code filter}
+         * (score 2/0), {@code all} and {@code except} (score 0/2). Each element of the relation
+         * chain is scored with a searched CASE:
+         *
+         * <pre>{@code CASE WHEN body THEN trueScore WHEN NOT body THEN falseScore ELSE 1 END}</pre>
+         *
+         * An UNKNOWN body matches neither WHEN (SQL treats an UNKNOWN condition as not taken),
+         * so undetermined elements land in the ELSE — that is what makes the polarity pair
+         * sufficient to distinguish all three states with a single scan. The subquery selects
+         *
+         * <pre>{@code NULLIF(COALESCE(MAX(score), 0), 1)}</pre>
+         *
+         * i.e. the dominant score with the empty collection folded to 0 and the
+         * "only undetermined elements dominate" state (max score 1) mapped to SQL NULL. A
+         * two-valued equality against 2 (exists/except) or 0 (all) then yields TRUE / FALSE /
+         * UNKNOWN exactly per the CEL macro truth tables, and {@code NOT} keeps UNKNOWN rows
+         * excluded ({@code NOT(UNKNOWN) = UNKNOWN}).
+         *
+         * <p>The body is translated exactly twice — once per polarity, the minimum Hibernate 6's
+         * stateful negation permits (see {@link TriPredicate}) — so nested macros grow at
+         * {@code 2^depth}, not the {@code 3^depth} of the previous
+         * EXISTS-plus-two-COUNT-probes translation.
          */
-        private Predicate unknownElementExists(Scope scope, Scope.ResolvedRelation ref,
-                                               SubqueryBodyBuilder bodyBuilder) {
-            ChainSubquery<Long> total = countSubquery(scope, ref);
+        private Subquery<Integer> macroScoreSubquery(Scope scope, Scope.ResolvedRelation ref,
+                                                     SubqueryBodyBuilder bodyBuilder,
+                                                     int trueScore, int falseScore) {
+            ChainSubquery<Integer> cs = chainSubquery(Integer.class, scope, ref);
+            jakarta.persistence.criteria.Expression<Integer> score = cb.<Integer>selectCase()
+                    .when(bodyBuilder.build(cs.sub(), cs.tailJoin(), cs.rebasedOuter()), trueScore)
+                    .when(tri.not(bodyBuilder.build(cs.sub(), cs.tailJoin(), cs.rebasedOuter())),
+                            falseScore)
+                    .otherwise(1);
+            cs.sub().select(cb.nullif(cb.coalesce(cb.max(score), 0), 1));
+            return cs.sub();
+        }
 
-            ChainSubquery<Long> determined = countSubquery(scope, ref);
-            determined.sub().where(tri.determined(() -> bodyBuilder.build(
-                    determined.sub(), determined.tailJoin(), determined.rebasedOuter())));
+        /**
+         * The strict counting subquery behind {@code exists_one} and {@code size(filter(...))}:
+         * selects the number of elements whose body is determined-true, poisoned to SQL NULL
+         * when ANY element body is UNKNOWN (CEL's strict macros error if any element errors —
+         * no absorption). Shape:
+         *
+         * <pre>{@code COALESCE(SUM(CASE WHEN body THEN 1 ELSE 0 END), 0) + poisonTerm}</pre>
+         *
+         * where {@code poisonTerm} ({@link #undeterminedPoisonTerm}) is 0 when every element is
+         * determined and NULL otherwise — NULL is absorbing under addition, so any undetermined
+         * element nulls the whole count and every comparison against it goes UNKNOWN (row
+         * excluded under both polarities). The empty collection yields 0 + 0 = 0, matching CEL
+         * ({@code exists_one} over an empty list is false, a zero count compares normally).
+         *
+         * <p>Costs three body translations (one positive in the match counter, one per polarity
+         * in the poison term); see {@link #macroScoreSubquery} for why two is the floor.
+         */
+        private Subquery<Long> strictMatchCountSubquery(Scope scope, Scope.ResolvedRelation ref,
+                                                        SubqueryBodyBuilder bodyBuilder) {
+            ChainSubquery<Long> cs = chainSubquery(Long.class, scope, ref);
+            jakarta.persistence.criteria.Expression<Long> match = cb.<Long>selectCase()
+                    .when(bodyBuilder.build(cs.sub(), cs.tailJoin(), cs.rebasedOuter()), 1L)
+                    .otherwise(0L);
+            cs.sub().select(cb.sum(
+                    cb.coalesce(cb.sum(match), 0L),
+                    undeterminedPoisonTerm(cs, bodyBuilder)));
+            return cs.sub();
+        }
 
-            return cb.greaterThan(total.sub(), determined.sub());
+        /**
+         * A subquery selecting ONLY the poison term: 0 when every element body is determined
+         * (or the collection is empty), SQL NULL when any element body is UNKNOWN. Used by the
+         * statically-collapsed {@code size(filter(...))} comparisons, whose count comparison is
+         * pre-decided but whose error semantics still depend on the lambda body.
+         */
+        private Subquery<Long> undeterminedPoisonSubquery(Scope scope, Scope.ResolvedRelation ref,
+                                                          SubqueryBodyBuilder bodyBuilder) {
+            ChainSubquery<Long> cs = chainSubquery(Long.class, scope, ref);
+            cs.sub().select(undeterminedPoisonTerm(cs, bodyBuilder));
+            return cs.sub();
+        }
+
+        /**
+         * {@code NULLIF(COALESCE(MAX(CASE WHEN body THEN 0 WHEN NOT body THEN 0 ELSE 1 END), 0), 1)}
+         * — 0 when every element body is determined (either WHEN taken; also the empty
+         * collection via COALESCE), SQL NULL when at least one element body is UNKNOWN (both
+         * WHENs skipped → ELSE 1 dominates the MAX → NULLIF). The body is translated once per
+         * polarity (stateful negation — see {@link TriPredicate#not}).
+         */
+        private jakarta.persistence.criteria.Expression<Long> undeterminedPoisonTerm(
+                ChainSubquery<?> cs, SubqueryBodyBuilder bodyBuilder) {
+            jakarta.persistence.criteria.Expression<Long> determined = cb.<Long>selectCase()
+                    .when(bodyBuilder.build(cs.sub(), cs.tailJoin(), cs.rebasedOuter()), 0L)
+                    .when(tri.not(bodyBuilder.build(cs.sub(), cs.tailJoin(), cs.rebasedOuter())), 0L)
+                    .otherwise(1L);
+            return cb.nullif(cb.coalesce(cb.max(determined), 0L), 1L);
         }
 
         @FunctionalInterface
@@ -1980,10 +2121,11 @@ public final class SpringDataQueryPlanAdapter {
          *       joining only the tail attribute off the anchor would either fail at query-build
          *       time or silently query a same-named collection on the wrong entity.</li>
          * </ul>
-         * EXISTS over the join chain and COUNT over {@code tailJoin} therefore express
-         * exists/in/hasIntersection membership and {@code size()} of the flattened union with
-         * the same element set, so the tri-state unknown-element machinery composes with chains
-         * unchanged (its COUNT subqueries traverse the identical chain).
+         * EXISTS over the join chain, aggregate scoring over {@code tailJoin}
+         * ({@link #macroScoreSubquery}/{@link #strictMatchCountSubquery}) and COUNT over
+         * {@code tailJoin} therefore express exists/in/hasIntersection membership and
+         * {@code size()} of the flattened union with the same element set, so the tri-state
+         * unknown-element machinery composes with chains unchanged.
          */
         private <T> ChainSubquery<T> chainSubquery(Class<T> resultType, Scope scope,
                                                    Scope.ResolvedRelation ref) {
