@@ -1,7 +1,7 @@
 plugins {
     java
-    id("org.springframework.boot") version "3.5.1"
-    id("io.spring.dependency-management") version "1.1.6"
+    id("org.springframework.boot") version "3.5.16"
+    id("io.spring.dependency-management") version "1.1.7"
 }
 
 group = "dev.cerbos.example"
@@ -24,10 +24,10 @@ dependencies {
 
     // Pulled in via the composite-build include in settings.gradle.kts — points at ../
     implementation("dev.cerbos:cerbos-spring-data:0.1.0-alpha.1")
-    implementation("dev.cerbos:cerbos-sdk-java:0.18.0")
+    implementation("dev.cerbos:cerbos-sdk-java:0.19.0")
     // Match the protobuf-java gencode the SDK was generated against; older versions throw
     // RuntimeVersion$ProtobufRuntimeVersionException at first message decode.
-    implementation("com.google.protobuf:protobuf-java:4.33.5")
+    implementation("com.google.protobuf:protobuf-java:4.35.1")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
 }

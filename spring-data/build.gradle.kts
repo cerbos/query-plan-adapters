@@ -18,40 +18,40 @@ repositories {
 }
 
 dependencies {
-    implementation("dev.cerbos:cerbos-sdk-java:0.18.0")
+    implementation("dev.cerbos:cerbos-sdk-java:0.19.0")
     // Must match the gencode version cerbos-sdk-java was generated against (see the README
     // "Pin protobuf-java" gotcha) — older runtimes throw ProtobufRuntimeVersionException.
-    implementation("com.google.protobuf:protobuf-java:4.33.5")
+    implementation("com.google.protobuf:protobuf-java:4.35.1")
     // Spring Data JPA + Jakarta Persistence are provided by the consuming application's
     // Spring Boot BOM (or equivalent). Declaring them as `compileOnly` keeps them out of
     // the published POM as transitive dependencies so they don't pin a specific version on
     // downstream consumers — matching how Spring Data JPA itself marks `hibernate-core`
     // as `<optional>true</optional>`.
-    compileOnly("org.springframework.data:spring-data-jpa:3.5.1")
+    compileOnly("org.springframework.data:spring-data-jpa:3.5.13")
     compileOnly("jakarta.persistence:jakarta.persistence-api:3.2.0")
     // Hibernate is needed only to compile MySqlDoubleCastFunctionContributor (the MySQL
     // IEEE double-cast registration) and the adapter's classpath-guarded probe for it.
     // `compileOnly` for the same reason as Spring Data JPA above: the consuming
     // application provides its own Hibernate, and the adapter degrades gracefully (plain
     // cb.toDouble casts) when Hibernate is absent at runtime.
-    compileOnly("org.hibernate.orm:hibernate-core:6.6.18.Final")
+    compileOnly("org.hibernate.orm:hibernate-core:6.6.54.Final")
 
-    testImplementation("org.springframework.data:spring-data-jpa:3.5.1")
+    testImplementation("org.springframework.data:spring-data-jpa:3.5.13")
     testImplementation("jakarta.persistence:jakarta.persistence-api:3.2.0")
-    testImplementation(platform("org.junit:junit-bom:5.12.2"))
+    testImplementation(platform("org.junit:junit-bom:5.14.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")
-    testImplementation("org.testcontainers:testcontainers:1.21.3")
-    testImplementation("org.testcontainers:junit-jupiter:1.21.3")
+    testImplementation("org.testcontainers:testcontainers:1.21.4")
+    testImplementation("org.testcontainers:junit-jupiter:1.21.4")
     // Real-database legs for AdversarialConformanceTest (selected via ADAPTER_TEST_DB /
     // -Dadapter.test.db): PostgreSQL and MySQL containers + their JDBC drivers.
-    testImplementation("org.testcontainers:postgresql:1.21.3")
-    testImplementation("org.testcontainers:mysql:1.21.3")
-    testRuntimeOnly("org.postgresql:postgresql:42.7.7")
-    testRuntimeOnly("com.mysql:mysql-connector-j:9.3.0")
-    testImplementation("org.hibernate.orm:hibernate-core:6.6.18.Final")
-    testImplementation("com.h2database:h2:2.3.232")
+    testImplementation("org.testcontainers:postgresql:1.21.4")
+    testImplementation("org.testcontainers:mysql:1.21.4")
+    testRuntimeOnly("org.postgresql:postgresql:42.7.13")
+    testRuntimeOnly("com.mysql:mysql-connector-j:9.7.0")
+    testImplementation("org.hibernate.orm:hibernate-core:6.6.54.Final")
+    testImplementation("com.h2database:h2:2.4.240")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
-    testRuntimeOnly("org.slf4j:slf4j-simple:2.0.17")
+    testRuntimeOnly("org.slf4j:slf4j-simple:2.0.18")
 }
 
 tasks.test {
