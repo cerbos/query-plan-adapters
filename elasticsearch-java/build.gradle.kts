@@ -15,7 +15,7 @@ repositories {
 }
 
 dependencies {
-    implementation("dev.cerbos:cerbos-sdk-java:0.18.0")
+    implementation("dev.cerbos:cerbos-sdk-java:0.19.0")
     implementation("com.google.protobuf:protobuf-java:4.35.1")
 
     testImplementation(platform("org.junit:junit-bom:6.1.2"))
