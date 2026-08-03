@@ -39,8 +39,11 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
 
+      # `npm run typecheck` is NOT run here: src/integration.test.ts and
+      # src/adversarial.test.ts import convex/_generated/api.js, which is produced by
+      # `npx convex codegen` against a live backend and is gitignored. It runs in the
+      # integration-test job instead, right after codegen.
       - run: npm install
-      - run: npm run typecheck
       - run: npm run test
 
   integration-test:
@@ -101,6 +104,10 @@ jobs:
           CONVEX_SELF_HOSTED_URL: http://127.0.0.1:3210
           CONVEX_SELF_HOSTED_ADMIN_KEY: ${{ steps.convex-key.outputs.key }}
         run: npx convex codegen
+
+      # Runs here rather than in unit-test: the harnesses import the generated API above.
+      - name: Type-check (including the backend-dependent harnesses)
+        run: npm run typecheck
 
       - name: Run integration tests
         env:
