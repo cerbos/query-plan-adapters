@@ -1,0 +1,57 @@
+// Prisma 6 client for the shared adversarial differential harness. Keep the data model in
+// lockstep with schema.adversarial.prisma; only the generator and datasource configuration
+// differ so each matrix leg executes through a genuinely version-matched client.
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma-adversarial-v6"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev-adversarial.db"
+}
+
+model AdversarialResource {
+  id              String                @id
+  aBool           Boolean
+  aString         String
+  aNumber         Int
+  aDouble         Float?
+  aOptionalString String?
+  createdBy       String
+  scope           String?
+  createdAt       DateTime?
+  tags            AdversarialTag[]
+  categories      AdversarialCategory[]
+}
+
+model AdversarialTag {
+  id         String              @id @default(cuid())
+  tagId      String
+  name       String?
+  resource   AdversarialResource @relation(fields: [resourceId], references: [id])
+  resourceId String
+}
+
+model AdversarialCategory {
+  id            String                   @id @default(cuid())
+  name          String
+  resource      AdversarialResource      @relation(fields: [resourceId], references: [id])
+  resourceId    String
+  subCategories AdversarialSubCategory[]
+}
+
+model AdversarialSubCategory {
+  id         String              @id @default(cuid())
+  name       String
+  category   AdversarialCategory @relation(fields: [categoryId], references: [id])
+  categoryId String
+  labels     AdversarialLabel[]
+}
+
+model AdversarialLabel {
+  id            String                 @id @default(cuid())
+  name          String?
+  subCategory   AdversarialSubCategory @relation(fields: [subCategoryId], references: [id])
+  subCategoryId String
+}

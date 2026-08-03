@@ -1,0 +1,7 @@
+{
+  "action": "p-has",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_ALWAYS_ALLOWED"
+  }
+}

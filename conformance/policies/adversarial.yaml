@@ -68,6 +68,30 @@ resourcePolicy:
         match:
           expr: R.attr.aString.endsWith("\\")
 
+    # '[' must be escaped: T-SQL LIKE treats '[...]' as a character class even under an
+    # ESCAPE clause (unescaped '[SEC]%' would match the d2 seed "Secret" and miss the d1
+    # seed "[SEC]ret" on SQL Server). On H2/PostgreSQL/MySQL — the three oracle legs —
+    # '\[' with ESCAPE must stay a literal '[': d1 in, d2 out, proving the escape is a
+    # semantic no-op on those dialects.
+    - actions: ["like-bracket"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aString.startsWith("[SEC]")
+
+    # -- case sensitivity: CEL string equality is exact and case-sensitive, so the c1 seed
+    # (aString "One") is DENIED here. A case-insensitive database collation (MySQL default
+    # utf8mb4_0900_ai_ci, SQL Server *_CI_*) matches it anyway — the differential oracle
+    # turns that into a test failure, proving the over-grant. See the README's
+    # "Database collation requirements" section.
+    - actions: ["cs-eq"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aString == "one"
+
     # -- string edge values --
     - actions: ["unicode-eq"]
       effect: EFFECT_ALLOW
@@ -367,6 +391,36 @@ resourcePolicy:
       condition:
         match:
           expr: 'R.attr.aNumber + 1.0 > R.attr.aNumber * 2.0'
+
+    # -- IEEE add-solve probes: eq/ne over field + FRACTIONAL constant. An algebraic solve
+    # computes 0.1 - 0.7 = exactly -0.6 in Java, but IEEE subtraction does not invert IEEE
+    # addition: check(aDouble=-0.6) DENIES eq because -0.6 + 0.7 == 0.09999999999999998 !=
+    # 0.1 (and ALLOWS ne). The a1 seed holds aDouble=-0.6 so a pre-solved `a_double = -0.6`
+    # filter diverges from the oracle in both directions; the adapter must lower these to
+    # SQL-side double arithmetic like the ordering operators.
+    - actions: ["arith-add-eq-frac"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aDouble + 0.7 == 0.1'
+
+    - actions: ["arith-add-ne-frac"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aDouble + 0.7 != 0.1'
+
+    # Exactly-representable witness: 0.25 + 0.5 == 0.75 IS exact in binary floating point,
+    # so the a2 seed (aDouble=0.25) must be INCLUDED — pins that the SQL lowering of eq is
+    # not just always-false.
+    - actions: ["arith-add-eq-frac-exact"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aDouble + 0.5 == 0.75'
 
     # ==================== clean-room probes (coverage gap hunt) ====================
 
@@ -691,3 +745,339 @@ resourcePolicy:
       condition:
         match:
           expr: 'size(R.attr.tags) >= 1.5'
+
+    # ==================== size(string) thresholds outside int range ====================
+    # The planner delivers giant integer constants verbatim (PDP-verified — not folded).
+    # cb.length is Expression<Integer>, so an unguarded (int) narrowing cast wrapped these
+    # (4294967296 → 0), turning `size(aString) > 4294967296` into LENGTH(a_string) > 0 —
+    # every non-empty row returned while check() denies ALL rows (no string has 2^32
+    # chars). The fixed adapter folds statically: gt huge → always-false.
+    - actions: ["size-huge-gt"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'size(R.attr.aString) > 4294967296'
+
+    # The mirror arm: lt huge is true for every PRESENT string (check() allows all seeds —
+    # every seed has aString set, including the empty a8), while the wrapped translation
+    # LENGTH(a_string) < 0 excluded everything.
+    - actions: ["size-huge-lt"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'size(R.attr.aString) < 4294967296'
+
+    # ==================== constant NaN / ±Infinity ordering ====================
+    # CEL/IEEE define every ordering comparison involving NaN as false. The planner does
+    # NOT fold div(0,0): the else arm below arrives as an unfolded div(0,0) subtree, so
+    # the adapter folds it to NaN in Java and must order with IEEE semantics — a
+    # Double.compare total order ranks NaN above every number and would turn the else arm
+    # into always-true, returning every aBool=false row the PDP denies.
+    - actions: ["nan-ord-ternary"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '(R.attr.aBool ? 1.0 : 0.0/0.0) > 0.5'
+
+    # Value-first spelling: the planner preserves source order, so the mirrored branch
+    # comparison places the folded NaN on the normalized LEFT (lt → gt divergence arm).
+    - actions: ["nan-ord-ternary-vf"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '0.5 < (R.attr.aBool ? 1.0 : 0.0/0.0)'
+
+    # NaN on the RIGHT of the comparison (ternary vs ternary — both sides stay
+    # expressions, so no mirror moves the NaN): le(0.5, NaN) must also be false.
+    - actions: ["nan-ord-le"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '(R.attr.aBool ? 1.0/1.0 : 1.0/2.0) <= (R.attr.aBool ? 0.5 : 0.0/0.0)'
+
+    # ±Infinity sanity: infinities are ORDERED normally in IEEE space (+Inf > 0.5 allows,
+    # -Inf > 0.5 denies) — they must not be excluded the way NaN is.
+    - actions: ["nan-ord-inf"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '(R.attr.aBool ? 1.0/0.0 : -1.0/0.0) > 0.5'
+
+    # ==================== hierarchy operators (hier-*) ====================
+    # Both operand orders for each operator, plus LIKE-metacharacter path segments. The
+    # planner preserves source order (PDP-verified: hierarchy(...) wrappers survive to the
+    # plan verbatim in both orders), so field-first spellings put hierarchy(variable) FIRST:
+    # when the field lands on the ANCESTOR side the adapter emits a strict-prefix IN list,
+    # and when it lands on the DESCENDANT side an escaped prefix LIKE. ancestorOf and
+    # descendentOf are STRICT (a path is never its own ancestor/descendant — the a3/b4
+    # equal-path seeds pin this); overlaps is inclusive. The scope seeds also include
+    # sibling STRING prefixes that are not PATH prefixes ("dept.engineering",
+    # "dept.eng.platform2") and unescaped-wildcard traps (b2/b3) — see scopeFor(...) in
+    # AdversarialConformanceTest.
+
+    # field-first ancestorOf → scope IN ('dept', 'dept.eng') — the strict-prefix IN list.
+    - actions: ["hier-ancestor-ff"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'hierarchy(R.attr.scope).ancestorOf(hierarchy("dept.eng.platform"))'
+
+    # constant-first ancestorOf → scope LIKE 'dept.eng.%' (strict descendants only).
+    - actions: ["hier-ancestor-cf"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'hierarchy("dept.eng").ancestorOf(hierarchy(R.attr.scope))'
+
+    # field-first descendentOf → scope LIKE 'dept.eng.%'.
+    - actions: ["hier-descendent-ff"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'hierarchy(R.attr.scope).descendentOf(hierarchy("dept.eng"))'
+
+    # constant-first descendentOf → the FIELD is the ancestor → strict-prefix IN list.
+    - actions: ["hier-descendent-cf"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'hierarchy("dept.eng.platform").descendentOf(hierarchy(R.attr.scope))'
+
+    # field-first overlaps → IN ('dept') OR = 'dept.eng' OR LIKE 'dept.eng.%' (inclusive).
+    - actions: ["hier-overlaps-ff"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'hierarchy(R.attr.scope).overlaps(hierarchy("dept.eng"))'
+
+    # constant-first overlaps → the same union with the operands mirrored.
+    - actions: ["hier-overlaps-cf"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'hierarchy("dept.eng").overlaps(hierarchy(R.attr.scope))'
+
+    # metachar LIKE branch: the prefix '50%:a_b:' must be escaped ('%'/'_' literal). The
+    # b2 seed ("50x:a_b:y") is the unescaped-% trap, b3 ("50%:aXb:y") the unescaped-_ trap,
+    # and b4 ("50%:a_b") the equal-path strictness trap.
+    - actions: ["hier-meta-like"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'hierarchy(R.attr.scope, ":").descendentOf(hierarchy("50%:a_b", ":"))'
+
+    # metachar IN branch: strict prefixes ('50%', '50%.a_b') compared by equality — the
+    # a9/b6 seeds match; no pattern matching may occur.
+    - actions: ["hier-meta-in"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'hierarchy(R.attr.scope).ancestorOf(hierarchy("50%.a_b.x"))'
+
+    # '[' in a path segment routes through the prefix-LIKE branch: the pattern must escape
+    # it as '\[' (SQL Server character classes ignore ESCAPE). The d1 scope
+    # ("[env]:prod:eu") is the literal-bracket descendant; d2 ("e:prod:eu") is the row an
+    # unescaped '[env]' class would match one character of on SQL Server.
+    - actions: ["hier-bracket"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'hierarchy(R.attr.scope, ":").descendentOf(hierarchy("[env]:prod", ":"))'
+
+    # -- timestamp(field) vs constant-instant comparisons (ts-*) --
+    # Wire shape (PDP-verified): the planner folds now()-duration arithmetic to a constant
+    # instant and re-wraps it in timestamp("<RFC-3339>"); both operand orders keep policy
+    # source order (both sides are EXPRESSION nodes — no normalization applies), so the
+    # value-first form below exercises the adapter's mirroring, not inversion.
+
+    # The retention-cutoff / time-window shape: rows older than 24h. now() is evaluated at
+    # PLAN time; the seeds are split firmly before 2026 and after 2036 so the boundary never
+    # lands near a seed. a3 has no created_at: timestamp(missing attr) is a CEL error →
+    # check() denies, and the SQL comparison over NULL excludes the row — both sides agree.
+    - actions: ["ts-window"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'timestamp(R.attr.createdAt) < now() - duration("24h")'
+
+    # Value-first form of the same window: gt(timestamp(constant), timestamp(variable)) on
+    # the wire. An inversion bug (translating lt instead of the mirrored gt) flips the
+    # entire included set — the oracle catches it on every seed.
+    - actions: ["ts-vf"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'now() - duration("24h") > timestamp(R.attr.createdAt)'
+
+    # Instant equality against a literal (a4 is the exact-match witness).
+    - actions: ["ts-eq"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'timestamp(R.attr.createdAt) == timestamp("2024-06-01T00:00:00Z")'
+
+    # The same instant expressed at a non-UTC offset: CEL timestamp equality is INSTANT
+    # equality (PDP-verified), so a4 must still match — pins the adapter's offset
+    # normalization (OffsetDateTime.parse fallback → Instant).
+    - actions: ["ts-eq-offset"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'timestamp(R.attr.createdAt) == timestamp("2024-06-01T02:00:00+02:00")'
+
+    # ne: allows every row EXCEPT the equal one — and except a3 (NULL created_at), whose
+    # missing attribute errors at check time while SQL three-valued logic excludes it.
+    - actions: ["ts-ne"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'timestamp(R.attr.createdAt) != timestamp("2024-06-01T00:00:00Z")'
+
+    # ==================== in-lists containing null ====================
+    # `R.attr.owner in [..., null]` compiles and the planner emits the null element
+    # VERBATIM in the value list; check() ALLOWS an explicitly-null attribute (CEL
+    # `null in [..., null]` is true). `owner` maps to the a_optional_string column, and —
+    # unlike aOptionalString — the oracle sends an EXPLICIT null attribute for NULL columns,
+    # matching the adapter's eq-null → IS NULL convention (the planner itself folds
+    # `x in [null]` to `eq(x, null)`). The null element must become an IS NULL disjunct:
+    # `IN (nonNulls) OR IS NULL`; a raw `IN (..., NULL)` silently excludes null rows and
+    # makes the negation UNKNOWN everywhere.
+
+    # Mixed list: matching ("x" → a3, "one_two" → b1), null (a2/a4/a8/c2), non-matching rest.
+    - actions: ["in-null-elem-mixed"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.owner in ["x", "one_two", null]'
+
+    # Negation: three-valued trap — over `IN (..., NULL)` the negation returned NOTHING.
+    - actions: ["in-null-elem-neg"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(R.attr.owner in ["x", "one_two", null])'
+
+    # Degenerate all-null list: the planner folds this to eq(owner, null) → pure IS NULL.
+    - actions: ["in-null-elem-only"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.owner in [null]'
+
+    - actions: ["in-null-elem-only-neg"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(R.attr.owner in [null])'
+
+    # Relation variant: `null in collection` is true iff the collection holds a null
+    # element (tagNames projects tags.name; b5/b6 hold NULL-name tags and the oracle sends
+    # those as explicit null list elements) → EXISTS(member IS NULL).
+    - actions: ["in-null-elem-rel"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'null in R.attr.tagNames'
+
+    # Negation: rows with no null member — including EMPTY collections (`null in []` is
+    # false, so the negation allows them).
+    - actions: ["in-null-elem-rel-neg"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(null in R.attr.tagNames)'
+
+    # hasIntersection with a null element behaves like `in` (PDP-verified: allows
+    # tagNames=[null]): the null element intersects collections holding a null member,
+    # so the shared EXISTS translation gains the same IS NULL disjunct. b5/b6 (NULL-name
+    # tags) plus the "public"-tagged rows must come back.
+    - actions: ["in-null-elem-hasint"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'hasIntersection(R.attr.tagNames, ["public", null])'
+
+    # ==================== in(variable, variable) ====================
+    # Attribute-in-attribute membership: the planner emits in(variable, variable) VERBATIM,
+    # member first (PDP-verified). `owner` is the explicit-null scalar convention and
+    # `tagNames` projects tags.name with NULL names as explicit null elements, so the seeds
+    # exercise every check()-verified branch: match (a9/b4 "same"/"mirror"), no match, empty
+    # collection (`x in []` is false — negation allows), null scalar vs null element
+    # (e1: `null in [null]` is TRUE), and null scalar without a null element (a4/a8:
+    # false — negation allows).
+    - actions: ["in-var-var"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.owner in R.attr.tagNames'
+
+    - actions: ["in-var-var-neg"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(R.attr.owner in R.attr.tagNames)'
+
+    # ==================== depth-3 nested collection macros ====================
+    # Three macro levels (categories → subCategories → labels). Pins that the single-
+    # subquery-per-polarity macro translation preserves tri-state semantics through deep
+    # nesting: a1 is the true witness (label "gold"), a6 is the error witness (a label with
+    # NO name — the inner lambda errors, no true sibling absorbs it, and the error must
+    # propagate up through BOTH outer exists levels → deny), a8 has labels but no "gold"
+    # (determined false), c1 is the case witness ("Gold" ≠ "gold": check() denies; a
+    # case-insensitive DB collation would over-include it), and rows without categories are
+    # exists-over-empty → false.
+    - actions: ["macro-depth3-exists"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.categories.exists(c, c.subCategories.exists(s, s.labels.exists(l, l.name == "gold")))'
+
+    # The negation: rows where the depth-3 exists is determined-FALSE must be ALLOWED, while
+    # the a6 error stays an error under NOT (deny) — the leak the tri-state machinery exists
+    # to prevent (NOT(UNKNOWN) must stay UNKNOWN, never flip to TRUE).
+    - actions: ["macro-depth3-not-exists"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!R.attr.categories.exists(c, c.subCategories.exists(s, s.labels.exists(l, l.name == "gold")))'
+
+    # all at the middle level: a6's erroring label makes the inner exists error, all() has no
+    # false witness to absorb it → error → deny; a8's labels hold no "gold", so its inner
+    # exists is determined-false → all() false; a1 is the true witness.
+    - actions: ["macro-depth3-all"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.categories.exists(c, c.subCategories.all(s, s.labels.exists(l, l.name == "gold")))'

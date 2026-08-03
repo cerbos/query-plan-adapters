@@ -19,8 +19,11 @@ model AdversarialResource {
   aBool           Boolean
   aString         String
   aNumber         Int
+  aDouble         Float?
   aOptionalString String?
   createdBy       String
+  scope           String?
+  createdAt       DateTime?
   tags            AdversarialTag[]
   categories      AdversarialCategory[]
 }
@@ -48,4 +51,12 @@ model AdversarialSubCategory {
   name       String
   category   AdversarialCategory @relation(fields: [categoryId], references: [id])
   categoryId String
+  labels     AdversarialLabel[]
+}
+
+model AdversarialLabel {
+  id            String                     @id @default(cuid())
+  name          String?
+  subCategory   AdversarialSubCategory     @relation(fields: [subCategoryId], references: [id])
+  subCategoryId String
 }

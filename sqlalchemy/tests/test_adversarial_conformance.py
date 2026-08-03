@@ -18,21 +18,26 @@ error — UNKNOWN in SQL — and must stay excluded under BOTH polarities).
 """
 
 import json
+import math
 import os
+from datetime import datetime
 from typing import Any, Dict, List, Set
 
 import pytest
 from cerbos.sdk.client import CerbosClient
 from cerbos.sdk.container import CerbosContainer
-from cerbos.sdk.model import Principal, Resource, ResourceDesc
+from cerbos.sdk.model import PlanResourcesFilterKind, Principal, Resource, ResourceDesc
 
 from cerbos_sqlalchemy import get_query
 from sqlalchemy import (
     Boolean,
     Column,
+    DateTime,
+    Float,
     ForeignKey,
     Integer,
     String,
+    and_,
     case,
     create_engine,
     event,
@@ -43,9 +48,11 @@ from sqlalchemy import (
     literal,
     not_,
     null,
+    or_,
     select,
     true,
 )
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import declarative_base
 
 CONFORMANCE_DIR = os.path.realpath(
@@ -62,16 +69,13 @@ with open(os.path.join(CONFORMANCE_DIR, "CERBOS_VERSION"), encoding="utf-8") as 
 SEEDS: List[Dict[str, Any]] = SEEDS_FILE["seeds"]
 RESOURCE_KIND: str = SEEDS_FILE["resourceKind"]
 
-# Conformance actions this adapter genuinely cannot express, asserted as loud
-# failures instead of oracle matches. Currently EMPTY: SQLAlchemy expresses the
-# full conformance list (correlated subqueries, COUNT thresholds, CASE
-# ternaries, field-to-field ESCAPE'd LIKE) that Prisma's filter language could
-# not.
-#
-# TODO: if this ever gains entries, move them to conformance/actions.json
-# `adapterUnsupported.sqlalchemy` (the shared corpus is not editable from this
-# change).
-SQLALCHEMY_UNSUPPORTED: Dict[str, str] = {}
+# Capability classifications come from the shared manifest. Unsupported
+# conformance actions must throw; globally-unsupported actions promoted for
+# this adapter are instead checked against the PDP oracle.
+SQLALCHEMY_UNSUPPORTED: Dict[str, str] = {
+    item["action"]: item["reason"]
+    for item in ACTIONS_FILE["adapterUnsupported"].get("sqlalchemy", [])
+}
 
 # Globally-`expectedUnsupported` planner shapes that this adapter DOES
 # translate: `matches` maps to SQLAlchemy's regexp_match, and on this harness's
@@ -81,11 +85,14 @@ SQLALCHEMY_UNSUPPORTED: Dict[str, str] = {}
 # across backends — CEL is RE2 — so on other databases semantics are
 # best-effort; recorded for corpus triage rather than regressing a documented
 # adapter feature to a throw.)
-SQLALCHEMY_SUPPORTED_DESPITE_EXPECTED_UNSUPPORTED = {"p-matches"}
+SQLALCHEMY_SUPPORTED_EXPECTED = {
+    item["action"]
+    for item in ACTIONS_FILE.get("adapterSupportedExpected", {}).get("sqlalchemy", [])
+}
 
 ORACLE_ACTIONS = [
     a for a in ACTIONS_FILE["conformance"] if a not in SQLALCHEMY_UNSUPPORTED
-] + sorted(SQLALCHEMY_SUPPORTED_DESPITE_EXPECTED_UNSUPPORTED)
+] + sorted(SQLALCHEMY_SUPPORTED_EXPECTED)
 # Globally-unsupported planner shapes plus this adapter's own unsupported list:
 # translation (or execution) must fail loudly, never produce a silently-wrong
 # filter.
@@ -94,7 +101,7 @@ THROWING_ACTIONS = sorted(
         {u["action"] for u in ACTIONS_FILE["expectedUnsupported"]}
         | set(SQLALCHEMY_UNSUPPORTED)
     )
-    - SQLALCHEMY_SUPPORTED_DESPITE_EXPECTED_UNSUPPORTED
+    - SQLALCHEMY_SUPPORTED_EXPECTED
 )
 
 
@@ -102,6 +109,63 @@ def _iso_for(seed: Dict[str, Any]) -> str:
     """Deterministic ISO instant per seed for the timestamp probe (see
     conformance/README.md): split around the probe's 2025-01-01 threshold."""
     return "2024-06-01T00:00:00Z" if seed["aNumber"] >= 2 else "2026-06-01T00:00:00Z"
+
+
+def _double_for(seed: Dict[str, Any]):
+    if seed["id"] == "a1":
+        return -0.6
+    if seed["id"] == "a2":
+        return 0.25
+    if seed["id"] == "a3":
+        return None
+    return seed["aNumber"] + 0.3
+
+
+def _timestamp_for(seed: Dict[str, Any]):
+    timestamps = {
+        "a1": "2020-03-15T10:30:00Z",
+        "a2": "2037-01-01T00:00:00Z",
+        "a3": None,
+        "a4": "2024-06-01T00:00:00Z",
+        "a5": "2020-03-15T10:30:00.123456Z",
+    }
+    value = timestamps.get(
+        seed["id"],
+        "2036-06-06T06:06:06Z" if seed["aNumber"] >= 2 else "2021-05-05T05:05:05Z",
+    )
+    return datetime.fromisoformat(value.replace("Z", "+00:00")) if value else None
+
+
+def _scope_for(seed: Dict[str, Any]):
+    return {
+        "a1": "dept",
+        "a2": "dept.eng",
+        "a3": "dept.eng.platform",
+        "a4": "dept.eng.platform.obs",
+        "a5": "dept.engineering",
+        "a6": "dept.sales",
+        "a8": "",
+        "a9": "50%",
+        "b1": "50%:a_b:x",
+        "b2": "50x:a_b:y",
+        "b3": "50%:aXb:y",
+        "b4": "50%:a_b",
+        "b5": "dept.eng.platform2",
+        "b6": "50%.a_b",
+        "c1": "Dept.Eng",
+        "c2": "dept.eng.",
+        "d1": "[env]:prod:eu",
+        "d2": "e:prod:eu",
+    }.get(seed["id"])
+
+
+def _labels_for(seed: Dict[str, Any]):
+    return {
+        "a1": ["gold", "silver"],
+        "a6": [None, "silver"],
+        "a8": ["silver"],
+        "c1": ["Gold"],
+    }.get(seed["id"], [])
 
 
 # ---------------------------------------------------------------------------
@@ -119,8 +183,11 @@ class AdvResource(AdvBase):
     a_bool = Column(Boolean, nullable=False)
     a_string = Column(String, nullable=False)
     a_number = Column(Integer, nullable=False)
+    a_double = Column(Float(precision=53), nullable=True)
     a_optional_string = Column(String, nullable=True)
     created_by = Column(String, nullable=False)
+    scope = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=True)
 
 
 class AdvTag(AdvBase):
@@ -146,6 +213,16 @@ class AdvSubCategory(AdvBase):
     id = Column(String, primary_key=True)
     name = Column(String, nullable=False)
     category_id = Column(String, ForeignKey("adversarial_category.id"), nullable=False)
+
+
+class AdvLabel(AdvBase):
+    __tablename__ = "adversarial_label"
+
+    id = Column(String, primary_key=True)
+    name = Column(String, nullable=True)
+    sub_category_id = Column(
+        String, ForeignKey("adversarial_sub_category.id"), nullable=False
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -190,6 +267,12 @@ TAGS = _Relation(
     # plans a tags exists INSIDE the categories lambda).
     correlate_targets=[AdvResource],
 )
+TAG_NAMES = _Relation(
+    "tagNames",
+    [AdvTag.resource_id == AdvResource.id],
+    correlate_targets=[AdvResource],
+    member_field=AdvTag.name,
+)
 CATEGORIES = _Relation(
     "categories",
     [AdvCategory.resource_id == AdvResource.id],
@@ -202,6 +285,11 @@ SUB_OF_CATEGORY = _Relation(
     "c.subCategories",
     [AdvSubCategory.category_id == AdvCategory.id],
     correlate_targets=[AdvCategory, AdvResource],
+)
+LABELS_OF_SUB = _Relation(
+    "s.labels",
+    [AdvLabel.sub_category_id == AdvSubCategory.id],
+    correlate_targets=[AdvSubCategory, AdvCategory, AdvResource],
 )
 # mainCategory.subCategories: the same two-hop chain flattened from the root —
 # the subquery must join THROUGH the intermediate category hop (which stays in
@@ -308,6 +396,13 @@ def _size_fn(target: Any, _: Any):
 
 
 def _has_intersection_fn(mapped: Any, values: Any):
+    if isinstance(mapped, _Relation):
+        if mapped.member_field is None:
+            raise ValueError(
+                f"hasIntersection over relation without member field: {mapped!r}"
+            )
+        return _exists_where(mapped, _scalar_membership(mapped.member_field, values))
+
     # hasIntersection(map(coll, x), list): map errors on any erroring element
     # (no absorption), so the error guard comes FIRST.
     if not (isinstance(mapped, tuple) and mapped[0] == "map"):
@@ -315,9 +410,36 @@ def _has_intersection_fn(mapped: Any, values: Any):
     _, rel, projected = mapped
     return case(
         (_exists_where(rel, projected.is_(None)), null()),
-        (_exists_where(rel, projected.in_(values)), true()),
+        (_exists_where(rel, _scalar_membership(projected, values)), true()),
         else_=false(),
     )
+
+
+def _scalar_membership(column: Any, values: Any):
+    members = values if isinstance(values, list) else [values]
+    non_nulls = [member for member in members if member is not None]
+    predicates = []
+    if non_nulls:
+        predicates.append(column.in_(non_nulls))
+    if len(non_nulls) != len(members):
+        predicates.append(column.is_(None))
+    return or_(*predicates) if predicates else false()
+
+
+def _relation_membership(relation: _Relation, value: Any):
+    if relation.member_field is None:
+        raise ValueError(f"in over relation without member field: {relation!r}")
+    member = relation.member_field
+    if value is None:
+        predicate = member.is_(None)
+    elif hasattr(value, "is_"):
+        predicate = or_(
+            member == value,
+            and_(member.is_(None), value.is_(None)),
+        )
+    else:
+        predicate = member == value
+    return _exists_where(relation, predicate)
 
 
 def _in_fn(column: Any, value: Any):
@@ -325,10 +447,10 @@ def _in_fn(column: Any, value: Any):
         # `value in R.attr.<chain>`: membership against the relation's member
         # column; rows with an empty chain are simply excluded (CEL
         # missing-attribute error → deny).
-        if column.member_field is None:
-            raise ValueError(f"in over relation without member field: {column!r}")
-        return _exists_where(column, column.member_field == value)
-    return column.in_(value) if isinstance(value, list) else column.in_([value])
+        return _relation_membership(column, value)
+    if isinstance(value, _Relation):
+        return _relation_membership(value, column)
+    return _scalar_membership(column, value)
 
 
 OPERATOR_OVERRIDES = {
@@ -349,12 +471,17 @@ ATTR_MAP = {
     "request.resource.attr.aBool": AdvResource.a_bool,
     "request.resource.attr.aString": AdvResource.a_string,
     "request.resource.attr.aNumber": AdvResource.a_number,
+    "request.resource.attr.aDouble": AdvResource.a_double,
     "request.resource.attr.aOptionalString": AdvResource.a_optional_string,
     "request.resource.attr.createdBy": AdvResource.created_by,
+    "request.resource.attr.owner": AdvResource.a_optional_string,
+    "request.resource.attr.scope": AdvResource.scope,
+    "request.resource.attr.createdAt": AdvResource.created_at,
     # obj.inner is not a real nested column — mirrors aString, the same trick
     # the spring-data and prisma reference harnesses use for the p-struct probe.
     "request.resource.attr.obj.inner": AdvResource.a_string,
     "request.resource.attr.tags": TAGS,
+    "request.resource.attr.tagNames": TAG_NAMES,
     "t": TAGS,
     "t.id": AdvTag.tag_id,
     "t.name": AdvTag.name,
@@ -363,6 +490,9 @@ ATTR_MAP = {
     "c.subCategories": SUB_OF_CATEGORY,
     "s": SUB_OF_CATEGORY,
     "s.name": AdvSubCategory.name,
+    "s.labels": LABELS_OF_SUB,
+    "l": LABELS_OF_SUB,
+    "l.name": AdvLabel.name,
     "request.resource.attr.mainCategory.subCategories": MAIN_SUB,
     "request.resource.attr.mainCategory.subNames": MAIN_SUBNAMES,
 }
@@ -381,8 +511,9 @@ def adv_engine():
     @event.listens_for(engine, "connect")
     def _configure(dbapi_conn, _):
         # CEL string matching is case-sensitive; SQLite's LIKE is
-        # case-insensitive by default. No REGEXP function is registered on
-        # purpose: `matches` (expectedUnsupported) must fail loudly.
+        # case-insensitive by default. SQLAlchemy's SQLite dialect supplies
+        # REGEXP for regexp_match(), so the manifest promotes p-matches into
+        # this adapter's oracle run.
         dbapi_conn.execute("PRAGMA case_sensitive_like = ON")
 
     AdvBase.metadata.create_all(engine)
@@ -391,6 +522,7 @@ def adv_engine():
     tag_rows = []
     category_rows = []
     sub_category_rows = []
+    label_rows = []
     for seed in SEEDS:
         resource_rows.append(
             {
@@ -398,8 +530,11 @@ def adv_engine():
                 "a_bool": seed["aBool"],
                 "a_string": seed["aString"],
                 "a_number": seed["aNumber"],
+                "a_double": _double_for(seed),
                 "a_optional_string": seed["aOptionalString"],
                 "created_by": _iso_for(seed),
+                "scope": _scope_for(seed),
+                "created_at": _timestamp_for(seed),
             }
         )
         for tag in seed["tags"]:
@@ -415,11 +550,19 @@ def adv_engine():
             )
             sub_category_rows.append(
                 {
-                    "id": f"{seed['id']}-sub{i}",
+                    "id": (sub_category_id := f"{seed['id']}-sub{i}"),
                     "name": sub_name,
                     "category_id": category_id,
                 }
             )
+            for label_index, label_name in enumerate(_labels_for(seed)):
+                label_rows.append(
+                    {
+                        "id": f"{seed['id']}-label{i}-{label_index}",
+                        "name": label_name,
+                        "sub_category_id": sub_category_id,
+                    }
+                )
 
     with engine.begin() as conn:
         conn.execute(insert(AdvResource.__table__), resource_rows)
@@ -429,6 +572,8 @@ def adv_engine():
             conn.execute(insert(AdvCategory.__table__), category_rows)
         if sub_category_rows:
             conn.execute(insert(AdvSubCategory.__table__), sub_category_rows)
+        if label_rows:
+            conn.execute(insert(AdvLabel.__table__), label_rows)
 
     yield engine
 
@@ -469,6 +614,11 @@ def _tag_attr(tag: Dict[str, Any]) -> Dict[str, Any]:
     return attr
 
 
+def _label_attr(name: Any) -> Dict[str, Any]:
+    """A NULL label name in the DB is a MISSING element attribute."""
+    return {"name": name} if name is not None else {}
+
+
 def _check_resource(seed: Dict[str, Any]) -> Resource:
     """Cerbos attributes mirroring exactly what the seeded DB row holds."""
     attr: Dict[str, Any] = {
@@ -478,8 +628,20 @@ def _check_resource(seed: Dict[str, Any]) -> Resource:
         "createdBy": _iso_for(seed),
         "obj": {"inner": seed["aString"]},
         "tags": [_tag_attr(t) for t in seed["tags"]],
+        # These two attributes deliberately use EXPLICIT nulls. Unlike the
+        # optional field above, CEL membership distinguishes null from missing.
+        "owner": seed["aOptionalString"],
+        "tagNames": [tag["name"] for tag in seed["tags"]],
         "categories": [
-            {"name": "business", "subCategories": [{"name": n}]}
+            {
+                "name": "business",
+                "subCategories": [
+                    {
+                        "name": n,
+                        "labels": [_label_attr(label) for label in _labels_for(seed)],
+                    }
+                ],
+            }
             for n in seed["subCategoryNames"]
         ],
     }
@@ -487,6 +649,12 @@ def _check_resource(seed: Dict[str, Any]) -> Resource:
     # it must deny (CEL error), matching SQL three-valued logic excluding the row.
     if seed["aOptionalString"] is not None:
         attr["aOptionalString"] = seed["aOptionalString"]
+    if (a_double := _double_for(seed)) is not None:
+        attr["aDouble"] = a_double
+    if (scope := _scope_for(seed)) is not None:
+        attr["scope"] = scope
+    if (created_at := _timestamp_for(seed)) is not None:
+        attr["createdAt"] = created_at.isoformat().replace("+00:00", "Z")
     # mainCategory mirrors the row's category graph as ONE nested object (the
     # seeder creates at most one category per seed); rows without a category get
     # NO attribute — a CEL missing-attr error (deny), matching the adapter's
@@ -542,6 +710,54 @@ class TestAdversarialConformance:
         # a silently-wrong filter is the only unacceptable outcome.
         with pytest.raises(Exception):
             _adapter_filtered_ids(adv_cerbos_client, adv_conn, action)
+
+    @pytest.mark.parametrize(
+        "action",
+        (
+            "nan-ord-ternary",
+            "nan-ord-ternary-vf",
+            "nan-ord-le",
+            "nan-ord-inf",
+        ),
+    )
+    def test_nonfinite_ordering_is_folded_before_postgresql_compilation(
+        self, action, adv_cerbos_client
+    ):
+        plan = adv_cerbos_client.plan_resources(
+            action, _principal(), ResourceDesc(RESOURCE_KIND)
+        )
+        query = get_query(
+            plan,
+            AdvResource,
+            ATTR_MAP,
+            operator_override_fns=OPERATOR_OVERRIDES,
+        )
+        compiled = query.compile(dialect=postgresql.dialect())
+
+        assert not any(
+            isinstance(value, float) and not math.isfinite(value)
+            for value in compiled.params.values()
+        )
+
+    def test_upstream_has_fold_overgrant_tripwire(self, adv_cerbos_client, adv_conn):
+        """Pin the PDP planner's known has() fold until the upstream fix lands.
+
+        The check API denies rows where ``aOptionalString`` is missing, while
+        the planner currently folds the same condition to ALWAYS_ALLOWED. The
+        adapter must translate that plan faithfully; this test keeps the one
+        intentional oracle divergence visible and fails when the image changes
+        so ``p-has`` can move back into the differential run.
+        """
+        action = "p-has"
+        plan = adv_cerbos_client.plan_resources(
+            action, _principal(), ResourceDesc(RESOURCE_KIND)
+        )
+        oracle = _oracle_allowed_ids(adv_cerbos_client, action)
+        all_ids = {seed["id"] for seed in SEEDS}
+
+        assert plan.filter.kind == PlanResourcesFilterKind.ALWAYS_ALLOWED
+        assert 0 < len(oracle) < len(all_ids)
+        assert _adapter_filtered_ids(adv_cerbos_client, adv_conn, action) == all_ids
 
     def test_oracle_is_not_degenerate(self, adv_cerbos_client):
         # Guard the guard: these actions must produce a non-empty, non-total

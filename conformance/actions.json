@@ -1,5 +1,5 @@
 {
-  "description": "Every action defined in policies/adversarial.yaml, grouped the same way as the reference (spring-data) harness. 'conformance' actions are expected to produce an oracle-matching filtered id set: adapterFilteredIds(action) == oracleAllowedIds(action) (see README.md). 'adapterUnsupported' lists, per adapter, conformance actions that adapter's query language genuinely cannot express -- the adapter must fail loudly (throw) for these, never emit a silently-wrong filter, and its harness asserts the throw instead of the oracle match. 'expectedUnsupported' actions are planner shapes NO adapter is expected to translate; every harness asserts a loud failure -- the 'message' field is spring-data's pinned wording and is illustrative only, not required verbatim in other languages. 'knownDivergences' lists action/adapter pairs where the reference implementation is intentionally excluded from the oracle run, with the reason; a new adapter should either match the oracle or add itself here with a linked follow-up issue.",
+  "description": "Every action defined in policies/adversarial.yaml, grouped against the Spring Data reference harness. 'conformance' actions must match the check() oracle. 'adapterUnsupported' lists conformance actions an adapter cannot express and must reject loudly. 'expectedUnsupported' lists shapes rejected by the reference; 'adapterSupportedExpected' records adapters that intentionally translate one of those shapes. 'knownDivergences' records upstream planner behavior that prevents an oracle comparison.",
   "conformance": [
     "vf-le", "vf-ge", "vf-ne",
     "in-single", "in-empty",
@@ -26,7 +26,21 @@
     "n-not-exists-one-null", "n-all-mixed-null", "n-not-all-null", "n-not-all-absorb",
     "cr-contains", "cr-startswith", "cr-endswith", "cr-startswith-concat",
     "cr-div-zero", "cr-size-frac-ge",
-    "w1-exists-chain", "w1-size-chain", "w1-in-chain", "w2-outer-relation"
+    "w1-exists-chain", "w1-size-chain", "w1-in-chain", "w2-outer-relation",
+    "like-bracket", "cs-eq",
+    "arith-add-eq-frac", "arith-add-ne-frac", "arith-add-eq-frac-exact",
+    "size-huge-gt", "size-huge-lt",
+    "nan-ord-ternary", "nan-ord-ternary-vf", "nan-ord-le", "nan-ord-inf",
+    "macro-depth3-exists", "macro-depth3-not-exists", "macro-depth3-all",
+    "hier-ancestor-ff", "hier-ancestor-cf",
+    "hier-descendent-ff", "hier-descendent-cf",
+    "hier-overlaps-ff", "hier-overlaps-cf",
+    "hier-meta-like", "hier-meta-in", "hier-bracket",
+    "ts-window", "ts-vf", "ts-eq", "ts-eq-offset", "ts-ne",
+    "in-null-elem-mixed", "in-null-elem-neg",
+    "in-null-elem-only", "in-null-elem-only-neg",
+    "in-null-elem-rel", "in-null-elem-rel-neg", "in-null-elem-hasint",
+    "in-var-var", "in-var-var-neg"
   ],
   "adapterUnsupported": {
     "prisma": [
@@ -48,7 +62,20 @@
       { "action": "cr-size-frac-ge", "reason": "Same relation-count limitation as size-threshold" },
       { "action": "w2-outer-relation", "reason": "Embeds a size(...) == 1 count threshold; same limitation as size-threshold" },
       { "action": "exists-one-multi", "reason": "exists_one requires counting matching elements, which Prisma where-filters cannot express; the adapter throws instead of silently degrading to exists" },
-      { "action": "n-not-exists-one-null", "reason": "Same exists_one counting limitation" }
+      { "action": "n-not-exists-one-null", "reason": "Same exists_one counting limitation" },
+      { "action": "arith-add-eq-frac", "reason": "Prisma filters cannot express column arithmetic, and algebraically solving fractional IEEE-754 addition is not reversible for every row" },
+      { "action": "arith-add-ne-frac", "reason": "Same fractional column-arithmetic limitation as arith-add-eq-frac" },
+      { "action": "arith-add-eq-frac-exact", "reason": "An exact corpus witness does not make the general column-addition predicate expressible; Prisma has no column arithmetic" },
+      { "action": "size-huge-gt", "reason": "Prisma has no string-length filter, so a giant size threshold remains inexpressible" },
+      { "action": "size-huge-lt", "reason": "Same string-length limitation as size-huge-gt" },
+      { "action": "hier-meta-like", "reason": "Hierarchy descendant prefixes require literal LIKE matching, but Prisma string filters cannot escape % or _; the adapter throws instead of treating them as wildcards" },
+      { "action": "in-var-var", "reason": "Comparing a related element column with an outer scalar column is cross-model, while Prisma field references are same-model only" },
+      { "action": "in-var-var-neg", "reason": "Same cross-model correlated comparison limitation as in-var-var, under negation" }
+    ]
+  },
+  "adapterSupportedExpected": {
+    "sqlalchemy": [
+      { "action": "p-matches", "reason": "SQLAlchemy's SQLite dialect supplies REGEXP support, and the adapter translates matches() through that database capability" }
     ]
   },
   "expectedUnsupported": [
@@ -59,7 +86,7 @@
   "knownDivergences": [
     {
       "action": "p-has",
-      "adapter": "spring-data",
+      "adapters": ["spring-data", "prisma", "drizzle", "sqlalchemy"],
       "reason": "The planner folds has(unknown attr) to KIND_ALWAYS_ALLOWED (a Cerbos planner bug, not an adapter bug), so the adapter returns all rows while check() denies rows where the attribute is missing. Excluded from the oracle run rather than asserted against.",
       "relatedIssue": null
     }

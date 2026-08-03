@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "spring-data/**"
+      - "conformance/**"
       - "policies/**"
       - ".github/workflows/spring-data.yaml"
   push:
@@ -21,10 +22,13 @@ jobs:
         java-version: ["17", "21"]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate conformance corpus
+        run: ../conformance/scripts/validate-corpus.sh
 
       - name: Setup JDK
-        uses: actions/setup-java@ad2b38190b15e4d6bdf0c97fb4fca8412226d287 # v5.3.0
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
         with:
           distribution: temurin
           java-version: ${{ matrix.java-version }}
@@ -34,3 +38,82 @@ jobs:
 
       - name: Build and test
         run: gradle build --no-daemon
+
+  # Runs the full suite with AdversarialConformanceTest (the differential check()-oracle)
+  # backed by a real database via Testcontainers instead of in-memory H2. Guards against
+  # dialect divergences H2 cannot surface — most importantly the collation over-grant
+  # documented in spring-data/README.md "Database collation requirements": the MySQL leg
+  # creates its schema with utf8mb4_0900_as_cs; the suite's mixed-case seeds fail the
+  # oracle comparison on MySQL's default case-insensitive collation.
+  #
+  # The MySQL leg runs TWICE: once with Connector/J's default client-side prepared
+  # statements (pins the adapter's `cast(... as double)` rendering — under the
+  # MySQLDialect decimal(53,20) cast, interpolated DECIMAL literals would evaluate the
+  # adapter's IEEE double arithmetic exactly and p-double-frac would fail; see the README
+  # "MySQL: keeping arithmetic IEEE-faithful" gotcha) and once with
+  # useServerPrepStmts=true (typed binds — the mode customers may opt into).
+  test-database:
+    strategy:
+      matrix:
+        include:
+          - database: postgres
+          - database: mysql
+          - database: mysql
+            server-prep-stmts: "true"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup JDK
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+
+      - name: Build and test (${{ matrix.database }})
+        run: gradle build --no-daemon
+        env:
+          ADAPTER_TEST_DB: ${{ matrix.database }}
+          ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS: ${{ matrix.server-prep-stmts || '' }}
+
+  # Compiles the standalone example app (a composite build over the adapter source — building
+  # the adapter alone never compiles it) and runs example/scripts/smoke.sh end-to-end: a live
+  # Cerbos PDP via docker compose, the Spring Boot app on H2, and row-set + PDP audit-log
+  # assertions for every (user, role, action) scenario. This is the repo's only end-to-end
+  # live-PDP row-set verification and the primary onboarding artifact, so an adapter API
+  # change that breaks the example must fail CI. On failure the script dumps the Cerbos
+  # container logs and the Spring Boot log before tearing the environment down.
+  example:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup JDK
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+        with:
+          # The example's Spring Boot 3.5.x Gradle plugin is validated against Gradle 8.x
+          # (smoke.sh's documented prerequisite), not the runner's floating preinstall.
+          gradle-version: "8.12"
+
+      - name: Build example
+        run: gradle -p example build --no-daemon
+
+      - name: Run smoke test
+        run: ./example/scripts/smoke.sh
+
+      # Full-stack regression tripwire: every scenario pins a historical adapter bug
+      # (PRs #273, #274, #275, #279, #285, #286) that would have returned a different
+      # row set — or an HTTP 500 — before its fix. See "Edge-case regression
+      # scenarios" in example/README.md.
+      - name: Run edge-case regression smoke test
+        run: ./example/scripts/smoke-edge-cases.sh

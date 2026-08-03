@@ -6,7 +6,9 @@ Current supported adapters:
 
 - [Convex](https://github.com/cerbos/query-plan-adapters/tree/main/convex)
 - [Drizzle ORM](https://github.com/cerbos/query-plan-adapters/tree/main/drizzle)
+- [Elasticsearch (Java)](https://github.com/cerbos/query-plan-adapters/tree/main/elasticsearch-java)
 - [LangChain / ChromaDB](https://github.com/cerbos/query-plan-adapters/tree/main/langchain-chromadb)
 - [Mongoose](https://github.com/cerbos/query-plan-adapters/tree/main/mongoose)
 - [Prisma](https://github.com/cerbos/query-plan-adapters/tree/main/prisma)
+- [Spring Data JPA](https://github.com/cerbos/query-plan-adapters/tree/main/spring-data)
 - [SQLAlchemy](https://github.com/cerbos/query-plan-adapters/tree/main/sqlalchemy)

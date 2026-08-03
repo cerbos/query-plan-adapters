@@ -26,7 +26,9 @@ An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanRe
 - `add`, `sub`, `mult`, `div` with a constant side are solved algebraically to a plain column
   comparison: `R.attr.aNumber + 1 > 2` → `{ aNumber: { gt: 1 } }` (Prisma where-filters cannot
   express column arithmetic). Multiplying/dividing by a negative constant mirrors directional
-  operators. Arithmetic on both sides of a comparison, or division BY a column, throws.
+  operators. Arithmetic on both sides of a comparison, division BY a column, and equality or
+  inequality over fractional addition throw. The latter cannot be solved reversibly in IEEE-754
+  arithmetic.
 - String concatenation solving: `P.attr.context == "projects:" + R.attr.id` → `{ id: { equals: "123" } }`
 
 #### Field-to-field comparisons
@@ -50,6 +52,8 @@ throw — Prisma only supports references between fields of the same model.
 - Collection mapping and filtering
 - Complex condition combinations
 - Type-safe field mappings
+- Timestamp comparisons against Prisma `DateTime` columns. Mark the field mapping with
+  `valueType: "dateTime"`; applying `timestamp()` to an untyped/string mapping throws.
 - Outer-column references inside collection expressions (e.g.
   `R.attr.tags.exists(t, t.name == "x" && R.attr.aBool)`) are hoisted or case-split so every
   filter lands on the model it belongs to
@@ -67,6 +71,27 @@ throw — Prisma only supports references between fields of the same model.
 - Counting: `exists_one`, `size()` thresholds other than empty/non-empty, and string-length
   comparisons throw (`_count` is not supported inside Prisma `where`).
 - Cross-model column comparisons throw (Prisma field references are same-model only).
+  This includes membership between an outer scalar column and a related collection column.
+
+#### Database collation is an authorization invariant
+
+Cerbos string comparisons are case-sensitive. Prisma delegates comparison semantics to the
+database collation, so a case-insensitive or accent-insensitive collation can make a generated
+authorization filter return rows that Cerbos would deny. Treat the database collation used by
+mapped authorization columns as part of the policy contract:
+
+- PostgreSQL: use a deterministic, case-sensitive collation and avoid `citext` or an
+  insensitive Prisma query mode for mapped fields.
+- MySQL/MariaDB: choose a case-sensitive (`_cs`) or binary collation rather than the common
+  case-insensitive (`_ci`) defaults.
+- SQL Server: use a case-sensitive (`_CS_`) collation rather than a case-insensitive (`_CI_`)
+  collation.
+- SQLite: do not apply `COLLATE NOCASE` to mapped fields, and verify the exact comparison
+  behavior of any database configuration or extension used in production.
+
+The adapter cannot override a column's collation in a Prisma `where` filter. See Prisma's
+[case-sensitivity documentation](https://docs.prisma.io/docs/orm/v6/prisma-client/queries/case-sensitivity)
+for provider-specific details.
 
 ## Requirements
 
@@ -462,9 +487,12 @@ The mapper configuration is also fully typed:
 ```ts
 type MapperConfig = {
   field?: string;
+  valueType?: "dateTime";
+  nullable?: boolean;
   relation?: {
     name: string;
     type: "one" | "many";
+    model?: string;
     field?: string;
     fields?: {
       [key: string]: MapperConfig; // Recursive for nested fields

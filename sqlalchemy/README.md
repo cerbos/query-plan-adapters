@@ -8,6 +8,20 @@ The following conditions are supported: `and`, `or`, `not`, `eq`, `ne`, `lt`, `g
 - Cerbos > v0.16
 - SQLAlchemy >= 1.4 / 2.0
 
+### Database collation requirements
+
+Cerbos CEL string and hierarchy comparisons are case-sensitive. The database
+columns used in `attr_map` must therefore use a case-sensitive collation for
+equality, membership, and the `LIKE` operations emitted by
+`contains`/`startsWith`/`endsWith` and hierarchy-prefix predicates.
+
+This is an authorization invariant: a case-insensitive database collation can
+silently over-grant access (for example, treating `One` as equal to `one`, or
+`Dept.Eng` as overlapping `dept.eng`). MySQL's common default `_ci` collations
+are case-insensitive; configure a case-sensitive or binary collation for mapped
+authorization columns. The adapter cannot enforce one portably because
+collation selection belongs to the database schema and dialect.
+
 ## Usage
 
 ```

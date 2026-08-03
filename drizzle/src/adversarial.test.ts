@@ -6,7 +6,7 @@ import { GRPC as Cerbos } from "@cerbos/grpc";
 import type { Principal, Resource, Value } from "@cerbos/core";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
-import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 import { queryPlanToDrizzle, PlanKind } from ".";
 import type { MapperEntry, RelationMapping } from ".";
@@ -61,10 +61,17 @@ interface AdapterUnsupportedEntry {
   reason: string;
 }
 
+interface KnownDivergence {
+  action: string;
+  adapters: string[];
+}
+
 interface ActionsFile {
   conformance: string[];
   adapterUnsupported?: Record<string, AdapterUnsupportedEntry[]>;
+  adapterSupportedExpected?: Record<string, AdapterUnsupportedEntry[]>;
   expectedUnsupported: UnsupportedShape[];
+  knownDivergences?: KnownDivergence[];
 }
 
 const seedsFile: SeedsFile = JSON.parse(
@@ -76,7 +83,7 @@ const actionsFile: ActionsFile = JSON.parse(
 const SEEDS = seedsFile.seeds;
 
 // Shapes the Drizzle adapter genuinely cannot express as SQL. Drizzle builds raw SQL
-// (COUNT subqueries, LENGTH(), field-to-field instr/substr matches, CASE ternaries,
+// (COUNT subqueries, LENGTH(), field-to-field REPLACE/SUBSTR matches, CASE ternaries,
 // WHERE-clause arithmetic), so the list is currently EMPTY. Kept as a LOCAL constant only
 // until conformance/actions.json gains an `adapterUnsupported.drizzle` key — move these
 // entries there when it does.
@@ -84,22 +91,142 @@ const DRIZZLE_UNSUPPORTED: AdapterUnsupportedEntry[] = [
   ...(actionsFile.adapterUnsupported?.["drizzle"] ?? []),
 ];
 
-const UNSUPPORTED_ACTIONS = new Set(DRIZZLE_UNSUPPORTED.map((u) => u.action));
-const ORACLE_ACTIONS = actionsFile.conformance.filter(
-  (action) => !UNSUPPORTED_ACTIONS.has(action)
+const DRIZZLE_SUPPORTED_EXPECTED = new Set(
+  (actionsFile.adapterSupportedExpected?.["drizzle"] ?? []).map(
+    (entry) => entry.action
+  )
 );
+
+const DRIZZLE_DIVERGENCES = new Set(
+  (actionsFile.knownDivergences ?? [])
+    .filter((entry) => entry.adapters.includes("drizzle"))
+    .map((entry) => entry.action)
+);
+
+const UNSUPPORTED_ACTIONS = new Set(DRIZZLE_UNSUPPORTED.map((u) => u.action));
+const EXPECTED_UNSUPPORTED_ACTIONS = new Set(
+  actionsFile.expectedUnsupported.map((entry) => entry.action)
+);
+const ORACLE_ACTIONS = [
+  ...actionsFile.conformance.filter(
+    (action) => !UNSUPPORTED_ACTIONS.has(action)
+  ),
+  ...[...DRIZZLE_SUPPORTED_EXPECTED].sort(),
+];
+type ThrowingAction = readonly [action: string, reason: string];
 // Globally unsupported planner shapes plus any declared Drizzle limitations: these must
 // fail loudly (translation throw, or — for p-matches, which translates to a REGEXP
 // predicate — a query-time error because this suite deliberately registers no REGEXP
 // UDF), never silently return a wrong id set.
-const THROWING_ACTIONS = [
-  ...DRIZZLE_UNSUPPORTED.map((u) => [u.action, u.reason] as const),
-  ...actionsFile.expectedUnsupported.map((u) => [u.action, u.shape] as const),
+const THROWING_ACTIONS: ThrowingAction[] = [
+  ...DRIZZLE_UNSUPPORTED.map(
+    (entry): ThrowingAction => [entry.action, entry.reason]
+  ),
+  ...actionsFile.expectedUnsupported
+    .filter((entry) => !DRIZZLE_SUPPORTED_EXPECTED.has(entry.action))
+    .map((entry): ThrowingAction => [entry.action, entry.shape]),
 ];
+
+const MANIFEST_ACTIONS = new Set([
+  ...actionsFile.conformance,
+  ...actionsFile.expectedUnsupported.map((entry) => entry.action),
+  ...DRIZZLE_SUPPORTED_EXPECTED,
+  ...DRIZZLE_DIVERGENCES,
+]);
 
 /** Deterministic ISO instant per seed for the timestamp probe: split around 2025-01-01. */
 function isoFor(seed: Seed): string {
   return seed.aNumber >= 2 ? "2024-06-01T00:00:00Z" : "2026-06-01T00:00:00Z";
+}
+
+function doubleFor(seed: Seed): number | null {
+  switch (seed.id) {
+    case "a1":
+      return -0.6;
+    case "a2":
+      return 0.25;
+    case "a3":
+      return null;
+    default:
+      return seed.aNumber + 0.3;
+  }
+}
+
+function scopeFor(seed: Seed): string | null {
+  switch (seed.id) {
+    case "a1":
+      return "dept";
+    case "a2":
+      return "dept.eng";
+    case "a3":
+      return "dept.eng.platform";
+    case "a4":
+      return "dept.eng.platform.obs";
+    case "a5":
+      return "dept.engineering";
+    case "a6":
+      return "dept.sales";
+    case "a8":
+      return "";
+    case "a9":
+      return "50%";
+    case "b1":
+      return "50%:a_b:x";
+    case "b2":
+      return "50x:a_b:y";
+    case "b3":
+      return "50%:aXb:y";
+    case "b4":
+      return "50%:a_b";
+    case "b5":
+      return "dept.eng.platform2";
+    case "b6":
+      return "50%.a_b";
+    case "c1":
+      return "Dept.Eng";
+    case "c2":
+      return "dept.eng.";
+    case "d1":
+      return "[env]:prod:eu";
+    case "d2":
+      return "e:prod:eu";
+    default:
+      return null;
+  }
+}
+
+function timestampFor(seed: Seed): string | null {
+  switch (seed.id) {
+    case "a1":
+      return "2020-03-15T10:30:00Z";
+    case "a2":
+      return "2037-01-01T00:00:00Z";
+    case "a3":
+      return null;
+    case "a4":
+      return "2024-06-01T00:00:00Z";
+    case "a5":
+      return "2020-03-15T10:30:00.123456Z";
+    default:
+      return seed.aNumber >= 2
+        ? "2036-06-06T06:06:06Z"
+        : "2021-05-05T05:05:05Z";
+  }
+}
+
+function labelsFor(seed: Seed): (string | null)[] {
+  switch (seed.id) {
+    case "a1":
+      return ["gold", "silver"];
+    case "a6":
+      return [null, "silver"];
+    case "a8":
+      return ["silver"];
+    case "c1":
+      return ["Gold"];
+    default:
+      return [];
+  }
 }
 
 // -- dedicated SQLite schema (adversarial.db, gitignored) --
@@ -114,8 +241,11 @@ const adversarialResources = sqliteTable("adversarial_resources", {
   aBool: integer("a_bool", { mode: "boolean" }).notNull(),
   aString: text("a_string").notNull(),
   aNumber: integer("a_number").notNull(),
+  aDouble: real("a_double"),
   aOptionalString: text("a_optional_string"),
   createdBy: text("created_by").notNull(),
+  scope: text("scope"),
+  createdAt: text("created_at"),
 });
 
 const adversarialTags = sqliteTable("adversarial_tags", {
@@ -138,6 +268,23 @@ const adversarialSubCategories = sqliteTable("adversarial_sub_categories", {
   categoryId: text("category_id").notNull(),
 });
 
+const adversarialLabels = sqliteTable("adversarial_labels", {
+  id: text("id").primaryKey(),
+  name: text("name"),
+  subCategoryId: text("sub_category_id").notNull(),
+});
+
+const labelsRelation: RelationMapping = {
+  type: "many",
+  table: adversarialLabels,
+  sourceColumn: adversarialSubCategories.id,
+  targetColumn: adversarialLabels.subCategoryId,
+  field: adversarialLabels.name,
+  fields: {
+    name: adversarialLabels.name,
+  },
+};
+
 const subCategoriesRelation: RelationMapping = {
   type: "many",
   table: adversarialSubCategories,
@@ -146,6 +293,7 @@ const subCategoriesRelation: RelationMapping = {
   field: adversarialSubCategories.name,
   fields: {
     name: adversarialSubCategories.name,
+    labels: { relation: labelsRelation },
   },
 };
 
@@ -153,8 +301,15 @@ const MAPPER: Record<string, MapperEntry> = {
   "request.resource.attr.aBool": adversarialResources.aBool,
   "request.resource.attr.aString": adversarialResources.aString,
   "request.resource.attr.aNumber": adversarialResources.aNumber,
+  "request.resource.attr.aDouble": adversarialResources.aDouble,
   "request.resource.attr.aOptionalString": adversarialResources.aOptionalString,
   "request.resource.attr.createdBy": adversarialResources.createdBy,
+  "request.resource.attr.scope": adversarialResources.scope,
+  "request.resource.attr.createdAt": {
+    column: adversarialResources.createdAt,
+    valueType: "timestamp",
+  },
+  "request.resource.attr.owner": adversarialResources.aOptionalString,
   // obj.inner is not a real nested column — mirrors aString, same trick the spring-data
   // and prisma reference harnesses use for the p-struct probe.
   "request.resource.attr.obj.inner": adversarialResources.aString,
@@ -169,6 +324,16 @@ const MAPPER: Record<string, MapperEntry> = {
         id: adversarialTags.tagId,
         name: adversarialTags.name,
       },
+    },
+  },
+  "request.resource.attr.tagNames": {
+    collectionValueType: "scalar",
+    relation: {
+      type: "many",
+      table: adversarialTags,
+      sourceColumn: adversarialResources.id,
+      targetColumn: adversarialTags.resourceId,
+      field: adversarialTags.name,
     },
   },
   "request.resource.attr.categories": {
@@ -209,8 +374,11 @@ beforeAll(() => {
       a_bool INTEGER NOT NULL,
       a_string TEXT NOT NULL,
       a_number INTEGER NOT NULL,
+      a_double REAL,
       a_optional_string TEXT,
-      created_by TEXT NOT NULL
+      created_by TEXT NOT NULL,
+      scope TEXT,
+      created_at TEXT
     );
     CREATE TABLE adversarial_tags (
       tag_id TEXT PRIMARY KEY,
@@ -227,6 +395,11 @@ beforeAll(() => {
       name TEXT NOT NULL,
       category_id TEXT NOT NULL
     );
+    CREATE TABLE adversarial_labels (
+      id TEXT PRIMARY KEY,
+      name TEXT,
+      sub_category_id TEXT NOT NULL
+    );
   `);
 
   // Distinct category/sub-category graphs per seed so no rows share relations by accident.
@@ -237,8 +410,11 @@ beforeAll(() => {
         aBool: seed.aBool,
         aString: seed.aString,
         aNumber: seed.aNumber,
+        aDouble: doubleFor(seed),
         aOptionalString: seed.aOptionalString,
         createdBy: isoFor(seed),
+        scope: scopeFor(seed),
+        createdAt: timestampFor(seed),
       })
       .run();
     for (const tag of seed.tags) {
@@ -258,6 +434,15 @@ beforeAll(() => {
           categoryId,
         })
         .run();
+      labelsFor(seed).forEach((labelName, labelIndex) => {
+        db.insert(adversarialLabels)
+          .values({
+            id: `${categoryId}-label-${labelIndex}`,
+            name: labelName,
+            subCategoryId: `${categoryId}-sub`,
+          })
+          .run();
+      });
     });
   }
 });
@@ -280,6 +465,10 @@ function asTagAttribute(tag: Tag): Record<string, Value> {
   return attr;
 }
 
+function asLabelAttribute(name: string | null): Record<string, Value> {
+  return name === null ? {} : { name };
+}
+
 /** Cerbos attributes mirroring exactly what the seeded DB row holds. */
 function asCheckResource(seed: Seed): Resource {
   const attr: Record<string, Value> = {
@@ -287,17 +476,36 @@ function asCheckResource(seed: Seed): Resource {
     aString: seed.aString,
     aNumber: seed.aNumber,
     createdBy: isoFor(seed),
+    owner: seed.aOptionalString,
     obj: { inner: seed.aString },
     tags: seed.tags.map(asTagAttribute),
+    tagNames: seed.tags.map((tag) => tag.name),
     categories: seed.subCategoryNames.map((subName) => ({
       name: "business",
-      subCategories: [{ name: subName }],
+      subCategories: [
+        {
+          name: subName,
+          labels: labelsFor(seed).map(asLabelAttribute),
+        },
+      ],
     })),
   };
   // A DB NULL is a missing attribute on the check side — conditions touching it must deny
   // (CEL error), matching SQL three-valued logic excluding the row.
   if (seed.aOptionalString !== null) {
     attr["aOptionalString"] = seed.aOptionalString;
+  }
+  const aDouble = doubleFor(seed);
+  if (aDouble !== null) {
+    attr["aDouble"] = aDouble;
+  }
+  const scope = scopeFor(seed);
+  if (scope !== null) {
+    attr["scope"] = scope;
+  }
+  const createdAt = timestampFor(seed);
+  if (createdAt !== null) {
+    attr["createdAt"] = createdAt;
   }
   // mainCategory mirrors the row's single category as ONE nested object (the seeder creates
   // at most one category per seed), so direct dotted-chain CEL expressions evaluate cleanly;
@@ -353,6 +561,26 @@ async function adapterFilteredIds(action: string): Promise<string[]> {
 }
 
 describe("adversarial conformance corpus", () => {
+  test("manifest assigns every action exactly one Drizzle outcome", () => {
+    const oracle = new Set(ORACLE_ACTIONS);
+    const throwing = new Set(THROWING_ACTIONS.map(([action]) => action));
+    const misclassified = [...MANIFEST_ACTIONS].filter((action) => {
+      const classificationCount = [
+        oracle.has(action),
+        throwing.has(action),
+        DRIZZLE_DIVERGENCES.has(action),
+      ].filter(Boolean).length;
+      return classificationCount !== 1;
+    });
+
+    expect(misclassified).toEqual([]);
+    expect(
+      [...DRIZZLE_SUPPORTED_EXPECTED].filter(
+        (action) => !EXPECTED_UNSUPPORTED_ACTIONS.has(action)
+      )
+    ).toEqual([]);
+  });
+
   test.each(ORACLE_ACTIONS)(
     "%s matches the check() oracle",
     async (action) => {
@@ -372,6 +600,24 @@ describe("adversarial conformance corpus", () => {
       await expect(adapterFilteredIds(action)).rejects.toThrow();
     }
   );
+
+  test("pins the upstream has() planner over-grant", async () => {
+    const action = "p-has";
+    expect(DRIZZLE_DIVERGENCES.has(action)).toBe(true);
+    const queryPlan = await cerbos.planResources({
+      principal: principal(),
+      resource: { kind: seedsFile.resourceKind },
+      action,
+    });
+    const oracle = await oracleAllowedIds(action);
+    const allIds = SEEDS.map((seed) => seed.id).sort();
+
+    expect(queryPlan.kind).toBe(PlanKind.ALWAYS_ALLOWED);
+    expect(oracle.length).toBeGreaterThan(0);
+    expect(oracle.length).toBeLessThan(allIds.length);
+    expect(oracle).toContain("a1");
+    expect(await adapterFilteredIds(action)).toEqual(allIds);
+  });
 
   test("oracle is not degenerate", async () => {
     // Guard the guard: at least one action must produce a non-empty, non-total oracle set,

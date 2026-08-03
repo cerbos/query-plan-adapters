@@ -6,6 +6,7 @@ import dev.cerbos.api.v1.response.Response.PlanResourcesResponse;
 import dev.cerbos.sdk.PlanResourcesResult;
 
 import jakarta.persistence.criteria.CriteriaBuilder;
+import jakarta.persistence.criteria.CriteriaQuery;
 import jakarta.persistence.criteria.From;
 import jakarta.persistence.criteria.Join;
 import jakarta.persistence.criteria.Path;
@@ -15,6 +16,10 @@ import jakarta.persistence.criteria.Subquery;
 
 import com.google.protobuf.Value;
 
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -28,15 +33,79 @@ import java.util.function.Supplier;
  */
 public final class SpringDataQueryPlanAdapter {
 
+    /**
+     * System property bounding collection-macro nesting depth
+     * ({@code exists}/{@code exists_one}/{@code all}/{@code filter}/
+     * {@code size(filter(...))}) accepted by the translator. Each nesting level multiplies the
+     * number of correlated subqueries in the translated filter (×2 for the {@code exists} family,
+     * ×3 for {@code exists_one}/{@code size(filter(...))} — see the collection-macro Javadoc in
+     * the translator), so unbounded nesting can silently degrade query latency on large tables.
+     * Plans nested deeper than the limit throw {@link IllegalArgumentException} at translation
+     * time (fail closed). Defaults to {@value #DEFAULT_MAX_MACRO_DEPTH}; set the property to a
+     * positive integer to raise or lower the limit.
+     */
+    public static final String MAX_MACRO_DEPTH_PROPERTY =
+            "dev.cerbos.queryplan.springdata.maxMacroDepth";
+
+    /** Default value of {@link #MAX_MACRO_DEPTH_PROPERTY}. */
+    public static final int DEFAULT_MAX_MACRO_DEPTH = 5;
+
     private SpringDataQueryPlanAdapter() {}
 
     // -- PlanResourcesResult overloads --
 
+    /**
+     * Translates a Cerbos query plan (as returned by the Java SDK's
+     * {@code CerbosBlockingClient.plan(...)}) into a {@link Result} wrapping a Spring Data
+     * JPA Specification, using the default operator translations.
+     *
+     * <p>Equivalent to {@link #toSpecification(PlanResourcesResult, Map, Map)} with no
+     * operator overrides.
+     *
+     * @param <T> the entity type the Specification will be executed against
+     * @param planResult the SDK plan result ({@code KIND_ALWAYS_ALLOWED},
+     *        {@code KIND_ALWAYS_DENIED}, or a conditional plan)
+     * @param mapper maps each plan variable ({@code request.resource.attr.<name>},
+     *        {@code request.resource.id}) to a JPA path or relation — see
+     *        {@link AttributeMapping}
+     * @return {@link Result.AlwaysAllowed}, {@link Result.AlwaysDenied}, or a
+     *         {@link Result.Conditional} wrapping the translated Specification
+     * @throws IllegalArgumentException if the conditional plan carries no condition.
+     *         Translation of the condition itself is deferred: unsupported operators,
+     *         unmapped attributes, and unresolvable paths throw
+     *         {@code IllegalArgumentException} (fail closed) when the Specification is first
+     *         evaluated by the repository, not from this call.
+     */
     public static <T> Result<T> toSpecification(
             PlanResourcesResult planResult, Map<String, AttributeMapping> mapper) {
         return toSpecification(planResult, mapper, Map.of());
     }
 
+    /**
+     * Translates a Cerbos query plan (as returned by the Java SDK's
+     * {@code CerbosBlockingClient.plan(...)}) into a {@link Result} wrapping a Spring Data
+     * JPA Specification, consulting {@code overrides} for scalar leaf translations.
+     *
+     * <p>Prefer this {@link PlanResourcesResult} entry point when using the Cerbos Java SDK
+     * client. The {@link #toSpecification(PlanResourcesResponse, Map, Map)} overloads accept
+     * the raw protobuf response instead — useful when the response was obtained without the
+     * SDK client wrapper (e.g. deserialized, proxied, or hand-built in tests, since
+     * {@code PlanResourcesResult} cannot be constructed outside the SDK package).
+     *
+     * @param <T> the entity type the Specification will be executed against
+     * @param planResult the SDK plan result
+     * @param mapper maps each plan variable to a JPA path or relation — see
+     *        {@link AttributeMapping}
+     * @param overrides per-operator replacement translations, keyed by Cerbos operator name;
+     *        consulted only for resolved scalar (field, value) leaves — see
+     *        {@link OperatorFunction} for exactly which translation sites are (and are not)
+     *        overridable
+     * @return {@link Result.AlwaysAllowed}, {@link Result.AlwaysDenied}, or a
+     *         {@link Result.Conditional} wrapping the translated Specification
+     * @throws IllegalArgumentException if the conditional plan carries no condition; see
+     *         {@link #toSpecification(PlanResourcesResult, Map)} for the deferred
+     *         fail-closed contract covering the translation itself
+     */
     public static <T> Result<T> toSpecification(
             PlanResourcesResult planResult,
             Map<String, AttributeMapping> mapper,
@@ -49,17 +118,62 @@ public final class SpringDataQueryPlanAdapter {
         }
         Operand condition = planResult.getCondition()
                 .orElseThrow(() -> new IllegalArgumentException("Conditional plan has no condition"));
+        // Defensive copies: the returned Specification is re-invoked fresh per query execution
+        // (see Result), so capturing the caller's maps by reference would let post-construction
+        // mutation silently change which columns the authorization filter resolves.
+        Map<String, AttributeMapping> mapperCopy = Map.copyOf(mapper);
+        Map<String, OperatorFunction> overridesCopy = Map.copyOf(overrides);
         return new Result.Conditional<>((root, query, cb) ->
-                new Translator(cb, overrides).traverse(condition, Scope.root(root, query, mapper)));
+                new Translator(cb, overridesCopy, isSelectInvocation(root, query))
+                        .traverse(condition, Scope.root(root, query, mapperCopy)));
     }
 
     // -- PlanResourcesResponse overloads --
 
+    /**
+     * Translates a raw {@link PlanResourcesResponse} protobuf into a {@link Result} wrapping
+     * a Spring Data JPA Specification, using the default operator translations.
+     *
+     * <p>Equivalent to {@link #toSpecification(PlanResourcesResponse, Map, Map)} with no
+     * operator overrides. Accepts the wire-level protobuf directly, so it works with
+     * responses obtained without the SDK client wrapper; when calling the PDP through the
+     * Cerbos Java SDK, the {@link #toSpecification(PlanResourcesResult, Map)} overloads are
+     * the natural fit.
+     *
+     * @param <T> the entity type the Specification will be executed against
+     * @param response the raw {@code PlanResources} RPC response
+     * @param mapper maps each plan variable to a JPA path or relation — see
+     *        {@link AttributeMapping}
+     * @return {@link Result.AlwaysAllowed}, {@link Result.AlwaysDenied}, or a
+     *         {@link Result.Conditional} wrapping the translated Specification
+     * @throws IllegalArgumentException if the filter kind is unknown or a conditional filter
+     *         carries no condition; see {@link #toSpecification(PlanResourcesResult, Map)}
+     *         for the deferred fail-closed contract covering the translation itself
+     */
     public static <T> Result<T> toSpecification(
             PlanResourcesResponse response, Map<String, AttributeMapping> mapper) {
         return toSpecification(response, mapper, Map.of());
     }
 
+    /**
+     * Translates a raw {@link PlanResourcesResponse} protobuf into a {@link Result} wrapping
+     * a Spring Data JPA Specification, consulting {@code overrides} for scalar leaf
+     * translations.
+     *
+     * @param <T> the entity type the Specification will be executed against
+     * @param response the raw {@code PlanResources} RPC response
+     * @param mapper maps each plan variable to a JPA path or relation — see
+     *        {@link AttributeMapping}
+     * @param overrides per-operator replacement translations, keyed by Cerbos operator name;
+     *        consulted only for resolved scalar (field, value) leaves — see
+     *        {@link OperatorFunction} for exactly which translation sites are (and are not)
+     *        overridable
+     * @return {@link Result.AlwaysAllowed}, {@link Result.AlwaysDenied}, or a
+     *         {@link Result.Conditional} wrapping the translated Specification
+     * @throws IllegalArgumentException if the filter kind is unknown or a conditional filter
+     *         carries no condition; see {@link #toSpecification(PlanResourcesResult, Map)}
+     *         for the deferred fail-closed contract covering the translation itself
+     */
     public static <T> Result<T> toSpecification(
             PlanResourcesResponse response,
             Map<String, AttributeMapping> mapper,
@@ -73,8 +187,12 @@ public final class SpringDataQueryPlanAdapter {
                 if (cond.getNodeCase() == Operand.NodeCase.NODE_NOT_SET) {
                     throw new IllegalArgumentException("Conditional plan has no condition");
                 }
+                // Defensive copies — same rationale as the PlanResourcesResult overload.
+                Map<String, AttributeMapping> mapperCopy = Map.copyOf(mapper);
+                Map<String, OperatorFunction> overridesCopy = Map.copyOf(overrides);
                 yield new Result.Conditional<T>((root, query, cb) ->
-                        new Translator(cb, overrides).traverse(cond, Scope.root(root, query, mapper)));
+                        new Translator(cb, overridesCopy, isSelectInvocation(root, query))
+                                .traverse(cond, Scope.root(root, query, mapperCopy)));
             }
             default -> throw new IllegalArgumentException("Unknown filter kind: " + filter.getKind());
         };
@@ -82,18 +200,81 @@ public final class SpringDataQueryPlanAdapter {
 
     // -- Internal translator --
 
+    /**
+     * Detects whether the Specification is being evaluated for the {@code SELECT} query it was
+     * handed: in every Spring Data SELECT path ({@code findAll}/{@code findOne}/{@code count}/
+     * {@code exists}/pagination) the {@code Root} is created via {@code query.from(...)}, so it is
+     * a member of {@code query.getRoots()}. In {@code SimpleJpaRepository.delete(Specification)}
+     * the {@code Root} comes from a {@code CriteriaDelete} while the {@code CriteriaQuery}
+     * argument is a fresh throwaway {@code createQuery(cls)} whose root set does not contain it
+     * (and newer Spring Data versions pass {@code null} for the query). Correlated subqueries are
+     * only sound in the first case — see {@code chainSubquery}.
+     */
+    private static boolean isSelectInvocation(Root<?> root, CriteriaQuery<?> query) {
+        return query != null && query.getRoots().contains(root);
+    }
+
     private static final class Translator {
         private final CriteriaBuilder cb;
         private final TriPredicate tri;
         private final Map<String, OperatorFunction> overrides;
         private final HierarchyTranslator hierarchy;
         private final ComparisonTranslator comparisons = new ComparisonTranslator();
+        private final boolean selectInvocation;
+        private final int maxMacroDepth = readMaxMacroDepth();
+        /** Current collection-macro nesting depth; maintained by {@link #enterMacro}. */
+        private int macroDepth;
 
-        Translator(CriteriaBuilder cb, Map<String, OperatorFunction> overrides) {
+        Translator(CriteriaBuilder cb, Map<String, OperatorFunction> overrides, boolean selectInvocation) {
             this.cb = cb;
             this.tri = new TriPredicate(cb);
             this.overrides = overrides;
             this.hierarchy = new HierarchyTranslator(cb);
+            this.selectInvocation = selectInvocation;
+        }
+
+        private static int readMaxMacroDepth() {
+            String raw = System.getProperty(MAX_MACRO_DEPTH_PROPERTY);
+            if (raw == null) {
+                return DEFAULT_MAX_MACRO_DEPTH;
+            }
+            int value;
+            try {
+                value = Integer.parseInt(raw.trim());
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException(
+                        MAX_MACRO_DEPTH_PROPERTY + " must be a positive integer, got '" + raw + "'", e);
+            }
+            if (value < 1) {
+                throw new IllegalArgumentException(
+                        MAX_MACRO_DEPTH_PROPERTY + " must be a positive integer, got " + value);
+            }
+            return value;
+        }
+
+        /**
+         * Track one collection-macro nesting level around {@code body}, failing closed when the
+         * plan nests deeper than {@link #MAX_MACRO_DEPTH_PROPERTY} allows. Each macro level
+         * multiplies the correlated-subquery count of the translated filter (one subquery per
+         * body polarity), so a runaway-deep policy must throw a clear error at translation time
+         * instead of silently emitting a filter that times out on production-sized tables.
+         */
+        private Predicate enterMacro(String op, Supplier<Predicate> body) {
+            macroDepth++;
+            try {
+                if (macroDepth > maxMacroDepth) {
+                    throw new IllegalArgumentException(
+                            "Collection-macro nesting depth " + macroDepth + " exceeds the maximum of "
+                            + maxMacroDepth + " (reached via operator '" + op + "'). Each nesting "
+                            + "level multiplies the number of correlated subqueries in the "
+                            + "translated filter, so deeply nested macros degrade query latency "
+                            + "sharply. If the policy shape is intentional, raise the limit via "
+                            + "the '" + MAX_MACRO_DEPTH_PROPERTY + "' system property.");
+                }
+                return body.get();
+            } finally {
+                macroDepth--;
+            }
         }
 
         Predicate traverse(Operand operand, Scope scope) {
@@ -107,6 +288,38 @@ public final class SpringDataQueryPlanAdapter {
         private Predicate handleBareVariable(String variable, Scope scope) {
             Path<?> path = scope.resolvePath(variable);
             return applyLeaf("eq", path, true);
+        }
+
+        /**
+         * The shared named error for Cerbos {@code except()} — a two-list function
+         * ({@code list.except(list)}) whose list-difference result has no JPA Criteria
+         * translation. PDP-verified arrival shapes: inside {@code size()}
+         * ({@code gt(size(except(variable, value-list)), 0)}) and as a comparison operand
+         * ({@code eq(except(variable, value-list), value-list)}).
+         */
+        private static IllegalArgumentException exceptUnsupported() {
+            return new IllegalArgumentException(
+                    "except is not supported: Cerbos except(list, list) computes a list "
+                            + "difference, which has no JPA Criteria translation. Rewrite the "
+                            + "policy with a collection macro instead — e.g. "
+                            + "size(R.attr.tags.except([\"x\"])) > 0 is equivalent to "
+                            + "R.attr.tags.exists(t, !(t in [\"x\"])).");
+        }
+
+        /**
+         * Shape-only description of an operand for error messages: node case plus the attribute
+         * name (VARIABLE) or inner operator (EXPRESSION). Constant VALUES report their type
+         * only — never their content — matching the adapter's no-value-leak discipline.
+         */
+        private static String describeOperand(Operand o) {
+            return switch (o.getNodeCase()) {
+                case VARIABLE -> "VARIABLE '" + o.getVariable() + "'";
+                case EXPRESSION -> "EXPRESSION " + o.getExpression().getOperator() + "()";
+                // The protobuf kind, not the converted value: conversion could itself throw on
+                // a malformed VALUE, and this helper must stay safe inside error paths.
+                case VALUE -> "VALUE (" + o.getValue().getKindCase() + ")";
+                default -> o.getNodeCase().toString();
+            };
         }
 
         private Predicate traverseExpression(PlanResourcesFilter.Expression expression, Scope scope) {
@@ -124,8 +337,15 @@ public final class SpringDataQueryPlanAdapter {
                     }
                     yield tri.not(traverse(operands.get(0), scope));
                 }
-                case "exists", "exists_one", "all", "except", "filter" ->
+                case "exists", "exists_one", "all", "filter" ->
                         handleCollectionOperator(op, operands, scope);
+                // Cerbos except() is a two-list function — PDP-verified wire shape:
+                // size(R.attr.tags.except(["archived"])) > 0 arrives as
+                // gt(size(except(variable, value-list)), 0). No lambda form exists on the wire
+                // (a previous lambda-except translation here was unreachable from any real
+                // plan), and list difference has no JPA Criteria translation — fail closed
+                // with a named error instead.
+                case "except" -> throw exceptUnsupported();
                 // has_intersection is the deprecated pre-camelCase alias still accepted by the PDP.
                 case "hasIntersection", "has_intersection" -> handleHasIntersection(operands, scope);
                 case "isSet" -> handleIsSet(operands, scope);
@@ -268,22 +488,23 @@ public final class SpringDataQueryPlanAdapter {
          * caller-knows-best coupling the seam exists to remove. The chosen shape classifies
          * structurally and converts lazily at the dispatch site that consumes the operand.
          *
-         * <p><b>Extension recipe — adding a new comparison-operand type</b>, worked example
-         * {@code timestamp("2024-01-01T00:00:00Z")} appearing as a comparison operand:
+         * <p><b>Extension recipe — adding a new comparison-operand type</b>. The
+         * {@code timestamp()} support is the worked example, implemented exactly this way:
          * <ol>
-         *   <li>Add a {@code Resolved} case: {@code record Timestamp(Operand arg)} with a lazy
-         *       accessor that parses the argument (its errors are then part of the contract);</li>
-         *   <li>Classify it in {@link #resolve}'s EXPRESSION arm (before the {@code Opaque}
-         *       fallback): {@code "timestamp".equals(exprOp) -> new Resolved.Timestamp(...)};
-         *       a pure-constant argument folds HERE, in the accessor — never in dispatch;</li>
+         *   <li>Add {@code Resolved} cases: {@link Resolved.TimestampField} /
+         *       {@link Resolved.TimestampConstant}, the latter with a lazy accessor that
+         *       parses the argument (its errors are then part of the contract);</li>
+         *   <li>Classify them in {@link #resolve}'s EXPRESSION arm (before the {@code Opaque}
+         *       fallback); a pure-constant argument folds in the accessor — never in
+         *       dispatch;</li>
          *   <li>Handle the new pairings in {@link #dispatch} next to the existing typed cases
-         *       (e.g. {@code Field vs Timestamp} → compare the column against the parsed
-         *       instant via {@link #applyLeaf} so {@link OperatorFunction} overrides keep
+         *       ({@link #timestampLeaf} compares the column against the parsed instant via
+         *       {@link #withOverride} so {@link OperatorFunction} overrides keep
          *       working).</li>
          * </ol>
          * Nothing else changes: no new probe, no re-scan, no ordering decision — unmatched
          * pairings still fall through to {@link #leafOperandError}, whose "Unexpected
-         * timestamp() expression in leaf operand of X" message is the pinned behavior today.
+         * X() expression in leaf operand of Y" message stays the pinned fail-closed behavior.
          */
         private final class ComparisonTranslator {
 
@@ -313,15 +534,18 @@ public final class SpringDataQueryPlanAdapter {
                     return ternaryPred;
                 }
                 NormalizedBinary nb = NormalizedBinary.of(op, operands);
-                Predicate sizePred = trySizeComparison(nb.op(), nb.operands(), scope);
-                if (sizePred != null) {
-                    return sizePred;
-                }
                 // Every leaf operator is binary. Extra operands are a malformed plan and must
-                // fail loudly rather than silently dropping one.
+                // fail loudly rather than silently dropping one — BEFORE the size() probe,
+                // whose last-match-wins operand scan would otherwise translate a partial
+                // comparison (e.g. eq(size(coll), variable, value) as COUNT = value, silently
+                // discarding the variable constraint).
                 if (nb.operands().size() != 2) {
                     throw new IllegalArgumentException(
                             nb.op() + " requires exactly 2 operands, got " + nb.operands().size());
+                }
+                Predicate sizePred = trySizeComparison(nb.op(), nb.operands(), scope);
+                if (sizePred != null) {
+                    return sizePred;
                 }
                 return dispatch(nb.op(),
                         resolve(nb.operands().get(0)),
@@ -506,8 +730,10 @@ public final class SpringDataQueryPlanAdapter {
 
                 /**
                  * {@code add(field, value)} / {@code add(value, field)} — solvable for the field
-                 * under eq/ne against a constant ({@link PlanValues#solveAdd}); every other
-                 * pairing lowers to SQL arithmetic.
+                 * under eq/ne against a constant ({@link PlanValues#solveAdd}) when the solve is
+                 * algebraically exact (string concatenation, in-range long/long integers); every
+                 * other pairing — including fractional doubles, which IEEE subtraction cannot
+                 * invert — lowers to SQL arithmetic.
                  */
                 record FieldPlusConstant(String fieldVariable, Operand constant, boolean fieldIsLeft)
                         implements Resolved {}
@@ -520,10 +746,48 @@ public final class SpringDataQueryPlanAdapter {
                 record Arithmetic(String operator) implements Resolved {}
 
                 /**
-                 * An operand no leaf comparison understands ({@code timestamp()}, {@code map()},
-                 * {@code lambda}, an unset node...). Dispatch routes these to
-                 * {@link #leafOperandError}, which reports from the RAW operands so each shape
-                 * keeps its exact message.
+                 * {@code timestamp(variable)} — a temporal column wrapped in the CEL
+                 * {@code timestamp()} cast. The path resolves at the consuming dispatch site
+                 * ({@link #timestampLeaf}), which also owns the column-type contract.
+                 */
+                record TimestampField(String variable) implements Resolved {}
+
+                /**
+                 * {@code timestamp(value)} — a constant instant. The planner constant-folds
+                 * {@code now()}/{@code now() - duration(...)} arithmetic and re-wraps the result
+                 * in {@code timestamp("<RFC-3339>")} on the wire (PDP-verified), so both policy
+                 * literals and folded relative windows arrive in this shape. {@link #instant()}
+                 * parses lazily: {@link Instant#parse} first, {@link OffsetDateTime#parse} as
+                 * the fallback for non-UTC offsets (Cerbos emits literals verbatim, including
+                 * offsets and nanosecond precision) — normalizing to the absolute instant,
+                 * matching CEL timestamp equality across offsets.
+                 */
+                record TimestampConstant(Operand operand) implements Resolved {
+                    Instant instant() {
+                        Object raw = PlanValues.protoValueToJava(operand.getValue());
+                        if (!(raw instanceof String s)) {
+                            throw new IllegalArgumentException(
+                                    "timestamp() constant must be an RFC-3339 string, got "
+                                            + (raw == null ? "null" : raw.getClass().getSimpleName()));
+                        }
+                        try {
+                            return Instant.parse(s);
+                        } catch (DateTimeParseException e) {
+                            try {
+                                return OffsetDateTime.parse(s).toInstant();
+                            } catch (DateTimeParseException e2) {
+                                throw new IllegalArgumentException(
+                                        "timestamp() constant could not be parsed as an RFC-3339 instant", e2);
+                            }
+                        }
+                    }
+                }
+
+                /**
+                 * An operand no leaf comparison understands ({@code map()}, {@code lambda},
+                 * {@code timestamp()} over a nested expression, an unset node...). Dispatch
+                 * routes these to {@link #leafOperandError}, which reports from the RAW operands
+                 * so each shape keeps its exact message.
                  */
                 record Opaque() implements Resolved {}
             }
@@ -539,6 +803,21 @@ public final class SpringDataQueryPlanAdapter {
                     case EXPRESSION -> {
                         PlanResourcesFilter.Expression e = o.getExpression();
                         String exprOp = e.getOperator();
+                        // timestamp(variable) / timestamp(value) — the only shapes the planner
+                        // emits for temporal comparisons (PDP-verified: the folded now()-duration
+                        // constant is re-wrapped in timestamp(), never a bare string). A nested
+                        // expression inside timestamp() has no verified translation and stays
+                        // Opaque → leafOperandError.
+                        if ("timestamp".equals(exprOp) && e.getOperandsCount() == 1) {
+                            Operand arg = e.getOperands(0);
+                            if (arg.getNodeCase() == Operand.NodeCase.VARIABLE) {
+                                yield new Resolved.TimestampField(arg.getVariable());
+                            }
+                            if (arg.getNodeCase() == Operand.NodeCase.VALUE) {
+                                yield new Resolved.TimestampConstant(arg);
+                            }
+                            yield new Resolved.Opaque();
+                        }
                         if (!ARITHMETIC_OPS.contains(exprOp)) {
                             yield new Resolved.Opaque();
                         }
@@ -627,17 +906,45 @@ public final class SpringDataQueryPlanAdapter {
                 }
 
                 if (COMPARISON_OPS.contains(op)) {
+                    // timestamp(field) vs timestamp(constant) — the wire shape of every
+                    // time-window / retention-cutoff policy (`timestamp(R.attr.createdAt) <
+                    // now() - duration("24h")` folds its RHS to timestamp("<instant>")).
+                    // NormalizedBinary cannot reorder these (both operands are EXPRESSION
+                    // nodes, equal rank), so the value-first form is MIRRORED here — never
+                    // inverted: the planner preserves policy source order.
+                    if (left instanceof Resolved.TimestampField tsField
+                            && right instanceof Resolved.TimestampConstant tsConst) {
+                        return timestampLeaf(op, tsField, tsConst, scope);
+                    }
+                    if (left instanceof Resolved.TimestampConstant tsConst
+                            && right instanceof Resolved.TimestampField tsField) {
+                        return timestampLeaf(NormalizedBinary.mirror(op), tsField, tsConst, scope);
+                    }
+                    // Two constant instants — reachable through ternary substitution, like the
+                    // numeric constant-vs-constant fold above; instant comparison is exact.
+                    if (left instanceof Resolved.TimestampConstant lts
+                            && right instanceof Resolved.TimestampConstant rts) {
+                        return timestampConstantComparison(op, lts.instant(), rts.instant());
+                    }
                     // Fold: `field op add(value, value)` — the folded constant compares like any
                     // plan constant (normalization guarantees the field arrives first). Strings
                     // concatenate here, matching CEL — this shape never enters double space.
                     if (left instanceof Resolved.Field f && right instanceof Resolved.ConstantAdd ca) {
                         return applyLeaf(op, scope.resolvePath(f.variable()), ca.fold());
                     }
-                    // Solve: `add(field, const) eq/ne constant` — string concat/numeric solve for
-                    // the field side (same algorithm as the Prisma adapter).
+                    // Solve: `add(field, const) eq/ne constant` — for the ALGEBRAICALLY EXACT
+                    // shapes only (string concatenation, in-range long/long integers).
+                    // Fractional/oversized numeric pairs fall through to numericComparison:
+                    // IEEE subtraction does not invert IEEE addition (fl(fl(t-c)+c) != t), so
+                    // a Java-side solve would return rows the PDP's check() denies — the SQL
+                    // side must compute fl(field + const) and compare it to the target in
+                    // double space, sharing IEEE semantics with the ordering operators.
                     if (("eq".equals(op) || "ne".equals(op))
                             && left instanceof Resolved.FieldPlusConstant fpc
-                            && right instanceof Resolved.Constant other) {
+                            && right instanceof Resolved.Constant other
+                            && !PlanValues.requiresSqlLowering(
+                                    other.value(),
+                                    PlanValues.protoValueToJava(fpc.constant().getValue()))) {
                         return solveAddComparison(op, fpc, other, scope);
                     }
                     // Everything else arithmetic-rooted lowers to SQL-side double-space arithmetic.
@@ -673,6 +980,28 @@ public final class SpringDataQueryPlanAdapter {
             private Predicate leafFieldValue(String op, Resolved.Field field,
                                              Resolved.Constant constant, Scope scope) {
                 Object value = constant.value();
+
+                // A structured constant — a CEL list literal (`R.attr.tags == ["a", "b"]`
+                // arrives as eq(variable, value-list) verbatim; PDP-verified in both operand
+                // orders) or, defensively, a struct VALUE (protoValueToJava can produce a Map,
+                // though the planner emits map literals as struct() expressions, which
+                // leafOperandError already names). No scalar-column comparison exists for
+                // these: letting the value through dies inside Hibernate with a raw coercion
+                // error ("Could not convert ... ListN to java.lang.String") instead of the
+                // adapter's named-IllegalArgumentException contract. Checked BEFORE path
+                // resolution so a Relation-mapped attribute reports this shape too, not the
+                // generic "is a Relation" resolution error. Reports the shape only — element
+                // values never leak into the message.
+                if (value instanceof List<?> || value instanceof Map<?, ?>) {
+                    throw new IllegalArgumentException(
+                            op + " comparison against a " + constantShape(value)
+                                    + " constant is not supported for attribute "
+                                    + field.variable() + ". Whole-" + kindWord(value)
+                                    + " equality is not translatable to a scalar column"
+                                    + " comparison; map the attribute as a Relation and use"
+                                    + " in/hasIntersection, or compare elements individually.");
+                }
+
                 Path<?> path = scope.resolvePath(field.variable());
 
                 if (value == null) {
@@ -689,10 +1018,103 @@ public final class SpringDataQueryPlanAdapter {
             }
 
             /**
-             * Solve {@code add(field, const) eq/ne constant} for the field. When no solution
-             * exists (e.g. {@code "projects:123" == "users:" + R.id} can never be true), eq is
-             * always-false; ne is NOT always-true — a missing attribute makes the concatenation a
-             * CEL evaluation error ({@code "users:" + null}) → deny, so NULL rows must stay
+             * {@code timestamp(field) op timestamp(constant)}: compare a temporal column against
+             * a parsed constant instant. {@code op} is already field-first (the dispatch mirrors
+             * value-first forms before calling here).
+             *
+             * <p><b>Column-type contract.</b> Only column types that unambiguously denote an
+             * absolute instant are translated:
+             * <ul>
+             *   <li>{@link Instant} — bound as-is;</li>
+             *   <li>{@link OffsetDateTime} — bound as the instant at UTC. Hibernate 6 stores
+             *       both with {@code SqlTypes.TIMESTAMP_UTC} (normalized to UTC before
+             *       binding), so the database comparison is an instant comparison regardless
+             *       of the bound offset.</li>
+             * </ul>
+             * {@code LocalDateTime} (no zone — the stored wall-clock time could mean any
+             * instant), {@code java.util.Date} (JDBC binding routes through zone conversions),
+             * {@code String} (format- and offset-dependent lexicographic order) and everything
+             * else throw a NAMED error instead of guessing: a wrong zone assumption here would
+             * silently include rows the PDP's {@code check()} denies (or vice versa) — an
+             * authorization-relevant divergence, so the adapter fails closed. A registered
+             * {@link OperatorFunction} override is consulted FIRST (with the parsed
+             * {@link Instant} as the value), so callers who know their column's zone semantics
+             * can translate those types themselves.
+             *
+             * <p>A NULL column value makes every comparison UNKNOWN under SQL three-valued
+             * logic → the row is excluded, matching CEL: a missing attribute is an evaluation
+             * error and {@code check()} denies (PDP-verified for eq/ne/lt and mirrored forms).
+             */
+            private Predicate timestampLeaf(String op, Resolved.TimestampField field,
+                                            Resolved.TimestampConstant constant, Scope scope) {
+                Instant instant = constant.instant();
+                Path<?> path = scope.resolvePath(field.variable());
+                return withOverride(op, path, instant, () -> {
+                    Class<?> javaType = path.getJavaType();
+                    Object bound;
+                    if (Instant.class.equals(javaType)) {
+                        bound = instant;
+                    } else if (OffsetDateTime.class.equals(javaType)) {
+                        bound = instant.atOffset(ZoneOffset.UTC);
+                    } else {
+                        throw new IllegalArgumentException(
+                                "timestamp() comparison requires a column mapped to java.time.Instant "
+                                        + "or java.time.OffsetDateTime, but '" + field.variable()
+                                        + "' maps to " + javaType.getSimpleName()
+                                        + ". Other temporal representations (LocalDateTime, "
+                                        + "java.util.Date, String) are ambiguous about the absolute "
+                                        + "instant they store; remap the column or register an "
+                                        + "OperatorFunction override for '" + op + "'.");
+                    }
+                    return defaultLeaf(op, path, bound);
+                });
+            }
+
+            /**
+             * Statically evaluate a comparison between two constant instants — reachable via
+             * ternary substitution, mirroring {@link #constantComparison}. Instant comparison
+             * is total and exact, so the collapse is oracle-faithful.
+             */
+            private Predicate timestampConstantComparison(String op, Instant left, Instant right) {
+                int cmp = left.compareTo(right);
+                boolean result = switch (op) {
+                    case "eq" -> cmp == 0;
+                    case "ne" -> cmp != 0;
+                    case "lt" -> cmp < 0;
+                    case "gt" -> cmp > 0;
+                    case "le" -> cmp <= 0;
+                    case "ge" -> cmp >= 0;
+                    default -> throw new IllegalArgumentException(
+                            "Unsupported constant timestamp comparison operator: " + op);
+                };
+                return result ? cb.conjunction() : cb.disjunction();
+            }
+
+            /**
+             * Shape description for a structured constant in an error message: size and kind
+             * only — never element values, matching the adapter's no-value-leak discipline
+             * (see {@link #typeName}).
+             */
+            private static String constantShape(Object value) {
+                if (value instanceof List<?> l) {
+                    return "list of " + l.size() + " element" + (l.size() == 1 ? "" : "s");
+                }
+                Map<?, ?> m = (Map<?, ?>) value;
+                return "map of " + m.size() + " entr" + (m.size() == 1 ? "y" : "ies");
+            }
+
+            private static String kindWord(Object value) {
+                return value instanceof List<?> ? "list" : "map";
+            }
+
+            /**
+             * Solve {@code add(field, const) eq/ne constant} for the field — only reached for
+             * algebraically exact solves (string concatenation, in-range long/long integers;
+             * {@link #dispatch} routes fractional doubles to {@link #numericComparison} because
+             * IEEE subtraction does not invert IEEE addition). When no solution exists (e.g.
+             * {@code "projects:123" == "users:" + R.id} can never be true), eq is always-false;
+             * ne is NOT always-true — a missing attribute makes the concatenation a CEL
+             * evaluation error ({@code "users:" + null}) → deny, so NULL rows must stay
              * excluded: IS NOT NULL, never an unconditional {@code 1=1} (which would leak exactly
              * the rows the PDP denies).
              */
@@ -728,7 +1150,13 @@ public final class SpringDataQueryPlanAdapter {
                     }
                 }
                 if (otherOperand == null) {
-                    throw new IllegalArgumentException("add comparison requires a second operand");
+                    // Both operands are add() expressions — there IS a second operand, it just
+                    // isn't a scalar to fold against, so say that instead of misreporting arity.
+                    throw new IllegalArgumentException(
+                            op + " between two add() expressions is not supported: got "
+                                    + describeOperand(operands.get(0)) + " and "
+                                    + describeOperand(operands.get(1))
+                                    + "; one operand must be a mapped attribute or constant");
                 }
                 List<Operand> addOperands = addExprOperand.getExpression().getOperandsList();
                 if (addOperands.size() != 2) {
@@ -776,6 +1204,11 @@ public final class SpringDataQueryPlanAdapter {
                                                 + "(operator: " + op + "). Wrap the map() expression in "
                                                 + "hasIntersection(map(...), [...]) instead.");
                             }
+                            // eq(except(variable, value-list), value-list) — the comparison
+                            // form of the two-list except() (PDP-verified wire shape).
+                            if ("except".equals(innerOp)) {
+                                throw exceptUnsupported();
+                            }
                             throw new IllegalArgumentException(
                                     "Unexpected " + innerOp + "() expression in leaf operand of " + op);
                         }
@@ -797,6 +1230,14 @@ public final class SpringDataQueryPlanAdapter {
              * only splits Long/Double for whole-number cosmetics, not semantics. Strings compare
              * lexicographically; booleans (and mixed incomparable types) support eq/ne only —
              * eq → false, ne → true — while ordering them is a planner bug and throws.
+             *
+             * <p>Numeric ordering uses the primitive IEEE operators, NOT {@link Double#compare}:
+             * the total order ranks {@code NaN} above every number (and {@code -0.0} below
+             * {@code 0.0}), so {@code Double.compare} would collapse {@code gt}/{@code ge}
+             * against a NaN constant — reachable via an unfolded {@code div(0,0)}, e.g. the
+             * else arm of {@code (aBool ? 1.0 : 0.0/0.0) > 0.5} — to always-true, returning
+             * rows the PDP denies. CEL/IEEE define every ordering comparison involving NaN as
+             * false → {@code cb.disjunction()} (exclusion).
              */
             private Predicate constantComparison(String op, Object left, Object right) {
                 boolean result;
@@ -805,17 +1246,19 @@ public final class SpringDataQueryPlanAdapter {
                             ? ln.doubleValue() == rn.doubleValue()
                             : Objects.equals(left, right);
                     result = "eq".equals(op) == equal;
-                } else {
-                    int cmp;
-                    if (left instanceof Number ln && right instanceof Number rn) {
-                        cmp = Double.compare(ln.doubleValue(), rn.doubleValue());
-                    } else if (left instanceof String ls && right instanceof String rs) {
-                        cmp = ls.compareTo(rs);
-                    } else {
-                        throw new IllegalArgumentException(
-                                "Cannot order constant operands of " + op + ": "
-                                        + typeName(left) + " vs " + typeName(right));
-                    }
+                } else if (left instanceof Number ln && right instanceof Number rn) {
+                    double l = ln.doubleValue();
+                    double r = rn.doubleValue();
+                    result = switch (op) {
+                        case "lt" -> l < r;
+                        case "gt" -> l > r;
+                        case "le" -> l <= r;
+                        case "ge" -> l >= r;
+                        default -> throw new IllegalArgumentException(
+                                "Unsupported constant comparison operator: " + op);
+                    };
+                } else if (left instanceof String ls && right instanceof String rs) {
+                    int cmp = ls.compareTo(rs);
                     result = switch (op) {
                         case "lt" -> cmp < 0;
                         case "gt" -> cmp > 0;
@@ -824,6 +1267,10 @@ public final class SpringDataQueryPlanAdapter {
                         default -> throw new IllegalArgumentException(
                                 "Unsupported constant comparison operator: " + op);
                     };
+                } else {
+                    throw new IllegalArgumentException(
+                            "Cannot order constant operands of " + op + ": "
+                                    + typeName(left) + " vs " + typeName(right));
                 }
                 return result ? cb.conjunction() : cb.disjunction();
             }
@@ -878,8 +1325,12 @@ public final class SpringDataQueryPlanAdapter {
              * {@code haystackColumn LIKE wildcards(escape(needleColumn))} — the column-to-column
              * analogue of the constant LIKE path in {@link #defaultLeaf}. The needle is data, so its
              * LIKE metacharacters are escaped dynamically with nested {@code REPLACE} (portable:
-             * H2/Postgres/MySQL/Oracle/SQL Server): {@code \} first, then {@code %} and {@code _},
-             * mirroring {@link PlanValues#escapeLike} and the same explicit {@code '\'} escape char.
+             * H2/Postgres/MySQL/Oracle/SQL Server): {@code \} first, then {@code %}, {@code _},
+             * and {@code [}, mirroring {@link PlanValues#escapeLike} and the same explicit
+             * {@code '\'} escape char. {@code [} is escaped because SQL Server LIKE treats
+             * {@code [...]} as a character class even under an ESCAPE clause; {@code \[} is a
+             * literal {@code [} on every targeted dialect ({@code ]} needs no escaping once no
+             * {@code [} can open a class — see {@link PlanValues#escapeLike}).
              *
              * <p>The explicit {@code IS NOT NULL} guard on the needle matches CEL (a missing
              * attribute is an evaluation error → deny) and also defends against dialects whose
@@ -897,6 +1348,8 @@ public final class SpringDataQueryPlanAdapter {
                         escaped, cb.literal("%"), cb.literal("\\%"));
                 escaped = cb.function("replace", String.class,
                         escaped, cb.literal("_"), cb.literal("\\_"));
+                escaped = cb.function("replace", String.class,
+                        escaped, cb.literal("["), cb.literal("\\["));
                 jakarta.persistence.criteria.Expression<String> pattern = escaped;
                 if (leadingWildcard) {
                     pattern = cb.concat(cb.literal("%"), pattern);
@@ -1018,11 +1471,20 @@ public final class SpringDataQueryPlanAdapter {
              * marker only) and {@code cb.toDouble(literal)} elides the cast on a node already
              * Double-typed, both leaving the arithmetic decimal. Therefore:
              * <ul>
-             *   <li>columns go through {@code cb.toDouble} (renders {@code cast(col as float(53))});</li>
+             *   <li>columns go through {@link #toIeeeDouble}: {@code cb.toDouble} (renders
+             *       {@code cast(col as float(53))}) — except on MySQL, where Hibernate's
+             *       {@code MySQLDialect} renders that cast as exact {@code decimal(53,20)} and
+             *       the adapter instead emits the {@code cerbos_ieee_double} function
+             *       ({@code cast(col as double)}) registered by
+             *       {@link MySqlDoubleCastFunctionContributor};</li>
              *   <li>constant subtrees fold in Java ({@link NumericOperand.Constant});</li>
              *   <li>constants mixed into SQL arithmetic bind through the plain-{@code Number}
              *       CriteriaBuilder overloads, which emit genuine double-typed bind parameters
-             *       instead of decimal literals.</li>
+             *       instead of decimal literals. (MySQL Connector/J's default client-side
+             *       prepared statements still interpolate those binds as DECIMAL literals in
+             *       the statement text — harmless once every column cast is a true DOUBLE,
+             *       because MySQL promotes arithmetic and comparisons with an approximate
+             *       operand to double space; see {@link MySqlDoubleCastFunctionContributor}.)</li>
              * </ul>
              *
              * <p>Division guard: SQL raises an error on a zero divisor — a data-dependent runtime
@@ -1043,7 +1505,7 @@ public final class SpringDataQueryPlanAdapter {
                         jakarta.persistence.criteria.Expression<? extends Number> path =
                                 (jakarta.persistence.criteria.Expression<? extends Number>)
                                         scope.resolvePath(operand.getVariable());
-                        return new NumericOperand.Sql(cb.toDouble(path));
+                        return new NumericOperand.Sql(toIeeeDouble(path));
                     }
                     case VALUE -> {
                         Object v = PlanValues.protoValueToJava(operand.getValue());
@@ -1090,6 +1552,26 @@ public final class SpringDataQueryPlanAdapter {
                             "Unexpected operand type in arithmetic comparison: "
                                     + operand.getNodeCase());
                 }
+            }
+
+            /**
+             * Force a column into IEEE double space for arithmetic (see
+             * {@link #resolveNumericOperand}). Renders {@code cb.toDouble} everywhere except
+             * when {@link MySqlDoubleCastFunctionContributor} has registered the
+             * {@code cerbos_ieee_double} function (Hibernate on MySQL 8.0.17+), which renders
+             * {@code cast(col as double)} instead of the {@code MySQLDialect}'s exact-decimal
+             * {@code decimal(53,20)} cast. Keyed off the ACTUAL function registration — not
+             * dialect name sniffing — so H2/PostgreSQL SQL stays byte-identical and a missing
+             * registration (non-Hibernate provider, old MySQL, contributor not discovered)
+             * degrades to the previous behavior, never to an unknown-function SQL error.
+             */
+            private jakarta.persistence.criteria.Expression<Double> toIeeeDouble(
+                    jakarta.persistence.criteria.Expression<? extends Number> path) {
+                if (IeeeDoubleCast.isRegistered(cb)) {
+                    return cb.function(
+                            MySqlDoubleCastFunctionContributor.FUNCTION_NAME, Double.class, path);
+                }
+                return cb.toDouble(path);
             }
 
             /**
@@ -1195,7 +1677,9 @@ public final class SpringDataQueryPlanAdapter {
                 }
                 List<Operand> sizeOps = sizeExpr.getOperandsList();
                 if (sizeOps.size() != 1) {
-                    throw new IllegalArgumentException("Unsupported size() expression");
+                    throw new IllegalArgumentException(
+                            "Unsupported size() expression: size() takes exactly 1 argument, got "
+                                    + sizeOps.size());
                 }
                 Operand sizeArg = sizeOps.get(0);
                 String var;
@@ -1218,8 +1702,16 @@ public final class SpringDataQueryPlanAdapter {
                             "lambda requires exactly 2 operands");
                     lambdaBody = lambda.body();
                     lambdaVarName = lambda.varName();
+                } else if (sizeArg.getNodeCase() == Operand.NodeCase.EXPRESSION
+                        && "except".equals(sizeArg.getExpression().getOperator())) {
+                    // size(coll.except([...])) — the PDP-verified wire shape of every real
+                    // except() policy. List difference has no JPA translation; the shared
+                    // named error points at the equivalent exists(...) rewrite.
+                    throw exceptUnsupported();
                 } else {
-                    throw new IllegalArgumentException("Unsupported size() expression");
+                    throw new IllegalArgumentException(
+                            "Unsupported size() expression: size() argument must be a collection "
+                                    + "attribute or filter(...), got " + describeOperand(sizeArg));
                 }
                 Scope.ResolvedRelation ref = scope.resolveRelation(var);
                 if (ref == null) {
@@ -1240,54 +1732,86 @@ public final class SpringDataQueryPlanAdapter {
                         // IS NOT NULL, never an unconditional 1=1. eq f excludes everything.
                         return fractionalCollapse ? cb.isNotNull(path) : cb.disjunction();
                     }
+                    // cb.length(...) is Expression<Integer>, so the threshold must fit in an
+                    // int. An unguarded narrowing cast wraps thresholds outside int range
+                    // (2147483648 → −2147483648, 4294967296 → 0), silently flipping the
+                    // filter — `size(s) > 4294967296` became `LENGTH(s) > 0` (always-true
+                    // over-inclusion while check() denies every row). No string's length
+                    // leaves int range, so these comparisons fold statically instead —
+                    // CEL-faithfully: the "vacuously true" arms still require IS NOT NULL
+                    // because a NULL column is a missing attribute → CEL error → deny.
+                    if (numValue > Integer.MAX_VALUE) {
+                        // LENGTH(s) < 2^31 for every present string: eq/gt/ge can never
+                        // hold; lt/le/ne always hold for a present string.
+                        return switch (cmpOp) {
+                            case "eq", "gt", "ge" -> cb.disjunction();
+                            case "lt", "le", "ne" -> cb.isNotNull(path);
+                            default -> throw new IllegalArgumentException(
+                                    "Unsupported size comparison operator: " + cmpOp);
+                        };
+                    }
+                    if (numValue < Integer.MIN_VALUE) {
+                        // LENGTH(s) >= 0 > any threshold below int range: gt/ge/ne always
+                        // hold for a present string; eq/lt/le can never hold.
+                        return switch (cmpOp) {
+                            case "gt", "ge", "ne" -> cb.isNotNull(path);
+                            case "eq", "lt", "le" -> cb.disjunction();
+                            default -> throw new IllegalArgumentException(
+                                    "Unsupported size comparison operator: " + cmpOp);
+                        };
+                    }
                     return compareCount(cb.length(path.as(String.class)), cmpOp, (int) numValue);
                 }
                 final Operand fBody = lambdaBody;
                 final String fVar = lambdaVarName;
-                SubqueryBodyBuilder bodyBuilder = (sub, tailJoin, rebased) ->
-                        fBody == null ? cb.conjunction()
-                                : traverse(fBody, Scope.lambda(tailJoin, sub, ref.tail(), fVar, rebased));
-
-                Predicate base;
-                if (fractionalCollapse != null) {
-                    // A Relation count is always defined (an empty join is count 0), so the
-                    // fractional eq/ne collapse is unconditional here. Falls through to the
-                    // size(filter(...)) unknown-element guard below so an erroring lambda body
-                    // still denies the row.
-                    base = fractionalCollapse ? cb.conjunction() : cb.disjunction();
-                } else {
+                if (fBody == null) {
+                    // size(collection) counts rows without evaluating a lambda — no element can
+                    // be UNKNOWN, so the plain EXISTS/COUNT comparisons are already exact.
+                    if (fractionalCollapse != null) {
+                        // A Relation count is always defined (an empty join is count 0), so the
+                        // fractional eq/ne collapse is unconditional here.
+                        return fractionalCollapse ? cb.conjunction() : cb.disjunction();
+                    }
                     boolean nonEmpty = ("gt".equals(cmpOp) && numValue == 0L)
                             || ("ge".equals(cmpOp) && numValue == 1L);
                     boolean empty = ("eq".equals(cmpOp) && numValue == 0L)
                             || ("le".equals(cmpOp) && numValue == 0L)
                             || ("lt".equals(cmpOp) && numValue == 1L);
                     if (nonEmpty) {
-                        base = existsSubquery(scope, ref, bodyBuilder);
-                    } else if (empty) {
-                        base = tri.not(existsSubquery(scope, ref, bodyBuilder));
-                    } else {
-                        // Arbitrary N → correlated (SELECT COUNT(...)) <op> N, same shape as
-                        // exists_one. For a multi-hop chain the COUNT joins through every hop, so it
-                        // counts the FLATTENED tail elements — the same element set the EXISTS
-                        // shortcuts range over.
-                        ChainSubquery<Long> cs = countSubquery(scope, ref);
-                        if (fBody != null) {
-                            cs.sub().where(bodyBuilder.build(cs.sub(), cs.tailJoin(), cs.rebasedOuter()));
-                        }
-                        base = compareCount(cs.sub(), cmpOp, numValue);
+                        return existsSubquery(scope, ref, (sub, tailJoin, rebased) -> cb.conjunction());
                     }
+                    if (empty) {
+                        return tri.not(existsSubquery(scope, ref,
+                                (sub, tailJoin, rebased) -> cb.conjunction()));
+                    }
+                    // Arbitrary N → correlated (SELECT COUNT(...)) <op> N. For a multi-hop chain
+                    // the COUNT joins through every hop, so it counts the FLATTENED tail
+                    // elements — the same element set the EXISTS shortcuts range over.
+                    return compareCount(countSubquery(scope, ref).sub(), cmpOp, numValue);
                 }
-                if (fBody == null) {
-                    // size(collection) counts rows without evaluating a lambda — no element can be
-                    // UNKNOWN, so the plain comparison is already exact.
-                    return base;
-                }
-                // size(coll.filter(x, pred)): CEL filter has NO error absorption — any element whose
-                // predicate errors (NULL-derived UNKNOWN body) errors the whole expression (deny),
-                // even when the count comparison would otherwise hold. Same strict table as
-                // exists_one: TriPredicate.baseUnlessUnknown.
-                return tri.baseUnlessUnknown(base,
-                        () -> unknownElementExists(scope, ref, bodyBuilder));
+                // size(coll.filter(x, pred)): CEL filter has NO error absorption — any element
+                // whose predicate errors (NULL-derived UNKNOWN body) errors the whole expression
+                // (deny), even when the count comparison would otherwise hold. Same strict table
+                // as exists_one: strictMatchCount yields SQL NULL whenever any element body is
+                // UNKNOWN, so every comparison against it goes UNKNOWN and the row stays excluded
+                // under both polarities.
+                SubqueryBodyBuilder bodyBuilder = (sub, tailJoin, rebased) ->
+                        traverse(fBody, Scope.lambda(tailJoin, sub, ref.tail(), fVar, rebased));
+                final String finalCmpOp = cmpOp;
+                final long finalNumValue = numValue;
+                final Boolean finalCollapse = fractionalCollapse;
+                return enterMacro("size(filter(...))", () -> {
+                    if (finalCollapse != null) {
+                        // The count comparison itself is statically decided (a COUNT is never
+                        // fractional), but an erroring lambda body must still deny the row: the
+                        // poison term is 0 when every element body is determined and SQL NULL
+                        // otherwise, making the collapse UNKNOWN exactly when CEL errors.
+                        Subquery<Long> poison = undeterminedPoisonSubquery(scope, ref, bodyBuilder);
+                        return finalCollapse ? cb.equal(poison, 0L) : cb.notEqual(poison, 0L);
+                    }
+                    return compareCount(strictMatchCountSubquery(scope, ref, bodyBuilder),
+                            finalCmpOp, finalNumValue);
+                });
             }
 
             /** Compare a numeric size expression (COUNT subquery or LENGTH) against a constant. */
@@ -1326,7 +1850,10 @@ public final class SpringDataQueryPlanAdapter {
                 }
             }
             if (variable == null || flag == null) {
-                throw new IllegalArgumentException("Invalid isSet operands");
+                throw new IllegalArgumentException(
+                        "Invalid isSet operands: expected one attribute variable and one boolean "
+                                + "value, got " + describeOperand(operands.get(0)) + " / "
+                                + describeOperand(operands.get(1)));
             }
             Path<?> path = scope.resolvePath(variable);
             boolean isSet = flag;
@@ -1336,9 +1863,13 @@ public final class SpringDataQueryPlanAdapter {
 
         // -- in (set membership or collection membership) --
 
-        /** Wrap a scalar plan constant as a single-element list; lists pass through unchanged. */
+        /**
+         * Wrap a scalar plan constant as a single-element list; lists pass through unchanged.
+         * The scalar may be the null constant ({@code null in R.attr.items} is planner-emitted),
+         * so the wrapper must be null-tolerant — {@code List.of} is not.
+         */
         private static List<?> asList(Object val) {
-            return (val instanceof List<?> l) ? l : List.of(val);
+            return (val instanceof List<?> l) ? l : java.util.Collections.singletonList(val);
         }
 
         private Predicate handleIn(List<Operand> rawOperands, Scope scope) {
@@ -1351,10 +1882,20 @@ public final class SpringDataQueryPlanAdapter {
             List<Operand> operands = NormalizedBinary.of("in", rawOperands).operands();
             Operand fieldOp = operands.get(0);
             Operand valueOp = operands.get(1);
+            // in(variable, variable) — attribute-in-attribute membership
+            // (`R.attr.createdBy in R.attr.ownedBy` arrives verbatim; PDP-verified). CEL `in`
+            // is receiver-shaped — the member is always FIRST, the list second — and two
+            // VARIABLE operands rank equally so normalization never swaps them: source order
+            // is authoritative here.
+            if (fieldOp.getNodeCase() == Operand.NodeCase.VARIABLE
+                    && valueOp.getNodeCase() == Operand.NodeCase.VARIABLE) {
+                return handleInVariableVariable(fieldOp.getVariable(), valueOp.getVariable(), scope);
+            }
             if (fieldOp.getNodeCase() != Operand.NodeCase.VARIABLE
                     || valueOp.getNodeCase() != Operand.NodeCase.VALUE) {
                 throw new IllegalArgumentException("Unsupported in operand combination: "
-                        + rawOperands.get(0).getNodeCase() + "/" + rawOperands.get(1).getNodeCase());
+                        + describeOperand(rawOperands.get(0)) + " / "
+                        + describeOperand(rawOperands.get(1)));
             }
             String var = fieldOp.getVariable();
             Object val = PlanValues.protoValueToJava(valueOp.getValue());
@@ -1370,10 +1911,94 @@ public final class SpringDataQueryPlanAdapter {
                     if (list.isEmpty()) {
                         return cb.disjunction();
                     }
-                    return path.in(list);
+                    return scalarInWithNullElements(path, list);
+                }
+                // Scalar membership over a Field mapping is equality — and equality against
+                // the null constant is IS NULL, mirroring the eq-null leaf translation.
+                if (val == null) {
+                    return cb.isNull(path);
                 }
                 return cb.equal(path, val);
             });
+        }
+
+        /**
+         * {@code in(variable, variable)} — a scalar attribute tested for membership of a
+         * collection attribute on the SAME resource ({@code R.attr.createdBy in
+         * R.attr.ownedBy}; PDP-verified the shape arrives verbatim). The member variable must
+         * resolve to a scalar column and the collection variable to a Relation mapping; the
+         * translation is a correlated EXISTS whose body compares the collection's member
+         * column against the outer scalar column:
+         *
+         * <pre>{@code EXISTS (SELECT 1 FROM <relation chain> e
+         *          WHERE e.member = outer.scalar
+         *             OR (e.member IS NULL AND outer.scalar IS NULL))}</pre>
+         *
+         * <p>Null semantics, verified against a live PDP {@code check()} oracle under the
+         * adapter's established column conventions (a NULL scalar column is the
+         * explicitly-null attribute — the {@code eq(x, null) → IS NULL} convention; a NULL
+         * member column is an explicit null list element — the {@code collectionContainsAny}
+         * convention; an empty join is the empty list):
+         * <ul>
+         *   <li>member matches an element → TRUE (row included);</li>
+         *   <li>no match (including the empty collection) → the EXISTS is FALSE, so the row
+         *       is excluded and {@code not(...)} includes it — matching CEL, where a
+         *       non-matching {@code in} is plain FALSE, not an error;</li>
+         *   <li>NULL scalar vs a null element → TRUE ({@code null in [..., null]} is TRUE in
+         *       CEL — the IS NULL conjunct is what matches it, since SQL {@code = NULL} never
+         *       does);</li>
+         *   <li>NULL scalar vs no null element → FALSE (the equality is UNKNOWN and the
+         *       IS NULL conjunct fails on the member side, so no subquery row qualifies).</li>
+         * </ul>
+         * EXISTS itself is two-valued, so {@code tri.not} composes exactly. Like field-to-field
+         * comparisons, there is no (field, value) pair — {@link OperatorFunction} overrides are
+         * not consulted.
+         */
+        private Predicate handleInVariableVariable(String memberVar, String collectionVar,
+                                                   Scope scope) {
+            Scope.ResolvedRelation ref = scope.resolveRelation(collectionVar);
+            if (ref == null) {
+                scope.resolveMapping(collectionVar); // throws "Unknown attribute" when unmapped
+                throw new IllegalArgumentException(
+                        "in(" + memberVar + ", " + collectionVar + ") requires the second "
+                                + "attribute to be mapped as a Relation (collection membership), "
+                                + "but " + collectionVar + " resolves to a scalar Field mapping");
+            }
+            // Resolve the member OUTSIDE the subquery first so an unknown/Relation-valued
+            // member reports its own resolution error rather than a subquery-build failure.
+            scope.resolvePath(memberVar);
+            return existsSubquery(scope, ref, (sub, tailJoin, rebased) -> {
+                Path<?> element = Scope.memberPath(tailJoin, ref.tail(), null);
+                // The outer scalar resolves through the REBASED scope so the produced path is
+                // a legal correlation reference inside the subquery.
+                Path<?> outer = rebased.resolvePath(memberVar);
+                return cb.or(
+                        cb.equal(element, outer),
+                        cb.and(cb.isNull(element), cb.isNull(outer)));
+            });
+        }
+
+        /**
+         * {@code path IN (list)} with CEL null-element semantics. CEL {@code x in [..., null]}
+         * is TRUE for an explicitly-null {@code x} (PDP-verified for both {@code in} and
+         * {@code hasIntersection}; the planner even folds the degenerate {@code x in [null]}
+         * to {@code eq(x, null)}, which this adapter translates as IS NULL) — so a null list
+         * element must become an IS NULL disjunct. Passing it to {@code path.in} instead
+         * renders {@code IN (..., NULL)} (verified on Hibernate 6.6/H2), whose SQL
+         * three-valued semantics silently EXCLUDE null rows — and make the negation UNKNOWN
+         * for every non-matching row, returning nothing. Both disjuncts here are two-valued
+         * for every row (IS NULL absorbs the NULL-column case), so {@code tri.not} composes
+         * cleanly over the OR. Callers guarantee a non-empty list.
+         */
+        private Predicate scalarInWithNullElements(Path<?> path, List<?> list) {
+            List<?> nonNull = list.stream().filter(Objects::nonNull).toList();
+            if (nonNull.size() == list.size()) {
+                return path.in(list);
+            }
+            if (nonNull.isEmpty()) {
+                return cb.isNull(path);
+            }
+            return cb.or(path.in(nonNull), cb.isNull(path));
         }
 
         // -- hasIntersection --
@@ -1404,7 +2029,7 @@ public final class SpringDataQueryPlanAdapter {
                 if (values.isEmpty()) {
                     return cb.disjunction();
                 }
-                return path.in(values);
+                return scalarInWithNullElements(path, values);
             }
 
             if (first.getNodeCase() == Operand.NodeCase.EXPRESSION
@@ -1418,7 +2043,10 @@ public final class SpringDataQueryPlanAdapter {
             }
 
             throw new IllegalArgumentException(
-                    "Unsupported hasIntersection operand shape: " + first.getNodeCase());
+                    "Unsupported hasIntersection operand shape: " + describeOperand(first) + " / "
+                            + describeOperand(second) + ". Supported shapes are "
+                            + "hasIntersection(collection-attribute, [values...]) and "
+                            + "hasIntersection(map(collection, lambda), [values...]).");
         }
 
         /** A parsed CEL lambda operand: its body and the name of its iteration variable. */
@@ -1492,9 +2120,21 @@ public final class SpringDataQueryPlanAdapter {
             // (deny) even when another element would intersect — the strict
             // TriPredicate.baseUnlessUnknown table, with the null-witness EXISTS as the unknown
             // detector (IS NULL itself is two-valued, so both EXISTS legs are safe to compose).
+            //
+            // A null element in the constant list only matches an explicitly-null projection,
+            // which member ACCESS can never yield from the column model: a NULL member column
+            // is the missing-attribute error above (PDP-verified: tags=[{}] denies under BOTH
+            // polarities even with null in the list; tags=[{"name": null}] would allow, but a
+            // column cannot distinguish that case and the error convention wins here). Null
+            // elements are therefore inert — stripped so they don't render as a never-matching
+            // SQL `IN (..., NULL)` literal — while NULL-projection rows stay UNKNOWN.
+            List<?> nonNull = values.stream().filter(Objects::nonNull).toList();
+            Predicate base = nonNull.isEmpty()
+                    ? cb.disjunction()
+                    : existsSubquery(scope, ref, (sub, tailJoin, rebased) ->
+                            Scope.memberPath(tailJoin, ref.tail(), memberField).in(nonNull));
             return tri.baseUnlessUnknown(
-                    existsSubquery(scope, ref, (sub, tailJoin, rebased) ->
-                            Scope.memberPath(tailJoin, ref.tail(), memberField).in(values)),
+                    base,
                     () -> existsSubquery(scope, ref, (sub, tailJoin, rebased) ->
                             cb.isNull(Scope.memberPath(tailJoin, ref.tail(), memberField))));
         }
@@ -1505,16 +2145,32 @@ public final class SpringDataQueryPlanAdapter {
             if (values.isEmpty()) {
                 return cb.disjunction();
             }
+            // CEL membership/intersection with a null constant is satisfied by a collection
+            // element that IS null (PDP-verified for both routes here: `null in R.attr.xs`
+            // with xs=["a", null] allows, and hasIntersection(R.attr.xs, ["public", null])
+            // with xs=[null] allows). A related row whose member column is NULL is exactly
+            // such an element under the scalar-projection (defaultMemberField) view, so the
+            // null constant becomes an IS NULL disjunct inside the EXISTS body —
+            // `member IN (...)`/`member = NULL` never matches it in SQL. (Contrast with
+            // map(t, t.name) member ACCESS, where a NULL column is a MISSING element
+            // attribute → CEL error; see handleMapIntersection.)
+            List<?> nonNull = values.stream().filter(Objects::nonNull).toList();
+            boolean hasNull = nonNull.size() < values.size();
             return existsSubquery(scope, ref, (sub, tailJoin, rebased) -> {
                 Path<?> field = Scope.memberPath(tailJoin, ref.tail(), null);
-                if (values.size() == 1) {
-                    return cb.equal(field, values.get(0));
+                if (!hasNull) {
+                    return values.size() == 1 ? cb.equal(field, values.get(0)) : field.in(values);
                 }
-                return field.in(values);
+                if (nonNull.isEmpty()) {
+                    return cb.isNull(field);
+                }
+                Predicate match = nonNull.size() == 1
+                        ? cb.equal(field, nonNull.get(0)) : field.in(nonNull);
+                return cb.or(match, cb.isNull(field));
             });
         }
 
-        // -- exists / exists_one / all / except / filter --
+        // -- exists / exists_one / all / filter --
 
         /**
          * Collection macros translate TRI-STATE to mirror CEL error semantics (per the cel-spec
@@ -1531,18 +2187,25 @@ public final class SpringDataQueryPlanAdapter {
          * ERROR maps to SQL UNKNOWN so the row stays excluded under BOTH polarities
          * ({@code NOT(UNKNOWN) = UNKNOWN}). A plain EXISTS is not enough: an element whose body
          * is UNKNOWN silently fails to match, collapsing the error case to FALSE — which
-         * {@code not(...)} flips to TRUE, an authorization leak. Building blocks:
-         * {@code EXISTS(elem WHERE body)} (true witness), {@code EXISTS(elem WHERE NOT body)}
-         * (false witness) and {@link #unknownElementExists} (any UNKNOWN-body element); the
-         * truth tables composing them live in {@link TriPredicate}.
+         * {@code not(...)} flips to TRUE, an authorization leak. Each macro is a SINGLE
+         * correlated aggregate subquery that scores every element into determined-true /
+         * determined-false / undetermined and folds the scores into one value whose comparison
+         * is TRUE, FALSE, or SQL UNKNOWN exactly per the CEL truth table — see
+         * {@link #macroScoreSubquery} (exists/all/filter) and
+         * {@link #strictMatchCountSubquery} (exists_one).
          *
-         * <p>{@code filter}/{@code except} in boolean position are kept consistent with the
-         * {@code exists} family. Cost note: the unknown machinery is always emitted — each
-         * {@link #unknownElementExists} probe is two correlated COUNT subqueries, and
-         * {@code exists_one} (like the arbitrary-N {@code size(filter(...))} shape) emits the
-         * probe twice, i.e. five correlated subqueries including the base COUNT — the attribute
-         * mapping carries no column-nullability metadata, so a NULL-free lambda body cannot be
-         * detected statically.
+         * <p>{@code filter} in boolean position is kept consistent with the
+         * {@code exists} family. Cost note: the unknown machinery is always emitted — the
+         * attribute mapping carries no column-nullability metadata, so a NULL-free lambda body
+         * cannot be detected statically. The lambda body is translated once per polarity
+         * (positive and negated — Hibernate 6 negation is stateful, see {@link TriPredicate},
+         * so a Predicate tree cannot be shared between polarities): twice for the
+         * {@code exists} family, three times for {@code exists_one} (which also needs the
+         * positive body inside its match counter). Nested macros therefore multiply — a
+         * depth-d exists chain emits {@code 2^d - 1} correlated subqueries (an exists_one
+         * chain up to {@code (3^d - 1) / 2}) — which is why {@link #enterMacro} bounds the
+         * nesting depth ({@link #MAX_MACRO_DEPTH_PROPERTY}, default
+         * {@value #DEFAULT_MAX_MACRO_DEPTH}).
          */
         private Predicate handleCollectionOperator(String op, List<Operand> operands, Scope scope) {
             if (operands.size() != 2) {
@@ -1550,6 +2213,16 @@ public final class SpringDataQueryPlanAdapter {
             }
             Operand listOperand = operands.get(0);
             Operand lambdaOperand = operands.get(1);
+
+            // A literal value-list collection arrives when the planner could not unroll a
+            // macro over a known collection: at <= 10 elements it folds exists/all into an
+            // or/and chain itself (cerbos/cerbos#2570, #2817; maxItems = 10 in the planner's
+            // struct matcher), above that the lambda ships with the folded value list as its
+            // collection operand. Apply the same fold here instead of demanding a Relation
+            // mapping that cannot exist for a literal.
+            if (listOperand.getNodeCase() == Operand.NodeCase.VALUE) {
+                return handleKnownValueCollection(op, listOperand.getValue(), lambdaOperand, scope);
+            }
 
             if (listOperand.getNodeCase() != Operand.NodeCase.VARIABLE) {
                 throw new IllegalArgumentException(op + " first operand must be a variable");
@@ -1580,58 +2253,243 @@ public final class SpringDataQueryPlanAdapter {
             // tree (Hibernate 6 negation is stateful — see TriPredicate.not()).
             SubqueryBodyBuilder bodyBuilder = (sub, tailJoin, rebased) -> traverse(body,
                     Scope.lambda(tailJoin, sub, ref.tail(), lambdaVarName, rebased));
-            SubqueryBodyBuilder negatedBodyBuilder = (sub, tailJoin, rebased) ->
-                    tri.not(bodyBuilder.build(sub, tailJoin, rebased));
 
-            return switch (op) {
-                // exists (and filter): OR with error absorption — TriPredicate.anyTrueOrUnknown.
-                case "exists", "filter" -> tri.anyTrueOrUnknown(
-                        existsSubquery(scope, ref, bodyBuilder),
-                        unknownElementExists(scope, ref, bodyBuilder));
-                // except is "some element fails the body" — the exists table with the false
-                // witness in the true-witness seat; an UNKNOWN body is UNKNOWN under NOT too.
-                case "except" -> tri.anyTrueOrUnknown(
-                        existsSubquery(scope, ref, negatedBodyBuilder),
-                        unknownElementExists(scope, ref, bodyBuilder));
-                // all: AND with error absorption — TriPredicate.allTrueOrUnknown, with the
-                // false witness EXISTS(elem WHERE NOT body).
-                case "all" -> tri.allTrueOrUnknown(
-                        existsSubquery(scope, ref, negatedBodyBuilder),
-                        unknownElementExists(scope, ref, bodyBuilder));
-                // exists_one: strict — any UNKNOWN element denies, else COUNT(body) = 1 —
-                // TriPredicate.baseUnlessUnknown.
-                case "exists_one" -> {
-                    ChainSubquery<Long> cs = countSubquery(scope, ref);
-                    cs.sub().where(bodyBuilder.build(cs.sub(), cs.tailJoin(), cs.rebasedOuter()));
-                    yield tri.baseUnlessUnknown(cb.equal(cs.sub(), 1L),
-                            () -> unknownElementExists(scope, ref, bodyBuilder));
-                }
+            return enterMacro(op, () -> switch (op) {
+                // exists (and filter): OR with error absorption — TRUE iff any element is
+                // determined-true (max score 2); UNKNOWN iff none is true but at least one is
+                // undetermined (max score 1 → NULLIF yields SQL NULL); FALSE otherwise.
+                case "exists", "filter" ->
+                        cb.equal(macroScoreSubquery(scope, ref, bodyBuilder, 2, 0), 2);
+                // all: AND with error absorption — FALSE iff any element is determined-false
+                // (max score 2 absorbs undetermined siblings); UNKNOWN iff none is false but at
+                // least one is undetermined; TRUE otherwise (including the empty collection).
+                case "all" ->
+                        cb.equal(macroScoreSubquery(scope, ref, bodyBuilder, 0, 2), 0);
+                // exists_one: strict — any UNKNOWN element denies, else COUNT(body) = 1. The
+                // strict counter goes SQL NULL when any element is undetermined, so the equality
+                // is UNKNOWN and the row stays excluded under both polarities.
+                case "exists_one" ->
+                        cb.equal(strictMatchCountSubquery(scope, ref, bodyBuilder), 1L);
                 default -> throw new IllegalArgumentException("Unsupported collection operator: " + op);
-            };
+            });
+        }
+
+        /** Operators whose second operand is a lambda that binds an iteration variable. */
+        private static final Set<String> LAMBDA_BINDING_OPERATORS =
+                Set.of("exists", "exists_one", "all", "filter", "map", "except");
+
+        /**
+         * Fold a collection macro whose collection operand is a literal value list: substitute
+         * each element into the lambda body and combine the per-element expressions with
+         * {@code or} ({@code exists}) or {@code and} ({@code all}), then translate the combined
+         * expression through the normal {@link #traverse} path — the same fold the planner
+         * itself applies to known collections of 10 or fewer elements, so the translated
+         * filter does not depend on which side of that threshold the collection lands.
+         *
+         * <p>The empty collection keeps CEL identity semantics: {@code exists} over {@code []}
+         * is false, {@code all} over {@code []} is true. Element comparisons produced by the
+         * fold flow through the standard comparison translation, so NULL columns keep their
+         * SQL-UNKNOWN (row excluded under both polarities) behavior — matching how a
+         * planner-unrolled chain of the same comparisons translates.
+         */
+        private Predicate handleKnownValueCollection(String op, Value collectionValue,
+                                                     Operand lambdaOperand, Scope scope) {
+            if (!"exists".equals(op) && !"all".equals(op)) {
+                throw new IllegalArgumentException(op
+                        + " over a literal collection value is not supported. "
+                        + "Only exists() and all() can be folded into a flat filter.");
+            }
+            if (collectionValue.getKindCase() != Value.KindCase.LIST_VALUE) {
+                throw new IllegalArgumentException(op
+                        + " over a literal collection requires a list value");
+            }
+            ParsedLambda lambda = parseLambda(lambdaOperand,
+                    op + " second operand must be a lambda",
+                    op + " over a literal collection supports single-variable lambdas only",
+                    "lambda variable must be a variable operand");
+
+            List<Value> elements = collectionValue.getListValue().getValuesList();
+            if (elements.isEmpty()) {
+                return "exists".equals(op) ? cb.disjunction() : cb.conjunction();
+            }
+
+            PlanResourcesFilter.Expression.Builder combined = PlanResourcesFilter.Expression
+                    .newBuilder()
+                    .setOperator("exists".equals(op) ? "or" : "and");
+            for (Value element : elements) {
+                combined.addOperands(
+                        substituteLambdaVariable(lambda.body(), lambda.varName(), element));
+            }
+            return traverse(Operand.newBuilder().setExpression(combined).build(), scope);
         }
 
         /**
-         * TRUE iff the relation holds at least one element whose lambda body evaluates to SQL
-         * UNKNOWN (NULL-derived). Not expressible as a single EXISTS: inside a subquery WHERE an
-         * UNKNOWN body simply fails to match, so {@code EXISTS(body)} and {@code EXISTS(NOT body)}
-         * both skip exactly the rows to be detected. Counting closes the gap — an element is
-         * <em>determined</em> iff {@code body OR NOT body} matches it, therefore
-         * {@code COUNT(elem) > COUNT(elem WHERE body OR NOT body)} holds iff at least one element
-         * is UNKNOWN, including mixed collections where sibling elements are determined
-         * true/false. Both COUNTs never yield NULL, so the comparison itself is two-valued and
-         * safe to negate through {@link TriPredicate#not}. The body is supplied to
-         * {@link TriPredicate#determined} as a Supplier and translated fresh per occurrence
-         * (stateful negation — see {@link TriPredicate#not}).
+         * Substitute a lambda iteration variable with a concrete collection element inside a
+         * lambda body. A bare reference to the variable becomes the element itself; a
+         * {@code variable.path.to.field} reference drills into the element (failing closed
+         * when the path is missing — the CEL evaluation of that element would error). A nested
+         * macro whose lambda rebinds the same variable name shadows the outer variable, so
+         * substitution only descends into its collection operand.
          */
-        private Predicate unknownElementExists(Scope scope, Scope.ResolvedRelation ref,
-                                               SubqueryBodyBuilder bodyBuilder) {
-            ChainSubquery<Long> total = countSubquery(scope, ref);
+        private static Operand substituteLambdaVariable(Operand operand, String varName,
+                                                        Value element) {
+            switch (operand.getNodeCase()) {
+                case VARIABLE -> {
+                    String name = operand.getVariable();
+                    if (name.equals(varName)) {
+                        return Operand.newBuilder().setValue(element).build();
+                    }
+                    if (name.startsWith(varName + ".")) {
+                        return Operand.newBuilder()
+                                .setValue(resolveElementPath(name,
+                                        name.substring(varName.length() + 1), element))
+                                .build();
+                    }
+                    return operand;
+                }
+                case EXPRESSION -> {
+                    PlanResourcesFilter.Expression expr = operand.getExpression();
+                    List<Operand> ops = expr.getOperandsList();
+                    PlanResourcesFilter.Expression.Builder rebuilt = expr.toBuilder();
+                    if (LAMBDA_BINDING_OPERATORS.contains(expr.getOperator()) && ops.size() == 2
+                            && shadowsVariable(ops.get(1), varName)) {
+                        // The nested lambda rebinds our variable: substitute only in the
+                        // collection operand.
+                        rebuilt.setOperands(0,
+                                substituteLambdaVariable(ops.get(0), varName, element));
+                        return Operand.newBuilder().setExpression(rebuilt).build();
+                    }
+                    for (int i = 0; i < ops.size(); i++) {
+                        rebuilt.setOperands(i,
+                                substituteLambdaVariable(ops.get(i), varName, element));
+                    }
+                    return Operand.newBuilder().setExpression(rebuilt).build();
+                }
+                default -> {
+                    return operand;
+                }
+            }
+        }
 
-            ChainSubquery<Long> determined = countSubquery(scope, ref);
-            determined.sub().where(tri.determined(() -> bodyBuilder.build(
-                    determined.sub(), determined.tailJoin(), determined.rebasedOuter())));
+        /** True when {@code lambdaOperand} is a lambda whose iteration variable is {@code varName}. */
+        private static boolean shadowsVariable(Operand lambdaOperand, String varName) {
+            if (lambdaOperand.getNodeCase() != Operand.NodeCase.EXPRESSION
+                    || !"lambda".equals(lambdaOperand.getExpression().getOperator())) {
+                return false;
+            }
+            List<Operand> ops = lambdaOperand.getExpression().getOperandsList();
+            return ops.size() == 2
+                    && ops.get(1).getNodeCase() == Operand.NodeCase.VARIABLE
+                    && varName.equals(ops.get(1).getVariable());
+        }
 
-            return cb.greaterThan(total.sub(), determined.sub());
+        /** Drill a dotted path into a struct element, failing closed on a missing field. */
+        private static Value resolveElementPath(String fullRef, String path, Value element) {
+            Value current = element;
+            for (String segment : path.split("\\.")) {
+                if (current.getKindCase() != Value.KindCase.STRUCT_VALUE
+                        || !current.getStructValue().containsFields(segment)) {
+                    throw new IllegalArgumentException("Cannot resolve \"" + fullRef
+                            + "\": collection element has no field \"" + segment + "\"");
+                }
+                current = current.getStructValue().getFieldsOrThrow(segment);
+            }
+            return current;
+        }
+
+        /**
+         * The single-subquery scoring translation shared by {@code exists}/{@code filter}
+         * (score 2/0) and {@code all} (score 0/2). Each element of the relation
+         * chain is scored with a searched CASE:
+         *
+         * <pre>{@code CASE WHEN body THEN trueScore WHEN NOT body THEN falseScore ELSE 1 END}</pre>
+         *
+         * An UNKNOWN body matches neither WHEN (SQL treats an UNKNOWN condition as not taken),
+         * so undetermined elements land in the ELSE — that is what makes the polarity pair
+         * sufficient to distinguish all three states with a single scan. The subquery selects
+         *
+         * <pre>{@code NULLIF(COALESCE(MAX(score), 0), 1)}</pre>
+         *
+         * i.e. the dominant score with the empty collection folded to 0 and the
+         * "only undetermined elements dominate" state (max score 1) mapped to SQL NULL. A
+         * two-valued equality against 2 (exists) or 0 (all) then yields TRUE / FALSE /
+         * UNKNOWN exactly per the CEL macro truth tables, and {@code NOT} keeps UNKNOWN rows
+         * excluded ({@code NOT(UNKNOWN) = UNKNOWN}).
+         *
+         * <p>The body is translated exactly twice — once per polarity, the minimum Hibernate 6's
+         * stateful negation permits (see {@link TriPredicate}) — so nested macros grow at
+         * {@code 2^depth}, not the {@code 3^depth} of the previous
+         * EXISTS-plus-two-COUNT-probes translation.
+         */
+        private Subquery<Integer> macroScoreSubquery(Scope scope, Scope.ResolvedRelation ref,
+                                                     SubqueryBodyBuilder bodyBuilder,
+                                                     int trueScore, int falseScore) {
+            ChainSubquery<Integer> cs = chainSubquery(Integer.class, scope, ref);
+            jakarta.persistence.criteria.Expression<Integer> score = cb.<Integer>selectCase()
+                    .when(bodyBuilder.build(cs.sub(), cs.tailJoin(), cs.rebasedOuter()), trueScore)
+                    .when(tri.not(bodyBuilder.build(cs.sub(), cs.tailJoin(), cs.rebasedOuter())),
+                            falseScore)
+                    .otherwise(1);
+            cs.sub().select(cb.nullif(cb.coalesce(cb.max(score), 0), 1));
+            return cs.sub();
+        }
+
+        /**
+         * The strict counting subquery behind {@code exists_one} and {@code size(filter(...))}:
+         * selects the number of elements whose body is determined-true, poisoned to SQL NULL
+         * when ANY element body is UNKNOWN (CEL's strict macros error if any element errors —
+         * no absorption). Shape:
+         *
+         * <pre>{@code COALESCE(SUM(CASE WHEN body THEN 1 ELSE 0 END), 0) + poisonTerm}</pre>
+         *
+         * where {@code poisonTerm} ({@link #undeterminedPoisonTerm}) is 0 when every element is
+         * determined and NULL otherwise — NULL is absorbing under addition, so any undetermined
+         * element nulls the whole count and every comparison against it goes UNKNOWN (row
+         * excluded under both polarities). The empty collection yields 0 + 0 = 0, matching CEL
+         * ({@code exists_one} over an empty list is false, a zero count compares normally).
+         *
+         * <p>Costs three body translations (one positive in the match counter, one per polarity
+         * in the poison term); see {@link #macroScoreSubquery} for why two is the floor.
+         */
+        private Subquery<Long> strictMatchCountSubquery(Scope scope, Scope.ResolvedRelation ref,
+                                                        SubqueryBodyBuilder bodyBuilder) {
+            ChainSubquery<Long> cs = chainSubquery(Long.class, scope, ref);
+            jakarta.persistence.criteria.Expression<Long> match = cb.<Long>selectCase()
+                    .when(bodyBuilder.build(cs.sub(), cs.tailJoin(), cs.rebasedOuter()), 1L)
+                    .otherwise(0L);
+            cs.sub().select(cb.sum(
+                    cb.coalesce(cb.sum(match), 0L),
+                    undeterminedPoisonTerm(cs, bodyBuilder)));
+            return cs.sub();
+        }
+
+        /**
+         * A subquery selecting ONLY the poison term: 0 when every element body is determined
+         * (or the collection is empty), SQL NULL when any element body is UNKNOWN. Used by the
+         * statically-collapsed {@code size(filter(...))} comparisons, whose count comparison is
+         * pre-decided but whose error semantics still depend on the lambda body.
+         */
+        private Subquery<Long> undeterminedPoisonSubquery(Scope scope, Scope.ResolvedRelation ref,
+                                                          SubqueryBodyBuilder bodyBuilder) {
+            ChainSubquery<Long> cs = chainSubquery(Long.class, scope, ref);
+            cs.sub().select(undeterminedPoisonTerm(cs, bodyBuilder));
+            return cs.sub();
+        }
+
+        /**
+         * {@code NULLIF(COALESCE(MAX(CASE WHEN body THEN 0 WHEN NOT body THEN 0 ELSE 1 END), 0), 1)}
+         * — 0 when every element body is determined (either WHEN taken; also the empty
+         * collection via COALESCE), SQL NULL when at least one element body is UNKNOWN (both
+         * WHENs skipped → ELSE 1 dominates the MAX → NULLIF). The body is translated once per
+         * polarity (stateful negation — see {@link TriPredicate#not}).
+         */
+        private jakarta.persistence.criteria.Expression<Long> undeterminedPoisonTerm(
+                ChainSubquery<?> cs, SubqueryBodyBuilder bodyBuilder) {
+            jakarta.persistence.criteria.Expression<Long> determined = cb.<Long>selectCase()
+                    .when(bodyBuilder.build(cs.sub(), cs.tailJoin(), cs.rebasedOuter()), 0L)
+                    .when(tri.not(bodyBuilder.build(cs.sub(), cs.tailJoin(), cs.rebasedOuter())), 0L)
+                    .otherwise(1L);
+            return cb.nullif(cb.coalesce(cb.max(determined), 0L), 1L);
         }
 
         @FunctionalInterface
@@ -1681,13 +2539,28 @@ public final class SpringDataQueryPlanAdapter {
          *       joining only the tail attribute off the anchor would either fail at query-build
          *       time or silently query a same-named collection on the wrong entity.</li>
          * </ul>
-         * EXISTS over the join chain and COUNT over {@code tailJoin} therefore express
-         * exists/in/hasIntersection membership and {@code size()} of the flattened union with
-         * the same element set, so the tri-state unknown-element machinery composes with chains
-         * unchanged (its COUNT subqueries traverse the identical chain).
+         * EXISTS over the join chain, aggregate scoring over {@code tailJoin}
+         * ({@link #macroScoreSubquery}/{@link #strictMatchCountSubquery}) and COUNT over
+         * {@code tailJoin} therefore express exists/in/hasIntersection membership and
+         * {@code size()} of the flattened union with the same element set, so the tri-state
+         * unknown-element machinery composes with chains unchanged.
          */
         private <T> ChainSubquery<T> chainSubquery(Class<T> resultType, Scope scope,
                                                    Scope.ResolvedRelation ref) {
+            if (!selectInvocation) {
+                String chain = ref.chain().stream()
+                        .map(AttributeMapping.Relation::joinAttribute)
+                        .collect(java.util.stream.Collectors.joining("."));
+                throw new UnsupportedOperationException(
+                        "Relation '" + chain + "' requires a correlated subquery, but this Specification "
+                        + "is being evaluated outside its own SELECT query — e.g. via "
+                        + "repository.delete(Specification) or a criteria bulk delete/update. "
+                        + "Hibernate's multi-table bulk delete first clears @ElementCollection/join "
+                        + "tables using this same predicate, which self-invalidates the correlated "
+                        + "subquery: 0 entity rows are deleted while their collection rows are "
+                        + "silently destroyed. The Cerbos Specification is SELECT-only; fetch the "
+                        + "matching ids with findAll(spec) and delete them with deleteAllById(ids).");
+            }
             Subquery<T> sub = scope.parentQuery().subquery(resultType);
             From<?, ?> correlated = correlate(sub, ref.owner().from());
             Join<?, ?> join = correlated.join(ref.chain().get(0).joinAttribute());
@@ -1711,6 +2584,43 @@ public final class SpringDataQueryPlanAdapter {
             cs.sub().select(cb.literal(1));
             cs.sub().where(bodyBuilder.build(cs.sub(), cs.tailJoin(), cs.rebasedOuter()));
             return cb.exists(cs.sub());
+        }
+    }
+
+    /**
+     * Classpath-guarded probe for the {@code cerbos_ieee_double} MySQL cast function
+     * registered by {@link MySqlDoubleCastFunctionContributor}. The adapter itself depends
+     * only on Jakarta Persistence; everything that touches Hibernate types lives in the
+     * nested {@link Probe} class, which is only loaded after {@code hibernate-core} has been
+     * confirmed present — on non-Hibernate providers {@link #isRegistered} is a constant
+     * {@code false} and the caller keeps the portable {@code cb.toDouble} path.
+     */
+    private static final class IeeeDoubleCast {
+
+        private static final boolean HIBERNATE_PRESENT = detectHibernate();
+
+        private static boolean detectHibernate() {
+            try {
+                Class.forName("org.hibernate.query.sqm.NodeBuilder", false,
+                        IeeeDoubleCast.class.getClassLoader());
+                return true;
+            } catch (ClassNotFoundException | LinkageError e) {
+                return false;
+            }
+        }
+
+        /** True when the current CriteriaBuilder's session factory has the function registered. */
+        static boolean isRegistered(CriteriaBuilder cb) {
+            return HIBERNATE_PRESENT && Probe.isRegistered(cb);
+        }
+
+        /** The only code that references Hibernate types; never loaded without hibernate-core. */
+        private static final class Probe {
+            static boolean isRegistered(CriteriaBuilder cb) {
+                return cb instanceof org.hibernate.query.sqm.NodeBuilder nb
+                        && nb.getQueryEngine().getSqmFunctionRegistry().findFunctionDescriptor(
+                                MySqlDoubleCastFunctionContributor.FUNCTION_NAME) != null;
+            }
         }
     }
 }

@@ -40,7 +40,7 @@
     "prepare": "npm run build",
     "prepublishOnly": "npm test",
     "version": "git add -A src",
-    "test": "cerbos run --log-level=error --set=storage.disk.directory=../policies --set=telemetry.disabled=true -- jest src/index.test.ts",
+    "test": "cerbos run --log-level=error --set=storage.disk.directory=../policies --set=telemetry.disabled=true -- jest src/index.test.ts src/postgresql.test.ts",
     "test:adversarial": "cerbos run --log-level=error --set=server.grpcListenAddr=:3621 --set=server.httpListenAddr=:3620 --set=storage.disk.directory=../conformance/policies --set=telemetry.disabled=true -- jest --config jest.adversarial.config.js",
     "cerbos": "cerbos server --config=./cerbos-config.yaml"
   },
@@ -63,8 +63,8 @@
     "drizzle-orm": "^0.44.0 || ^0.45.0"
   },
   "dependencies": {
-    "@cerbos/core": "^0.31.0",
-    "@cerbos/grpc": "^0.27.0",
+    "@cerbos/core": "^0.32.0",
+    "@cerbos/grpc": "^0.28.0",
     "@tsconfig/node20": "^20.1.8",
     "@tsconfig/strictest": "^2.0.8",
     "tslib": "^2.8.1"

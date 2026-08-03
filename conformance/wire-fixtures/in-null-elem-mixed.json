@@ -1,0 +1,24 @@
+{
+  "action": "in-null-elem-mixed",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "in",
+        "operands": [
+          {
+            "variable": "request.resource.attr.owner"
+          },
+          {
+            "value": [
+              "x",
+              "one_two",
+              null
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

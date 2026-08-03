@@ -1,0 +1,20 @@
+{
+  "action": "in-null-elem-rel",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "in",
+        "operands": [
+          {
+            "value": null
+          },
+          {
+            "variable": "request.resource.attr.tagNames"
+          }
+        ]
+      }
+    }
+  }
+}

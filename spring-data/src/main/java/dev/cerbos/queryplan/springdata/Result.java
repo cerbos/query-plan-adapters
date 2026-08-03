@@ -11,13 +11,31 @@ public sealed interface Result<T> permits Result.AlwaysAllowed, Result.AlwaysDen
      * <ul>
      *   <li>{@link AlwaysAllowed} – {@code null} predicate; Spring Data's
      *       {@code SimpleJpaRepository} treats this as "no restriction" and omits the
-     *       {@code WHERE} clause entirely (matches {@link Specification#unrestricted()}).</li>
+     *       {@code WHERE} clause entirely (matches {@code Specification.unrestricted()}).</li>
      *   <li>{@link AlwaysDenied} – always-false predicate ({@code 1=0}).</li>
      *   <li>{@link Conditional} – the wrapped Specification. The lambda is invoked fresh
      *       for every query (including Spring Data's separate COUNT pass under
      *       {@code findAll(spec, Pageable)}), so callers must not cache the produced
      *       {@code Predicate} across query executions.</li>
      * </ul>
+     *
+     * <p><strong>The Specification is SELECT-only.</strong> Never pass it to
+     * {@code JpaSpecificationExecutor.delete(Specification)} or any other criteria bulk
+     * operation. When the attribute mapping contains {@link AttributeMapping.Relation}
+     * entries, the translation builds correlated subqueries over collection/join tables, and
+     * Hibernate's multi-table bulk delete first clears those {@code @ElementCollection}/join
+     * tables using the same predicate — self-invalidating the correlated subquery so that
+     * 0 entity rows are deleted while their collection rows are silently destroyed (which can
+     * in turn flip the outcome of ownership/blocklist policies for the surviving rows). The
+     * adapter detects the bulk-delete invocation context and throws
+     * {@link UnsupportedOperationException} before anything is deleted. To delete
+     * policy-permitted rows, select first and delete by id:
+     *
+     * <pre>{@code
+     * List<Long> ids = repository.findAll(result.toSpecification())
+     *         .stream().map(MyEntity::getId).toList();
+     * repository.deleteAllById(ids);
+     * }</pre>
      */
     Specification<T> toSpecification();
 
@@ -50,6 +68,13 @@ public sealed interface Result<T> permits Result.AlwaysAllowed, Result.AlwaysDen
      * never cache or re-use the {@code Predicate} returned by
      * {@link Specification#toPredicate}; pass the Specification itself to repository methods
      * and let Spring Data invoke it once per query.
+     *
+     * <p>The Specification is SELECT-only: passing it to
+     * {@code JpaSpecificationExecutor.delete(Specification)} (or any criteria bulk operation)
+     * throws {@link UnsupportedOperationException} whenever the plan touches a
+     * {@link AttributeMapping.Relation} — see {@link Result#toSpecification()} for the
+     * corruption mechanism this prevents and the select-ids-then-{@code deleteAllById}
+     * alternative.</p>
      */
     record Conditional<T>(Specification<T> specification) implements Result<T> {
         @Override

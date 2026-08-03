@@ -80,13 +80,27 @@ switch (evaluation.kind) {
 
 Cerbos plans reference both resources (`request.resource.attr.*`) and principals (`request.principal.attr.*`), so include the paths your policies emit in the mapper.
 
+### Database collation requirement
+
+> **Every mapped string column must use a binary or case-sensitive collation.** CEL
+> string comparison is exact and case-sensitive, while MySQL and PlanetScale commonly
+> default to case-insensitive collations. With a CI collation, a database predicate can
+> return `"Finance"` for a policy that allowed only `"finance"`, silently over-granting
+> access compared with the PDP's `check()` decision.
+
+On MySQL use a collation such as `utf8mb4_bin` or `utf8mb4_0900_as_cs`. PostgreSQL is
+case-sensitive by default, but nondeterministic ICU collations and `citext` are not safe
+for mapped policy attributes. On SQLite, do not apply `COLLATE NOCASE` to mapped columns.
+This requirement covers equality and ordering, `in`, intersections, string matching, and
+hierarchy prefix/ancestor comparisons.
+
 ### Mapper options
 
 The mapper associates Cerbos attribute references with Drizzle columns. It can be:
 
 - A plain object where keys are Cerbos attribute references and values are Drizzle columns or SQL expressions.
 - A function receiving the attribute reference and returning the column/expression.
-- An object with a `column` property and an optional `transform` function to customize how operator/value pairs are converted into SQL.
+- An object with a `column` property and optional metadata or a `transform` function to customize how operator/value pairs are converted into SQL.
 
 ```ts
 const result = queryPlanToDrizzle({
@@ -115,6 +129,16 @@ Every mapper entry can be:
 - A column or SQL fragment.
 - An object with `column` and/or `transform` to customize how each operator is translated.
 - A relation mapping (described below) for nested resource structures.
+
+Fields used through CEL's `timestamp()` must opt in with `valueType: "timestamp"`.
+The adapter then normalizes RFC 3339 constants to UTC before comparing them:
+
+```ts
+"request.resource.attr.createdAt": {
+  column: resources.createdAt,
+  valueType: "timestamp",
+}
+```
 
 ### Mapping relations
 
@@ -166,6 +190,7 @@ are translated into `EXISTS` expressions that join the `owners` and `tags` table
 
 - `hasIntersection`: Use for multi-valued attributes such as tags. When Cerbos emits `hasIntersection(map(resource.tags, lambda t => t.name), ["tag"])`, the mapper looks up the nested field and the adapter converts it into a `column IN (...)` condition.
 - `exists`, `exists_one`, and `all`: When policies reference array attributes (e.g., `request.resource.attr.tags`), mark the mapper entry as a relation. The adapter scopes the lambda variable, generates the `EXISTS` subquery, and correlates it with the parent table automatically.
+- Scalar collections stored through a relation can opt in with `collectionValueType: "scalar"` and set the relation's `field`. This enables direct membership such as `R.attr.owner in R.attr.tagNames`, including explicit `null` elements.
 - `filter`: Cerbos uses `filter` during plan construction. The adapter discards those lambdas because the entire filter is rerun in Drizzle land.
 
 ## Testing

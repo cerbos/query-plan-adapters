@@ -31,6 +31,16 @@
     { "id": "b5", "aBool": true,  "aString": "nulltag",     "aNumber": 9,  "aOptionalString": "nt",   "tags": [{"id": "t10a", "name": null}], "subCategoryNames": [],
       "note": "NULL element column: only a NULL-name tag (no true/false witness -> macro errors)" },
     { "id": "b6", "aBool": false, "aString": "mixed",       "aNumber": 10, "aOptionalString": "mx",   "tags": [{"id": "t11a", "name": null}, {"id": "t11b", "name": "public"}], "subCategoryNames": [],
-      "note": "NULL element column mixed with a determined witness: exists absorbs the error, all/exists_one/map do not" }
+      "note": "NULL element column mixed with a determined witness: exists absorbs the error, all/exists_one/map do not" },
+    { "id": "c1", "aBool": true,  "aString": "One",         "aNumber": 11, "aOptionalString": "Set",   "tags": [{"id": "tc1", "name": "Public"}], "subCategoryNames": ["Finance"],
+      "note": "case-sensitive collation witness across equality, membership, intersection, and nested relations" },
+    { "id": "c2", "aBool": false, "aString": "xA_by",       "aNumber": 12, "aOptionalString": null,    "tags": [], "subCategoryNames": [],
+      "note": "case-sensitive LIKE witness: contains(a_b) must not match xA_by" },
+    { "id": "d1", "aBool": true,  "aString": "[SEC]ret",    "aNumber": 13, "aOptionalString": "[SEC]", "tags": [], "subCategoryNames": [],
+      "note": "literal '[' LIKE and hierarchy witness" },
+    { "id": "d2", "aBool": false, "aString": "Secret",      "aNumber": 14, "aOptionalString": "xSECy", "tags": [], "subCategoryNames": [],
+      "note": "SQL Server character-class trap: an unescaped [SEC]% would match this row" },
+    { "id": "e1", "aBool": true,  "aString": "nullowner",   "aNumber": 15, "aOptionalString": null,    "tags": [{"id": "te1", "name": null}], "subCategoryNames": [],
+      "note": "explicit-null owner and null-in-null-list witness for variable membership" }
   ]
 }

@@ -6,6 +6,7 @@ on:
   pull_request:
     paths:
       - "sqlalchemy/**"
+      - "conformance/**"
       - "policies/**"
       - ".github/workflows/sqlalchemy_pr.yaml"
       - ".github/workflows/sqlalchemy_release.yaml"
@@ -19,7 +20,10 @@ jobs:
     name: SQLA test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate conformance corpus
+        run: ../conformance/scripts/validate-corpus.sh
 
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:

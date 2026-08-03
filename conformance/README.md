@@ -30,10 +30,12 @@ rows, and one oracle recipe that every adapter's harness implements against its 
   actions that adapter's query language genuinely cannot express — LIKE-wildcard escaping,
   relation-count thresholds, cross-model column comparisons; the adapter must THROW for these,
   never emit a silently-wrong filter, and its harness asserts the throw instead of the oracle
-  match), `expectedUnsupported` (planner shapes NO adapter translates; must fail loudly,
-  never silently-wrong), and `knownDivergences` (a specific adapter/action pair intentionally
-  excluded from the oracle run, with a reason — currently only `p-has`, excluded because of a
-  planner bug, not an adapter bug).
+  match), `expectedUnsupported` (planner shapes rejected by the Spring reference adapter; other
+  adapters must also fail loudly unless listed in `adapterSupportedExpected`),
+  `adapterSupportedExpected` (per-adapter exceptions that intentionally translate a
+  reference-unsupported shape through a documented database capability), and `knownDivergences`
+  (an action plus the affected adapters intentionally excluded from the oracle run, with a
+  reason — currently only `p-has`, excluded because of a planner bug, not an adapter bug).
 - `wire-fixtures/*.json` — one golden `PlanResources` response per action, captured against the
   pinned Cerbos version in `CERBOS_VERSION`. These pin planner *wire shape* independent of any
   adapter or database — a `diff` against a freshly-regenerated fixture after bumping
@@ -59,20 +61,24 @@ are necessarily language/ORM-specific):
    attributes built to mirror that row exactly (`oracleAllowedIds`). No hand-computed
    expectations — the PDP is the oracle for both sides.
 4. **Compare**: `adapterFilteredIds(action)` must equal `oracleAllowedIds(action)` for every
-   `conformance` action, and translation must throw for every `expectedUnsupported` action.
+   `conformance` action. Translation must throw for every `expectedUnsupported` action unless the
+   adapter is listed for that action in `adapterSupportedExpected`; declared exceptions must run
+   through the same oracle comparison as conformance actions.
 
-### NULL is a missing attribute
+### NULL conventions
 
 A DB `NULL` (or a missing element field, e.g. a NULL tag name) must become a **missing attribute**
-on the check side, never an explicit null value. CEL's `!=`/macro bodies raise a missing-attribute
-evaluation error against a missing attribute, which Cerbos treats as a deny — the same three-valued
-logic SQL applies when a `NULL` participates in a comparison (`UNKNOWN`, excluded from both a
-predicate and its negation). Getting this wrong is exactly the bug class in mind: an adapter or an
-oracle that models "NULL" as an explicit CEL `null` gets `==`/`!=` semantics that diverge from what
-SQL actually does with the row, especially under negation (`NOT (NULL = x)` is still `UNKNOWN`, not
-`TRUE`). Concretely: build the check-side resource by conditionally calling `.withAttribute(...)`
-only when the seed's field is non-null; never pass an explicit null attribute value.
+on the check side by default. CEL's `!=`/macro bodies raise a missing-attribute evaluation error,
+which Cerbos treats as a deny — the same three-valued logic SQL applies when a `NULL` participates
+in a comparison (`UNKNOWN`, excluded from both a predicate and its negation). In particular,
+`NOT (NULL = x)` is still `UNKNOWN`, not `TRUE`.
 
+The `in-null-elem-*` and `in-var-var*` probes deliberately exercise the other planner convention:
+`owner` aliases the `aOptionalString` column but is sent as an **explicit null** when the column is
+NULL, and `tagNames` is the scalar projection of `tags[].name` with NULL names retained as explicit
+null list elements. This pins `null in [null]`, `null in tagNames`, and variable-in-variable
+membership. Object-valued `tags` still omit a NULL `name`, so collection lambda bodies continue to
+exercise missing-attribute errors. Each harness must implement both representations exactly.
 ### The degeneracy guard
 
 The comparison in step 4 can pass vacuously if the oracle itself is trivial (e.g. the PDP denies
@@ -83,11 +89,23 @@ harness whose PDP connection or policy load silently failed would still pass eve
 
 ### Deterministic derived fields
 
-`createdBy` (used by the `p-timestamp` probe, currently `expectedUnsupported`) is not stored in
-`seeds.json` because it's a formula, not raw seed data: `aNumber >= 2 ? "2024-06-01T00:00:00Z" :
-"2026-06-01T00:00:00Z"`, splitting seeds around the probe's `2025-01-01` threshold. Reproduce it
-exactly if a future adapter exercises that probe.
+The corpus keeps raw relational rows compact; these resource attributes and stored columns are
+derived from each seed exactly as follows:
 
+- `createdBy`: `aNumber >= 2 ? "2024-06-01T00:00:00Z" : "2026-06-01T00:00:00Z"`.
+- `aDouble`: `a1 = -0.6`, `a2 = 0.25`, `a3 = NULL`/missing, otherwise `aNumber + 0.3`.
+- `createdAt`: `a1 = 2020-03-15T10:30:00Z`, `a2 = 2037-01-01T00:00:00Z`, `a3 = NULL`/missing,
+  `a4 = 2024-06-01T00:00:00Z`, `a5 = 2020-03-15T10:30:00.123456Z`; otherwise use
+  `2036-06-06T06:06:06Z` when `aNumber >= 2`, or `2021-05-05T05:05:05Z`.
+- third-level `labels[].name`: `a1 = ["gold", "silver"]`, `a6 = [missing, "silver"]`,
+  `a8 = ["silver"]`, `c1 = ["Gold"]`, otherwise empty.
+- `scope`: `a1=dept`, `a2=dept.eng`, `a3=dept.eng.platform`,
+  `a4=dept.eng.platform.obs`, `a5=dept.engineering`, `a6=dept.sales`, `a7=NULL`,
+  `a8=""`, `a9=50%`, `b1=50%:a_b:x`, `b2=50x:a_b:y`, `b3=50%:aXb:y`,
+  `b4=50%:a_b`, `b5=dept.eng.platform2`, `b6=50%.a_b`, `c1=Dept.Eng`,
+  `c2=dept.eng.`, `d1=[env]:prod:eu`, `d2=e:prod:eu`; all other seeds use NULL.
+
+These are part of the shared contract. Do not replace them with adapter-specific fixtures.
 ## Adding a new hostile shape
 
 1. Add the action + condition to `policies/adversarial.yaml`.

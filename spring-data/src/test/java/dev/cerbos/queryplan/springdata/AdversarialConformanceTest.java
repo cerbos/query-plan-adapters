@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import dev.cerbos.queryplan.springdata.testmodel.CategoryEntity;
+import dev.cerbos.queryplan.springdata.testmodel.LabelEntity;
 import dev.cerbos.queryplan.springdata.testmodel.ResourceEntity;
 import dev.cerbos.queryplan.springdata.testmodel.SubCategoryEntity;
 import dev.cerbos.sdk.CerbosBlockingClient;
@@ -31,6 +32,9 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.jpa.domain.Specification;
 import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.containers.JdbcDatabaseContainer;
+import org.testcontainers.containers.MySQLContainer;
+import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.images.builder.Transferable;
@@ -50,22 +54,21 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Adversarial differential suite: every action in the shared {@code ../conformance/} corpus is
- * planned against a REAL Cerbos PDP, translated by the adapter, and executed against seeded rows
- * — then the filtered id set is compared against an <em>oracle</em> computed by calling the check
- * API for each row with attributes mirroring that row exactly.
+ * Adversarial differential suite: every action from the repo-level {@code ../conformance/}
+ * corpus is planned against a real Cerbos PDP, translated by the adapter, and executed against
+ * seeded rows. The filtered id set is compared with an oracle computed by calling the check API
+ * for each row with matching attributes.
  *
  * <p>No hand-computed expectations: if the adapter's SQL semantics diverge from Cerbos's own
- * evaluation for any row, the mismatch surfaces mechanically. Seed rows deliberately hold hostile
- * data — empty collections, LIKE metacharacters ({@code % _ \}), unicode, empty strings, negative
- * numbers — and the policies use planner shapes the conformance policies don't (value-first
- * comparisons, empty {@code in} lists, fractional thresholds against integer columns, outer
- * attribute references two lambda levels deep).
+ * evaluation for any row, the mismatch surfaces mechanically. See {@code conformance/README.md}
+ * for the shared seed, NULL, and degeneracy conventions.
  *
- * <p>The policy, seed data, and action list are NOT owned by this module — they live in the
- * repo-level {@code conformance/} corpus (see {@code conformance/README.md}) so prisma and
- * sqlalchemy can run the same hostile shapes against their own oracle harnesses. Only the
- * JPA-specific translation (seeding entities, executing the {@link Specification}) belongs here.
+ * <p><strong>Database selection.</strong> By default the suite runs on in-memory H2. Set the
+ * {@code adapter.test.db} system property (forwarded from {@code ADAPTER_TEST_DB}) to
+ * {@code postgres} or {@code mysql} to run the same oracle against a real Testcontainers
+ * database. The MySQL leg defaults to the case-sensitive {@code utf8mb4_0900_as_cs} collation;
+ * using {@code -Dadapter.test.mysql.collation=utf8mb4_0900_ai_ci} reproduces the documented
+ * case-insensitive authorization over-grant.
  */
 class AdversarialConformanceTest {
 
@@ -73,10 +76,23 @@ class AdversarialConformanceTest {
             Map.entry("request.resource.attr.aBool", AttributeMapping.field("aBool")),
             Map.entry("request.resource.attr.aString", AttributeMapping.field("aString")),
             Map.entry("request.resource.attr.aNumber", AttributeMapping.field("aNumber")),
+            Map.entry("request.resource.attr.aDouble", AttributeMapping.field("aDouble")),
             Map.entry("request.resource.attr.aOptionalString", AttributeMapping.field("aOptionalString")),
             // ISO-date string column + flattened struct member for the p-* probes
             Map.entry("request.resource.attr.createdBy", AttributeMapping.field("createdBy")),
+            // Delimited hierarchy path column for the hier-* actions
+            Map.entry("request.resource.attr.scope", AttributeMapping.field("scope")),
+            // Instant column for the ts-* timestamp() comparison actions
+            Map.entry("request.resource.attr.createdAt", AttributeMapping.field("createdAt")),
             Map.entry("request.resource.attr.obj.inner", AttributeMapping.field("aString")),
+            // in-null-elem-*: same column as aOptionalString, but the oracle sends an
+            // EXPLICIT null attribute for NULL columns (aOptionalString is OMITTED instead)
+            // — pinning the adapter's convention that a DB NULL is the explicitly-null
+            // attribute (eq-null → IS NULL, and `x in [..., null]` → OR IS NULL).
+            Map.entry("request.resource.attr.owner", AttributeMapping.field("aOptionalString")),
+            // Scalar projection of tags (defaultMemberField=name) for `null in R.attr.tagNames`;
+            // NULL name columns become explicit null list elements on the check side.
+            Map.entry("request.resource.attr.tagNames", AttributeMapping.relation("tags", "name")),
             Map.entry("request.resource.attr.tags", AttributeMapping.relation("tags", Map.of(
                     "id", AttributeMapping.field("id"),
                     "name", AttributeMapping.field("name")
@@ -84,7 +100,11 @@ class AdversarialConformanceTest {
             Map.entry("request.resource.attr.categories", AttributeMapping.relation("categories", Map.of(
                     "name", AttributeMapping.field("name"),
                     "subCategories", AttributeMapping.relation("subCategories", Map.of(
-                            "name", AttributeMapping.field("name")
+                            "name", AttributeMapping.field("name"),
+                            // Third macro level for the macro-depth3-* actions.
+                            "labels", AttributeMapping.relation("labels", Map.of(
+                                    "name", AttributeMapping.field("name")
+                            ))
                     ))
             ))),
             // Multi-hop chain probe (W1): mainCategory is a SINGLE nested object on the check
@@ -140,7 +160,28 @@ class AdversarialConformanceTest {
 
     static Stream<Arguments> unsupportedShapes() {
         return actionsFile.expectedUnsupported().stream()
+                .filter(u -> !u.action().equals("p-timestamp"))
                 .map(u -> Arguments.of(u.action(), u.springDataMessage()));
+    }
+    /**
+     * Deterministic label names per seed for the {@code macro-depth3-*} actions — the third
+     * macro level (categories → subCategories → labels). A {@code null} entry seeds a label
+     * whose {@code name} column is NULL: a missing element attribute on the check side, so the
+     * innermost lambda body touching it is a CEL evaluation error that must propagate up
+     * through BOTH enclosing macro levels (deny) — and SQL UNKNOWN through the nested scoring
+     * subqueries on the adapter side. a1 is the true witness ("gold"), a6 the error witness
+     * (no true sibling to absorb the NULL-name error), a8 the determined-false witness, and
+     * c1 the collation witness ("Gold" vs "gold"). Only consulted for seeds that hold a
+     * category/subCategory chain.
+     */
+    private static List<String> labelsFor(Seed s) {
+        return switch (s.id()) {
+            case "a1" -> java.util.Arrays.asList("gold", "silver");
+            case "a6" -> java.util.Arrays.asList(null, "silver");
+            case "a8" -> List.of("silver");
+            case "c1" -> List.of("Gold");
+            default -> List.of();
+        };
     }
 
     /** Deterministic ISO instant per seed for the timestamp probe: split around 2025-01-01. */
@@ -148,9 +189,92 @@ class AdversarialConformanceTest {
         return s.aNumber() >= 2 ? "2024-06-01T00:00:00Z" : "2026-06-01T00:00:00Z";
     }
 
+    /**
+     * Deterministic {@link Instant} per seed for the {@code ts-*} timestamp() comparison
+     * actions. The split matters: a1/a5 and the {@code aNumber < 2} seeds are firmly in the
+     * past (the {@code ts-window} retention cutoff, {@code now() - 24h}, must include them),
+     * a2 and the {@code aNumber >= 2} seeds are far enough in the future to stay AFTER any
+     * plan-time {@code now()} yet inside MySQL's {@code TIMESTAMP} range (which ends
+     * 2038-01-19 — the CI MySQL leg stores Instant as {@code timestamp}), a3 is NULL
+     * (missing attribute → CEL error → {@code check()} denies; SQL NULL comparison →
+     * UNKNOWN → excluded — both sides must agree), a4 is the {@code ts-eq} witness, and a5
+     * carries sub-second (microsecond) precision — exactly representable on H2, PostgreSQL,
+     * and MySQL {@code timestamp(6)} columns.
+     */
+    private static java.time.Instant tsFor(Seed s) {
+        return switch (s.id()) {
+            case "a1" -> java.time.Instant.parse("2020-03-15T10:30:00Z");
+            case "a2" -> java.time.Instant.parse("2037-01-01T00:00:00Z");
+            case "a3" -> null;
+            case "a4" -> java.time.Instant.parse("2024-06-01T00:00:00Z");
+            case "a5" -> java.time.Instant.parse("2020-03-15T10:30:00.123456Z");
+            default -> s.aNumber() >= 2
+                    ? java.time.Instant.parse("2036-06-06T06:06:06Z")
+                    : java.time.Instant.parse("2021-05-05T05:05:05Z");
+        };
+    }
+
+    /**
+     * Deterministic fractional double per seed for the IEEE add-solve probes
+     * ({@code arith-add-*-frac*}). a1 carries the algebraic-solve trap: {@code -0.6} is
+     * EXACTLY what solving {@code aDouble + 0.7 == 0.1} yields in Java double space, yet
+     * {@code check()} denies it ({@code -0.6 + 0.7 == 0.09999999999999998 != 0.1}) — so a
+     * pre-solved filter diverges from the oracle on this row. a2 is the exact-arithmetic
+     * agreement witness ({@code 0.25 + 0.5 == 0.75} holds bit-for-bit: both filter and
+     * oracle INCLUDE it). a3 has NO aDouble (missing attribute → CEL error → deny; SQL NULL
+     * arithmetic → UNKNOWN → excluded). The rest get an unremarkable fractional value both
+     * sides agree to exclude.
+     */
+    private static Double doubleFor(Seed s) {
+        return switch (s.id()) {
+            case "a1" -> -0.6;
+            case "a2" -> 0.25;
+            case "a3" -> null;
+            default -> s.aNumber() + 0.3;
+        };
+    }
+
+    /**
+     * Deterministic hierarchy path per seed for the {@code hier-*} actions. The paths
+     * triangulate the translator's branches: strict-prefix IN lists (ancestor-side fields),
+     * prefix LIKE (descendant-side fields), the EQUAL path (ancestorOf/descendentOf are
+     * strict — verified against a live PDP — while overlaps is inclusive), sibling STRING
+     * prefixes that are not PATH prefixes ({@code "dept.engineering"},
+     * {@code "dept.eng.platform2"}), LIKE metacharacters in segments (b2 is the
+     * unescaped-{@code %} trap, b3 the unescaped-{@code _} trap, b4 the equal-path
+     * strictness trap for the colon-delimited metachar actions), a trailing-delimiter empty
+     * segment (c2), a case variant for the collation legs (c1), and a NULL (a7: missing
+     * attribute → CEL error → deny on the check side vs SQL NULL → excluded on the SQL side).
+     */
+    private static String scopeFor(Seed s) {
+        return switch (s.id()) {
+            case "a1" -> "dept";
+            case "a2" -> "dept.eng";
+            case "a3" -> "dept.eng.platform";
+            case "a4" -> "dept.eng.platform.obs";
+            case "a5" -> "dept.engineering";
+            case "a6" -> "dept.sales";
+            case "a8" -> "";
+            case "a9" -> "50%";
+            case "b1" -> "50%:a_b:x";
+            case "b2" -> "50x:a_b:y";
+            case "b3" -> "50%:aXb:y";
+            case "b4" -> "50%:a_b";
+            case "b5" -> "dept.eng.platform2";
+            case "b6" -> "50%.a_b";
+            case "c1" -> "Dept.Eng";
+            case "c2" -> "dept.eng.";
+            case "d1" -> "[env]:prod:eu"; // literal-bracket descendant for hier-bracket
+            case "d2" -> "e:prod:eu"; // SQL Server char-class trap sibling for hier-bracket
+            default -> null; // a7: NULL scope — a missing attribute on the check side
+        };
+    }
+
     private static GenericContainer<?> cerbos;
     private static CerbosBlockingClient client;
     private static EntityManagerFactory emf;
+    /** Non-null only when {@code adapter.test.db} selects a real database. */
+    private static JdbcDatabaseContainer<?> database;
 
     @BeforeAll
     static void setUp() throws Exception {
@@ -159,9 +283,9 @@ class AdversarialConformanceTest {
         seedsFile = mapper.readValue(conformance.resolve("seeds.json").toFile(), SeedsFile.class);
         actionsFile = mapper.readValue(conformance.resolve("actions.json").toFile(), ActionsFile.class);
         SEEDS = seedsFile.seeds();
-        String cerbosVersion = Files.readString(conformance.resolve("CERBOS_VERSION")).strip();
 
-        cerbos = new GenericContainer<>("ghcr.io/cerbos/cerbos:" + cerbosVersion)
+        // Pinned PDP image — see CerbosTestImage for the pin rationale and bump policy.
+        cerbos = new GenericContainer<>(CerbosTestImage.IMAGE)
                 .withExposedPorts(3593)
                 .withCommand("server", "--set=storage.disk.directory=/policies")
                 .withEnv("CERBOS_NO_TELEMETRY", "1")
@@ -174,16 +298,83 @@ class AdversarialConformanceTest {
             throw new UncheckedIOException(e);
         }
         cerbos.start();
+        System.out.printf("==> Adversarial-oracle Cerbos PDP image: %s (digest %s)%n",
+                CerbosTestImage.IMAGE, CerbosTestImage.resolvedDigest(cerbos));
         client = new CerbosClientBuilder(cerbos.getHost() + ":" + cerbos.getMappedPort(3593))
                 .withPlaintext().buildBlockingClient();
 
-        emf = Persistence.createEntityManagerFactory("adversarial-pu");
+        emf = createEntityManagerFactory();
         seed();
+    }
+
+    /**
+     * Builds the EntityManagerFactory for the database selected by {@code adapter.test.db}:
+     * the H2-backed persistence unit as-is (default), or the same unit with its JDBC
+     * connection properties overridden to point at a Testcontainers-managed PostgreSQL or
+     * MySQL instance.
+     */
+    private static EntityManagerFactory createEntityManagerFactory() {
+        String db = System.getProperty("adapter.test.db", "h2");
+        switch (db) {
+            case "h2":
+                return Persistence.createEntityManagerFactory("adversarial-pu");
+            case "postgres": {
+                PostgreSQLContainer<?> pg = new PostgreSQLContainer<>("postgres:16");
+                pg.start();
+                database = pg;
+                return Persistence.createEntityManagerFactory(
+                        "adversarial-pu", jdbcOverrides(pg, "org.hibernate.dialect.PostgreSQLDialect"));
+            }
+            case "mysql": {
+                // Case-sensitive server collation by default, per the README's
+                // "Database collation requirements" section. Overriding this with MySQL's
+                // default utf8mb4_0900_ai_ci reproduces the collation over-grant: the
+                // mixed-case seeds (c1/c2) then diverge from the check() oracle.
+                String collation = System.getProperty(
+                        "adapter.test.mysql.collation", "utf8mb4_0900_as_cs");
+                MySQLContainer<?> my = new MySQLContainer<>("mysql:8.4")
+                        .withCommand("--character-set-server=utf8mb4",
+                                "--collation-server=" + collation);
+                // The leg runs with Connector/J's DEFAULT client-side prepared statements,
+                // which interpolate double bind parameters as DECIMAL literals. Hibernate's
+                // MySQLDialect renders to-double casts as decimal(53,20), so without the
+                // adapter's own `cast(... as double)` rendering (registered by
+                // MySqlDoubleCastFunctionContributor) the double-space arithmetic would
+                // evaluate in exact decimal — 3 * 0.1 == 0.3 becomes TRUE, diverging from
+                // CEL IEEE semantics; p-double-frac is the witness. Running client-side by
+                // default makes the oracle pin the DOUBLE-cast fix; set
+                // -Dadapter.test.mysql.serverPrepStmts=true (env var
+                // ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS) to verify the server-side prepared
+                // statement mode too — both
+                // modes must agree with the check() oracle. Verified empirically on
+                // MySQL 8.4.
+                if (Boolean.getBoolean("adapter.test.mysql.serverPrepStmts")) {
+                    my.withUrlParam("useServerPrepStmts", "true");
+                }
+                my.start();
+                database = my;
+                return Persistence.createEntityManagerFactory(
+                        "adversarial-pu", jdbcOverrides(my, "org.hibernate.dialect.MySQLDialect"));
+            }
+            default:
+                throw new IllegalArgumentException(
+                        "Unknown adapter.test.db '" + db + "' (expected h2, postgres, or mysql)");
+        }
+    }
+
+    private static Map<String, Object> jdbcOverrides(JdbcDatabaseContainer<?> c, String dialect) {
+        return Map.of(
+                "jakarta.persistence.jdbc.url", c.getJdbcUrl(),
+                "jakarta.persistence.jdbc.driver", c.getDriverClassName(),
+                "jakarta.persistence.jdbc.user", c.getUsername(),
+                "jakarta.persistence.jdbc.password", c.getPassword(),
+                "hibernate.dialect", dialect);
     }
 
     @AfterAll
     static void tearDown() {
         if (emf != null) emf.close();
+        if (database != null) database.stop();
         if (cerbos != null) cerbos.stop();
     }
 
@@ -199,8 +390,11 @@ class AdversarialConformanceTest {
             r.setaBool(s.aBool());
             r.setaString(s.aString());
             r.setaNumber(s.aNumber());
+            r.setaDouble(doubleFor(s));
             r.setaOptionalString(s.aOptionalString());
             r.setCreatedBy(isoFor(s));
+            r.setScope(scopeFor(s));
+            r.setCreatedAt(tsFor(s));
             for (Tag tag : s.tags()) {
                 r.addTag(tag.id(), tag.name());
             }
@@ -208,6 +402,15 @@ class AdversarialConformanceTest {
             for (String subName : s.subCategoryNames()) {
                 catSeq++;
                 SubCategoryEntity sub = new SubCategoryEntity("adv-sub-" + catSeq, subName);
+                List<LabelEntity> labels = new ArrayList<>();
+                int labSeq = 0;
+                for (String labelName : labelsFor(s)) {
+                    labSeq++;
+                    LabelEntity label = new LabelEntity("adv-lab-" + catSeq + "-" + labSeq, labelName);
+                    em.persist(label);
+                    labels.add(label);
+                }
+                sub.setLabels(labels);
                 em.persist(sub);
                 CategoryEntity cat = new CategoryEntity("adv-cat-" + catSeq, "business");
                 cat.setSubCategories(new ArrayList<>(List.of(sub)));
@@ -251,12 +454,43 @@ class AdversarialConformanceTest {
                                 "name", AttributeValue.stringValue("business"),
                                 "subCategories", AttributeValue.listValue(
                                         AttributeValue.mapValue(Map.of(
-                                                "name", AttributeValue.stringValue(subName)))))))
+                                                "name", AttributeValue.stringValue(subName),
+                                                "labels", AttributeValue.listValue(labelsFor(s).stream()
+                                                        .map(AdversarialConformanceTest::asLabelAttribute)
+                                                        .toList())))))))
                         .toList()));
         // A DB NULL is a missing attribute on the check side — conditions touching it must
         // deny (CEL error), matching SQL three-valued logic excluding the row.
         if (s.aOptionalString() != null) {
             r = r.withAttribute("aOptionalString", AttributeValue.stringValue(s.aOptionalString()));
+        }
+        // `owner` reads the SAME column under the OTHER null convention: a DB NULL is the
+        // EXPLICITLY-null attribute. This is the convention the adapter's null translations
+        // implement (eq-null → IS NULL; a null in-list element → OR IS NULL), and the two
+        // check() verdicts genuinely differ: `null in ["x", null]` is TRUE (allow) while a
+        // MISSING owner is a CEL error (deny). SQL cannot distinguish the two — the adapter
+        // follows the planner, which itself folds `x in [null]` to eq(x, null).
+        r = r.withAttribute("owner", s.aOptionalString() != null
+                ? AttributeValue.stringValue(s.aOptionalString())
+                : nullAttributeValue());
+        // tagNames: the scalar name projection of tags, with NULL name columns as explicit
+        // null elements — the representation under which `null in R.attr.tagNames` is TRUE
+        // exactly when a related row's member column IS NULL.
+        r = r.withAttribute("tagNames", AttributeValue.listValue(s.tags().stream()
+                .map(t -> t.name() != null
+                        ? AttributeValue.stringValue(t.name())
+                        : nullAttributeValue())
+                .toList()));
+        if (doubleFor(s) != null) {
+            r = r.withAttribute("aDouble", AttributeValue.doubleValue(doubleFor(s)));
+        }
+        if (scopeFor(s) != null) {
+            r = r.withAttribute("scope", AttributeValue.stringValue(scopeFor(s)));
+        }
+        // A NULL created_at column is a missing attribute on the check side: timestamp()
+        // over it is a CEL evaluation error → deny, matching SQL NULL exclusion.
+        if (tsFor(s) != null) {
+            r = r.withAttribute("createdAt", AttributeValue.stringValue(tsFor(s).toString()));
         }
         // mainCategory mirrors the row's single category as ONE nested object (the seeder
         // creates at most one category per seed), so direct dotted-chain CEL expressions
@@ -274,6 +508,33 @@ class AdversarialConformanceTest {
                             .toList()))));
         }
         return r;
+    }
+
+    /**
+     * An explicit protobuf NULL attribute value. The SDK's {@link AttributeValue} exposes no
+     * null factory (string/double/bool/list/map only), so the private constructor is reached
+     * reflectively — the null attribute is exactly what the in-null-elem-* actions exist to
+     * exercise, and check() verdicts differ between an explicit null and a missing attribute.
+     */
+    private static AttributeValue nullAttributeValue() {
+        try {
+            var ctor = AttributeValue.class.getDeclaredConstructor(com.google.protobuf.Value.class);
+            ctor.setAccessible(true);
+            return ctor.newInstance(com.google.protobuf.Value.newBuilder()
+                    .setNullValue(com.google.protobuf.NullValue.NULL_VALUE).build());
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException(
+                    "cerbos-sdk-java AttributeValue no longer has a (Value) constructor", e);
+        }
+    }
+
+    /** A NULL label name in the DB is a missing element attribute on the check side. */
+    private static AttributeValue asLabelAttribute(String name) {
+        Map<String, AttributeValue> attrs = new LinkedHashMap<>();
+        if (name != null) {
+            attrs.put("name", AttributeValue.stringValue(name));
+        }
+        return AttributeValue.mapValue(attrs);
     }
 
     /** A NULL tag name in the DB is a missing element attribute on the check side. */
@@ -338,6 +599,125 @@ class AdversarialConformanceTest {
         IllegalArgumentException ex = assertThrows(
                 IllegalArgumentException.class, () -> adapterFilteredIds(action));
         assertEquals(expectedMessage, ex.getMessage());
+    }
+
+    /**
+     * {@code p-timestamp} compares {@code timestamp(R.attr.createdBy)} where {@code createdBy}
+     * maps to a STRING column: timestamp() comparisons are supported only on columns that
+     * unambiguously denote an absolute instant (Instant / OffsetDateTime), so this must keep
+     * failing closed — with the column-type error, not the old pre-support operand error.
+     */
+    @Test
+    void timestampOnNonTemporalColumnThrowsNamedError() {
+        IllegalArgumentException ex = assertThrows(
+                IllegalArgumentException.class, () -> adapterFilteredIds("p-timestamp"));
+        assertTrue(ex.getMessage().contains("timestamp() comparison requires a column mapped to")
+                        && ex.getMessage().contains("String")
+                        && ex.getMessage().contains("request.resource.attr.createdBy"),
+                "unexpected message: " + ex.getMessage());
+    }
+
+    /**
+     * Pins the MySQL IEEE double-cast wiring. On the MySQL leg the ServiceLoader-discovered
+     * {@link MySqlDoubleCastFunctionContributor} must have registered the
+     * {@code cerbos_ieee_double} function — without it the adapter's arithmetic silently
+     * evaluates in exact decimal under Connector/J's default client-side prepared statements
+     * ({@code p-double-frac} catches the semantics; this test names the mechanism when it
+     * breaks, e.g. the META-INF/services entry going missing). On H2/PostgreSQL the function
+     * must NOT be registered: those dialects render IEEE-correct casts already, and the
+     * adapter must keep their SQL on the untouched {@code cb.toDouble} path.
+     */
+    @Test
+    void ieeeDoubleCastRegistrationMatchesDatabase() {
+        org.hibernate.query.sqm.NodeBuilder nb =
+                (org.hibernate.query.sqm.NodeBuilder) emf.getCriteriaBuilder();
+        boolean registered = nb.getQueryEngine().getSqmFunctionRegistry()
+                .findFunctionDescriptor(MySqlDoubleCastFunctionContributor.FUNCTION_NAME) != null;
+        boolean mysqlLeg = "mysql".equals(System.getProperty("adapter.test.db", "h2"));
+        assertEquals(mysqlLeg, registered, mysqlLeg
+                ? "cerbos_ieee_double must be registered on MySQL (is the "
+                        + "META-INF/services FunctionContributor entry intact?)"
+                : "cerbos_ieee_double must not be registered off-MySQL — H2/PostgreSQL "
+                        + "keep the cb.toDouble cast path");
+    }
+
+    /**
+     * Tripwire pinning the known UPSTREAM planner over-grant on the {@code has(...)} macro.
+     *
+     * <p>The Cerbos query planner constant-folds {@code has(R.attr.aOptionalString)} (action
+     * {@code p-has}) to {@code KIND_ALWAYS_ALLOWED} — "return every row" — even though the
+     * {@code check()} API denies resources that lack the attribute. The fold happens at the
+     * PLANNER, so every query-plan adapter is affected equally; this adapter translates the
+     * always-allowed plan faithfully. That is why {@code p-has} is excluded from the
+     * shared conformance action list: the differential comparison
+     * cannot pass while the planner itself over-grants. (Tracked in the Cerbos team's
+     * internal issue tracker as of 2026-07; no public cerbos/cerbos issue exists.)
+     *
+     * <p>This test asserts BOTH halves of the divergence — the plan kind AND the check()
+     * denials — so that the moment an upstream image stops folding, the test fails with
+     * explicit re-inclusion instructions instead of the coverage hole silently becoming
+     * permanent. NOTE: the suite runs against the pinned image in {@link CerbosTestImage},
+     * so this "fires when upstream fixes the fold" property is dormant between image bumps —
+     * the tripwire is re-evaluated on every deliberate bump of that pin (see the bump policy
+     * in {@code CerbosTestImage}), which is when an upstream fix would surface here.
+     *
+     * <p>README "Gotchas" documents the policy-author workaround:
+     * {@code R.attr.aOptionalString != null} plans as a conditional {@code ne(variable, null)}
+     * that this adapter translates to {@code IS NOT NULL} (PDP-verified).
+     */
+    @Test
+    void upstreamHasFoldOverGrantTripwire() {
+        PlanResourcesResult plan =
+                client.plan(principal(), Resource.newInstance("adversarial"), "p-has");
+        List<String> allIds = SEEDS.stream().map(Seed::id).sorted().toList();
+        List<String> oracle = oracleAllowedIds("p-has");
+
+        String upstreamChanged = String.format(
+                """
+
+                UPSTREAM CHANGE DETECTED: the Cerbos planner's has() -> KIND_ALWAYS_ALLOWED \
+                over-grant no longer reproduces on the image under test.
+
+                Until now, has(R.attr.aOptionalString) (action 'p-has') planned as \
+                KIND_ALWAYS_ALLOWED while check() denied rows without the attribute — a known \
+                upstream planner fold this adapter translated faithfully into "return all \
+                rows". 'p-has' is therefore EXCLUDED from the adapterMatchesCheckOracle \
+                @MethodSource. This tripwire exists to keep that exclusion honest.
+
+                The exclusion is no longer justified. Do ALL of the following:
+                  1. Classify "p-has" as a shared conformance action and delete its known-divergence
+                     entry — the differential oracle then owns
+                     has() semantics and will catch any mistranslation of the new residual
+                     plan shape mechanically.
+                  2. Run the oracle. If the adapter cannot translate the residual shape the
+                     planner now emits for has() (fetch it with: curl -s <pdp>/api/plan/resources
+                     -d '{"principal":{"id":"u1","roles":["USER"]},"resource":{"kind":
+                     "adversarial","attr":{}},"action":"p-has"}'), implement or fail-closed
+                     route that shape before re-including.
+                  3. Update the README "Gotchas" entry on has() (the over-grant caveat and the
+                     != null workaround) to reflect the fixed planner behaviour.
+                  4. Delete this tripwire test.
+
+                Observed on this run:
+                  plan kind for 'p-has': %s (pinned while broken: KIND_ALWAYS_ALLOWED)
+                  check() allowed %d of %d seeded rows: %s
+                """,
+                plan.getRaw().getFilter().getKind(), oracle.size(), allIds.size(), oracle);
+
+        // Pinned fact 1: the planner still folds has(...) to an unconditional allow-all plan.
+        assertTrue(plan.isAlwaysAllowed(), upstreamChanged);
+        // Pinned fact 2: the check() oracle diverges from that plan — at least one seeded row
+        // (a2/a4/a8/c2 hold NULL aOptionalString) is denied while the plan admits everything.
+        assertTrue(oracle.size() < allIds.size(), upstreamChanged);
+        assertTrue(oracle.contains("a1"),
+                "sanity: check() must still allow rows whose aOptionalString is set; oracle="
+                        + oracle);
+
+        // Executable record of the over-grant itself: the adapter translates the always-allowed
+        // plan faithfully, so the filtered set is EVERY row — including the ones check() denies.
+        assertEquals(allIds, adapterFilteredIds("p-has"),
+                "the adapter is expected to translate KIND_ALWAYS_ALLOWED faithfully into all "
+                        + "rows — if this fails the adapter started second-guessing plan kinds");
     }
 
     @Test

@@ -1,3 +1,6 @@
+import math
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from types import MappingProxyType
 from typing import Any, Callable, Dict, List, Tuple, Union
 
@@ -8,6 +11,7 @@ from google.protobuf.json_format import MessageToDict
 
 from sqlalchemy import (
     Column,
+    DateTime,
     Float,
     Integer,
     String,
@@ -15,9 +19,11 @@ from sqlalchemy import (
     and_,
     case,
     cast,
+    false,
     func,
     literal,
     not_,
+    null,
     or_,
     select,
 )
@@ -34,12 +40,33 @@ OperatorFnMap = Dict[str, Callable[[GenericColumn, Any], GenericExpression]]
 _LIKE_ESCAPE_CHAR = "\\"
 
 
+@dataclass(frozen=True)
+class _IEEEConstant:
+    """A non-finite CEL double that must not be bound into dialect SQL."""
+
+    value: float
+
+
+@dataclass(frozen=True)
+class _ConditionalValue:
+    """A ternary retained until comparison so non-finite arms can be folded."""
+
+    condition: Any
+    then_value: Any
+    else_value: Any
+
+
 def _escape_like_literal(needle: str) -> str:
-    """Escape LIKE metacharacters in a literal needle so `% _ \\` match literally."""
+    """Escape LIKE metacharacters in a literal needle.
+
+    ``[`` is a character-class opener on SQL Server even with an ESCAPE clause,
+    so escape it alongside the portable ``%``/``_`` wildcards.
+    """
     return (
         needle.replace(_LIKE_ESCAPE_CHAR, _LIKE_ESCAPE_CHAR * 2)
         .replace("%", _LIKE_ESCAPE_CHAR + "%")
         .replace("_", _LIKE_ESCAPE_CHAR + "_")
+        .replace("[", _LIKE_ESCAPE_CHAR + "[")
     )
 
 
@@ -52,7 +79,8 @@ def _escape_like_column(needle: Any) -> Any:
     """
     escaped = func.replace(needle, _LIKE_ESCAPE_CHAR, _LIKE_ESCAPE_CHAR * 2)
     escaped = func.replace(escaped, "%", _LIKE_ESCAPE_CHAR + "%")
-    return func.replace(escaped, "_", _LIKE_ESCAPE_CHAR + "_", type_=String)
+    escaped = func.replace(escaped, "_", _LIKE_ESCAPE_CHAR + "_")
+    return func.replace(escaped, "[", _LIKE_ESCAPE_CHAR + "[", type_=String)
 
 
 def _string_match(receiver: Any, needle: Any, *, prefix: bool, suffix: bool) -> Any:
@@ -88,11 +116,199 @@ def _float_div(c: Any, v: Any) -> Any:
     """CEL numeric attribute arithmetic is double-typed (Cerbos transports all
     numbers as doubles), so force float division: dialects with integer `/`
     (SQLite, PostgreSQL) would otherwise truncate `3 / 2.0` to `1`."""
-    if isinstance(c, bool) or not isinstance(c, (int, float)):
-        c = cast(c, Float)
+    if (
+        not isinstance(c, bool)
+        and isinstance(c, (int, float))
+        and not isinstance(v, bool)
+        and isinstance(v, (int, float))
+    ):
+        numerator = float(c)
+        denominator = float(v)
+        if denominator == 0.0:
+            if numerator == 0.0 or math.isnan(numerator):
+                return _IEEEConstant(math.nan)
+            sign = math.copysign(1.0, numerator) * math.copysign(1.0, denominator)
+            return _IEEEConstant(math.copysign(math.inf, sign))
+        return numerator / denominator
+
+    numerator = (
+        float(c)
+        if not isinstance(c, bool) and isinstance(c, (int, float))
+        else cast(c, Float)
+    )
+    denominator = (
+        float(v)
+        if not isinstance(v, bool) and isinstance(v, (int, float))
+        else cast(v, Float)
+    )
+    # SQL dialects disagree on division-by-zero (NULL vs exception). NULL has
+    # the same filtering behaviour as CEL NaN for the supported comparison
+    # plans, and prevents a database exception from aborting the query.
+    return numerator / func.nullif(denominator, 0.0)
+
+
+def _apply_comparison(operator: str, left: Any, right: Any) -> Any:
+    comparisons = {
+        "eq": lambda: left == right,
+        "ne": lambda: left != right,
+        "lt": lambda: left < right,
+        "gt": lambda: left > right,
+        "le": lambda: left <= right,
+        "ge": lambda: left >= right,
+    }
+    return comparisons[operator]()
+
+
+def _compare_leaf(operator: str, left: Any, right: Any) -> Any:
+    left_is_ieee = isinstance(left, _IEEEConstant)
+    right_is_ieee = isinstance(right, _IEEEConstant)
+    if left_is_ieee or right_is_ieee:
+        left_value = left.value if left_is_ieee else left
+        right_value = right.value if right_is_ieee else right
+        left_is_nan = left_is_ieee and math.isnan(left_value)
+        right_is_nan = right_is_ieee and math.isnan(right_value)
+        if left_is_nan or right_is_nan:
+            other = right_value if left_is_nan else left_value
+            if isinstance(other, (int, float)):
+                # CEL follows IEEE: NaN is unequal to everything and unordered.
+                return operator == "ne"
+            if hasattr(other, "is_"):
+                # Preserve CEL missing-attribute errors as SQL UNKNOWN while
+                # folding every present numeric value dialect-independently.
+                return case(
+                    (other.is_(None), null()),
+                    else_=(operator == "ne"),
+                )
+            raise ValueError(
+                "NaN can only be compared with numeric constants or SQLAlchemy "
+                "expressions"
+            )
+        if not isinstance(left_value, (int, float)) or not isinstance(
+            right_value, (int, float)
+        ):
+            raise ValueError(
+                "Non-finite numeric constants can only be compared with numeric "
+                "constants"
+            )
+        return _apply_comparison(operator, left_value, right_value)
+
+    return _apply_comparison(operator, left, right)
+
+
+def _compare(operator: str, left: Any, right: Any) -> Any:
+    """Compare values without leaking PostgreSQL's non-IEEE NaN ordering."""
+    if isinstance(left, _ConditionalValue):
+        return case(
+            (left.condition, _compare(operator, left.then_value, right)),
+            (not_(left.condition), _compare(operator, left.else_value, right)),
+        )
+    if isinstance(right, _ConditionalValue):
+        return case(
+            (right.condition, _compare(operator, left, right.then_value)),
+            (not_(right.condition), _compare(operator, left, right.else_value)),
+        )
+    return _compare_leaf(operator, left, right)
+
+
+def _in(c: Any, values: Any) -> Any:
+    """CEL membership, including explicit-null list elements."""
+    members = values if isinstance(values, list) else [values]
+    non_nulls = [member for member in members if member is not None]
+    predicates = []
+    if non_nulls:
+        predicates.append(c.in_(non_nulls))
+    if len(non_nulls) != len(members):
+        predicates.append(c.is_(None))
+    if not predicates:
+        return false()
+    return or_(*predicates)
+
+
+def _timestamp(value: Any, _: Any) -> Any:
+    """Unwrap a temporal column or parse an RFC-3339 planner constant."""
+    column_type = getattr(value, "type", None)
+    if isinstance(column_type, DateTime):
+        return value
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError(f"Invalid timestamp literal: {value}") from exc
     else:
-        c = float(c)
-    return c / v
+        raise ValueError(
+            "timestamp() requires an RFC-3339 literal or a SQLAlchemy DateTime column"
+        )
+    if parsed.tzinfo is None:
+        raise ValueError(f"Timestamp literal must include an offset: {value}")
+    return parsed.astimezone(timezone.utc)
+
+
+@dataclass(frozen=True)
+class _Hierarchy:
+    value: Any
+    delimiter: str
+
+
+def _hierarchy(value: Any, delimiter: Any) -> _Hierarchy:
+    delimiter = "." if delimiter is None else delimiter
+    if not isinstance(delimiter, str) or not delimiter:
+        raise ValueError("hierarchy() delimiter must be a non-empty string")
+    return _Hierarchy(value, delimiter)
+
+
+def _assert_matching_hierarchies(
+    left: Any, right: Any
+) -> Tuple[_Hierarchy, _Hierarchy]:
+    if not isinstance(left, _Hierarchy) or not isinstance(right, _Hierarchy):
+        raise ValueError("Hierarchy operator requires hierarchy() operands")
+    if left.delimiter != right.delimiter:
+        raise ValueError("Hierarchy operands must use the same delimiter")
+    return left, right
+
+
+def _ancestor_of(left: Any, right: Any) -> Any:
+    ancestor, descendent = _assert_matching_hierarchies(left, right)
+    ancestor_value = ancestor.value
+    descendent_value = descendent.value
+    delimiter = ancestor.delimiter
+
+    if isinstance(ancestor_value, str) and isinstance(descendent_value, str):
+        return descendent_value.startswith(ancestor_value + delimiter)
+    if isinstance(descendent_value, str):
+        parts = descendent_value.split(delimiter)
+        prefixes = [delimiter.join(parts[:i]) for i in range(1, len(parts))]
+        return ancestor_value.in_(prefixes)
+    if isinstance(ancestor_value, str):
+        return _string_match(
+            descendent_value,
+            ancestor_value + delimiter,
+            prefix=False,
+            suffix=True,
+        )
+    raise ValueError("Hierarchy comparison between two columns is not supported")
+
+
+def _descendent_of(left: Any, right: Any) -> Any:
+    return _ancestor_of(right, left)
+
+
+def _hierarchy_overlaps(left: Any, right: Any) -> Any:
+    left_hierarchy, right_hierarchy = _assert_matching_hierarchies(left, right)
+    left_value = left_hierarchy.value
+    right_value = right_hierarchy.value
+    if isinstance(left_value, str) and isinstance(right_value, str):
+        return (
+            left_value == right_value
+            or _ancestor_of(left_hierarchy, right_hierarchy)
+            or _ancestor_of(right_hierarchy, left_hierarchy)
+        )
+    return or_(
+        left_value == right_value,
+        _ancestor_of(left_hierarchy, right_hierarchy),
+        _ancestor_of(right_hierarchy, left_hierarchy),
+    )
 
 
 # We want to make the base dict "immutable", and enforce explicit (optional) overrides on
@@ -100,13 +316,13 @@ def _float_div(c: Any, v: Any) -> Any:
 # could wreak havoc if different calls from the same memory space weren't aware of each other's
 # overrides)
 __operator_fns: OperatorFnMap = {
-    "eq": lambda c, v: c == v,  # c, v denotes column, value respectively
-    "ne": lambda c, v: c != v,
-    "lt": lambda c, v: c < v,
-    "gt": lambda c, v: c > v,
-    "le": lambda c, v: c <= v,
-    "ge": lambda c, v: c >= v,
-    "in": lambda c, v: c.in_([v]) if not isinstance(v, list) else c.in_(v),
+    "eq": lambda c, v: _compare("eq", c, v),
+    "ne": lambda c, v: _compare("ne", c, v),
+    "lt": lambda c, v: _compare("lt", c, v),
+    "gt": lambda c, v: _compare("gt", c, v),
+    "le": lambda c, v: _compare("le", c, v),
+    "ge": lambda c, v: _compare("ge", c, v),
+    "in": _in,
     # Arithmetic operators — return value expressions (not boolean), composed
     # inside parent comparisons like gt(add(col, 1), 2).
     "add": lambda c, v: c + v,
@@ -128,6 +344,11 @@ __operator_fns: OperatorFnMap = {
     "int": lambda c, _: cast(c, Integer),
     # size() over a string column — collection-typed columns require an override.
     "size": lambda c, _: func.length(c),
+    "timestamp": _timestamp,
+    "hierarchy": _hierarchy,
+    "ancestorOf": _ancestor_of,
+    "descendentOf": _descendent_of,
+    "overlaps": _hierarchy_overlaps,
 }
 OPERATOR_FNS = MappingProxyType(__operator_fns)
 
@@ -152,7 +373,7 @@ _MIRRORED_OPERATORS = MappingProxyType(
 _ORDER_INSENSITIVE_OPERATORS = frozenset({"eq", "ne", "in"})
 
 # Unary value-returning operators take a single non-value input.
-_UNARY_VALUE_OPERATORS = frozenset({"string", "double", "int", "size"})
+_UNARY_VALUE_OPERATORS = frozenset({"string", "double", "int", "size", "timestamp"})
 
 # We support both the legacy HTTP and gRPC clients, so therefore we need to accept both input types
 _deny_types = frozenset(
@@ -178,6 +399,36 @@ def _get_table_name(t: GenericTable) -> str:
         return t.name
 
 
+def _variables_outside_overrides(
+    operand: dict, override_operators: frozenset, override_owned: bool = False
+) -> frozenset:
+    """Find variables that still require an ordinary table mapping.
+
+    An override owns its complete operand subtree: it may turn foreign columns
+    or relation markers into a correlated subquery instead of a flat JOIN.
+    Variables outside such a subtree retain the normal fail-closed
+    ``table_mapping`` requirement. Boolean/ternary traversal is built in and
+    cannot itself be overridden, so merely declaring those keys owns nothing.
+    """
+    if (expression := operand.get("expression")) is not None:
+        return _variables_outside_overrides(
+            expression, override_operators, override_owned
+        )
+    if "variable" in operand:
+        return frozenset() if override_owned else frozenset({operand["variable"]})
+
+    operator = operand.get("operator")
+    operator_owns_children = override_owned or (
+        operator in override_operators and operator not in {"and", "or", "not", "if"}
+    )
+    variables = frozenset()
+    for child in operand.get("operands", []):
+        variables |= _variables_outside_overrides(
+            child, override_operators, operator_owns_children
+        )
+    return variables
+
+
 def get_query(
     query_plan: Union[PlanResourcesResponse, response_pb2.PlanResourcesResponse],  # type: ignore (https://github.com/microsoft/pyright/issues/1035)
     table: GenericTable,
@@ -191,31 +442,55 @@ def get_query(
     if query_plan.filter.kind in _allow_types:
         return select(table)
 
-    # Inspect passed columns. If > 1 origin table, assert that the mapping has been defined.
-    # Skipped when operator overrides are supplied: overrides commonly translate
-    # relation traversals into correlated subqueries (EXISTS/COUNT), where columns
-    # from other tables — or non-column marker objects — are legitimate without a
-    # flat join, and a forced `table_mapping` JOIN would change row multiplicity.
-    if operator_override_fns is None:
-        required_tables = set()
-        for c in attr_map.values():
-            # c is of type Union[Column, InstrumentedAttribute] - both have a `table` attribute returning a `Table` type
-            if (n := c.table.name) != _get_table_name(table):
-                required_tables.add(n)
+    cond = (
+        MessageToDict(query_plan.filter.condition)
+        if isinstance(query_plan, response_pb2.PlanResourcesResponse)
+        else query_plan.filter.condition.to_dict()
+    )
 
-        if len(required_tables):
-            if table_mapping is None:
-                raise TypeError(
-                    "get_query() missing 1 required positional argument: 'table_mapping'"
+    # Inspect columns that the normal translator owns. Override-owned operands
+    # may legitimately be relation markers or columns translated into
+    # correlated subqueries, but an unrelated override must never disable the
+    # ordinary cross-table mapping requirement.
+    if operator_override_fns is None:
+        attributes_to_validate = attr_map.items()
+    else:
+        active_override_operators = frozenset(
+            operator
+            for operator, override in operator_override_fns.items()
+            if override is not None
+        )
+        variables = _variables_outside_overrides(cond, active_override_operators)
+        attributes_to_validate = (
+            (variable, attr_map[variable])
+            for variable in variables
+            if variable in attr_map
+        )
+
+    required_tables = set()
+    for variable, column in attributes_to_validate:
+        column_table = getattr(column, "table", None)
+        if column_table is None:
+            raise TypeError(
+                f"Attribute '{variable}' must be handled by an operator override "
+                "or map to a SQLAlchemy column"
+            )
+        if column_table.name != _get_table_name(table):
+            required_tables.add(column_table.name)
+
+    if required_tables:
+        if table_mapping is None:
+            raise TypeError(
+                "get_query() missing 1 required positional argument: 'table_mapping'"
+            )
+        for mapped_table, _ in table_mapping:
+            required_tables.discard(_get_table_name(mapped_table))
+        if required_tables:
+            raise TypeError(
+                "positional argument 'table_mapping' missing mapping for table(s): '{0}'".format(
+                    "', '".join(sorted(required_tables))
                 )
-            for t, _ in table_mapping:
-                required_tables.discard(_get_table_name(t))
-            if len(required_tables):
-                raise TypeError(
-                    "positional argument 'table_mapping' missing mapping for table(s): '{0}'".format(
-                        "', '".join(required_tables)
-                    )
-                )
+            )
 
     def get_operator_fn(op: str, c: Any, v: Any) -> GenericExpression:
         # Check to see if the client has overridden the function
@@ -282,7 +557,18 @@ def get_query(
                 cond = resolve_operand(first)
             then_value = resolve_operand(child_operands[1])
             else_value = resolve_operand(child_operands[2])
+            if isinstance(then_value, (_IEEEConstant, _ConditionalValue)) or isinstance(
+                else_value, (_IEEEConstant, _ConditionalValue)
+            ):
+                return _ConditionalValue(cond, then_value, else_value)
             return case((cond, then_value), (not_(cond), else_value))
+
+        if operator == "hierarchy":
+            target = resolve_operand(child_operands[0])
+            delimiter = (
+                resolve_operand(child_operands[1]) if len(child_operands) == 2 else None
+            )
+            return get_operator_fn(operator, target, delimiter)
 
         if operator in _UNARY_VALUE_OPERATORS:
             target = resolve_operand(child_operands[0])
@@ -392,12 +678,6 @@ def get_query(
 
         # the operator handlers here are the leaf nodes of the recursion
         return get_operator_fn(operator, column, value)
-
-    cond = (
-        MessageToDict(query_plan.filter.condition)
-        if isinstance(query_plan, response_pb2.PlanResourcesResponse)
-        else query_plan.filter.condition.to_dict()
-    )
 
     q = select(table).where(traverse_and_map_operands(cond))
 

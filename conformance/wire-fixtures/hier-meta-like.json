@@ -1,0 +1,40 @@
+{
+  "action": "hier-meta-like",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "descendentOf",
+        "operands": [
+          {
+            "expression": {
+              "operator": "hierarchy",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.scope"
+                },
+                {
+                  "value": ":"
+                }
+              ]
+            }
+          },
+          {
+            "expression": {
+              "operator": "hierarchy",
+              "operands": [
+                {
+                  "value": "50%:a_b"
+                },
+                {
+                  "value": ":"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

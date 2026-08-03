@@ -56,10 +56,60 @@ interface AdapterUnsupportedEntry {
   reason: string;
 }
 
+interface KnownDivergence {
+  action: string;
+  adapters: string[];
+}
+
 interface ActionsFile {
   conformance: string[];
   adapterUnsupported?: Record<string, AdapterUnsupportedEntry[]>;
+  adapterSupportedExpected?: Record<string, AdapterUnsupportedEntry[]>;
   expectedUnsupported: UnsupportedShape[];
+  knownDivergences?: KnownDivergence[];
+}
+
+type ThrowingAction = readonly [action: string, reason: string];
+
+interface ActionClassification {
+  oracleActions: string[];
+  throwingActions: ThrowingAction[];
+  supportedExpected: Set<string>;
+}
+
+function classifyActionsForAdapter(
+  manifest: ActionsFile,
+  adapter: string
+): ActionClassification {
+  const unsupported = manifest.adapterUnsupported?.[adapter] ?? [];
+  const unsupportedActions = new Set(unsupported.map((entry) => entry.action));
+  const supportedExpected = new Set(
+    (manifest.adapterSupportedExpected?.[adapter] ?? []).map(
+      (entry) => entry.action
+    )
+  );
+  const oracleActions = [
+    ...manifest.conformance.filter(
+      (action) => !unsupportedActions.has(action)
+    ),
+    ...supportedExpected,
+  ];
+  const throwingActions: ThrowingAction[] = [
+    ...unsupported.map(
+      (entry): ThrowingAction => [entry.action, entry.reason]
+    ),
+    ...manifest.expectedUnsupported
+      .filter((entry) => !supportedExpected.has(entry.action))
+      .map((entry): ThrowingAction => [entry.action, entry.shape]),
+  ];
+
+  return {
+    oracleActions: [...new Set(oracleActions)].sort(),
+    throwingActions: throwingActions.sort(([left], [right]) =>
+      left.localeCompare(right)
+    ),
+    supportedExpected,
+  };
 }
 
 const seedsFile: SeedsFile = JSON.parse(
@@ -70,34 +120,136 @@ const actionsFile: ActionsFile = JSON.parse(
 );
 const SEEDS = seedsFile.seeds;
 
-// Shapes Prisma's filter language genuinely cannot express (LIKE-wildcard escaping,
-// relation-count thresholds, cross-model column comparisons, ...). The adapter must throw
-// for these — a loud failure, never a silently-wrong filter — so they are asserted as
-// throws instead of oracle matches. Each entry carries its reason in actions.json.
-const PRISMA_UNSUPPORTED = new Set(
-  (actionsFile.adapterUnsupported?.prisma ?? []).map((u) => u.action)
+const {
+  oracleActions: ORACLE_ACTIONS,
+  throwingActions: THROWING_ACTIONS,
+  supportedExpected: PRISMA_SUPPORTED_EXPECTED,
+} = classifyActionsForAdapter(actionsFile, "prisma");
+const PRISMA_KNOWN_DIVERGENCES = new Set(
+  (actionsFile.knownDivergences ?? [])
+    .filter((entry) => entry.adapters.includes("prisma"))
+    .map((entry) => entry.action)
 );
-const ORACLE_ACTIONS = actionsFile.conformance.filter(
-  (action) => !PRISMA_UNSUPPORTED.has(action)
+const EXPECTED_UNSUPPORTED_ACTIONS = new Set(
+  actionsFile.expectedUnsupported.map((entry) => entry.action)
 );
-const THROWING_ACTIONS = [
-  ...(actionsFile.adapterUnsupported?.prisma ?? []).map(
-    (u) => [u.action, u.reason] as const
-  ),
-  ...actionsFile.expectedUnsupported.map((u) => [u.action, u.shape] as const),
-];
+const MANIFEST_ACTIONS = new Set([
+  ...actionsFile.conformance,
+  ...EXPECTED_UNSUPPORTED_ACTIONS,
+  ...PRISMA_KNOWN_DIVERGENCES,
+]);
+
+function doubleFor(seed: Seed): number | null {
+  switch (seed.id) {
+    case "a1":
+      return -0.6;
+    case "a2":
+      return 0.25;
+    case "a3":
+      return null;
+    default:
+      return seed.aNumber + 0.3;
+  }
+}
+
+function labelsFor(seed: Seed): (string | null)[] {
+  switch (seed.id) {
+    case "a1":
+      return ["gold", "silver"];
+    case "a6":
+      return [null, "silver"];
+    case "a8":
+      return ["silver"];
+    case "c1":
+      return ["Gold"];
+    default:
+      return [];
+  }
+}
 
 /** Deterministic ISO instant per seed for the timestamp probe: split around 2025-01-01. */
 function isoFor(seed: Seed): string {
   return seed.aNumber >= 2 ? "2024-06-01T00:00:00Z" : "2026-06-01T00:00:00Z";
 }
 
+function timestampFor(seed: Seed): string | null {
+  switch (seed.id) {
+    case "a1":
+      return "2020-03-15T10:30:00Z";
+    case "a2":
+      return "2037-01-01T00:00:00Z";
+    case "a3":
+      return null;
+    case "a4":
+      return "2024-06-01T00:00:00Z";
+    case "a5":
+      return "2020-03-15T10:30:00.123456Z";
+    default:
+      return seed.aNumber >= 2
+        ? "2036-06-06T06:06:06Z"
+        : "2021-05-05T05:05:05Z";
+  }
+}
+
+function scopeFor(seed: Seed): string | null {
+  switch (seed.id) {
+    case "a1":
+      return "dept";
+    case "a2":
+      return "dept.eng";
+    case "a3":
+      return "dept.eng.platform";
+    case "a4":
+      return "dept.eng.platform.obs";
+    case "a5":
+      return "dept.engineering";
+    case "a6":
+      return "dept.sales";
+    case "a8":
+      return "";
+    case "a9":
+      return "50%";
+    case "b1":
+      return "50%:a_b:x";
+    case "b2":
+      return "50x:a_b:y";
+    case "b3":
+      return "50%:aXb:y";
+    case "b4":
+      return "50%:a_b";
+    case "b5":
+      return "dept.eng.platform2";
+    case "b6":
+      return "50%.a_b";
+    case "c1":
+      return "Dept.Eng";
+    case "c2":
+      return "dept.eng.";
+    case "d1":
+      return "[env]:prod:eu";
+    case "d2":
+      return "e:prod:eu";
+    default:
+      return null;
+  }
+}
+
 const MAPPER: Record<string, MapperConfig> = {
   "request.resource.attr.aBool": { field: "aBool" },
   "request.resource.attr.aString": { field: "aString" },
   "request.resource.attr.aNumber": { field: "aNumber" },
+  "request.resource.attr.aDouble": { field: "aDouble" },
   "request.resource.attr.aOptionalString": { field: "aOptionalString" },
   "request.resource.attr.createdBy": { field: "createdBy" },
+  "request.resource.attr.scope": { field: "scope" },
+  "request.resource.attr.createdAt": {
+    field: "createdAt",
+    valueType: "dateTime",
+  },
+  "request.resource.attr.owner": {
+    field: "aOptionalString",
+    nullable: true,
+  },
   // obj.inner is not a real nested column — mirrors aString, same trick the spring-data
   // reference harness uses for the p-struct probe.
   "request.resource.attr.obj.inner": { field: "aString" },
@@ -116,6 +268,14 @@ const MAPPER: Record<string, MapperConfig> = {
       },
     },
   },
+  "request.resource.attr.tagNames": {
+    relation: {
+      name: "tags",
+      type: "many",
+      field: "name",
+      fields: { name: { field: "name", nullable: true } },
+    },
+  },
   "request.resource.attr.categories": {
     relation: {
       name: "categories",
@@ -126,7 +286,18 @@ const MAPPER: Record<string, MapperConfig> = {
           relation: {
             name: "subCategories",
             type: "many",
-            fields: { name: { field: "name" } },
+            fields: {
+              name: { field: "name" },
+              labels: {
+                relation: {
+                  name: "labels",
+                  type: "many",
+                  fields: {
+                    name: { field: "name", nullable: true },
+                  },
+                },
+              },
+            },
           },
         },
       },
@@ -163,6 +334,7 @@ const MAPPER: Record<string, MapperConfig> = {
 };
 
 beforeAll(async () => {
+  await prisma.adversarialLabel.deleteMany();
   await prisma.adversarialSubCategory.deleteMany();
   await prisma.adversarialCategory.deleteMany();
   await prisma.adversarialTag.deleteMany();
@@ -176,15 +348,27 @@ beforeAll(async () => {
         aBool: seed.aBool,
         aString: seed.aString,
         aNumber: seed.aNumber,
+        aDouble: doubleFor(seed),
         aOptionalString: seed.aOptionalString,
         createdBy: isoFor(seed),
+        scope: scopeFor(seed),
+        createdAt: timestampFor(seed),
         tags: {
           create: seed.tags.map((t) => ({ tagId: t.id, name: t.name })),
         },
         categories: {
           create: seed.subCategoryNames.map((subName) => ({
             name: "business",
-            subCategories: { create: [{ name: subName }] },
+            subCategories: {
+              create: [
+                {
+                  name: subName,
+                  labels: {
+                    create: labelsFor(seed).map((name) => ({ name })),
+                  },
+                },
+              ],
+            },
           })),
         },
       },
@@ -216,17 +400,38 @@ function asCheckResource(seed: Seed): Resource {
     aString: seed.aString,
     aNumber: seed.aNumber,
     createdBy: isoFor(seed),
+    owner: seed.aOptionalString,
+    tagNames: seed.tags.map((tag) => tag.name),
     obj: { inner: seed.aString },
     tags: seed.tags.map(asTagAttribute),
     categories: seed.subCategoryNames.map((subName) => ({
       name: "business",
-      subCategories: [{ name: subName }],
+      subCategories: [
+        {
+          name: subName,
+          labels: labelsFor(seed).map((name) =>
+            name === null ? {} : { name }
+          ),
+        },
+      ],
     })),
   };
   // A DB NULL is a missing attribute on the check side — conditions touching it must deny
   // (CEL error), matching SQL three-valued logic excluding the row.
   if (seed.aOptionalString !== null) {
     attr.aOptionalString = seed.aOptionalString;
+  }
+  const aDouble = doubleFor(seed);
+  if (aDouble !== null) {
+    attr.aDouble = aDouble;
+  }
+  const scope = scopeFor(seed);
+  if (scope !== null) {
+    attr.scope = scope;
+  }
+  const createdAt = timestampFor(seed);
+  if (createdAt !== null) {
+    attr.createdAt = createdAt;
   }
   // mainCategory mirrors the row's single category as ONE nested object (the seeder creates
   // at most one category per seed), so direct dotted-chain CEL expressions evaluate cleanly;
@@ -284,6 +489,52 @@ async function adapterFilteredIds(action: string): Promise<string[]> {
 }
 
 describe("adversarial conformance corpus", () => {
+  test("adapter-supported expected shapes move from throwing to oracle", () => {
+    const promotedAction = "promoted-shape";
+    const classification = classifyActionsForAdapter(
+      {
+        conformance: [],
+        adapterSupportedExpected: {
+          prisma: [{ action: promotedAction, reason: "supported by Prisma" }],
+        },
+        expectedUnsupported: [
+          {
+            action: promotedAction,
+            shape: "synthetic globally unsupported shape",
+            springDataMessage: "unsupported",
+          },
+        ],
+      },
+      "prisma"
+    );
+
+    expect(classification.oracleActions).toContain(promotedAction);
+    expect(
+      classification.throwingActions.map(([action]) => action)
+    ).not.toContain(promotedAction);
+  });
+
+  test("manifest assigns all 117 policy actions exactly one Prisma outcome", () => {
+    const oracle = new Set(ORACLE_ACTIONS);
+    const throwing = new Set(THROWING_ACTIONS.map(([action]) => action));
+    const misclassified = [...MANIFEST_ACTIONS].filter((action) => {
+      const classificationCount = [
+        oracle.has(action),
+        throwing.has(action),
+        PRISMA_KNOWN_DIVERGENCES.has(action),
+      ].filter(Boolean).length;
+      return classificationCount !== 1;
+    });
+
+    expect(MANIFEST_ACTIONS.size).toBe(117);
+    expect(misclassified).toEqual([]);
+    expect(
+      [...PRISMA_SUPPORTED_EXPECTED].filter(
+        (action) => !EXPECTED_UNSUPPORTED_ACTIONS.has(action)
+      )
+    ).toEqual([]);
+  });
+
   test.each(ORACLE_ACTIONS)(
     "%s matches the check() oracle",
     async (action) => {
@@ -304,6 +555,24 @@ describe("adversarial conformance corpus", () => {
       await expect(adapterFilteredIds(action)).rejects.toThrow();
     }
   );
+
+  test("pins the upstream has() planner over-grant", async () => {
+    const action = "p-has";
+    expect(PRISMA_KNOWN_DIVERGENCES.has(action)).toBe(true);
+    const queryPlan = await cerbos.planResources({
+      principal: principal(),
+      resource: { kind: seedsFile.resourceKind },
+      action,
+    });
+    const oracle = await oracleAllowedIds(action);
+    const allIds = SEEDS.map((seed) => seed.id).sort();
+
+    expect(queryPlan.kind).toBe(PlanKind.ALWAYS_ALLOWED);
+    expect(oracle.length).toBeGreaterThan(0);
+    expect(oracle.length).toBeLessThan(allIds.length);
+    expect(oracle).toContain("a1");
+    expect(await adapterFilteredIds(action)).toEqual(allIds);
+  });
 
   test("oracle is not degenerate", async () => {
     // Guard the guard: at least one action must produce a non-empty, non-total oracle set,

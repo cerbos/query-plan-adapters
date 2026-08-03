@@ -71,8 +71,10 @@ final class TriPredicate {
 
     /**
      * {@code body OR NOT body} — TRUE iff {@code body} is determined (two-valued), UNKNOWN iff
-     * {@code body} is UNKNOWN. This is the determinedness test the unknown-element COUNT probes
-     * filter on. {@code body} is built twice (once per polarity).
+     * {@code body} is UNKNOWN. This is the determinedness test behind the ternary's
+     * unknown-condition arm; the collection macros encode the same polarity pair inside their
+     * scoring CASE expressions (see the adapter's {@code macroScoreSubquery}). {@code body} is
+     * built twice (once per polarity).
      */
     Predicate determined(Supplier<Predicate> body) {
         return cb.or(body.get(), not(body.get()));
@@ -111,39 +113,10 @@ final class TriPredicate {
     }
 
     /**
-     * OR with error absorption — the {@code exists}/{@code filter}/{@code except} table:
-     * {@code trueWitness OR (unknownWitness AND UNKNOWN)}.
-     * <ul>
-     *   <li>witness TRUE → TRUE (a true witness absorbs any unknown sibling)</li>
-     *   <li>witness FALSE, unknown witness TRUE → UNKNOWN (deny)</li>
-     *   <li>witness FALSE, unknown witness FALSE → FALSE</li>
-     * </ul>
-     * Both inputs are consumed once, positively; {@code unknownWitness} must be a two-valued
-     * detector (e.g. an EXISTS or a COUNT comparison).
-     */
-    Predicate anyTrueOrUnknown(Predicate trueWitness, Predicate unknownWitness) {
-        return cb.or(trueWitness, cb.and(unknownWitness, unknown()));
-    }
-
-    /**
-     * AND with error absorption — the {@code all} table:
-     * {@code NOT falseWitness AND (NOT unknownWitness OR UNKNOWN)}.
-     * <ul>
-     *   <li>false witness TRUE → FALSE (a false witness absorbs any unknown sibling)</li>
-     *   <li>false witness FALSE, unknown witness TRUE → UNKNOWN (deny)</li>
-     *   <li>false witness FALSE, unknown witness FALSE → TRUE</li>
-     * </ul>
-     * Both inputs are consumed once, each in a single (negated) polarity; both must be
-     * two-valued detectors.
-     */
-    Predicate allTrueOrUnknown(Predicate falseWitness, Predicate unknownWitness) {
-        return cb.and(not(falseWitness), cb.or(not(unknownWitness), unknown()));
-    }
-
-    /**
-     * Strict guard — the {@code exists_one} / {@code size(filter(...))} /
-     * map-intersection table: {@code (base AND NOT unknownWitness) OR (unknownWitness AND
-     * UNKNOWN)}. No absorption: ANY unknown witness poisons the result.
+     * Strict guard — the map-intersection table (the collection macros encode their strict
+     * variant arithmetically inside a single aggregate subquery — see the adapter's
+     * {@code strictMatchCountSubquery}): {@code (base AND NOT unknownWitness) OR
+     * (unknownWitness AND UNKNOWN)}. No absorption: ANY unknown witness poisons the result.
      * <ul>
      *   <li>unknown witness TRUE → UNKNOWN (deny), even when {@code base} is TRUE</li>
      *   <li>unknown witness FALSE → {@code base}</li>

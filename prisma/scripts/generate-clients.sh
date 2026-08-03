@@ -1,20 +1,47 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-echo "Generating Prisma v7 client..."
-node node_modules/prisma/build/index.js generate
+generate_v7_clients() {
+  echo "Generating Prisma v7 clients..."
+  node node_modules/prisma/build/index.js generate
+  node node_modules/prisma/build/index.js generate --schema=prisma/schema.adversarial.prisma
+}
 
-echo "Generating Prisma v6 client..."
-mv node_modules/@prisma/client node_modules/@prisma/client-v7-temp
-mv node_modules/@prisma/client-v6 node_modules/@prisma/client
+restore_v7_client_package() {
+  if [[ -d node_modules/@prisma/client ]]; then
+    mv node_modules/@prisma/client node_modules/@prisma/client-v6
+  fi
+  if [[ -d node_modules/@prisma/client-v7-temp ]]; then
+    mv node_modules/@prisma/client-v7-temp node_modules/@prisma/client
+  fi
+}
 
-trap 'mv node_modules/@prisma/client node_modules/@prisma/client-v6; mv node_modules/@prisma/client-v7-temp node_modules/@prisma/client' EXIT
+generate_v6_clients() {
+  echo "Generating Prisma v6 clients..."
+  mv node_modules/@prisma/client node_modules/@prisma/client-v7-temp
+  trap restore_v7_client_package EXIT
+  mv node_modules/@prisma/client-v6 node_modules/@prisma/client
 
-node node_modules/prisma-v6/build/index.js generate --schema=prisma/schema.v6.prisma
+  node node_modules/prisma-v6/build/index.js generate --schema=prisma/schema.v6.prisma
+  node node_modules/prisma-v6/build/index.js generate --schema=prisma/schema.adversarial.v6.prisma
 
-trap - EXIT
+  restore_v7_client_package
+  trap - EXIT
+}
 
-mv node_modules/@prisma/client node_modules/@prisma/client-v6
-mv node_modules/@prisma/client-v7-temp node_modules/@prisma/client
-
-echo "Both clients generated successfully!"
+case "${1:-all}" in
+  6)
+    generate_v6_clients
+    ;;
+  7)
+    generate_v7_clients
+    ;;
+  all)
+    generate_v7_clients
+    generate_v6_clients
+    ;;
+  *)
+    echo "Usage: $0 [6|7|all]" >&2
+    exit 2
+    ;;
+esac

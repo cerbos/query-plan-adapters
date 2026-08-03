@@ -87,6 +87,81 @@ Page<Contact> results = contactRepository.findAll(
     own.and(result.toSpecification()), pageable);
 ```
 
+> [!WARNING]
+> **The Specification is SELECT-only.** Never pass it to
+> `repository.delete(Specification)` or any other criteria bulk operation. Relation
+> mappings translate to correlated subqueries over collection/join tables, and
+> Hibernate's multi-table bulk delete first clears those `@ElementCollection`/join
+> tables using the same predicate — the pre-clear removes exactly the rows the
+> correlated subquery references, so the delete removes **0 entity rows while
+> silently destroying their collection rows** (e.g. all ownership entries). Under a
+> blocklist policy like `!(P.id in R.attr.ownedBy)`, the now-ownerless survivors
+> become visible to every principal. The adapter detects the bulk-delete invocation
+> context and throws `UnsupportedOperationException` before anything is deleted.
+> To delete policy-permitted rows, select ids first, then delete by id:
+>
+> ```java
+> List<Long> ids = contactRepository.findAll(result.toSpecification())
+>         .stream().map(Contact::getId).toList();
+> contactRepository.deleteAllById(ids);
+> ```
+
+## Database collation requirements
+
+> **⚠️ Hard requirement: every string column referenced by an `AttributeMapping` MUST use a
+> binary or case-sensitive collation.** On MySQL use `utf8mb4_bin` or `utf8mb4_0900_as_cs`;
+> on SQL Server use a `*_CS_AS` collation (e.g. `Latin1_General_100_CS_AS`). PostgreSQL,
+> H2, and Oracle are case-sensitive by default and are safe unless you opt into
+> case-insensitive behavior (PostgreSQL nondeterministic `ICU` collations, `citext`).
+
+**Why.** CEL string comparison at the PDP is exact and case-sensitive: with
+`R.attr.department == "finance"`, a `check()` call for a resource holding
+`department = "Finance"` returns **DENY**. But the adapter builds every string predicate
+with no collation control, so the database's column collation decides what matches. MySQL
+8's default collation, `utf8mb4_0900_ai_ci`, is case- **and** accent-insensitive, and SQL
+Server defaults to CI collations — on those defaults `WHERE department = 'finance'`
+matches the `'Finance'` row the PDP just denied. The plan-based filter silently returns
+rows the policy denies: **an authorization over-grant**, with no error or log line to
+notice. The same divergence applies to accent folding (`'résumé'` vs `'resume'`).
+
+**Every string predicate the adapter emits is affected:**
+
+- `eq` / `ne` (`cb.equal` / `cb.notEqual`)
+- string ordering: `lt` / `gt` / `le` / `ge`
+- the LIKE family: `contains` / `startsWith` / `endsWith`, including the constant-receiver
+  forms and the field-to-field variants built from `REPLACE`-escaped column patterns
+- `in` list membership (`path.in(...)`)
+- `hasIntersection` (both the direct-collection and `map(...)`-projection translations)
+- `hierarchy(...)` ancestor/descendant checks (prefix `LIKE` and ancestor-prefix `IN` lists)
+
+**`OperatorFunction` overrides are not a workaround for all of these.** In particular, the
+`hasIntersection` translation over a plain field (`path.in(values)`) is built before any
+override consultation, so a user-supplied `OperatorFunction` cannot intercept it. Fix the
+collation in the schema — that is the only route that covers every predicate site.
+
+Role and tenancy checks are the highest-risk shapes: `'admin'` vs `'Admin'` under
+`eq`/`in`/`hasIntersection`, and hierarchy descendant checks where `LIKE 'a:b:%'` matches
+`'A:B:x'`.
+
+**How this is enforced in CI.** The differential oracle suite
+(`AdversarialConformanceTest`) runs against real PostgreSQL and MySQL databases via
+Testcontainers, with mixed-case seed rows whose `check()` decisions differ from what a
+case-insensitive collation would match. The MySQL leg creates its schema with
+`utf8mb4_0900_as_cs`; running it against MySQL's default collation makes the suite fail,
+demonstrating the over-grant. Run the legs locally:
+
+```bash
+# PostgreSQL (case-sensitive by default — passes)
+ADAPTER_TEST_DB=postgres gradle test --tests AdversarialConformanceTest
+
+# MySQL with the required case-sensitive collation — passes
+ADAPTER_TEST_DB=mysql gradle test --tests AdversarialConformanceTest
+
+# MySQL with its DEFAULT collation — FAILS, reproducing the over-grant
+ADAPTER_TEST_DB=mysql ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_ai_ci \
+  gradle test --tests AdversarialConformanceTest
+```
+
 ## Field mapping
 
 Map each `request.resource.attr.<name>` to a JPA path or a relation:
@@ -108,24 +183,25 @@ Map each `request.resource.attr.<name>` to a JPA path or a relation:
 | `eq` / `ne`                      | `cb.equal` / `cb.notEqual` (auto `isNull`/`isNotNull` for `null` RHS) |
 | `lt` / `gt` / `le` / `ge`        | `cb.lessThan` / `greaterThan` / `lessThanOrEqualTo` / `greaterThanOrEqualTo` |
 | `in`                             | `path.in(values)` or correlated `EXISTS` for collections            |
-| `contains` / `startsWith` / `endsWith` | `cb.like(...)` with proper `_`/`%`/`\` escaping — incl. the constant-receiver form (`"a,b".contains(R.attr.x)`: the constant is the haystack, the column the needle) |
+| `in(R.attr.x, R.attr.coll)` (attribute-in-attribute) | Correlated `EXISTS` comparing the collection's member column to the outer scalar column; a `NULL` scalar matches a `NULL` member element (CEL `null in [..., null]` is true) |
+| `contains` / `startsWith` / `endsWith` | `cb.like(...)` with proper `_`/`%`/`\`/`[` escaping (`[` guards SQL Server character classes — see Gotchas) — incl. the constant-receiver form (`"a,b".contains(R.attr.x)`: the constant is the haystack, the column the needle) |
 | `isSet(field, true/false)`       | `cb.isNotNull` / `cb.isNull`                                        |
 | `hasIntersection(coll, [values])` | Correlated `EXISTS` with `IN`                                      |
 | `hasIntersection(coll.map(x, x.f), [values])` | Correlated `EXISTS` with projected `IN`             |
 | `size(coll) > 0` / `>= 1`        | Correlated `EXISTS`                                                 |
 | `size(coll) == 0` / `<= 0` / `< 1`| `NOT EXISTS`                                                       |
 | `size(coll) <op> N`              | Correlated `(SELECT COUNT...) <op> N`                               |
-| `size(coll.filter(x, pred)) <op> N` | Correlated `(SELECT COUNT... WHERE pred) <op> N`                 |
+| `size(coll.filter(x, pred)) <op> N` | Correlated strict-count subquery: counts elements matching `pred`, NULL-poisoned (→ UNKNOWN → excluded) when any element body is undetermined |
 | `size(string)`                   | `cb.length(column)` (see Gotchas for astral-character caveat)       |
 | Field-to-field (`R.attr.a == R.attr.b`) | `cb.equal(pathA, pathB)` and friends for `eq`/`ne`/`lt`/`gt`/`le`/`ge`, incl. inside lambdas |
 | Ternary (`cond ? a : b`)         | Predicate rewrite: `(cond AND cmp(a, v)) OR (NOT cond AND cmp(b, v))` — nested, boolean-position, and value-first forms compose; constant residues fold (see Gotchas for `NULL` semantics) |
 | Arithmetic in comparisons (`add`/`sub`/`mult`/`div`) | `cb.sum`/`diff`/`prod`/`quot` in double space, compared via `eq`/`ne`/`lt`/`gt`/`le`/`ge`; nested and both-sides shapes compose (see Gotchas — CEL attribute arithmetic is double arithmetic) |
-| Field-to-field `contains`/`startsWith`/`endsWith` | `cb.like` over a `REPLACE`-escaped column-derived pattern (`\`, `%`, `_`), with an `IS NOT NULL` needle guard |
+| Timestamp comparisons (`timestamp(R.attr.createdAt) < now() - duration("24h")`) | Temporal column comparison for all of `eq`/`ne`/`lt`/`gt`/`le`/`ge`, both operand orders (value-first forms mirror). The planner folds `now()`/`now() - duration(...)` to a constant RFC-3339 instant at **plan time**, so the window is fixed per query — re-plan to refresh it. The mapped column must be `java.time.Instant` or `java.time.OffsetDateTime` (both denote an absolute instant; Hibernate 6 stores them UTC-normalized). `LocalDateTime`, `java.util.Date`, and `String` columns throw a named error — they are ambiguous about the absolute instant they store (see Gotchas). A `NULL` column value is excluded, matching `check()` denying on the missing attribute. |
+| Field-to-field `contains`/`startsWith`/`endsWith` | `cb.like` over a `REPLACE`-escaped column-derived pattern (`\`, `%`, `_`, `[`), with an `IS NOT NULL` needle guard |
 | Multi-hop relation chains (`R.attr.categories.subCategories`) | Correlated subquery joining through every hop; `exists`/`in`/`hasIntersection`/`size` all treat the chain as the flattened union of tail elements |
-| `exists(coll, lambda)`           | Correlated `EXISTS` with lambda body                                |
-| `exists_one(coll, lambda)`       | Correlated `(SELECT COUNT...) = 1`                                  |
-| `all(coll, lambda)`              | `NOT EXISTS (... AND NOT(body))`                                    |
-| `except(coll, lambda)`           | Correlated `EXISTS (... AND NOT(body))`                             |
+| `exists(coll, lambda)`           | One correlated aggregate scoring subquery (`MAX(CASE WHEN body … WHEN NOT body … ELSE …)`) whose comparison is TRUE/FALSE/UNKNOWN per the CEL truth table — see the nested-macros gotcha |
+| `exists_one(coll, lambda)`       | One correlated strict-count subquery `= 1` (NULL-poisoned when any element body is undetermined) |
+| `all(coll, lambda)`              | Same scoring subquery as `exists`, compared for "no false and no undetermined element" |
 | `filter(coll, lambda)`           | Same as `exists` (filter returns a list — treated as "exists matching") |
 | Bare boolean variable            | `cb.equal(path, true)`                                              |
 | `eq(field, add(const1, const2))` | Constant fold then compare: `cb.equal(field, const1 ⊕ const2)`     |
@@ -133,7 +209,8 @@ Map each `request.resource.attr.<name>` to a JPA path or a relation:
 | `hierarchy(...).overlaps / ancestorOf / descendentOf` | Segment/prefix predicates (`IN` over ancestor prefixes, `LIKE 'a:b:%'` for descendants), mirroring the Prisma adapter |
 | Value-first comparisons (`5 < R.attr.x`) | Normalized field-first with the operator mirrored (`x > 5`) |
 
-Unsupported operators raise `IllegalArgumentException` — override them with `OperatorFunction`:
+Unsupported constructs raise `IllegalArgumentException`. Some — but not all — can be
+overridden with an `OperatorFunction`:
 
 ```java
 Map<String, OperatorFunction> overrides = Map.of(
@@ -145,21 +222,35 @@ Result<Contact> result =
     SpringDataQueryPlanAdapter.toSpecification(planResult, MAPPING, overrides);
 ```
 
+An override is consulted only where the adapter has already resolved a `(field, value)`
+pair for a top-level operator — the plain comparisons (`eq`/`ne`/`lt`/`gt`/`le`/`ge`,
+consulted under the mirrored name for value-first forms), the LIKE family, unknown
+top-level leaf operators such as `matches`, and timestamp comparisons (the override
+receives the parsed `java.time.Instant` as the value, including for column types the
+default translation rejects). Constructs rejected **while resolving an operand** — `mod`,
+`int()`/type casts, list indexing — throw before any override lookup and **cannot be
+intercepted**; the "Not yet supported" table below marks each row.
+
 ## Not yet supported
 
 The Criteria-based predicate builder has no shape for these CEL constructs; they
-throw `IllegalArgumentException` with a message naming the operator. Override
-via `OperatorFunction` when the runtime can express them (e.g. database-specific
-SQL fragments), or wait for adapter support.
+throw `IllegalArgumentException` with a message naming the operator. The
+"Overridable" column says whether a registered `OperatorFunction` can intercept
+the construct: rows marked **no** are rejected while resolving an operand,
+*before* any override consultation, so an override genuinely cannot fire for them.
 
-| Construct                                       | Example CEL                                       | Notes |
-|-------------------------------------------------|---------------------------------------------------|-------|
-| `mod`                                           | `R.attr.aNumber % 2 == 0`                         | CEL `%` is int-only and Cerbos attribute numbers are doubles, so `%` on an attribute always errors → the check API denies every row; translating to SQL `MOD` would fabricate matches. |
-| Arithmetic on non-numeric operands              | `R.attr.aString + "x" < "y"`                      | Ordering through string concatenation is not translated; `add` string folding remains `eq`/`ne`-only. |
-| Regex match                                     | `R.attr.aString.matches("^foo.*")`                | JPA has no portable regex predicate; override per-dialect (`regexp_like`, `~`, `REGEXP`). |
-| List indexing                                   | `R.attr.tags[0] == "x"`                           | JPA collections are unordered sets — no positional access. |
-| Type casts (`int(...)` / `double(...)` / `string(...)`) | `int(R.attr.aString) > 0`                 | No portable `CAST` in Criteria; override per-dialect. |
-| `eq(map(...), [...])`                           | `R.attr.tags.map(t, t.id) == ["tag1", "tag2"]`    | Use `hasIntersection(map(...), [...])` instead. |
+| Construct                                       | Example CEL                                       | Overridable | Notes |
+|-------------------------------------------------|---------------------------------------------------|-------------|-------|
+| `mod`                                           | `R.attr.aNumber % 2 == 0`                         | no          | CEL `%` is int-only and Cerbos attribute numbers are doubles, so `%` on an attribute always errors → the check API denies every row; translating to SQL `MOD` would fabricate matches. |
+| Arithmetic on non-numeric operands              | `R.attr.aString + "x" < "y"`                      | no          | Ordering through string concatenation is not translated; `add` string folding remains `eq`/`ne`-only. |
+| Regex match                                     | `R.attr.aString.matches("^foo.*")`                | yes (`matches`) | JPA has no portable regex predicate; override per-dialect (`regexp_like`, `~`, `REGEXP`). |
+| List indexing                                   | `R.attr.tags[0] == "x"`                           | no          | JPA collections are unordered sets — no positional access. |
+| Type casts (`int(...)` / `double(...)` / `string(...)`) | `int(R.attr.aString) > 0`                 | no          | No portable `CAST` in Criteria. |
+| `eq(map(...), [...])`                           | `R.attr.tags.map(t, t.id) == ["tag1", "tag2"]`    | no          | Use `hasIntersection(map(...), [...])` instead. |
+| Timestamp comparison on an ambiguous column type | `timestamp(R.attr.createdAt) < now() - duration("24h")` with `createdAt` mapped to `LocalDateTime`/`java.util.Date`/`String` | yes (the comparison operator) | The supported shape (see table above) requires an `Instant` or `OffsetDateTime` column. Other types don't pin the absolute instant they store — a wrong zone/format assumption would silently diverge from `check()`. The override receives the parsed `Instant` and can apply schema-specific knowledge. |
+| Timestamp shapes beyond `timestamp(field) vs constant` | `timestamp(R.attr.a) < timestamp(R.attr.b)`, `timestamp(...)` inside arithmetic | no | Only the leaf comparison shape the planner emits for time-window policies is translated; nested/derived shapes keep their named errors. |
+| `eq`/`ne` against a list constant               | `R.attr.tags == ["a", "b"]`                       | no          | Whole-list equality has no scalar-column translation (the plan arrives as `eq(variable, value-list)` verbatim); rejected before path resolution. Map the attribute as a Relation and use `in`/`hasIntersection`, or compare elements individually. |
+| `except` (list difference)                      | `size(R.attr.tags.except(["archived"])) > 0`      | no          | Cerbos `except(list, list)` is a two-list function (the wire shape is `except(variable, value-list)`, typically inside `size()` — PDP-verified); list difference has no JPA Criteria translation. Rewrite with an equivalent macro: `size(coll.except([...])) > 0` ≡ `coll.exists(x, !(x in [...]))`. |
 
 ## Gotchas
 
@@ -188,10 +279,81 @@ the only satisfiable one: `/` is true double division (`5 / 2.0 == 2.5`), never
 integer truncation. Write double literals (`1.0`, `2.0`) in policy arithmetic over
 attributes, or the plan-based filter and per-resource `check` calls will disagree.
 
+### MySQL: keeping arithmetic IEEE-faithful
+
+Affects only policies with **arithmetic inside a comparison** (`R.attr.aNumber * 0.1 ==
+0.3`, `R.attr.aDouble + 0.7 != 0.1`, …). Plain comparisons, `in`, LIKE, and collection
+shapes are not involved.
+
+Two MySQL defaults each pull the adapter's deliberately-IEEE double arithmetic into
+**exact decimal** evaluation:
+
+- Hibernate's `MySQLDialect` renders to-double casts as `cast(col as decimal(53,20))` —
+  its cast mapping predates MySQL 8.0.17, which added `CAST(... AS DOUBLE)`.
+- MySQL Connector/J's default **client-side** prepared statements
+  (`useServerPrepStmts=false`) interpolate double bind parameters into the statement
+  text, where MySQL parses them as exact `DECIMAL` literals.
+
+Decimal arithmetic is not IEEE double arithmetic: `3 * 0.1 == 0.3` is TRUE in decimal
+but FALSE in CEL (`0.30000000000000004`), so on those defaults the SQL filter returns
+rows the PDP's `check()` API **denies** — a silent over-grant (verified on MySQL 8.4:
+`CAST(3 AS DECIMAL(53,20)) * 0.1 = 0.3` → 1, `CAST(3 AS DOUBLE) * 0.1 = 0.3` → 0).
+
+**What the adapter does about it.** The library ships a Hibernate `FunctionContributor`
+(`MySqlDoubleCastFunctionContributor`, discovered automatically via
+`META-INF/services`) that, on MySQL 8.0.17+, registers a cast function rendering
+`cast(col as double)`; every column entering arithmetic goes through it. Because MySQL
+promotes any expression with an approximate (DOUBLE) operand to double, the
+interpolated decimal literals stop mattering — client- and server-side prepared
+statements both agree with `check()`, with **no JDBC URL settings required**. H2 and
+PostgreSQL already render IEEE-correct casts; the contributor registers nothing there
+and their SQL is unchanged.
+
+**When you still need `useServerPrepStmts=true`** (typed double binds restore IEEE
+semantics even under the decimal cast) — set it in the JDBC URL if any of these apply:
+
+- MySQL older than 8.0.17 (no `CAST(... AS DOUBLE)`).
+- MariaDB (own dialect lineage and driver; not covered by the contributor).
+- A non-Hibernate JPA provider (the contributor is Hibernate-only; the adapter then
+  falls back to the portable `cast(col as float(53))`, which MySQL would need typed
+  binds to keep in double space).
+- Hibernate configured with `hibernate.boot.allow_jdbc_metadata_access=false` and only
+  `hibernate.dialect` set: the dialect then reports its minimum supported version and
+  the version-gated registration is skipped.
+
+The differential oracle's MySQL CI leg runs with Connector/J's default client-side
+prepared statements precisely so this stays pinned (`p-double-frac` fails within
+seconds if the cast regresses to decimal); set `ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS=true`
+to run the same leg in server-side mode — both must pass.
+
+### Timestamp comparisons: plan-time `now()`, and only unambiguous column types
+
+`timestamp(R.attr.createdAt) < now() - duration("24h")` reaches the adapter as a
+comparison against a **constant** instant: the planner evaluates `now()` and folds the
+duration arithmetic when the plan is produced, wrapping the result back in
+`timestamp("<RFC-3339>")`. Two consequences:
+
+- The cutoff is frozen at plan time. A cached `Specification` keeps filtering against the
+  old instant — call `plan` (and re-translate) per request if the window must track wall
+  clock.
+- The mapped column must be `java.time.Instant` or `java.time.OffsetDateTime`. Both
+  unambiguously denote an absolute instant, and Hibernate 6 binds them UTC-normalized
+  (`TIMESTAMP_UTC`), so the database comparison is an instant comparison on H2,
+  PostgreSQL, and MySQL alike (the differential oracle runs all three). `LocalDateTime`
+  has no zone, `java.util.Date` binding routes through zone conversions, and `String`
+  ordering depends on format and offset — the adapter throws a named error for those
+  rather than guessing an assumption that could silently diverge from `check()`. If you
+  know your schema's zone semantics, register an `OperatorFunction` override for the
+  comparison operator: it receives the parsed `Instant` as the value.
+
+  On MySQL, Hibernate maps these columns to `TIMESTAMP`, whose range ends at
+  2038-01-19 — instants beyond that need a schema-controlled `DATETIME(6)` column
+  (still UTC-normalized by Hibernate).
+
 ### Field-to-field string matching builds its pattern with `REPLACE`
 
 `R.attr.a.contains(R.attr.b)` becomes `a LIKE CONCAT('%', <escaped b>, '%') ESCAPE '\'`
-where `b` is escaped via nested `REPLACE` calls (`\`, `%`, `_`) — chosen because
+where `b` is escaped via nested `REPLACE` calls (`\`, `%`, `_`, `[`) — chosen because
 `REPLACE` is available on H2, PostgreSQL, MySQL, Oracle, and SQL Server. A `NULL`
 needle column excludes the row (`IS NOT NULL` guard), which matches CEL
 missing-attribute → deny and also defends against dialects whose `CONCAT` treats
@@ -207,10 +369,75 @@ three-valued logic, including the places where naive translations leak under `NO
   `qty` is NULL yields UNKNOWN (row excluded under both `all(...)` and `!all(...)`),
   matching CEL's error-absorption rules — `exists` is still true if *any* element
   matches, `all` is still false if *any* element fails, `exists_one` errors on any
-  unknown element. This costs two extra correlated `COUNT` subqueries per macro.
+  unknown element. The tri-state machinery is folded into each macro's single scoring
+  subquery (see the nested-macros gotcha below for the cost model).
 - Ternaries carry a third arm that is UNKNOWN exactly when the condition column is NULL,
   so `!(ternary...)` cannot flip a null-condition row to included.
 - `ne` against an unsolvable string concatenation reduces to `IS NOT NULL`, not `TRUE`.
+
+### `has(...)` over-grants at the planner level — write `!= null` instead
+
+This one is an **upstream Cerbos planner issue, not an adapter bug, and it affects every
+query-plan adapter equally** (tracked in the Cerbos team's internal issue tracker). The
+planner constant-folds an attribute-presence check like
+
+```
+has(R.attr.aOptionalString)
+```
+
+to `KIND_ALWAYS_ALLOWED` — a plan that admits **every row** — even though the `check()`
+API denies resources that lack the attribute. Any adapter that translates the plan
+faithfully (as this one does) turns a `has()`-based policy into a silent authorization
+over-grant: rows whose column is `NULL` come back from `findAll(spec)` although a
+per-resource `check()` call would deny them.
+`AdversarialConformanceTest#upstreamHasFoldOverGrantTripwire` pins both halves of the
+divergence against the live PDP and fails with re-inclusion instructions the moment an
+upstream image fixes the fold.
+
+**Workaround (PDP-verified):** express presence as a null comparison instead —
+
+```
+R.attr.aOptionalString != null
+```
+
+The planner emits a conditional `ne(variable, null)` plan, which this adapter translates
+to `a_optional_string IS NOT NULL`, and `check()` agrees on every case: attribute missing
+→ deny, explicitly `null` → deny, present → allow. Guarding an existing policy with
+`has(R.attr.x) && R.attr.x != null` produces the identical (correct) plan, so it is a
+safe drop-in edit. The only semantic difference from true `has()` is the
+explicitly-`null` attribute value, which `has()` treats as *present* — for column-backed
+attributes that distinction doesn't exist, because SQL `NULL` is the only representation
+of "not set".
+
+### Nested collection macros multiply correlated subqueries — depth is bounded
+
+Every collection macro (`exists`/`exists_one`/`all`/`filter`/
+`size(filter(...))`) translates to a single correlated aggregate subquery, but the
+lambda body inside it is translated once per polarity — positive and negated — because
+Hibernate 6's criteria negation is stateful and a `Predicate` tree cannot be shared
+between polarities. Nesting therefore multiplies: a depth-`d` `exists` chain emits
+`2^d − 1` correlated subqueries (`exists_one` and `size(filter(...))` add a third body
+translation for their match counter, so a chain of those grows at `3^d`). Measured on
+the benchmark suite (`MacroNestingBenchmarkTest`, H2, ~3 000 rows across the chain):
+
+| depth | correlated subqueries | translate | execute |
+|-------|-----------------------|-----------|---------|
+| 1     | 1                     | ~0.2 ms   | ~1.7 ms |
+| 2     | 3                     | ~0.3 ms   | ~2.2 ms |
+| 3     | 7                     | ~0.6 ms   | ~2.8 ms |
+| 4     | 15                    | ~1.3 ms   | ~5.9 ms |
+
+To keep a legal-but-degenerate deeply nested policy from silently timing out on
+production-sized tables, the translator bounds macro nesting depth at **5** by default
+and throws `IllegalArgumentException` beyond it (fail closed, at translation time). If
+your policies intentionally nest deeper, raise the limit via a system property:
+
+```
+-Ddev.cerbos.queryplan.springdata.maxMacroDepth=8
+```
+
+The property is read per translation, must be a positive integer, and applies to
+`exists`/`exists_one`/`all`/`filter` and `size(filter(...))` nesting.
 
 ### Division by a column is guarded with `NULLIF` — zero divisors deny
 
@@ -290,7 +517,7 @@ repository methods; don't cache the `Predicate` it returns.
 ### MySQL / MariaDB `LIKE` backslash escaping
 
 `contains` / `startsWith` / `endsWith` translate to `cb.like(path, pattern, '\\')` — the
-adapter escapes `%`, `_`, and `\` in the user value and declares `\` as the SQL escape
+adapter escapes `%`, `_`, `\`, and `[` in the user value and declares `\` as the SQL escape
 character (the three-arg `LIKE … ESCAPE '\'` form). On most databases this is exact and
 unambiguous.
 
@@ -305,6 +532,20 @@ backslashes and you target MySQL/MariaDB, either:
   the `LIKE` predicate with an escape character your dialect handles cleanly.
 
 Values without backslashes are unaffected.
+
+### SQL Server `LIKE` `[` character classes
+
+T-SQL `LIKE` treats `[...]` as a character class **even when an `ESCAPE` clause is
+declared**: an unescaped `'[SEC]%'` matches one character from `{S,E,C}` — returning rows
+the PDP denies — and does *not* match a literal `[SEC]` prefix. The adapter therefore
+escapes `[` as `\[` in every pattern it generates: the constant
+`contains`/`startsWith`/`endsWith` forms, the field-to-field `REPLACE` chain, and the
+hierarchy prefix `LIKE`. With the escape declared, `\[` denotes a literal `[` on every
+supported dialect — the differential oracle's H2, PostgreSQL, and MySQL legs verify the
+escape is a semantic no-op where `[` is inert.
+
+`]` is intentionally left unescaped: it is only special on SQL Server as the closer of a
+character class, and no class can open once every `[` is escaped.
 
 ## Build
 

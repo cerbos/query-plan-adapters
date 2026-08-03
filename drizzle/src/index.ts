@@ -48,6 +48,8 @@ type MappingConfig = {
   column?: AnyColumn;
   transform?: MapperTransform;
   relation?: RelationMapping;
+  valueType?: "timestamp";
+  collectionValueType?: "scalar";
 };
 
 interface RelationValue {
@@ -126,7 +128,11 @@ const isMappingConfig = (entry: MapperEntry): entry is MappingConfig =>
   typeof entry === "object" &&
   entry !== null &&
   !isScopedRelationEntry(entry) &&
-  ("column" in entry || "transform" in entry || "relation" in entry);
+  ("column" in entry ||
+    "transform" in entry ||
+    "relation" in entry ||
+    "valueType" in entry ||
+    "collectionValueType" in entry);
 
 const isRelationValue = (entry: BaseMapperEntry): entry is RelationValue =>
   typeof entry === "object" &&
@@ -493,7 +499,7 @@ const MIRRORED_OPERATORS: Record<string, ComparisonOperator> = {
 
 type StringMatchOperator = "contains" | "startsWith" | "endsWith";
 
-// CEL-exact string matching: instr/substr are case-sensitive, interpret no LIKE
+// CEL-exact string matching: replace/substr are case-sensitive, interpret no LIKE
 // metacharacters (% _ \ in the needle match literally), and propagate NULL as SQL
 // UNKNOWN — which excludes the row under both polarities, mirroring the CEL
 // missing-attribute error (deny). The receiver is ALWAYS the haystack and the needle
@@ -505,7 +511,12 @@ const buildStringMatchCondition = (
 ): SQL => {
   switch (operator) {
     case "contains":
-      return sql`instr(${receiver}, ${needle}) > 0`;
+      // REPLACE is case-sensitive and treats the needle literally on SQLite,
+      // PostgreSQL, and MySQL. Unlike LIKE it cannot reinterpret %, _, \, or [
+      // from a column-valued needle as pattern syntax. The explicit NULL arm
+      // preserves CEL missing-attribute errors under negation, and contains("")
+      // remains true for every present receiver.
+      return sql`(case when ${receiver} is null or ${needle} is null then null when ${needle} = '' then true else length(replace(${receiver}, ${needle}, '')) < length(${receiver}) end)`;
     case "startsWith":
       return sql`substr(${receiver}, 1, length(${needle})) = ${needle}`;
     case "endsWith":
@@ -513,9 +524,188 @@ const buildStringMatchCondition = (
   }
 };
 
+type ConstantHierarchy = {
+  kind: "constant";
+  segments: string[];
+  delimiter: string;
+};
+
+type FieldHierarchy = {
+  kind: "field";
+  reference: string;
+  resolved: ResolvedMapping;
+  delimiter: string;
+};
+
+type ResolvedHierarchy = ConstantHierarchy | FieldHierarchy;
+
+const resolveHierarchy = (
+  operand: PlanExpressionOperand,
+  mapper: Mapper
+): ResolvedHierarchy => {
+  if (!isExpressionOperand(operand) || operand.operator !== "hierarchy") {
+    throw new Error("Hierarchy operators require hierarchy(...) operands");
+  }
+  if (operand.operands.length < 1 || operand.operands.length > 2) {
+    throw new Error("'hierarchy' operator requires one or two operands");
+  }
+  const [pathOperand, delimiterOperand] = operand.operands;
+  if (!pathOperand) {
+    throw new Error("'hierarchy' operator is missing its path operand");
+  }
+  let delimiter = ".";
+  if (delimiterOperand) {
+    if (
+      !isValueOperand(delimiterOperand) ||
+      typeof delimiterOperand.value !== "string"
+    ) {
+      throw new Error("Hierarchy delimiter must be a string value");
+    }
+    delimiter = delimiterOperand.value;
+  }
+
+  if (isValueOperand(pathOperand)) {
+    if (typeof pathOperand.value !== "string") {
+      throw new Error("Hierarchy path must be a string value or field reference");
+    }
+    return {
+      kind: "constant",
+      segments: pathOperand.value.split(delimiter),
+      delimiter,
+    };
+  }
+  if (isNameOperand(pathOperand)) {
+    return {
+      kind: "field",
+      reference: pathOperand.name,
+      resolved: resolveFieldReference(pathOperand.name, mapper),
+      delimiter,
+    };
+  }
+  throw new Error(
+    "Segmented hierarchy expressions are not supported by the Drizzle adapter"
+  );
+};
+
+const hierarchyStrictPrefixes = (
+  segments: string[],
+  delimiter: string
+): string[] => {
+  const prefixes: string[] = [];
+  for (let length = 1; length < segments.length; length += 1) {
+    prefixes.push(segments.slice(0, length).join(delimiter));
+  }
+  return prefixes;
+};
+
+const buildHierarchyFilter = (
+  operator: "ancestorOf" | "descendentOf" | "overlaps",
+  operands: PlanExpressionOperand[],
+  mapper: Mapper,
+  options?: BuildFilterOptions
+): SQL => {
+  if (operands.length !== 2) {
+    throw new Error(`'${operator}' operator requires exactly two operands`);
+  }
+  const [leftOperand, rightOperand] = operands;
+  if (!leftOperand || !rightOperand) {
+    throw new Error(`'${operator}' operator is missing operands`);
+  }
+  const left = resolveHierarchy(leftOperand, mapper);
+  const right = resolveHierarchy(rightOperand, mapper);
+  if (left.kind === "field" && right.kind === "field") {
+    throw new Error(
+      `'${operator}' between two field-backed hierarchies is not supported`
+    );
+  }
+  if (left.kind === "constant" && right.kind === "constant") {
+    throw new Error(
+      `'${operator}' between two constant hierarchies should be folded by the planner`
+    );
+  }
+
+  let field: FieldHierarchy;
+  let constant: ConstantHierarchy;
+  if (left.kind === "field") {
+    if (right.kind !== "constant") {
+      throw new Error(`'${operator}' requires one constant hierarchy operand`);
+    }
+    field = left;
+    constant = right;
+  } else {
+    if (right.kind !== "field") {
+      throw new Error(`'${operator}' requires one field hierarchy operand`);
+    }
+    field = right;
+    constant = left;
+  }
+  const fieldExpr = buildColumnExpression(field.resolved.mapping, field.reference);
+  const constantPath = constant.segments.join(field.delimiter);
+  const fieldIsLeft = left.kind === "field";
+  const fieldIsAncestor =
+    operator === "ancestorOf"
+      ? fieldIsLeft
+      : operator === "descendentOf"
+        ? !fieldIsLeft
+        : false;
+
+  let filter: SQL;
+  if (operator === "overlaps") {
+    const prefixes = hierarchyStrictPrefixes(
+      constant.segments,
+      field.delimiter
+    );
+    const conditions: SQL[] = [sql`${fieldExpr} = ${constantPath}`];
+    if (prefixes.length > 0) {
+      conditions.unshift(
+        sql`${fieldExpr} in ${prefixes.map((prefix) => sql`${prefix}`)}`
+      );
+    }
+    conditions.push(
+      buildStringMatchCondition(
+        "startsWith",
+        fieldExpr,
+        sql`${constantPath + field.delimiter}`
+      )
+    );
+    const combined = or(...conditions);
+    if (!combined) {
+      throw new Error("Unable to combine hierarchy overlap conditions");
+    }
+    filter = combined;
+  } else if (fieldIsAncestor) {
+    const prefixes = hierarchyStrictPrefixes(
+      constant.segments,
+      field.delimiter
+    );
+    if (prefixes.length === 0) {
+      filter = FALSE_CONDITION;
+    } else {
+      filter = sql`${fieldExpr} in ${prefixes.map((prefix) => sql`${prefix}`)}`;
+    }
+  } else {
+    filter = buildStringMatchCondition(
+      "startsWith",
+      fieldExpr,
+      sql`${constantPath + field.delimiter}`
+    );
+  }
+
+  return field.resolved.relations.length > 0
+    ? wrapWithRelations(
+        field.resolved.relations,
+        filter,
+        field.reference,
+        options
+      )
+    : filter;
+};
+
 const CONVERSION_TARGETS: Record<string, string> = {
   string: "TEXT",
-  double: "REAL",
+  // FLOAT(53) is float8 on PostgreSQL, DOUBLE on MySQL, and receives REAL
+  // affinity on SQLite.
+  double: "FLOAT(53)",
   int: "INTEGER",
 };
 
@@ -719,14 +909,32 @@ const buildValueExpression = (
     if (operands.length !== 2) {
       throw new Error(`Arithmetic operator '${operator}' requires two operands`);
     }
-    const left = buildValueExpression(operands[0]!, mapper, options);
-    const right = buildValueExpression(operands[1]!, mapper, options);
+    const leftOperand = operands[0];
+    const rightOperand = operands[1];
+    if (!leftOperand || !rightOperand) {
+      throw new Error(`Arithmetic operator '${operator}' is missing operands`);
+    }
+    if (
+      operator === "div" &&
+      isValueOperand(leftOperand) &&
+      typeof leftOperand.value === "number" &&
+      isValueOperand(rightOperand) &&
+      typeof rightOperand.value === "number"
+    ) {
+      // Fold pure-constant division in JavaScript's IEEE double space. SQL engines
+      // disagree on division by zero (SQLite returns NULL, PostgreSQL throws), while
+      // CEL produces +/-Infinity or NaN. Binding the folded value preserves ordering
+      // semantics; SQLite represents bound NaN as NULL, whose comparisons are never true.
+      return sql`${leftOperand.value / rightOperand.value}`;
+    }
+    const left = buildValueExpression(leftOperand, mapper, options);
+    const right = buildValueExpression(rightOperand, mapper, options);
     if (operator === "div") {
       // CEL attribute arithmetic is double-typed: force REAL division so an
       // INTEGER/INTEGER pair does not silently truncate (3 / 2 must be 1.5, not 1).
       // SQLite yields NULL for division by zero — UNKNOWN, excluded under both
       // polarities — matching CEL's NaN comparisons (always false → deny).
-      return sql`(cast(${left} as real) / ${right})`;
+      return sql`(cast(${left} as float(53)) / ${right})`;
     }
     const op = ARITHMETIC_OPERATORS[operator]!;
     return sql`(${left} ${sql.raw(op)} ${right})`;
@@ -762,6 +970,41 @@ const buildValueExpression = (
       throw new Error("'size' operator requires exactly one operand");
     }
     return buildSizeExpression(operands[0]!, mapper, options);
+  }
+
+  if (operator === "timestamp") {
+    if (operands.length !== 1) {
+      throw new Error("'timestamp' operator requires exactly one operand");
+    }
+    const inner = operands[0];
+    if (!inner) {
+      throw new Error("'timestamp' operator is missing its operand");
+    }
+    if (isNameOperand(inner)) {
+      const resolved = resolveFieldReference(inner.name, mapper);
+      if (
+        !isMappingConfig(resolved.mapping) ||
+        resolved.mapping.valueType !== "timestamp"
+      ) {
+        throw new Error(
+          `'timestamp' field '${inner.name}' requires a mapping with valueType: "timestamp"`
+        );
+      }
+      return buildValueExpression(inner, mapper, options);
+    }
+    if (!isValueOperand(inner) || typeof inner.value !== "string") {
+      throw new Error(
+        "'timestamp' requires an RFC-3339 string value or field reference"
+      );
+    }
+    const instant = new Date(inner.value);
+    if (Number.isNaN(instant.getTime())) {
+      throw new Error("'timestamp' value is not a valid RFC-3339 instant");
+    }
+    // Normalize offsets so instant equality is preserved. Removing the zero
+    // millisecond suffix matches the canonical UTC strings used by timestamp columns.
+    const normalized = instant.toISOString().replace(".000Z", "Z");
+    return sql`${normalized}`;
   }
 
   if (operator === "index") {
@@ -854,7 +1097,24 @@ const applyComparison = (
       return sql`${column} >= ${bound}`;
     case "in": {
       const values = Array.isArray(value) ? value : [value];
-      return sql`${column} in ${values.map(v => new Param(v, column))}`;
+      if (values.length === 0) {
+        return FALSE_CONDITION;
+      }
+      const nonNullValues = values.filter((candidate) => candidate !== null);
+      if (nonNullValues.length === 0) {
+        return isNull(column);
+      }
+      const membership = sql`${column} in ${nonNullValues.map(
+        (candidate) => new Param(candidate, column)
+      )}`;
+      if (nonNullValues.length === values.length) {
+        return membership;
+      }
+      const withNull = or(membership, isNull(column));
+      if (!withNull) {
+        throw new Error("Unable to combine null-aware membership conditions");
+      }
+      return withNull;
     }
     case "contains":
     case "startsWith":
@@ -871,6 +1131,76 @@ const applyComparison = (
     default:
       throw new Error(`Unsupported operator: ${operator}`);
   }
+};
+
+const buildVariableMembershipFilter = (
+  operands: PlanExpressionOperand[],
+  mapper: Mapper,
+  options?: BuildFilterOptions
+): SQL => {
+  if (operands.length !== 2) {
+    throw new Error("'in' operator requires exactly two operands");
+  }
+  const [memberOperand, collectionOperand] = operands;
+  if (
+    !memberOperand ||
+    !collectionOperand ||
+    !isNameOperand(memberOperand) ||
+    !isNameOperand(collectionOperand)
+  ) {
+    throw new Error(
+      "Variable membership requires scalar and collection field references"
+    );
+  }
+
+  const member = resolveFieldReference(memberOperand.name, mapper);
+  const unskippedMemberRelations = member.relations.filter(
+    (relation) => !options?.skipRelations?.has(relation)
+  );
+  if (unskippedMemberRelations.length > 0) {
+    throw new Error(
+      "Variable membership requires its first operand to resolve to a scalar field"
+    );
+  }
+  const collectionEntry = getMappingEntry(collectionOperand.name, mapper);
+  if (
+    !collectionEntry ||
+    !isMappingConfig(collectionEntry) ||
+    collectionEntry.collectionValueType !== "scalar"
+  ) {
+    throw new Error(
+      "Variable membership requires a scalar collection mapping"
+    );
+  }
+  const collection = resolveRelationDefaultField(
+    resolveFieldReference(collectionOperand.name, mapper),
+    collectionOperand.name
+  );
+  if (collection.relations.length === 0) {
+    throw new Error(
+      "Variable membership requires its second operand to resolve to a collection"
+    );
+  }
+
+  const memberExpr = buildColumnExpression(member.mapping, memberOperand.name);
+  const elementExpr = buildColumnExpression(
+    collection.mapping,
+    collectionOperand.name
+  );
+  const nullMatch = and(
+    sql`${memberExpr} is null`,
+    sql`${elementExpr} is null`
+  );
+  const match = or(sql`${memberExpr} = ${elementExpr}`, nullMatch);
+  if (!match) {
+    throw new Error("Unable to combine variable membership conditions");
+  }
+  return wrapWithRelations(
+    collection.relations,
+    match,
+    collectionOperand.name,
+    options
+  );
 };
 
 function applyRelationComparison(
@@ -1067,7 +1397,8 @@ const buildHasIntersectionFilter = (
   const buildResolvedFilter = (
     resolved: { relations: RelationMapping[]; mapping: BaseMapperEntry },
     reference: string,
-    wrapOptions?: BuildFilterOptions
+    wrapOptions?: BuildFilterOptions,
+    guardNullProjection = false
   ) => {
     const normalized = resolveRelationDefaultField(resolved, reference);
     const filter = applyComparison(normalized.mapping, "in", rightValues);
@@ -1080,12 +1411,14 @@ const buildHasIntersectionFilter = (
       reference,
       wrapOptions
     );
-    const guard = nullProjectionGuard(
-      normalized.relations,
-      normalized.mapping,
-      reference,
-      wrapOptions
-    );
+    const guard = guardNullProjection
+      ? nullProjectionGuard(
+          normalized.relations,
+          normalized.mapping,
+          reference,
+          wrapOptions
+        )
+      : undefined;
     if (!guard) {
       return wrapped;
     }
@@ -1133,7 +1466,8 @@ const buildHasIntersectionFilter = (
     const projectedFilter = buildResolvedFilter(
       resolved,
       projectionOperand.name,
-      skipRelations ? { skipRelations } : undefined
+      skipRelations ? { skipRelations } : undefined,
+      true
     );
     if (!metadata) {
       return projectedFilter;
@@ -1189,6 +1523,169 @@ const buildHasIntersectionFilter = (
 
 type CollectionOperator = "exists" | "exists_one" | "filter" | "all" | "except";
 
+// Operators whose second operand is a lambda that binds an iteration variable.
+const LAMBDA_BINDING_OPERATORS = new Set([
+  "exists",
+  "exists_one",
+  "all",
+  "filter",
+  "map",
+  "except",
+]);
+
+/**
+ * Substitute a lambda iteration variable with a concrete collection element
+ * inside a lambda body. A bare reference to the variable becomes the element
+ * itself; a `variable.path.to.field` reference drills into the element. A
+ * nested collection macro whose lambda rebinds the same variable name shadows
+ * the outer variable, so substitution only descends into its collection
+ * operand.
+ */
+const substituteLambdaVariable = (
+  operand: PlanExpressionOperand,
+  variableName: string,
+  element: Value
+): PlanExpressionOperand => {
+  if (isNameOperand(operand)) {
+    if (operand.name === variableName) {
+      return { value: element };
+    }
+    if (operand.name.startsWith(`${variableName}.`)) {
+      let current: Value = element;
+      for (const segment of operand.name
+        .slice(variableName.length + 1)
+        .split(".")) {
+        if (
+          current === null ||
+          typeof current !== "object" ||
+          Array.isArray(current) ||
+          !(segment in current)
+        ) {
+          throw new Error(
+            `Cannot resolve "${operand.name}": collection element has no field "${segment}"`
+          );
+        }
+        const next = current[segment];
+        if (next === undefined) {
+          throw new Error(
+            `Cannot resolve "${operand.name}": collection element field "${segment}" is undefined`
+          );
+        }
+        current = next;
+      }
+      return { value: current };
+    }
+    return operand;
+  }
+
+  if (isExpressionOperand(operand)) {
+    if (
+      LAMBDA_BINDING_OPERATORS.has(operand.operator) &&
+      operand.operands.length === 2
+    ) {
+      const [nestedCollection, nestedLambda] = operand.operands;
+      if (
+        nestedCollection !== undefined &&
+        nestedLambda !== undefined &&
+        isExpressionOperand(nestedLambda) &&
+        nestedLambda.operator === "lambda"
+      ) {
+        const nestedVariable = nestedLambda.operands[1];
+        if (
+          nestedVariable !== undefined &&
+          isNameOperand(nestedVariable) &&
+          nestedVariable.name === variableName
+        ) {
+          // The nested lambda shadows our variable: substitute only in the
+          // collection operand.
+          return {
+            operator: operand.operator,
+            operands: [
+              substituteLambdaVariable(nestedCollection, variableName, element),
+              nestedLambda,
+            ],
+          };
+        }
+      }
+    }
+    return {
+      operator: operand.operator,
+      operands: operand.operands.map((o) =>
+        substituteLambdaVariable(o, variableName, element)
+      ),
+    };
+  }
+
+  return operand;
+};
+
+/**
+ * Fold a collection macro whose collection operand is a literal value list.
+ *
+ * The planner emits this shape when a known-value collection (typically a
+ * folded principal attribute) has more than 10 elements — at 10 or fewer it
+ * unrolls `exists`/`all` into an or/and chain itself (cerbos/cerbos#2570,
+ * cerbos/cerbos#2817; `maxItems = 10` in the planner's struct matcher). Apply
+ * the same fold here so the translated filter does not depend on which side of
+ * that threshold the collection lands: substitute each element into the lambda
+ * body and combine the per-element conditions with OR (`exists`) or AND
+ * (`all`). The empty collection keeps CEL identity semantics: `exists` over
+ * `[]` is false, `all` over `[]` is true.
+ */
+const buildKnownValueCollectionFilter = (
+  operator: CollectionOperator,
+  collectionValue: Value,
+  lambdaOperand: PlanExpressionOperand,
+  mapper: Mapper,
+  options: BuildFilterOptions | undefined,
+  negated: boolean
+): SQL => {
+  if (operator !== "exists" && operator !== "all") {
+    throw new Error(
+      `'${operator}' over a literal collection value is not supported. ` +
+        "Only exists() and all() can be folded into a flat filter."
+    );
+  }
+
+  if (!Array.isArray(collectionValue)) {
+    throw new Error(
+      `'${operator}' over a literal collection requires a list value`
+    );
+  }
+
+  const { variable: variableOperand, expression: bodyOperand } =
+    extractLambdaComponents(lambdaOperand, `'${operator}' lambda operand`);
+  if (!isNameOperand(variableOperand)) {
+    throw new Error("Lambda variable must have a name operand");
+  }
+
+  if (collectionValue.length === 0) {
+    const combinesWithOr = operator === "exists" ? !negated : negated;
+    return combinesWithOr ? FALSE_CONDITION : TRUE_CONDITION;
+  }
+
+  const filters = collectionValue.map((element) =>
+    buildFilterFromExpression(
+      substituteLambdaVariable(bodyOperand, variableOperand.name, element),
+      mapper,
+      options,
+      negated
+    )
+  );
+
+  // Push negation through the macro rather than applying a SQL NOT around it:
+  // !exists(body) == all(!body), and !all(body) == exists(!body). This keeps
+  // CEL evaluation errors as deny instead of treating UNKNOWN as false.
+  const combinesWithOr = operator === "exists" ? !negated : negated;
+  const combined = combinesWithOr ? or(...filters) : and(...filters);
+  if (!combined) {
+    throw new Error(
+      `Unable to combine folded '${operator}' collection conditions`
+    );
+  }
+  return combined;
+};
+
 /**
  * Collection macros with CEL's three-valued semantics. An element whose lambda condition
  * is UNKNOWN (a NULL element column) is a CEL missing-attribute evaluation error:
@@ -1197,10 +1694,9 @@ type CollectionOperator = "exists" | "exists_one" | "filter" | "all" | "except";
  * - all     = FALSE on a false witness (absorbs errors), else error if any element errors;
  * - exists_one errors on ANY erroring element, never absorbed.
  *
- * A CEL error is a deny, and stays a deny under negation (!error is still an error) —
- * so the negated forms are NOT the plain SQL NOT of the positive forms. The `negated`
- * flag selects the correct polarity-specific translation using SQLite's IS [NOT]
- * TRUE/FALSE, which distinguish UNKNOWN from FALSE.
+ * The generated CASE expressions preserve those three states as TRUE, FALSE, or NULL.
+ * SQL NOT can therefore apply the requested polarity without turning an evaluation error
+ * into an allow, while IS TRUE/FALSE/NULL keeps witnesses distinct inside each macro.
  */
 const buildCollectionOperatorFilter = (
   operator: CollectionOperator,
@@ -1217,6 +1713,19 @@ const buildCollectionOperatorFilter = (
   const lambdaOperand = operands[1];
   if (!collectionOperand || !lambdaOperand) {
     throw new Error(`'${operator}' operator requires collection and lambda operands`);
+  }
+  // A literal value list arrives when the planner could not unroll a macro
+  // over a known collection (more than 10 elements) — fold it here instead of
+  // requiring a relation mapping that cannot exist for a literal.
+  if (isValueOperand(collectionOperand)) {
+    return buildKnownValueCollectionFilter(
+      operator,
+      collectionOperand.value,
+      lambdaOperand,
+      mapper,
+      options,
+      negated
+    );
   }
 
   const scope = resolveCollectionScope(
@@ -1251,21 +1760,23 @@ const buildCollectionOperatorFilter = (
       return negated ? not(filter) : filter;
     }
     case "exists":
-      // Positive: a true witness. Negated (exists = FALSE): EVERY element is determined
-      // false — an UNKNOWN element would be an unabsorbed CEL error (deny).
-      return negated
-        ? not(wrapAll(sql`(${rowCondition}) is not false`))
-        : wrapAll(rowCondition);
+      {
+        const trueWitness = wrapAll(sql`(${rowCondition}) is true`);
+        const unknownWitness = wrapAll(sql`(${rowCondition}) is null`);
+        const triState = sql`(case when ${trueWitness} then true when ${unknownWitness} then null else false end)`;
+        return negated ? not(triState) : triState;
+      }
     case "except": {
       const exceptFilter = wrapAll(not(rowCondition));
       return negated ? not(exceptFilter) : exceptFilter;
     }
     case "all":
-      // Positive: no element is false OR unknown. Negated (all = FALSE): a determined
-      // false witness exists (which absorbs sibling errors in CEL).
-      return negated
-        ? wrapAll(sql`(${rowCondition}) is false`)
-        : not(wrapAll(sql`(${rowCondition}) is not true`));
+      {
+        const falseWitness = wrapAll(sql`(${rowCondition}) is false`);
+        const unknownWitness = wrapAll(sql`(${rowCondition}) is null`);
+        const triState = sql`(case when ${falseWitness} then false when ${unknownWitness} then null else true end)`;
+        return negated ? not(triState) : triState;
+      }
     case "exists_one": {
       const tableName = resolveTableName(primaryRelation.table, collectionName);
       const joinCondition = eq(
@@ -1278,23 +1789,14 @@ const buildCollectionOperatorFilter = (
       }
 
       const countExpr = sql`(select count(*) from ${sql.identifier(tableName)} where ${matchCondition})`;
-      const countCheck = negated
-        ? sql`${countExpr} <> 1`
-        : sql`${countExpr} = 1`;
-      // exists_one never absorbs an erroring element: ANY unknown-condition element is a
-      // CEL error (deny) regardless of polarity.
-      const unknownGuard = not(
-        wrapWithRelations(
-          [primaryRelation],
-          sql`(${rowCondition}) is null`,
-          collectionName
-        )
+      const unknownWitness = wrapWithRelations(
+        [primaryRelation],
+        sql`(${rowCondition}) is null`,
+        collectionName
       );
-      const combinedFilter = and(countCheck, unknownGuard);
-      if (!combinedFilter) {
-        return FALSE_CONDITION;
-      }
-      return wrapLeading(combinedFilter);
+      const triState = sql`(case when ${unknownWitness} then null when ${countExpr} = 1 then true else false end)`;
+      const wrapped = wrapLeading(triState);
+      return negated ? not(wrapped) : wrapped;
     }
     default:
       throw new Error(`Unsupported collection operator: ${operator}`);
@@ -1311,6 +1813,302 @@ const COLLECTION_OPERATORS: Record<string, CollectionOperator> = {
   all: "all",
   except: "except",
   exists_one: "exists_one",
+};
+
+type LeafComparisonOperator = "eq" | "ne" | "lt" | "le" | "gt" | "ge";
+
+type ConstantNumberResolution =
+  | { kind: "constant"; value: number }
+  | { kind: "dynamic" };
+
+const resolveConstantNumber = (
+  operand: PlanExpressionOperand
+): ConstantNumberResolution => {
+  if (isValueOperand(operand)) {
+    return typeof operand.value === "number"
+      ? { kind: "constant", value: operand.value }
+      : { kind: "dynamic" };
+  }
+  if (!isExpressionOperand(operand) || operand.operands.length !== 2) {
+    return { kind: "dynamic" };
+  }
+  if (
+    operand.operator !== "add" &&
+    operand.operator !== "sub" &&
+    operand.operator !== "mult" &&
+    operand.operator !== "div"
+  ) {
+    return { kind: "dynamic" };
+  }
+  const [leftOperand, rightOperand] = operand.operands;
+  if (!leftOperand || !rightOperand) {
+    return { kind: "dynamic" };
+  }
+  const left = resolveConstantNumber(leftOperand);
+  const right = resolveConstantNumber(rightOperand);
+  if (left.kind !== "constant" || right.kind !== "constant") {
+    return { kind: "dynamic" };
+  }
+  switch (operand.operator) {
+    case "add":
+      return { kind: "constant", value: left.value + right.value };
+    case "sub":
+      return { kind: "constant", value: left.value - right.value };
+    case "mult":
+      return { kind: "constant", value: left.value * right.value };
+    case "div":
+      return { kind: "constant", value: left.value / right.value };
+  }
+};
+
+const evaluateConstantNumberComparison = (
+  operator: LeafComparisonOperator,
+  left: number,
+  right: number
+): boolean => {
+  switch (operator) {
+    case "eq":
+      return left === right;
+    case "ne":
+      return left !== right;
+    case "lt":
+      return left < right;
+    case "le":
+      return left <= right;
+    case "gt":
+      return left > right;
+    case "ge":
+      return left >= right;
+  }
+};
+
+const evaluateScalarValueComparison = (
+  operator: LeafComparisonOperator,
+  left: Value,
+  right: Value
+): boolean | undefined => {
+  const bothNumbers = typeof left === "number" && typeof right === "number";
+  const bothStrings = typeof left === "string" && typeof right === "string";
+  const bothBooleans = typeof left === "boolean" && typeof right === "boolean";
+  const bothNull = left === null && right === null;
+  if (!bothNumbers && !bothStrings && !bothBooleans && !bothNull) {
+    return undefined;
+  }
+  switch (operator) {
+    case "eq":
+      return left === right;
+    case "ne":
+      return left !== right;
+    case "lt":
+      return bothNumbers || bothStrings ? left < right : undefined;
+    case "le":
+      return bothNumbers || bothStrings ? left <= right : undefined;
+    case "gt":
+      return bothNumbers || bothStrings ? left > right : undefined;
+    case "ge":
+      return bothNumbers || bothStrings ? left >= right : undefined;
+  }
+};
+
+const buildComparisonFilter = (
+  operator: LeafComparisonOperator,
+  left: PlanExpressionOperand,
+  right: PlanExpressionOperand,
+  mapper: Mapper,
+  options: BuildFilterOptions | undefined,
+  negated: boolean
+): SQL => {
+  const buildTernary = (
+    ternary: PlanExpressionOperand & {
+      operator: string;
+      operands: PlanExpressionOperand[];
+    },
+    other: PlanExpressionOperand,
+    ternaryIsLeft: boolean
+  ): SQL => {
+    if (ternary.operands.length !== 3) {
+      throw new Error("'if' operator requires exactly three operands");
+    }
+    const [conditionOperand, thenOperand, elseOperand] = ternary.operands;
+    if (!conditionOperand || !thenOperand || !elseOperand) {
+      throw new Error("'if' operator is missing operands");
+    }
+    const condition = buildFilterFromExpression(
+      conditionOperand,
+      mapper,
+      options
+    );
+    const thenFilter = ternaryIsLeft
+      ? buildComparisonFilter(
+          operator,
+          thenOperand,
+          other,
+          mapper,
+          options,
+          negated
+        )
+      : buildComparisonFilter(
+          operator,
+          other,
+          thenOperand,
+          mapper,
+          options,
+          negated
+        );
+    const elseFilter = ternaryIsLeft
+      ? buildComparisonFilter(
+          operator,
+          elseOperand,
+          other,
+          mapper,
+          options,
+          negated
+        )
+      : buildComparisonFilter(
+          operator,
+          other,
+          elseOperand,
+          mapper,
+          options,
+          negated
+        );
+    const combined = or(
+      and(condition, thenFilter),
+      and(not(condition), elseFilter)
+    );
+    if (!combined) {
+      throw new Error("Unable to combine ternary comparison conditions");
+    }
+    return combined;
+  };
+
+  if (isExpressionOperand(left) && left.operator === "if") {
+    return buildTernary(left, right, true);
+  }
+  if (isExpressionOperand(right) && right.operator === "if") {
+    return buildTernary(right, left, false);
+  }
+
+  const leftConstant = resolveConstantNumber(left);
+  const rightConstant = resolveConstantNumber(right);
+  if (
+    leftConstant.kind === "constant" &&
+    rightConstant.kind === "constant"
+  ) {
+    const result = evaluateConstantNumberComparison(
+      operator,
+      leftConstant.value,
+      rightConstant.value
+    );
+    return result !== negated ? TRUE_CONDITION : FALSE_CONDITION;
+  }
+
+  const buildDynamicNaNComparison = (
+    dynamicOperand: PlanExpressionOperand,
+    nanIsLeft: boolean
+  ): SQL => {
+    const dynamic = resolveScalarOperand(dynamicOperand, mapper, options);
+    // Every IEEE comparison with NaN has the same result for every present value:
+    // only != is true. Preserve SQL NULL as UNKNOWN so a missing CEL attribute still
+    // denies under either polarity, without ever sending a NaN parameter to a driver.
+    const presentResult = nanIsLeft
+      ? evaluateConstantNumberComparison(operator, Number.NaN, 0)
+      : evaluateConstantNumberComparison(operator, 0, Number.NaN);
+    const presentCondition = presentResult ? sql`true` : sql`false`;
+    let filter = sql`(case when ${dynamic.expr} is null then null else ${presentCondition} end)`;
+    if (dynamic.relations.length) {
+      const reference = isNameOperand(dynamicOperand)
+        ? dynamicOperand.name
+        : `'${operator}' operand`;
+      filter = wrapWithRelations(
+        dynamic.relations,
+        filter,
+        reference,
+        options
+      );
+    }
+    return negated ? not(filter) : filter;
+  };
+
+  if (
+    leftConstant.kind === "constant" &&
+    Number.isNaN(leftConstant.value) &&
+    rightConstant.kind === "dynamic" &&
+    !isValueOperand(right)
+  ) {
+    return buildDynamicNaNComparison(right, true);
+  }
+  if (
+    rightConstant.kind === "constant" &&
+    Number.isNaN(rightConstant.value) &&
+    leftConstant.kind === "dynamic" &&
+    !isValueOperand(left)
+  ) {
+    return buildDynamicNaNComparison(left, false);
+  }
+
+  if (isValueOperand(left) && isValueOperand(right)) {
+    const result = evaluateScalarValueComparison(
+      operator,
+      left.value,
+      right.value
+    );
+    if (result === undefined) {
+      throw new Error(
+        `'${operator}' cannot compare the provided constant value types`
+      );
+    }
+    return result !== negated ? TRUE_CONDITION : FALSE_CONDITION;
+  }
+
+  let filter: SQL;
+  if (isExpressionOperand(left) || isExpressionOperand(right)) {
+    const leftExpr = buildValueExpression(left, mapper, options);
+    const rightExpr = buildValueExpression(right, mapper, options);
+    filter = applyComparisonWithExpression(operator, leftExpr, rightExpr);
+  } else if (isNameOperand(left) && isNameOperand(right)) {
+    const leftResolved = resolveFieldReference(left.name, mapper);
+    const rightResolved = resolveFieldReference(right.name, mapper);
+    const comparison = applyComparisonWithExpression(
+      operator,
+      buildColumnExpression(leftResolved.mapping, left.name),
+      buildColumnExpression(rightResolved.mapping, right.name)
+    );
+    filter = wrapCombinedRelations(
+      comparison,
+      leftResolved.relations,
+      rightResolved.relations,
+      left.name,
+      options
+    );
+  } else if (isNameOperand(left) && isValueOperand(right)) {
+    const resolved = resolveFieldReference(left.name, mapper);
+    const comparison = applyComparison(
+      resolved.mapping,
+      operator,
+      right.value
+    );
+    filter = resolved.relations.length
+      ? wrapWithRelations(resolved.relations, comparison, left.name, options)
+      : comparison;
+  } else if (isValueOperand(left) && isNameOperand(right)) {
+    const mirrored = MIRRORED_OPERATORS[operator];
+    if (!mirrored) {
+      throw new Error(`Unable to mirror comparison operator '${operator}'`);
+    }
+    const resolved = resolveFieldReference(right.name, mapper);
+    const comparison = applyComparison(
+      resolved.mapping,
+      mirrored,
+      left.value
+    );
+    filter = resolved.relations.length
+      ? wrapWithRelations(resolved.relations, comparison, right.name, options)
+      : comparison;
+  } else {
+    throw new Error(`'${operator}' operator requires field or value operands`);
+  }
+  return negated ? not(filter) : filter;
 };
 
 /**
@@ -1419,59 +2217,14 @@ const buildFilterFromExpression = (
       if (!left || !right) {
         throw new Error("Comparison operator requires two operands");
       }
-      let filter: SQL;
-      if (isExpressionOperand(left) || isExpressionOperand(right)) {
-        // Expression-valued side (arithmetic, conversion, `if`, `size`): evaluate both
-        // sides as SQL value expressions in wire order and emit a raw comparison.
-        const leftExpr = buildValueExpression(left, mapper, options);
-        const rightExpr = buildValueExpression(right, mapper, options);
-        filter = applyComparisonWithExpression(operator, leftExpr, rightExpr);
-      } else if (isNameOperand(left) && isNameOperand(right)) {
-        // Field-to-field: compare the two columns directly, wrapping whatever relation
-        // chains the columns live behind so both are in scope.
-        const leftResolved = resolveFieldReference(left.name, mapper);
-        const rightResolved = resolveFieldReference(right.name, mapper);
-        const comparison = applyComparisonWithExpression(
-          operator,
-          buildColumnExpression(leftResolved.mapping, left.name),
-          buildColumnExpression(rightResolved.mapping, right.name)
-        );
-        filter = wrapCombinedRelations(
-          comparison,
-          leftResolved.relations,
-          rightResolved.relations,
-          left.name,
-          options
-        );
-      } else if (isNameOperand(left) && isValueOperand(right)) {
-        const resolved = resolveFieldReference(left.name, mapper);
-        const comparison = applyComparison(
-          resolved.mapping,
-          operator,
-          right.value
-        );
-        filter = resolved.relations.length
-          ? wrapWithRelations(resolved.relations, comparison, left.name, options)
-          : comparison;
-      } else if (isValueOperand(left) && isNameOperand(right)) {
-        // Value-first comparison: the planner preserves source order, so MIRROR the
-        // operator instead of silently swapping operands (3 <= col ⇔ col >= 3).
-        const mirrored = MIRRORED_OPERATORS[operator]!;
-        const resolved = resolveFieldReference(right.name, mapper);
-        const comparison = applyComparison(
-          resolved.mapping,
-          mirrored,
-          left.value
-        );
-        filter = resolved.relations.length
-          ? wrapWithRelations(resolved.relations, comparison, right.name, options)
-          : comparison;
-      } else {
-        throw new Error(
-          `'${operator}' operator requires field or value operands`
-        );
-      }
-      return negated ? not(filter) : filter;
+      return buildComparisonFilter(
+        operator,
+        left,
+        right,
+        mapper,
+        options,
+        negated
+      );
     }
     case "contains":
     case "startsWith":
@@ -1479,8 +2232,11 @@ const buildFilterFromExpression = (
       const filter = buildStringMatchFilter(operator, operands, mapper, options);
       return negated ? not(filter) : filter;
     }
-    case "in":
-    case "isSet": {
+    case "in": {
+      if (operands.every(isNameOperand)) {
+        const filter = buildVariableMembershipFilter(operands, mapper, options);
+        return negated ? not(filter) : filter;
+      }
       // Membership/isSet: whichever side is the name operand is the column — the planner
       // emits both `R.attr.x in [..]` (name, values) and `"v" in R.attr.list`
       // (value, name), and both mean membership against the column.
@@ -1491,6 +2247,35 @@ const buildFilterFromExpression = (
       const valueOperand = operands.find(isValueOperand);
       if (!valueOperand) {
         throw new Error("Comparison operator missing value operand");
+      }
+      const unresolved = resolveFieldReference(fieldOperand.name, mapper);
+      const entry = getMappingEntry(fieldOperand.name, mapper);
+      const resolved =
+        entry &&
+        isMappingConfig(entry) &&
+        entry.collectionValueType === "scalar"
+          ? resolveRelationDefaultField(unresolved, fieldOperand.name)
+          : unresolved;
+      const comparison = applyComparison(
+        resolved.mapping,
+        operator,
+        valueOperand.value
+      );
+      const filter = resolved.relations.length
+        ? wrapWithRelations(
+            resolved.relations,
+            comparison,
+            fieldOperand.name,
+            options
+          )
+        : comparison;
+      return negated ? not(filter) : filter;
+    }
+    case "isSet": {
+      const fieldOperand = operands.find(isNameOperand);
+      const valueOperand = operands.find(isValueOperand);
+      if (!fieldOperand || !valueOperand) {
+        throw new Error("'isSet' requires field and boolean value operands");
       }
       const resolved = resolveFieldReference(fieldOperand.name, mapper);
       const comparison = applyComparison(
@@ -1535,6 +2320,12 @@ const buildFilterFromExpression = (
     }
     case "hasIntersection": {
       const filter = buildHasIntersectionFilter(operands, mapper);
+      return negated ? not(filter) : filter;
+    }
+    case "ancestorOf":
+    case "descendentOf":
+    case "overlaps": {
+      const filter = buildHierarchyFilter(operator, operands, mapper, options);
       return negated ? not(filter) : filter;
     }
     default: {

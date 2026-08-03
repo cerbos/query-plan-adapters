@@ -58,6 +58,12 @@ export type PrismaFilter = Record<string, any>;
 export type MapperConfig = {
   field?: string;
   /**
+   * Declares the database value kind when the Cerbos expression wraps a field in a typed
+   * constructor. Date-time metadata is required for timestamp(field) so a string column is
+   * never silently treated as a temporal column merely because it happens to contain ISO text.
+   */
+  valueType?: "dateTime";
+  /**
    * Marks the mapped column as nullable in the database. Cerbos treats a missing attribute as
    * an evaluation error (deny), which matches SQL three-valued logic for simple predicates —
    * but relation subqueries (some/every/none) collapse UNKNOWN to false at the EXISTS boundary,
@@ -147,6 +153,203 @@ function assertDefined<T>(value: T | undefined, message: string): T {
   return value;
 }
 
+// Operators whose second operand is a lambda that binds an iteration variable.
+const LAMBDA_BINDING_OPERATORS = new Set([
+  "exists",
+  "exists_one",
+  "all",
+  "filter",
+  "map",
+  "except",
+]);
+
+/**
+ * Substitute a lambda iteration variable with a concrete collection element
+ * inside a lambda body. A bare reference to the variable becomes the element
+ * itself; a `variable.path.to.field` reference drills into the element. A
+ * nested collection macro whose lambda rebinds the same variable name shadows
+ * the outer variable, so substitution only descends into its collection
+ * operand.
+ */
+function substituteLambdaVariable(
+  operand: PlanExpressionOperand,
+  variableName: string,
+  element: Value
+): PlanExpressionOperand {
+  if (isNamedOperand(operand)) {
+    if (operand.name === variableName) {
+      return { value: element };
+    }
+    if (operand.name.startsWith(`${variableName}.`)) {
+      let current: Value = element;
+      for (const segment of operand.name
+        .slice(variableName.length + 1)
+        .split(".")) {
+        if (
+          current === null ||
+          typeof current !== "object" ||
+          Array.isArray(current) ||
+          !(segment in current) ||
+          current[segment] === undefined
+        ) {
+          throw new Error(
+            `Cannot resolve "${operand.name}": collection element has no field "${segment}"`
+          );
+        }
+        current = current[segment];
+      }
+      return { value: current };
+    }
+    return operand;
+  }
+
+  if (isOperatorOperand(operand)) {
+    if (
+      LAMBDA_BINDING_OPERATORS.has(operand.operator) &&
+      operand.operands.length === 2
+    ) {
+      const [nestedCollection, nestedLambda] = operand.operands;
+      if (
+        nestedCollection !== undefined &&
+        nestedLambda !== undefined &&
+        isOperatorOperand(nestedLambda) &&
+        nestedLambda.operator === "lambda"
+      ) {
+        const nestedVariable = nestedLambda.operands[1];
+        if (
+          nestedVariable !== undefined &&
+          isNamedOperand(nestedVariable) &&
+          nestedVariable.name === variableName
+        ) {
+          // The nested lambda shadows our variable: substitute only in the
+          // collection operand.
+          return {
+            operator: operand.operator,
+            operands: [
+              substituteLambdaVariable(nestedCollection, variableName, element),
+              nestedLambda,
+            ],
+          };
+        }
+      }
+    }
+    return {
+      operator: operand.operator,
+      operands: operand.operands.map((o) =>
+        substituteLambdaVariable(o, variableName, element)
+      ),
+    };
+  }
+
+  return operand;
+}
+
+/**
+ * Fold a collection macro whose collection operand is a literal value list.
+ *
+ * The planner emits this shape when a known-value collection (typically a
+ * folded principal attribute) has more than 10 elements — at 10 or fewer it
+ * unrolls `exists`/`all` into an or/and chain itself (cerbos/cerbos#2570,
+ * cerbos/cerbos#2817; `maxItems = 10` in the planner's struct matcher). Apply
+ * the same fold here so the translated filter does not depend on which side of
+ * that threshold the collection lands: substitute each element into the lambda
+ * body and combine the per-element filters with OR (`exists`) or AND (`all`).
+ *
+ * An empty list yields `{OR: []}` / `{AND: []}`, which Prisma evaluates to
+ * match-nothing / match-everything — exactly CEL's `exists`/`all` semantics
+ * over an empty collection.
+ */
+function handleKnownValueCollectionOperator(
+  operator: string,
+  collection: ValueOperand,
+  lambda: PlanExpressionOperand,
+  mapper: Mapper,
+  negated: boolean
+): PrismaFilter {
+  if (operator !== "exists" && operator !== "all") {
+    throw new Error(
+      `${operator} over a literal collection value is not supported. ` +
+        "Only exists() and all() can be folded into a flat filter."
+    );
+  }
+
+  const elements = collection.value;
+  if (!Array.isArray(elements)) {
+    throw new Error(
+      `${operator} over a literal collection requires a list value`
+    );
+  }
+
+  if (!isOperatorOperand(lambda) || lambda.operator !== "lambda") {
+    throw new Error(
+      `Second operand of ${operator} must be a lambda expression`
+    );
+  }
+  if (lambda.operands.length !== 2) {
+    throw new Error(
+      `${operator} over a literal collection supports single-variable lambdas only`
+    );
+  }
+
+  const body = assertDefined(
+    lambda.operands[0],
+    "Lambda expression must provide a condition"
+  );
+  const variable = assertDefined(
+    lambda.operands[1],
+    "Lambda variable must have a name"
+  );
+  if (!isNamedOperand(variable)) {
+    throw new Error("Lambda variable must have a name");
+  }
+
+  const filters = elements.map((element) => {
+    const substituted = substituteLambdaVariable(
+      body,
+      variable.name,
+      element
+    );
+    return negated
+      ? buildNegatedFilter(substituted, mapper)
+      : buildPrismaFilterFromCerbosExpression(substituted, mapper);
+  });
+
+  const combinesWithOr = operator === "exists" ? !negated : negated;
+  return combinesWithOr ? { OR: filters } : { AND: filters };
+}
+
+function tryHandleKnownValueCollectionOperator(
+  operator: string,
+  operands: PlanExpressionOperand[],
+  mapper: Mapper,
+  negated: boolean
+): PrismaFilter | undefined {
+  if (operands.length !== 2) {
+    return undefined;
+  }
+
+  const collection = operands[0];
+  const lambda = operands[1];
+  if (
+    collection === undefined ||
+    lambda === undefined ||
+    !isValueOperand(collection)
+  ) {
+    return undefined;
+  }
+
+  // A literal value list arrives when the planner could not unroll a macro
+  // over a known collection (more than 10 elements). Fold it before attempting
+  // relation resolution because there is no relation mapping for a literal.
+  return handleKnownValueCollectionOperator(
+    operator,
+    collection,
+    lambda,
+    mapper,
+    negated
+  );
+}
+
 function getLeafField(path: string[]): string {
   const fieldName = path[path.length - 1];
   if (!fieldName) {
@@ -175,6 +378,7 @@ type RelationConfig = {
 type ResolvedFieldReference = {
   path: string[];
   relations?: RelationConfig[];
+  valueType?: "dateTime";
 };
 
 type ResolvedValue = {
@@ -265,6 +469,26 @@ function buildFieldDirectOrInFilter(
   return wrapRelations(fieldRef.relations, baseFilter);
 }
 
+function buildMembershipFilter(
+  fieldRef: ResolvedFieldReference,
+  values: Value[]
+): PrismaFilter {
+  const nonNullValues = values.filter((value) => value !== null);
+  const filters: PrismaFilter[] = [];
+
+  if (nonNullValues.length > 0 || values.length === 0) {
+    filters.push(buildFieldDirectOrInFilter(fieldRef, nonNullValues));
+  }
+  if (nonNullValues.length !== values.length) {
+    filters.push(buildFieldDirectOrInFilter(fieldRef, [null]));
+  }
+
+  if (filters.length === 1) {
+    return assertDefined(filters[0], "Membership filter is missing");
+  }
+  return { OR: filters };
+}
+
 function buildAlwaysTrueFilter(): PrismaFilter {
   return {};
 }
@@ -282,6 +506,7 @@ type LambdaScope = {
   variableName: string;
   relationModel: string | undefined;
   nullableFields: Set<string>;
+  unknownFilters: PrismaFilter[];
 };
 let lambdaScopes: LambdaScope[] = [];
 let rootModelName: string | undefined;
@@ -605,6 +830,23 @@ function constantFoldExpression(
       }
       return folded;
     }
+    case "add":
+    case "sub":
+    case "mult":
+    case "div": {
+      const [left, right] = operands;
+      if (
+        left !== undefined &&
+        right !== undefined &&
+        isValueOperand(left) &&
+        isValueOperand(right)
+      ) {
+        return {
+          value: foldArithmetic(expr.operator, left.value, right.value),
+        };
+      }
+      return folded;
+    }
     case "contains":
     case "startsWith":
     case "endsWith": {
@@ -765,11 +1007,18 @@ function resolveFieldReference(
       }
     }
 
-    return { path: field ? [field] : remainingParts, relations };
+    return {
+      path: field ? [field] : remainingParts,
+      relations,
+      valueType: activeConfig.valueType,
+    };
   }
 
   // Simple field mapping
-  return { path: [activeConfig?.field || reference] };
+  return {
+    path: [activeConfig?.field || reference],
+    valueType: activeConfig?.valueType,
+  };
 }
 
 /**
@@ -830,12 +1079,47 @@ function resolveOperand(
   } else if (isValueOperand(operand)) {
     return { value: operand.value };
   } else if (isOperatorOperand(operand)) {
+    if (operand.operator === "timestamp") {
+      return resolveTimestampOperand(operand, mapper);
+    }
     const folded = tryFoldValueExpression(operand, mapper);
     if (folded !== null) return { value: folded };
     const nestedResult = buildPrismaFilterFromCerbosExpression(operand, mapper);
     return { value: nestedResult };
   }
   throw new Error("Operand must have name, value, or be an expression");
+}
+
+function resolveTimestampOperand(
+  expression: OperatorOperand,
+  mapper: Mapper
+): ResolvedOperand {
+  if (expression.operands.length !== 1) {
+    throw new Error("timestamp() requires exactly one operand");
+  }
+
+  const operand = assertDefined(
+    expression.operands[0],
+    "timestamp() requires an operand"
+  );
+  if (isNamedOperand(operand)) {
+    const fieldRef = resolveFieldReference(operand.name, mapper);
+    if (fieldRef.valueType !== "dateTime") {
+      throw new Error(
+        `timestamp() field ${operand.name} must be mapped with valueType: \"dateTime\"`
+      );
+    }
+    return fieldRef;
+  }
+
+  if (!isValueOperand(operand) || typeof operand.value !== "string") {
+    throw new Error("timestamp() requires a field reference or RFC 3339 string");
+  }
+  const milliseconds = Date.parse(operand.value);
+  if (Number.isNaN(milliseconds)) {
+    throw new Error(`Invalid timestamp value: ${operand.value}`);
+  }
+  return { value: new Date(milliseconds).toISOString() };
 }
 
 function tryFoldValueExpression(
@@ -1417,6 +1701,13 @@ function evaluateConstantComparison(
     case "gt":
     case "ge": {
       if (
+        typeof left === "number" &&
+        typeof right === "number" &&
+        (Number.isNaN(left) || Number.isNaN(right))
+      ) {
+        return false;
+      }
+      if (
         !(
           (typeof left === "number" && typeof right === "number") ||
           (typeof left === "string" && typeof right === "string")
@@ -1631,6 +1922,28 @@ function handleRelationalOperator(
     );
   }
 
+  if (isResolvedValue(left) && isResolvedFieldReference(right)) {
+    return buildComparisonFilter(
+      right,
+      MIRRORED_OPERATOR[operator] ?? operator,
+      left.value
+    );
+  }
+
+  if (isResolvedValue(left) && isResolvedValue(right)) {
+    const matches = evaluateConstantComparison(
+      operator,
+      left.value,
+      right.value
+    );
+    if (matches) {
+      return buildAlwaysTrueFilter();
+    }
+    throw new Error(
+      "A constant-false conditional predicate must be folded by the Cerbos planner"
+    );
+  }
+
   const rightValue = requireResolvedValue(
     right,
     "Right operand must be a value"
@@ -1787,18 +2100,39 @@ function handleInOperator(
   operands: PlanExpressionOperand[],
   mapper: Mapper
 ): PrismaFilter {
-  const nameOperand = getNamedOperand(operands, "Name operand is undefined");
-  const valueOperand = getValueOperand(operands, "Value operand is undefined");
-  const fieldRef = requireResolvedFieldReference(
-    resolveOperand(nameOperand, mapper),
-    "Name operand must resolve to a field reference"
+  if (operands.length !== 2) {
+    throw new Error("in requires exactly two operands");
+  }
+  const member = assertDefined(operands[0], "in requires a member operand");
+  const collection = assertDefined(
+    operands[1],
+    "in requires a collection operand"
   );
-  const { value } = requireResolvedValue(
-    resolveOperand(valueOperand, mapper),
-    "Value operand must resolve to a value"
+
+  if (isNamedOperand(member) && isValueOperand(collection)) {
+    const fieldRef = resolveFieldReference(member.name, mapper);
+    const values = Array.isArray(collection.value)
+      ? collection.value
+      : [collection.value];
+    return buildMembershipFilter(fieldRef, values);
+  }
+
+  if (isValueOperand(member) && isNamedOperand(collection)) {
+    return buildMembershipFilter(
+      resolveFieldReference(collection.name, mapper),
+      [member.value]
+    );
+  }
+
+  if (isNamedOperand(member) && isNamedOperand(collection)) {
+    throw new Error(
+      "Membership between two database attributes is not supported: Prisma cannot compare a related element column with an outer scalar column"
+    );
+  }
+
+  throw new Error(
+    "in requires a field member and literal list, or a literal member and field collection"
   );
-  const values = Array.isArray(value) ? value : [value];
-  return buildFieldDirectOrInFilter(fieldRef, values);
 }
 
 // Upper bound on the IN-list produced when enumerating a constant receiver's substrings.
@@ -2005,6 +2339,7 @@ function handleHasIntersectionOperator(
       variableName: variable.name,
       relationModel: relations[relations.length - 1]?.model,
       nullableFields: new Set(),
+      unknownFilters: [],
     };
     lambdaScopes.push(scope);
     let resolved: ResolvedFieldReference;
@@ -2055,11 +2390,7 @@ function handleHasIntersectionOperator(
   }
 
   if (relations && relations.length > 0) {
-    const fieldName = getLeafField(path);
-    const fieldFilter = {
-      [fieldName]: { in: rightOperand.value },
-    };
-    return buildNestedRelationFilter(relations, fieldFilter);
+    return buildMembershipFilter({ path, relations }, rightOperand.value);
   }
 
   const fieldName = getLeafField(path);
@@ -2095,6 +2426,8 @@ type CollectionLambdaParts = {
   filterValue: PrismaFilter;
   /** Nullable element columns referenced by the lambda body (for 3VL guards). */
   nullableFields: Set<string>;
+  /** Element-level predicates under which a nested collection expression is UNKNOWN. */
+  unknownFilters: PrismaFilter[];
 };
 
 function buildCollectionLambdaParts(
@@ -2167,6 +2500,7 @@ function buildCollectionLambdaParts(
     variableName: variable.name,
     relationModel: deepest.model,
     nullableFields: new Set(),
+    unknownFilters: [],
   };
   lambdaScopes.push(scope);
   let lambdaCondition: PrismaFilter;
@@ -2209,6 +2543,7 @@ function buildCollectionLambdaParts(
     restRelations,
     filterValue,
     nullableFields: scope.nullableFields,
+    unknownFilters: scope.unknownFilters,
   };
 }
 
@@ -2219,6 +2554,27 @@ function buildNullWitnessFilter(nullableFields: Set<string>): PrismaFilter {
     return checks[0]!;
   }
   return { OR: checks };
+}
+
+function buildUnknownElementFilter(
+  parts: CollectionLambdaParts
+): PrismaFilter | undefined {
+  const filters = [...parts.unknownFilters];
+  if (parts.nullableFields.size > 0) {
+    filters.push(buildNullWitnessFilter(parts.nullableFields));
+  }
+  if (filters.length === 0) {
+    return undefined;
+  }
+  if (filters.length === 1) {
+    return filters[0];
+  }
+  return { OR: filters };
+}
+
+function recordNestedCollectionUnknownFilter(filter: PrismaFilter): void {
+  const enclosingScope = lambdaScopes[lambdaScopes.length - 1];
+  enclosingScope?.unknownFilters.push(filter);
 }
 
 /** Wraps an element-level filter through the full relation chain (head + rest). */
@@ -2254,6 +2610,16 @@ function handleCollectionOperator(
   operands: PlanExpressionOperand[],
   mapper: Mapper
 ): PrismaFilter {
+  const knownValueFilter = tryHandleKnownValueCollectionOperator(
+    operator,
+    operands,
+    mapper,
+    false
+  );
+  if (knownValueFilter !== undefined) {
+    return knownValueFilter;
+  }
+
   if (operator === "exists_one" || operator === "filter") {
     throwUnsupportedCollectionOperator(operator);
   }
@@ -2262,10 +2628,21 @@ function handleCollectionOperator(
   const { head, filterValue, nullableFields } = parts;
 
   switch (operator) {
-    case "exists":
+    case "exists": {
       // A NULL element keeps the per-element predicate UNKNOWN, so it can never create a
       // false positive here; a CEL error (deny) coincides with "no match" — no guard needed.
-      return { [head.name]: { some: filterValue } };
+      const filter = { [head.name]: { some: filterValue } };
+      const unknownElement = buildUnknownElementFilter(parts);
+      if (unknownElement !== undefined) {
+        recordNestedCollectionUnknownFilter({
+          AND: [
+            { NOT: filter },
+            wrapCollectionElementFilter(parts, unknownElement),
+          ],
+        });
+      }
+      return filter;
+    }
     case "except":
       return { [head.name]: { some: { NOT: filterValue } } };
     case "all": {
@@ -2303,6 +2680,16 @@ function buildNegatedCollectionFilter(
   operands: PlanExpressionOperand[],
   mapper: Mapper
 ): PrismaFilter {
+  const knownValueFilter = tryHandleKnownValueCollectionOperator(
+    operator,
+    operands,
+    mapper,
+    true
+  );
+  if (knownValueFilter !== undefined) {
+    return knownValueFilter;
+  }
+
   if (operator === "exists_one" || operator === "filter") {
     throwUnsupportedCollectionOperator(operator);
   }
@@ -2313,7 +2700,8 @@ function buildNegatedCollectionFilter(
   switch (operator) {
     case "exists": {
       const base = { NOT: { [head.name]: { some: filterValue } } };
-      if (nullableFields.size === 0) {
+      const unknownElement = buildUnknownElementFilter(parts);
+      if (unknownElement === undefined) {
         return base;
       }
       // !exists is TRUE only when every element is definitively false: no P-match AND no
@@ -2324,7 +2712,7 @@ function buildNegatedCollectionFilter(
           {
             NOT: wrapCollectionElementFilter(
               parts,
-              buildNullWitnessFilter(nullableFields)
+              unknownElement
             ),
           },
         ],
@@ -2532,6 +2920,16 @@ function handleArithmeticComparison(
 
   if (typeof constant !== "number" || typeof other.value !== "number") {
     throw new Error(`${arithOp} comparison requires numeric operands`);
+  }
+
+  if (
+    arithOp === "add" &&
+    (effectiveOperator === "eq" || effectiveOperator === "ne") &&
+    (!Number.isInteger(constant) || !Number.isInteger(other.value))
+  ) {
+    throw new Error(
+      "Fractional addition equality cannot be translated safely: solving IEEE-754 addition into a plain Prisma column comparison is not reversible"
+    );
   }
 
   let solved: number;
@@ -2895,7 +3293,13 @@ function handleAncestorDescendantOperator(
   const descendant = direction === "ancestor" ? right : left;
 
   if (ancestor.type === "constant" && descendant.type === "field") {
-    const prefix = ancestor.segments.join(descendant.delimiter) + descendant.delimiter;
+    const prefix =
+      ancestor.segments.join(descendant.delimiter) + descendant.delimiter;
+    if (/[%_]/.test(prefix)) {
+      throw new Error(
+        "Cannot translate hierarchy prefix matching with LIKE metacharacters (% or _): Prisma does not escape wildcards in string filters"
+      );
+    }
     return buildFieldFilter(descendant.fieldRef, "startsWith", prefix);
   }
 

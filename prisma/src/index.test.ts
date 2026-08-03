@@ -8070,3 +8070,623 @@ describe("Value-First Operand Order", () => {
     );
   });
 });
+
+describe("Known-Value Collections (planner unroll cliff)", () => {
+  // The planner unrolls exists/all over a known collection (e.g. a folded
+  // principal attribute) into an or/and chain at <= 10 elements
+  // (cerbos/cerbos#2570, #2817) and emits the lambda with a literal value-list
+  // collection above that. These tests straddle the 10-item cliff so both wire
+  // shapes stay exercised regardless of the PDP version behind the sidecar.
+  describe("live plans across the 10-item threshold", () => {
+    const buildTeams = (size: number): string[] => {
+      const teams = ["string", "string3"];
+      while (teams.length < size) {
+        teams.push(`filler-${teams.length}`);
+      }
+      return teams;
+    };
+
+    // Supported PDPs are >= 0.54, where both macros unroll at <= 10 elements and
+    // ship the value-list lambda above that. Pin the wire shape so each leg
+    // provably exercises its side of the cliff — if a future planner moves the
+    // threshold, this fails loudly instead of silently testing one shape only.
+    const expectShape = (
+      queryPlan: PlanResourcesResponse,
+      size: number,
+      unrolledOperator: string,
+      macroOperator: string
+    ): void => {
+      const condition = (queryPlan as PlanResourcesConditionalResponse)
+        .condition;
+      expect((condition as PlanExpression).operator).toEqual(
+        size <= 10 ? unrolledOperator : macroOperator
+      );
+    };
+
+    describe.each([9, 10, 11])("with %i-element principal collection", (size) => {
+      test("conditional - principal-exists", async () => {
+        const teams = buildTeams(size);
+        const queryPlan = await cerbos.planResources({
+          principal: { id: "user1", roles: ["USER"], attr: { teams } },
+          resource: { kind: "resource" },
+          action: "principal-exists",
+        });
+
+        expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+        expectShape(queryPlan, size, "or", "exists");
+
+        const result = queryPlanToPrisma({
+          queryPlan,
+          mapper: {
+            "request.resource.attr.aString": { field: "aString" },
+          },
+        });
+
+        if (result.kind !== PlanKind.CONDITIONAL) {
+          throw new Error("Expected CONDITIONAL result");
+        }
+
+        const query = await prisma.resource.findMany({
+          where: { ...result.filters },
+        });
+        expect(query.map((r) => r.id).sort()).toEqual(
+          fixtureResources
+            .filter((r) => teams.includes(r.aString))
+            .map((r) => r.id)
+            .sort()
+        );
+      });
+
+      test("conditional - principal-all", async () => {
+        const teams = buildTeams(size);
+        const queryPlan = await cerbos.planResources({
+          principal: { id: "user1", roles: ["USER"], attr: { teams } },
+          resource: { kind: "resource" },
+          action: "principal-all",
+        });
+
+        expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+        expectShape(queryPlan, size, "and", "all");
+
+        const result = queryPlanToPrisma({
+          queryPlan,
+          mapper: {
+            "request.resource.attr.aString": { field: "aString" },
+          },
+        });
+
+        if (result.kind !== PlanKind.CONDITIONAL) {
+          throw new Error("Expected CONDITIONAL result");
+        }
+
+        const query = await prisma.resource.findMany({
+          where: { ...result.filters },
+        });
+        expect(query.map((r) => r.id).sort()).toEqual(
+          fixtureResources
+            .filter((r) => !teams.includes(r.aString))
+            .map((r) => r.id)
+            .sort()
+        );
+      });
+    });
+  });
+
+  describe("value-list lambda fold", () => {
+    const valueListPlan = (
+      operator: string,
+      elements: unknown[],
+      body: PlanExpressionOperand,
+      variable = "t"
+    ): PlanResourcesConditionalResponse =>
+      createConditionalPlan({
+        operator,
+        operands: [
+          { value: elements },
+          { operator: "lambda", operands: [body, { name: variable }] },
+        ],
+      } as PlanExpressionOperand);
+
+    test("exists over a value list folds to OR of the substituted body", () => {
+      const result = queryPlanToPrisma({
+        queryPlan: valueListPlan("exists", ["a", "b", "c"], {
+          operator: "eq",
+          operands: [{ name: "request.resource.attr.aString" }, { name: "t" }],
+        }),
+        mapper: { "request.resource.attr.aString": { field: "aString" } },
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          OR: [
+            { aString: { equals: "a" } },
+            { aString: { equals: "b" } },
+            { aString: { equals: "c" } },
+          ],
+        },
+      });
+    });
+
+    test("all over a value list folds to AND of the substituted body", () => {
+      const result = queryPlanToPrisma({
+        queryPlan: valueListPlan("all", ["a", "b"], {
+          operator: "ne",
+          operands: [{ name: "request.resource.attr.aString" }, { name: "t" }],
+        }),
+        mapper: { "request.resource.attr.aString": { field: "aString" } },
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          AND: [{ aString: { not: "a" } }, { aString: { not: "b" } }],
+        },
+      });
+    });
+
+    test("substitutes variable path references into element fields", () => {
+      const result = queryPlanToPrisma({
+        queryPlan: valueListPlan(
+          "exists",
+          [{ name: "alpha", meta: { rank: 1 } }, { name: "beta", meta: { rank: 2 } }],
+          {
+            operator: "eq",
+            operands: [{ name: "request.resource.attr.aString" }, { name: "t.name" }],
+          }
+        ),
+        mapper: { "request.resource.attr.aString": { field: "aString" } },
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          OR: [{ aString: { equals: "alpha" } }, { aString: { equals: "beta" } }],
+        },
+      });
+    });
+
+    test("empty value list yields CEL identity semantics", () => {
+      const body: PlanExpressionOperand = {
+        operator: "eq",
+        operands: [{ name: "request.resource.attr.aString" }, { name: "t" }],
+      };
+      const mapper = { "request.resource.attr.aString": { field: "aString" } };
+
+      // exists over [] is false — Prisma matches nothing for OR: []
+      expect(
+        queryPlanToPrisma({ queryPlan: valueListPlan("exists", [], body), mapper })
+      ).toStrictEqual({ kind: PlanKind.CONDITIONAL, filters: { OR: [] } });
+
+      // all over [] is true — Prisma matches everything for AND: []
+      expect(
+        queryPlanToPrisma({ queryPlan: valueListPlan("all", [], body), mapper })
+      ).toStrictEqual({ kind: PlanKind.CONDITIONAL, filters: { AND: [] } });
+    });
+
+    test("nested lambda rebinding the variable shadows the outer substitution", () => {
+      // Outer t is substituted; the inner exists rebinds t over a relation, so
+      // its body must keep referencing the inner variable untouched.
+      const result = queryPlanToPrisma({
+        queryPlan: valueListPlan("exists", ["public", "private"], {
+          operator: "exists",
+          operands: [
+            { name: "request.resource.attr.tags" },
+            {
+              operator: "lambda",
+              operands: [
+                {
+                  operator: "eq",
+                  operands: [{ name: "t.name" }, { value: "fixed" }],
+                },
+                { name: "t" },
+              ],
+            },
+          ],
+        }),
+        mapper: {
+          "request.resource.attr.tags": {
+            relation: { name: "tags", type: "many" },
+          },
+        },
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          OR: [
+            { tags: { some: { name: { equals: "fixed" } } } },
+            { tags: { some: { name: { equals: "fixed" } } } },
+          ],
+        },
+      });
+    });
+
+    test("throws when a variable path is missing on an element", () => {
+      expect(() =>
+        queryPlanToPrisma({
+          queryPlan: valueListPlan("exists", [{ name: "alpha" }], {
+            operator: "eq",
+            operands: [
+              { name: "request.resource.attr.aString" },
+              { name: "t.missing" },
+            ],
+          }),
+          mapper: { "request.resource.attr.aString": { field: "aString" } },
+        })
+      ).toThrow('Cannot resolve "t.missing"');
+    });
+
+    test("throws for exists_one over a value list", () => {
+      expect(() =>
+        queryPlanToPrisma({
+          queryPlan: valueListPlan("exists_one", ["a"], {
+            operator: "eq",
+            operands: [{ name: "request.resource.attr.aString" }, { name: "t" }],
+          }),
+          mapper: { "request.resource.attr.aString": { field: "aString" } },
+        })
+      ).toThrow("exists_one over a literal collection value is not supported");
+    });
+
+    test("throws for a non-list collection value", () => {
+      expect(() =>
+        queryPlanToPrisma({
+          queryPlan: valueListPlan("exists", ["ignored"], {
+            operator: "eq",
+            operands: [{ name: "request.resource.attr.aString" }, { name: "t" }],
+          }),
+          mapper: { "request.resource.attr.aString": { field: "aString" } },
+        })
+      ).not.toThrow();
+
+      const plan = createConditionalPlan({
+        operator: "exists",
+        operands: [
+          { value: { not: "a list" } },
+          {
+            operator: "lambda",
+            operands: [
+              {
+                operator: "eq",
+                operands: [
+                  { name: "request.resource.attr.aString" },
+                  { name: "t" },
+                ],
+              },
+              { name: "t" },
+            ],
+          },
+        ],
+      } as PlanExpressionOperand);
+      expect(() =>
+        queryPlanToPrisma({
+          queryPlan: plan,
+          mapper: { "request.resource.attr.aString": { field: "aString" } },
+        })
+      ).toThrow("exists over a literal collection requires a list value");
+    });
+  });
+});
+
+describe("Promoted adversarial planner shapes", () => {
+  const valueListMacro = (
+    operator: "exists" | "all",
+    elements: string[]
+  ): PlanExpressionOperand => ({
+    operator,
+    operands: [
+      { value: elements },
+      {
+        operator: "lambda",
+        operands: [
+          {
+            operator: "eq",
+            operands: [
+              { name: "request.resource.attr.aString" },
+              { name: "team" },
+            ],
+          },
+          { name: "team" },
+        ],
+      },
+    ],
+  });
+
+  test("negated exists over a literal collection folds to AND of negated bodies (#294)", () => {
+    const result = queryPlanToPrisma({
+      queryPlan: createConditionalPlan({
+        operator: "not",
+        operands: [valueListMacro("exists", ["a", "b"])],
+      }),
+      mapper: {
+        "request.resource.attr.aString": { field: "aString" },
+      },
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        AND: [
+          { NOT: { aString: { equals: "a" } } },
+          { NOT: { aString: { equals: "b" } } },
+        ],
+      },
+    });
+  });
+
+  test("negated all over a literal collection folds to OR of negated bodies (#294)", () => {
+    const result = queryPlanToPrisma({
+      queryPlan: createConditionalPlan({
+        operator: "not",
+        operands: [valueListMacro("all", ["a", "b"])],
+      }),
+      mapper: {
+        "request.resource.attr.aString": { field: "aString" },
+      },
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        OR: [
+          { NOT: { aString: { equals: "a" } } },
+          { NOT: { aString: { equals: "b" } } },
+        ],
+      },
+    });
+  });
+
+  test("constant NaN ordering in a ternary branch is always false", () => {
+    const result = queryPlanToPrisma({
+      queryPlan: createConditionalPlan({
+        operator: "gt",
+        operands: [
+          {
+            operator: "if",
+            operands: [
+              { name: "request.resource.attr.aBool" },
+              { value: 1 },
+              {
+                operator: "div",
+                operands: [{ value: 0 }, { value: 0 }],
+              },
+            ],
+          },
+          { value: 0.5 },
+        ],
+      }),
+      mapper: { "request.resource.attr.aBool": { field: "aBool" } },
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        OR: [
+          { aBool: { equals: true } },
+          {
+            AND: [
+              { aBool: { equals: true } },
+              { aBool: { equals: false } },
+            ],
+          },
+        ],
+      },
+    });
+  });
+
+  test("value-first timestamp comparison mirrors and normalizes the instant", () => {
+    const result = queryPlanToPrisma({
+      queryPlan: createConditionalPlan({
+        operator: "gt",
+        operands: [
+          {
+            operator: "timestamp",
+            operands: [{ value: "2024-06-01T02:00:00+02:00" }],
+          },
+          {
+            operator: "timestamp",
+            operands: [{ name: "request.resource.attr.createdAt" }],
+          },
+        ],
+      }),
+      mapper: {
+        "request.resource.attr.createdAt": {
+          field: "createdAt",
+          valueType: "dateTime",
+        },
+      },
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        createdAt: { lt: "2024-06-01T00:00:00.000Z" },
+      },
+    });
+  });
+
+  test("timestamp over an untyped string mapping fails closed", () => {
+    expect(() =>
+      queryPlanToPrisma({
+        queryPlan: createConditionalPlan({
+          operator: "lt",
+          operands: [
+            {
+              operator: "timestamp",
+              operands: [{ name: "request.resource.attr.createdBy" }],
+            },
+            {
+              operator: "timestamp",
+              operands: [{ value: "2025-01-01T00:00:00Z" }],
+            },
+          ],
+        }),
+        mapper: {
+          "request.resource.attr.createdBy": { field: "createdBy" },
+        },
+      })
+    ).toThrow('must be mapped with valueType: "dateTime"');
+  });
+
+  test("membership list containing null becomes an explicit null disjunct", () => {
+    const result = queryPlanToPrisma({
+      queryPlan: createConditionalPlan({
+        operator: "in",
+        operands: [
+          { name: "request.resource.attr.owner" },
+          { value: ["x", "one_two", null] },
+        ],
+      }),
+      mapper: {
+        "request.resource.attr.owner": { field: "aOptionalString" },
+      },
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        OR: [
+          { aOptionalString: { in: ["x", "one_two"] } },
+          { aOptionalString: null },
+        ],
+      },
+    });
+  });
+
+  test("fractional addition equality fails closed instead of algebraically solving", () => {
+    expect(() =>
+      queryPlanToPrisma({
+        queryPlan: createConditionalPlan({
+          operator: "eq",
+          operands: [
+            {
+              operator: "add",
+              operands: [
+                { name: "request.resource.attr.aDouble" },
+                { value: 0.7 },
+              ],
+            },
+            { value: 0.1 },
+          ],
+        }),
+        mapper: {
+          "request.resource.attr.aDouble": { field: "aDouble" },
+        },
+      })
+    ).toThrow(
+      "solving IEEE-754 addition into a plain Prisma column comparison is not reversible"
+    );
+  });
+
+  test("hierarchy prefix containing LIKE metacharacters fails closed", () => {
+    expect(() =>
+      queryPlanToPrisma({
+        queryPlan: createConditionalPlan({
+          operator: "descendentOf",
+          operands: [
+            {
+              operator: "hierarchy",
+              operands: [
+                { name: "request.resource.attr.scope" },
+                { value: ":" },
+              ],
+            },
+            {
+              operator: "hierarchy",
+              operands: [{ value: "50%:a_b" }, { value: ":" }],
+            },
+          ],
+        }),
+        mapper: { "request.resource.attr.scope": { field: "scope" } },
+      })
+    ).toThrow("Prisma does not escape wildcards in string filters");
+  });
+
+  test("nested nullable collection errors propagate through negated exists", () => {
+    const result = queryPlanToPrisma({
+      queryPlan: createConditionalPlan({
+        operator: "not",
+        operands: [
+          {
+            operator: "exists",
+            operands: [
+              { name: "request.resource.attr.categories" },
+              {
+                operator: "lambda",
+                operands: [
+                  {
+                    operator: "exists",
+                    operands: [
+                      { name: "category.subCategories" },
+                      {
+                        operator: "lambda",
+                        operands: [
+                          {
+                            operator: "exists",
+                            operands: [
+                              { name: "subCategory.labels" },
+                              {
+                                operator: "lambda",
+                                operands: [
+                                  {
+                                    operator: "eq",
+                                    operands: [
+                                      { name: "label.name" },
+                                      { value: "gold" },
+                                    ],
+                                  },
+                                  { name: "label" },
+                                ],
+                              },
+                            ],
+                          },
+                          { name: "subCategory" },
+                        ],
+                      },
+                    ],
+                  },
+                  { name: "category" },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+      mapper: {
+        "request.resource.attr.categories": {
+          relation: {
+            name: "categories",
+            type: "many",
+            fields: {
+              subCategories: {
+                relation: {
+                  name: "subCategories",
+                  type: "many",
+                  fields: {
+                    labels: {
+                      relation: {
+                        name: "labels",
+                        type: "many",
+                        fields: {
+                          name: { field: "name", nullable: true },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    expect(result.kind).toBe(PlanKind.CONDITIONAL);
+    if (result.kind !== PlanKind.CONDITIONAL) {
+      throw new Error("Expected CONDITIONAL result");
+    }
+    expect(JSON.stringify(result.filters)).toContain('"name":null');
+    expect(JSON.stringify(result.filters)).toContain('"NOT":{"categories"');
+  });
+});

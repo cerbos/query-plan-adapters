@@ -18,6 +18,11 @@ cerbos:
 
 logging:
   level:
-    org.hibernate.SQL: DEBUG
-    org.hibernate.orm.jdbc.bind: TRACE
+    # LOCAL DEBUGGING ONLY — uncomment to see the SQL each authorization plan produces.
+    # `org.hibernate.orm.jdbc.bind: TRACE` prints every JDBC bind parameter verbatim,
+    # and the Cerbos planner constant-folds PRINCIPAL attributes (emails, departments,
+    # owner ids — potentially PII) into the plan constants the adapter binds. Never
+    # enable these loggers in production; see "SQL logging" in the README.
+    # org.hibernate.SQL: DEBUG
+    # org.hibernate.orm.jdbc.bind: TRACE
     dev.cerbos.example: INFO
