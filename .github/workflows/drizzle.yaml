@@ -32,7 +32,7 @@ jobs:
       - name: Setup Cerbos
         uses: cerbos/cerbos-setup-action@f772482c8504a05c49018a0bf2d84012a607733c # v1
         with:
-          version: ${{ steps.cerbos.outputs.version }}
+          version: v${{ steps.cerbos.outputs.version }}
 
       - name: Test using Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -57,7 +57,7 @@ jobs:
       - name: Setup Cerbos
         uses: cerbos/cerbos-setup-action@f772482c8504a05c49018a0bf2d84012a607733c # v1
         with:
-          version: ${{ steps.cerbos.outputs.version }}
+          version: v${{ steps.cerbos.outputs.version }}
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0

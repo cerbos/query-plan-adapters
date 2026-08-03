@@ -904,6 +904,38 @@ class TestSemanticEdgeTranslations:
                 {"request.resource.attr.createdAt": string_table.c.created_at},
             )
 
+    def test_timestamp_accepts_nanosecond_precision(self):
+        temporal_table = table("events", column("created_at", DateTime(timezone=True)))
+        plan = _conditional_plan(
+            {
+                "operator": "eq",
+                "operands": [
+                    {
+                        "expression": {
+                            "operator": "timestamp",
+                            "operands": [
+                                {"variable": "request.resource.attr.createdAt"}
+                            ],
+                        }
+                    },
+                    {
+                        "expression": {
+                            "operator": "timestamp",
+                            "operands": [{"value": "2024-06-01T00:00:00.123456789Z"}],
+                        }
+                    },
+                ],
+            }
+        )
+
+        query = get_query(
+            plan,
+            temporal_table,
+            {"request.resource.attr.createdAt": temporal_table.c.created_at},
+        )
+        compiled = str(query.compile(compile_kwargs={"literal_binds": True}))
+        assert "2024-06-01 00:00:00.123456" in compiled
+
 
 class TestGetQueryOverrides:
     def test_unrelated_override_does_not_bypass_table_mapping_validation(

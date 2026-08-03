@@ -1,4 +1,5 @@
 import math
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from types import MappingProxyType
@@ -38,6 +39,7 @@ OperatorFnMap = Dict[str, Callable[[GenericColumn, Any], GenericExpression]]
 
 
 _LIKE_ESCAPE_CHAR = "\\"
+_EXCESS_RFC3339_PRECISION = re.compile(r"(\.\d{6})\d+(?=(?:Z|[+-]\d{2}:\d{2})$)")
 
 
 @dataclass(frozen=True)
@@ -233,7 +235,8 @@ def _timestamp(value: Any, _: Any) -> Any:
         parsed = value
     elif isinstance(value, str):
         try:
-            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            normalized = _EXCESS_RFC3339_PRECISION.sub(r"\1", value)
+            parsed = datetime.fromisoformat(normalized.replace("Z", "+00:00"))
         except ValueError as exc:
             raise ValueError(f"Invalid timestamp literal: {value}") from exc
     else:
