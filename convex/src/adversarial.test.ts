@@ -323,7 +323,7 @@ function checkResource(seed: Seed): Resource {
     owner: seed.aOptionalString,
     tagNames: seed.tags.map((tag) => tag.name),
     obj: { inner: seed.aString },
-    tags: seed.tags.map((tag) =>
+    tags: seed.tags.map((tag): Record<string, Value> =>
       tag.name === null ? { id: tag.id } : { id: tag.id, name: tag.name },
     ),
     categories: seed.subCategoryNames.map((name) => ({
@@ -331,7 +331,7 @@ function checkResource(seed: Seed): Resource {
       subCategories: [
         {
           name,
-          labels: labelsFor(seed).map((labelName) =>
+          labels: labelsFor(seed).map((labelName): Record<string, Value> =>
             labelName === null ? {} : { name: labelName },
           ),
         },

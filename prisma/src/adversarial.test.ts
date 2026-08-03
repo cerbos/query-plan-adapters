@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 
 import { GRPC as Cerbos } from "@cerbos/grpc";
-import type { Principal, Resource } from "@cerbos/core";
+import type { Principal, Resource, Value } from "@cerbos/core";
 
 import { queryPlanToPrisma, PlanKind, MapperConfig } from ".";
 import { prisma } from "./test-setup.adversarial";
@@ -385,17 +385,17 @@ function principal(): Principal {
 }
 
 /** A NULL tag name in the DB is a missing element attribute on the check side. */
-function asTagAttribute(tag: Tag): Record<string, unknown> {
-  const attr: Record<string, unknown> = { id: tag.id };
+function asTagAttribute(tag: Tag): Record<string, Value> {
+  const attr: Record<string, Value> = { id: tag.id };
   if (tag.name !== null) {
-    attr.name = tag.name;
+    attr["name"] = tag.name;
   }
   return attr;
 }
 
 /** Cerbos attributes mirroring exactly what the seeded DB row holds. */
 function asCheckResource(seed: Seed): Resource {
-  const attr: Record<string, unknown> = {
+  const attr: Record<string, Value> = {
     aBool: seed.aBool,
     aString: seed.aString,
     aNumber: seed.aNumber,
@@ -409,7 +409,7 @@ function asCheckResource(seed: Seed): Resource {
       subCategories: [
         {
           name: subName,
-          labels: labelsFor(seed).map((name) =>
+          labels: labelsFor(seed).map((name): Record<string, Value> =>
             name === null ? {} : { name }
           ),
         },
@@ -419,26 +419,26 @@ function asCheckResource(seed: Seed): Resource {
   // A DB NULL is a missing attribute on the check side — conditions touching it must deny
   // (CEL error), matching SQL three-valued logic excluding the row.
   if (seed.aOptionalString !== null) {
-    attr.aOptionalString = seed.aOptionalString;
+    attr["aOptionalString"] = seed.aOptionalString;
   }
   const aDouble = doubleFor(seed);
   if (aDouble !== null) {
-    attr.aDouble = aDouble;
+    attr["aDouble"] = aDouble;
   }
   const scope = scopeFor(seed);
   if (scope !== null) {
-    attr.scope = scope;
+    attr["scope"] = scope;
   }
   const createdAt = timestampFor(seed);
   if (createdAt !== null) {
-    attr.createdAt = createdAt;
+    attr["createdAt"] = createdAt;
   }
   // mainCategory mirrors the row's single category as ONE nested object (the seeder creates
   // at most one category per seed), so direct dotted-chain CEL expressions evaluate cleanly;
   // rows without a category get NO attribute — a CEL missing-attr error (deny), matching the
   // adapter's empty join chain excluding the row.
   if (seed.subCategoryNames.length > 0) {
-    attr.mainCategory = {
+    attr["mainCategory"] = {
       name: "business",
       subCategories: seed.subCategoryNames.map((name) => ({ name })),
       subNames: seed.subCategoryNames,

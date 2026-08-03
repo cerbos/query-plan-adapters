@@ -49,7 +49,7 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` d
 | Classification | Coverage |
 | --- | --- |
 | Oracle-tested | 15 reference actions: directional and inequality comparisons, single/empty membership, Unicode and empty strings, negative numbers, n-ary/double/triple negation, membership on an optional resource field, mapped nested-field equality, and case-sensitive equality |
-| Fail-closed | 98 reference conformance actions plus regex, ordered indexing/`get-field`, and timestamp probes (101 actions total) |
+| Fail-closed | 99 reference conformance actions plus regex, ordered indexing/`get-field`, and timestamp probes (102 actions total) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute documents. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 
 Chroma metadata filters are limited to flat scalar comparisons and membership. Nested collections, field-to-field and arithmetic expressions, string helpers, hierarchy/timestamp operations, ternaries, nullable inequality, and other shapes that cannot be represented faithfully throw before a filter is returned.
@@ -58,7 +58,7 @@ Chroma metadata filters are limited to flat scalar comparisons and membership. N
 
 - Cerbos > v0.16
 - `@cerbos/http` or `@cerbos/grpc` client
-- Node.js >= 20.0.0
+- Node.js >= 22.0.0
 - ChromaDB 3.x
 
 ## Installation

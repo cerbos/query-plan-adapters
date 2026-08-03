@@ -65,7 +65,7 @@ The adapter is differentially tested with 20 hostile seed documents against Cerb
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | All 113 reference conformance actions, plus `matches()`, list indexing/`get-field`, and `timestamp()` plans that the Spring Data reference adapter rejects (116 actions total) |
+| Oracle-tested | All 114 reference conformance actions, plus `matches()`, list indexing/`get-field`, and `timestamp()` plans that the Spring Data reference adapter rejects (117 actions total) |
 | Fail-closed | No corpus shape when `allowPostFilter: true`; unknown operators and invalid expression structures still throw |
 | Explicit opt-in | Any plan that cannot be represented entirely as a Convex database filter requires `allowPostFilter: true` |
 | Known planner divergence | `has()` on a missing attribute is currently folded by the Cerbos planner to `ALWAYS_ALLOWED`; `checkResource` still denies documents where the attribute is missing. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
@@ -78,7 +78,7 @@ This support statement includes value-first comparisons, field-to-field expressi
 
 ## System Requirements
 
-- Node.js >= 20.0.0
+- Node.js >= 22.0.0
 - Convex 1.x
 
 ## Installation

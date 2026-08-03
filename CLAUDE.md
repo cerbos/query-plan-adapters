@@ -22,7 +22,8 @@ Run from the adapter directory:
 ### TypeScript adapters
 ```bash
 npm install
-npm run build    # tsc --build -> lib/
+npm run build    # tsc --build -> lib/ (published surface only; test files are excluded)
+npm run typecheck # tsc -p tsconfig.typecheck.json — noEmit, covers src/ AND *.test.ts
 npm test         # Jest + Cerbos sidecar
 ```
 
@@ -37,10 +38,13 @@ pdm run format   # isort + black
 
 ### Java (Elasticsearch, Spring Data)
 ```bash
-# For tests that use testcontainers (cerbos PDP + DBs), mount the docker socket:
-docker run --rm -v "$(pwd)":/app -v /var/run/docker.sock:/var/run/docker.sock \
+# Run from the REPOSITORY ROOT, not the adapter directory: the Java harnesses read the
+# shared corpus at ../conformance/ (seeds.json, actions.json, CERBOS_VERSION), so the whole
+# repo must be mounted or they fail with FileNotFoundException.
+# The docker socket mount is for the testcontainers-backed tests (cerbos PDP + DBs).
+docker run --rm -v "$(pwd)":/repo -v /var/run/docker.sock:/var/run/docker.sock \
   -e TESTCONTAINERS_RYUK_DISABLED=true --network host \
-  -w /app gradle:8.12-jdk17 gradle build --no-daemon
+  -w /repo/elasticsearch-java gradle:8.12-jdk17 gradle build --no-daemon
 ```
 
 ## Testing
@@ -70,7 +74,7 @@ Conventional Commits: `feat(prisma):`, `fix(mongoose):`, `chore(deps):`. Scope i
 
 ## CI
 
-Each adapter has its own GitHub Actions workflow triggered by changes in its directory or `/policies/`. Matrix tests across Node versions (20, 22, 24, 25) and relevant service versions.
+Each adapter has its own GitHub Actions workflow triggered by changes in its directory or `/policies/`. Matrix tests across Node versions (22, 24, 25) and relevant service versions.
 
 Tag-based publishing: `prisma/v*` -> npm, `sqla/v*` -> PyPI, `elasticsearch-java/v*` and `spring-data/v*` -> Maven Central.
 

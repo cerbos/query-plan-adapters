@@ -106,8 +106,8 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` d
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 84 reference actions |
-| Fail-closed | 29 reference actions plus the 3 reference-unsupported shapes (32 actions total) |
+| Oracle-tested | 83 reference actions |
+| Fail-closed | 31 reference actions plus the 3 reference-unsupported shapes (34 actions total) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 
 The fail-closed set consists of literal `LIKE` cases Prisma cannot escape safely, cross-model field references, arbitrary relation counts and string lengths, `exists_one`, unsolved column arithmetic, sub-millisecond `now()` thresholds, and the reference probes for regex, ordered indexing, and `timestamp()` over a string field. Supported timestamp plans require a mapper entry with `valueType: "dateTime"` and a strict, millisecond-exact RFC 3339 literal in CEL's supported instant range. These shapes throw instead of producing a broader authorization filter.
@@ -120,7 +120,7 @@ The fail-closed set consists of literal `LIKE` cases Prisma cannot escape safely
 
 ## System Requirements
 
-- Node.js >= 20.0.
+- Node.js >= 22.0.
 - Prisma CLI & Client >= 6.0 (v7 supported)
 - A database supported by Prisma (SQLite/PostgreSQL/MySQL/etc.) so the Prisma client can communicate with stored data
 

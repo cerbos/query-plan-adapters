@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { afterAll, beforeAll, describe, expect, jest, test } from "@jest/globals";
-import type { Principal, Resource } from "@cerbos/core";
+import type { Principal, Resource, Value } from "@cerbos/core";
 import { GRPC as Cerbos } from "@cerbos/grpc";
 import {
   ChromaClient,
@@ -414,8 +414,8 @@ function scopeFor(seed: Seed): string | null {
   }
 }
 
-function tagAttribute(tag: Tag): Record<string, unknown> {
-  const attr: Record<string, unknown> = { id: tag.id };
+function tagAttribute(tag: Tag): Record<string, Value> {
+  const attr: Record<string, Value> = { id: tag.id };
   if (tag.name !== null) {
     attr["name"] = tag.name;
   }
@@ -423,7 +423,7 @@ function tagAttribute(tag: Tag): Record<string, unknown> {
 }
 
 function checkResource(seed: Seed): Resource {
-  const attr: Record<string, unknown> = {
+  const attr: Record<string, Value> = {
     aBool: seed.aBool,
     aString: seed.aString,
     aNumber: seed.aNumber,
@@ -437,7 +437,7 @@ function checkResource(seed: Seed): Resource {
       subCategories: [
         {
           name: subCategoryName,
-          labels: labelsFor(seed).map((name) =>
+          labels: labelsFor(seed).map((name): Record<string, Value> =>
             name === null ? {} : { name },
           ),
         },

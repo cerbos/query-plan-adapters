@@ -35,6 +35,7 @@
   },
   "scripts": {
     "build": "tsc --build",
+    "typecheck": "tsc -p tsconfig.typecheck.json",
     "prepare": "npm run build",
     "preversion": "npm run lint",
     "version": "git add -A src",
@@ -47,7 +48,7 @@
     "chroma": "docker run --rm -p 8234:8000 chromadb/chroma@sha256:1e0b73a187a28757c572acba508c46f48c9e8b0acaf5c20e6d95cdedce1acdf6"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.0.0"
   },
   "devDependencies": {
     "@jest/globals": "^30.2.0",

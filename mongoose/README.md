@@ -44,7 +44,7 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` d
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 84 reference conformance actions plus regex, ordered indexing/`get-field`, and timestamp probes (87 actions) |
+| Oracle-tested | 85 reference conformance actions plus regex, ordered indexing/`get-field`, and timestamp probes (88 actions) |
 | Fail-closed | 29 reference actions |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute documents. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 
@@ -56,7 +56,7 @@ The fail-closed set covers exact-one cardinality, aggregation expressions or out
 
 ## System Requirements
 
-- Node.js >= 20.0.0
+- Node.js >= 22.0.0
 - Mongoose 9.x
 - MongoDB 7.0 or newer
 

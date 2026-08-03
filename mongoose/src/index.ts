@@ -117,6 +117,11 @@ const normalizeRe2PatternForMongo = (pattern: string): string => {
 
 const RFC3339_TIMESTAMP_PATTERN =
   /^((?!0000)\d{4})-(\d{2})-(\d{2})[Tt](?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?(?:[Zz]|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/;
+// Same source, but for PCRE2 (Mongo) rather than the JS engine: PCRE2 `$`
+// also matches immediately before a final newline, so "…Z\n" would pass as
+// RFC 3339 and $convert would silently accept it. `\z` pins the absolute end.
+const RFC3339_TIMESTAMP_MONGO_PATTERN =
+  RFC3339_TIMESTAMP_PATTERN.source.replace(/\$$/, "\\z");
 const MIN_CEL_TIMESTAMP_MILLISECONDS = Date.parse(
   "0001-01-01T00:00:00.000Z"
 );
@@ -691,7 +696,7 @@ const buildAggregationExpressionFromExpression = (
                   then: {
                     $regexMatch: {
                       input,
-                      regex: RFC3339_TIMESTAMP_PATTERN.source,
+                      regex: RFC3339_TIMESTAMP_MONGO_PATTERN,
                     },
                   },
                   else: false,
@@ -1401,12 +1406,18 @@ const buildMongooseFilterFromCerbosExpression = (
       }
 
       const escapedValue = escapeRegexValue(rightOperand.value);
+      // Mongo matches $regex with PCRE2, where `$` also matches immediately
+      // before a final newline, so "tail\n" would satisfy endsWith("tail")
+      // while CEL says false. `\z` is the absolute end of subject — the same
+      // rewrite normalizeRe2PatternForMongo applies to a trailing `$`.
+      // `^` needs no counterpart: without PCRE2_MULTILINE it already matches
+      // only at the start of the subject.
       const regexStr =
         operator === "contains"
           ? escapedValue
           : operator === "startsWith"
           ? `^${escapedValue}`
-          : `${escapedValue}$`;
+          : `${escapedValue}\\z`;
 
       const { path, relation } = resolveFieldReference(
         leftOperand.name,

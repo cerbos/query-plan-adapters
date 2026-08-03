@@ -37,6 +37,9 @@
   "scripts": {
     "clean": "rimraf lib",
     "build": "tsc --build",
+    "typecheck": "npm run typecheck:v7 && npm run typecheck:v6",
+    "typecheck:v6": "tsc -p tsconfig.typecheck.v6.json",
+    "typecheck:v7": "tsc -p tsconfig.typecheck.json",
     "prepare": "npm run build",
     "version": "git add -A src",
     "prisma:generate": "bash scripts/generate-clients.sh all",
@@ -51,7 +54,7 @@
     "cerbos": "cerbos server --config=./cerbos-config.yaml"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.0.0"
   },
   "devDependencies": {
     "@jest/globals": "^30.2.0",

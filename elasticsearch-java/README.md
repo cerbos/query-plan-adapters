@@ -336,7 +336,7 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `check()` decisio
 | Classification | Coverage |
 | --- | --- |
 | Oracle-tested | 36 reference conformance actions plus regex and timestamp probes (38 actions) |
-| Fail-closed | 77 reference actions plus ordered list indexing/`get-field` (78 actions total) |
+| Fail-closed | 78 reference actions plus ordered list indexing/`get-field` (79 actions total) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute documents. Until the planner is fixed, use `R.attr.x != null` for indexed attributes instead of `has(R.attr.x)` |
 
 The oracle-tested set covers value-first comparisons, literal-safe wildcard matching, safe

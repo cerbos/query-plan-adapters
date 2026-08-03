@@ -719,7 +719,7 @@ describe("Field Operations", () => {
       expect(result).toStrictEqual({
         kind: PlanKind.CONDITIONAL,
         filters: {
-          aString: { $regex: "ing$" },
+          aString: { $regex: "ing\\z" },
         },
       });
 
@@ -729,6 +729,41 @@ describe("Field Operations", () => {
           .filter((r) => r.aString.endsWith("ing"))
           .map((r) => r.key)
       );
+    });
+
+    test("conditional - endsWith anchors at the absolute end of the string", async () => {
+      const queryPlan = await cerbos.planResources({
+        principal: { id: "user1", roles: ["USER"] },
+        resource: { kind: "resource" },
+        action: "ends-with",
+      });
+
+      const result = queryPlanToMongoose({
+        queryPlan,
+        mapper: defaultMapper,
+      });
+
+      // `\z`, not `$`: Mongo evaluates $regex with PCRE2, whose `$` also
+      // matches immediately before a final newline, so "ing$" would admit
+      // "string\n" even though CEL "string\n".endsWith("ing") is false.
+      expect(result.filters).toStrictEqual({ aString: { $regex: "ing\\z" } });
+
+      const template = fixtureResources[0];
+      if (!template) {
+        throw new Error("fixtureResources must not be empty");
+      }
+      await Resource.create({
+        ...template,
+        key: "trailing-newline",
+        id: "resource-trailing-newline",
+        aString: "string\n",
+      });
+      try {
+        const query = await Resource.find(result.filters || {});
+        expect(query.map((r) => r.key)).not.toContain("trailing-newline");
+      } finally {
+        await Resource.deleteMany({ key: "trailing-newline" });
+      }
     });
   });
 });
