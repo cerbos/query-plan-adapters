@@ -2,6 +2,13 @@ package dev.cerbos.queryplan.elasticsearch;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.protobuf.ListValue;
+import com.google.protobuf.NullValue;
+import com.google.protobuf.Value;
+import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter;
+import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression;
+import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand;
+import dev.cerbos.api.v1.response.Response.PlanResourcesResponse;
 import dev.cerbos.sdk.CerbosBlockingClient;
 import dev.cerbos.sdk.CerbosClientBuilder;
 import dev.cerbos.sdk.PlanResourcesResult;
@@ -38,6 +45,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class ElasticsearchIntegrationTest {
 
     private static final String INDEX = "resources";
+    private static final String SEMANTIC_SAFETY_INDEX = "semantic-safety";
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @Container
@@ -72,7 +80,7 @@ class ElasticsearchIntegrationTest {
     private static final Set<String> NESTED_PATHS = Set.of("tagObjects");
 
     private static GenericContainer<?> createCerbosContainer() {
-        GenericContainer<?> container = new GenericContainer<>("ghcr.io/cerbos/cerbos:dev")
+        GenericContainer<?> container = new GenericContainer<>(CerbosTestImage.IMAGE)
                 .withExposedPorts(3593)
                 .withCommand("server", "--set=storage.disk.directory=/policies", "--set=schema.enforcement=reject")
                 .withEnv("CERBOS_NO_TELEMETRY", "1")
@@ -130,6 +138,17 @@ class ElasticsearchIntegrationTest {
 
         String body = MAPPER.writeValueAsString(Map.of("mappings", Map.of("properties", topProps)));
         esRequest("PUT", "/" + INDEX, body);
+
+        String semanticSafetyBody = MAPPER.writeValueAsString(Map.of(
+                "mappings", Map.of("properties", Map.ofEntries(
+                        Map.entry("scenario", Map.of("type", "keyword")),
+                        Map.entry("tagObjects", Map.of(
+                                "type", "nested", "properties", tagObjectProps)),
+                        Map.entry("owner", Map.of("type", "keyword")),
+                        Map.entry("regexValue", Map.of("type", "keyword")),
+                        Map.entry("timestampValue", Map.of(
+                                "type", "date", "format", "strict_date_optional_time_nanos"))))));
+        esRequest("PUT", "/" + SEMANTIC_SAFETY_INDEX, semanticSafetyBody);
     }
 
     private static void seedData() throws Exception {
@@ -171,6 +190,34 @@ class ElasticsearchIntegrationTest {
                         "nextlevel", Map.of("aBool", false, "aString", "strValue")),
                 "tagObjects", List.of(
                         Map.of("id", "tag1", "name", "public"))));
+
+        indexDoc(SEMANTIC_SAFETY_INDEX, "empty", Map.of(
+                "scenario", "collection", "tagObjects", List.of()));
+        indexDoc(SEMANTIC_SAFETY_INDEX, "missing", Map.of("scenario", "collection"));
+        indexDoc(SEMANTIC_SAFETY_INDEX, "present", Map.of(
+                "scenario", "collection",
+                "tagObjects", List.of(Map.of("id", "tag1", "name", "public"))));
+
+        indexDoc(SEMANTIC_SAFETY_INDEX, "explicit-null-owner", mapOf(
+                "scenario", "null", "marker", "same", "owner", null));
+        indexDoc(SEMANTIC_SAFETY_INDEX, "missing-owner", Map.of(
+                "scenario", "null", "marker", "same"));
+        indexDoc(SEMANTIC_SAFETY_INDEX, "other-owner", Map.of(
+                "scenario", "null", "marker", "same", "owner", "other"));
+
+        indexDoc(SEMANTIC_SAFETY_INDEX, "regex-at", Map.of(
+                "scenario", "regex", "regexValue", "@"));
+        indexDoc(SEMANTIC_SAFETY_INDEX, "regex-other", Map.of(
+                "scenario", "regex", "regexValue", "anything"));
+        indexDoc(SEMANTIC_SAFETY_INDEX, "regex-containing", Map.of(
+                "scenario", "regex", "regexValue", "prefix@suffix"));
+        indexDoc(SEMANTIC_SAFETY_INDEX, "regex-newline", Map.of(
+                "scenario", "regex", "regexValue", "a\nb"));
+
+        indexDoc(SEMANTIC_SAFETY_INDEX, "timestamp-millis", Map.of(
+                "scenario", "timestamp", "timestampValue", "2024-06-01T00:00:00.123Z"));
+        indexDoc(SEMANTIC_SAFETY_INDEX, "timestamp-nanos", Map.of(
+                "scenario", "timestamp", "timestampValue", "2024-06-01T00:00:00.123456Z"));
     }
 
     private static Map<String, Object> mapOf(Object... keyValues) {
@@ -182,11 +229,16 @@ class ElasticsearchIntegrationTest {
     }
 
     private static void indexDoc(String id, Map<String, Object> doc) throws Exception {
-        esRequest("PUT", "/" + INDEX + "/_doc/" + id, MAPPER.writeValueAsString(doc));
+        indexDoc(INDEX, id, doc);
+    }
+
+    private static void indexDoc(String index, String id, Map<String, Object> doc) throws Exception {
+        esRequest("PUT", "/" + index + "/_doc/" + id, MAPPER.writeValueAsString(doc));
     }
 
     private static void refreshIndex() throws Exception {
         esRequest("POST", "/" + INDEX + "/_refresh", null);
+        esRequest("POST", "/" + SEMANTIC_SAFETY_INDEX + "/_refresh", null);
     }
 
     private static String esRequest(String method, String path, String body) throws Exception {
@@ -214,9 +266,20 @@ class ElasticsearchIntegrationTest {
     }
 
     private static List<String> search(Map<String, Object> filterClause) throws Exception {
+        return search(INDEX, filterClause);
+    }
+
+    private static List<String> search(String index, Map<String, Object> filterClause) throws Exception {
         Map<String, Object> body = Map.of("query", Map.of(
                 "bool", Map.of("filter", List.of(filterClause))));
-        return searchRaw(body).stream()
+        String responseBody = esRequest(
+                "POST", "/" + index + "/_search", MAPPER.writeValueAsString(body));
+        Map<String, Object> result = MAPPER.readValue(responseBody, new TypeReference<>() {});
+        @SuppressWarnings("unchecked")
+        Map<String, Object> hits = (Map<String, Object>) result.get("hits");
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> hitList = (List<Map<String, Object>>) hits.get("hits");
+        return hitList.stream()
                 .map(h -> (String) h.get("_id"))
                 .sorted()
                 .collect(Collectors.toList());
@@ -235,6 +298,56 @@ class ElasticsearchIntegrationTest {
                 Resource.newInstance("resource"),
                 action
         );
+    }
+
+    private static PlanResourcesResponse conditionalPlan(Operand condition) {
+        return PlanResourcesResponse.newBuilder()
+                .setFilter(PlanResourcesFilter.newBuilder()
+                        .setKind(PlanResourcesFilter.Kind.KIND_CONDITIONAL)
+                        .setCondition(condition))
+                .build();
+    }
+
+    private static Operand expressionOperand(String operator, Operand... operands) {
+        Expression.Builder expression = Expression.newBuilder().setOperator(operator);
+        for (Operand operand : operands) {
+            expression.addOperands(operand);
+        }
+        return Operand.newBuilder().setExpression(expression).build();
+    }
+
+    private static Operand variableOperand(String variable) {
+        return Operand.newBuilder().setVariable(variable).build();
+    }
+
+    private static Operand stringValueOperand(String value) {
+        return Operand.newBuilder()
+                .setValue(Value.newBuilder().setStringValue(value))
+                .build();
+    }
+
+    private static Operand nullValueOperand() {
+        return Operand.newBuilder()
+                .setValue(Value.newBuilder().setNullValue(NullValue.NULL_VALUE))
+                .build();
+    }
+
+    private static Operand listValueOperandWithNull(String... values) {
+        ListValue.Builder list = ListValue.newBuilder();
+        for (String value : values) {
+            list.addValues(Value.newBuilder().setStringValue(value));
+        }
+        list.addValues(Value.newBuilder().setNullValue(NullValue.NULL_VALUE));
+        return Operand.newBuilder()
+                .setValue(Value.newBuilder().setListValue(list))
+                .build();
+    }
+
+    private static Map<String, Object> inScenario(
+            String scenario, Map<String, Object> query) {
+        return Map.of("bool", Map.of("must", List.of(
+                Map.of("term", Map.of("scenario", Map.of("value", scenario))),
+                query)));
     }
 
     private static List<String> executeQuery(String action) throws Exception {
@@ -563,9 +676,9 @@ class ElasticsearchIntegrationTest {
     }
 
     @Test
-    void hasNoTag() throws Exception {
-        // !("private" in tags) → docs 1, 3
-        assertEquals(List.of("1", "3"), executeQuery("has-no-tag"));
+    void hasNoTagFailsClosed() {
+        assertThrows(IllegalArgumentException.class,
+                () -> executeQuery("has-no-tag"));
     }
 
     // --- Principal references ---
@@ -589,9 +702,9 @@ class ElasticsearchIntegrationTest {
     }
 
     @Test
-    void relationNone() throws Exception {
-        // !(P.id in ownedBy) → doc 2
-        assertEquals(List.of("2"), executeQuery("relation-none"));
+    void relationNoneFailsClosed() {
+        assertThrows(IllegalArgumentException.class,
+                () -> executeQuery("relation-none"));
     }
 
     @Test
@@ -601,9 +714,9 @@ class ElasticsearchIntegrationTest {
     }
 
     @Test
-    void relationMultipleNone() throws Exception {
-        // not(createdBy == P.id) AND not("public" in tags) → doc 2
-        assertEquals(List.of("2"), executeQuery("relation-multiple-none"));
+    void relationMultipleNoneFailsClosed() {
+        assertThrows(IllegalArgumentException.class,
+                () -> executeQuery("relation-multiple-none"));
     }
 
     // --- Array intersection ---
@@ -623,9 +736,9 @@ class ElasticsearchIntegrationTest {
     }
 
     @Test
-    void relationHasNoMembers() throws Exception {
-        // DENY if size(ownedBy) > 0, ALLOW otherwise → not(exists) → no docs
-        assertEquals(List.of(), executeQuery("relation-has-no-members"));
+    void relationHasNoMembersFailsClosed() {
+        assertThrows(IllegalArgumentException.class,
+                () -> executeQuery("relation-has-no-members"));
     }
 
     // --- Cross-level combined ---
@@ -667,10 +780,9 @@ class ElasticsearchIntegrationTest {
     // --- Regex (supported via ES regexp query on keyword fields) ---
 
     @Test
-    void matchesRegex() throws Exception {
-        // aString matches "str.*" → keyword field, case-sensitive.
-        // Doc 1: "string" matches. Doc 2: "amIAString?" no. Doc 3: "anotherString" no.
-        assertEquals(List.of("1"), executeQuery("matches-regex"));
+    void matchesRegexWithDotFailsClosed() {
+        assertThrows(IllegalArgumentException.class,
+                () -> executeQuery("matches-regex"));
     }
 
     // --- List indexing (unsupported: ES treats arrays as multivalued, no ordered access) ---
@@ -723,9 +835,110 @@ class ElasticsearchIntegrationTest {
     // --- Empty collection (size(arr) == 0 → must_not exists) ---
 
     @Test
-    void emptyCollection() throws Exception {
-        // size(tags) == 0 — no doc has an empty/missing tags list.
-        assertEquals(List.of(), executeQuery("empty-collection"));
+    void emptyCollectionFailsClosed() {
+        assertThrows(IllegalArgumentException.class,
+                () -> executeQuery("empty-collection"));
+    }
+
+    @Test
+    void ElasticsearchCannotDistinguishEmptyAndMissingCollections() throws Exception {
+        Map<String, Object> nestedElement = Map.of("nested", Map.of(
+                "path", "tagObjects",
+                "query", Map.of("match_all", Map.of())));
+        Map<String, Object> noNestedElement = Map.of("bool", Map.of(
+                "must", List.of(Map.of("term", Map.of(
+                        "scenario", Map.of("value", "collection")))),
+                "must_not", List.of(nestedElement)));
+
+        assertEquals(List.of("present"), search(SEMANTIC_SAFETY_INDEX,
+                inScenario("collection", nestedElement)));
+        assertEquals(List.of("empty", "missing"),
+                search(SEMANTIC_SAFETY_INDEX, noNestedElement));
+
+        assertThrows(IllegalArgumentException.class,
+                () -> executeNestedQuery("all"));
+        assertThrows(IllegalArgumentException.class,
+                () -> executeQuery("empty-collection"));
+    }
+
+    @Test
+    void ElasticsearchCannotDistinguishExplicitNullAndMissingFields() throws Exception {
+        Map<String, Object> absentOwner = Map.of("bool", Map.of(
+                "must", List.of(Map.of("term", Map.of(
+                        "scenario", Map.of("value", "null")))),
+                "must_not", List.of(Map.of("exists", Map.of("field", "owner")))));
+        assertEquals(List.of("explicit-null-owner", "missing-owner"),
+                search(SEMANTIC_SAFETY_INDEX, absentOwner));
+
+        Operand positiveNull = expressionOperand("eq",
+                variableOperand("request.resource.attr.owner"),
+                nullValueOperand());
+        assertThrows(IllegalArgumentException.class,
+                () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
+                        conditionalPlan(positiveNull),
+                        Map.of("request.resource.attr.owner", "owner")));
+
+        Operand negatedMembership = expressionOperand("not",
+                expressionOperand("in",
+                        variableOperand("request.resource.attr.owner"),
+                        listValueOperandWithNull("blocked")));
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
+                conditionalPlan(negatedMembership),
+                Map.of("request.resource.attr.owner", "owner"));
+        assertEquals(List.of("other-owner"), search(
+                SEMANTIC_SAFETY_INDEX,
+                inScenario("null", ((Result.Conditional) result).query())));
+    }
+
+    @Test
+    void matchesTreatsAtAsLiteralInRealElasticsearch() throws Exception {
+        Operand condition = expressionOperand("matches",
+                variableOperand("request.resource.attr.regexValue"),
+                stringValueOperand("^@$"));
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
+                conditionalPlan(condition),
+                Map.of("request.resource.attr.regexValue", "regexValue"));
+
+        assertEquals(List.of("regex-at"), search(
+                SEMANTIC_SAFETY_INDEX,
+                inScenario("regex", ((Result.Conditional) result).query())));
+    }
+
+    @Test
+    void matchesRejectsDotBecauseLuceneWouldMatchANewline() throws Exception {
+        Map<String, Object> luceneDot = Map.of("regexp", Map.of(
+                "regexValue", Map.of("value", "a.b", "flags", "NONE")));
+        assertEquals(List.of("regex-newline"), search(
+                SEMANTIC_SAFETY_INDEX,
+                inScenario("regex", luceneDot)));
+
+        Operand condition = expressionOperand("matches",
+                variableOperand("request.resource.attr.regexValue"),
+                stringValueOperand("^a.b$"));
+        assertThrows(IllegalArgumentException.class,
+                () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
+                        conditionalPlan(condition),
+                        Map.of("request.resource.attr.regexValue", "regexValue")));
+    }
+
+    @Test
+    void ordinaryDateMappingCollapsesSubMillisecondPrecision() throws Exception {
+        Map<String, Object> exactMillisecond = Map.of(
+                "term", Map.of("timestampValue", Map.of(
+                        "value", "2024-06-01T00:00:00.123Z")));
+        assertEquals(List.of("timestamp-millis", "timestamp-nanos"), search(
+                SEMANTIC_SAFETY_INDEX,
+                inScenario("timestamp", exactMillisecond)));
+
+        Operand subMillisecond = expressionOperand("eq",
+                expressionOperand("timestamp",
+                        variableOperand("request.resource.attr.timestampValue")),
+                expressionOperand("timestamp",
+                        stringValueOperand("2024-06-01T00:00:00.123456Z")));
+        assertThrows(IllegalArgumentException.class,
+                () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
+                        conditionalPlan(subMillisecond),
+                        Map.of("request.resource.attr.timestampValue", "timestampValue")));
     }
 
     // --- Nested object (collection operator) integration tests ---
@@ -786,10 +999,9 @@ class ElasticsearchIntegrationTest {
         }
 
         @Test
-        void allMatchingCondition() throws Exception {
-            // R.attr.tags.all(tag, tag.name == "public")
-            // Only doc 3 has all tagObjects with name=="public"
-            assertEquals(List.of("3"), executeNestedQuery("all"));
+        void allMatchingConditionFailsClosed() {
+            assertThrows(IllegalArgumentException.class,
+                    () -> executeNestedQuery("all"));
         }
 
         @Test
@@ -802,12 +1014,9 @@ class ElasticsearchIntegrationTest {
         // --- Issue #232: collection macro composition ---
 
         @Test
-        void allWithNestedLambdaBody() throws Exception {
-            // R.attr.tags.all(tag, tag.name == "public" && tag.id != "tag1")
-            // Doc 1: tag2/private fails name → not all
-            // Doc 2: tag3/private fails name → not all
-            // Doc 3: tag1/public fails id != tag1 → not all
-            assertEquals(List.of(), executeNestedQuery("all-nested"));
+        void allWithNestedLambdaBodyFailsClosed() {
+            assertThrows(IllegalArgumentException.class,
+                    () -> executeNestedQuery("all-nested"));
         }
 
         // TODO(#232): map(...) compared directly to a list literal is
@@ -832,25 +1041,15 @@ class ElasticsearchIntegrationTest {
     // --- Issue #229: locked-in operator/comparison shapes ---
 
     @Test
-    void isNotSet() throws Exception {
-        // aOptionalString == null → doc 2 (field missing)
-        assertEquals(List.of("2"), executeQuery("is-not-set"));
+    void isNotSetFailsClosedWithoutNullValueSentinel() {
+        assertThrows(IllegalArgumentException.class,
+                () -> executeQuery("is-not-set"));
     }
 
-    // TODO(#229): the ES Java adapter does not support comparing two document
-    // fields (variable-to-variable equality). The current implementation
-    // silently produces an incorrect query rather than throwing. This test
-    // asserts an UnsupportedOperationException is *not* yet raised by capturing
-    // the current (incorrect) behavior so a future fix forces a revisit.
     @Test
-    void equalFieldToFieldIsUnsupported() throws Exception {
-        // aString == id — both operands are document variables. None of the
-        // seed docs have aString equal to their id (ids are OIDs), so even if
-        // the adapter emitted semantically correct query, the expected result
-        // would be []. The current adapter's broken last-write-wins also
-        // happens to return [] here because every doc has an `id` field set,
-        // so `must_not exists id` matches nothing. Either way: empty list.
-        assertEquals(List.of(), executeQuery("equal-field-to-field"));
+    void equalFieldToFieldFailsClosed() {
+        assertThrows(IllegalArgumentException.class,
+                () -> executeQuery("equal-field-to-field"));
     }
 
     @Test

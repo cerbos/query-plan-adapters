@@ -20,6 +20,59 @@ import { Param } from "drizzle-orm/sql";
 const FALSE_CONDITION = sql`0 = 1`;
 const TRUE_CONDITION = sql`1 = 1`;
 
+const RFC3339_MILLISECOND_TIMESTAMP =
+  /^((?!0000)\d{4})-(\d{2})-(\d{2})[Tt](?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.(\d{1,9}))?(?:[Zz]|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/;
+const MIN_RFC3339_TIMESTAMP_MILLISECONDS = Date.parse(
+  "0001-01-01T00:00:00.000Z"
+);
+const MAX_RFC3339_TIMESTAMP_MILLISECONDS = Date.parse(
+  "9999-12-31T23:59:59.999Z"
+);
+
+const normalizeRfc3339Milliseconds = (value: string): string => {
+  const match = RFC3339_MILLISECOND_TIMESTAMP.exec(value);
+  const yearText = match?.[1];
+  const monthText = match?.[2];
+  const dayText = match?.[3];
+  const fraction = match?.[4] ?? "";
+  if (!yearText || !monthText || !dayText) {
+    throw new Error(`Invalid RFC-3339 timestamp value: ${value}`);
+  }
+  if ([...fraction.slice(3)].some((digit) => digit !== "0")) {
+    throw new Error(
+      `Timestamp value exceeds millisecond precision: ${value}`
+    );
+  }
+
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const calendarDate = new Date(0);
+  calendarDate.setUTCHours(0, 0, 0, 0);
+  calendarDate.setUTCFullYear(year, month - 1, day);
+  if (
+    calendarDate.getUTCFullYear() !== year ||
+    calendarDate.getUTCMonth() !== month - 1 ||
+    calendarDate.getUTCDate() !== day
+  ) {
+    throw new Error(`Invalid RFC-3339 timestamp value: ${value}`);
+  }
+
+  const milliseconds = Date.parse(value);
+  if (Number.isNaN(milliseconds)) {
+    throw new Error(`Invalid RFC-3339 timestamp value: ${value}`);
+  }
+  if (
+    milliseconds < MIN_RFC3339_TIMESTAMP_MILLISECONDS ||
+    milliseconds > MAX_RFC3339_TIMESTAMP_MILLISECONDS
+  ) {
+    throw new Error(
+      `Timestamp value is outside CEL's supported instant range: ${value}`
+    );
+  }
+  return new Date(milliseconds).toISOString().replace(".000Z", "Z");
+};
+
 export { PlanKind };
 
 export type DrizzleFilter = SQL;
@@ -997,13 +1050,9 @@ const buildValueExpression = (
         "'timestamp' requires an RFC-3339 string value or field reference"
       );
     }
-    const instant = new Date(inner.value);
-    if (Number.isNaN(instant.getTime())) {
-      throw new Error("'timestamp' value is not a valid RFC-3339 instant");
-    }
     // Normalize offsets so instant equality is preserved. Removing the zero
     // millisecond suffix matches the canonical UTC strings used by timestamp columns.
-    const normalized = instant.toISOString().replace(".000Z", "Z");
+    const normalized = normalizeRfc3339Milliseconds(inner.value);
     return sql`${normalized}`;
   }
 
@@ -2294,29 +2343,9 @@ const buildFilterFromExpression = (
       return negated ? not(filter) : filter;
     }
     case "matches": {
-      if (operands.length !== 2) {
-        throw new Error("'matches' operator requires exactly two operands");
-      }
-      const fieldOperand = operands[0];
-      const patternOperand = operands[1];
-      if (!fieldOperand || !isNameOperand(fieldOperand)) {
-        throw new Error("'matches' first operand must be a field reference");
-      }
-      if (!patternOperand || !isValueOperand(patternOperand)) {
-        throw new Error("'matches' second operand must be a regex value");
-      }
-      if (typeof patternOperand.value !== "string") {
-        throw new Error("'matches' regex pattern must be a string");
-      }
-      const resolved = resolveFieldReference(fieldOperand.name, mapper);
-      if (resolved.relations.length > 0) {
-        throw new Error(
-          "'matches' on a relation-valued field is not supported"
-        );
-      }
-      const colExpr = buildColumnExpression(resolved.mapping, fieldOperand.name);
-      const filter = sql`${colExpr} regexp ${patternOperand.value}`;
-      return negated ? not(filter) : filter;
+      throw new Error(
+        "'matches' is not supported because SQL regex dialects do not guarantee CEL/RE2 semantics"
+      );
     }
     case "hasIntersection": {
       const filter = buildHasIntersectionFilter(operands, mapper);

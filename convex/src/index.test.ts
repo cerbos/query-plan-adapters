@@ -756,10 +756,19 @@ describe("Additional Operator Shapes", () => {
     expect(result.kind).toBe(PlanKind.CONDITIONAL);
     expect(result.filter).toBeUndefined();
     expect(result.postFilter).toBeDefined();
-    // TODO(#229): invoking the postFilter on real Cerbos plans throws because
-    // the evaluator assumes lambda operands as [var, body] but Cerbos emits
-    // [body, var]. Tracked as a separate follow-up; for now we only assert
-    // the split (filter undefined, postFilter present).
+    expect(result.postFilter?.({ aBool: true, tags: [] })).toBe(true);
+    expect(
+      result.postFilter?.({
+        aBool: false,
+        tags: [{ id: "tag1", name: "public" }],
+      }),
+    ).toBe(true);
+    expect(
+      result.postFilter?.({
+        aBool: false,
+        tags: [{ id: "tag1", name: "private" }],
+      }),
+    ).toBe(false);
   });
 
   test("conditional - or-leaf-exists throws without allowPostFilter", async () => {
@@ -1876,6 +1885,51 @@ describe("Regex Operator (postFilter)", () => {
       queryPlanToConvex({ queryPlan, mapper: defaultMapper }),
     ).toThrow("allowPostFilter");
   });
+
+  test("rejects patterns outside the supported RE2 subset", () => {
+    const queryPlan = {
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "matches",
+        operands: [
+          { name: "request.resource.attr.aString" },
+          { value: "(a)\\1" },
+        ],
+      },
+    } as unknown as PlanResourcesResponse;
+
+    expect(() =>
+      queryPlanToConvex({
+        queryPlan,
+        mapper: defaultMapper,
+        allowPostFilter: true,
+      }),
+    ).toThrow("constant RE2-compatible pattern");
+  });
+
+  test.each(["^allowed.*$", "allowed.*$"])(
+    "rejects trailing wildcard with an end anchor: %s",
+    (pattern) => {
+      const queryPlan = {
+        kind: PlanKind.CONDITIONAL,
+        condition: {
+          operator: "matches",
+          operands: [
+            { name: "request.resource.attr.aString" },
+            { value: pattern },
+          ],
+        },
+      } as unknown as PlanResourcesResponse;
+
+      expect(() =>
+        queryPlanToConvex({
+          queryPlan,
+          mapper: defaultMapper,
+          allowPostFilter: true,
+        }),
+      ).toThrow("constant RE2-compatible pattern");
+    },
+  );
 });
 
 describe("List Index Operator (postFilter)", () => {
@@ -2254,10 +2308,16 @@ describe("Collection Macro Composition (#232)", () => {
     expect(result.kind).toBe(PlanKind.CONDITIONAL);
     expect(result.filter).toBeUndefined();
     expect(result.postFilter).toBeDefined();
-    // TODO(#232): the convex evaluator assumes lambda operands as [var, body]
-    // but Cerbos emits [body, var], so invoking the postFilter on real Cerbos
-    // plans throws (tracked alongside #229). For now we only assert the split
-    // (filter undefined, postFilter present).
+    expect(result.postFilter?.({ tags: [] })).toBe(true);
+    expect(
+      result.postFilter?.({ tags: [{ id: "tag2", name: "public" }] }),
+    ).toBe(true);
+    expect(
+      result.postFilter?.({ tags: [{ id: "tag1", name: "public" }] }),
+    ).toBe(false);
+    expect(
+      result.postFilter?.({ tags: [{ id: "tag2", name: "private" }] }),
+    ).toBe(false);
   });
 
   test("conditional - all-nested throws without allowPostFilter", async () => {
@@ -2315,11 +2375,22 @@ describe("Collection Macro Composition (#232)", () => {
     expect(result.kind).toBe(PlanKind.CONDITIONAL);
     expect(result.filter).toBeUndefined();
     expect(result.postFilter).toBeDefined();
-    // TODO(#232): the convex evaluator assumes lambda operands as [var, body]
-    // but Cerbos emits [body, var]. For map-compared the lambda body is a
-    // variable (`t.id`) so the evaluator does not throw, but the resulting
-    // projection binds the wrong variable name and produces incorrect output.
-    // For now we only assert the split (filter undefined, postFilter present).
+    expect(
+      result.postFilter?.({
+        tags: [
+          { id: "tag1", name: "public" },
+          { id: "tag2", name: "private" },
+        ],
+      }),
+    ).toBe(true);
+    expect(
+      result.postFilter?.({
+        tags: [
+          { id: "tag2", name: "private" },
+          { id: "tag1", name: "public" },
+        ],
+      }),
+    ).toBe(false);
   });
 
   test("conditional - map-compared throws without allowPostFilter", async () => {
@@ -2379,10 +2450,13 @@ describe("Collection Macro Composition (#232)", () => {
     expect(result.kind).toBe(PlanKind.CONDITIONAL);
     expect(result.filter).toBeUndefined();
     expect(result.postFilter).toBeDefined();
-    // TODO(#232): invoking the postFilter on real Cerbos plans throws because
-    // the evaluator assumes lambda operands as [var, body] but Cerbos emits
-    // [body, var]. Tracked alongside #229. For now we only assert the split
-    // (filter undefined, postFilter present).
+    expect(
+      result.postFilter?.({ tags: [{ id: "tag1", name: "public" }] }),
+    ).toBe(true);
+    expect(
+      result.postFilter?.({ tags: [{ id: "tag1", name: "private" }] }),
+    ).toBe(false);
+    expect(result.postFilter?.({ tags: [] })).toBe(false);
   });
 
   test("conditional - filter-count-gt throws without allowPostFilter", async () => {
@@ -2400,5 +2474,193 @@ describe("Collection Macro Composition (#232)", () => {
     expect(() => queryPlanToConvex({ queryPlan, mapper })).toThrow(
       "allowPostFilter",
     );
+  });
+});
+
+describe("Post-filter CEL semantics", () => {
+  const postFilterFor = (
+    condition: PlanExpression,
+    mapper: Mapper,
+  ): ((doc: Record<string, unknown>) => boolean) => {
+    const queryPlan = {
+      kind: PlanKind.CONDITIONAL,
+      condition,
+    } as unknown as PlanResourcesResponse;
+    const result = queryPlanToConvex({
+      queryPlan,
+      mapper,
+      allowPostFilter: true,
+    });
+    if (!result.postFilter) throw new Error("Expected a postFilter");
+    return result.postFilter;
+  };
+
+  test("exists_one scans for CEL errors before negation", () => {
+    const postFilter = postFilterFor(
+      {
+        operator: "not",
+        operands: [
+          {
+            operator: "exists_one",
+            operands: [
+              { name: "request.resource.attr.items" },
+              {
+                operator: "lambda",
+                operands: [
+                  {
+                    operator: "eq",
+                    operands: [{ name: "item.x" }, { value: true }],
+                  },
+                  { name: "item" },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      { "request.resource.attr.items": { field: "items" } },
+    );
+
+    expect(postFilter({ items: [{ x: true }, { x: true }, {}] })).toBe(false);
+  });
+
+  test("size counts Unicode code points", () => {
+    const postFilter = postFilterFor(
+      {
+        operator: "eq",
+        operands: [
+          {
+            operator: "size",
+            operands: [{ name: "request.resource.attr.value" }],
+          },
+          { value: 1 },
+        ],
+      },
+      { "request.resource.attr.value": { field: "value" } },
+    );
+
+    expect(postFilter({ value: "🚀" })).toBe(true);
+  });
+
+  test("double rejects JavaScript-only coercions", () => {
+    const postFilter = postFilterFor(
+      {
+        operator: "eq",
+        operands: [
+          {
+            operator: "double",
+            operands: [{ name: "request.resource.attr.value" }],
+          },
+          { value: 1 },
+        ],
+      },
+      { "request.resource.attr.value": { field: "value" } },
+    );
+
+    expect(postFilter({ value: true })).toBe(false);
+    expect(postFilter({ value: "" })).toBe(false);
+  });
+
+  test("string rejects null instead of coercing it", () => {
+    const postFilter = postFilterFor(
+      {
+        operator: "eq",
+        operands: [
+          {
+            operator: "string",
+            operands: [{ name: "request.resource.attr.value" }],
+          },
+          { value: "null" },
+        ],
+      },
+      { "request.resource.attr.value": { field: "value" } },
+    );
+
+    expect(postFilter({ value: null })).toBe(false);
+  });
+
+  test("int rejects non-integer strings", () => {
+    const postFilter = postFilterFor(
+      {
+        operator: "eq",
+        operands: [
+          {
+            operator: "int",
+            operands: [{ name: "request.resource.attr.value" }],
+          },
+          { value: 1 },
+        ],
+      },
+      { "request.resource.attr.value": { field: "value" } },
+    );
+
+    expect(postFilter({ value: "1.5" })).toBe(false);
+  });
+
+  test("timestamp rejects non-RFC3339 strings under negation", () => {
+    const postFilter = postFilterFor(
+      {
+        operator: "not",
+        operands: [
+          {
+            operator: "eq",
+            operands: [
+              {
+                operator: "timestamp",
+                operands: [{ name: "request.resource.attr.value" }],
+              },
+              {
+                operator: "timestamp",
+                operands: [{ value: "2025-01-02T00:00:00Z" }],
+              },
+            ],
+          },
+        ],
+      },
+      { "request.resource.attr.value": { field: "value" } },
+    );
+
+    expect(postFilter({ value: "01/02/2025" })).toBe(false);
+  });
+
+  test("timestamp comparisons preserve nanosecond precision", () => {
+    const postFilter = postFilterFor(
+      {
+        operator: "gt",
+        operands: [
+          {
+            operator: "timestamp",
+            operands: [{ name: "request.resource.attr.value" }],
+          },
+          {
+            operator: "timestamp",
+            operands: [{ value: "2025-01-02T00:00:00.000000001Z" }],
+          },
+        ],
+      },
+      { "request.resource.attr.value": { field: "value" } },
+    );
+
+    expect(postFilter({ value: "2025-01-02T00:00:00.000000002Z" })).toBe(true);
+    expect(postFilter({ value: "2025-01-02T00:00:00.000000001Z" })).toBe(false);
+  });
+
+  test("numeric equality follows CEL NaN and signed-zero semantics", () => {
+    const postFilter = postFilterFor(
+      {
+        operator: "eq",
+        operands: [
+          { name: "request.resource.attr.left" },
+          { name: "request.resource.attr.right" },
+        ],
+      },
+      {
+        "request.resource.attr.left": { field: "left" },
+        "request.resource.attr.right": { field: "right" },
+      },
+    );
+
+    expect(postFilter({ left: Number.NaN, right: Number.NaN })).toBe(false);
+    expect(postFilter({ left: -0, right: 0 })).toBe(true);
   });
 });

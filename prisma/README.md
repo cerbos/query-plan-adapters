@@ -54,6 +54,9 @@ throw — Prisma only supports references between fields of the same model.
 - Type-safe field mappings
 - Timestamp comparisons against Prisma `DateTime` columns. Mark the field mapping with
   `valueType: "dateTime"`; applying `timestamp()` to an untyped/string mapping throws.
+  Literals must be strict RFC 3339 instants in CEL's supported year 0001–9999 range and
+  exactly representable at millisecond precision (fractional digits after the third may
+  only be zero). The mapped column/database must preserve that precision.
 - Outer-column references inside collection expressions (e.g.
   `R.attr.tags.exists(t, t.name == "x" && R.attr.aBool)`) are hoisted or case-split so every
   filter lands on the model it belongs to
@@ -92,6 +95,18 @@ mapped authorization columns as part of the policy contract:
 The adapter cannot override a column's collation in a Prisma `where` filter. See Prisma's
 [case-sensitivity documentation](https://docs.prisma.io/docs/orm/v6/prisma-client/queries/case-sensitivity)
 for provider-specific details.
+
+### Conformance contract
+
+The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 20 hostile seed rows and both Prisma 6 and 7. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
+
+| Classification | Coverage |
+| --- | --- |
+| Oracle-tested | 84 reference actions |
+| Fail-closed | 29 reference actions plus the 3 reference-unsupported shapes (32 actions total) |
+| Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
+
+The fail-closed set consists of literal `LIKE` cases Prisma cannot escape safely, cross-model field references, arbitrary relation counts and string lengths, `exists_one`, unsolved column arithmetic, sub-millisecond `now()` thresholds, and the reference probes for regex, ordered indexing, and `timestamp()` over a string field. Supported timestamp plans require a mapper entry with `valueType: "dateTime"` and a strict, millisecond-exact RFC 3339 literal in CEL's supported instant range. These shapes throw instead of producing a broader authorization filter.
 
 ## Requirements
 
@@ -532,4 +547,4 @@ A complete example application using this adapter can be found at [https://githu
 
 ## License
 
-Apache 2.0 - See [LICENSE](../LICENSE) for more information.
+Apache 2.0.

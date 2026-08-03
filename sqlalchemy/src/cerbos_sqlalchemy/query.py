@@ -39,7 +39,14 @@ OperatorFnMap = Dict[str, Callable[[GenericColumn, Any], GenericExpression]]
 
 
 _LIKE_ESCAPE_CHAR = "\\"
-_EXCESS_RFC3339_PRECISION = re.compile(r"(\.\d{6})\d+(?=(?:Z|[+-]\d{2}:\d{2})$)")
+_RFC3339_TIMESTAMP = re.compile(
+    r"^((?!0000)\d{4})-(\d{2})-(\d{2})[Tt]"
+    r"(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d"
+    r"(?:\.(\d{1,9}))?(?:[Zz]|[+-](?:[01]\d|2[0-3]):[0-5]\d)$"
+)
+_EXCESS_RFC3339_PRECISION = re.compile(r"(\.\d{6})\d+(?=(?:[Zz]|[+-]\d{2}:\d{2})$)")
+_MIN_CEL_TIMESTAMP = datetime(1, 1, 1, tzinfo=timezone.utc)
+_MAX_CEL_TIMESTAMP = datetime(9999, 12, 31, 23, 59, 59, 999999, tzinfo=timezone.utc)
 
 
 @dataclass(frozen=True)
@@ -234,18 +241,39 @@ def _timestamp(value: Any, _: Any) -> Any:
     if isinstance(value, datetime):
         parsed = value
     elif isinstance(value, str):
+        match = _RFC3339_TIMESTAMP.fullmatch(value)
+        if match is None:
+            raise ValueError(f"Invalid RFC-3339 timestamp literal: {value}")
+        digits = match.group(4) or ""
+        if len(digits) > 6 and any(d != "0" for d in digits[6:]):
+            raise ValueError(
+                "Timestamp literal precision exceeds the exact microsecond range: "
+                f"{value}"
+            )
         try:
             normalized = _EXCESS_RFC3339_PRECISION.sub(r"\1", value)
-            parsed = datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+            normalized = normalized.replace("t", "T")
+            normalized = normalized.replace("z", "+00:00").replace("Z", "+00:00")
+            parsed = datetime.fromisoformat(normalized)
         except ValueError as exc:
-            raise ValueError(f"Invalid timestamp literal: {value}") from exc
+            raise ValueError(f"Invalid RFC-3339 timestamp literal: {value}") from exc
     else:
         raise ValueError(
             "timestamp() requires an RFC-3339 literal or a SQLAlchemy DateTime column"
         )
     if parsed.tzinfo is None:
         raise ValueError(f"Timestamp literal must include an offset: {value}")
-    return parsed.astimezone(timezone.utc)
+    try:
+        normalized = parsed.astimezone(timezone.utc)
+    except (OverflowError, ValueError) as exc:
+        raise ValueError(
+            f"Timestamp literal is outside CEL's supported instant range: {value}"
+        ) from exc
+    if normalized < _MIN_CEL_TIMESTAMP or normalized > _MAX_CEL_TIMESTAMP:
+        raise ValueError(
+            f"Timestamp literal is outside CEL's supported instant range: {value}"
+        )
+    return normalized
 
 
 @dataclass(frozen=True)
@@ -333,8 +361,6 @@ __operator_fns: OperatorFnMap = {
     "mult": lambda c, v: c * v,
     "div": _float_div,
     "mod": lambda c, v: c % v,
-    # String matching — portable across most SQLAlchemy dialects.
-    "matches": lambda c, v: c.regexp_match(v),
     # CEL receiver-style string matches. Operands arrive in source order
     # (receiver first): the receiver may be a constant and the needle a
     # column, and LIKE metacharacters in the needle are always escaped.

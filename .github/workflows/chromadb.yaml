@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "langchain-chromadb/**"
+      - "conformance/**"
       - "policies/**"
       - ".github/workflows/chromadb.yaml"
       - ".github/workflows/chromadb-publish.yaml"
@@ -19,17 +20,20 @@ jobs:
   test:
     strategy:
       matrix:
-        cerbos-version: ["latest"]
         node-version: ["20", "22", "24", "25"]
-        chroma-image: ["ghcr.io/chroma-core/chroma:latest"]
+        chroma-image: ["chromadb/chroma@sha256:1e0b73a187a28757c572acba508c46f48c9e8b0acaf5c20e6d95cdedce1acdf6"]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Read pinned Cerbos version
+        id: cerbos
+        run: echo "version=$(tr -d '[:space:]' < ../conformance/CERBOS_VERSION)" >> "$GITHUB_OUTPUT"
+
       - name: Setup Cerbos
         uses: cerbos/cerbos-setup-action@f772482c8504a05c49018a0bf2d84012a607733c # v1
         with:
-          version: ${{ matrix.cerbos-version }}
+          version: v${{ steps.cerbos.outputs.version }}
 
       - name: Start ChromaDB
         run: |
@@ -52,3 +56,48 @@ jobs:
       - run: npm run test:cerbos
         env:
           CHROMA_URL: http://127.0.0.1:8000
+
+  adversarial:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate conformance corpus
+        run: ../conformance/scripts/validate-corpus.sh
+
+      - name: Read pinned Cerbos version
+        id: cerbos
+        run: echo "version=$(tr -d '[:space:]' < ../conformance/CERBOS_VERSION)" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Cerbos
+        uses: cerbos/cerbos-setup-action@f772482c8504a05c49018a0bf2d84012a607733c # v1
+        with:
+          version: v${{ steps.cerbos.outputs.version }}
+
+      - name: Start ChromaDB
+        run: |
+          docker run -d --name chromadb -p 8000:8000 chromadb/chroma@sha256:1e0b73a187a28757c572acba508c46f48c9e8b0acaf5c20e6d95cdedce1acdf6
+          for _ in {1..30}; do
+            if curl -sf http://127.0.0.1:8000/api/v2/heartbeat > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "ChromaDB failed to start" >&2
+          exit 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
+      - run: npm install
+
+      - name: Run adversarial differential suite
+        run: npm run test:adversarial:cerbos
+        env:
+          CHROMA_URL: http://127.0.0.1:8000
+
+      - name: Stop ChromaDB
+        if: always()
+        run: docker rm -f chromadb

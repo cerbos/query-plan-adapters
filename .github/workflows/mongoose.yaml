@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "mongoose/**"
+      - "conformance/**"
       - "policies/**"
       - ".github/workflows/mongoose.yaml"
       - ".github/workflows/mongoose-publish.yaml"
@@ -19,17 +20,20 @@ jobs:
   test:
     strategy:
       matrix:
-        cerbos-version: ["latest"]
         mongodb-version: ["7.0", "8.0"]
         node-version: ["20", "22", "24", "25"]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Read pinned Cerbos version
+        id: cerbos
+        run: echo "version=$(tr -d '[:space:]' < ../conformance/CERBOS_VERSION)" >> "$GITHUB_OUTPUT"
+
       - name: Setup Cerbos
         uses: cerbos/cerbos-setup-action@f772482c8504a05c49018a0bf2d84012a607733c # v1
         with:
-          version: ${{ matrix.cerbos-version }}
+          version: v${{ steps.cerbos.outputs.version }}
 
       - name: Start MongoDB
         uses: supercharge/mongodb-github-action@315db7fe45ac2880b7758f1933e6e5d59afd5e94 # 1.12.1
@@ -43,3 +47,36 @@ jobs:
 
       - run: npm install
       - run: npm run test
+
+  adversarial:
+    strategy:
+      matrix:
+        mongodb-version: ["7.0", "8.0"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate conformance corpus
+        run: ../conformance/scripts/validate-corpus.sh
+
+      - name: Read pinned Cerbos version
+        id: cerbos
+        run: echo "version=$(tr -d '[:space:]' < ../conformance/CERBOS_VERSION)" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Cerbos
+        uses: cerbos/cerbos-setup-action@f772482c8504a05c49018a0bf2d84012a607733c # v1
+        with:
+          version: v${{ steps.cerbos.outputs.version }}
+
+      - name: Start MongoDB
+        uses: supercharge/mongodb-github-action@315db7fe45ac2880b7758f1933e6e5d59afd5e94 # 1.12.1
+        with:
+          mongodb-version: ${{ matrix.mongodb-version }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
+      - run: npm install
+      - run: npm run test:adversarial

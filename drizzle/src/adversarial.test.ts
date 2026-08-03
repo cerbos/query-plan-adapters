@@ -82,11 +82,8 @@ const actionsFile: ActionsFile = JSON.parse(
 );
 const SEEDS = seedsFile.seeds;
 
-// Shapes the Drizzle adapter genuinely cannot express as SQL. Drizzle builds raw SQL
-// (COUNT subqueries, LENGTH(), field-to-field REPLACE/SUBSTR matches, CASE ternaries,
-// WHERE-clause arithmetic), so the list is currently EMPTY. Kept as a LOCAL constant only
-// until conformance/actions.json gains an `adapterUnsupported.drizzle` key — move these
-// entries there when it does.
+// Reference actions this adapter cannot express without changing CEL semantics. The shared
+// manifest is the source of truth so the package-local harness and README stay aligned.
 const DRIZZLE_UNSUPPORTED: AdapterUnsupportedEntry[] = [
   ...(actionsFile.adapterUnsupported?.["drizzle"] ?? []),
 ];
@@ -115,9 +112,7 @@ const ORACLE_ACTIONS = [
 ];
 type ThrowingAction = readonly [action: string, reason: string];
 // Globally unsupported planner shapes plus any declared Drizzle limitations: these must
-// fail loudly (translation throw, or — for p-matches, which translates to a REGEXP
-// predicate — a query-time error because this suite deliberately registers no REGEXP
-// UDF), never silently return a wrong id set.
+// fail loudly during translation, never silently return a wrong id set.
 const THROWING_ACTIONS: ThrowingAction[] = [
   ...DRIZZLE_UNSUPPORTED.map(
     (entry): ThrowingAction => [entry.action, entry.reason]
@@ -592,8 +587,8 @@ describe("adversarial conformance corpus", () => {
     }
   );
 
-  // Shapes the adapter does not support: translation (or execution, for p-matches) must
-  // fail loudly, never produce a silently-wrong filter.
+  // Shapes the adapter does not support must fail during translation, never produce a
+  // silently-wrong filter.
   test.each(THROWING_ACTIONS)(
     "%s fails loudly instead of silently mistranslating (%s)",
     async (action) => {

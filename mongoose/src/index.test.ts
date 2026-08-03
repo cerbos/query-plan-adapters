@@ -217,6 +217,34 @@ const defaultMapper: Mapper = {
   "request.resource.attr.nested.aString": { field: "nested.aString" },
 };
 
+const conditionalPlan = (condition: PlanExpression): PlanResourcesResponse => ({
+  kind: PlanKind.CONDITIONAL,
+  condition,
+  cerbosCallId: "test",
+  requestId: "test",
+  validationErrors: [],
+  metadata: undefined,
+});
+
+const checkedConversion = (
+  input: unknown,
+  allowedTypes: string[],
+  targetType: "string" | "double" | "long"
+) => ({
+  $cond: {
+    if: { $in: [{ $type: input }, allowedTypes] },
+    then: {
+      $convert: {
+        input,
+        to: targetType,
+        onError: null,
+        onNull: null,
+      },
+    },
+    else: null,
+  },
+});
+
 describe("Adapter Unit Behavior", () => {
   test("maps single-object relations without elemMatch", async () => {
     const queryPlan = {
@@ -329,13 +357,12 @@ describe("Adapter Unit Behavior", () => {
       mapper: defaultMapper,
     });
 
-    // The adapter normalises the operand order, putting the value-producing
-    // expression first. Mongo's `$eq` is commutative so this is semantically
-    // identical to `3 == aNumber + 1`.
+    // Preserve source operand order. This is immaterial for `$eq`, but is
+    // essential for directional comparisons such as `<` and `>=`.
     expect(result).toStrictEqual({
       kind: PlanKind.CONDITIONAL,
       filters: {
-        $expr: { $eq: [{ $add: ["$aNumber", 1] }, 3] },
+        $expr: { $eq: [3, { $add: ["$aNumber", 1] }] },
       },
     });
 
@@ -776,44 +803,28 @@ describe("Collection Operations", () => {
     );
   });
 
-  test("conditional - exists_one", async () => {
+  test("conditional - exists_one fails loudly", async () => {
     const queryPlan = await cerbos.planResources({
       principal: { id: "user1", roles: ["USER"] },
       resource: { kind: "resource" },
       action: "exists-one",
     });
 
-    const result = queryPlanToMongoose({
-      queryPlan,
-      mapper: {
-        ...defaultMapper,
-        "request.resource.attr.tags": {
-          relation: {
-            name: "tags",
-            type: "many",
-            field: "name",
+    expect(() =>
+      queryPlanToMongoose({
+        queryPlan,
+        mapper: {
+          ...defaultMapper,
+          "request.resource.attr.tags": {
+            relation: {
+              name: "tags",
+              type: "many",
+              field: "name",
+            },
           },
         },
-      },
-    });
-
-    expect(result).toStrictEqual({
-      kind: PlanKind.CONDITIONAL,
-      filters: {
-        tags: {
-          $elemMatch: {
-            name: { $eq: "public" },
-          },
-        },
-      },
-    });
-
-    const query = await Resource.find(result.filters || {});
-    expect(query.map((r) => r.key)).toEqual(
-      fixtureResources
-        .filter((r) => r.tags.some((t) => t.name === "public"))
-        .map((r) => r.key)
-    );
+      })
+    ).toThrow("exists_one requires exact match cardinality and is unsupported");
   });
 
   test("conditional - all", async () => {
@@ -841,6 +852,7 @@ describe("Collection Operations", () => {
       kind: PlanKind.CONDITIONAL,
       filters: {
         tags: {
+          $type: "array",
           $not: {
             $elemMatch: {
               $nor: [{ name: { $eq: "public" } }],
@@ -856,6 +868,44 @@ describe("Collection Operations", () => {
         .filter((r) => r.tags.every((t) => t.name === "public"))
         .map((r) => r.key)
     );
+  });
+
+  test("conditional - all rejects a missing collection", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "all-nested",
+    });
+    const result = queryPlanToMongoose({
+      queryPlan,
+      mapper: {
+        ...defaultMapper,
+        "request.resource.attr.tags": {
+          relation: {
+            name: "tags",
+            type: "many",
+          },
+        },
+      },
+    });
+    const original = fixtureResources.find(({ key }) => key === "a");
+    if (!original) {
+      throw new Error("Missing fixture resource a");
+    }
+
+    await Resource.collection.updateOne(
+      { key: original.key },
+      { $unset: { tags: "" } }
+    );
+    try {
+      const query = await Resource.find(result.filters || {});
+      expect(query.map(({ key }) => key)).not.toContain(original.key);
+    } finally {
+      await Resource.collection.updateOne(
+        { key: original.key },
+        { $set: { tags: original.tags } }
+      );
+    }
   });
 
   test("conditional - hasIntersection", async () => {
@@ -954,6 +1004,7 @@ describe("Collection Operations", () => {
       kind: PlanKind.CONDITIONAL,
       filters: {
         tags: {
+          $type: "array",
           $not: {
             $elemMatch: {
               $nor: [
@@ -1888,11 +1939,19 @@ describe("Arithmetic Operations", () => {
       queryPlan,
       mapper: arithMapper,
     });
+    const conversion = checkedConversion(
+      "$aNumber",
+      ["string", "int", "long", "double", "decimal"],
+      "long"
+    );
 
     expect(result).toStrictEqual({
       kind: PlanKind.CONDITIONAL,
       filters: {
-        $expr: { $eq: [{ $mod: [{ $toInt: "$aNumber" }, 2] }, 0] },
+        $and: [
+          { $expr: { $ne: [conversion, null] } },
+          { $expr: { $eq: [{ $mod: [conversion, 2] }, 0] } },
+        ],
       },
     });
 
@@ -1945,6 +2004,71 @@ describe("Regex Match", () => {
         .sort()
     );
   });
+
+  test("terminal $ keeps RE2 absolute end-of-text semantics", async () => {
+    const matches = new PlanExpression("matches", [
+      new PlanExpressionVariable("request.resource.attr.aString"),
+      new PlanExpressionValue("^foo$"),
+    ]);
+    const plans = [
+      conditionalPlan(matches),
+      conditionalPlan(
+        new PlanExpression("eq", [matches, new PlanExpressionValue(true)])
+      ),
+    ];
+    const original = fixtureResources.find(({ key }) => key === "a");
+    if (!original) {
+      throw new Error("Missing fixture resource a");
+    }
+
+    try {
+      for (const plan of plans) {
+        const result = queryPlanToMongoose({
+          queryPlan: plan,
+          mapper: defaultMapper,
+        });
+        await Resource.collection.updateOne(
+          { key: original.key },
+          { $set: { aString: "foo" } }
+        );
+        expect(
+          (await Resource.find(result.filters || {})).map(({ key }) => key)
+        ).toContain(original.key);
+
+        await Resource.collection.updateOne(
+          { key: original.key },
+          { $set: { aString: "foo\n" } }
+        );
+        expect(
+          (await Resource.find(result.filters || {})).map(({ key }) => key)
+        ).not.toContain(original.key);
+      }
+    } finally {
+      await Resource.collection.updateOne(
+        { key: original.key },
+        { $set: { aString: original.aString } }
+      );
+    }
+  });
+
+  test("unsupported regex syntax fails closed in both Mongo paths", () => {
+    const matches = new PlanExpression("matches", [
+      new PlanExpressionVariable("request.resource.attr.aString"),
+      new PlanExpressionValue("(?=foo)"),
+    ]);
+    const plans = [
+      conditionalPlan(matches),
+      conditionalPlan(
+        new PlanExpression("eq", [matches, new PlanExpressionValue(true)])
+      ),
+    ];
+
+    for (const queryPlan of plans) {
+      expect(() =>
+        queryPlanToMongoose({ queryPlan, mapper: defaultMapper })
+      ).toThrow("common RE2/PCRE2 subset");
+    }
+  });
 });
 
 describe("Index Access", () => {
@@ -1983,7 +2107,20 @@ describe("Index Access", () => {
     expect(result).toStrictEqual({
       kind: PlanKind.CONDITIONAL,
       filters: {
-        $expr: { $eq: [{ $arrayElemAt: ["$ownedBy", 0] }, "user1"] },
+        $and: [
+          {
+            $expr: {
+              $cond: {
+                if: { $isArray: "$ownedBy" },
+                then: { $gt: [{ $size: "$ownedBy" }, 0] },
+                else: false,
+              },
+            },
+          },
+          {
+            $expr: { $eq: [{ $arrayElemAt: ["$ownedBy", 0] }, "user1"] },
+          },
+        ],
       },
     });
 
@@ -1997,6 +2134,50 @@ describe("Index Access", () => {
         .map((r) => r.key)
         .sort()
     );
+  });
+
+  test.each([-1, 1.5])("rejects the unsound constant index %s", (index) => {
+    const queryPlan = conditionalPlan(
+      new PlanExpression("eq", [
+        new PlanExpression("index", [
+          new PlanExpressionVariable("request.resource.attr.ownedBy"),
+          new PlanExpressionValue(index),
+        ]),
+        new PlanExpressionValue("user1"),
+      ])
+    );
+
+    expect(() =>
+      queryPlanToMongoose({
+        queryPlan,
+        mapper: {
+          ...defaultMapper,
+          "request.resource.attr.ownedBy": { field: "ownedBy" },
+        },
+      })
+    ).toThrow("index operator requires a non-negative integer constant");
+  });
+
+  test("an out-of-bounds index cannot make ne authorize", async () => {
+    const queryPlan = conditionalPlan(
+      new PlanExpression("ne", [
+        new PlanExpression("index", [
+          new PlanExpressionVariable("request.resource.attr.ownedBy"),
+          new PlanExpressionValue(10),
+        ]),
+        new PlanExpressionValue("user1"),
+      ])
+    );
+    const result = queryPlanToMongoose({
+      queryPlan,
+      mapper: {
+        ...defaultMapper,
+        "request.resource.attr.ownedBy": { field: "ownedBy" },
+      },
+    });
+
+    const query = await Resource.find(result.filters || {});
+    expect(query).toHaveLength(0);
   });
 });
 
@@ -2026,11 +2207,19 @@ describe("Type Conversion", () => {
       queryPlan,
       mapper: defaultMapper,
     });
+    const conversion = checkedConversion(
+      "$aNumber",
+      ["string", "bool", "int", "long", "double", "decimal"],
+      "string"
+    );
 
     expect(result).toStrictEqual({
       kind: PlanKind.CONDITIONAL,
       filters: {
-        $expr: { $eq: [{ $toString: "$aNumber" }, "1"] },
+        $and: [
+          { $expr: { $ne: [conversion, null] } },
+          { $expr: { $eq: [conversion, "1"] } },
+        ],
       },
     });
 
@@ -2068,11 +2257,19 @@ describe("Type Conversion", () => {
       queryPlan,
       mapper: defaultMapper,
     });
+    const conversion = checkedConversion(
+      "$aNumber",
+      ["string", "int", "long", "double", "decimal"],
+      "double"
+    );
 
     expect(result).toStrictEqual({
       kind: PlanKind.CONDITIONAL,
       filters: {
-        $expr: { $gt: [{ $toDouble: "$aNumber" }, 1.5] },
+        $and: [
+          { $expr: { $ne: [conversion, null] } },
+          { $expr: { $gt: [conversion, 1.5] } },
+        ],
       },
     });
 
@@ -2085,7 +2282,7 @@ describe("Type Conversion", () => {
     );
   });
 
-  test("convert-int: int(aString) > 0 — filter built, runtime $toInt throws", async () => {
+  test("convert-int: invalid source values fail closed without aborting the query", async () => {
     const queryPlan = await cerbos.planResources({
       principal: { id: "user1", roles: ["USER"] },
       resource: { kind: "resource" },
@@ -2110,19 +2307,241 @@ describe("Type Conversion", () => {
       queryPlan,
       mapper: defaultMapper,
     });
+    const conversion = checkedConversion(
+      "$aString",
+      ["string", "int", "long", "double", "decimal"],
+      "long"
+    );
 
     expect(result).toStrictEqual({
       kind: PlanKind.CONDITIONAL,
       filters: {
-        $expr: { $gt: [{ $toInt: "$aString" }, 0] },
+        $and: [
+          { $expr: { $ne: [conversion, null] } },
+          { $expr: { $gt: [conversion, 0] } },
+        ],
       },
     });
 
-    // aString values like "string" are not parseable as ints — Mongo errors
-    // out during query evaluation. We assert the runtime failure here so the
-    // adapter contract is documented: the adapter produces the right shape,
-    // but the underlying data must be numeric for the query to succeed.
-    await expect(Resource.find(result.filters || {})).rejects.toThrow();
+    expect(await Resource.find(result.filters || {})).toHaveLength(0);
+  });
+
+  test.each(["double", "int"] as const)(
+    "%s rejects boolean inputs under both positive and negative polarity",
+    async (operator) => {
+      const conversion = new PlanExpression(operator, [
+        new PlanExpressionVariable("request.resource.attr.aBool"),
+      ]);
+      const comparison = new PlanExpression("eq", [
+        conversion,
+        new PlanExpressionValue(1),
+      ]);
+      for (const condition of [
+        comparison,
+        new PlanExpression("not", [comparison]),
+      ]) {
+        const result = queryPlanToMongoose({
+          queryPlan: conditionalPlan(condition),
+          mapper: defaultMapper,
+        });
+        expect(await Resource.find(result.filters || {})).toHaveLength(0);
+      }
+    }
+  );
+
+  test("string conversion rejects null and missing inputs under negation", async () => {
+    const condition = new PlanExpression("ne", [
+      new PlanExpression("string", [
+        new PlanExpressionVariable(
+          "request.resource.attr.aOptionalString"
+        ),
+      ]),
+      new PlanExpressionValue("x"),
+    ]);
+    const result = queryPlanToMongoose({
+      queryPlan: conditionalPlan(condition),
+      mapper: defaultMapper,
+    });
+
+    await Resource.collection.updateOne(
+      { key: "c" },
+      { $set: { aOptionalString: null } }
+    );
+    try {
+      expect(
+        (await Resource.find(result.filters || {})).map(({ key }) => key)
+      ).toEqual(["a"]);
+    } finally {
+      await Resource.collection.updateOne(
+        { key: "c" },
+        { $unset: { aOptionalString: "" } }
+      );
+    }
+  });
+
+  test("int conversion rejects BSON dates instead of using milliseconds", async () => {
+    const condition = new PlanExpression("eq", [
+      new PlanExpression("int", [
+        new PlanExpressionVariable("request.resource.attr.aString"),
+      ]),
+      new PlanExpressionValue(1704067200000),
+    ]);
+    const result = queryPlanToMongoose({
+      queryPlan: conditionalPlan(condition),
+      mapper: defaultMapper,
+    });
+    const original = fixtureResources.find(({ key }) => key === "a");
+    if (!original) {
+      throw new Error("Missing fixture resource a");
+    }
+
+    await Resource.collection.updateOne(
+      { key: original.key },
+      { $set: { aString: new Date("2024-01-01T00:00:00Z") } }
+    );
+    try {
+      expect(await Resource.find(result.filters || {})).toHaveLength(0);
+    } finally {
+      await Resource.collection.updateOne(
+        { key: original.key },
+        { $set: { aString: original.aString } }
+      );
+    }
+  });
+
+  test("timestamp comparisons reject malformed and non-RFC 3339 fields", async () => {
+    const timestamp = (operator: "lt" | "gt") =>
+      new PlanExpression(operator, [
+        new PlanExpression("timestamp", [
+          new PlanExpressionVariable("request.resource.attr.aString"),
+        ]),
+        new PlanExpression("timestamp", [
+          new PlanExpressionValue("2025-01-01T00:00:00Z"),
+        ]),
+      ]);
+    const conditions = [
+      timestamp("lt"),
+      new PlanExpression("not", [timestamp("gt")]),
+    ];
+    const original = fixtureResources.find(({ key }) => key === "a");
+    if (!original) {
+      throw new Error("Missing fixture resource a");
+    }
+
+    try {
+      for (const invalidTimestamp of [
+        "2024-01-01",
+        "0000-01-01T00:00:00Z",
+        "2024-01-01T00:00:00.0001Z",
+        "2024-01-01T00:00:00.1234567890Z",
+        "9999-12-31T23:00:00-02:00",
+      ]) {
+        await Resource.collection.updateOne(
+          { key: original.key },
+          { $set: { aString: invalidTimestamp } }
+        );
+        for (const condition of conditions) {
+          const queryPlan = conditionalPlan(condition);
+          const result = queryPlanToMongoose({
+            queryPlan,
+            mapper: defaultMapper,
+          });
+          const query = await Resource.find(result.filters || {});
+          expect(query).toHaveLength(0);
+        }
+      }
+    } finally {
+      await Resource.collection.updateOne(
+        { key: original.key },
+        { $set: { aString: original.aString } }
+      );
+    }
+  });
+
+  test.each([
+    "2024-01-01",
+    "0000-01-01T00:00:00Z",
+    "2024-01-01T00:00:00.0001Z",
+    "9999-12-31T23:00:00-02:00",
+  ])("timestamp rejects the unsupported literal %s", (literal) => {
+    const queryPlan = conditionalPlan(
+      new PlanExpression("eq", [
+        new PlanExpression("timestamp", [
+          new PlanExpressionValue(literal),
+        ]),
+        new PlanExpression("timestamp", [
+          new PlanExpressionValue("2024-01-01T00:00:00Z"),
+        ]),
+      ])
+    );
+
+    expect(() =>
+      queryPlanToMongoose({ queryPlan, mapper: defaultMapper })
+    ).toThrow(
+      "timestamp value must be a millisecond-exact RFC 3339 instant in the CEL range"
+    );
+  });
+
+  test("timestamp rejects precision that BSON Date would silently truncate", async () => {
+    const queryPlan = conditionalPlan(
+      new PlanExpression("eq", [
+        new PlanExpression("timestamp", [
+          new PlanExpressionVariable("request.resource.attr.aString"),
+        ]),
+        new PlanExpression("timestamp", [
+          new PlanExpressionValue("2024-01-01T00:00:00.000Z"),
+        ]),
+      ])
+    );
+    const result = queryPlanToMongoose({ queryPlan, mapper: defaultMapper });
+    const original = fixtureResources.find(({ key }) => key === "a");
+    if (!original) {
+      throw new Error("Missing fixture resource a");
+    }
+
+    await Resource.collection.updateOne(
+      { key: original.key },
+      { $set: { aString: "2024-01-01T00:00:00.0001Z" } }
+    );
+    try {
+      expect(await Resource.find(result.filters || {})).toHaveLength(0);
+    } finally {
+      await Resource.collection.updateOne(
+        { key: original.key },
+        { $set: { aString: original.aString } }
+      );
+    }
+  });
+
+  test("timestamp rejects BSON dates outside the CEL instant range", async () => {
+    const queryPlan = conditionalPlan(
+      new PlanExpression("ne", [
+        new PlanExpression("timestamp", [
+          new PlanExpressionVariable("request.resource.attr.aString"),
+        ]),
+        new PlanExpression("timestamp", [
+          new PlanExpressionValue("2024-01-01T00:00:00.000Z"),
+        ]),
+      ])
+    );
+    const result = queryPlanToMongoose({ queryPlan, mapper: defaultMapper });
+    const original = fixtureResources.find(({ key }) => key === "a");
+    if (!original) {
+      throw new Error("Missing fixture resource a");
+    }
+
+    await Resource.collection.updateOne(
+      { key: original.key },
+      { $set: { aString: new Date("+010000-01-01T00:00:00.000Z") } }
+    );
+    try {
+      expect(await Resource.find(result.filters || {})).toHaveLength(0);
+    } finally {
+      await Resource.collection.updateOne(
+        { key: original.key },
+        { $set: { aString: original.aString } }
+      );
+    }
   });
 });
 
@@ -2323,17 +2742,54 @@ describe("Missing operator shapes (issue #229)", () => {
     expect(result).toStrictEqual({
       kind: PlanKind.CONDITIONAL,
       filters: {
-        aOptionalString: { $eq: null },
+        $and: [
+          { aOptionalString: { $exists: true } },
+          { aOptionalString: { $eq: null } },
+        ],
       },
     });
 
-    const query = await Resource.find(result.filters || {});
-    expect(query.map((r) => r.key).sort()).toEqual(
-      fixtureResources
-        .filter((r) => r.aOptionalString == null)
-        .map((r) => r.key)
-        .sort()
+    await Resource.collection.updateOne(
+      { key: "c" },
+      { $set: { aOptionalString: null } }
     );
+    try {
+      expect(
+        (await Resource.find(result.filters || {})).map(({ key }) => key)
+      ).toEqual(["c"]);
+    } finally {
+      await Resource.collection.updateOne(
+        { key: "c" },
+        { $unset: { aOptionalString: "" } }
+      );
+    }
+  });
+
+  test("membership containing null excludes a missing field", async () => {
+    const queryPlan = conditionalPlan(
+      new PlanExpression("in", [
+        new PlanExpressionVariable(
+          "request.resource.attr.aOptionalString"
+        ),
+        new PlanExpressionValue([null]),
+      ])
+    );
+    const result = queryPlanToMongoose({ queryPlan, mapper: defaultMapper });
+
+    await Resource.collection.updateOne(
+      { key: "c" },
+      { $set: { aOptionalString: null } }
+    );
+    try {
+      expect(
+        (await Resource.find(result.filters || {})).map(({ key }) => key)
+      ).toEqual(["c"]);
+    } finally {
+      await Resource.collection.updateOne(
+        { key: "c" },
+        { $unset: { aOptionalString: "" } }
+      );
+    }
   });
 
   test("equal-field-to-field: aString == id", async () => {
@@ -2518,4 +2974,3 @@ describe("Missing operator shapes (issue #229)", () => {
     );
   });
 });
-

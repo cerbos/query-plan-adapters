@@ -77,14 +77,8 @@ SQLALCHEMY_UNSUPPORTED: Dict[str, str] = {
     for item in ACTIONS_FILE["adapterUnsupported"].get("sqlalchemy", [])
 }
 
-# Globally-`expectedUnsupported` planner shapes that this adapter DOES
-# translate: `matches` maps to SQLAlchemy's regexp_match, and on this harness's
-# SQLite backend SQLAlchemy registers a Python-`re` REGEXP implementation, so
-# the probe executes with CEL-compatible semantics. Verified differentially
-# against the oracle instead of asserted as a throw. (Regex dialects differ
-# across backends — CEL is RE2 — so on other databases semantics are
-# best-effort; recorded for corpus triage rather than regressing a documented
-# adapter feature to a throw.)
+# Globally expected-unsupported shapes promoted by this adapter. Regex is not
+# promoted because SQL dialect regex engines do not guarantee CEL/RE2 semantics.
 SQLALCHEMY_SUPPORTED_EXPECTED = {
     item["action"]
     for item in ACTIONS_FILE.get("adapterSupportedExpected", {}).get("sqlalchemy", [])
@@ -511,9 +505,7 @@ def adv_engine():
     @event.listens_for(engine, "connect")
     def _configure(dbapi_conn, _):
         # CEL string matching is case-sensitive; SQLite's LIKE is
-        # case-insensitive by default. SQLAlchemy's SQLite dialect supplies
-        # REGEXP for regexp_match(), so the manifest promotes p-matches into
-        # this adapter's oracle run.
+        # case-insensitive by default.
         dbapi_conn.execute("PRAGMA case_sensitive_like = ON")
 
     AdvBase.metadata.create_all(engine)

@@ -398,7 +398,15 @@ class TestGetQuery:
     ):
         plan = cerbos_client.plan_resources("matches-regex", principal, resource_desc)
         attr = {"request.resource.attr.aString": resource_table.aString}
-        query = get_query(plan, resource_table, attr)
+        with pytest.raises(ValueError, match="Unrecognised operator: matches"):
+            get_query(plan, resource_table, attr)
+
+        query = get_query(
+            plan,
+            resource_table,
+            attr,
+            operator_override_fns={"matches": lambda c, v: c.regexp_match(v)},
+        )
         res = conn.execute(query).fetchall()
         assert len(res) == 1
         assert res[0].name == "resource1"
@@ -904,7 +912,7 @@ class TestSemanticEdgeTranslations:
                 {"request.resource.attr.createdAt": string_table.c.created_at},
             )
 
-    def test_timestamp_accepts_nanosecond_precision(self):
+    def test_timestamp_rejects_inexact_nanosecond_precision(self):
         temporal_table = table("events", column("created_at", DateTime(timezone=True)))
         plan = _conditional_plan(
             {
@@ -928,6 +936,37 @@ class TestSemanticEdgeTranslations:
             }
         )
 
+        with pytest.raises(ValueError, match="precision"):
+            get_query(
+                plan,
+                temporal_table,
+                {"request.resource.attr.createdAt": temporal_table.c.created_at},
+            )
+
+    def test_timestamp_accepts_exact_trailing_nanosecond_zeroes(self):
+        temporal_table = table("events", column("created_at", DateTime(timezone=True)))
+        plan = _conditional_plan(
+            {
+                "operator": "eq",
+                "operands": [
+                    {
+                        "expression": {
+                            "operator": "timestamp",
+                            "operands": [
+                                {"variable": "request.resource.attr.createdAt"}
+                            ],
+                        }
+                    },
+                    {
+                        "expression": {
+                            "operator": "timestamp",
+                            "operands": [{"value": "2024-06-01T00:00:00.123456000Z"}],
+                        }
+                    },
+                ],
+            }
+        )
+
         query = get_query(
             plan,
             temporal_table,
@@ -935,6 +974,48 @@ class TestSemanticEdgeTranslations:
         )
         compiled = str(query.compile(compile_kwargs={"literal_binds": True}))
         assert "2024-06-01 00:00:00.123456" in compiled
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "2024-01-01",
+            "2024-W01-1T00:00:00Z",
+            "2024-01-01 00:00:00Z",
+            "0000-01-01T00:00:00Z",
+            "2024-02-30T00:00:00Z",
+            "9999-12-31T23:00:00-02:00",
+        ],
+    )
+    def test_timestamp_rejects_non_rfc3339_or_out_of_range_literals(self, value):
+        temporal_table = table("events", column("created_at", DateTime(timezone=True)))
+        plan = _conditional_plan(
+            {
+                "operator": "eq",
+                "operands": [
+                    {
+                        "expression": {
+                            "operator": "timestamp",
+                            "operands": [
+                                {"variable": "request.resource.attr.createdAt"}
+                            ],
+                        }
+                    },
+                    {
+                        "expression": {
+                            "operator": "timestamp",
+                            "operands": [{"value": value}],
+                        }
+                    },
+                ],
+            }
+        )
+
+        with pytest.raises(ValueError, match="RFC-3339|instant range"):
+            get_query(
+                plan,
+                temporal_table,
+                {"request.resource.attr.createdAt": temporal_table.c.created_at},
+            )
 
 
 class TestGetQueryOverrides:

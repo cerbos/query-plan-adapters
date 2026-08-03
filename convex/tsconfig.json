@@ -1,7 +1,7 @@
 {
   "extends": ["@tsconfig/node20", "@tsconfig/strictest"],
   "include": ["src"],
-  "exclude": ["src/integration.test.ts"],
+  "exclude": ["src/integration.test.ts", "src/adversarial.test.ts"],
   "compilerOptions": {
     "checkJs": true,
     "composite": true,

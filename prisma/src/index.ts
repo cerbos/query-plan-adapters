@@ -24,6 +24,59 @@ const MIRRORED_OPERATOR: Record<string, string> = {
   ge: "le",
 };
 
+const RFC3339_MILLISECOND_TIMESTAMP =
+  /^((?!0000)\d{4})-(\d{2})-(\d{2})[Tt](?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.(\d{1,9}))?(?:[Zz]|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/;
+const MIN_RFC3339_TIMESTAMP_MILLISECONDS = Date.parse(
+  "0001-01-01T00:00:00.000Z"
+);
+const MAX_RFC3339_TIMESTAMP_MILLISECONDS = Date.parse(
+  "9999-12-31T23:59:59.999Z"
+);
+
+function normalizeRfc3339Milliseconds(value: string): string {
+  const match = RFC3339_MILLISECOND_TIMESTAMP.exec(value);
+  const yearText = match?.[1];
+  const monthText = match?.[2];
+  const dayText = match?.[3];
+  const fraction = match?.[4] ?? "";
+  if (!yearText || !monthText || !dayText) {
+    throw new Error(`Invalid RFC 3339 timestamp value: ${value}`);
+  }
+  if ([...fraction.slice(3)].some((digit) => digit !== "0")) {
+    throw new Error(
+      `Timestamp value exceeds millisecond precision: ${value}`
+    );
+  }
+
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const calendarDate = new Date(0);
+  calendarDate.setUTCHours(0, 0, 0, 0);
+  calendarDate.setUTCFullYear(year, month - 1, day);
+  if (
+    calendarDate.getUTCFullYear() !== year ||
+    calendarDate.getUTCMonth() !== month - 1 ||
+    calendarDate.getUTCDate() !== day
+  ) {
+    throw new Error(`Invalid RFC 3339 timestamp value: ${value}`);
+  }
+
+  const milliseconds = Date.parse(value);
+  if (Number.isNaN(milliseconds)) {
+    throw new Error(`Invalid RFC 3339 timestamp value: ${value}`);
+  }
+  if (
+    milliseconds < MIN_RFC3339_TIMESTAMP_MILLISECONDS ||
+    milliseconds > MAX_RFC3339_TIMESTAMP_MILLISECONDS
+  ) {
+    throw new Error(
+      `Timestamp value is outside CEL's supported instant range: ${value}`
+    );
+  }
+  return new Date(milliseconds).toISOString();
+}
+
 /**
  * Normalize a binary comparison to field-side-first. The planner preserves policy source
  * order, so a constant may precede the field it constrains (`1 < R.attr.x` arrives as
@@ -1115,11 +1168,7 @@ function resolveTimestampOperand(
   if (!isValueOperand(operand) || typeof operand.value !== "string") {
     throw new Error("timestamp() requires a field reference or RFC 3339 string");
   }
-  const milliseconds = Date.parse(operand.value);
-  if (Number.isNaN(milliseconds)) {
-    throw new Error(`Invalid timestamp value: ${operand.value}`);
-  }
-  return { value: new Date(milliseconds).toISOString() };
+  return { value: normalizeRfc3339Milliseconds(operand.value) };
 }
 
 function tryFoldValueExpression(

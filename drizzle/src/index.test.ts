@@ -26,15 +26,6 @@ import type { MapperEntry, QueryPlanToDrizzleResult } from ".";
 
 const cerbos = new Cerbos("127.0.0.1:3593", { tls: false });
 const sqlite = new Database(":memory:");
-// Register a REGEXP function so SQLite can evaluate the matches() CEL operator.
-sqlite.function("regexp", (pattern: unknown, value: unknown) => {
-  if (value === null || value === undefined) return 0;
-  try {
-    return new RegExp(String(pattern)).test(String(value)) ? 1 : 0;
-  } catch {
-    return 0;
-  }
-});
 const db = drizzle(sqlite);
 
 const users = sqliteTable("users", {
@@ -745,8 +736,6 @@ const conditionalActions = [
   "arith-mult",
   "arith-div",
   "arith-mod",
-  // Regex match via CEL string.matches() — relies on SQLite REGEXP UDF.
-  "matches-regex",
   // CEL type conversions: string(), double(), int() — compiled to CAST.
   "convert-string",
   "convert-double",
@@ -1206,6 +1195,79 @@ describe("queryPlanToDrizzle", () => {
         mapper,
       })
     ).toThrow(/No mapping/);
+  });
+
+  test("fails closed for regex matches regardless of SQL dialect support", () => {
+    const queryPlan = buildPlan({
+      operator: "matches",
+      operands: [
+        { name: "request.resource.attr.aString" },
+        { value: "^foo$" },
+      ],
+    });
+
+    expect(() => queryPlanToDrizzle({ queryPlan, mapper })).toThrow(
+      /do not guarantee CEL\/RE2 semantics/
+    );
+  });
+
+  test.each([
+    "2024-01-01",
+    "0000-01-01T00:00:00Z",
+    "2024-02-30T00:00:00Z",
+    "2024-01-01T00:00:00.1234Z",
+    "9999-12-31T23:00:00-02:00",
+  ])("fails closed for inexact or invalid timestamp literal %s", (value) => {
+    const queryPlan = buildPlan({
+      operator: "eq",
+      operands: [
+        {
+          operator: "timestamp",
+          operands: [{ name: "request.resource.attr.createdAt" }],
+        },
+        { operator: "timestamp", operands: [{ value }] },
+      ],
+    });
+
+    expect(() =>
+      queryPlanToDrizzle({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.createdAt": {
+            column: resources.aString,
+            valueType: "timestamp",
+          },
+        },
+      })
+    ).toThrow(/RFC-3339|millisecond|instant range/);
+  });
+
+  test("accepts a timestamp literal whose excess fractional digits are zero", () => {
+    const queryPlan = buildPlan({
+      operator: "eq",
+      operands: [
+        {
+          operator: "timestamp",
+          operands: [{ name: "request.resource.attr.createdAt" }],
+        },
+        {
+          operator: "timestamp",
+          operands: [{ value: "2024-01-01T00:00:00.123000Z" }],
+        },
+      ],
+    });
+
+    expect(() =>
+      queryPlanToDrizzle({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.createdAt": {
+            column: resources.aString,
+            valueType: "timestamp",
+          },
+        },
+      })
+    ).not.toThrow();
   });
 });
 

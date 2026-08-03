@@ -6,15 +6,22 @@ import {
   PlanKind as PK,
   PlanResourcesResponse,
 } from "@cerbos/core";
+import type { Where } from "chromadb";
 
 export type PlanKind = PK;
 export const PlanKind = PK;
 
-type FieldMapper =
-  | {
-      [key: string]: string;
-    }
-  | ((key: string) => string);
+export interface FieldNameMapperConfig {
+  field: string;
+  required?: boolean;
+  numericType?: "integer" | "float";
+}
+
+type FieldNameMapperValue = string | FieldNameMapperConfig;
+
+export type FieldMapper =
+  | Record<string, FieldNameMapperValue>
+  | ((key: string) => FieldNameMapperValue);
 
 interface QueryPlanToChromaDBArgs {
   queryPlan: PlanResourcesResponse;
@@ -23,23 +30,64 @@ interface QueryPlanToChromaDBArgs {
 
 interface QueryPlanToChromaDBResult {
   kind: PlanKind;
-  filters?: Record<string, unknown>;
+  filters?: Where;
 }
+
+type ChromaLiteral = string | number | boolean;
+
+type BinaryOperands = {
+  variable: PlanExpressionVariable;
+  variableIndex: number;
+  value: PlanExpressionValue;
+};
+
+type ResolvedField = {
+  name: string;
+  numericType?: "integer" | "float";
+  required: boolean;
+};
+
+type FieldResolver = (key: string) => ResolvedField;
+
+const NEGATED_OPERATOR: Readonly<Record<string, string>> = {
+  eq: "ne",
+  ne: "eq",
+  lt: "ge",
+  gt: "le",
+  le: "gt",
+  ge: "lt",
+  in: "nin",
+};
+
+const MIRRORED_OPERATOR: Readonly<Record<string, string>> = {
+  eq: "eq",
+  ne: "ne",
+  lt: "gt",
+  le: "ge",
+  gt: "lt",
+  ge: "le",
+};
 
 export function queryPlanToChromaDB({
   queryPlan,
   fieldNameMapper,
 }: QueryPlanToChromaDBArgs): QueryPlanToChromaDBResult {
-  const toFieldName = (key: string) => {
-    if (typeof fieldNameMapper === "function") {
-      return fieldNameMapper(key);
+  const toField = (key: string): ResolvedField => {
+    const mapped =
+      typeof fieldNameMapper === "function"
+        ? fieldNameMapper(key)
+        : fieldNameMapper[key];
+    if (typeof mapped === "string") {
+      return { name: mapped, required: true };
     }
-
-    if (fieldNameMapper[key]) {
-      return fieldNameMapper[key];
+    if (mapped) {
+      return {
+        name: mapped.field,
+        numericType: mapped.numericType,
+        required: mapped.required ?? true,
+      };
     }
-
-    return key;
+    return { name: key, required: true };
   };
 
   switch (queryPlan.kind) {
@@ -55,145 +103,264 @@ export function queryPlanToChromaDB({
     case PlanKind.CONDITIONAL:
       return {
         kind: PlanKind.CONDITIONAL,
-        filters: mapOperand(queryPlan.condition, toFieldName),
+        filters: mapOperand(queryPlan.condition, toField),
       };
     default:
-      throw Error(`Invalid query plan.`);
+      throw Error("Invalid query plan.");
   }
 }
 
-function getOperandVariable(
-  operands: PlanExpressionOperand[],
-): string | undefined {
-  const op = operands.find((o) => o instanceof PlanExpressionVariable);
-  if (!op) return;
-  return (op as PlanExpressionVariable).name;
+function binaryOperands(operands: PlanExpressionOperand[]): BinaryOperands {
+  if (operands.length !== 2) {
+    throw Error("Expected exactly two operands");
+  }
+
+  let variable: PlanExpressionVariable | undefined;
+  let variableIndex = -1;
+  let value: PlanExpressionValue | undefined;
+
+  for (const [index, operand] of operands.entries()) {
+    if (operand instanceof PlanExpressionVariable) {
+      if (variable) {
+        throw Error(
+          "Variable-to-variable comparisons are not supported by ChromaDB filters",
+        );
+      }
+      variable = operand;
+      variableIndex = index;
+    } else if (operand instanceof PlanExpressionValue) {
+      if (value) {
+        throw Error("Value-to-value comparisons are not supported by ChromaDB filters");
+      }
+      value = operand;
+    } else {
+      throw Error("Nested expressions are not supported by ChromaDB filters");
+    }
+  }
+
+  if (!variable) {
+    throw Error(`Unexpected variable ${String(operands)}`);
+  }
+  if (!value) {
+    throw Error(
+      "Variable-to-variable comparisons are not supported by ChromaDB filters",
+    );
+  }
+
+  return { variable, variableIndex, value };
 }
 
-function getOperandValue(
-  operands: PlanExpressionOperand[],
-): unknown | undefined {
-  const op = operands.find((o) => o instanceof PlanExpressionValue);
-  if (!op) return;
-  return (op as PlanExpressionValue).value;
+function isChromaLiteral(value: unknown): value is ChromaLiteral {
+  return (
+    typeof value === "string" ||
+    typeof value === "boolean" ||
+    (typeof value === "number" && Number.isFinite(value))
+  );
 }
 
-const NEGATED_OPERATOR: Record<string, string> = {
-  eq: "ne",
-  ne: "eq",
-  lt: "ge",
-  gt: "le",
-  le: "gt",
-  ge: "lt",
-  in: "nin",
-};
+function requireLiteral(value: unknown, operator: string): ChromaLiteral {
+  if (!isChromaLiteral(value)) {
+    throw Error(
+      `${operator} requires a finite number, string, or boolean literal`,
+    );
+  }
+  return value;
+}
 
-const OPERATORS: Record<string, string> = {
-  eq: "$eq",
-  ne: "$ne",
-  in: "$in",
-  nin: "$nin",
-  lt: "$lt",
-  gt: "$gt",
-  le: "$lte",
-  ge: "$gte",
-};
+function requireNumber(value: unknown, operator: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw Error(`${operator} requires a finite number literal`);
+  }
+  return value;
+}
+
+function requireLiteralList(value: unknown, operator: string): ChromaLiteral[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw Error(`${operator} requires a non-empty literal list`);
+  }
+  if (!value.every(isChromaLiteral)) {
+    throw Error(
+      `${operator} requires a list containing only finite numbers, strings, or booleans`,
+    );
+  }
+  const firstType = typeof value[0];
+  if (!value.every((item) => typeof item === firstType)) {
+    throw Error(`${operator} requires a list whose values have one scalar type`);
+  }
+  return value;
+}
+
+function whereFor(
+  fieldName: string,
+  operator: string,
+  value: unknown,
+): Where {
+  switch (operator) {
+    case "eq":
+      return { [fieldName]: { $eq: requireLiteral(value, operator) } };
+    case "ne":
+      return { [fieldName]: { $ne: requireLiteral(value, operator) } };
+    case "lt":
+      return { [fieldName]: { $lt: requireNumber(value, operator) } };
+    case "le":
+      return { [fieldName]: { $lte: requireNumber(value, operator) } };
+    case "gt":
+      return { [fieldName]: { $gt: requireNumber(value, operator) } };
+    case "ge":
+      return { [fieldName]: { $gte: requireNumber(value, operator) } };
+    case "in":
+      return { [fieldName]: { $in: requireLiteralList(value, operator) } };
+    case "nin":
+      return { [fieldName]: { $nin: requireLiteralList(value, operator) } };
+    default:
+      throw Error(`Unsupported operator ${operator}`);
+  }
+}
+
+function normalizeOperator(operator: string, variableIndex: number): string {
+  if (variableIndex === 0) {
+    return operator;
+  }
+  if (operator === "in") {
+    throw Error(
+      "ChromaDB filters cannot test whether a literal is contained in a metadata field",
+    );
+  }
+
+  const mirrored = MIRRORED_OPERATOR[operator];
+  if (!mirrored) {
+    throw Error(`Unsupported operator ${operator}`);
+  }
+  return mirrored;
+}
+
+function mapComparison(
+  operator: string,
+  operands: PlanExpressionOperand[],
+  resolveField: FieldResolver,
+  negate: boolean,
+): Where {
+  const { variable, variableIndex, value } = binaryOperands(operands);
+  const normalized = normalizeOperator(operator, variableIndex);
+  const mappedOperator = negate ? NEGATED_OPERATOR[normalized] : normalized;
+  if (!mappedOperator) {
+    throw Error(`Cannot negate operator ${normalized}`);
+  }
+
+  const field = resolveField(variable.name);
+  if (!field.name) {
+    throw Error("Field name is required");
+  }
+  if (!field.required && (mappedOperator === "ne" || mappedOperator === "nin")) {
+    throw Error(
+      `${mappedOperator} is unsafe for optional Chroma metadata because missing fields match the filter`,
+    );
+  }
+  if (
+    ["lt", "le", "gt", "ge"].includes(mappedOperator) &&
+    typeof value.value === "number" &&
+    !Number.isInteger(value.value) &&
+    field.numericType !== "float"
+  ) {
+    throw Error(
+      `${mappedOperator} cannot safely compare a fractional threshold unless the mapped Chroma metadata field declares numericType: "float"`,
+    );
+  }
+  return whereFor(field.name, mappedOperator, value.value);
+}
+
+function mapBooleanVariable(
+  variable: PlanExpressionVariable,
+  resolveField: FieldResolver,
+  negate: boolean,
+): Where {
+  const field = resolveField(variable.name);
+  if (!field.name) {
+    throw Error("Field name is required");
+  }
+  if (negate && !field.required) {
+    throw Error(
+      "ne is unsafe for optional Chroma metadata because missing fields match the filter",
+    );
+  }
+  return whereFor(field.name, negate ? "ne" : "eq", true);
+}
 
 function negateOperand(
   operand: PlanExpressionOperand,
-  getFieldName: (key: string) => string,
-): Record<string, unknown> {
-  if (!(operand instanceof PlanExpression))
+  resolveField: FieldResolver,
+): Where {
+  if (operand instanceof PlanExpressionVariable) {
+    return mapBooleanVariable(operand, resolveField, true);
+  }
+  if (!(operand instanceof PlanExpression)) {
     throw Error(
       `Query plan did not contain an expression for operand ${String(operand)}`,
     );
+  }
 
   const { operator, operands } = operand;
 
   if (operator === "and") {
     if (operands.length < 2) throw Error("Expected at least 2 operands");
     return {
-      $or: operands.map((o) => negateOperand(o, getFieldName)),
+      $or: operands.map((child) => negateOperand(child, resolveField)),
     };
   }
 
   if (operator === "or") {
     if (operands.length < 2) throw Error("Expected at least 2 operands");
     return {
-      $and: operands.map((o) => negateOperand(o, getFieldName)),
+      $and: operands.map((child) => negateOperand(child, resolveField)),
     };
   }
 
   if (operator === "not") {
     if (operands.length !== 1 || !operands[0])
       throw Error("Expected exactly one operand");
-    return mapOperand(operands[0], getFieldName);
+    return mapOperand(operands[0], resolveField);
   }
 
-  const negated = NEGATED_OPERATOR[operator];
-  if (!negated) throw Error(`Cannot negate operator ${operator}`);
-
-  const chromaOp = OPERATORS[negated];
-  if (!chromaOp) throw Error(`Unsupported negated operator ${negated}`);
-
-  const opVariable = getOperandVariable(operands);
-  if (!opVariable) throw Error(`Unexpected variable ${String(operands)}`);
-
-  const opValue = getOperandValue(operands);
-  if (opValue === undefined)
-    throw Error(
-      `Variable-to-variable comparisons are not supported by ChromaDB filters`,
-    );
-  const fieldName = getFieldName(opVariable);
-  if (!fieldName) throw Error("Field name is required");
-
-  return { [fieldName]: { [chromaOp]: opValue } };
+  if (!NEGATED_OPERATOR[operator]) {
+    throw Error(`Cannot negate operator ${operator}`);
+  }
+  return mapComparison(operator, operands, resolveField, true);
 }
 
 function mapOperand(
   operand: PlanExpressionOperand,
-  getFieldName: (key: string) => string,
-): Record<string, unknown> {
-  if (!(operand instanceof PlanExpression))
+  resolveField: FieldResolver,
+): Where {
+  if (operand instanceof PlanExpressionVariable) {
+    return mapBooleanVariable(operand, resolveField, false);
+  }
+  if (!(operand instanceof PlanExpression)) {
     throw Error(
       `Query plan did not contain an expression for operand ${String(operand)}`,
     );
+  }
 
   const { operator, operands } = operand;
 
   if (operator === "and") {
     if (operands.length < 2) throw Error("Expected at least 2 operands");
     return {
-      $and: operands.map((o) => mapOperand(o, getFieldName)),
+      $and: operands.map((child) => mapOperand(child, resolveField)),
     };
   }
 
   if (operator === "or") {
     if (operands.length < 2) throw Error("Expected at least 2 operands");
     return {
-      $or: operands.map((o) => mapOperand(o, getFieldName)),
+      $or: operands.map((child) => mapOperand(child, resolveField)),
     };
   }
 
   if (operator === "not") {
     if (operands.length !== 1 || !operands[0])
       throw Error("Expected exactly one operand");
-    return negateOperand(operands[0], getFieldName);
+    return negateOperand(operands[0], resolveField);
   }
 
-  const chromaOp = OPERATORS[operator];
-  if (!chromaOp) throw Error(`Unsupported operator ${operator}`);
-
-  const opVariable = getOperandVariable(operands);
-  if (!opVariable) throw Error(`Unexpected variable ${String(operands)}`);
-
-  const opValue = getOperandValue(operands);
-  if (opValue === undefined)
-    throw Error(
-      `Variable-to-variable comparisons are not supported by ChromaDB filters`,
-    );
-  const fieldName = getFieldName(opVariable);
-  if (!fieldName) throw Error("Field name is required");
-
-  return { [fieldName]: { [chromaOp]: opValue } };
+  return mapComparison(operator, operands, resolveField, false);
 }

@@ -12,6 +12,18 @@ An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanRe
 - Supports relation-aware mappings, including nested relations and many-to-many joins
 - Works with Drizzle SQLite, PostgreSQL, MySQL and PlanetScale drivers
 
+## Conformance contract
+
+The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 20 hostile seed rows and real Drizzle queries. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
+
+| Classification | Coverage |
+| --- | --- |
+| Oracle-tested | 111 reference conformance actions |
+| Fail-closed corpus shapes | Sub-millisecond `now()` thresholds plus regex `matches()`, ordered list indexing/`get-field`, and `timestamp()` over an untyped string field (5 actions) |
+| Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
+
+The oracle coverage includes value-first and field-to-field comparisons, escaped string predicates, relation counts and nested collection macros, null/error propagation, arithmetic and ternaries, hierarchy operations, typed timestamps, and multi-hop relations. The five fail-closed shapes throw rather than return a broader SQL filter. `matches()` is rejected because SQL regex dialects do not guarantee CEL/RE2 semantics.
+
 ## How it works
 
 Cerbos can respond to a `PlanResources` request with one of three plan kinds. The adapter mirrors that API:
@@ -131,7 +143,7 @@ Every mapper entry can be:
 - A relation mapping (described below) for nested resource structures.
 
 Fields used through CEL's `timestamp()` must opt in with `valueType: "timestamp"`.
-The adapter then normalizes RFC 3339 constants to UTC before comparing them:
+The adapter then validates strict RFC 3339 constants and normalizes them to UTC before comparing them. The instant must fall inside CEL's supported year 0001–9999 range and be exactly representable at millisecond precision: fractional digits after the third must be zero. The mapped column and database must preserve the same precision.
 
 ```ts
 "request.resource.attr.createdAt": {

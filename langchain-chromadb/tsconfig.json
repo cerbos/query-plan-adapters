@@ -1,7 +1,7 @@
 {
   "extends": ["@tsconfig/node22", "@tsconfig/strictest"],
   "include": ["src"],
-  "exclude": ["src/index.test.ts"],
+  "exclude": ["src/index.test.ts", "src/adversarial.test.ts"],
   "compilerOptions": {
     "checkJs": true,
     "composite": true,

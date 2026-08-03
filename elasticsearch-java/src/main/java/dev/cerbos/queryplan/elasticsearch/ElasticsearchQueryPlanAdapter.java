@@ -7,12 +7,25 @@ import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand;
 import dev.cerbos.api.v1.response.Response.PlanResourcesResponse;
 import dev.cerbos.sdk.PlanResourcesResult;
 
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 public class ElasticsearchQueryPlanAdapter {
+
+    private static final Pattern RFC3339_TIMESTAMP = Pattern.compile(
+            "^(?!0000-)[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+                    + "(?:\\.[0-9]+)?(?:Z|[+-][0-9]{2}:[0-9]{2})$");
+    private static final Instant CEL_TIMESTAMP_MIN = Instant.parse("0001-01-01T00:00:00Z");
+    private static final Instant CEL_TIMESTAMP_MAX =
+            Instant.parse("9999-12-31T23:59:59.999999999Z");
 
     public sealed interface Result permits Result.AlwaysAllowed, Result.AlwaysDenied, Result.Conditional {
         record AlwaysAllowed() implements Result {}
@@ -21,6 +34,19 @@ public class ElasticsearchQueryPlanAdapter {
     }
 
     private record LambdaScope(String nestedPath, String lambdaVariable) {}
+
+    private record SizeComparison(
+            String variable, String field, double value, boolean nonEmpty, boolean empty) {}
+
+    private record ResolvedOperand(String variable, Object value, boolean isVariable) {
+        static ResolvedOperand variable(String variable) {
+            return new ResolvedOperand(variable, null, true);
+        }
+
+        static ResolvedOperand value(Object value) {
+            return new ResolvedOperand(null, value, false);
+        }
+    }
 
     private static final Map<String, OperatorFunction> DEFAULT_OPERATORS = Map.ofEntries(
             Map.entry("eq", (field, value) ->
@@ -44,8 +70,7 @@ public class ElasticsearchQueryPlanAdapter {
                     Map.of("prefix", Map.of(field, Map.of("value", value)))),
             Map.entry("endsWith", (field, value) ->
                     Map.of("wildcard", Map.of(field, Map.of("value", "*" + escapeWildcard(value))))),
-            Map.entry("matches", (field, value) ->
-                    Map.of("regexp", Map.of(field, Map.of("value", toLuceneRegex(value.toString()))))),
+            Map.entry("matches", ElasticsearchQueryPlanAdapter::matchesQuery),
             Map.entry("hasIntersection", (field, value) ->
                     Map.of("terms", Map.of(field, value instanceof List<?> l ? l : List.of(value)))),
             Map.entry("isSet", (field, value) ->
@@ -161,6 +186,24 @@ public class ElasticsearchQueryPlanAdapter {
         };
     }
 
+    private static Map<String, Object> traverseOperandFalse(
+            Operand operand,
+            Map<String, String> fieldMap,
+            Map<String, OperatorFunction> overrides,
+            Set<String> nestedPaths) {
+        return switch (operand.getNodeCase()) {
+            case EXPRESSION -> traverseExpressionFalse(
+                    operand.getExpression(), fieldMap, overrides, nestedPaths);
+            case VARIABLE -> {
+                String field = mappedField(operand.getVariable(), fieldMap);
+                OperatorFunction fn = overrides.getOrDefault("eq", DEFAULT_OPERATORS.get("eq"));
+                yield fn.apply(field, false);
+            }
+            default -> throw new IllegalArgumentException(
+                    "Unexpected operand type: " + operand.getNodeCase());
+        };
+    }
+
     private static Map<String, Object> traverseExpression(
             Expression expression,
             Map<String, String> fieldMap,
@@ -183,21 +226,58 @@ public class ElasticsearchQueryPlanAdapter {
                 yield Map.of("bool", Map.of("should", clauses, "minimum_should_match", 1));
             }
             case "not" -> {
-                List<Map<String, Object>> clauses = operands.stream()
-                        .map(o -> traverseOperand(o, fieldMap, overrides, nestedPaths))
-                        .toList();
-                yield Map.of("bool", Map.of("must_not", clauses));
+                requireUnary("not", operands);
+                yield traverseOperandFalse(operands.get(0), fieldMap, overrides, nestedPaths);
             }
             case "exists", "all", "except" ->
-                    handleCollectionOperator(operator, operands, fieldMap, overrides, nestedPaths);
+                    handleCollectionOperator(
+                            operator, operands, fieldMap, overrides, nestedPaths, true);
+            case "exists_one" -> throw new IllegalArgumentException(
+                    "exists_one cannot be expressed by Elasticsearch nested queries without scripts");
             case "hasIntersection" ->
                     handleHasIntersection(operands, fieldMap, overrides, nestedPaths);
             default -> {
-                Map<String, Object> sizeResult = trySizeComparison(operator, operands, fieldMap);
+                Map<String, Object> sizeResult =
+                        trySizeComparison(operator, operands, fieldMap, nestedPaths);
                 if (sizeResult != null) {
                     yield sizeResult;
                 }
                 yield applyLeafOperator(operator, operands, fieldMap, overrides);
+            }
+        };
+    }
+
+    private static Map<String, Object> traverseExpressionFalse(
+            Expression expression,
+            Map<String, String> fieldMap,
+            Map<String, OperatorFunction> overrides,
+            Set<String> nestedPaths) {
+        String operator = expression.getOperator();
+        List<Operand> operands = expression.getOperandsList();
+
+        return switch (operator) {
+            case "and" -> boolShould(operands.stream()
+                    .map(o -> traverseOperandFalse(o, fieldMap, overrides, nestedPaths)).toList());
+            case "or" -> boolMust(operands.stream()
+                    .map(o -> traverseOperandFalse(o, fieldMap, overrides, nestedPaths)).toList());
+            case "not" -> {
+                requireUnary("not", operands);
+                yield traverseOperand(operands.get(0), fieldMap, overrides, nestedPaths);
+            }
+            case "exists", "all", "except" ->
+                    handleCollectionOperator(
+                            operator, operands, fieldMap, overrides, nestedPaths, false);
+            case "exists_one" -> throw new IllegalArgumentException(
+                    "exists_one cannot be expressed by Elasticsearch nested queries without scripts");
+            case "hasIntersection" -> throw new IllegalArgumentException(
+                    "Negated hasIntersection cannot distinguish a missing collection from an empty collection in Elasticsearch");
+            default -> {
+                Map<String, Object> sizeResult =
+                        trySizeComparisonFalse(operator, operands, fieldMap, nestedPaths);
+                if (sizeResult != null) {
+                    yield sizeResult;
+                }
+                yield applyLeafOperatorFalse(operator, operands, fieldMap, overrides);
             }
         };
     }
@@ -209,7 +289,8 @@ public class ElasticsearchQueryPlanAdapter {
             List<Operand> operands,
             Map<String, String> fieldMap,
             Map<String, OperatorFunction> overrides,
-            Set<String> nestedPaths) {
+            Set<String> nestedPaths,
+            boolean whenTrue) {
         if (operands.size() != 2) {
             throw new IllegalArgumentException(
                     operator + " requires exactly 2 operands, got " + operands.size());
@@ -224,10 +305,7 @@ public class ElasticsearchQueryPlanAdapter {
         }
 
         String cerbosAttr = listOperand.getVariable();
-        String esField = fieldMap.get(cerbosAttr);
-        if (esField == null) {
-            throw new IllegalArgumentException("Unknown attribute: " + cerbosAttr);
-        }
+        String esField = mappedField(cerbosAttr, fieldMap);
 
         if (!nestedPaths.contains(esField)) {
             throw new IllegalArgumentException(
@@ -259,15 +337,38 @@ public class ElasticsearchQueryPlanAdapter {
         }
         String lambdaVar = lambdaVarOperand.getVariable();
         LambdaScope scope = new LambdaScope(esField, lambdaVar);
-        Map<String, Object> innerQuery = traverseOperandScoped(bodyOperand, scope, overrides, nestedPaths);
 
+        if (whenTrue && "all".equals(operator)) {
+            throw new IllegalArgumentException(
+                    "all cannot distinguish a missing collection from an empty collection in Elasticsearch");
+        }
+        if (!whenTrue && "exists".equals(operator)) {
+            throw new IllegalArgumentException(
+                    "Negated exists cannot distinguish a missing collection from an empty collection in Elasticsearch");
+        }
+
+        Map<String, Object> innerTrue =
+                traverseOperandScoped(bodyOperand, scope, overrides, nestedPaths);
+
+        if (whenTrue) {
+            return switch (operator) {
+                case "exists" -> nestedQuery(esField, innerTrue);
+                case "all" -> notQuery(nestedQuery(esField, notQuery(innerTrue)));
+                case "except" -> nestedQuery(esField, notQuery(innerTrue));
+                default -> throw new IllegalArgumentException(
+                        "Unknown collection operator: " + operator);
+            };
+        }
+
+        Map<String, Object> innerFalse =
+                traverseOperandScopedFalse(bodyOperand, scope, overrides, nestedPaths);
         return switch (operator) {
-            case "exists" -> Map.of("nested", Map.of("path", esField, "query", innerQuery));
-            case "all" -> Map.of("bool", Map.of("must_not", List.of(
-                    Map.of("nested", Map.of("path", esField, "query",
-                            Map.of("bool", Map.of("must_not", List.of(innerQuery))))))));
-            case "except" -> Map.of("nested", Map.of("path", esField, "query",
-                    Map.of("bool", Map.of("must_not", List.of(innerQuery)))));
+            // exists is false only when every element is definitely false. An element for which
+            // the lambda is undefined prevents both true and false, preserving CEL errors.
+            case "exists" -> notQuery(nestedQuery(esField, notQuery(innerFalse)));
+            case "all" -> nestedQuery(esField, innerFalse);
+            case "except" -> throw new IllegalArgumentException(
+                    "Negated except cannot be expressed safely without element error tracking");
             default -> throw new IllegalArgumentException("Unknown collection operator: " + operator);
         };
     }
@@ -291,6 +392,14 @@ public class ElasticsearchQueryPlanAdapter {
             return handleMapHasIntersection(first.getExpression(), second, fieldMap, nestedPaths);
         }
 
+        if (second.getNodeCase() == Operand.NodeCase.VALUE) {
+            Object values = protoValueToJava(second.getValue());
+            if (values instanceof List<?> list && list.stream().anyMatch(java.util.Objects::isNull)) {
+                throw new IllegalArgumentException(
+                        "hasIntersection with null requires an explicit null-value mapping");
+            }
+        }
+
         return applyLeafOperator("hasIntersection", operands, fieldMap, overrides);
     }
 
@@ -310,10 +419,7 @@ public class ElasticsearchQueryPlanAdapter {
         }
 
         String cerbosAttr = listOperand.getVariable();
-        String esField = fieldMap.get(cerbosAttr);
-        if (esField == null) {
-            throw new IllegalArgumentException("Unknown attribute: " + cerbosAttr);
-        }
+        String esField = mappedField(cerbosAttr, fieldMap);
 
         if (!nestedPaths.contains(esField)) {
             throw new IllegalArgumentException(
@@ -352,8 +458,10 @@ public class ElasticsearchQueryPlanAdapter {
         Object values = protoValueToJava(valuesOperand.getValue());
         List<?> valueList = values instanceof List<?> l ? l : List.of(values);
 
-        return Map.of("nested", Map.of("path", esField, "query",
-                Map.of("terms", Map.of(nestedField, valueList))));
+        Map<String, Object> matchingValue = nestedQuery(
+                esField, Map.of("terms", Map.of(nestedField, valueList)));
+        Map<String, Object> missingProjection = nestedQuery(esField, notExists(nestedField));
+        return boolMust(List.of(matchingValue, notQuery(missingProjection)));
     }
 
     // --- Scoped traversal (inside lambda) ---
@@ -369,6 +477,24 @@ public class ElasticsearchQueryPlanAdapter {
                 String field = resolveScopedVariable(operand.getVariable(), scope);
                 OperatorFunction fn = overrides.getOrDefault("eq", DEFAULT_OPERATORS.get("eq"));
                 yield fn.apply(field, true);
+            }
+            default -> throw new IllegalArgumentException(
+                    "Unexpected operand type: " + operand.getNodeCase());
+        };
+    }
+
+    private static Map<String, Object> traverseOperandScopedFalse(
+            Operand operand,
+            LambdaScope scope,
+            Map<String, OperatorFunction> overrides,
+            Set<String> nestedPaths) {
+        return switch (operand.getNodeCase()) {
+            case EXPRESSION -> traverseExpressionScopedFalse(
+                    operand.getExpression(), scope, overrides, nestedPaths);
+            case VARIABLE -> {
+                String field = resolveScopedVariable(operand.getVariable(), scope);
+                OperatorFunction fn = overrides.getOrDefault("eq", DEFAULT_OPERATORS.get("eq"));
+                yield fn.apply(field, false);
             }
             default -> throw new IllegalArgumentException(
                     "Unexpected operand type: " + operand.getNodeCase());
@@ -397,12 +523,30 @@ public class ElasticsearchQueryPlanAdapter {
                 yield Map.of("bool", Map.of("should", clauses, "minimum_should_match", 1));
             }
             case "not" -> {
-                List<Map<String, Object>> clauses = operands.stream()
-                        .map(o -> traverseOperandScoped(o, scope, overrides, nestedPaths))
-                        .toList();
-                yield Map.of("bool", Map.of("must_not", clauses));
+                requireUnary("not", operands);
+                yield traverseOperandScopedFalse(operands.get(0), scope, overrides, nestedPaths);
             }
             default -> applyScopedLeafOperator(operator, operands, scope, overrides);
+        };
+    }
+
+    private static Map<String, Object> traverseExpressionScopedFalse(
+            Expression expression,
+            LambdaScope scope,
+            Map<String, OperatorFunction> overrides,
+            Set<String> nestedPaths) {
+        String operator = expression.getOperator();
+        List<Operand> operands = expression.getOperandsList();
+        return switch (operator) {
+            case "and" -> boolShould(operands.stream()
+                    .map(o -> traverseOperandScopedFalse(o, scope, overrides, nestedPaths)).toList());
+            case "or" -> boolMust(operands.stream()
+                    .map(o -> traverseOperandScopedFalse(o, scope, overrides, nestedPaths)).toList());
+            case "not" -> {
+                requireUnary("not", operands);
+                yield traverseOperandScoped(operands.get(0), scope, overrides, nestedPaths);
+            }
+            default -> applyScopedLeafOperatorFalse(operator, operands, scope, overrides);
         };
     }
 
@@ -411,43 +555,17 @@ public class ElasticsearchQueryPlanAdapter {
             List<Operand> operands,
             LambdaScope scope,
             Map<String, OperatorFunction> overrides) {
-        String variable = null;
-        Object value = null;
+        return applyResolvedLeaf(
+                operator, operands, variable -> resolveScopedVariable(variable, scope), overrides, true);
+    }
 
-        for (Operand op : operands) {
-            switch (op.getNodeCase()) {
-                case VARIABLE -> variable = op.getVariable();
-                case VALUE -> value = protoValueToJava(op.getValue());
-                default -> throw new IllegalArgumentException(
-                        "Unexpected operand type in scoped leaf expression: " + op.getNodeCase());
-            }
-        }
-
-        if (variable == null) {
-            throw new IllegalArgumentException("Missing variable in expression");
-        }
-
-        String field = resolveScopedVariable(variable, scope);
-
-        if (value == null) {
-            return switch (operator) {
-                case "eq" -> Map.of("bool", Map.of("must_not", List.of(
-                        Map.of("exists", Map.of("field", field)))));
-                case "ne" -> Map.of("exists", Map.of("field", field));
-                default -> throw new IllegalArgumentException(
-                        "Null values are only supported with eq and ne operators");
-            };
-        }
-
-        OperatorFunction fn = overrides.get(operator);
-        if (fn == null) {
-            fn = DEFAULT_OPERATORS.get(operator);
-        }
-        if (fn == null) {
-            throw new IllegalArgumentException("Unknown operator: " + operator);
-        }
-
-        return fn.apply(field, value);
+    private static Map<String, Object> applyScopedLeafOperatorFalse(
+            String operator,
+            List<Operand> operands,
+            LambdaScope scope,
+            Map<String, OperatorFunction> overrides) {
+        return applyResolvedLeaf(
+                operator, operands, variable -> resolveScopedVariable(variable, scope), overrides, false);
     }
 
     private static String resolveScopedVariable(String variable, LambdaScope scope) {
@@ -469,59 +587,90 @@ public class ElasticsearchQueryPlanAdapter {
     private static Map<String, Object> trySizeComparison(
             String operator,
             List<Operand> operands,
-            Map<String, String> fieldMap) {
-        Expression sizeExpr = null;
-        long numValue = -1;
+            Map<String, String> fieldMap,
+            Set<String> nestedPaths) {
+        SizeComparison comparison = resolveSizeComparison(operator, operands, fieldMap);
+        if (comparison == null) return null;
 
-        for (Operand op : operands) {
-            switch (op.getNodeCase()) {
+        Map<String, Object> present = collectionPresentQuery(comparison.field(), nestedPaths);
+        if (comparison.nonEmpty()) return present;
+        if (comparison.empty()) throw unsafeEmptyCollectionSize(comparison.variable());
+        throw unsupportedSizeComparison(operator, comparison);
+    }
+
+    private static Map<String, Object> trySizeComparisonFalse(
+            String operator,
+            List<Operand> operands,
+            Map<String, String> fieldMap,
+            Set<String> nestedPaths) {
+        SizeComparison comparison = resolveSizeComparison(operator, operands, fieldMap);
+        if (comparison == null) return null;
+
+        Map<String, Object> present = collectionPresentQuery(comparison.field(), nestedPaths);
+        if (comparison.empty()) return present;
+        if (comparison.nonEmpty()) throw unsafeEmptyCollectionSize(comparison.variable());
+        throw unsupportedSizeComparison(operator, comparison);
+    }
+
+    private static SizeComparison resolveSizeComparison(
+            String operator,
+            List<Operand> operands,
+            Map<String, String> fieldMap) {
+        Expression sizeExpression = null;
+        Double value = null;
+        for (Operand operand : operands) {
+            switch (operand.getNodeCase()) {
                 case EXPRESSION -> {
-                    if ("size".equals(op.getExpression().getOperator())) {
-                        sizeExpr = op.getExpression();
+                    if ("size".equals(operand.getExpression().getOperator())) {
+                        sizeExpression = operand.getExpression();
                     }
                 }
                 case VALUE -> {
-                    Object v = protoValueToJava(op.getValue());
-                    if (v instanceof Number n) {
-                        numValue = n.longValue();
-                    }
+                    Object resolved = protoValueToJava(operand.getValue());
+                    if (resolved instanceof Number number) value = number.doubleValue();
                 }
                 default -> {}
             }
         }
+        if (sizeExpression == null) return null;
 
-        if (sizeExpr == null) {
-            return null;
-        }
-
-        List<Operand> sizeOperands = sizeExpr.getOperandsList();
-        if (sizeOperands.size() != 1 || sizeOperands.get(0).getNodeCase() != Operand.NodeCase.VARIABLE) {
+        List<Operand> sizeOperands = sizeExpression.getOperandsList();
+        if (sizeOperands.size() != 1
+                || sizeOperands.get(0).getNodeCase() != Operand.NodeCase.VARIABLE) {
             throw new IllegalArgumentException("Unsupported size() expression");
+        }
+        if (value == null || !Double.isFinite(value)) {
+            throw new IllegalArgumentException("size comparison requires a finite numeric value");
         }
 
         String variable = sizeOperands.get(0).getVariable();
-        String field = fieldMap.get(variable);
-        if (field == null) {
-            throw new IllegalArgumentException("Unknown attribute: " + variable);
-        }
+        boolean nonEmpty = (operator.equals("gt") && value == 0.0)
+                || (operator.equals("ge") && value == 1.0);
+        boolean empty = (operator.equals("eq") && value == 0.0)
+                || (operator.equals("le") && value == 0.0)
+                || (operator.equals("lt") && value == 1.0);
+        return new SizeComparison(variable, mappedField(variable, fieldMap), value, nonEmpty, empty);
+    }
 
-        boolean nonEmpty = (operator.equals("gt") && numValue == 0)
-                || (operator.equals("ge") && numValue == 1);
-        boolean empty = (operator.equals("eq") && numValue == 0)
-                || (operator.equals("le") && numValue == 0)
-                || (operator.equals("lt") && numValue == 1);
+    private static Map<String, Object> collectionPresentQuery(
+            String field, Set<String> nestedPaths) {
+        return nestedPaths.contains(field)
+                ? nestedQuery(field, Map.of("match_all", Map.of()))
+                : exists(field);
+    }
 
-        if (nonEmpty) {
-            return Map.of("exists", Map.of("field", field));
-        }
-        if (empty) {
-            return Map.of("bool", Map.of("must_not", List.of(
-                    Map.of("exists", Map.of("field", field)))));
-        }
-
-        throw new IllegalArgumentException(
-                "Unsupported size comparison: size(" + variable + ") " + operator + " " + numValue
+    private static IllegalArgumentException unsupportedSizeComparison(
+            String operator, SizeComparison comparison) {
+        return new IllegalArgumentException(
+                "Unsupported size comparison: size(" + comparison.variable() + ") " + operator + " "
+                        + comparison.value()
                         + ". Only emptiness checks (size > 0, size == 0) are supported.");
+    }
+
+    private static IllegalArgumentException unsafeEmptyCollectionSize(String variable) {
+        return new IllegalArgumentException(
+                "size(" + variable + ") emptiness cannot distinguish a missing collection "
+                        + "from an empty collection in Elasticsearch");
     }
 
     // --- Leaf operators ---
@@ -531,46 +680,259 @@ public class ElasticsearchQueryPlanAdapter {
             List<Operand> operands,
             Map<String, String> fieldMap,
             Map<String, OperatorFunction> overrides) {
-        String variable = null;
-        Object value = null;
+        return applyResolvedLeaf(operator, operands, variable -> mappedField(variable, fieldMap),
+                overrides, true);
+    }
 
-        for (Operand op : operands) {
-            switch (op.getNodeCase()) {
-                case VARIABLE -> variable = op.getVariable();
-                case VALUE -> value = protoValueToJava(op.getValue());
-                default -> throw new IllegalArgumentException(
-                        "Unexpected operand type in leaf expression: " + op.getNodeCase());
+    private static Map<String, Object> applyLeafOperatorFalse(
+            String operator,
+            List<Operand> operands,
+            Map<String, String> fieldMap,
+            Map<String, OperatorFunction> overrides) {
+        return applyResolvedLeaf(operator, operands, variable -> mappedField(variable, fieldMap),
+                overrides, false);
+    }
+
+    private static Map<String, Object> applyResolvedLeaf(
+            String operator,
+            List<Operand> operands,
+            Function<String, String> fieldResolver,
+            Map<String, OperatorFunction> overrides,
+            boolean whenTrue) {
+        if (operands.size() != 2) {
+            throw new IllegalArgumentException(
+                    operator + " requires exactly 2 operands, got " + operands.size());
+        }
+
+        ResolvedOperand left = resolveLeafOperand(operands.get(0));
+        ResolvedOperand right = resolveLeafOperand(operands.get(1));
+        if (left.isVariable() == right.isVariable()) {
+            throw new IllegalArgumentException(left.isVariable()
+                    ? "Elasticsearch Query DSL cannot compare two document fields without scripts"
+                    : "Leaf expression must contain exactly one document field");
+        }
+
+        boolean variableFirst = left.isVariable();
+        String variable = variableFirst ? left.variable() : right.variable();
+        Object value = variableFirst ? right.value() : left.value();
+        String field = fieldResolver.apply(variable);
+
+        String normalizedOperator = normalizeLeafOperator(operator, variableFirst);
+        if (!whenTrue && "in".equals(normalizedOperator) && !variableFirst) {
+            throw new IllegalArgumentException(
+                    "Negated membership in a document collection cannot distinguish a missing "
+                            + "collection from an empty collection in Elasticsearch");
+        }
+        if (value == null) {
+            return nullLeafQuery(normalizedOperator, field, variableFirst, whenTrue);
+        }
+        if ("in".equals(normalizedOperator) && value instanceof List<?> values
+                && values.stream().anyMatch(java.util.Objects::isNull)) {
+            return nullAwareMembershipQuery(field, values, whenTrue);
+        }
+
+        Map<String, Object> positive;
+        if ("in".equals(normalizedOperator)) {
+            positive = membershipQuery(field, value);
+        } else if ("ne".equals(normalizedOperator) && !overrides.containsKey("ne")) {
+            positive = definedAndNot(field, DEFAULT_OPERATORS.get("eq").apply(field, value));
+        } else {
+            OperatorFunction function = overrides.getOrDefault(
+                    normalizedOperator, DEFAULT_OPERATORS.get(normalizedOperator));
+            if (function == null) {
+                throw new IllegalArgumentException("Unknown operator: " + normalizedOperator);
             }
+            positive = function.apply(field, value);
+        }
+        if (whenTrue) {
+            return positive;
         }
 
-        if (variable == null) {
-            throw new IllegalArgumentException("Missing variable in expression");
-        }
+        return switch (normalizedOperator) {
+            case "eq" -> definedAndNot(field, positive);
+            case "ne" -> overrides.getOrDefault("eq", DEFAULT_OPERATORS.get("eq"))
+                    .apply(field, value);
+            case "lt" -> range(field, "gte", value);
+            case "le" -> range(field, "gt", value);
+            case "gt" -> range(field, "lte", value);
+            case "ge" -> range(field, "lt", value);
+            case "in", "contains", "startsWith", "endsWith", "matches" ->
+                    definedAndNot(field, positive);
+            case "isSet" -> Boolean.TRUE.equals(value) ? notExists(field) : exists(field);
+            default -> throw new IllegalArgumentException(
+                    "Cannot safely negate operator without scripts: " + normalizedOperator);
+        };
+    }
 
+    private static ResolvedOperand resolveLeafOperand(Operand operand) {
+        return switch (operand.getNodeCase()) {
+            case VARIABLE -> ResolvedOperand.variable(operand.getVariable());
+            case VALUE -> ResolvedOperand.value(protoValueToJava(operand.getValue()));
+            case EXPRESSION -> {
+                Expression expression = operand.getExpression();
+                if (!"timestamp".equals(expression.getOperator())
+                        || expression.getOperandsCount() != 1) {
+                    throw new IllegalArgumentException(
+                            "Unexpected " + expression.getOperator() + " expression in leaf operand");
+                }
+                ResolvedOperand resolved = resolveLeafOperand(expression.getOperands(0));
+                if (!resolved.isVariable()) {
+                    validateTimestampLiteral(resolved.value());
+                }
+                yield resolved;
+            }
+            default -> throw new IllegalArgumentException(
+                    "Unexpected operand type in leaf expression: " + operand.getNodeCase());
+        };
+    }
+
+    private static void validateTimestampLiteral(Object value) {
+        if (!(value instanceof String literal)) {
+            throw new IllegalArgumentException("timestamp() requires an RFC 3339 string literal");
+        }
+        if (!RFC3339_TIMESTAMP.matcher(literal).matches()) {
+            throw invalidTimestampLiteral(literal, null);
+        }
+        try {
+            Instant instant = OffsetDateTime.parse(literal, DateTimeFormatter.ISO_OFFSET_DATE_TIME)
+                    .toInstant();
+            if (instant.isBefore(CEL_TIMESTAMP_MIN) || instant.isAfter(CEL_TIMESTAMP_MAX)) {
+                throw invalidTimestampLiteral(literal, null);
+            }
+            int nanos = instant.getNano();
+            if (nanos % 1_000_000 != 0) {
+                throw new IllegalArgumentException(
+                        "Sub-millisecond timestamp literals require an explicit date_nanos "
+                                + "mapping mode, which this adapter does not configure");
+            }
+        } catch (DateTimeParseException error) {
+            throw invalidTimestampLiteral(literal, error);
+        }
+    }
+
+    private static IllegalArgumentException invalidTimestampLiteral(
+            String literal, DateTimeParseException cause) {
+        String message = "timestamp() requires a valid RFC 3339 string literal: " + literal;
+        return cause == null
+                ? new IllegalArgumentException(message)
+                : new IllegalArgumentException(message, cause);
+    }
+
+    private static String normalizeLeafOperator(String operator, boolean variableFirst) {
+        if (variableFirst) {
+            return operator;
+        }
+        return switch (operator) {
+            case "eq", "ne", "in" -> operator;
+            case "lt" -> "gt";
+            case "le" -> "ge";
+            case "gt" -> "lt";
+            case "ge" -> "le";
+            case "contains", "startsWith", "endsWith", "matches" ->
+                    throw new IllegalArgumentException(
+                            operator + " with a document field as the receiver argument "
+                                    + "cannot be expressed without scripts");
+            default -> operator;
+        };
+    }
+
+    private static Map<String, Object> nullLeafQuery(
+            String operator,
+            String field,
+            boolean variableFirst,
+            boolean whenTrue) {
+        return switch (operator) {
+            case "eq" -> {
+                if (whenTrue) {
+                    throw unsafeExplicitNullComparison();
+                }
+                yield exists(field);
+            }
+            case "ne" -> {
+                if (!whenTrue) {
+                    throw unsafeExplicitNullComparison();
+                }
+                yield exists(field);
+            }
+            case "in" -> {
+                if (!variableFirst) {
+                    throw new IllegalArgumentException(
+                            "null membership in a document array requires an explicit null-value mapping");
+                }
+                throw unsafeExplicitNullComparison();
+            }
+            default -> throw new IllegalArgumentException(
+                    "Null values are only supported with eq, ne, and scalar in operators");
+        };
+    }
+
+    private static Map<String, Object> membershipQuery(String field, Object value) {
+        return DEFAULT_OPERATORS.get("in").apply(field, value);
+    }
+
+    private static Map<String, Object> nullAwareMembershipQuery(
+            String field, List<?> values, boolean whenTrue) {
+        if (whenTrue) {
+            throw unsafeExplicitNullComparison();
+        }
+        List<?> nonNull = values.stream().filter(java.util.Objects::nonNull).toList();
+        if (nonNull.isEmpty()) {
+            return exists(field);
+        }
+        return definedAndNot(field, DEFAULT_OPERATORS.get("in").apply(field, nonNull));
+    }
+
+    private static IllegalArgumentException unsafeExplicitNullComparison() {
+        return new IllegalArgumentException(
+                "Elasticsearch cannot distinguish an explicit null value from a missing field "
+                        + "without an indexed null-value sentinel");
+    }
+
+    private static String mappedField(String variable, Map<String, String> fieldMap) {
         String field = fieldMap.get(variable);
         if (field == null) {
             throw new IllegalArgumentException("Unknown attribute: " + variable);
         }
+        return field;
+    }
 
-        if (value == null) {
-            return switch (operator) {
-                case "eq" -> Map.of("bool", Map.of("must_not", List.of(
-                        Map.of("exists", Map.of("field", field)))));
-                case "ne" -> Map.of("exists", Map.of("field", field));
-                default -> throw new IllegalArgumentException(
-                        "Null values are only supported with eq and ne operators");
-            };
+    private static void requireUnary(String operator, List<Operand> operands) {
+        if (operands.size() != 1) {
+            throw new IllegalArgumentException(
+                    operator + " requires exactly 1 operand, got " + operands.size());
         }
+    }
 
-        OperatorFunction fn = overrides.get(operator);
-        if (fn == null) {
-            fn = DEFAULT_OPERATORS.get(operator);
-        }
-        if (fn == null) {
-            throw new IllegalArgumentException("Unknown operator: " + operator);
-        }
+    private static Map<String, Object> boolMust(List<Map<String, Object>> clauses) {
+        return Map.of("bool", Map.of("must", clauses));
+    }
 
-        return fn.apply(field, value);
+    private static Map<String, Object> boolShould(List<Map<String, Object>> clauses) {
+        return Map.of("bool", Map.of("should", clauses, "minimum_should_match", 1));
+    }
+
+    private static Map<String, Object> notQuery(Map<String, Object> query) {
+        return Map.of("bool", Map.of("must_not", List.of(query)));
+    }
+
+    private static Map<String, Object> exists(String field) {
+        return Map.of("exists", Map.of("field", field));
+    }
+
+    private static Map<String, Object> notExists(String field) {
+        return notQuery(exists(field));
+    }
+
+    private static Map<String, Object> definedAndNot(String field, Map<String, Object> query) {
+        return boolMust(List.of(exists(field), notQuery(query)));
+    }
+
+    private static Map<String, Object> range(String field, String operator, Object value) {
+        return Map.of("range", Map.of(field, Map.of(operator, value)));
+    }
+
+    private static Map<String, Object> nestedQuery(String path, Map<String, Object> query) {
+        return Map.of("nested", Map.of("path", path, "query", query));
     }
 
     private static String escapeWildcard(Object value) {
@@ -580,27 +942,121 @@ public class ElasticsearchQueryPlanAdapter {
                 .replace("?", "\\?");
     }
 
-    // CEL `matches()` uses RE2 partial-match semantics with explicit `^` / `$` anchors.
-    // Elasticsearch's `regexp` query uses Lucene regex which always anchors the whole
-    // field — anchors aren't syntax, they'd match literal `^` / `$` characters. Convert:
-    //  - drop a leading `^` (Lucene already anchors at start)
-    //  - drop a trailing unescaped `$` (Lucene already anchors at end)
-    //  - if the CEL pattern wasn't anchored at start/end, wrap with `.*` so a partial
-    //    match in CEL still maps to a whole-field match in Lucene.
+    private static Map<String, Object> matchesQuery(String field, Object value) {
+        String pattern = value.toString();
+        boolean anchoredStart = pattern.startsWith("^");
+        String body = anchoredStart ? pattern.substring(1) : pattern;
+        boolean anchoredEnd = body.endsWith("$") && !isEscaped(body, body.length() - 1);
+        if (anchoredStart && !anchoredEnd && !body.isEmpty() && isPlainRegexLiteral(body)) {
+            return Map.of("prefix", Map.of(field, Map.of("value", body)));
+        }
+        return Map.of("regexp", Map.of(field, Map.of(
+                "value", toLuceneRegex(pattern),
+                "flags", "NONE")));
+    }
+
+    private static boolean isPlainRegexLiteral(String pattern) {
+        for (int index = 0; index < pattern.length(); index++) {
+            if ("\\.[](){}?*+|^$".indexOf(pattern.charAt(index)) >= 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // CEL `matches()` uses RE2 partial-match semantics. Elasticsearch's `regexp`
+    // query uses Lucene regex with whole-field semantics, and Lucene `.` includes
+    // newlines while RE2 `.` does not. Only explicitly whole-field patterns in the
+    // common syntax subset reach Lucene; simple `^literal` prefixes use `prefix`.
+    // Optional Lucene operators are disabled at the query site with flags=NONE.
     static String toLuceneRegex(String celPattern) {
         boolean anchoredStart = celPattern.startsWith("^");
         String body = anchoredStart ? celPattern.substring(1) : celPattern;
-        boolean anchoredEnd = body.endsWith("$") && !body.endsWith("\\$");
+        boolean anchoredEnd = body.endsWith("$") && !isEscaped(body, body.length() - 1);
         if (anchoredEnd) {
             body = body.substring(0, body.length() - 1);
         }
-        if (!anchoredStart && !body.startsWith(".*")) {
-            body = ".*" + body;
+        body = validateAndEscapeLuceneRegexBody(body);
+        if (!anchoredStart || !anchoredEnd) {
+            throw new IllegalArgumentException(
+                    "matches regex patterns must be fully anchored unless they are a simple "
+                            + "literal prefix");
         }
-        if (!anchoredEnd && !body.endsWith(".*")) {
-            body = body + ".*";
+        if (body.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "matches regex for only the empty string is not supported by Elasticsearch");
         }
         return body;
+    }
+
+    private static String validateAndEscapeLuceneRegexBody(String pattern) {
+        StringBuilder translated = new StringBuilder(pattern.length());
+        boolean escaped = false;
+        boolean inCharacterClass = false;
+        for (int index = 0; index < pattern.length(); index++) {
+            char current = pattern.charAt(index);
+            if (escaped) {
+                if (Character.isLetterOrDigit(current)) {
+                    throw unsupportedRegexSyntax(pattern, index - 1);
+                }
+                translated.append('\\').append(current);
+                escaped = false;
+                continue;
+            }
+            if (current == '\\') {
+                escaped = true;
+                continue;
+            }
+            if (current == '[') {
+                if (inCharacterClass) {
+                    throw unsupportedRegexSyntax(pattern, index);
+                }
+                inCharacterClass = true;
+                translated.append(current);
+                continue;
+            }
+            if (current == ']') {
+                if (!inCharacterClass) {
+                    throw unsupportedRegexSyntax(pattern, index);
+                }
+                inCharacterClass = false;
+                translated.append(current);
+                continue;
+            }
+            if (!inCharacterClass && (current == '^' || current == '$')) {
+                throw unsupportedRegexSyntax(pattern, index);
+            }
+            if (!inCharacterClass && current == '.') {
+                throw unsupportedRegexSyntax(pattern, index);
+            }
+            if (!inCharacterClass && current == '('
+                    && index + 1 < pattern.length() && pattern.charAt(index + 1) == '?') {
+                throw unsupportedRegexSyntax(pattern, index);
+            }
+            if (current == '"') {
+                translated.append("\\\"");
+            } else {
+                translated.append(current);
+            }
+        }
+        if (escaped || inCharacterClass) {
+            throw unsupportedRegexSyntax(pattern, pattern.length());
+        }
+        return translated.toString();
+    }
+
+    private static boolean isEscaped(String value, int index) {
+        int backslashes = 0;
+        for (int cursor = index - 1; cursor >= 0 && value.charAt(cursor) == '\\'; cursor--) {
+            backslashes++;
+        }
+        return backslashes % 2 != 0;
+    }
+
+    private static IllegalArgumentException unsupportedRegexSyntax(String pattern, int index) {
+        return new IllegalArgumentException(
+                "matches regex uses syntax outside the supported RE2/Lucene subset at index "
+                        + index + ": " + pattern);
     }
 
     static Object protoValueToJava(Value value) {

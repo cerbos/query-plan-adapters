@@ -42,6 +42,18 @@ ChromaDB stores flat scalar metadata, so the following Cerbos operators cannot b
 
 Any unsupported operator in the plan causes `queryPlanToChromaDB` to throw an error.
 
+## Conformance contract
+
+The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 20 hostile seed documents and real ChromaDB metadata queries. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
+
+| Classification | Coverage |
+| --- | --- |
+| Oracle-tested | 15 reference actions: directional and inequality comparisons, single/empty membership, Unicode and empty strings, negative numbers, n-ary/double/triple negation, membership on an optional resource field, mapped nested-field equality, and case-sensitive equality |
+| Fail-closed | 98 reference conformance actions plus regex, ordered indexing/`get-field`, and timestamp probes (101 actions total) |
+| Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute documents. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
+
+Chroma metadata filters are limited to flat scalar comparisons and membership. Nested collections, field-to-field and arithmetic expressions, string helpers, hierarchy/timestamp operations, ternaries, nullable inequality, and other shapes that cannot be represented faithfully throw before a filter is returned.
+
 ## Requirements
 
 - Cerbos > v0.16
@@ -82,7 +94,18 @@ export enum PlanKind {
 
 ### Field name mapper
 
-The Cerbos query plan references fields using paths such as `request.resource.attr.title`. Use a mapper to translate those to the metadata field names in your ChromaDB collection.
+The Cerbos query plan references fields using paths such as `request.resource.attr.title`. Use a mapper to translate those to the metadata field names in your ChromaDB collection. Map entries can be a field name or a configuration object:
+
+```ts
+type FieldNameMapperConfig = {
+  field: string;
+  required?: boolean;
+  numericType?: "integer" | "float";
+};
+```
+
+- Set `required: false` for metadata that may be absent. Chroma's `$ne` and `$nin` operators match missing metadata, unlike a missing Cerbos attribute, which produces an evaluation error and denies access. The adapter rejects those unsafe combinations instead of over-authorizing.
+- Set `numericType: "float"` when a field is always stored as floating-point metadata and must be compared with fractional thresholds. Without that declaration, fractional ordered comparisons are rejected because Chroma distinguishes integer and floating-point metadata.
 
 As a map:
 
@@ -92,11 +115,16 @@ const result = queryPlanToChromaDB({
   fieldNameMapper: {
     "request.resource.attr.aBool": "aBool",
     "request.resource.attr.aString": "title",
+    "request.resource.attr.score": {
+      field: "score",
+      required: true,
+      numericType: "float",
+    },
   },
 });
 ```
 
-As a function:
+As a function, return either a field name or a configuration object:
 
 ```ts
 const result = queryPlanToChromaDB({
@@ -107,7 +135,7 @@ const result = queryPlanToChromaDB({
 });
 ```
 
-If a field is not found in the map, the original path is used as-is.
+If a field is not found in the map, the original path is used as-is and treated as required.
 
 ## Usage example
 
@@ -156,3 +184,6 @@ const matches = await chroma.similaritySearch("query", 10, filters);
 - An operator in the plan is not supported by ChromaDB's filter syntax.
 - A comparison operator is missing a variable or field name.
 - A `not` expression wraps an operator that cannot be negated.
+- A filter literal is null, nested, non-finite, or otherwise invalid for Chroma metadata.
+- `$ne` or `$nin` targets a field configured with `required: false`.
+- A fractional ordered comparison targets a field that is not configured with `numericType: "float"`.

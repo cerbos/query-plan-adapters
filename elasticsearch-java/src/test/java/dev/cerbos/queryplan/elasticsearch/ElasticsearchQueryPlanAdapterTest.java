@@ -55,6 +55,10 @@ class ElasticsearchQueryPlanAdapterTest {
         return Operand.newBuilder().setExpression(expr).build();
     }
 
+    private static Operand timestampOperand(Operand operand) {
+        return expressionOperand("timestamp", operand);
+    }
+
     private static Operand variableOperand(String name) {
         return Operand.newBuilder().setVariable(name).build();
     }
@@ -88,6 +92,17 @@ class ElasticsearchQueryPlanAdapterTest {
         for (String v : values) {
             list.addValues(Value.newBuilder().setStringValue(v));
         }
+        return Operand.newBuilder()
+                .setValue(Value.newBuilder().setListValue(list))
+                .build();
+    }
+
+    private static Operand listValueOperandWithNull(String... values) {
+        ListValue.Builder list = ListValue.newBuilder();
+        for (String value : values) {
+            list.addValues(Value.newBuilder().setStringValue(value));
+        }
+        list.addValues(Value.newBuilder().setNullValue(NullValue.NULL_VALUE));
         return Operand.newBuilder()
                 .setValue(Value.newBuilder().setListValue(list))
                 .build();
@@ -136,7 +151,7 @@ class ElasticsearchQueryPlanAdapterTest {
     }
 
     @Test
-    void neProducesBoolMustNotTerm() {
+    void neRequiresFieldToExistAndNotMatch() {
         Operand condition = expressionOperand("ne",
                 variableOperand("request.resource.attr.status"),
                 stringValueOperand("archived"));
@@ -146,8 +161,10 @@ class ElasticsearchQueryPlanAdapterTest {
 
         Map<String, Object> query = ((Result.Conditional) result).query();
         assertEquals(
-                Map.of("bool", Map.of("must_not", List.of(
-                        Map.of("term", Map.of("status", Map.of("value", "archived")))))),
+                Map.of("bool", Map.of("must", List.of(
+                        Map.of("exists", Map.of("field", "status")),
+                        Map.of("bool", Map.of("must_not", List.of(
+                                Map.of("term", Map.of("status", Map.of("value", "archived"))))))))),
                 query);
     }
 
@@ -204,6 +221,19 @@ class ElasticsearchQueryPlanAdapterTest {
     }
 
     @Test
+    void valueFirstLeMirrorsToFieldGe() {
+        Operand condition = expressionOperand("le",
+                numberValueOperand(3),
+                variableOperand("request.resource.attr.aNumber"));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
+
+        assertEquals(Map.of("range", Map.of("aNumber", Map.of("gte", 3L))),
+                ((Result.Conditional) result).query());
+    }
+
+    @Test
     void inProducesTermsQuery() {
         Operand condition = expressionOperand("in",
                 variableOperand("request.resource.attr.status"),
@@ -214,6 +244,23 @@ class ElasticsearchQueryPlanAdapterTest {
 
         Map<String, Object> query = ((Result.Conditional) result).query();
         assertEquals(Map.of("terms", Map.of("status", List.of("active", "pending"))), query);
+    }
+
+    @Test
+    void inListContainingNullFailsClosed() {
+        Operand values = Operand.newBuilder().setValue(Value.newBuilder().setListValue(
+                ListValue.newBuilder()
+                        .addValues(Value.newBuilder().setStringValue("active"))
+                        .addValues(Value.newBuilder().setNullValue(
+                                com.google.protobuf.NullValue.NULL_VALUE))))
+                .build();
+        Operand condition = expressionOperand("in",
+                variableOperand("request.resource.attr.status"), values);
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP));
+        assertTrue(error.getMessage().contains("explicit null value from a missing field"));
     }
 
     @Test
@@ -261,7 +308,7 @@ class ElasticsearchQueryPlanAdapterTest {
     }
 
     @Test
-    void notProducesBoolMustNot() {
+    void notEqualsRequiresFieldToExist() {
         Operand condition = expressionOperand("not",
                 expressionOperand("eq",
                         variableOperand("request.resource.attr.status"),
@@ -272,8 +319,10 @@ class ElasticsearchQueryPlanAdapterTest {
 
         Map<String, Object> query = ((Result.Conditional) result).query();
         assertEquals(
-                Map.of("bool", Map.of("must_not", List.of(
-                        Map.of("term", Map.of("status", Map.of("value", "archived")))))),
+                Map.of("bool", Map.of("must", List.of(
+                        Map.of("exists", Map.of("field", "status")),
+                        Map.of("bool", Map.of("must_not", List.of(
+                                Map.of("term", Map.of("status", Map.of("value", "archived"))))))))),
                 query);
     }
 
@@ -292,12 +341,16 @@ class ElasticsearchQueryPlanAdapterTest {
         Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
 
         Map<String, Object> query = ((Result.Conditional) result).query();
-        assertEquals(
+        Map<String, Object> falseBool = Map.of("bool", Map.of("must", List.of(
+                Map.of("exists", Map.of("field", "aBool")),
                 Map.of("bool", Map.of("must_not", List.of(
-                        Map.of("bool", Map.of("must", List.of(
-                                Map.of("term", Map.of("aBool", Map.of("value", true))),
-                                Map.of("term", Map.of("aString", Map.of("value", "foo"))))))))),
-                query);
+                        Map.of("term", Map.of("aBool", Map.of("value", true)))))))));
+        Map<String, Object> falseString = Map.of("bool", Map.of("must", List.of(
+                Map.of("exists", Map.of("field", "aString")),
+                Map.of("bool", Map.of("must_not", List.of(
+                        Map.of("term", Map.of("aString", Map.of("value", "foo")))))))));
+        assertEquals(Map.of("bool", Map.of(
+                "should", List.of(falseBool, falseString), "minimum_should_match", 1)), query);
     }
 
     @Test
@@ -316,13 +369,14 @@ class ElasticsearchQueryPlanAdapterTest {
         Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
 
         Map<String, Object> query = ((Result.Conditional) result).query();
-        assertEquals(
+        Map<String, Object> falseBool = Map.of("bool", Map.of("must", List.of(
+                Map.of("exists", Map.of("field", "aBool")),
                 Map.of("bool", Map.of("must_not", List.of(
-                        Map.of("bool", Map.of("must", List.of(
-                                Map.of("term", Map.of("aBool", Map.of("value", true))),
-                                Map.of("bool", Map.of("must_not", List.of(
-                                        Map.of("term", Map.of("aString", Map.of("value", "string"))))))))))) ),
-                query);
+                        Map.of("term", Map.of("aBool", Map.of("value", true)))))))));
+        assertEquals(Map.of("bool", Map.of(
+                "should", List.of(falseBool,
+                        Map.of("term", Map.of("aString", Map.of("value", "string")))),
+                "minimum_should_match", 1)), query);
     }
 
     @Test
@@ -341,15 +395,12 @@ class ElasticsearchQueryPlanAdapterTest {
         Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
 
         Map<String, Object> query = ((Result.Conditional) result).query();
-        assertEquals(
+        Map<String, Object> falseBool = Map.of("bool", Map.of("must", List.of(
+                Map.of("exists", Map.of("field", "aBool")),
                 Map.of("bool", Map.of("must_not", List.of(
-                        Map.of("bool", Map.of(
-                                "should", List.of(
-                                        Map.of("term", Map.of("aBool", Map.of("value", true))),
-                                        Map.of("bool", Map.of("must_not", List.of(
-                                                Map.of("term", Map.of("aString", Map.of("value", "string"))))))),
-                                "minimum_should_match", 1))))),
-                query);
+                        Map.of("term", Map.of("aBool", Map.of("value", true)))))))));
+        assertEquals(Map.of("bool", Map.of("must", List.of(
+                falseBool, Map.of("term", Map.of("aString", Map.of("value", "string")))))), query);
     }
 
     @Test
@@ -364,10 +415,7 @@ class ElasticsearchQueryPlanAdapterTest {
         Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
 
         Map<String, Object> query = ((Result.Conditional) result).query();
-        assertEquals(
-                Map.of("bool", Map.of("must_not", List.of(
-                        Map.of("range", Map.of("aNumber", Map.of("gt", 1L)))))),
-                query);
+        assertEquals(Map.of("range", Map.of("aNumber", Map.of("lte", 1L))), query);
     }
 
     @Test
@@ -382,10 +430,7 @@ class ElasticsearchQueryPlanAdapterTest {
         Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
 
         Map<String, Object> query = ((Result.Conditional) result).query();
-        assertEquals(
-                Map.of("bool", Map.of("must_not", List.of(
-                        Map.of("range", Map.of("aNumber", Map.of("lt", 2L)))))),
-                query);
+        assertEquals(Map.of("range", Map.of("aNumber", Map.of("gte", 2L))), query);
     }
 
     @Test
@@ -400,10 +445,10 @@ class ElasticsearchQueryPlanAdapterTest {
         Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
 
         Map<String, Object> query = ((Result.Conditional) result).query();
-        assertEquals(
+        assertEquals(Map.of("bool", Map.of("must", List.of(
+                Map.of("exists", Map.of("field", "aString")),
                 Map.of("bool", Map.of("must_not", List.of(
-                        Map.of("wildcard", Map.of("aString", Map.of("value", "*str*")))))),
-                query);
+                        Map.of("wildcard", Map.of("aString", Map.of("value", "*str*"))))))))), query);
     }
 
     @Test
@@ -418,10 +463,10 @@ class ElasticsearchQueryPlanAdapterTest {
         Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
 
         Map<String, Object> query = ((Result.Conditional) result).query();
-        assertEquals(
+        assertEquals(Map.of("bool", Map.of("must", List.of(
+                Map.of("exists", Map.of("field", "aString")),
                 Map.of("bool", Map.of("must_not", List.of(
-                        Map.of("prefix", Map.of("aString", Map.of("value", "str")))))),
-                query);
+                        Map.of("prefix", Map.of("aString", Map.of("value", "str"))))))))), query);
     }
 
     @Test
@@ -448,6 +493,17 @@ class ElasticsearchQueryPlanAdapterTest {
 
         Map<String, Object> query = ((Result.Conditional) result).query();
         assertEquals(Map.of("prefix", Map.of("title", Map.of("value", "draft"))), query);
+    }
+
+    @Test
+    void constantReceiverStringOperatorThrows() {
+        Operand condition = expressionOperand("startsWith",
+                stringValueOperand("constant"),
+                variableOperand("request.resource.attr.title"));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        assertThrows(IllegalArgumentException.class,
+                () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP));
     }
 
     @Test
@@ -622,19 +678,29 @@ class ElasticsearchQueryPlanAdapterTest {
     }
 
     @Test
-    void eqNullProducesNotExists() {
+    void eqNullFailsClosed() {
         Operand condition = expressionOperand("eq",
                 variableOperand("request.resource.attr.department"),
                 nullValueOperand());
         PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
 
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP));
+        assertTrue(error.getMessage().contains("explicit null value from a missing field"));
+    }
+
+    @Test
+    void negatedEqNullProducesExists() {
+        Operand condition = expressionOperand("not",
+                expressionOperand("eq",
+                        variableOperand("request.resource.attr.department"),
+                        nullValueOperand()));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
         Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
 
-        Map<String, Object> query = ((Result.Conditional) result).query();
-        assertEquals(
-                Map.of("bool", Map.of("must_not", List.of(
-                        Map.of("exists", Map.of("field", "department"))))),
-                query);
+        assertEquals(Map.of("exists", Map.of("field", "department")),
+                ((Result.Conditional) result).query());
     }
 
     @Test
@@ -679,20 +745,16 @@ class ElasticsearchQueryPlanAdapterTest {
     }
 
     @Test
-    void sizeEqZeroProducesNotExists() {
+    void sizeEqZeroFailsClosed() {
         Operand condition = expressionOperand("eq",
                 expressionOperand("size",
                         variableOperand("request.resource.attr.ownedBy")),
                 numberValueOperand(0));
         PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
 
-        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
-
-        Map<String, Object> query = ((Result.Conditional) result).query();
-        assertEquals(
-                Map.of("bool", Map.of("must_not", List.of(
-                        Map.of("exists", Map.of("field", "ownedBy"))))),
-                query);
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP));
+        assertTrue(error.getMessage().contains("missing collection from an empty collection"));
     }
 
     @Test
@@ -719,6 +781,50 @@ class ElasticsearchQueryPlanAdapterTest {
 
         Map<String, Object> query = ((Result.Conditional) result).query();
         assertEquals(Map.of("exists", Map.of("field", "department")), query);
+    }
+
+    @Test
+    void negatedNeNullFailsClosed() {
+        Operand condition = expressionOperand("not",
+                expressionOperand("ne",
+                        variableOperand("request.resource.attr.department"),
+                        nullValueOperand()));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP));
+        assertTrue(error.getMessage().contains("explicit null value from a missing field"));
+    }
+
+    @Test
+    void negatedMembershipContainingNullRequiresFieldAndExcludesNonNullTerms() {
+        Operand condition = expressionOperand("not",
+                expressionOperand("in",
+                        variableOperand("request.resource.attr.department"),
+                        listValueOperandWithNull("engineering")));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
+
+        assertEquals(Map.of("bool", Map.of("must", List.of(
+                        Map.of("exists", Map.of("field", "department")),
+                        Map.of("bool", Map.of("must_not", List.of(
+                                Map.of("terms", Map.of("department", List.of("engineering"))))))))),
+                ((Result.Conditional) result).query());
+    }
+
+    @Test
+    void negatedMembershipContainingOnlyNullProducesExists() {
+        Operand condition = expressionOperand("not",
+                expressionOperand("in",
+                        variableOperand("request.resource.attr.department"),
+                        listValueOperandWithNull()));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
+
+        assertEquals(Map.of("exists", Map.of("field", "department")),
+                ((Result.Conditional) result).query());
     }
 
     @Test
@@ -751,7 +857,7 @@ class ElasticsearchQueryPlanAdapterTest {
     }
 
     @Test
-    void notBareBoolProducesMustNot() {
+    void notBareBoolProducesFalseTerm() {
         Operand condition = expressionOperand("not",
                 variableOperand("request.resource.attr.aBool"));
         PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
@@ -760,10 +866,7 @@ class ElasticsearchQueryPlanAdapterTest {
 
         assertInstanceOf(Result.Conditional.class, result);
         Map<String, Object> query = ((Result.Conditional) result).query();
-        assertEquals(
-                Map.of("bool", Map.of("must_not", List.of(
-                        Map.of("term", Map.of("aBool", Map.of("value", true)))))),
-                query);
+        assertEquals(Map.of("term", Map.of("aBool", Map.of("value", false))), query);
     }
 
     // --- Collection operator helpers ---
@@ -825,7 +928,7 @@ class ElasticsearchQueryPlanAdapterTest {
     // --- all ---
 
     @Test
-    void allProducesDoubleNegation() {
+    void allFailsClosedBecauseMissingAndEmptyCollectionsAreIndistinguishable() {
         // all(tagObjects, t, t.name == "public")
         Operand condition = expressionOperand("all",
                 variableOperand("request.resource.attr.tagObjects"),
@@ -835,16 +938,52 @@ class ElasticsearchQueryPlanAdapterTest {
                                 stringValueOperand("public"))));
         PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
 
-        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP, NESTED_PATHS);
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
+                        resp, FIELD_MAP, NESTED_PATHS));
+        assertTrue(error.getMessage().contains("missing collection from an empty collection"));
+    }
 
-        Map<String, Object> query = ((Result.Conditional) result).query();
-        assertEquals(
+    @Test
+    void negatedAllStillProducesARequiredFalseElementQuery() {
+        Operand condition = expressionOperand("not",
+                expressionOperand("all",
+                        variableOperand("request.resource.attr.tagObjects"),
+                        lambdaOperand("t",
+                                expressionOperand("eq",
+                                        variableOperand("t.name"),
+                                        stringValueOperand("public")))));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
+                resp, FIELD_MAP, NESTED_PATHS);
+
+        Map<String, Object> falseElement = Map.of("bool", Map.of("must", List.of(
+                Map.of("exists", Map.of("field", "tagObjects.name")),
                 Map.of("bool", Map.of("must_not", List.of(
-                        Map.of("nested", Map.of(
-                                "path", "tagObjects",
-                                "query", Map.of("bool", Map.of("must_not", List.of(
-                                        Map.of("term", Map.of("tagObjects.name", Map.of("value", "public"))))))))))),
-                query);
+                        Map.of("term", Map.of(
+                                "tagObjects.name", Map.of("value", "public")))))))));
+        assertEquals(Map.of("nested", Map.of(
+                        "path", "tagObjects",
+                        "query", falseElement)),
+                ((Result.Conditional) result).query());
+    }
+
+    @Test
+    void negatedExistsFailsClosedBecauseMissingAndEmptyCollectionsAreIndistinguishable() {
+        Operand condition = expressionOperand("not",
+                expressionOperand("exists",
+                        variableOperand("request.resource.attr.tagObjects"),
+                        lambdaOperand("t",
+                                expressionOperand("eq",
+                                        variableOperand("t.name"),
+                                        stringValueOperand("public")))));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
+                        resp, FIELD_MAP, NESTED_PATHS));
+        assertTrue(error.getMessage().contains("missing collection from an empty collection"));
     }
 
     // --- except ---
@@ -874,7 +1013,7 @@ class ElasticsearchQueryPlanAdapterTest {
     // --- hasIntersection + map ---
 
     @Test
-    void hasIntersectionWithMapProducesNestedTerms() {
+    void hasIntersectionWithMapRejectsMissingProjectionMembers() {
         // hasIntersection(map(tagObjects, t, t.name), ["public", "private"])
         Operand mapExpr = expressionOperand("map",
                 variableOperand("request.resource.attr.tagObjects"),
@@ -887,11 +1026,16 @@ class ElasticsearchQueryPlanAdapterTest {
         Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP, NESTED_PATHS);
 
         Map<String, Object> query = ((Result.Conditional) result).query();
-        assertEquals(
-                Map.of("nested", Map.of(
-                        "path", "tagObjects",
-                        "query", Map.of("terms", Map.of("tagObjects.name", List.of("public", "private"))))),
-                query);
+        Map<String, Object> matchingValue = Map.of("nested", Map.of(
+                "path", "tagObjects",
+                "query", Map.of("terms", Map.of("tagObjects.name", List.of("public", "private")))));
+        Map<String, Object> missingProjection = Map.of("nested", Map.of(
+                "path", "tagObjects",
+                "query", Map.of("bool", Map.of("must_not", List.of(
+                        Map.of("exists", Map.of("field", "tagObjects.name")))))));
+        assertEquals(Map.of("bool", Map.of("must", List.of(
+                matchingValue,
+                Map.of("bool", Map.of("must_not", List.of(missingProjection)))))), query);
     }
 
     // --- flat hasIntersection unchanged ---
@@ -929,38 +1073,175 @@ class ElasticsearchQueryPlanAdapterTest {
     // --- matches (regex) ---
 
     @Test
-    void matchesProducesRegexpQuery() {
-        // aString.matches("^str.*") → regexp on keyword field.
+    void matchesRejectsRe2DotBecauseLuceneDotIncludesNewlines() {
         Operand condition = expressionOperand("matches",
                 variableOperand("request.resource.attr.aString"),
                 stringValueOperand("^str.*"));
         PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
 
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP));
+        assertTrue(error.getMessage().contains("supported RE2/Lucene subset"));
+    }
+
+    @Test
+    void matchesLiteralPrefixProducesPrefixQuery() {
+        Operand condition = expressionOperand("matches",
+                variableOperand("request.resource.attr.aString"),
+                stringValueOperand("^h"));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
         Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
 
-        Map<String, Object> query = ((Result.Conditional) result).query();
-        // CEL `^str.*` -> Lucene whole-field anchored `str.*`
-        assertEquals(Map.of("regexp", Map.of("aString", Map.of("value", "str.*"))), query);
+        assertEquals(Map.of("prefix", Map.of("aString", Map.of("value", "h"))),
+                ((Result.Conditional) result).query());
+    }
+
+    @Test
+    void matchesTreatsLuceneOptionalOperatorsAsLiterals() {
+        Operand condition = expressionOperand("matches",
+                variableOperand("request.resource.attr.aString"),
+                stringValueOperand("^@$"));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
+
+        assertEquals(Map.of("regexp", Map.of("aString", Map.of(
+                "value", "@",
+                "flags", "NONE"))), ((Result.Conditional) result).query());
+    }
+
+    @Test
+    void matchesRejectsRegexSyntaxOutsideTheCommonSubset() {
+        for (String pattern : List.of(
+                "^\\d+$", "^(?i)admin$", "^a^b$", "^[[:alpha:]]$", "^a.b$", "^a.*b$")) {
+            Operand condition = expressionOperand("matches",
+                    variableOperand("request.resource.attr.aString"),
+                    stringValueOperand(pattern));
+            PlanResourcesResponse resp = buildResponse(
+                    PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+            IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                    () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP));
+            assertTrue(error.getMessage().contains("supported RE2/Lucene subset"), pattern);
+        }
+    }
+
+    @Test
+    void timestampEqualityAcceptsMillisecondExactLiteral() {
+        Operand condition = expressionOperand("eq",
+                timestampOperand(variableOperand("request.resource.attr.aString")),
+                timestampOperand(stringValueOperand("2024-06-01T00:00:00.123Z")));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
+
+        assertEquals(Map.of("term", Map.of("aString", Map.of(
+                "value", "2024-06-01T00:00:00.123Z"))),
+                ((Result.Conditional) result).query());
+    }
+
+    @Test
+    void timestampEqualityRejectsSubMillisecondLiteral() {
+        Operand condition = expressionOperand("eq",
+                timestampOperand(variableOperand("request.resource.attr.aString")),
+                timestampOperand(stringValueOperand("2024-06-01T00:00:00.123456Z")));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP));
+        assertTrue(error.getMessage().contains("Sub-millisecond timestamp literals"));
+    }
+
+    @Test
+    void timestampRejectsStringsOutsideStrictRfc3339() {
+        for (String literal : List.of(
+                "2024-W01-1T00:00:00Z",
+                "2024-06-01 00:00:00Z",
+                "0000-01-01T00:00:00Z",
+                "2024-02-30T00:00:00Z",
+                "0001-01-01T00:00:00+02:00",
+                "9999-12-31T23:00:00-02:00")) {
+            Operand condition = expressionOperand("eq",
+                    timestampOperand(variableOperand("request.resource.attr.aString")),
+                    timestampOperand(stringValueOperand(literal)));
+            PlanResourcesResponse resp = buildResponse(
+                    PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+            IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                    () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP));
+            assertTrue(error.getMessage().contains("valid RFC 3339"), literal);
+        }
     }
 
     // --- empty-collection (size(tags) == 0) ---
 
     @Test
-    void sizeEqZeroOnTagsProducesNotExists() {
-        // size(tags) == 0 → bool must_not exists tags.
+    void sizeEqZeroOnTagsFailsClosed() {
         Operand condition = expressionOperand("eq",
                 expressionOperand("size",
                         variableOperand("request.resource.attr.tags")),
                 numberValueOperand(0));
         PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
 
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP));
+        assertTrue(error.getMessage().contains("missing collection from an empty collection"));
+    }
+
+    @Test
+    void negatedSizeEqZeroProducesExists() {
+        Operand condition = expressionOperand("not",
+                expressionOperand("eq",
+                        expressionOperand("size",
+                                variableOperand("request.resource.attr.tags")),
+                        numberValueOperand(0)));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
         Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
 
-        Map<String, Object> query = ((Result.Conditional) result).query();
-        assertEquals(
-                Map.of("bool", Map.of("must_not", List.of(
-                        Map.of("exists", Map.of("field", "tags"))))),
-                query);
+        assertEquals(Map.of("exists", Map.of("field", "tags")),
+                ((Result.Conditional) result).query());
+    }
+
+    @Test
+    void negatedSizeGtZeroFailsClosed() {
+        Operand condition = expressionOperand("not",
+                expressionOperand("gt",
+                        expressionOperand("size",
+                                variableOperand("request.resource.attr.tags")),
+                        numberValueOperand(0)));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP));
+        assertTrue(error.getMessage().contains("missing collection from an empty collection"));
+    }
+
+    @Test
+    void negatedHasIntersectionFailsClosed() {
+        Operand condition = expressionOperand("not",
+                expressionOperand("hasIntersection",
+                        variableOperand("request.resource.attr.tags"),
+                        listValueOperand("public")));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP));
+        assertTrue(error.getMessage().contains("missing collection from an empty collection"));
+    }
+
+    @Test
+    void negatedMembershipInDocumentCollectionFailsClosed() {
+        Operand condition = expressionOperand("not",
+                expressionOperand("in",
+                        stringValueOperand("public"),
+                        variableOperand("request.resource.attr.tags")));
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP));
+        assertTrue(error.getMessage().contains("missing collection from an empty collection"));
     }
 
     // --- Unsupported: arithmetic / cast / ternary / index throw on expression operand ---
@@ -1039,33 +1320,17 @@ class ElasticsearchQueryPlanAdapterTest {
     // --- Issue #229: locked-in operator/comparison shapes ---
 
     @Test
-    void isNotSetProducesMustNotExists() {
-        // request.resource.attr.<field> == null → bool must_not exists field.
-        // Mirrors the policy `is-not-set` action (aOptionalString == null) — for
-        // unit-test purposes we use any string field in FIELD_MAP since the
-        // adapter shape is identical regardless of which field the null check
-        // is applied to.
+    void isNotSetFailsClosedWithoutNullValueSentinel() {
         Operand condition = expressionOperand("eq",
                 variableOperand("request.resource.attr.aString"),
                 nullValueOperand());
         PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
 
-        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
-
-        Map<String, Object> query = ((Result.Conditional) result).query();
-        assertEquals(
-                Map.of("bool", Map.of("must_not", List.of(
-                        Map.of("exists", Map.of("field", "aString"))))),
-                query);
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP));
+        assertTrue(error.getMessage().contains("explicit null value from a missing field"));
     }
 
-    // TODO(#229): the ES Java adapter does not support comparing two document
-    // fields. The current implementation silently overwrites `variable` when
-    // two VARIABLE operands are present (last-write-wins), then treats the
-    // missing value as null and emits a must_not/exists query — which is
-    // semantically wrong. Until field-to-field comparisons are explicitly
-    // rejected or supported, this test documents the current shape so a
-    // future change forces a revisit.
     @Test
     void equalFieldToFieldIsUnsupported() {
         // aString == id → both operands are VARIABLE.
@@ -1074,15 +1339,9 @@ class ElasticsearchQueryPlanAdapterTest {
                 variableOperand("request.resource.attr.department"));
         PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
 
-        // Current behavior: does not throw; produces a "field == null" style query
-        // for whichever variable was last seen. Captured here so it's noisy on change.
-        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
-        assertInstanceOf(Result.Conditional.class, result);
-        Map<String, Object> query = ((Result.Conditional) result).query();
-        assertEquals(
-                Map.of("bool", Map.of("must_not", List.of(
-                        Map.of("exists", Map.of("field", "department"))))),
-                query);
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP));
+        assertTrue(error.getMessage().contains("cannot compare two document fields"));
     }
 
     @Test
@@ -1122,7 +1381,7 @@ class ElasticsearchQueryPlanAdapterTest {
     // --- Issue #232: collection macro composition ---
 
     @Test
-    void allWithMultiClauseLambdaBodyProducesNestedBoolMust() {
+    void allWithMultiClauseLambdaBodyFailsClosed() {
         // all(tagObjects, t, t.name == "public" && t.id != "tag1")
         Operand condition = expressionOperand("all",
                 variableOperand("request.resource.attr.tagObjects"),
@@ -1136,28 +1395,10 @@ class ElasticsearchQueryPlanAdapterTest {
                                         stringValueOperand("tag1")))));
         PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
 
-        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP, NESTED_PATHS);
-
-        // all is double-negated:  must_not(nested(must_not(<body>))).
-        // The lambda body `and(eq(name, "public"), ne(id, "tag1"))` becomes
-        // bool.must of [term(name=public), must_not(term(id=tag1))].
-        Map<String, Object> termName = Map.of("term",
-                Map.of("tagObjects.name", Map.of("value", "public")));
-        Map<String, Object> termId = Map.of("term",
-                Map.of("tagObjects.id", Map.of("value", "tag1")));
-        Map<String, Object> notTermId = Map.of("bool",
-                Map.of("must_not", List.of(termId)));
-        Map<String, Object> lambdaBody = Map.of("bool",
-                Map.of("must", List.of(termName, notTermId)));
-        Map<String, Object> negatedLambdaBody = Map.of("bool",
-                Map.of("must_not", List.of(lambdaBody)));
-        Map<String, Object> nestedClause = Map.of("nested",
-                Map.of("path", "tagObjects", "query", negatedLambdaBody));
-        Map<String, Object> expected = Map.of("bool",
-                Map.of("must_not", List.of(nestedClause)));
-
-        Map<String, Object> query = ((Result.Conditional) result).query();
-        assertEquals(expected, query);
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
+                        resp, FIELD_MAP, NESTED_PATHS));
+        assertTrue(error.getMessage().contains("missing collection from an empty collection"));
     }
 
     @Test

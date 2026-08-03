@@ -5,6 +5,7 @@
     "checkJs": true,
     "composite": true,
     "exactOptionalPropertyTypes": false,
+    "types": ["node"],
     "outDir": "lib",
     "rootDir": "src",
     "declarationMap": true,

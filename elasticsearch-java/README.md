@@ -6,13 +6,17 @@ An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanRe
 
 - Supports logical operators: `and`, `or`, `not`
 - Supports comparison operators: `eq`, `ne`, `lt`, `gt`, `le`, `ge`, `in`
-- Supports string operators: `contains`, `startsWith`, `endsWith`
+- Supports string operators: `contains`, `startsWith`, `endsWith`, and the safe
+  `matches` subset described below
 - Supports `hasIntersection` for array overlap checks
 - Supports `isSet` for field existence checks
-- Supports `size` comparisons for array emptiness checks
-- Supports collection operators (`exists`, `all`, `except`) for nested object arrays
+- Supports polarity-safe `size` checks for array emptiness
+- Supports polarity-safe collection operators for nested object arrays
 - Supports `hasIntersection` + `map` for projecting and matching nested object fields
-- Handles null values (`eq`/`ne` with null maps to `exists` queries)
+- Preserves missing-field semantics for safe null comparisons and fails closed when explicit null
+  cannot be distinguished from a missing field
+- Supports millisecond-exact `timestamp()` comparisons when the mapped Elasticsearch field uses a
+  `date` type and indexed values obey the same precision contract
 - Handles bare boolean variables (e.g. `request.resource.attr.isPublic`)
 - Custom operator overrides for full control over query generation
 - Works with both `PlanResourcesResult` (SDK) and `PlanResourcesResponse` (protobuf) inputs
@@ -143,7 +147,14 @@ The adapter produces:
         "bool": {
           "must": [
             { "term": { "aBool": { "value": true } } },
-            { "bool": { "must_not": [{ "term": { "aString": { "value": "string" } } }] } }
+            {
+              "bool": {
+                "must": [
+                  { "exists": { "field": "aString" } },
+                  { "bool": { "must_not": [{ "term": { "aString": { "value": "string" } } }] } }
+                ]
+              }
+            }
           ]
         }
       },
@@ -264,20 +275,78 @@ The `OperatorFunction` interface takes a field name and value, and returns a `Ma
 
 | Cerbos operator | Elasticsearch query |
 |---|---|
-| `eq` | `term` (or `bool.must_not` + `exists` when value is `null`) |
-| `ne` | `bool.must_not` + `term` (or `exists` when value is `null`) |
+| `eq` | `term`; negated equality with `null` maps to `exists` |
+| `ne` | `exists` + `bool.must_not` + `term`; positive `ne null` maps to `exists` |
 | `lt`, `gt`, `le`, `ge` | `range` |
-| `in` | `terms` |
+| `in` | `terms`; a negated list containing `null` adds an `exists` guard |
 | `contains` | `wildcard` (`*value*`) |
 | `startsWith` | `prefix` |
 | `endsWith` | `wildcard` (`*value`) |
+| `matches` | `prefix` for `^literal`; `regexp` with Lucene optional flags disabled for fully anchored patterns in the validated common subset |
+| `timestamp` in comparisons | `term` / `range` against a mapped Elasticsearch `date` field, for millisecond-exact values |
 | `hasIntersection` | `terms` (array overlap) |
 | `isSet` | `exists` (true) / `bool.must_not` + `exists` (false) |
-| `size` (via comparison) | `exists` / `bool.must_not` + `exists` |
-| `exists` (collection) | `nested` + inner query |
-| `all` (collection) | `bool.must_not` + `nested` + `bool.must_not` |
+| Positive non-empty `size` checks; negated empty checks | `exists` or `nested` + `match_all` |
+| Positive `exists` (collection) | `nested` + inner query |
+| Negated `all` (collection) | `nested` + a definitely-false inner query |
 | `except` (collection) | `nested` + `bool.must_not` |
 | `hasIntersection` + `map` | `nested` + `terms` |
+
+`ne`, negated leaf queries, and safe negated membership containing `null` include an `exists` guard.
+Cerbos treats a missing attribute as an evaluation error, so a document with no mapped field must
+not become authorized merely because an Elasticsearch `must_not` clause matches it.
+
+Elasticsearch does not index a JSON `null` value unless the mapping defines a `null_value` sentinel,
+and this adapter does not accept sentinel configuration. Positive equality with `null`, negated
+inequality with `null`, and positive membership lists containing `null` therefore throw. The safe
+opposite polarities map to `exists`-guarded queries.
+
+For `matches()`, the adapter translates a simple literal prefix such as `^admin` to `prefix` and
+fully anchored patterns such as `^admin-[0-9]+$` through the common RE2/Lucene subset. It rejects
+partial non-literal patterns, inline flags, RE2 shorthand and Unicode classes, POSIX classes,
+interior anchors, empty-string-only patterns, and unescaped `.`. Lucene optional regex operators are
+disabled (`flags: NONE`), so characters such as `@` remain literals. Dot is rejected because RE2
+excludes a newline while Lucene's dot includes it.
+
+### Unsupported query-plan shapes
+
+The adapter fails closed with `IllegalArgumentException` for shapes that Elasticsearch Query DSL
+cannot express safely without scripts, including field-to-field comparisons, a constant string
+receiver with a document-field argument, arithmetic over document fields, conditional values,
+arbitrary collection counts, string lengths, ordered array indexing, positive `all`, negated
+`exists`, negated membership in a document collection, negated intersection, collection-empty
+checks, and membership tests that need to distinguish an explicit null value or array element from
+a missing field. Unsupported regex
+syntax and sub-millisecond timestamp literals also fail closed. Painless scripts are not generated
+by this adapter because they would change the security and performance profile of every
+authorization filter.
+
+For `timestamp()` comparisons, map the target field as an Elasticsearch `date`; comparing ISO date
+strings stored as `keyword` values does not provide reliable instant ordering. Ordinary `date`
+fields store epoch milliseconds even when their input format parses additional fractional digits.
+The adapter accepts strict RFC 3339 timestamp literals whose offset-normalized instant is within the
+CEL timestamp range, rejects sub-millisecond precision, and callers must also ensure the resource
+attributes sent to Cerbos and the corresponding indexed values are millisecond-exact. This adapter
+has no `date_nanos` mapping mode.
+
+### Conformance contract
+
+The adapter is differentially tested against Cerbos PDP 0.54.0 `check()` decisions using 20 hostile seed documents and real Elasticsearch queries. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
+
+| Classification | Coverage |
+| --- | --- |
+| Oracle-tested | 36 reference conformance actions plus regex and timestamp probes (38 actions) |
+| Fail-closed | 77 reference actions plus ordered list indexing/`get-field` (78 actions total) |
+| Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute documents. Until the planner is fixed, use `R.attr.x != null` for indexed attributes instead of `has(R.attr.x)` |
+
+The oracle-tested set covers value-first comparisons, literal-safe wildcard matching, safe
+null/missing polarities, positive `exists` and non-empty collection checks, negated `all`,
+millisecond-exact timestamp ordering, and chained nested paths. The fail-closed set comprises the
+unexpressible categories above plus hierarchy expressions, positive explicit-null comparisons,
+null-sensitive variable membership, positive `all`, negated `exists`, and collection-emptiness
+predicates that require distinguishing an indexed empty array from a missing field.
+
+Elasticsearch does not index empty arrays. An `exists` or nested query therefore cannot distinguish an attribute explicitly set to `[]` from an attribute omitted entirely. CEL treats the former as an empty collection and the latter as an evaluation error, so polarity matters: positive `exists`, positive non-empty checks, negated `all`, and negated empty checks remain safe; the opposite polarities throw rather than authorizing a document with a missing collection.
 
 ### Nested object queries (collection operators)
 

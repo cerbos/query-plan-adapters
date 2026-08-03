@@ -2,7 +2,19 @@
 
 An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanResources API](https://docs.cerbos.dev/cerbos/latest/api/index.html#resources-query-plan)) response and converts it into a [SQLAlchemy](https://docs.sqlalchemy.org/en/14/) Select instance. This is designed to work alongside a project using the [Cerbos Python SDK](https://github.com/cerbos/cerbos-sdk-python).
 
-The following conditions are supported: `and`, `or`, `not`, `eq`, `ne`, `lt`, `gt`, `le` (`lte`), `ge` (`gte`) and `in`. Other operators (eg math operators) can be implemented programatically, and attached to the query object via the `query.where(...)` API.
+The adapter supports logical and comparison operators, value-first and field-to-field comparisons, literal-safe string helpers, arithmetic and conditional expressions, scalar casts and sizes, timestamps, and hierarchy comparisons. `operator_override_fns` can provide database- or schema-specific translations for collection and other non-portable shapes.
+
+## Conformance contract
+
+The adapter is differentially tested against Cerbos PDP 0.54.0 `check()` decisions using 20 hostile seed rows and executable SQLAlchemy queries. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
+
+| Classification | Coverage |
+| --- | --- |
+| Oracle-tested | 111 reference conformance actions |
+| Fail-closed corpus shapes | Nanosecond `now()` thresholds plus regex `matches()`, ordered list indexing/`get-field`, and `timestamp()` over an ambiguous string column (5 actions) |
+| Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
+
+The conformance harness supplies the same public `operator_override_fns` mechanism available to applications for schema-specific collection translations. Regex `matches()` fails closed by default because SQL dialect regex engines do not guarantee CEL/RE2 semantics; applications may provide an override only when their database translation is known to be equivalent. Timestamp literals must use strict RFC 3339 grammar, resolve inside CEL's supported year 0001–9999 instant range, and be exactly representable at Python/SQLAlchemy microsecond precision: discarded fractional digits must be zero, and the mapped column/database must preserve microseconds. Unsupported shapes raise instead of producing a broader query.
 
 ## Requirements
 - Cerbos > v0.16

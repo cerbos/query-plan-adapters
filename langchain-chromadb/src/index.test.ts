@@ -933,7 +933,7 @@ test("conditional - empty-collection (unsupported)", async () => {
 
 // --- Issue #229: lock in missing operator/comparison shapes ---
 
-test("conditional - is-not-set", async () => {
+test("conditional - is-not-set rejects null metadata filters", async () => {
   // #given - policy: ALLOW when aOptionalString == null
   // Cerbos produces eq(aOptionalString, null)
   const queryPlan = await cerbos.planResources({
@@ -942,23 +942,16 @@ test("conditional - is-not-set", async () => {
     action: "is-not-set",
   });
 
-  // #when
-  const result = queryPlanToChromaDB({
-    queryPlan,
-    fieldNameMapper: {
-      "request.resource.attr.aOptionalString": "aOptionalString",
-    },
-  });
-
-  // #then - eq null translates to $eq: null.
-  // NOTE: ChromaDB metadata filters do not natively match null/missing
-  // values via $eq: null. The adapter passes the literal through; the
-  // downstream query is expected to return no rows. The shape is what
-  // we're locking in here.
-  expect(result).toStrictEqual({
-    kind: PlanKind.CONDITIONAL,
-    filters: { aOptionalString: { $eq: null } },
-  });
+  // Chroma metadata operands cannot be null. Reject at the adapter boundary
+  // instead of returning a filter that fails only when Chroma executes it.
+  expect(() =>
+    queryPlanToChromaDB({
+      queryPlan,
+      fieldNameMapper: {
+        "request.resource.attr.aOptionalString": "aOptionalString",
+      },
+    }),
+  ).toThrow(/finite number, string, or boolean literal/);
 });
 
 test("conditional - equal-field-to-field (unsupported)", async () => {

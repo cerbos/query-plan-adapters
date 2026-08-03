@@ -8529,6 +8529,64 @@ describe("Promoted adversarial planner shapes", () => {
     ).toThrow('must be mapped with valueType: "dateTime"');
   });
 
+  test.each([
+    "2024-01-01",
+    "0000-01-01T00:00:00Z",
+    "2024-02-30T00:00:00Z",
+    "2024-01-01T00:00:00.1234Z",
+    "9999-12-31T23:00:00-02:00",
+  ])("timestamp literal %s fails closed", (value) => {
+    expect(() =>
+      queryPlanToPrisma({
+        queryPlan: createConditionalPlan({
+          operator: "eq",
+          operands: [
+            {
+              operator: "timestamp",
+              operands: [{ name: "request.resource.attr.createdAt" }],
+            },
+            { operator: "timestamp", operands: [{ value }] },
+          ],
+        }),
+        mapper: {
+          "request.resource.attr.createdAt": {
+            field: "createdAt",
+            valueType: "dateTime",
+          },
+        },
+      })
+    ).toThrow(/RFC 3339|millisecond|instant range/);
+  });
+
+  test("timestamp accepts excess fractional digits only when they are zero", () => {
+    const result = queryPlanToPrisma({
+      queryPlan: createConditionalPlan({
+        operator: "eq",
+        operands: [
+          {
+            operator: "timestamp",
+            operands: [{ name: "request.resource.attr.createdAt" }],
+          },
+          {
+            operator: "timestamp",
+            operands: [{ value: "2024-01-01T00:00:00.123000Z" }],
+          },
+        ],
+      }),
+      mapper: {
+        "request.resource.attr.createdAt": {
+          field: "createdAt",
+          valueType: "dateTime",
+        },
+      },
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { createdAt: { equals: "2024-01-01T00:00:00.123Z" } },
+    });
+  });
+
   test("membership list containing null becomes an explicit null disjunct", () => {
     const result = queryPlanToPrisma({
       queryPlan: createConditionalPlan({
