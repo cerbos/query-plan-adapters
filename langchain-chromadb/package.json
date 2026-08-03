@@ -1,6 +1,6 @@
 {
   "name": "@cerbos/langchain-chromadb",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "homepage": "https://cerbos.dev",
   "repository": {
     "type": "git",
