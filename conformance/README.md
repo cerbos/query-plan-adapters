@@ -117,6 +117,83 @@ These are part of the shared contract. Do not replace them with adapter-specific
 4. Run `scripts/regenerate-wire-fixtures.sh` and commit the new fixture alongside the policy change.
 5. Every adapter harness picks up the new action automatically from `actions.json` on next run;
    triage any divergence into a per-adapter fix issue rather than special-casing it in the harness.
+6. Each harness pins the corpus size as a tripwire (e.g. `expect(MANIFEST_ACTIONS.size).toBe(118)`
+   in `prisma/src/adversarial.test.ts`, and the oracle/throwing counts in the convex and
+   langchain-chromadb harnesses). Bump them deliberately — that assertion exists so a new action
+   cannot slip past an adapter unnoticed.
+
+## Adding a new adapter
+
+The corpus is the contract; a new adapter joins by proving itself against it. Work in this order —
+the classification is an *output* of the harness, not an input to it. Declaring an action
+unsupported before you have watched it fail is how a translatable shape gets permanently skipped.
+
+1. **Implement translation.** Follow the closest existing adapter. Spring Data is the reference
+   implementation: when a shape is ambiguous, its behaviour defines the answer, and whether it
+   translates a shape at all decides `conformance` vs `expectedUnsupported`.
+
+2. **Write the differential harness**, implementing the oracle recipe above against the adapter's
+   own store. Never hand-write expected id sets — the PDP is the oracle for both sides. Derive
+   the classification from `actions.json` at runtime rather than copying it:
+
+   ```
+   oracleActions   = conformance - adapterUnsupported[me] + adapterSupportedExpected[me]
+   throwingActions = adapterUnsupported[me] + (expectedUnsupported - adapterSupportedExpected[me])
+   skipped         = knownDivergences where adapters contains me
+   ```
+
+   `drizzle/src/adversarial.test.ts` is the cleanest example of this wiring. Every adapter's key
+   in `actions.json` is its **directory name** (`langchain-chromadb`, `elasticsearch-java`).
+
+3. **Persist the seeds exactly**, including the NULL conventions and the derived fields above.
+   `aOptionalString` is NULL for several seeds and `tags[].name` is NULL for others — those are
+   not incidental, they are what the three-valued-logic probes discriminate on. Getting them wrong
+   makes the oracle agree with the adapter for the wrong reason.
+
+4. **Assert the degeneracy guard** (see above) and pin the corpus size, so a silently broken PDP
+   connection or a newly added action cannot pass vacuously.
+
+5. **Run it and let it fail.** Triage every divergence into exactly one of:
+   - a translation bug in the adapter — fix it;
+   - a shape the query language genuinely cannot express — add it to
+     `adapterUnsupported[<adapter>]` with a **specific** reason naming the real mechanism, and
+     make the adapter throw. "Cannot express this shape faithfully" is not a reason; "emits LIKE
+     without an ESCAPE clause, so `%` cannot be matched literally" is;
+   - an upstream planner bug — add to `knownDivergences` with the affected adapters and a reason.
+
+   The invariant is absolute: **an inexpressible shape must throw before its filter can be used.**
+   A wrong filter is an authorization bug that returns rows the PDP denies. A throw is a bug
+   report. Never degrade one operator into a weaker one (`exists_one` into `exists`) to make a
+   test pass.
+
+6. **Register in `actions.json`** and run `scripts/validate-corpus.sh` — it enforces that every
+   `adapterUnsupported` entry names a real `conformance` action and every
+   `adapterSupportedExpected` entry names a real `expectedUnsupported` one.
+
+7. **Wire CI.** Copy an existing adapter workflow. It must: read the PDP version from
+   `CERBOS_VERSION` (never hardcode it), run `scripts/validate-corpus.sh`, trigger on
+   `conformance/**` as well as the adapter's own directory, and run the adversarial suite as its
+   own job. Pin any service image by digest.
+
+8. **Document the contract** in the adapter's README with a `Conformance contract` table
+   (oracle-tested / fail-closed / known divergence counts). Each adapter is published
+   independently, so its README must stand alone — a consumer should not need this monorepo to
+   understand what the adapter guarantees.
+
+### Gotchas worth knowing up front
+
+- **Do not trust a local pass that depends on gitignored generated state.** Convex's harness
+  imports `convex/_generated/`, which only exists after `npx convex codegen` against a live
+  backend; a type-check that passes locally can fail in CI purely because your tree has stale
+  artifacts. The same applies to Prisma's generated clients.
+- **Java harnesses read `../conformance/`**, so containerised runs must mount the repository
+  root, not the adapter directory. See the recipe in the repo's `CLAUDE.md`.
+- **The wire fixtures are not consumed by adapter harnesses.** They pin planner shape
+  independently and are enforced by the `Conformance Corpus` workflow, which replans against the
+  pinned PDP and fails on drift.
+- **A dialect the harness does not exercise is not covered.** Most TypeScript harnesses run on
+  SQLite only; collation and LIKE metacharacter behaviour differ on MySQL and SQL Server, and the
+  READMEs treat collation as part of the policy contract for exactly this reason.
 
 ## Regenerating wire fixtures after a Cerbos version bump
 
