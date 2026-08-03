@@ -1,0 +1,30 @@
+{
+  "action": "cr-div-zero",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "gt",
+        "operands": [
+          {
+            "expression": {
+              "operator": "div",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "variable": "request.resource.attr.aNumber"
+                }
+              ]
+            }
+          },
+          {
+            "value": 0.5
+          }
+        ]
+      }
+    }
+  }
+}

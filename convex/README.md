@@ -8,11 +8,11 @@ An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanRe
 2. Provide `queryPlanToConvex` with that plan and an optional mapper that describes how Cerbos attribute paths relate to your Convex document fields.
 3. The adapter walks the Cerbos expression tree and returns `{ kind, filter?, postFilter? }`:
    - `filter` is a Convex-native filter function `(q) => Expression<boolean>` pushed to the DB.
-   - `postFilter` is a JS predicate `(doc) => boolean` for operators Convex can't express natively (string ops, collection ops). **Requires `allowPostFilter: true`** — see below.
+   - `postFilter` is a JS predicate `(doc) => boolean` for operators Convex can't express natively (string ops, collection ops). **Requires `allowPostFilter: true`** and must run in trusted backend code before any document is returned — see below.
 4. Inspect `result.kind`:
    - `ALWAYS_ALLOWED`: the caller can query without any additional filters.
    - `ALWAYS_DENIED`: short-circuit and return an empty result set.
-   - `CONDITIONAL`: apply `result.filter` server-side and `result.postFilter` client-side (see usage example below).
+   - `CONDITIONAL`: apply `result.filter` in the Convex query, then apply `result.postFilter` to every candidate inside the trusted backend before returning results (see usage example below).
 
 ## Supported operators
 
@@ -30,15 +30,20 @@ The following operators cannot be expressed as Convex DB filters. When the adapt
 | Category | Operators | JS Behavior |
 | --- | --- | --- |
 | String | `contains`, `startsWith`, `endsWith` | `String.prototype.includes` / `startsWith` / `endsWith` |
-| Collection | `hasIntersection` | `a.some(v => b.includes(v))` |
-| Quantifiers | `exists`, `exists_one`, `all` | `Array.prototype.some` / filter-count / `every` with lambda |
-| Higher-order | `filter`, `map`, `lambda` | Used internally by quantifier operators |
+| Collection | `hasIntersection`, `index`, `get-field`, `size` | CEL-compatible collection and nested-field evaluation |
+| Quantifiers | `exists`, `exists_one`, `all` | CEL-compatible lambda evaluation, including empty collections and missing members |
+| Higher-order | `filter`, `map`, `lambda` | Collection filtering and projection inside larger expressions |
+| Arithmetic | `add`, `sub`, `mult`, `div`, `mod` | Numeric evaluation with CEL error propagation |
+| Conversion | `string`, `double`, `int`, `timestamp` | Scalar conversion and RFC 3339 timestamp comparison |
+| Conditional | `if` | Evaluates only the selected branch |
+| Pattern | `matches` | Constant patterns in the safe common RE2/JavaScript subset: literals, `^`/`$` anchors, and a trailing `.*` when no `$` end anchor is present |
+| Hierarchy | `hierarchy`, `ancestorOf`, `descendentOf`, `overlaps` | Delimiter-aware hierarchy comparison |
 
 For mixed expressions (e.g. `and(eq(...), contains(...))`), the adapter splits the tree: DB-pushable children go to `filter`, the rest go to `postFilter`. For `or(...)` with any unsupported child, the entire expression goes to `postFilter` (partial OR push-down would miss results).
 
 ### `allowPostFilter` opt-in
 
-By default, `queryPlanToConvex` throws an error when the query plan requires a `postFilter`. This is because post-filter operators cause data to be fetched from the database before authorization filtering is applied — the DB-level filter alone may not fully enforce the authorization policy.
+By default, `queryPlanToConvex` throws an error when the query plan requires a `postFilter`. This is because post-filter operators cause documents to be read before the complete authorization predicate is applied — the DB-level filter alone may not fully enforce the authorization policy.
 
 To enable post-filtering, pass `allowPostFilter: true`:
 
@@ -50,7 +55,22 @@ const { kind, filter, postFilter } = queryPlanToConvex({
 });
 ```
 
+> **Security requirement:** `postFilter` is part of the authorization predicate. Run it in the same trusted Convex/backend function and apply it to every candidate before serialization or return. Never send unfiltered candidates to a browser or other untrusted client for filtering.
+
 If your Cerbos policies only use operators that Convex supports natively (comparisons, `in`, `isSet`, logical combinators), you don't need this flag — `filter` alone will enforce the full policy at the DB level.
+
+## Conformance contract
+
+The adapter is differentially tested with 20 hostile seed documents against Cerbos PDP 0.54.0 `checkResource` decisions: each query plan is executed by Convex, and the returned document IDs must equal the PDP's per-document decisions. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
+
+| Classification | Coverage |
+| --- | --- |
+| Oracle-tested | All 114 reference conformance actions, plus `matches()`, list indexing/`get-field`, and `timestamp()` plans that the Spring Data reference adapter rejects (117 actions total) |
+| Fail-closed | No corpus shape when `allowPostFilter: true`; unknown operators and invalid expression structures still throw |
+| Explicit opt-in | Any plan that cannot be represented entirely as a Convex database filter requires `allowPostFilter: true` |
+| Known planner divergence | `has()` on a missing attribute is currently folded by the Cerbos planner to `ALWAYS_ALLOWED`; `checkResource` still denies documents where the attribute is missing. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
+
+This support statement includes value-first comparisons, field-to-field expressions, null and missing-attribute behavior, nested lambdas, collection macros, string and arithmetic expressions, timestamps, hierarchy operations, and chained nested fields. Fields that may be absent must be marked `nullable: true` in the mapper so the adapter evaluates their predicates with CEL-compatible missing-value semantics instead of pushing them to a Convex filter.
 
 ## Requirements
 
@@ -58,7 +78,7 @@ If your Cerbos policies only use operators that Convex supports natively (compar
 
 ## System Requirements
 
-- Node.js >= 20.0.0
+- Node.js >= 22.0.0
 - Convex 1.x
 
 ## Installation
@@ -75,11 +95,16 @@ import {
   PlanKind,
   type Mapper,
 } from "@cerbos/orm-convex";
+import type { Expression, FilterBuilder } from "convex/server";
+import type { DataModel } from "./_generated/dataModel";
 
-const { kind, filter, postFilter } = queryPlanToConvex({
-  queryPlan, // PlanResourcesResponse from Cerbos
+const { kind, filter, postFilter } = queryPlanToConvex<
+  FilterBuilder<DataModel["myTable"]>,
+  Expression<boolean>
+>({
+  queryPlan, // PlanResourcesResponse obtained by trusted backend code
   mapper, // optional Mapper - see below
-  allowPostFilter: true, // opt in to client-side filtering (see note below)
+  allowPostFilter: true, // opt in to trusted-backend filtering (see note below)
 });
 
 if (kind === PlanKind.ALWAYS_DENIED) return [];
@@ -110,6 +135,7 @@ The Cerbos query plan references fields using paths such as `request.resource.at
 ```ts
 export type MapperConfig = {
   field?: string;
+  nullable?: boolean;
 };
 
 export type Mapper =
@@ -118,6 +144,7 @@ export type Mapper =
 ```
 
 - `field` rewrites a single Cerbos path to a different field name in your Convex document. Dot-notation is supported for nested fields.
+- `nullable` declares that the document field may be absent. Predicates involving that field are evaluated by the post-filter so missing values cannot be mistaken for ordinary Convex comparison results.
 
 If you omit the mapper the adapter will use the query plan paths verbatim.
 
@@ -128,6 +155,10 @@ const mapper: Mapper = {
   "request.resource.attr.aBool": { field: "aBool" },
   "request.resource.attr.title": { field: "title" },
   "request.resource.attr.nested.value": { field: "metadata.value" },
+  "request.resource.attr.optionalOwner": {
+    field: "optionalOwner",
+    nullable: true,
+  },
 };
 ```
 
@@ -141,17 +172,20 @@ const mapper: Mapper = (path) => ({
 });
 ```
 
-## Usage example
+## Trusted usage pattern
+
+Call Cerbos from a trusted Convex action or from your application backend. Pass the resulting query plan to an `internalQuery` that applies both the Convex filter and any `postFilter`. Do not expose a public query that accepts a caller-supplied plan: an untrusted caller could submit an `ALWAYS_ALLOWED` plan.
 
 ```ts
-import { GRPC as Cerbos } from "@cerbos/grpc";
+import type { PlanResourcesResponse } from "@cerbos/core";
 import {
   queryPlanToConvex,
   PlanKind,
   type Mapper,
 } from "@cerbos/orm-convex";
-
-const cerbos = new Cerbos("localhost:3592", { tls: false });
+import { internalQuery, type Expression, type FilterBuilder } from "convex/server";
+import { v } from "convex/values";
+import type { DataModel } from "./_generated/dataModel";
 
 const mapper: Mapper = {
   "request.resource.attr.title": { field: "title" },
@@ -159,32 +193,31 @@ const mapper: Mapper = {
   "request.resource.attr.priority": { field: "priority" },
 };
 
-// Inside a Convex query function:
-const queryPlan = await cerbos.planResources({
-  principal: { id: "user1", roles: ["USER"] },
-  resource: { kind: "document" },
-  action: "view",
+export const executePlan = internalQuery({
+  args: { queryPlan: v.any() },
+  handler: async (ctx, { queryPlan }) => {
+    // This internal-only argument must be the response returned directly by Cerbos.
+    const { kind, filter, postFilter } = queryPlanToConvex<
+      FilterBuilder<DataModel["documents"]>,
+      Expression<boolean>
+    >({
+      queryPlan: queryPlan as PlanResourcesResponse,
+      mapper,
+      allowPostFilter: true,
+    });
+
+    if (kind === PlanKind.ALWAYS_DENIED) return [];
+    if (kind === PlanKind.ALWAYS_ALLOWED && !postFilter) {
+      return await ctx.db.query("documents").collect();
+    }
+
+    let query = ctx.db.query("documents");
+    if (filter) query = query.filter(filter);
+    let results = await query.collect();
+    if (postFilter) results = results.filter(postFilter);
+    return results;
+  },
 });
-
-const { kind, filter, postFilter } = queryPlanToConvex({
-  queryPlan,
-  mapper,
-  allowPostFilter: true,
-});
-
-if (kind === PlanKind.ALWAYS_DENIED) {
-  return [];
-}
-
-if (kind === PlanKind.ALWAYS_ALLOWED && !postFilter) {
-  return await ctx.db.query("documents").collect();
-}
-
-let query = ctx.db.query("documents");
-if (filter) query = query.filter(filter);
-let results = await query.collect();
-if (postFilter) results = results.filter(postFilter);
-return results;
 ```
 
 ## Error handling
@@ -195,10 +228,12 @@ return results;
 - A conditional plan omits the `operator`/`operands` structure (`Invalid Cerbos expression structure`).
 - An operator listed in the plan is not implemented by this adapter (`Unsupported operator for Convex: <name>` or `Unsupported operator: <name>`).
 - The `in` operator is given a non-array value.
-- The query plan requires client-side filtering and `allowPostFilter` is not set to `true`.
+- The query plan requires trusted-backend filtering and `allowPostFilter` is not set to `true`.
 
 ## Limitations
 
-- String and collection operators (`contains`, `startsWith`, `endsWith`, `hasIntersection`, `exists`, `all`, etc.) are evaluated as a JavaScript `postFilter` after the DB query returns. This means these conditions do not reduce the number of documents read from the database.
-- For `or(...)` expressions where any child uses an unsupported operator, the entire OR is evaluated client-side via `postFilter`. Only `and(...)` expressions can be split between DB filter and post-filter.
+- String and collection operators (`contains`, `startsWith`, `endsWith`, `hasIntersection`, `exists`, `all`, etc.) are evaluated as a JavaScript `postFilter` after the DB query returns candidates. This means these conditions do not reduce the number of documents read from the database; they must still run in trusted backend code before any candidate is returned.
+- For `or(...)` expressions where any child uses an unsupported operator, the entire OR is evaluated in the trusted backend via `postFilter`. Only `and(...)` expressions can be split between DB filter and post-filter.
 - The `in` operator is composed as multiple `eq` comparisons joined with `or`, which may be less efficient for large value lists.
+- `matches` rejects dynamic patterns and regex syntax outside the documented safe subset. This avoids JavaScript-only regex semantics and regular-expression denial of service in the trusted backend.
+- Type conversions accept only CEL-compatible source types and strict string formats. JavaScript-only coercions such as `Number(true)`, `Number("")`, or `String(null)` fail closed.

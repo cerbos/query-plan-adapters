@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "convex/**"
+      - "conformance/**"
       - "policies/**"
       - ".github/workflows/convex.yaml"
       - ".github/workflows/convex-publish.yaml"
@@ -19,38 +20,51 @@ jobs:
   unit-test:
     strategy:
       matrix:
-        cerbos-version: ["latest"]
-        node-version: ["20", "22", "24"]
+        node-version: ["22", "24"]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Read pinned Cerbos version
+        id: cerbos
+        run: echo "version=$(tr -d '[:space:]' < ../conformance/CERBOS_VERSION)" >> "$GITHUB_OUTPUT"
+
       - name: Setup Cerbos
         uses: cerbos/cerbos-setup-action@f772482c8504a05c49018a0bf2d84012a607733c # v1
         with:
-          version: ${{ matrix.cerbos-version }}
+          version: v${{ steps.cerbos.outputs.version }}
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ matrix.node-version }}
 
+      # `npm run typecheck` is NOT run here: src/integration.test.ts and
+      # src/adversarial.test.ts import convex/_generated/api.js, which is produced by
+      # `npx convex codegen` against a live backend and is gitignored. It runs in the
+      # integration-test job instead, right after codegen.
       - run: npm install
       - run: npm run test
 
   integration-test:
     strategy:
       matrix:
-        cerbos-version: ["latest"]
         node-version: ["22"]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Validate conformance corpus
+        run: ../conformance/scripts/validate-corpus.sh
+
+      - name: Read pinned Cerbos version
+        id: cerbos
+        run: echo "version=$(tr -d '[:space:]' < ../conformance/CERBOS_VERSION)" >> "$GITHUB_OUTPUT"
+
       - name: Setup Cerbos
         uses: cerbos/cerbos-setup-action@f772482c8504a05c49018a0bf2d84012a607733c # v1
         with:
-          version: ${{ matrix.cerbos-version }}
+          version: v${{ steps.cerbos.outputs.version }}
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -83,7 +97,7 @@ jobs:
         env:
           CONVEX_SELF_HOSTED_URL: http://127.0.0.1:3210
           CONVEX_SELF_HOSTED_ADMIN_KEY: ${{ steps.convex-key.outputs.key }}
-        run: npx convex deploy --typecheck disable -y
+        run: npx convex deploy -y
 
       - name: Generate Convex types
         env:
@@ -91,10 +105,19 @@ jobs:
           CONVEX_SELF_HOSTED_ADMIN_KEY: ${{ steps.convex-key.outputs.key }}
         run: npx convex codegen
 
+      # Runs here rather than in unit-test: the harnesses import the generated API above.
+      - name: Type-check (including the backend-dependent harnesses)
+        run: npm run typecheck
+
       - name: Run integration tests
         env:
           CONVEX_URL: http://127.0.0.1:3210
         run: npm run test:integration
+
+      - name: Run adversarial conformance tests
+        env:
+          CONVEX_URL: http://127.0.0.1:3210
+        run: npm run test:adversarial
 
       - name: Stop Convex backend
         if: always()

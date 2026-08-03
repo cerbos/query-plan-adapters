@@ -1,3 +1,5 @@
+import math
+
 import pytest
 from cerbos.response.v1 import response_pb2
 from cerbos.sdk.model import (
@@ -8,7 +10,8 @@ from cerbos.sdk.model import (
 from google.protobuf.json_format import MessageToDict
 
 from cerbos_sqlalchemy import get_query
-from sqlalchemy import any_, func, literal
+from sqlalchemy import DateTime, String, any_, column, func, literal, table
+from sqlalchemy.dialects import postgresql
 
 
 def _default_resp_params():
@@ -27,6 +30,18 @@ def _condition_to_dict(plan):
     if isinstance(plan, response_pb2.PlanResourcesResponse):
         return MessageToDict(plan.filter.condition)
     return plan.filter.condition.to_dict()
+
+
+def _conditional_plan(expression):
+    return PlanResourcesResponse(
+        filter=PlanResourcesFilter.from_dict(
+            {
+                "kind": PlanResourcesFilterKind.CONDITIONAL,
+                "condition": {"expression": expression},
+            }
+        ),
+        **_default_resp_params(),
+    )
 
 
 class TestGetQuery:
@@ -383,7 +398,15 @@ class TestGetQuery:
     ):
         plan = cerbos_client.plan_resources("matches-regex", principal, resource_desc)
         attr = {"request.resource.attr.aString": resource_table.aString}
-        query = get_query(plan, resource_table, attr)
+        with pytest.raises(ValueError, match="Unrecognised operator: matches"):
+            get_query(plan, resource_table, attr)
+
+        query = get_query(
+            plan,
+            resource_table,
+            attr,
+            operator_override_fns={"matches": lambda c, v: c.regexp_match(v)},
+        )
         res = conn.execute(query).fetchall()
         assert len(res) == 1
         assert res[0].name == "resource1"
@@ -510,12 +533,12 @@ class TestGetQuery:
     def test_equal_field_to_field(
         self, cerbos_client, principal, resource_desc, resource_table, conn
     ):
-        # `aString == id` -> both operands are `variable`. The adapter's
-        # boolean-leaf path expects exactly one `variable` and one `value`
-        # operand and currently raises `KeyError: 'value'` when both sides
-        # are variables.
-        # TODO: extend the SQLAlchemy adapter to resolve variable-vs-variable
-        # comparisons (both sides via `resolve_variable`).
+        # `aString == id` -> both operands are `variable`. The adapter resolves
+        # variable-vs-variable comparisons as a column-to-column predicate
+        # (previously it raised `KeyError: 'value'`; fixed as part of the
+        # adversarial conformance work, #263 — see the `field-to-field` corpus
+        # action). No row's aString equals its numeric id, so the filter
+        # matches nothing.
         plan = cerbos_client.plan_resources(
             "equal-field-to-field", principal, resource_desc
         )
@@ -523,8 +546,11 @@ class TestGetQuery:
             "request.resource.attr.aString": resource_table.aString,
             "request.resource.attr.id": resource_table.id,
         }
-        with pytest.raises(KeyError):
-            get_query(plan, resource_table, attr)
+        query = get_query(plan, resource_table, attr)
+        compiled = str(query.compile(compile_kwargs={"literal_binds": True}))
+        assert 'resource."aString" = resource.id' in compiled
+        res = conn.execute(query).fetchall()
+        assert len(res) == 0
 
     def test_equal_bool_false(
         self, cerbos_client, principal, resource_desc, resource_table, conn
@@ -597,9 +623,12 @@ class TestGetQuery:
         #                               ne(tag.id, "tag1")), var:tag)).
         # TODO(#232): the SQLAlchemy adapter has no built-in handler for the
         # CEL `all` collection macro (nor for `lambda`); without an override
-        # the default path emits `ValueError: Unrecognised operator: and`
-        # — the adapter recurses into the lambda body before it can be
-        # short-circuited. Locks in current behavior.
+        # the default path fails loudly on the unsupported `lambda` operator.
+        # (Previously it tripped earlier, on the `and` INSIDE the lambda body;
+        # boolean combinators nested in value expressions are now translatable
+        # as part of the adversarial conformance work, #263, so the traversal
+        # reaches the comprehension itself before raising.) Locks in current
+        # behavior.
         plan = cerbos_client.plan_resources("all-nested", principal, resource_desc)
         cond = _condition_to_dict(plan)
         assert cond["expression"]["operator"] == "all"
@@ -617,7 +646,7 @@ class TestGetQuery:
             "tag.id": resource_table.id,
             "tag.name": resource_table.name,
         }
-        with pytest.raises(ValueError, match="Unrecognised operator: and"):
+        with pytest.raises(ValueError, match="Unrecognised operator: lambda"):
             get_query(plan, resource_table, attr)
 
     def test_map_compared(
@@ -687,7 +716,359 @@ class TestGetQuery:
             get_query(plan, resource_table, attr)
 
 
+class TestSemanticEdgeTranslations:
+    def test_in_list_with_explicit_null_uses_is_null_disjunct(
+        self, resource_table, conn
+    ):
+        plan = _conditional_plan(
+            {
+                "operator": "in",
+                "operands": [
+                    {"variable": "request.resource.attr.name"},
+                    {"value": ["resource1", None]},
+                ],
+            }
+        )
+        query = get_query(
+            plan,
+            resource_table,
+            {"request.resource.attr.name": resource_table.name},
+        )
+
+        compiled = str(query.compile(compile_kwargs={"literal_binds": True}))
+        assert " IN " in compiled
+        assert " IS NULL" in compiled
+        assert [row.name for row in conn.execute(query)] == ["resource1"]
+
+    def test_constant_zero_division_preserves_nan_and_infinity(
+        self, resource_table, conn
+    ):
+        attr = {"request.resource.attr.enabled": resource_table.aBool}
+
+        nan_plan = _conditional_plan(
+            {
+                "operator": "gt",
+                "operands": [
+                    {
+                        "expression": {
+                            "operator": "if",
+                            "operands": [
+                                {"variable": "request.resource.attr.enabled"},
+                                {"value": 1},
+                                {
+                                    "expression": {
+                                        "operator": "div",
+                                        "operands": [{"value": 0}, {"value": 0}],
+                                    }
+                                },
+                            ],
+                        }
+                    },
+                    {"value": 0.5},
+                ],
+            }
+        )
+        infinity_plan = _conditional_plan(
+            {
+                "operator": "gt",
+                "operands": [
+                    {
+                        "expression": {
+                            "operator": "if",
+                            "operands": [
+                                {"variable": "request.resource.attr.enabled"},
+                                {
+                                    "expression": {
+                                        "operator": "div",
+                                        "operands": [{"value": 1}, {"value": 0}],
+                                    }
+                                },
+                                {
+                                    "expression": {
+                                        "operator": "div",
+                                        "operands": [{"value": -1}, {"value": 0}],
+                                    }
+                                },
+                            ],
+                        }
+                    },
+                    {"value": 0.5},
+                ],
+            }
+        )
+
+        for plan in (nan_plan, infinity_plan):
+            query = get_query(plan, resource_table, attr)
+            assert {row.name for row in conn.execute(query)} == {
+                "resource1",
+                "resource3",
+            }
+
+        # PostgreSQL gives NaN a total ordering above finite numbers. Letting a
+        # raw NaN bind reach that dialect turns the false CEL comparison into
+        # true; the adapter must fold it before SQL compilation.
+        nan_query = get_query(nan_plan, resource_table, attr)
+        compiled = nan_query.compile(dialect=postgresql.dialect())
+        assert not any(
+            isinstance(value, float) and math.isnan(value)
+            for value in compiled.params.values()
+        )
+
+    @pytest.mark.parametrize("field_first", (True, False))
+    def test_direct_field_nan_ordering_is_folded_in_both_orders(
+        self, field_first, resource_table, conn
+    ):
+        field = {"variable": "request.resource.attr.number"}
+        nan = {
+            "expression": {
+                "operator": "div",
+                "operands": [{"value": 0}, {"value": 0}],
+            }
+        }
+        plan = _conditional_plan(
+            {
+                "operator": "gt" if field_first else "lt",
+                "operands": [field, nan] if field_first else [nan, field],
+            }
+        )
+        query = get_query(
+            plan,
+            resource_table,
+            {"request.resource.attr.number": resource_table.aNumber},
+        )
+
+        assert conn.execute(query).fetchall() == []
+        compiled = query.compile(dialect=postgresql.dialect())
+        assert not any(
+            isinstance(value, float) and not math.isfinite(value)
+            for value in compiled.params.values()
+        )
+
+    def test_hierarchy_field_as_strict_ancestor(self, resource_table, conn):
+        plan = _conditional_plan(
+            {
+                "operator": "ancestorOf",
+                "operands": [
+                    {
+                        "expression": {
+                            "operator": "hierarchy",
+                            "operands": [{"variable": "request.resource.attr.path"}],
+                        }
+                    },
+                    {
+                        "expression": {
+                            "operator": "hierarchy",
+                            "operands": [{"value": "resource1.child"}],
+                        }
+                    },
+                ],
+            }
+        )
+        query = get_query(
+            plan,
+            resource_table,
+            {"request.resource.attr.path": resource_table.name},
+        )
+
+        assert [row.name for row in conn.execute(query)] == ["resource1"]
+
+    def test_timestamp_requires_temporal_column_and_normalizes_offset(self):
+        temporal_table = table("events", column("created_at", DateTime(timezone=True)))
+        plan = _conditional_plan(
+            {
+                "operator": "eq",
+                "operands": [
+                    {
+                        "expression": {
+                            "operator": "timestamp",
+                            "operands": [
+                                {"variable": "request.resource.attr.createdAt"}
+                            ],
+                        }
+                    },
+                    {
+                        "expression": {
+                            "operator": "timestamp",
+                            "operands": [{"value": "2024-06-01T02:00:00+02:00"}],
+                        }
+                    },
+                ],
+            }
+        )
+
+        query = get_query(
+            plan,
+            temporal_table,
+            {"request.resource.attr.createdAt": temporal_table.c.created_at},
+        )
+        compiled = str(query.compile(compile_kwargs={"literal_binds": True}))
+        assert "2024-06-01 00:00:00" in compiled
+
+        string_table = table("events", column("created_at", String))
+        with pytest.raises(ValueError, match="DateTime column"):
+            get_query(
+                plan,
+                string_table,
+                {"request.resource.attr.createdAt": string_table.c.created_at},
+            )
+
+    def test_timestamp_rejects_inexact_nanosecond_precision(self):
+        temporal_table = table("events", column("created_at", DateTime(timezone=True)))
+        plan = _conditional_plan(
+            {
+                "operator": "eq",
+                "operands": [
+                    {
+                        "expression": {
+                            "operator": "timestamp",
+                            "operands": [
+                                {"variable": "request.resource.attr.createdAt"}
+                            ],
+                        }
+                    },
+                    {
+                        "expression": {
+                            "operator": "timestamp",
+                            "operands": [{"value": "2024-06-01T00:00:00.123456789Z"}],
+                        }
+                    },
+                ],
+            }
+        )
+
+        with pytest.raises(ValueError, match="precision"):
+            get_query(
+                plan,
+                temporal_table,
+                {"request.resource.attr.createdAt": temporal_table.c.created_at},
+            )
+
+    def test_timestamp_accepts_exact_trailing_nanosecond_zeroes(self):
+        temporal_table = table("events", column("created_at", DateTime(timezone=True)))
+        plan = _conditional_plan(
+            {
+                "operator": "eq",
+                "operands": [
+                    {
+                        "expression": {
+                            "operator": "timestamp",
+                            "operands": [
+                                {"variable": "request.resource.attr.createdAt"}
+                            ],
+                        }
+                    },
+                    {
+                        "expression": {
+                            "operator": "timestamp",
+                            "operands": [{"value": "2024-06-01T00:00:00.123456000Z"}],
+                        }
+                    },
+                ],
+            }
+        )
+
+        query = get_query(
+            plan,
+            temporal_table,
+            {"request.resource.attr.createdAt": temporal_table.c.created_at},
+        )
+        compiled = str(query.compile(compile_kwargs={"literal_binds": True}))
+        assert "2024-06-01 00:00:00.123456" in compiled
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "2024-01-01",
+            "2024-W01-1T00:00:00Z",
+            "2024-01-01 00:00:00Z",
+            "0000-01-01T00:00:00Z",
+            "2024-02-30T00:00:00Z",
+            "9999-12-31T23:00:00-02:00",
+        ],
+    )
+    def test_timestamp_rejects_non_rfc3339_or_out_of_range_literals(self, value):
+        temporal_table = table("events", column("created_at", DateTime(timezone=True)))
+        plan = _conditional_plan(
+            {
+                "operator": "eq",
+                "operands": [
+                    {
+                        "expression": {
+                            "operator": "timestamp",
+                            "operands": [
+                                {"variable": "request.resource.attr.createdAt"}
+                            ],
+                        }
+                    },
+                    {
+                        "expression": {
+                            "operator": "timestamp",
+                            "operands": [{"value": value}],
+                        }
+                    },
+                ],
+            }
+        )
+
+        with pytest.raises(ValueError, match="RFC-3339|instant range"):
+            get_query(
+                plan,
+                temporal_table,
+                {"request.resource.attr.createdAt": temporal_table.c.created_at},
+            )
+
+
 class TestGetQueryOverrides:
+    def test_unrelated_override_does_not_bypass_table_mapping_validation(
+        self, resource_table, user_table
+    ):
+        plan = _conditional_plan(
+            {
+                "operator": "eq",
+                "operands": [
+                    {"variable": "request.resource.attr.externalOwner"},
+                    {"value": 1},
+                ],
+            }
+        )
+
+        with pytest.raises(TypeError, match="table_mapping"):
+            get_query(
+                plan,
+                resource_table,
+                {"request.resource.attr.externalOwner": user_table.id},
+                operator_override_fns={"size": lambda *_: literal(0)},
+            )
+
+    def test_used_override_owns_foreign_operand_without_flat_mapping(
+        self, resource_table, user_table, conn
+    ):
+        plan = _conditional_plan(
+            {
+                "operator": "eq",
+                "operands": [
+                    {"variable": "request.resource.attr.externalOwner"},
+                    {"value": 1},
+                ],
+            }
+        )
+        query = get_query(
+            plan,
+            resource_table,
+            {"request.resource.attr.externalOwner": user_table.id},
+            operator_override_fns={
+                # The override deliberately consumes the foreign marker and
+                # rewrites it to a predicate on the root table.
+                "eq": lambda _column, value: resource_table.ownedBy
+                == str(value)
+            },
+        )
+
+        assert {row.name for row in conn.execute(query)} == {
+            "resource1",
+            "resource2",
+        }
+
     def test_in_single_query(self, resource_table, conn):
         plan_resources_filter = PlanResourcesFilter.from_dict(
             {

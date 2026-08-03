@@ -30,14 +30,31 @@ export const deleteAll = mutation({
 });
 
 const filterValue = v.union(v.string(), v.number(), v.boolean());
+const resourceField = v.union(
+  v.literal("key"),
+  v.literal("aBool"),
+  v.literal("aNumber"),
+  v.literal("aString"),
+  v.literal("aOptionalString"),
+  v.literal("nested.aBool"),
+  v.literal("nested.aNumber"),
+  v.literal("nested.aString"),
+);
+
+const requireArgument = <T>(value: T | undefined, name: string): T => {
+  if (value === undefined) {
+    throw new Error(`${name} is required`);
+  }
+  return value;
+};
 
 export const filteredQuery = query({
   args: {
     filterType: v.string(),
-    filterField: v.optional(v.string()),
+    filterField: v.optional(resourceField),
     filterValue: v.optional(filterValue),
     filterValues: v.optional(v.array(filterValue)),
-    filterField2: v.optional(v.string()),
+    filterField2: v.optional(resourceField),
     filterValue2: v.optional(filterValue),
   },
   handler: async (ctx, args) => {
@@ -48,38 +65,81 @@ export const filteredQuery = query({
     switch (filterType) {
       case "eq":
         return await q
-          .filter((f) => f.eq(f.field(filterField!), filterValue))
+          .filter((f) =>
+            f.eq(
+              f.field(requireArgument(filterField, "filterField")),
+              requireArgument(filterValue, "filterValue"),
+            ),
+          )
           .collect();
       case "neq":
         return await q
-          .filter((f) => f.neq(f.field(filterField!), filterValue))
+          .filter((f) =>
+            f.neq(
+              f.field(requireArgument(filterField, "filterField")),
+              requireArgument(filterValue, "filterValue"),
+            ),
+          )
           .collect();
       case "gt":
         return await q
-          .filter((f) => f.gt(f.field(filterField!), filterValue))
+          .filter((f) =>
+            f.gt(
+              f.field(requireArgument(filterField, "filterField")),
+              requireArgument(filterValue, "filterValue"),
+            ),
+          )
           .collect();
       case "gte":
         return await q
-          .filter((f) => f.gte(f.field(filterField!), filterValue))
+          .filter((f) =>
+            f.gte(
+              f.field(requireArgument(filterField, "filterField")),
+              requireArgument(filterValue, "filterValue"),
+            ),
+          )
           .collect();
       case "lt":
         return await q
-          .filter((f) => f.lt(f.field(filterField!), filterValue))
+          .filter((f) =>
+            f.lt(
+              f.field(requireArgument(filterField, "filterField")),
+              requireArgument(filterValue, "filterValue"),
+            ),
+          )
           .collect();
       case "lte":
         return await q
-          .filter((f) => f.lte(f.field(filterField!), filterValue))
+          .filter((f) =>
+            f.lte(
+              f.field(requireArgument(filterField, "filterField")),
+              requireArgument(filterValue, "filterValue"),
+            ),
+          )
           .collect();
       case "not":
         return await q
-          .filter((f) => f.not(f.eq(f.field(filterField!), filterValue)))
+          .filter((f) =>
+            f.not(
+              f.eq(
+                f.field(requireArgument(filterField, "filterField")),
+                requireArgument(filterValue, "filterValue"),
+              ),
+            ),
+          )
           .collect();
       case "and":
         return await q
           .filter((f) =>
             f.and(
-              f.eq(f.field(filterField!), filterValue),
-              f.neq(f.field(filterField2!), filterValue2),
+              f.eq(
+                f.field(requireArgument(filterField, "filterField")),
+                requireArgument(filterValue, "filterValue"),
+              ),
+              f.neq(
+                f.field(requireArgument(filterField2, "filterField2")),
+                requireArgument(filterValue2, "filterValue2"),
+              ),
             ),
           )
           .collect();
@@ -87,8 +147,14 @@ export const filteredQuery = query({
         return await q
           .filter((f) =>
             f.or(
-              f.eq(f.field(filterField!), filterValue),
-              f.neq(f.field(filterField2!), filterValue2),
+              f.eq(
+                f.field(requireArgument(filterField, "filterField")),
+                requireArgument(filterValue, "filterValue"),
+              ),
+              f.neq(
+                f.field(requireArgument(filterField2, "filterField2")),
+                requireArgument(filterValue2, "filterValue2"),
+              ),
             ),
           )
           .collect();
@@ -99,13 +165,23 @@ export const filteredQuery = query({
         return await q
           .filter((f) =>
             f.or(
-              ...filterValues.map((v) => f.eq(f.field(filterField!), v)),
+              ...filterValues.map((value) =>
+                f.eq(
+                  f.field(requireArgument(filterField, "filterField")),
+                  value,
+                ),
+              ),
             ),
           )
           .collect();
       case "isSet":
         return await q
-          .filter((f) => f.neq(f.field(filterField!), undefined))
+          .filter((f) =>
+            f.neq(
+              f.field(requireArgument(filterField, "filterField")),
+              undefined,
+            ),
+          )
           .collect();
       default:
         return await q.collect();

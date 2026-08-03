@@ -1,0 +1,30 @@
+{
+  "action": "arith-add-eq-frac-exact",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "eq",
+        "operands": [
+          {
+            "expression": {
+              "operator": "add",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aDouble"
+                },
+                {
+                  "value": 0.5
+                }
+              ]
+            }
+          },
+          {
+            "value": 0.75
+          }
+        ]
+      }
+    }
+  }
+}

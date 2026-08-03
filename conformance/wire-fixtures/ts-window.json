@@ -1,0 +1,34 @@
+{
+  "action": "ts-window",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "lt",
+        "operands": [
+          {
+            "expression": {
+              "operator": "timestamp",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.createdAt"
+                }
+              ]
+            }
+          },
+          {
+            "expression": {
+              "operator": "timestamp",
+              "operands": [
+                {
+                  "value": "__NOW_MINUS_24H__"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

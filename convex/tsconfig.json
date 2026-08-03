@@ -1,7 +1,7 @@
 {
-  "extends": ["@tsconfig/node20", "@tsconfig/strictest"],
+  "extends": ["@tsconfig/node22", "@tsconfig/strictest"],
   "include": ["src"],
-  "exclude": ["src/integration.test.ts"],
+  "exclude": ["src/**/*.test.ts"],
   "compilerOptions": {
     "checkJs": true,
     "composite": true,

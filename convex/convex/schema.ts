@@ -14,4 +14,42 @@ export default defineSchema({
       aString: v.string(),
     }),
   }),
+  adversarial: defineTable({
+    id: v.string(),
+    aBool: v.boolean(),
+    aString: v.string(),
+    aNumber: v.number(),
+    aDouble: v.optional(v.number()),
+    aOptionalString: v.optional(v.string()),
+    createdBy: v.string(),
+    createdAt: v.optional(v.string()),
+    scope: v.optional(v.string()),
+    owner: v.union(v.string(), v.null()),
+    tagNames: v.array(v.union(v.string(), v.null())),
+    obj: v.object({ inner: v.string() }),
+    tags: v.array(
+      v.object({
+        id: v.string(),
+        name: v.optional(v.string()),
+      }),
+    ),
+    categories: v.array(
+      v.object({
+        name: v.string(),
+        subCategories: v.array(
+          v.object({
+            name: v.string(),
+            labels: v.array(v.object({ name: v.optional(v.string()) })),
+          }),
+        ),
+      }),
+    ),
+    mainCategory: v.optional(
+      v.object({
+        name: v.string(),
+        subCategories: v.array(v.object({ name: v.string() })),
+        subNames: v.array(v.string()),
+      }),
+    ),
+  }),
 });

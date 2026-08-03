@@ -1,0 +1,30 @@
+{
+  "action": "arith-add",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "gt",
+        "operands": [
+          {
+            "expression": {
+              "operator": "add",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 1
+                }
+              ]
+            }
+          },
+          {
+            "value": 2
+          }
+        ]
+      }
+    }
+  }
+}

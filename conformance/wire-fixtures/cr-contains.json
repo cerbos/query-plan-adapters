@@ -1,0 +1,20 @@
+{
+  "action": "cr-contains",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "contains",
+        "operands": [
+          {
+            "value": "s100Xdone-tail\\one-end"
+          },
+          {
+            "variable": "request.resource.attr.aString"
+          }
+        ]
+      }
+    }
+  }
+}

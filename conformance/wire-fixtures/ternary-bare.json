@@ -1,0 +1,43 @@
+{
+  "action": "ternary-bare",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "if",
+        "operands": [
+          {
+            "variable": "request.resource.attr.aBool"
+          },
+          {
+            "expression": {
+              "operator": "eq",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aString"
+                },
+                {
+                  "value": "one"
+                }
+              ]
+            }
+          },
+          {
+            "expression": {
+              "operator": "lt",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 0
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

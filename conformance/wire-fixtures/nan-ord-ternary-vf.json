@@ -1,0 +1,43 @@
+{
+  "action": "nan-ord-ternary-vf",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "lt",
+        "operands": [
+          {
+            "value": 0.5
+          },
+          {
+            "expression": {
+              "operator": "if",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aBool"
+                },
+                {
+                  "value": 1
+                },
+                {
+                  "expression": {
+                    "operator": "div",
+                    "operands": [
+                      {
+                        "value": 0
+                      },
+                      {
+                        "value": 0
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

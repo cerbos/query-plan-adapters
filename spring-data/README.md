@@ -252,6 +252,18 @@ the construct: rows marked **no** are rejected while resolving an operand,
 | `eq`/`ne` against a list constant               | `R.attr.tags == ["a", "b"]`                       | no          | Whole-list equality has no scalar-column translation (the plan arrives as `eq(variable, value-list)` verbatim); rejected before path resolution. Map the attribute as a Relation and use `in`/`hasIntersection`, or compare elements individually. |
 | `except` (list difference)                      | `size(R.attr.tags.except(["archived"])) > 0`      | no          | Cerbos `except(list, list)` is a two-list function (the wire shape is `except(variable, value-list)`, typically inside `size()` — PDP-verified); list difference has no JPA Criteria translation. Rewrite with an equivalent macro: `size(coll.except([...])) > 0` ≡ `coll.exists(x, !(x in [...]))`. |
 
+## Conformance contract
+
+The adapter is differentially tested against Cerbos PDP 0.54.0 `check()` decisions using 20 hostile seed rows on H2, PostgreSQL, and MySQL. This Spring Data implementation defines the reference semantics that the other adapters follow.
+
+| Classification | Coverage |
+| --- | --- |
+| Oracle-tested | All 114 reference conformance actions |
+| Fail-closed corpus shapes | Regex `matches()`, ordered list indexing/`get-field`, and `timestamp()` over an ambiguous string column (3 actions) |
+| Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute rows; this is pinned separately as an upstream divergence |
+
+The oracle coverage includes value-first and field-to-field comparisons, literal-safe string matching, nested and correlated collection macros, three-valued null/error propagation, arithmetic and ternaries, hierarchy operations, timestamp comparisons on supported absolute-instant columns, and multi-hop relations. Unsupported shapes throw before a predicate can be used.
+
 ## Gotchas
 
 Things you're likely to hit when integrating the adapter into a Spring Boot app — see the
@@ -569,15 +581,15 @@ evaluation. Three suites with distinct roles:
 | Suite | Role |
 |---|---|
 | `SpringDataQueryPlanAdapterTest` | Unit: protobuf operands built by hand, executed against H2 to catch translation/mapping errors and pin error messages |
-| `SpringDataIntegrationTest` | Integration: the shared `/policies/resource.yaml` conformance actions planned by a live PDP, results asserted against seeded rows |
+| `SpringDataIntegrationTest` | Integration: the adapter's policy fixture planned by a live PDP, results asserted against seeded rows |
 | `AdversarialConformanceTest` | Differential: hostile policy shapes + hostile seed data (LIKE metacharacters, unicode, empty collections, value-first operand order); the adapter's filtered rows are compared per action against an oracle computed from the PDP's own `check` API — no hand-computed expectations, so any semantic divergence between the generated SQL and Cerbos's evaluation fails mechanically |
 
 Two run modes are supported:
 
 ### 1. Self-managed (default)
 
-[Testcontainers](https://testcontainers.com) pulls and starts `ghcr.io/cerbos/cerbos:latest`,
-mounts `../policies/resource.yaml`, and runs the suite against the gRPC endpoint. The container's
+[Testcontainers](https://testcontainers.com) pulls and starts the source-controlled Cerbos PDP
+0.54.0 pin, loads the adapter's bundled policy fixture, and runs the suite against the gRPC endpoint. The container's
 **audit + decision logs are streamed to the test JVM logger** so you can see every
 `PlanResources` call the test issued.
 
@@ -610,7 +622,7 @@ At the end of `run-e2e.sh` you'll see something like:
 ```
 
 — this is the PDP's own decision log, proving every assertion in the suite came from a real
-policy evaluation against the shared `../policies/resource.yaml`.
+policy evaluation against the adapter's bundled policy fixture.
 
 You can also run the compose stack by hand:
 

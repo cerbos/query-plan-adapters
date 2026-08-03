@@ -2,6 +2,9 @@ package dev.cerbos.queryplan.springdata;
 
 import org.testcontainers.containers.GenericContainer;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 
 /**
@@ -27,9 +30,20 @@ final class CerbosTestImage {
 
     /** Pinned Cerbos PDP image; override with the {@code cerbos.test.image} system property. */
     static final String IMAGE =
-            System.getProperty("cerbos.test.image", "ghcr.io/cerbos/cerbos:0.54.0");
+            System.getProperty("cerbos.test.image", defaultImage());
 
     private CerbosTestImage() {}
+
+    private static String defaultImage() {
+        Path versionFile = Path.of(
+                System.getProperty("user.dir"), "..", "conformance", "CERBOS_VERSION");
+        try {
+            return "ghcr.io/cerbos/cerbos:" + Files.readString(versionFile).strip();
+        } catch (IOException e) {
+            throw new ExceptionInInitializerError(
+                    "Unable to read pinned Cerbos version from " + versionFile + ": " + e);
+        }
+    }
 
     /**
      * Best-effort repo digest of the image backing a started container, so CI logs record

@@ -1,0 +1,43 @@
+{
+  "action": "nary-and",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "and",
+        "operands": [
+          {
+            "variable": "request.resource.attr.aBool"
+          },
+          {
+            "expression": {
+              "operator": "ge",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 0
+                }
+              ]
+            }
+          },
+          {
+            "expression": {
+              "operator": "ne",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aString"
+                },
+                {
+                  "value": "one"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

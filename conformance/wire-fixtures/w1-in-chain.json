@@ -1,0 +1,20 @@
+{
+  "action": "w1-in-chain",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "in",
+        "operands": [
+          {
+            "value": "finance"
+          },
+          {
+            "variable": "request.resource.attr.mainCategory.subNames"
+          }
+        ]
+      }
+    }
+  }
+}

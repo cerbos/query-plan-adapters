@@ -1,0 +1,30 @@
+{
+  "action": "arith-mult-neg",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "lt",
+        "operands": [
+          {
+            "expression": {
+              "operator": "mult",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": -2
+                }
+              ]
+            }
+          },
+          {
+            "value": 3
+          }
+        ]
+      }
+    }
+  }
+}

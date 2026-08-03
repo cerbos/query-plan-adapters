@@ -1,0 +1,23 @@
+{
+  "action": "in-null-elem-hasint",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "hasIntersection",
+        "operands": [
+          {
+            "variable": "request.resource.attr.tagNames"
+          },
+          {
+            "value": [
+              "public",
+              null
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

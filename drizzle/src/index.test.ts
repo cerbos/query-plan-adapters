@@ -26,15 +26,6 @@ import type { MapperEntry, QueryPlanToDrizzleResult } from ".";
 
 const cerbos = new Cerbos("127.0.0.1:3593", { tls: false });
 const sqlite = new Database(":memory:");
-// Register a REGEXP function so SQLite can evaluate the matches() CEL operator.
-sqlite.function("regexp", (pattern: unknown, value: unknown) => {
-  if (value === null || value === undefined) return 0;
-  try {
-    return new RegExp(String(pattern)).test(String(value)) ? 1 : 0;
-  } catch {
-    return 0;
-  }
-});
 const db = drizzle(sqlite);
 
 const users = sqliteTable("users", {
@@ -745,8 +736,6 @@ const conditionalActions = [
   "arith-mult",
   "arith-div",
   "arith-mod",
-  // Regex match via CEL string.matches() — relies on SQLite REGEXP UDF.
-  "matches-regex",
   // CEL type conversions: string(), double(), int() — compiled to CAST.
   "convert-string",
   "convert-double",
@@ -763,6 +752,10 @@ const conditionalActions = [
   "or-leaf-exists",
   // Issue #232: collection macro composition.
   "all-nested",
+  // #263: field-to-field equality and size(filter(...)) now translate (previously threw);
+  // verified here against the check() oracle like every other supported shape.
+  "equal-field-to-field",
+  "filter-count-gt",
 ];
 
 beforeAll(() => {
@@ -1160,18 +1153,6 @@ describe("queryPlanToDrizzle", () => {
   // and the dispatch in buildFilterFromExpression requires one value operand.
   // If/when the adapter learns to compare two columns, replace this with a
   // data-driven assertion against the conditionalActions loop.
-  test("throws for equal-field-to-field (field-to-field equality)", async () => {
-    const queryPlan = await cerbos.planResources({
-      principal: { id: "user1", roles: ["USER"] },
-      resource: { kind: "resource" },
-      action: "equal-field-to-field",
-    });
-
-    expect(() =>
-      queryPlanToDrizzle({ queryPlan, mapper })
-    ).toThrow(/value operand/i);
-  });
-
   test("throws for index-list (array indexing on a relation)", async () => {
     // ownedBy is modelled as a join table — there is no scalar index column,
     // so R.attr.ownedBy[0] cannot be translated into a deterministic SQL fragment.
@@ -1199,19 +1180,6 @@ describe("queryPlanToDrizzle", () => {
     expect(() => queryPlanToDrizzle({ queryPlan, mapper })).toThrow();
   });
 
-  // TODO(#232): drizzle adapter handles size(R.attr.collection) > N via a
-  // correlated COUNT subquery but does not unwrap size(filter(coll, lambda))
-  // — the inner filter() lambda is not pushed into the count predicate.
-  test("throws for filter-count-gt (size(filter(...)) > 0)", async () => {
-    const queryPlan = await cerbos.planResources({
-      principal: { id: "user1", roles: ["USER"] },
-      resource: { kind: "resource" },
-      action: "filter-count-gt",
-    });
-
-    expect(() => queryPlanToDrizzle({ queryPlan, mapper })).toThrow();
-  });
-
   test("throws when mapping is missing", () => {
     const queryPlan = buildPlan({
       operator: "eq",
@@ -1227,6 +1195,79 @@ describe("queryPlanToDrizzle", () => {
         mapper,
       })
     ).toThrow(/No mapping/);
+  });
+
+  test("fails closed for regex matches regardless of SQL dialect support", () => {
+    const queryPlan = buildPlan({
+      operator: "matches",
+      operands: [
+        { name: "request.resource.attr.aString" },
+        { value: "^foo$" },
+      ],
+    });
+
+    expect(() => queryPlanToDrizzle({ queryPlan, mapper })).toThrow(
+      /do not guarantee CEL\/RE2 semantics/
+    );
+  });
+
+  test.each([
+    "2024-01-01",
+    "0000-01-01T00:00:00Z",
+    "2024-02-30T00:00:00Z",
+    "2024-01-01T00:00:00.1234Z",
+    "9999-12-31T23:00:00-02:00",
+  ])("fails closed for inexact or invalid timestamp literal %s", (value) => {
+    const queryPlan = buildPlan({
+      operator: "eq",
+      operands: [
+        {
+          operator: "timestamp",
+          operands: [{ name: "request.resource.attr.createdAt" }],
+        },
+        { operator: "timestamp", operands: [{ value }] },
+      ],
+    });
+
+    expect(() =>
+      queryPlanToDrizzle({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.createdAt": {
+            column: resources.aString,
+            valueType: "timestamp",
+          },
+        },
+      })
+    ).toThrow(/RFC-3339|millisecond|instant range/);
+  });
+
+  test("accepts a timestamp literal whose excess fractional digits are zero", () => {
+    const queryPlan = buildPlan({
+      operator: "eq",
+      operands: [
+        {
+          operator: "timestamp",
+          operands: [{ name: "request.resource.attr.createdAt" }],
+        },
+        {
+          operator: "timestamp",
+          operands: [{ value: "2024-01-01T00:00:00.123000Z" }],
+        },
+      ],
+    });
+
+    expect(() =>
+      queryPlanToDrizzle({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.createdAt": {
+            column: resources.aString,
+            valueType: "timestamp",
+          },
+        },
+      })
+    ).not.toThrow();
   });
 });
 
@@ -1317,17 +1358,23 @@ describe("known-value collections (planner unroll cliff)", () => {
   describe("value-list lambda fold", () => {
     const valueListPlan = (
       operator: string,
-      elements: unknown[],
+      elements: Value[],
       body: PlanExpressionOperand,
-      variable = "t"
-    ): PlanResourcesResponse =>
-      buildPlan({
+      variable = "t",
+      negated = false
+    ): PlanResourcesResponse => {
+      const macro = {
         operator,
         operands: [
           { value: elements },
           { operator: "lambda", operands: [body, { name: variable }] },
         ],
-      } as PlanExpressionOperand);
+      } satisfies PlanExpressionOperand;
+      const condition = negated
+        ? ({ operator: "not", operands: [macro] } satisfies PlanExpressionOperand)
+        : macro;
+      return buildPlan(condition);
+    };
 
     test("exists over a value list matches any element", () => {
       const result = queryPlanToDrizzle({
@@ -1355,6 +1402,46 @@ describe("known-value collections (planner unroll cliff)", () => {
         "resource1",
         "resource3",
       ]);
+    });
+
+    test("negated exists over a value list preserves UNKNOWN as deny", () => {
+      const result = queryPlanToDrizzle({
+        queryPlan: valueListPlan(
+          "exists",
+          ["does-not-match"],
+          {
+            operator: "eq",
+            operands: [
+              { name: "request.resource.attr.aOptionalString" },
+              { name: "t" },
+            ],
+          },
+          "t",
+          true
+        ),
+        mapper,
+      });
+      expect(selectIds(ensureFilter(result))).toEqual(["resource1"]);
+    });
+
+    test("negated all over a value list preserves UNKNOWN as deny", () => {
+      const result = queryPlanToDrizzle({
+        queryPlan: valueListPlan(
+          "all",
+          ["optionalString", "does-not-match"],
+          {
+            operator: "eq",
+            operands: [
+              { name: "request.resource.attr.aOptionalString" },
+              { name: "t" },
+            ],
+          },
+          "t",
+          true
+        ),
+        mapper,
+      });
+      expect(selectIds(ensureFilter(result))).toEqual(["resource1"]);
     });
 
     test("empty value list keeps CEL identity semantics", () => {

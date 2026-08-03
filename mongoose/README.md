@@ -22,12 +22,33 @@ You can merge the adapter output with existing application filters (for example,
 | Comparisons | `eq`, `ne`, `lt`, `le`, `gt`, `ge` | Emits `$eq`, `$ne`, `$lt`, `$lte`, `$gt`, `$gte` checks against the mapped field. |
 | Membership | `in`, `hasIntersection` | `$in` on simple lists, or `$elemMatch` when targeting array relations; `hasIntersection` supports either a direct array field or a `map` projection inside the plan. |
 | String helpers | `contains`, `startsWith`, `endsWith` | Generates escaped regular expressions that target substrings, prefixes, or suffixes. |
-| Existence helpers | `isSet`, `exists`, `exists_one` | Uses `$exists`/`$ne: null` for scalars and `$elemMatch` for collections. |
-| Collection helpers | `filter`, `lambda`, `map`, `all` | Translates Cerbos collection expressions into scoped `$elemMatch` filters and maps lambda variables to the correct nested paths. |
+| Existence helpers | `isSet`, `exists` | Uses `$exists`/`$ne: null` for scalars and `$elemMatch` for collections. |
+| Collection helpers | `filter`, `lambda`, `map`, `all` | Translates Cerbos collection expressions into scoped `$elemMatch` filters and maps lambda variables to the correct nested paths. `all` requires the stored field to be an array. |
+| Arithmetic and values | `add`, `sub`, `mult`, `div`, `mod`, `if`, `size`, `index`, `get-field` | Uses document-level MongoDB `$expr` expressions. Division requires a non-zero constant denominator; indexing requires a non-negative integer constant and adds a per-document bounds check. |
+| Conversions and matching | `string`, `double`, `int`, `timestamp`, `matches` | Uses guarded MongoDB conversion and regular-expression expressions. Timestamps accept BSON dates or millisecond-exact RFC 3339 strings in the CEL instant range. Regex matching accepts a validated common RE2/PCRE2 subset. |
+| Hierarchies | `hierarchy`, `ancestorOf`, `descendentOf`, `overlaps` | Translates a mapped scalar hierarchy path using literal prefix and ancestor-list filters. |
 
 Any operator not listed above causes `queryPlanToMongoose` to throw `Unsupported operator: <name>`.
 
-> **Note:** `exists_one` currently behaves like “at least one element matches”. Enforcing “exactly one” requires an aggregation pipeline, which is outside the scope of this adapter.
+`exists_one` fails loudly because a normal match filter cannot preserve exact-match cardinality and CEL error semantics for nullable elements.
+
+Conversions fail closed when the stored BSON type is outside CEL's compatible source types or when parsing fails. `double` and `int` accept strings and numeric BSON values, but not booleans; `int` also rejects BSON dates rather than interpreting them as milliseconds. `string` accepts strings, booleans, and numeric BSON values. A failed conversion remains denied under negation.
+
+Timestamp values must fall in CEL's UTC instant range (`0001-01-01T00:00:00Z` through `9999-12-31T23:59:59.999Z`). Strings must use RFC 3339 syntax with no more than three fractional-second digits, matching BSON Date's millisecond precision. Higher-precision or out-of-range strings and BSON dates fail closed instead of being silently truncated into a different CEL instant.
+
+`matches` supports literals, `.`, the `*`, `+`, and `?` quantifiers, leading `^`, terminal `$`, and escaped regex metacharacters. Other constructs fail closed. A terminal `$` is translated to PCRE2's absolute end-of-text anchor so MongoDB cannot match before a final newline, preserving RE2 semantics.
+
+## Conformance contract
+
+The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 20 hostile seed documents and real MongoDB 7 and 8 queries. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
+
+| Classification | Coverage |
+| --- | --- |
+| Oracle-tested | 85 reference conformance actions plus regex, ordered indexing/`get-field`, and timestamp probes (88 actions) |
+| Fail-closed | 29 reference actions |
+| Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute documents. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
+
+The fail-closed set covers exact-one cardinality, aggregation expressions or outer-document references inside `$elemMatch`, nested collection counts, correlated variable-in-variable membership, unsafe division/non-finite arithmetic, and negated nullable collection predicates that cannot preserve CEL's three-valued error semantics. These plans throw instead of silently degrading to a weaker MongoDB filter.
 
 ## Requirements
 
@@ -35,9 +56,9 @@ Any operator not listed above causes `queryPlanToMongoose` to throw `Unsupported
 
 ## System Requirements
 
-- Node.js >= 20.0.0
-- Mongoose 8.x
-- A MongoDB-compatible server (MongoDB 5.0+ is recommended for compatibility with Mongoose 8)
+- Node.js >= 22.0.0
+- Mongoose 9.x
+- MongoDB 7.0 or newer
 
 ## Installation
 
@@ -81,6 +102,7 @@ The Cerbos query plan references fields using paths such as `request.resource.at
 ```ts
 export type MapperConfig = {
   field?: string;
+  nullable?: boolean;
   valueParser?: (value: any) => any;
   relation?: {
     name: string;
@@ -96,6 +118,7 @@ export type Mapper =
 ```
 
 - `field` rewrites a single Cerbos path to a different field in MongoDB.
+- `nullable` declares that a stored `null` represents a missing Cerbos attribute. Comparisons add a non-null guard so MongoDB does not turn a CEL evaluation error into an authorized match. Do not set it for fields where `null` is an explicit Cerbos value.
 - `valueParser` transforms leaf values during filter construction. This is useful when the Cerbos plan contains string representations that need to be converted to MongoDB-specific types (for example, converting a string to an `ObjectId`). The parser is applied to each value in `eq`, `ne`, `lt`, `le`, `gt`, `ge`, and `in` operators. It also works on nested relation fields via the `fields` map.
 - `relation` describes embedded documents (`type: "one"`) or arrays (`type: "many"`). When `field` is provided on a relation it identifies the property inside that relation that should be used for comparisons (for example, matching `createdBy.id` without an `$elemMatch`).
 - `fields` supplies nested overrides so lambda expressions such as `tag.name` can be mapped to the correct property.
@@ -140,7 +163,7 @@ const mapper: Mapper = {
 
 #### Collection operators in practice
 
-Collection-aware operators (`filter`, `exists`, `exists_one`, `hasIntersection`, `map`, and `all`) require the mapper to declare the relation with `type: "many"`. The adapter automatically scopes lambda variables and uses the `fields` map when translating expressions such as `tag.name`:
+Collection-aware operators (`filter`, `exists`, `hasIntersection`, `map`, and `all`) require the mapper to declare the relation with `type: "many"`. The adapter automatically scopes lambda variables and uses the `fields` map when translating expressions such as `tag.name`:
 
 ```ts
 const mapper: Mapper = {
@@ -149,14 +172,14 @@ const mapper: Mapper = {
       name: "tags",
       type: "many",
       fields: {
-        name: { field: "name" },
+        name: { field: "name", nullable: true },
       },
     },
   },
 };
 ```
 
-- `exists`, `exists_one`, and `filter` wrap the translated condition in `$elemMatch`.
+- `exists` and `filter` wrap the translated condition in `$elemMatch`.
 - `hasIntersection` works for both scalar arrays and arrays of objects; when the plan uses `map(lambda(tag.name))` the adapter projects `tag.name` to `tags.$elemMatch.name`.
 - `all` converts the lambda condition into a negated `$elemMatch` so that all elements must satisfy the predicate.
 - A bare `map` expression verifies that the referenced nested path exists inside each element.
@@ -279,6 +302,7 @@ Surfacing these errors early helps keep the adapter and your Cerbos policies in 
 
 ## Limitations
 
-- `exists_one` behaves like “at least one element matches” because counting matches requires an aggregation pipeline.
+- `exists_one` throws rather than silently degrading to `exists`.
+- Aggregation expressions inside collection predicates, outer-document references from lambdas, and negation of nullable collection macros fail closed because `$elemMatch` cannot preserve their CEL scoping and three-valued error semantics.
 - Operators not enumerated in **Supported operators** (such as search, mode, scalar math helpers, atomic number operations, composite keys, etc.) are not implemented and will throw `Unsupported operator`.
-- All translations target standard MongoDB find filters; anything that would require `$expr` or a multi-stage aggregation pipeline is currently out of scope.
+- Translations may use document-level `$expr`, but never require a multi-stage aggregation pipeline.

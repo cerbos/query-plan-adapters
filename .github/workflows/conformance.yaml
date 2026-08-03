@@ -1,0 +1,57 @@
+name: Conformance Corpus
+
+# No branch filter on pull_request: like the adapter workflows, this must also run on PRs
+# targeting non-main bases (e.g. stacked PRs).
+on:
+  pull_request:
+    paths:
+      - "conformance/**"
+      - ".github/workflows/conformance.yaml"
+  push:
+    branches:
+      - main
+    paths:
+      - "conformance/**"
+      - ".github/workflows/conformance.yaml"
+
+jobs:
+  # The golden wire fixtures in conformance/wire-fixtures/ pin planner *shape* (operand order,
+  # operator choice, filter kind) independent of any adapter. Nothing else in the repo reads
+  # them — every adapter harness plans live against its own sidecar — so without this job a
+  # CERBOS_VERSION bump would silently desynchronise the fixtures from the pinned PDP and no
+  # test would fail. Re-planning here and diffing is what makes them load-bearing.
+  fixtures:
+    name: Corpus validity and wire-fixture drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate conformance corpus
+        run: conformance/scripts/validate-corpus.sh
+
+      # Mutates conformance/wire-fixtures/ in place, replanning every action in actions.json
+      # against the PDP version pinned in conformance/CERBOS_VERSION.
+      - name: Regenerate golden wire fixtures
+        run: conformance/scripts/regenerate-wire-fixtures.sh
+
+      - name: Check golden wire fixtures are up to date
+        run: |
+          # --intent-to-add stages any *new* fixture as an empty blob so `git diff` reports it;
+          # plain `git diff` ignores untracked files and would miss an added action. Deleted
+          # fixtures already show up in `git diff` because they are tracked.
+          git add --intent-to-add conformance/wire-fixtures
+          if git diff --exit-code -- conformance/wire-fixtures; then
+            exit 0
+          fi
+          echo
+          echo "::error::Golden wire fixtures are out of date with the pinned Cerbos PDP."
+          echo "The PDP at the version in conformance/CERBOS_VERSION returns different wire"
+          echo "output than conformance/wire-fixtures/ records. If this is an intentional PDP"
+          echo "upgrade, run:"
+          echo
+          echo "    ./conformance/scripts/regenerate-wire-fixtures.sh"
+          echo
+          echo "locally and commit the resulting diff alongside the CERBOS_VERSION bump, so"
+          echo "reviewers can see exactly what the planner's wire contract changed."
+          exit 1

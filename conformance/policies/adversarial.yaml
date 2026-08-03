@@ -888,6 +888,24 @@ resourcePolicy:
         match:
           expr: 'hierarchy(R.attr.scope).ancestorOf(hierarchy("50%.a_b.x"))'
 
+    # metachar overlaps: the inclusive union emits BOTH branches at once over a constant whose
+    # segments carry LIKE metacharacters — an equality IN list for the strict prefixes, an
+    # equality for the whole path, and a prefix LIKE on '50%:a_b:' that must be escaped. The
+    # hier-meta-like reaches the prefix-LIKE branch through descendentOf and hier-meta-in the
+    # IN branch through ancestorOf; only overlaps reaches the prefix LIKE through the union,
+    # so an adapter that escapes on its ancestor/descendant path but not on its overlap path
+    # passes both of those and still leaks here. a9 ("50%") is the strict
+    # prefix, b4 ("50%:a_b") the equal path, b1 ("50%:a_b:x") the descendant; b2 ("50x:a_b:y")
+    # is the unescaped-% trap and b3 ("50%:aXb:y") the unescaped-_ trap, both of which an
+    # unescaped LIKE '50%:a_b:%' would wrongly ALLOW. b6 ("50%.a_b") stays a single segment
+    # under the ':' delimiter and must not match any branch.
+    - actions: ["hier-overlaps-meta"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'hierarchy(R.attr.scope, ":").overlaps(hierarchy("50%:a_b", ":"))'
+
     # '[' in a path segment routes through the prefix-LIKE branch: the pattern must escape
     # it as '\[' (SQL Server character classes ignore ESCAPE). The d1 scope
     # ("[env]:prod:eu") is the literal-bracket descendant; d2 ("e:prod:eu") is the row an

@@ -1,0 +1,47 @@
+{
+  "action": "n-not-all-null",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "not",
+        "operands": [
+          {
+            "expression": {
+              "operator": "all",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.tags"
+                },
+                {
+                  "expression": {
+                    "operator": "lambda",
+                    "operands": [
+                      {
+                        "expression": {
+                          "operator": "eq",
+                          "operands": [
+                            {
+                              "variable": "t.name"
+                            },
+                            {
+                              "value": "public"
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "variable": "t"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

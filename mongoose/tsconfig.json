@@ -1,10 +1,12 @@
 {
   "extends": ["@tsconfig/node22", "@tsconfig/strictest"],
   "include": ["src"],
+  "exclude": ["src/**/*.test.ts"],
   "compilerOptions": {
     "checkJs": true,
     "composite": true,
     "exactOptionalPropertyTypes": false,
+    "types": ["node"],
     "outDir": "lib",
     "rootDir": "src",
     "declarationMap": true,

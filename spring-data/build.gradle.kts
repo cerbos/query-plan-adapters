@@ -50,6 +50,9 @@ dependencies {
     testRuntimeOnly("com.mysql:mysql-connector-j:9.7.0")
     testImplementation("org.hibernate.orm:hibernate-core:6.6.54.Final")
     testImplementation("com.h2database:h2:2.4.240")
+    // Parses seeds.json/actions.json from the shared ../conformance/ corpus (see
+    // AdversarialConformanceTest and conformance/README.md).
+    testImplementation("com.fasterxml.jackson.core:jackson-databind:2.22.1")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     testRuntimeOnly("org.slf4j:slf4j-simple:2.0.18")
 }

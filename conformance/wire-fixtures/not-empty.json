@@ -1,0 +1,34 @@
+{
+  "action": "not-empty",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "not",
+        "operands": [
+          {
+            "expression": {
+              "operator": "eq",
+              "operands": [
+                {
+                  "expression": {
+                    "operator": "size",
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.tags"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "value": 0
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

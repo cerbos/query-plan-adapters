@@ -1,0 +1,30 @@
+{
+  "action": "arith-vf",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "lt",
+        "operands": [
+          {
+            "value": 2
+          },
+          {
+            "expression": {
+              "operator": "add",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 1
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

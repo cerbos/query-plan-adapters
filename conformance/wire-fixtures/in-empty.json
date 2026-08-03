@@ -1,0 +1,7 @@
+{
+  "action": "in-empty",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_ALWAYS_DENIED"
+  }
+}

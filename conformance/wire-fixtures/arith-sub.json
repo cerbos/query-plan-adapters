@@ -1,0 +1,30 @@
+{
+  "action": "arith-sub",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "le",
+        "operands": [
+          {
+            "expression": {
+              "operator": "sub",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 3
+                }
+              ]
+            }
+          },
+          {
+            "value": 0
+          }
+        ]
+      }
+    }
+  }
+}

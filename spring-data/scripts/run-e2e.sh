@@ -15,7 +15,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-echo "==> Starting Cerbos PDP container (ghcr.io/cerbos/cerbos:latest)"
+echo "==> Starting Cerbos PDP container (ghcr.io/cerbos/cerbos:0.54.0)"
 docker compose up -d --wait cerbos
 
 CERBOS_HOST="${CERBOS_HOST:-localhost}"

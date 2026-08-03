@@ -1,0 +1,40 @@
+{
+  "action": "hier-bracket",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "descendentOf",
+        "operands": [
+          {
+            "expression": {
+              "operator": "hierarchy",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.scope"
+                },
+                {
+                  "value": ":"
+                }
+              ]
+            }
+          },
+          {
+            "expression": {
+              "operator": "hierarchy",
+              "operands": [
+                {
+                  "value": "[env]:prod"
+                },
+                {
+                  "value": ":"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

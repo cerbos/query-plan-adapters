@@ -1,0 +1,33 @@
+{
+  "action": "ternary-value-first",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "lt",
+        "operands": [
+          {
+            "value": 0
+          },
+          {
+            "expression": {
+              "operator": "if",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aBool"
+                },
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": -1
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

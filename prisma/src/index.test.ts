@@ -512,6 +512,7 @@ describe("Field Operations", () => {
         }
       );
 
+      // Without the model name there is no container for a Prisma field reference.
       expect(() =>
         queryPlanToPrisma({
           queryPlan,
@@ -520,7 +521,38 @@ describe("Field Operations", () => {
             "request.resource.attr.id": { field: "id" },
           },
         })
-      ).toThrow(/Right operand must be a value/);
+      ).toThrow(
+        "Field-to-field comparison requires the `model` option (the Prisma model name) to build a field reference"
+      );
+
+      // With the model name, the comparison compiles to a Prisma field reference.
+      const result = queryPlanToPrisma({
+        queryPlan,
+        mapper: {
+          "request.resource.attr.aString": { field: "aString" },
+          "request.resource.attr.id": { field: "id" },
+        },
+        model: "Resource",
+      });
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          aString: { equals: { _ref: "id", _container: "Resource" } },
+        },
+      });
+
+      if (result.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected CONDITIONAL result");
+      }
+      const query = await prisma.resource.findMany({
+        where: { ...result.filters },
+      });
+      expect(query.map((r) => r.id).sort()).toEqual(
+        fixtureResources
+          .filter((r) => r.aString === r.id)
+          .map((r) => r.id)
+          .sort()
+      );
     });
 
     test("conditional - ne", async () => {
@@ -2164,62 +2196,24 @@ describe("Collection Operations", () => {
         }
       );
 
-      const result = queryPlanToPrisma({
-        queryPlan,
-        mapper: {
-          "request.resource.attr.tags": {
-            relation: {
-              name: "tags",
-              type: "many",
-            },
-          },
-        },
-      });
-
-      expect(result).toStrictEqual({
-        kind: PlanKind.CONDITIONAL,
-        filters: {
-          tags: {
-            some: {
-              name: { equals: "public" },
-            },
-          },
-          AND: [
-            {
-              tags: {
-                every: {
-                  OR: [
-                    { name: { equals: "public" } },
-                    { NOT: { name: { equals: "public" } } },
-                  ],
-                },
+      // exists_one means EXACTLY one matching element, which requires counting matches —
+      // inexpressible in Prisma's where shape. The previous translation silently degraded
+      // to a plain exists (its `every: OR[P, NOT P]` clause was a tautology), returning
+      // wrong rows whenever a resource had two or more matches; it now fails loudly.
+      expect(() =>
+        queryPlanToPrisma({
+          queryPlan,
+          mapper: {
+            "request.resource.attr.tags": {
+              relation: {
+                name: "tags",
+                type: "many",
               },
             },
-          ],
-        },
-      });
-
-      if (result.kind !== PlanKind.CONDITIONAL) {
-        throw new Error("Expected CONDITIONAL result");
-      }
-
-      const query = await prisma.resource.findMany({
-        where: { ...result.filters },
-      });
-
-      expect(query.map((r) => r.id)).toEqual(
-        fixtureResources
-          .filter(
-            (a) =>
-              Array.isArray(a.tags?.connect) &&
-              a.tags?.connect
-                .map((t) => {
-                  return fixtureTags.find((f) => f.id === t.id);
-                })
-                .filter((t) => t?.id === "tag1" && t?.name === "public")
-                .length > 0
-          )
-          .map((r) => r.id)
+          },
+        })
+      ).toThrow(
+        "exists_one requires counting matching elements, which Prisma where-filters cannot express"
       );
     });
 
@@ -6566,13 +6560,13 @@ describe("Add Operator", () => {
   });
 });
 
-// Coverage for additional CEL operators emitted by the planner.
-// Most of these are unsupported in Prisma's type-safe filter API because they
-// require expressing computed columns / CASTs / regex / list indexing — none of
-// which Prisma's where shape exposes. They throw the adapter's existing
-// "Unsupported operator: <op>" error so callers can detect them.
+// Coverage for additional CEL operators emitted by the planner. Linear arithmetic with a
+// constant side is solved to a plain column comparison (Prisma's where shape cannot express
+// computed columns); genuinely inexpressible shapes (mod, regex, list indexing, arithmetic
+// on both sides) throw the adapter's "Unsupported operator: <op>" error so callers can
+// detect them.
 describe("Arithmetic Operators", () => {
-  test("arith-add (gt with field+value add) is unsupported", async () => {
+  test("arith-add (gt with field+value add) solves for the column", async () => {
     const queryPlan = await cerbos.planResources({
       principal: { id: "user1", roles: ["USER"] },
       resource: { kind: "resource" },
@@ -6594,19 +6588,33 @@ describe("Arithmetic Operators", () => {
       ],
     });
 
-    expect(() =>
-      queryPlanToPrisma({
-        queryPlan,
-        mapper: {
-          "request.resource.attr.aNumber": { field: "aNumber" },
-        },
-      })
-    ).toThrow(
-      "Operator gt is not supported with add and field references"
+    // aNumber + 1 > 2  ⇔  aNumber > 1
+    const result = queryPlanToPrisma({
+      queryPlan,
+      mapper: {
+        "request.resource.attr.aNumber": { field: "aNumber" },
+      },
+    });
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { aNumber: { gt: 1 } },
+    });
+
+    if (result.kind !== PlanKind.CONDITIONAL) {
+      throw new Error("Expected CONDITIONAL result");
+    }
+    const query = await prisma.resource.findMany({
+      where: { ...result.filters },
+    });
+    expect(query.map((r) => r.id).sort()).toEqual(
+      fixtureResources
+        .filter((r) => r.aNumber + 1 > 2)
+        .map((r) => r.id)
+        .sort()
     );
   });
 
-  test("arith-sub is unsupported", async () => {
+  test("arith-sub solves for the column", async () => {
     const queryPlan = await cerbos.planResources({
       principal: { id: "user1", roles: ["USER"] },
       resource: { kind: "resource" },
@@ -6628,17 +6636,33 @@ describe("Arithmetic Operators", () => {
       ],
     });
 
-    expect(() =>
-      queryPlanToPrisma({
-        queryPlan,
-        mapper: {
-          "request.resource.attr.aNumber": { field: "aNumber" },
-        },
-      })
-    ).toThrow("Unsupported operator: sub");
+    // aNumber - 1 < 2  ⇔  aNumber < 3
+    const result = queryPlanToPrisma({
+      queryPlan,
+      mapper: {
+        "request.resource.attr.aNumber": { field: "aNumber" },
+      },
+    });
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { aNumber: { lt: 3 } },
+    });
+
+    if (result.kind !== PlanKind.CONDITIONAL) {
+      throw new Error("Expected CONDITIONAL result");
+    }
+    const query = await prisma.resource.findMany({
+      where: { ...result.filters },
+    });
+    expect(query.map((r) => r.id).sort()).toEqual(
+      fixtureResources
+        .filter((r) => r.aNumber - 1 < 2)
+        .map((r) => r.id)
+        .sort()
+    );
   });
 
-  test("arith-mult is unsupported", async () => {
+  test("arith-mult solves for the column", async () => {
     const queryPlan = await cerbos.planResources({
       principal: { id: "user1", roles: ["USER"] },
       resource: { kind: "resource" },
@@ -6660,17 +6684,33 @@ describe("Arithmetic Operators", () => {
       ],
     });
 
-    expect(() =>
-      queryPlanToPrisma({
-        queryPlan,
-        mapper: {
-          "request.resource.attr.aNumber": { field: "aNumber" },
-        },
-      })
-    ).toThrow("Unsupported operator: mult");
+    // aNumber * 2 > 2  ⇔  aNumber > 1
+    const result = queryPlanToPrisma({
+      queryPlan,
+      mapper: {
+        "request.resource.attr.aNumber": { field: "aNumber" },
+      },
+    });
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { aNumber: { gt: 1 } },
+    });
+
+    if (result.kind !== PlanKind.CONDITIONAL) {
+      throw new Error("Expected CONDITIONAL result");
+    }
+    const query = await prisma.resource.findMany({
+      where: { ...result.filters },
+    });
+    expect(query.map((r) => r.id).sort()).toEqual(
+      fixtureResources
+        .filter((r) => r.aNumber * 2 > 2)
+        .map((r) => r.id)
+        .sort()
+    );
   });
 
-  test("arith-div is unsupported", async () => {
+  test("arith-div solves for the column", async () => {
     const queryPlan = await cerbos.planResources({
       principal: { id: "user1", roles: ["USER"] },
       resource: { kind: "resource" },
@@ -6692,14 +6732,30 @@ describe("Arithmetic Operators", () => {
       ],
     });
 
-    expect(() =>
-      queryPlanToPrisma({
-        queryPlan,
-        mapper: {
-          "request.resource.attr.aNumber": { field: "aNumber" },
-        },
-      })
-    ).toThrow("Unsupported operator: div");
+    // aNumber / 2 > 0  ⇔  aNumber > 0
+    const result = queryPlanToPrisma({
+      queryPlan,
+      mapper: {
+        "request.resource.attr.aNumber": { field: "aNumber" },
+      },
+    });
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { aNumber: { gt: 0 } },
+    });
+
+    if (result.kind !== PlanKind.CONDITIONAL) {
+      throw new Error("Expected CONDITIONAL result");
+    }
+    const query = await prisma.resource.findMany({
+      where: { ...result.filters },
+    });
+    expect(query.map((r) => r.id).sort()).toEqual(
+      fixtureResources
+        .filter((r) => r.aNumber / 2 > 0)
+        .map((r) => r.id)
+        .sort()
+    );
   });
 
   test("arith-mod is unsupported", async () => {
@@ -7875,6 +7931,141 @@ describe("Hierarchy descendentOf", () => {
   });
 });
 
+// Every hierarchy relationship that narrows a column with a prefix emits a Prisma
+// `startsWith`, which compiles to `LIKE` with no `ESCAPE` clause: `%` and `_` in the
+// constant hierarchy would match as wildcards and admit rows the PDP denies. `[` is unsafe
+// even where an `ESCAPE` clause exists, because SQL Server opens a character class on it.
+// Both prefix-emitting paths (ancestorOf/descendentOf and overlaps) must throw.
+describe("Hierarchy prefix LIKE metacharacters", () => {
+  const likeMetacharacterError =
+    "Cannot translate hierarchy prefix matching with LIKE metacharacters (%, _ or [): " +
+    "Prisma emits LIKE without an ESCAPE clause, and [ opens a character class on SQL Server even with one";
+
+  const metacharacterHierarchies: [string, string][] = [
+    ["percent", "50%:a"],
+    ["underscore", "50_:a"],
+    ["bracket", "[env]:prod"],
+  ];
+
+  function hierarchyOf(
+    operand: PlanExpressionOperand,
+    delimiter?: string
+  ): PlanExpressionOperand {
+    return {
+      operator: "hierarchy",
+      operands: delimiter === undefined ? [operand] : [operand, { value: delimiter }],
+    };
+  }
+
+  const scopeHierarchy = (delimiter?: string): PlanExpressionOperand =>
+    hierarchyOf({ name: "request.resource.attr.scope" }, delimiter);
+  const constantHierarchy = (
+    raw: string,
+    delimiter?: string
+  ): PlanExpressionOperand => hierarchyOf({ value: raw }, delimiter);
+
+  const translate = (condition: PlanExpressionOperand): QueryPlanToPrismaResult =>
+    queryPlanToPrisma({
+      queryPlan: createConditionalPlan(condition),
+      mapper: hierarchyMapper,
+    });
+
+  describe.each(metacharacterHierarchies)(
+    "constant hierarchy containing a %s",
+    (_name, raw) => {
+      test("overlaps - field-first throws", () => {
+        expect(() =>
+          translate({
+            operator: "overlaps",
+            operands: [scopeHierarchy(":"), constantHierarchy(raw, ":")],
+          })
+        ).toThrow(likeMetacharacterError);
+      });
+
+      test("overlaps - constant-first throws", () => {
+        expect(() =>
+          translate({
+            operator: "overlaps",
+            operands: [constantHierarchy(raw, ":"), scopeHierarchy(":")],
+          })
+        ).toThrow(likeMetacharacterError);
+      });
+
+      test("ancestorOf - constant ancestor of field descendant throws", () => {
+        expect(() =>
+          translate({
+            operator: "ancestorOf",
+            operands: [constantHierarchy(raw, ":"), scopeHierarchy(":")],
+          })
+        ).toThrow(likeMetacharacterError);
+      });
+
+      test("descendentOf - field descendant of constant ancestor throws", () => {
+        expect(() =>
+          translate({
+            operator: "descendentOf",
+            operands: [scopeHierarchy(":"), constantHierarchy(raw, ":")],
+          })
+        ).toThrow(likeMetacharacterError);
+      });
+    }
+  );
+
+  // The guard must not widen into a blanket rejection of hierarchy prefixes: pin the exact
+  // filter emitted for a metacharacter-free hierarchy.
+  describe("metacharacter-free hierarchy still translates", () => {
+    const overlapsFilter = {
+      OR: [
+        { scope: { in: ["dept"] } },
+        { scope: { equals: "dept.eng" } },
+        { scope: { startsWith: "dept.eng." } },
+      ],
+    };
+
+    test("overlaps - field-first", () => {
+      expect(
+        translate({
+          operator: "overlaps",
+          operands: [scopeHierarchy(), constantHierarchy("dept.eng")],
+        })
+      ).toEqual({ kind: PlanKind.CONDITIONAL, filters: overlapsFilter });
+    });
+
+    test("overlaps - constant-first", () => {
+      expect(
+        translate({
+          operator: "overlaps",
+          operands: [constantHierarchy("dept.eng"), scopeHierarchy()],
+        })
+      ).toEqual({ kind: PlanKind.CONDITIONAL, filters: overlapsFilter });
+    });
+
+    test("ancestorOf - constant ancestor of field descendant", () => {
+      expect(
+        translate({
+          operator: "ancestorOf",
+          operands: [constantHierarchy("dept.eng"), scopeHierarchy()],
+        })
+      ).toEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: { scope: { startsWith: "dept.eng." } },
+      });
+    });
+
+    test("descendentOf - field descendant of constant ancestor", () => {
+      expect(
+        translate({
+          operator: "descendentOf",
+          operands: [scopeHierarchy(), constantHierarchy("dept.eng")],
+        })
+      ).toEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: { scope: { startsWith: "dept.eng." } },
+      });
+    });
+  });
+});
+
 // The planner preserves policy source order, so a constant can be the FIRST operand of a
 // comparison (`1 < R.attr.aNumber`). Directional operators must be mirrored when the value
 // precedes the field, or the filter is silently inverted. See #256.
@@ -8310,5 +8501,385 @@ describe("Known-Value Collections (planner unroll cliff)", () => {
         })
       ).toThrow("exists over a literal collection requires a list value");
     });
+  });
+});
+
+describe("Promoted adversarial planner shapes", () => {
+  const valueListMacro = (
+    operator: "exists" | "all",
+    elements: string[]
+  ): PlanExpressionOperand => ({
+    operator,
+    operands: [
+      { value: elements },
+      {
+        operator: "lambda",
+        operands: [
+          {
+            operator: "eq",
+            operands: [
+              { name: "request.resource.attr.aString" },
+              { name: "team" },
+            ],
+          },
+          { name: "team" },
+        ],
+      },
+    ],
+  });
+
+  test("negated exists over a literal collection folds to AND of negated bodies (#294)", () => {
+    const result = queryPlanToPrisma({
+      queryPlan: createConditionalPlan({
+        operator: "not",
+        operands: [valueListMacro("exists", ["a", "b"])],
+      }),
+      mapper: {
+        "request.resource.attr.aString": { field: "aString" },
+      },
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        AND: [
+          { NOT: { aString: { equals: "a" } } },
+          { NOT: { aString: { equals: "b" } } },
+        ],
+      },
+    });
+  });
+
+  test("negated all over a literal collection folds to OR of negated bodies (#294)", () => {
+    const result = queryPlanToPrisma({
+      queryPlan: createConditionalPlan({
+        operator: "not",
+        operands: [valueListMacro("all", ["a", "b"])],
+      }),
+      mapper: {
+        "request.resource.attr.aString": { field: "aString" },
+      },
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        OR: [
+          { NOT: { aString: { equals: "a" } } },
+          { NOT: { aString: { equals: "b" } } },
+        ],
+      },
+    });
+  });
+
+  test("constant NaN ordering in a ternary branch is always false", () => {
+    const result = queryPlanToPrisma({
+      queryPlan: createConditionalPlan({
+        operator: "gt",
+        operands: [
+          {
+            operator: "if",
+            operands: [
+              { name: "request.resource.attr.aBool" },
+              { value: 1 },
+              {
+                operator: "div",
+                operands: [{ value: 0 }, { value: 0 }],
+              },
+            ],
+          },
+          { value: 0.5 },
+        ],
+      }),
+      mapper: { "request.resource.attr.aBool": { field: "aBool" } },
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        OR: [
+          { aBool: { equals: true } },
+          {
+            AND: [
+              { aBool: { equals: true } },
+              { aBool: { equals: false } },
+            ],
+          },
+        ],
+      },
+    });
+  });
+
+  test("value-first timestamp comparison mirrors and normalizes the instant", () => {
+    const result = queryPlanToPrisma({
+      queryPlan: createConditionalPlan({
+        operator: "gt",
+        operands: [
+          {
+            operator: "timestamp",
+            operands: [{ value: "2024-06-01T02:00:00+02:00" }],
+          },
+          {
+            operator: "timestamp",
+            operands: [{ name: "request.resource.attr.createdAt" }],
+          },
+        ],
+      }),
+      mapper: {
+        "request.resource.attr.createdAt": {
+          field: "createdAt",
+          valueType: "dateTime",
+        },
+      },
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        createdAt: { lt: "2024-06-01T00:00:00.000Z" },
+      },
+    });
+  });
+
+  test("timestamp over an untyped string mapping fails closed", () => {
+    expect(() =>
+      queryPlanToPrisma({
+        queryPlan: createConditionalPlan({
+          operator: "lt",
+          operands: [
+            {
+              operator: "timestamp",
+              operands: [{ name: "request.resource.attr.createdBy" }],
+            },
+            {
+              operator: "timestamp",
+              operands: [{ value: "2025-01-01T00:00:00Z" }],
+            },
+          ],
+        }),
+        mapper: {
+          "request.resource.attr.createdBy": { field: "createdBy" },
+        },
+      })
+    ).toThrow('must be mapped with valueType: "dateTime"');
+  });
+
+  test.each([
+    "2024-01-01",
+    "0000-01-01T00:00:00Z",
+    "2024-02-30T00:00:00Z",
+    "2024-01-01T00:00:00.1234Z",
+    "9999-12-31T23:00:00-02:00",
+  ])("timestamp literal %s fails closed", (value) => {
+    expect(() =>
+      queryPlanToPrisma({
+        queryPlan: createConditionalPlan({
+          operator: "eq",
+          operands: [
+            {
+              operator: "timestamp",
+              operands: [{ name: "request.resource.attr.createdAt" }],
+            },
+            { operator: "timestamp", operands: [{ value }] },
+          ],
+        }),
+        mapper: {
+          "request.resource.attr.createdAt": {
+            field: "createdAt",
+            valueType: "dateTime",
+          },
+        },
+      })
+    ).toThrow(/RFC 3339|millisecond|instant range/);
+  });
+
+  test("timestamp accepts excess fractional digits only when they are zero", () => {
+    const result = queryPlanToPrisma({
+      queryPlan: createConditionalPlan({
+        operator: "eq",
+        operands: [
+          {
+            operator: "timestamp",
+            operands: [{ name: "request.resource.attr.createdAt" }],
+          },
+          {
+            operator: "timestamp",
+            operands: [{ value: "2024-01-01T00:00:00.123000Z" }],
+          },
+        ],
+      }),
+      mapper: {
+        "request.resource.attr.createdAt": {
+          field: "createdAt",
+          valueType: "dateTime",
+        },
+      },
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { createdAt: { equals: "2024-01-01T00:00:00.123Z" } },
+    });
+  });
+
+  test("membership list containing null becomes an explicit null disjunct", () => {
+    const result = queryPlanToPrisma({
+      queryPlan: createConditionalPlan({
+        operator: "in",
+        operands: [
+          { name: "request.resource.attr.owner" },
+          { value: ["x", "one_two", null] },
+        ],
+      }),
+      mapper: {
+        "request.resource.attr.owner": { field: "aOptionalString" },
+      },
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        OR: [
+          { aOptionalString: { in: ["x", "one_two"] } },
+          { aOptionalString: null },
+        ],
+      },
+    });
+  });
+
+  test("fractional addition equality fails closed instead of algebraically solving", () => {
+    expect(() =>
+      queryPlanToPrisma({
+        queryPlan: createConditionalPlan({
+          operator: "eq",
+          operands: [
+            {
+              operator: "add",
+              operands: [
+                { name: "request.resource.attr.aDouble" },
+                { value: 0.7 },
+              ],
+            },
+            { value: 0.1 },
+          ],
+        }),
+        mapper: {
+          "request.resource.attr.aDouble": { field: "aDouble" },
+        },
+      })
+    ).toThrow(
+      "solving IEEE-754 addition into a plain Prisma column comparison is not reversible"
+    );
+  });
+
+  test("hierarchy prefix containing LIKE metacharacters fails closed", () => {
+    expect(() =>
+      queryPlanToPrisma({
+        queryPlan: createConditionalPlan({
+          operator: "descendentOf",
+          operands: [
+            {
+              operator: "hierarchy",
+              operands: [
+                { name: "request.resource.attr.scope" },
+                { value: ":" },
+              ],
+            },
+            {
+              operator: "hierarchy",
+              operands: [{ value: "50%:a_b" }, { value: ":" }],
+            },
+          ],
+        }),
+        mapper: { "request.resource.attr.scope": { field: "scope" } },
+      })
+    ).toThrow("Prisma emits LIKE without an ESCAPE clause");
+  });
+
+  test("nested nullable collection errors propagate through negated exists", () => {
+    const result = queryPlanToPrisma({
+      queryPlan: createConditionalPlan({
+        operator: "not",
+        operands: [
+          {
+            operator: "exists",
+            operands: [
+              { name: "request.resource.attr.categories" },
+              {
+                operator: "lambda",
+                operands: [
+                  {
+                    operator: "exists",
+                    operands: [
+                      { name: "category.subCategories" },
+                      {
+                        operator: "lambda",
+                        operands: [
+                          {
+                            operator: "exists",
+                            operands: [
+                              { name: "subCategory.labels" },
+                              {
+                                operator: "lambda",
+                                operands: [
+                                  {
+                                    operator: "eq",
+                                    operands: [
+                                      { name: "label.name" },
+                                      { value: "gold" },
+                                    ],
+                                  },
+                                  { name: "label" },
+                                ],
+                              },
+                            ],
+                          },
+                          { name: "subCategory" },
+                        ],
+                      },
+                    ],
+                  },
+                  { name: "category" },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+      mapper: {
+        "request.resource.attr.categories": {
+          relation: {
+            name: "categories",
+            type: "many",
+            fields: {
+              subCategories: {
+                relation: {
+                  name: "subCategories",
+                  type: "many",
+                  fields: {
+                    labels: {
+                      relation: {
+                        name: "labels",
+                        type: "many",
+                        fields: {
+                          name: { field: "name", nullable: true },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    expect(result.kind).toBe(PlanKind.CONDITIONAL);
+    if (result.kind !== PlanKind.CONDITIONAL) {
+      throw new Error("Expected CONDITIONAL result");
+    }
+    expect(JSON.stringify(result.filters)).toContain('"name":null');
+    expect(JSON.stringify(result.filters)).toContain('"NOT":{"categories"');
   });
 });

@@ -16,13 +16,28 @@ An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanRe
 
 - One-to-one: `is`, `isNot`
 - One-to-many/Many-to-many: `some`, `none`, `every`
-- Collection operators: `exists`, `exists_one`, `all`, `filter`, `except`
+- Collection operators: `exists`, `all`, `except` (`exists_one` requires counting matches,
+  which Prisma where-filters cannot express — it throws rather than silently degrading to
+  `exists`; `filter` only appears inside other expressions)
 - Set operations: `hasIntersection`
 
-#### String Concatenation
+#### Arithmetic
 
-- `add` operator for string/numeric concatenation in conditions
-- Algebraic solving: `P.attr.context == "projects:" + R.attr.id` → `{ id: { equals: "123" } }`
+- `add`, `sub`, `mult`, `div` with a constant side are solved algebraically to a plain column
+  comparison: `R.attr.aNumber + 1 > 2` → `{ aNumber: { gt: 1 } }` (Prisma where-filters cannot
+  express column arithmetic). Multiplying/dividing by a negative constant mirrors directional
+  operators. Arithmetic on both sides of a comparison, division BY a column, and equality or
+  inequality over fractional addition throw. The latter cannot be solved reversibly in IEEE-754
+  arithmetic.
+- String concatenation solving: `P.attr.context == "projects:" + R.attr.id` → `{ id: { equals: "123" } }`
+
+#### Field-to-field comparisons
+
+Comparisons between two columns of the same model compile to
+[Prisma field references](https://www.prisma.io/docs/orm/reference/prisma-client-reference#compare-columns-in-the-same-table).
+Pass the Prisma model name via the `model` option (root columns) or `relation.model` in the
+mapper (columns of a related model inside a collection expression). Comparisons across models
+throw — Prisma only supports references between fields of the same model.
 
 #### Hierarchy Operators
 
@@ -37,6 +52,65 @@ An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanRe
 - Collection mapping and filtering
 - Complex condition combinations
 - Type-safe field mappings
+- Timestamp comparisons against Prisma `DateTime` columns. Mark the field mapping with
+  `valueType: "dateTime"`; applying `timestamp()` to an untyped/string mapping throws.
+  Literals must be strict RFC 3339 instants in CEL's supported year 0001–9999 range and
+  exactly representable at millisecond precision (fractional digits after the third may
+  only be zero). The mapped column/database must preserve that precision.
+- Outer-column references inside collection expressions (e.g.
+  `R.attr.tags.exists(t, t.name == "x" && R.attr.aBool)`) are hoisted or case-split so every
+  filter lands on the model it belongs to
+- Three-valued-logic guards for nullable element columns: mark a relation field as
+  `nullable: true` in the mapper and collection macros (`all`, negated `exists`,
+  `hasIntersection` over `map`) exclude rows whose elements hold `NULL` in that column,
+  matching Cerbos's treatment of a missing attribute as a deny
+
+#### Known limitations (loud failures, never silently-wrong filters)
+
+- LIKE wildcards: Prisma emits `LIKE` without an `ESCAPE` clause, so `contains`/`startsWith`/
+  `endsWith` with a needle containing `%` or `_`, or with a column-valued needle, throws.
+  (A constant *receiver* with a column needle — `"a-b".startsWith(R.attr.x)` — is translated
+  exactly by enumerating candidate needles into an `in` filter.)
+- Hierarchy prefixes: `ancestorOf`, `descendentOf` and `overlaps` narrow a column with a
+  `startsWith`, so they throw when the constant hierarchy contains `%`, `_` or `[`. `[` is
+  rejected as well as the two LIKE wildcards because SQL Server opens a character class on
+  `[` even when an `ESCAPE` clause is declared, so it cannot be matched literally at all.
+- Counting: `exists_one`, `size()` thresholds other than empty/non-empty, and string-length
+  comparisons throw (`_count` is not supported inside Prisma `where`).
+- Cross-model column comparisons throw (Prisma field references are same-model only).
+  This includes membership between an outer scalar column and a related collection column.
+
+#### Database collation is an authorization invariant
+
+Cerbos string comparisons are case-sensitive. Prisma delegates comparison semantics to the
+database collation, so a case-insensitive or accent-insensitive collation can make a generated
+authorization filter return rows that Cerbos would deny. Treat the database collation used by
+mapped authorization columns as part of the policy contract:
+
+- PostgreSQL: use a deterministic, case-sensitive collation and avoid `citext` or an
+  insensitive Prisma query mode for mapped fields.
+- MySQL/MariaDB: choose a case-sensitive (`_cs`) or binary collation rather than the common
+  case-insensitive (`_ci`) defaults.
+- SQL Server: use a case-sensitive (`_CS_`) collation rather than a case-insensitive (`_CI_`)
+  collation.
+- SQLite: do not apply `COLLATE NOCASE` to mapped fields, and verify the exact comparison
+  behavior of any database configuration or extension used in production.
+
+The adapter cannot override a column's collation in a Prisma `where` filter. See Prisma's
+[case-sensitivity documentation](https://docs.prisma.io/docs/orm/v6/prisma-client/queries/case-sensitivity)
+for provider-specific details.
+
+### Conformance contract
+
+The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 20 hostile seed rows and both Prisma 6 and 7. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
+
+| Classification | Coverage |
+| --- | --- |
+| Oracle-tested | 83 reference actions |
+| Fail-closed | 31 reference actions plus the 3 reference-unsupported shapes (34 actions total) |
+| Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
+
+The fail-closed set consists of literal `LIKE` cases Prisma cannot escape safely, cross-model field references, arbitrary relation counts and string lengths, `exists_one`, unsolved column arithmetic, sub-millisecond `now()` thresholds, and the reference probes for regex, ordered indexing, and `timestamp()` over a string field. Supported timestamp plans require a mapper entry with `valueType: "dateTime"` and a strict, millisecond-exact RFC 3339 literal in CEL's supported instant range. These shapes throw instead of producing a broader authorization filter.
 
 ## Requirements
 
@@ -46,7 +120,7 @@ An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanRe
 
 ## System Requirements
 
-- Node.js >= 20.0.
+- Node.js >= 22.0.
 - Prisma CLI & Client >= 6.0 (v7 supported)
 - A database supported by Prisma (SQLite/PostgreSQL/MySQL/etc.) so the Prisma client can communicate with stored data
 
@@ -432,9 +506,12 @@ The mapper configuration is also fully typed:
 ```ts
 type MapperConfig = {
   field?: string;
+  valueType?: "dateTime";
+  nullable?: boolean;
   relation?: {
     name: string;
     type: "one" | "many";
+    model?: string;
     field?: string;
     fields?: {
       [key: string]: MapperConfig; // Recursive for nested fields
@@ -474,4 +551,4 @@ A complete example application using this adapter can be found at [https://githu
 
 ## License
 
-Apache 2.0 - See [LICENSE](../LICENSE) for more information.
+Apache 2.0.

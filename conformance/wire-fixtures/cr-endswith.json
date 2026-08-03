@@ -1,0 +1,20 @@
+{
+  "action": "cr-endswith",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "endsWith",
+        "operands": [
+          {
+            "value": "prefix-xaXby"
+          },
+          {
+            "variable": "request.resource.attr.aString"
+          }
+        ]
+      }
+    }
+  }
+}

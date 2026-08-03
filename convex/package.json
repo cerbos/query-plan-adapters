@@ -36,23 +36,25 @@
   },
   "scripts": {
     "build": "tsc --build",
+    "typecheck": "tsc -p tsconfig.typecheck.json",
     "prepare": "npm run build",
     "version": "git add -A src",
     "postversion": "git push && git push --tags",
     "test": "cerbos run --log-level=debug --set=storage.disk.directory=../policies --set=telemetry.disabled=true -- jest src/index.test.ts",
     "test:integration": "cerbos run --log-level=debug --set=storage.disk.directory=../policies --set=telemetry.disabled=true -- jest src/integration.test.ts",
+    "test:adversarial": "cerbos run --log-level=error --set=storage.disk.directory=../conformance/policies --set=telemetry.disabled=true -- jest src/adversarial.test.ts --runInBand",
     "convex:deploy": "npx convex deploy --url ${CONVEX_URL:-http://127.0.0.1:3210} --admin-key ${CONVEX_ADMIN_KEY}",
     "convex:up": "docker compose up -d && echo 'Waiting for Convex backend...' && sleep 5",
     "convex:down": "docker compose down -v",
     "cerbos": "cerbos server --config=./cerbos-config.yaml"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.0.0"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",
     "@types/node": "^24.0.0",
-    "@tsconfig/node20": "^20.1.7",
+    "@tsconfig/node22": "^22.0.5",
     "@tsconfig/strictest": "^2.0.8",
     "convex": "^1.21.0",
     "ts-jest": "^29.0.0",
