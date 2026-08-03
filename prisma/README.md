@@ -71,6 +71,10 @@ throw — Prisma only supports references between fields of the same model.
   `endsWith` with a needle containing `%` or `_`, or with a column-valued needle, throws.
   (A constant *receiver* with a column needle — `"a-b".startsWith(R.attr.x)` — is translated
   exactly by enumerating candidate needles into an `in` filter.)
+- Hierarchy prefixes: `ancestorOf`, `descendentOf` and `overlaps` narrow a column with a
+  `startsWith`, so they throw when the constant hierarchy contains `%`, `_` or `[`. `[` is
+  rejected as well as the two LIKE wildcards because SQL Server opens a character class on
+  `[` even when an `ESCAPE` clause is declared, so it cannot be matched literally at all.
 - Counting: `exists_one`, `size()` thresholds other than empty/non-empty, and string-length
   comparisons throw (`_count` is not supported inside Prisma `where`).
 - Cross-model column comparisons throw (Prisma field references are same-model only).

@@ -411,10 +411,10 @@ describe("adversarial conformance corpus", () => {
         ].filter(Boolean).length !== 1,
     );
 
-    expect(allActions.size).toBe(117);
+    expect(allActions.size).toBe(118);
     expect(CONVEX_UNSUPPORTED).toHaveLength(0);
     expect(CONVEX_SUPPORTED_EXPECTED).toHaveLength(3);
-    expect(ORACLE_ACTIONS).toHaveLength(116);
+    expect(ORACLE_ACTIONS).toHaveLength(117);
     expect(THROWING_ACTIONS).toHaveLength(0);
     expect(misclassified).toEqual([]);
   });

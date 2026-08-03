@@ -132,6 +132,25 @@ for action in ts-window ts-vf; do
   fi
 done
 
+# CERBOS_VERSION is the single source of truth for the pinned PDP: every workflow reads it,
+# as does spring-data's CerbosTestImage. A Compose file cannot read another file, so the two
+# spring-data copies are asserted to agree instead of de-duplicated.
+pinned_version="$(tr -d '[:space:]' <CERBOS_VERSION)"
+
+compose_version="$(sed -n 's|^[[:space:]]*image:[[:space:]]*ghcr\.io/cerbos/cerbos:\([^@[:space:]]*\).*|\1|p' \
+  ../spring-data/docker-compose.yml)"
+if [[ "${compose_version}" != "${pinned_version}" ]]; then
+  echo "spring-data/docker-compose.yml pins Cerbos ${compose_version:-<none>}, expected ${pinned_version} (conformance/CERBOS_VERSION)"
+  exit 1
+fi
+
+e2e_version="$(sed -n 's|.*ghcr\.io/cerbos/cerbos:\([0-9][^@)"[:space:]]*\).*|\1|p' \
+  ../spring-data/scripts/run-e2e.sh | sort -u)"
+if [[ "${e2e_version}" != "${pinned_version}" ]]; then
+  echo "spring-data/scripts/run-e2e.sh names Cerbos ${e2e_version:-<none>}, expected ${pinned_version} (conformance/CERBOS_VERSION)"
+  exit 1
+fi
+
 seed_count="$(jq '.seeds | length' seeds.json)"
 unique_seed_count="$(jq -r '.seeds[].id' seeds.json | sort -u | wc -l | tr -d '[:space:]')"
 if [[ "${seed_count}" != "${unique_seed_count}" ]]; then

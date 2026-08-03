@@ -299,18 +299,23 @@ const MANIFEST_ACTIONS = new Set([
   ...CHROMA_DIVERGENCES,
 ]);
 
+// Fields are optional unless declared otherwise, so `$ne`/`$nin` are rejected by default.
+// `required: true` is asserted only for the metadata keys that `metadataFor` writes for every
+// seed in conformance/seeds.json. `aOptionalString` is null for a2/a4/a8/c2/e1, so it stays
+// optional and its inequality shapes remain fail-closed.
 const FIELD_NAME_MAPPER: Record<string, string | FieldNameMapperConfig> = {
-  "request.resource.attr.aBool": "aBool",
-  "request.resource.attr.aString": "aString",
+  "request.resource.attr.aBool": { field: "aBool", required: true },
+  "request.resource.attr.aString": { field: "aString", required: true },
   "request.resource.attr.aNumber": {
     field: "aNumber",
     numericType: "integer",
+    required: true,
   },
   "request.resource.attr.aOptionalString": {
     field: "aOptionalString",
     required: false,
   },
-  "request.resource.attr.obj.inner": "obj.inner",
+  "request.resource.attr.obj.inner": { field: "obj.inner", required: true },
 };
 
 function doubleFor(seed: Seed): number | null {
@@ -558,7 +563,7 @@ async function adapterFilteredIds(action: string): Promise<string[]> {
 }
 
 describe("adversarial conformance corpus", () => {
-  test("manifest assigns all 117 policy actions exactly one Chroma outcome", () => {
+  test("manifest assigns all 118 policy actions exactly one Chroma outcome", () => {
     const oracle = new Set(CHROMA_SUPPORTED_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map(({ action }) => action));
     const misclassified = [...MANIFEST_ACTIONS].filter((action) => {
@@ -570,12 +575,12 @@ describe("adversarial conformance corpus", () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(117);
+    expect(MANIFEST_ACTIONS.size).toBe(118);
     expect(CHROMA_SUPPORTED_ACTIONS).toHaveLength(15);
     expect(oracle.size).toBe(CHROMA_SUPPORTED_ACTIONS.length);
-    expect(CHROMA_UNSUPPORTED).toHaveLength(98);
+    expect(CHROMA_UNSUPPORTED).toHaveLength(99);
     expect(CHROMA_SUPPORTED_EXPECTED).toHaveLength(0);
-    expect(THROWING_ACTIONS).toHaveLength(101);
+    expect(THROWING_ACTIONS).toHaveLength(102);
     expect(misclassified).toEqual([]);
   });
 

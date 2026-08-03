@@ -7931,6 +7931,141 @@ describe("Hierarchy descendentOf", () => {
   });
 });
 
+// Every hierarchy relationship that narrows a column with a prefix emits a Prisma
+// `startsWith`, which compiles to `LIKE` with no `ESCAPE` clause: `%` and `_` in the
+// constant hierarchy would match as wildcards and admit rows the PDP denies. `[` is unsafe
+// even where an `ESCAPE` clause exists, because SQL Server opens a character class on it.
+// Both prefix-emitting paths (ancestorOf/descendentOf and overlaps) must throw.
+describe("Hierarchy prefix LIKE metacharacters", () => {
+  const likeMetacharacterError =
+    "Cannot translate hierarchy prefix matching with LIKE metacharacters (%, _ or [): " +
+    "Prisma emits LIKE without an ESCAPE clause, and [ opens a character class on SQL Server even with one";
+
+  const metacharacterHierarchies: [string, string][] = [
+    ["percent", "50%:a"],
+    ["underscore", "50_:a"],
+    ["bracket", "[env]:prod"],
+  ];
+
+  function hierarchyOf(
+    operand: PlanExpressionOperand,
+    delimiter?: string
+  ): PlanExpressionOperand {
+    return {
+      operator: "hierarchy",
+      operands: delimiter === undefined ? [operand] : [operand, { value: delimiter }],
+    };
+  }
+
+  const scopeHierarchy = (delimiter?: string): PlanExpressionOperand =>
+    hierarchyOf({ name: "request.resource.attr.scope" }, delimiter);
+  const constantHierarchy = (
+    raw: string,
+    delimiter?: string
+  ): PlanExpressionOperand => hierarchyOf({ value: raw }, delimiter);
+
+  const translate = (condition: PlanExpressionOperand): QueryPlanToPrismaResult =>
+    queryPlanToPrisma({
+      queryPlan: createConditionalPlan(condition),
+      mapper: hierarchyMapper,
+    });
+
+  describe.each(metacharacterHierarchies)(
+    "constant hierarchy containing a %s",
+    (_name, raw) => {
+      test("overlaps - field-first throws", () => {
+        expect(() =>
+          translate({
+            operator: "overlaps",
+            operands: [scopeHierarchy(":"), constantHierarchy(raw, ":")],
+          })
+        ).toThrow(likeMetacharacterError);
+      });
+
+      test("overlaps - constant-first throws", () => {
+        expect(() =>
+          translate({
+            operator: "overlaps",
+            operands: [constantHierarchy(raw, ":"), scopeHierarchy(":")],
+          })
+        ).toThrow(likeMetacharacterError);
+      });
+
+      test("ancestorOf - constant ancestor of field descendant throws", () => {
+        expect(() =>
+          translate({
+            operator: "ancestorOf",
+            operands: [constantHierarchy(raw, ":"), scopeHierarchy(":")],
+          })
+        ).toThrow(likeMetacharacterError);
+      });
+
+      test("descendentOf - field descendant of constant ancestor throws", () => {
+        expect(() =>
+          translate({
+            operator: "descendentOf",
+            operands: [scopeHierarchy(":"), constantHierarchy(raw, ":")],
+          })
+        ).toThrow(likeMetacharacterError);
+      });
+    }
+  );
+
+  // The guard must not widen into a blanket rejection of hierarchy prefixes: pin the exact
+  // filter emitted for a metacharacter-free hierarchy.
+  describe("metacharacter-free hierarchy still translates", () => {
+    const overlapsFilter = {
+      OR: [
+        { scope: { in: ["dept"] } },
+        { scope: { equals: "dept.eng" } },
+        { scope: { startsWith: "dept.eng." } },
+      ],
+    };
+
+    test("overlaps - field-first", () => {
+      expect(
+        translate({
+          operator: "overlaps",
+          operands: [scopeHierarchy(), constantHierarchy("dept.eng")],
+        })
+      ).toEqual({ kind: PlanKind.CONDITIONAL, filters: overlapsFilter });
+    });
+
+    test("overlaps - constant-first", () => {
+      expect(
+        translate({
+          operator: "overlaps",
+          operands: [constantHierarchy("dept.eng"), scopeHierarchy()],
+        })
+      ).toEqual({ kind: PlanKind.CONDITIONAL, filters: overlapsFilter });
+    });
+
+    test("ancestorOf - constant ancestor of field descendant", () => {
+      expect(
+        translate({
+          operator: "ancestorOf",
+          operands: [constantHierarchy("dept.eng"), scopeHierarchy()],
+        })
+      ).toEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: { scope: { startsWith: "dept.eng." } },
+      });
+    });
+
+    test("descendentOf - field descendant of constant ancestor", () => {
+      expect(
+        translate({
+          operator: "descendentOf",
+          operands: [scopeHierarchy(), constantHierarchy("dept.eng")],
+        })
+      ).toEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: { scope: { startsWith: "dept.eng." } },
+      });
+    });
+  });
+});
+
 // The planner preserves policy source order, so a constant can be the FIRST operand of a
 // comparison (`1 < R.attr.aNumber`). Directional operators must be mirrored when the value
 // precedes the field, or the filter is silently inverted. See #256.
@@ -8658,7 +8793,7 @@ describe("Promoted adversarial planner shapes", () => {
         }),
         mapper: { "request.resource.attr.scope": { field: "scope" } },
       })
-    ).toThrow("Prisma does not escape wildcards in string filters");
+    ).toThrow("Prisma emits LIKE without an ESCAPE clause");
   });
 
   test("nested nullable collection errors propagate through negated exists", () => {

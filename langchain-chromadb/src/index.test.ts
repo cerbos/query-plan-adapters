@@ -171,7 +171,8 @@ test("conditional - ne", async () => {
   const result = queryPlanToChromaDB({
     queryPlan,
     fieldNameMapper: {
-      "request.resource.attr.aString": "aString",
+      // Every fixture record carries aString, so $ne is safe to assert here.
+      "request.resource.attr.aString": { field: "aString", required: true },
     },
   });
 
@@ -189,6 +190,44 @@ test("conditional - ne", async () => {
   );
 });
 
+test("conditional - ne on an unmapped field is rejected", async () => {
+  // #given - policy: ALLOW when aString != "string"
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "ne",
+  });
+
+  // #then - an unmapped path is optional by default, and Chroma's $ne matches
+  // records that are missing the metadata key, so translation must fail closed.
+  expect(() =>
+    queryPlanToChromaDB({
+      queryPlan,
+      fieldNameMapper: {},
+    }),
+  ).toThrow(/unsafe for optional Chroma metadata/);
+});
+
+test("conditional - ne on a plain-string mapping is rejected", async () => {
+  // #given - policy: ALLOW when aString != "string"
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"] },
+    resource: { kind: "resource" },
+    action: "ne",
+  });
+
+  // #then - a bare field name carries no presence assertion, so it is optional
+  // and $ne is rejected until the mapping declares `required: true`.
+  expect(() =>
+    queryPlanToChromaDB({
+      queryPlan,
+      fieldNameMapper: {
+        "request.resource.attr.aString": "aString",
+      },
+    }),
+  ).toThrow(/unsafe for optional Chroma metadata/);
+});
+
 test("conditional - and", async () => {
   const queryPlan = await cerbos.planResources({
     principal: { id: "user1", roles: ["USER"] },
@@ -199,8 +238,8 @@ test("conditional - and", async () => {
   const result = queryPlanToChromaDB({
     queryPlan,
     fieldNameMapper: {
-      "request.resource.attr.aBool": "aBool",
-      "request.resource.attr.aString": "aString",
+      "request.resource.attr.aBool": { field: "aBool", required: true },
+      "request.resource.attr.aString": { field: "aString", required: true },
     },
   });
 
@@ -225,8 +264,8 @@ test("conditional - or", async () => {
   const result = queryPlanToChromaDB({
     queryPlan,
     fieldNameMapper: {
-      "request.resource.attr.aBool": "aBool",
-      "request.resource.attr.aString": "aString",
+      "request.resource.attr.aBool": { field: "aBool", required: true },
+      "request.resource.attr.aString": { field: "aString", required: true },
     },
   });
 
@@ -386,7 +425,8 @@ test("conditional - explicit-deny (not eq)", async () => {
   const result = queryPlanToChromaDB({
     queryPlan,
     fieldNameMapper: {
-      "request.resource.attr.aBool": "aBool",
+      // Every fixture record carries aBool, so $ne is safe to assert here.
+      "request.resource.attr.aBool": { field: "aBool", required: true },
     },
   });
 
@@ -418,8 +458,8 @@ test("conditional - nand (not and)", async () => {
   const result = queryPlanToChromaDB({
     queryPlan,
     fieldNameMapper: {
-      "request.resource.attr.aBool": "aBool",
-      "request.resource.attr.aString": "aString",
+      "request.resource.attr.aBool": { field: "aBool", required: true },
+      "request.resource.attr.aString": { field: "aString", required: true },
     },
   });
 
@@ -453,8 +493,8 @@ test("conditional - nor (not or)", async () => {
   const result = queryPlanToChromaDB({
     queryPlan,
     fieldNameMapper: {
-      "request.resource.attr.aBool": "aBool",
-      "request.resource.attr.aString": "aString",
+      "request.resource.attr.aBool": { field: "aBool", required: true },
+      "request.resource.attr.aString": { field: "aString", required: true },
     },
   });
 
@@ -488,8 +528,8 @@ test("conditional - not-and", async () => {
   const result = queryPlanToChromaDB({
     queryPlan,
     fieldNameMapper: {
-      "request.resource.attr.aBool": "aBool",
-      "request.resource.attr.aString": "aString",
+      "request.resource.attr.aBool": { field: "aBool", required: true },
+      "request.resource.attr.aString": { field: "aString", required: true },
     },
   });
 
@@ -523,8 +563,8 @@ test("conditional - not-or", async () => {
   const result = queryPlanToChromaDB({
     queryPlan,
     fieldNameMapper: {
-      "request.resource.attr.aBool": "aBool",
-      "request.resource.attr.aString": "aString",
+      "request.resource.attr.aBool": { field: "aBool", required: true },
+      "request.resource.attr.aString": { field: "aString", required: true },
     },
   });
 

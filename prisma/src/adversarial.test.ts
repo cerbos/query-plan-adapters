@@ -514,7 +514,7 @@ describe("adversarial conformance corpus", () => {
     ).not.toContain(promotedAction);
   });
 
-  test("manifest assigns all 117 policy actions exactly one Prisma outcome", () => {
+  test("manifest assigns all 118 policy actions exactly one Prisma outcome", () => {
     const oracle = new Set(ORACLE_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map(([action]) => action));
     const misclassified = [...MANIFEST_ACTIONS].filter((action) => {
@@ -526,7 +526,7 @@ describe("adversarial conformance corpus", () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(117);
+    expect(MANIFEST_ACTIONS.size).toBe(118);
     expect(misclassified).toEqual([]);
     expect(
       [...PRISMA_SUPPORTED_EXPECTED].filter(

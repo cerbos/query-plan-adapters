@@ -104,7 +104,8 @@ type FieldNameMapperConfig = {
 };
 ```
 
-- Set `required: false` for metadata that may be absent. Chroma's `$ne` and `$nin` operators match missing metadata, unlike a missing Cerbos attribute, which produces an evaluation error and denies access. The adapter rejects those unsafe combinations instead of over-authorizing.
+- Fields are optional by default. Chroma's `$ne` and `$nin` operators match missing metadata, unlike a missing Cerbos attribute, which produces an evaluation error and denies access. The adapter rejects those operators unless the field is declared `required: true`, instead of over-authorizing.
+- Set `required: true` to assert that the metadata key is present on every record in the collection. That assertion is what permits `$ne` and `$nin` against the field; declaring it for a field that may be absent reintroduces the over-grant.
 - Set `numericType: "float"` when a field is always stored as floating-point metadata and must be compared with fractional thresholds. Without that declaration, fractional ordered comparisons are rejected because Chroma distinguishes integer and floating-point metadata.
 
 As a map:
@@ -135,7 +136,7 @@ const result = queryPlanToChromaDB({
 });
 ```
 
-If a field is not found in the map, the original path is used as-is and treated as required.
+If a field is not found in the map, the original path is used as-is and treated as optional, so `$ne` and `$nin` against it are rejected. A mapper that returns a plain string is also treated as optional; return a configuration object with `required: true` to permit those operators.
 
 ## Usage example
 
@@ -185,5 +186,5 @@ const matches = await chroma.similaritySearch("query", 10, filters);
 - A comparison operator is missing a variable or field name.
 - A `not` expression wraps an operator that cannot be negated.
 - A filter literal is null, nested, non-finite, or otherwise invalid for Chroma metadata.
-- `$ne` or `$nin` targets a field configured with `required: false`.
+- `$ne` or `$nin` targets a field that is not declared `required: true`.
 - A fractional ordered comparison targets a field that is not configured with `numericType: "float"`.

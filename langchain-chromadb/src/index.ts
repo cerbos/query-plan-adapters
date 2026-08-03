@@ -72,22 +72,26 @@ export function queryPlanToChromaDB({
   queryPlan,
   fieldNameMapper,
 }: QueryPlanToChromaDBArgs): QueryPlanToChromaDBResult {
+  // Fields default to optional: Chroma's $ne/$nin match records where the metadata key is
+  // absent, while Cerbos denies on a missing attribute. Without an explicit
+  // `required: true` assertion from the integrator the adapter cannot know the key is always
+  // present, so those operators are rejected rather than allowed to over-grant.
   const toField = (key: string): ResolvedField => {
     const mapped =
       typeof fieldNameMapper === "function"
         ? fieldNameMapper(key)
         : fieldNameMapper[key];
     if (typeof mapped === "string") {
-      return { name: mapped, required: true };
+      return { name: mapped, required: false };
     }
     if (mapped) {
       return {
         name: mapped.field,
         numericType: mapped.numericType,
-        required: mapped.required ?? true,
+        required: mapped.required ?? false,
       };
     }
-    return { name: key, required: true };
+    return { name: key, required: false };
   };
 
   switch (queryPlan.kind) {

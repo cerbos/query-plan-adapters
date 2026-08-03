@@ -3262,6 +3262,24 @@ function handleOverlapsOperator(
   return validConditions[0]!;
 }
 
+/**
+ * Guards every hierarchy prefix that is about to become a Prisma `startsWith`.
+ *
+ * `startsWith` compiles to `LIKE` with no `ESCAPE` clause, so `%` and `_` in the prefix
+ * match as wildcards instead of literally and widen the filter past what the PDP allows.
+ * `[` is unsafe for a separate reason: SQL Server opens a character class on `[` even when
+ * an `ESCAPE` clause is declared, so it cannot be made literal at all. Fail loudly rather
+ * than emit a filter that admits denied rows.
+ */
+function assertLikeSafePrefix(prefix: string): void {
+  if (/[%_\[]/.test(prefix)) {
+    throw new Error(
+      "Cannot translate hierarchy prefix matching with LIKE metacharacters (%, _ or [): " +
+        "Prisma emits LIKE without an ESCAPE clause, and [ opens a character class on SQL Server even with one"
+    );
+  }
+}
+
 function handleFieldOverlaps(
   left: ResolvedHierarchy,
   right: ResolvedHierarchy
@@ -3286,7 +3304,9 @@ function handleFieldOverlaps(
     conditions.push(buildFieldFilter(field.fieldRef, "in", strictPrefixes));
   }
   conditions.push(buildFieldFilter(field.fieldRef, "equals", otherRaw));
-  conditions.push(buildFieldFilter(field.fieldRef, "startsWith", otherRaw + delimiter));
+  const prefix = otherRaw + delimiter;
+  assertLikeSafePrefix(prefix);
+  conditions.push(buildFieldFilter(field.fieldRef, "startsWith", prefix));
 
   if (conditions.length === 1) return conditions[0]!;
   return { OR: conditions };
@@ -3344,11 +3364,7 @@ function handleAncestorDescendantOperator(
   if (ancestor.type === "constant" && descendant.type === "field") {
     const prefix =
       ancestor.segments.join(descendant.delimiter) + descendant.delimiter;
-    if (/[%_]/.test(prefix)) {
-      throw new Error(
-        "Cannot translate hierarchy prefix matching with LIKE metacharacters (% or _): Prisma does not escape wildcards in string filters"
-      );
-    }
+    assertLikeSafePrefix(prefix);
     return buildFieldFilter(descendant.fieldRef, "startsWith", prefix);
   }
 
