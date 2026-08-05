@@ -1541,3 +1541,109 @@ describe("known-value collections (planner unroll cliff)", () => {
     });
   });
 });
+
+// cerbos/query-plan-adapters#302. Both NULL-column conventions produce the identical
+// `eq(attr, null)` wire node, so the adapter cannot infer which one the caller uses. Under
+// "omitted" a NULL column carries no attribute at all, CEL raises a missing-attribute error,
+// and check() denies every row — an IS NULL filter would return precisely the rows the PDP
+// refuses.
+describe("nullAttributeRepresentation", () => {
+  const nullEqPlan = buildPlan({
+    operator: "eq",
+    operands: [
+      { name: "request.resource.attr.aOptionalString" },
+      { value: null },
+    ],
+  } as PlanExpressionOperand);
+
+  const nullNePlan = buildPlan({
+    operator: "ne",
+    operands: [
+      { name: "request.resource.attr.aOptionalString" },
+      { value: null },
+    ],
+  } as PlanExpressionOperand);
+
+  test('"explicit" is the default and keeps the IS NULL translation', () => {
+    const withDefault = ensureFilter(
+      queryPlanToDrizzle({ queryPlan: nullEqPlan, mapper })
+    );
+    const withExplicit = ensureFilter(
+      queryPlanToDrizzle({
+        queryPlan: nullEqPlan,
+        mapper,
+        nullAttributeRepresentation: "explicit",
+      })
+    );
+
+    expect(db.select().from(resources).where(withDefault).toSQL().sql).toEqual(
+      db.select().from(resources).where(withExplicit).toSQL().sql
+    );
+    expect(db.select().from(resources).where(withDefault).toSQL().sql).toContain(
+      "is null"
+    );
+  });
+
+  test('"omitted" rejects eq against a null operand', () => {
+    expect(() =>
+      queryPlanToDrizzle({
+        queryPlan: nullEqPlan,
+        mapper,
+        nullAttributeRepresentation: "omitted",
+      })
+    ).toThrow(/missing-attribute error/);
+  });
+
+  // Conservatively rejected too: `ne` alone is aligned under "omitted", but negation is applied
+  // by wrapping the built condition, so a leaf cannot see whether an enclosing `not` will flip
+  // IS NOT NULL back into a NULL-selecting predicate.
+  test('"omitted" rejects ne against a null operand', () => {
+    expect(() =>
+      queryPlanToDrizzle({
+        queryPlan: nullNePlan,
+        mapper,
+        nullAttributeRepresentation: "omitted",
+      })
+    ).toThrow(/missing-attribute error/);
+  });
+
+  test('"omitted" rejects a null element in an in-list', () => {
+    const plan = buildPlan({
+      operator: "in",
+      operands: [
+        { name: "request.resource.attr.aOptionalString" },
+        { value: ["x", null] },
+      ],
+    } as PlanExpressionOperand);
+
+    expect(() =>
+      queryPlanToDrizzle({
+        queryPlan: plan,
+        mapper,
+        nullAttributeRepresentation: "omitted",
+      })
+    ).toThrow(/null element in an `in` list/);
+  });
+
+  test('"omitted" leaves null-free comparisons untouched', () => {
+    const plan = buildPlan({
+      operator: "eq",
+      operands: [
+        { name: "request.resource.attr.aOptionalString" },
+        { value: "x" },
+      ],
+    } as PlanExpressionOperand);
+
+    const filter = ensureFilter(
+      queryPlanToDrizzle({
+        queryPlan: plan,
+        mapper,
+        nullAttributeRepresentation: "omitted",
+      })
+    );
+
+    expect(db.select().from(resources).where(filter).toSQL().sql).toContain(
+      "="
+    );
+  });
+});

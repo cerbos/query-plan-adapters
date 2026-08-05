@@ -115,7 +115,14 @@ export const deleteAll = mutation({
 });
 
 export const executePlan = query({
-  args: { queryPlan: v.any() },
+  args: {
+    queryPlan: v.any(),
+    // #302: the conformance harness runs the `nullRepresentationOmitted` actions through the
+    // same entry point with the option flipped, so it has to cross the Convex boundary.
+    nullAttributeRepresentation: v.optional(
+      v.union(v.literal("explicit"), v.literal("omitted")),
+    ),
+  },
   handler: async (ctx, args) => {
     const queryPlan: unknown = args.queryPlan;
     if (!isPlanResourcesResponse(queryPlan)) {
@@ -125,7 +132,12 @@ export const executePlan = query({
     const translated = queryPlanToConvex<
       FilterBuilder<DataModel["adversarial"]>,
       Expression<boolean>
-    >({ queryPlan, mapper: MAPPER, allowPostFilter: true });
+    >({
+      queryPlan,
+      mapper: MAPPER,
+      allowPostFilter: true,
+      nullAttributeRepresentation: args.nullAttributeRepresentation ?? "explicit",
+    });
 
     if (translated.kind === PlanKind.ALWAYS_DENIED) return [];
 

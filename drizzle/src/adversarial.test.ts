@@ -71,6 +71,7 @@ interface ActionsFile {
   adapterUnsupported?: Record<string, AdapterUnsupportedEntry[]>;
   adapterSupportedExpected?: Record<string, AdapterUnsupportedEntry[]>;
   expectedUnsupported: UnsupportedShape[];
+  nullRepresentationOmitted: AdapterUnsupportedEntry[];
   knownDivergences?: KnownDivergence[];
 }
 
@@ -122,9 +123,17 @@ const THROWING_ACTIONS: ThrowingAction[] = [
     .map((entry): ThrowingAction => [entry.action, entry.shape]),
 ];
 
+// Actions whose `== null` probe targets an attribute the oracle OMITS for NULL columns. They
+// carry no oracle comparison: under the omitted representation check() denies every row, so the
+// adapter must reject the shape rather than emit a filter (#302).
+const NULL_REPRESENTATION_OMITTED = actionsFile.nullRepresentationOmitted.map(
+  (entry): ThrowingAction => [entry.action, entry.reason]
+);
+
 const MANIFEST_ACTIONS = new Set([
   ...actionsFile.conformance,
   ...actionsFile.expectedUnsupported.map((entry) => entry.action),
+  ...NULL_REPRESENTATION_OMITTED.map(([action]) => action),
   ...DRIZZLE_SUPPORTED_EXPECTED,
   ...DRIZZLE_DIVERGENCES,
 ]);
@@ -535,13 +544,20 @@ async function oracleAllowedIds(action: string): Promise<string[]> {
 
 // -- adapter execution through the public queryPlanToDrizzle path --
 
-async function adapterFilteredIds(action: string): Promise<string[]> {
+async function adapterFilteredIds(
+  action: string,
+  nullAttributeRepresentation: "explicit" | "omitted" = "explicit"
+): Promise<string[]> {
   const queryPlan = await cerbos.planResources({
     principal: principal(),
     resource: { kind: seedsFile.resourceKind },
     action,
   });
-  const result = queryPlanToDrizzle({ queryPlan, mapper: MAPPER });
+  const result = queryPlanToDrizzle({
+    queryPlan,
+    mapper: MAPPER,
+    nullAttributeRepresentation,
+  });
   if (result.kind === PlanKind.ALWAYS_DENIED) {
     return [];
   }
@@ -555,19 +571,37 @@ async function adapterFilteredIds(action: string): Promise<string[]> {
   return rows.map((row) => row.id).sort();
 }
 
+/** Whether any operand anywhere in the plan is a literal null, or a list containing one. */
+function planCarriesNullLiteral(operand: unknown): boolean {
+  if (typeof operand !== "object" || operand === null) return false;
+  const node = operand as Record<string, unknown>;
+  if ("value" in node) {
+    const value = node["value"];
+    return value === null || (Array.isArray(value) && value.includes(null));
+  }
+  const operands = node["operands"];
+  return Array.isArray(operands) && operands.some(planCarriesNullLiteral);
+}
+
 describe("adversarial conformance corpus", () => {
   test("manifest assigns every action exactly one Drizzle outcome", () => {
     const oracle = new Set(ORACLE_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map(([action]) => action));
+    const nullOmitted = new Set(
+      NULL_REPRESENTATION_OMITTED.map(([action]) => action)
+    );
     const misclassified = [...MANIFEST_ACTIONS].filter((action) => {
       const classificationCount = [
         oracle.has(action),
         throwing.has(action),
+        nullOmitted.has(action),
         DRIZZLE_DIVERGENCES.has(action),
       ].filter(Boolean).length;
       return classificationCount !== 1;
     });
 
+    expect(MANIFEST_ACTIONS.size).toBe(127);
+    expect(NULL_REPRESENTATION_OMITTED).toHaveLength(1);
     expect(misclassified).toEqual([]);
     expect(
       [...DRIZZLE_SUPPORTED_EXPECTED].filter(
@@ -595,6 +629,62 @@ describe("adversarial conformance corpus", () => {
       await expect(adapterFilteredIds(action)).rejects.toThrow();
     }
   );
+
+  // #302. `null-eq-missing` probes `aOptionalString == null`, and `aOptionalString` follows the
+  // corpus default: a NULL column sends NO attribute. Both halves are asserted because the
+  // rejection alone would pass vacuously if the adapter threw for an unrelated reason — the
+  // over-grant under the default representation is what makes the rejection necessary.
+  test.each(NULL_REPRESENTATION_OMITTED)(
+    "%s over-grants under the explicit representation and is rejected under omitted (%s)",
+    async (action) => {
+      const oracle = await oracleAllowedIds(action);
+      expect(oracle).toEqual([]);
+
+      // The default translation emits IS NULL and returns exactly the rows the PDP denies.
+      const overGranted = await adapterFilteredIds(action, "explicit");
+      expect(overGranted.length).toBeGreaterThan(0);
+
+      await expect(adapterFilteredIds(action, "omitted")).rejects.toThrow(
+        /missing-attribute error/
+      );
+    }
+  );
+
+  // #302 completeness guard. The rejection must key off the null OPERAND, not off a list of
+  // operators: `hasIntersection(tagNames, ["public", null])` carries one in its value list, and
+  // an allowlist of eq/ne/in silently misses it. Enumerating the corpus rather than naming
+  // shapes means a newly added action carrying a null constant is covered automatically.
+  test("every corpus action carrying a null literal is rejected under omitted", async () => {
+    const nullCarrying: string[] = [];
+    for (const action of [...MANIFEST_ACTIONS].sort()) {
+      const queryPlan = await cerbos.planResources({
+        principal: principal(),
+        resource: { kind: seedsFile.resourceKind },
+        action,
+      });
+      if (
+        queryPlan.kind === PlanKind.CONDITIONAL &&
+        planCarriesNullLiteral(queryPlan.condition)
+      ) {
+        nullCarrying.push(action);
+      }
+    }
+
+    // Guard the guard: if the walk stopped finding null operands the loop below is vacuous.
+    expect(nullCarrying).toContain("null-eq-missing");
+    expect(nullCarrying).toContain("in-null-elem-hasint");
+
+    const notRejected: string[] = [];
+    for (const action of nullCarrying) {
+      try {
+        await adapterFilteredIds(action, "omitted");
+        notRejected.push(action);
+      } catch {
+        // expected: the shape must be rejected under this representation
+      }
+    }
+    expect(notRejected).toEqual([]);
+  });
 
   test("pins the upstream has() planner over-grant", async () => {
     const action = "p-has";

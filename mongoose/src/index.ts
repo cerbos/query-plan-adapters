@@ -33,9 +33,30 @@ export type Mapper =
     }
   | ((key: string) => MapperConfig);
 
+/**
+ * How the caller represents a NULL field when building the attributes it sends to `check()`.
+ *
+ * The planner emits the same `eq(attr, null)` node either way, so the plan cannot reveal which
+ * convention is in use and the adapter has to be told.
+ *
+ * - `"explicit"` (default) — a NULL field is sent as an explicit `null` attribute. CEL compares
+ *   `null == null`, so matching null selects exactly the documents `check()` allows.
+ * - `"omitted"` — a NULL field sends no attribute at all. CEL then raises a missing-attribute
+ *   error, which Cerbos treats as a deny, so a filter that *selects* null documents returns
+ *   documents the PDP denies. Null comparison operands are rejected instead of translated.
+ *
+ * See https://github.com/cerbos/query-plan-adapters/issues/302.
+ */
+export type NullAttributeRepresentation = "explicit" | "omitted";
+
 export interface QueryPlanToMongooseArgs {
   queryPlan: PlanResourcesResponse;
   mapper?: Mapper;
+  /**
+   * Which NULL-field representation the caller uses when building `check()` attributes.
+   * Defaults to `"explicit"`, preserving the historical null-matching translation.
+   */
+  nullAttributeRepresentation?: NullAttributeRepresentation;
 }
 
 export interface QueryPlanToMongooseResult {
@@ -172,7 +193,9 @@ const isRfc3339Timestamp = (value: string): boolean => {
 export function queryPlanToMongoose({
   queryPlan,
   mapper = {},
+  nullAttributeRepresentation = "explicit",
 }: QueryPlanToMongooseArgs): QueryPlanToMongooseResult {
+  nullRepresentation = nullAttributeRepresentation;
   switch (queryPlan.kind) {
     case PlanKind.ALWAYS_ALLOWED:
       return {
@@ -364,6 +387,42 @@ const buildNestedObject = (path: string[], value: any) =>
 
 const buildFieldFilter = (path: string[], value: any) =>
   path.length === 0 ? value : buildNestedObject(path, value);
+
+// Translation-scoped, set at the queryPlanToMongoose entry. Translation is synchronous, so
+// module scope is safe.
+let nullRepresentation: NullAttributeRepresentation = "explicit";
+
+/**
+ * Guards every site that would emit a null-selecting predicate out of a `null` comparison
+ * operand.
+ *
+ * Under the `"omitted"` representation a NULL field carries no attribute, so CEL raises a
+ * missing-attribute error and `check()` denies the document; matching null would return exactly
+ * the documents the PDP refuses. The rejection is deliberately wider than the over-granting
+ * shapes: `ne(x, null)` on its own is aligned, but negation is applied by wrapping the built
+ * filter rather than by pushing it into the leaf, so a leaf cannot tell whether an enclosing
+ * `not` will flip a not-null predicate back into a null-selecting one. Rejecting every null
+ * operand is correct under any nesting; narrowing it requires negation-parity tracking.
+ */
+const assertNullOperandTranslatable = (context: string): void => {
+  if (nullRepresentation === "omitted") {
+    throw new Error(
+      `Cannot translate ${context} under nullAttributeRepresentation "omitted": a NULL field ` +
+        "sends no attribute, so Cerbos evaluates the comparison as a missing-attribute error " +
+        "(deny) while a null-selecting filter would return those documents. Send NULL fields " +
+        'as explicit nulls and use "explicit", or keep this shape out of the policy.'
+    );
+  }
+};
+
+/**
+ * Whether a comparison operand carries a plan-level `null` — directly, or as an element of an
+ * `in` list. This is the guard's own predicate rather than a reuse of `requireExists`: the two
+ * happen to coincide today, but `requireExists` means "the field must be present", and a future
+ * caller setting it for that reason alone must not trip the null rejection.
+ */
+const carriesNullOperand = (value: unknown): boolean =>
+  value === null || (Array.isArray(value) && value.includes(null));
 
 const buildGuardedFieldFilter = (
   path: string[],
@@ -1418,7 +1477,12 @@ const buildMongooseFilterFromCerbosExpression = (
         ),
       };
       const nullable = isNullableReference(variableOperand.name, mapper);
-      const requireExists = valueOperand.value === null;
+      const requireExists = carriesNullOperand(valueOperand.value);
+      if (requireExists) {
+        assertNullOperandTranslatable(
+          `\`${effectiveOperator}\` against a null operand`
+        );
+      }
       if (relation?.type === "many") {
         return {
           [relation.name]: {
@@ -1457,7 +1521,10 @@ const buildMongooseFilterFromCerbosExpression = (
           ),
         };
         const nullable = isNullableReference(leftOperand.name, mapper);
-        const requireExists = rightOperand.value.includes(null);
+        const requireExists = carriesNullOperand(rightOperand.value);
+        if (requireExists) {
+          assertNullOperandTranslatable("a null element in an `in` list");
+        }
         if (relation?.type === "many") {
           return {
             [relation.name]: {
@@ -1491,7 +1558,12 @@ const buildMongooseFilterFromCerbosExpression = (
           ),
         };
         const nullable = isNullableReference(rightOperand.name, mapper);
-        const requireExists = leftOperand.value === null;
+        const requireExists = carriesNullOperand(leftOperand.value);
+        if (requireExists) {
+          assertNullOperandTranslatable(
+            "a null needle in a mapped-collection `in`"
+          );
+        }
         if (relation?.type === "many") {
           return {
             [relation.name]: {
@@ -1643,6 +1715,14 @@ const buildMongooseFilterFromCerbosExpression = (
         1,
         "hasIntersection requires a value operand"
       );
+
+      // A null element in the intersection list lowers to a null-matching disjunct exactly as
+      // it does for `in`, so it is subject to the same representation guard.
+      if (isValue(rightOperand) && carriesNullOperand(rightOperand.value)) {
+        assertNullOperandTranslatable(
+          "a null element in a `hasIntersection` list"
+        );
+      }
 
       // Handle map expressions specially for hasIntersection
       if (isExpression(leftOperand) && leftOperand.operator === "map") {

@@ -136,9 +136,30 @@ export type Mapper =
     }
   | ((reference: string) => MapperEntry | undefined);
 
+/**
+ * How the caller represents a NULL column when building the attributes it sends to `check()`.
+ *
+ * The planner emits the same `eq(attr, null)` node either way, so the plan cannot reveal which
+ * convention is in use and the adapter has to be told.
+ *
+ * - `"explicit"` (default) — a NULL column is sent as an explicit `null` attribute. CEL compares
+ *   `null == null`, so `IS NULL` selects exactly the rows `check()` allows.
+ * - `"omitted"` — a NULL column sends no attribute at all. CEL then raises a missing-attribute
+ *   error, which Cerbos treats as a deny, so a filter that *selects* NULL rows returns rows the
+ *   PDP denies. Null comparison operands are rejected instead of translated.
+ *
+ * See https://github.com/cerbos/query-plan-adapters/issues/302.
+ */
+export type NullAttributeRepresentation = "explicit" | "omitted";
+
 export interface QueryPlanToDrizzleArgs {
   queryPlan: PlanResourcesResponse;
   mapper: Mapper;
+  /**
+   * Which NULL-column representation the caller uses when building `check()` attributes.
+   * Defaults to `"explicit"`, preserving the historical `IS NULL` translation.
+   */
+  nullAttributeRepresentation?: NullAttributeRepresentation;
 }
 
 export type QueryPlanToDrizzleResult =
@@ -1097,11 +1118,43 @@ const applyComparisonWithExpression = (
   }
 };
 
+// Translation-scoped, set at the queryPlanToDrizzle entry. Translation is synchronous, so
+// module scope is safe.
+let nullRepresentation: NullAttributeRepresentation = "explicit";
+
+/**
+ * Guards every site that would emit a NULL-selecting predicate out of a `null` comparison
+ * operand.
+ *
+ * Under the `"omitted"` representation a NULL column carries no attribute, so CEL raises a
+ * missing-attribute error and `check()` denies the row — `IS NULL` would return exactly the rows
+ * the PDP refuses. The rejection is deliberately wider than the over-granting shapes: `ne(x,
+ * null)` on its own is aligned, but negation is applied by wrapping the built condition rather
+ * than by pushing it into the leaf, so a leaf cannot tell whether an enclosing `not` will flip
+ * `IS NOT NULL` back into a NULL-selecting predicate. Rejecting every null operand is correct
+ * under any nesting; narrowing it requires negation-parity tracking.
+ */
+const assertNullOperandTranslatable = (context: string): void => {
+  if (nullRepresentation === "omitted") {
+    throw new Error(
+      `Cannot translate ${context} under nullAttributeRepresentation "omitted": a NULL column ` +
+        "sends no attribute, so Cerbos evaluates the comparison as a missing-attribute error " +
+        "(deny) while a NULL-selecting filter would return those rows. Send NULL columns as " +
+        'explicit nulls and use "explicit", or keep this shape out of the policy.'
+    );
+  }
+};
+
 const applyComparison = (
   mapping: BaseMapperEntry,
   operator: ComparisonOperator,
   value: Value
 ): SQL => {
+  if (value === null) {
+    assertNullOperandTranslatable(`\`${operator}\` against a null operand`);
+  } else if (Array.isArray(value) && value.includes(null)) {
+    assertNullOperandTranslatable("a null element in an `in` list");
+  }
   if (isRelationValue(mapping)) {
     return applyRelationComparison(mapping, operator);
   }
@@ -2439,7 +2492,9 @@ const buildFilterFromExpression = (
 export function queryPlanToDrizzle({
   queryPlan,
   mapper,
+  nullAttributeRepresentation = "explicit",
 }: QueryPlanToDrizzleArgs): QueryPlanToDrizzleResult {
+  nullRepresentation = nullAttributeRepresentation;
   switch (queryPlan.kind) {
     case PlanKind.ALWAYS_ALLOWED:
       return { kind: PlanKind.ALWAYS_ALLOWED };

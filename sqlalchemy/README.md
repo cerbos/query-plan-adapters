@@ -4,6 +4,39 @@ An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanRe
 
 The adapter supports logical and comparison operators, value-first and field-to-field comparisons, literal-safe string helpers, arithmetic and conditional expressions, scalar casts and sizes, timestamps, and hierarchy comparisons. `operator_override_fns` can provide database- or schema-specific translations for collection and other non-portable shapes.
 
+## NULL attribute representation
+
+`R.attr.x == null` compiles to the same `eq(x, null)` plan node however your application represents
+a NULL column in the attributes it sends to `check()`, so the adapter cannot infer the convention
+and has to be told which one you use.
+
+| attributes you send for a NULL column | `check()` on that row | `IS NULL` filter |
+| --- | --- | --- |
+| `{"x": None}` — explicit null | allow | selects it — aligned |
+| `{}` — attribute omitted | **deny** (CEL missing-attribute error) | selects it — **over-grants** |
+
+`null_attribute_representation` defaults to `"explicit"`, preserving the historical `IS NULL`
+translation. If your application omits attributes for NULL columns, pass `"omitted"`: the adapter
+then raises on every null comparison operand instead of emitting a filter that returns rows the PDP
+denies.
+
+```python
+get_query(
+    plan,
+    Resource,
+    attr_map,
+    null_attribute_representation="omitted",
+)
+```
+
+The rejection is deliberately wider than the shapes that actually over-grant — `x != null` and
+`!(x == null)` are aligned under both conventions — because negation is applied around the built
+predicate rather than pushed into the leaf, so a leaf cannot tell whether an enclosing `not` will
+flip `IS NOT NULL` back into a NULL-selecting predicate. Rejecting every null operand is correct
+under any nesting. It also fires ahead of `operator_override_fns`, since an override cannot
+recover a representation the plan never carried. See
+[#302](https://github.com/cerbos/query-plan-adapters/issues/302).
+
 ## Conformance contract
 
 The adapter is differentially tested against Cerbos PDP 0.54.0 `check()` decisions using 20 hostile seed rows and executable SQLAlchemy queries. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
@@ -12,6 +45,7 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `check()` decisio
 | --- | --- |
 | Oracle-tested | 120 reference conformance actions |
 | Fail-closed corpus shapes | Nanosecond `now()` thresholds plus regex `matches()`, ordered list indexing/`get-field`, and `timestamp()` over an ambiguous string column (5 actions) |
+| Representation-dependent | `null-eq-missing` — raises under `null_attribute_representation="omitted"`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 
 The conformance harness supplies the same public `operator_override_fns` mechanism available to applications for schema-specific collection translations. Regex `matches()` fails closed by default because SQL dialect regex engines do not guarantee CEL/RE2 semantics; applications may provide an override only when their database translation is known to be equivalent. Timestamp literals must use strict RFC 3339 grammar, resolve inside CEL's supported year 0001–9999 instant range, and be exactly representable at Python/SQLAlchemy microsecond precision: discarded fractional digits must be zero, and the mapped column/database must preserve microseconds. Unsupported shapes raise instead of producing a broader query.

@@ -13,6 +13,32 @@ An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanRe
 - Supports relation-aware mappings, including nested relations and many-to-many joins
 - Works with Drizzle SQLite, PostgreSQL, MySQL and PlanetScale drivers
 
+## NULL attribute representation
+
+`R.attr.x == null` compiles to the same `eq(x, null)` plan node however your application represents
+a NULL column in the attributes it sends to `check()`, so the adapter cannot infer the convention
+and has to be told which one you use.
+
+| attributes you send for a NULL column | `check()` on that row | null-matching filter |
+| --- | --- | --- |
+| `{"x": null}` — explicit null | allow | selects it — aligned |
+| `{}` — attribute omitted | **deny** (CEL missing-attribute error) | selects it — **over-grants** |
+
+``nullAttributeRepresentation`` defaults to ``"explicit"``, preserving the historical translation. If your application
+omits attributes for NULL columns, set it to ``"omitted"``: the adapter then rejects every null
+comparison operand instead of emitting a filter that returns rows the PDP denies.
+
+```ts
+queryPlanToDrizzle({ queryPlan, mapper, nullAttributeRepresentation: "omitted" });
+```
+
+The rejection is deliberately wider than the shapes that actually over-grant — `x != null` and
+`!(x == null)` are aligned under both conventions — because negation is applied by wrapping the
+built condition rather than pushing it into the leaf, so a leaf cannot tell whether an enclosing
+`not` will flip a not-null predicate back into a null-selecting one. Rejecting every null operand
+is correct under any nesting. See
+[#302](https://github.com/cerbos/query-plan-adapters/issues/302).
+
 ## Conformance contract
 
 The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 20 hostile seed rows and real Drizzle queries. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
@@ -21,6 +47,7 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` d
 | --- | --- |
 | Oracle-tested | 120 reference conformance actions |
 | Fail-closed corpus shapes | Sub-millisecond `now()` thresholds plus regex `matches()`, ordered list indexing/`get-field`, and `timestamp()` over an untyped string field (5 actions) |
+| Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 
 The oracle coverage includes value-first and field-to-field comparisons, escaped string predicates, relation counts and nested collection macros, null/error propagation, arithmetic and ternaries, hierarchy operations, typed timestamps, and multi-hop relations. The five fail-closed shapes throw rather than return a broader SQL filter. `matches()` is rejected because SQL regex dialects do not guarantee CEL/RE2 semantics.

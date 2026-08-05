@@ -18,6 +18,7 @@ sed -n 's/^[[:space:]]*- actions: \["\([^"]*\)"\].*/\1/p' \
 jq -r '
   .conformance[],
   .expectedUnsupported[].action,
+  .nullRepresentationOmitted[].action,
   .knownDivergences[].action
 ' actions.json | sort >"${VALIDATION_TMP}/classified-actions"
 

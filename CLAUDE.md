@@ -136,6 +136,10 @@ So when you add, fix, or change the handling of any shape:
    upstream planner bug (`knownDivergences`).
 5. **Bump the per-harness tripwires deliberately** — corpus size, oracle/throwing counts, and the
    degeneracy-guard action list. Add the new action to that guard so it cannot pass vacuously.
+   The exception is an action whose oracle is empty *by construction* (a `nullRepresentationOmitted`
+   probe): the guard asserts a non-empty, non-total oracle, so such an action must stay out of it
+   and carry a different anti-vacuity assertion — one pinning *why* its rejection is required, not
+   merely that a rejection happens. See `conformance/README.md`.
 6. **Update the affected READMEs' `Conformance contract` tables** in the same commit.
 
 A per-adapter unit test is not a substitute for a corpus action. Unit tests pin the filter an

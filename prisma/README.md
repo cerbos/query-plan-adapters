@@ -102,6 +102,32 @@ The adapter cannot override a column's collation in a Prisma `where` filter. See
 [case-sensitivity documentation](https://docs.prisma.io/docs/orm/v6/prisma-client/queries/case-sensitivity)
 for provider-specific details.
 
+### NULL attribute representation
+
+`R.attr.x == null` compiles to the same `eq(x, null)` plan node however your application represents
+a NULL column in the attributes it sends to `check()`, so the adapter cannot infer the convention
+and has to be told which one you use.
+
+| attributes you send for a NULL column | `check()` on that row | `IS NULL` filter |
+| --- | --- | --- |
+| `{"x": null}` — explicit null | allow | selects it — aligned |
+| `{}` — attribute omitted | **deny** (CEL missing-attribute error) | selects it — **over-grants** |
+
+`nullAttributeRepresentation` defaults to `"explicit"`, preserving the historical `IS NULL`
+translation. If your application omits attributes for NULL columns, set it to `"omitted"`: the
+adapter then rejects every null comparison operand instead of emitting a filter that returns rows
+the PDP denies.
+
+```ts
+queryPlanToPrisma({ queryPlan, mapper, nullAttributeRepresentation: "omitted" });
+```
+
+The rejection is deliberately wider than the shapes that actually over-grant — `x != null` and
+`!(x == null)` are aligned under both conventions — because Prisma applies negation by wrapping
+(`{ NOT: ... }`) rather than pushing it into the leaf, so a leaf cannot tell whether an enclosing
+`not` will flip `IS NOT NULL` back into a NULL-selecting predicate. Rejecting every null operand is
+correct under any nesting. See [#302](https://github.com/cerbos/query-plan-adapters/issues/302).
+
 ### Conformance contract
 
 The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 20 hostile seed rows and both Prisma 6 and 7. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
@@ -110,6 +136,7 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` d
 | --- | --- |
 | Oracle-tested | 89 reference actions |
 | Fail-closed | 33 reference actions plus the 3 reference-unsupported shapes (36 actions total) |
+| Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 
 The fail-closed set consists of literal `LIKE` cases Prisma cannot escape safely, cross-model field references, arbitrary relation counts and string lengths, `exists_one`, unsolved column arithmetic, sub-millisecond `now()` thresholds, and the reference probes for regex, ordered indexing, and `timestamp()` over a string field. Supported timestamp plans require a mapper entry with `valueType: "dateTime"` and a strict, millisecond-exact RFC 3339 literal in CEL's supported instant range. These shapes throw instead of producing a broader authorization filter.

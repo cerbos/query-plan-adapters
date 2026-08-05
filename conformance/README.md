@@ -33,9 +33,12 @@ rows, and one oracle recipe that every adapter's harness implements against its 
   match), `expectedUnsupported` (planner shapes rejected by the Spring reference adapter; other
   adapters must also fail loudly unless listed in `adapterSupportedExpected`),
   `adapterSupportedExpected` (per-adapter exceptions that intentionally translate a
-  reference-unsupported shape through a documented database capability), and `knownDivergences`
-  (an action plus the affected adapters intentionally excluded from the oracle run, with a
-  reason — currently only `p-has`, excluded because of a planner bug, not an adapter bug).
+  reference-unsupported shape through a documented database capability), `nullRepresentationOmitted`
+  (actions probing `== null` against an attribute the oracle OMITS for NULL columns; every adapter
+  must translate these with its NULL representation set to omitted and reject them — see "NULL
+  conventions" below), and `knownDivergences` (an action plus the affected adapters intentionally
+  excluded from the oracle run, with a reason — currently only `p-has`, excluded because of a
+  planner bug, not an adapter bug).
 - `wire-fixtures/*.json` — one golden `PlanResources` response per action, captured against the
   pinned Cerbos version in `CERBOS_VERSION`. These pin planner *wire shape* independent of any
   adapter or database — a `diff` against a freshly-regenerated fixture after bumping
@@ -79,6 +82,47 @@ NULL, and `tagNames` is the scalar projection of `tags[].name` with NULL names r
 null list elements. This pins `null in [null]`, `null in tagNames`, and variable-in-variable
 membership. Object-valued `tags` still omit a NULL `name`, so collection lambda bodies continue to
 exercise missing-attribute errors. Each harness must implement both representations exactly.
+
+#### `nullRepresentationOmitted`: the two conventions are indistinguishable on the wire
+
+The planner emits the same `eq(attr, null)` node under both conventions — `null-eq` (against the
+explicit-null `owner`) and `null-eq-missing` (against the default-convention `aOptionalString`)
+have byte-identical wire fixtures apart from the variable name. Their oracles do not agree:
+
+| action | attribute convention | `check()` allows | a NULL-selecting filter returns |
+|---|---|---|---|
+| `null-eq` | explicit null | `a2 a4 a8 c2 e1` | the same 5 — aligned |
+| `null-eq-missing` | omitted | **nothing** | those 5 — **over-grants** |
+
+Under the omitted convention CEL raises a missing-attribute error for every NULL row and compares
+`"set" == null` false for every other, so `check()` denies all 20 seeds. An adapter cannot recover
+the caller's convention from the plan, so it has to be told: every adapter that can emit a
+NULL-selecting predicate takes a `nullAttributeRepresentation` option, defaulting to `explicit`
+(the historical translation). See cerbos/query-plan-adapters#302.
+
+`null-eq-missing` lives in its own `actions.json` group rather than in `conformance`, because a
+rejected shape has no filter to compare against the oracle. Each harness translates the group's
+actions with its adapter's representation set to omitted and asserts the rejection — and asserts
+the *reason* the rejection is needed, so the test cannot pass by throwing for an unrelated cause.
+What that second assertion looks like depends on where the adapter's NULL lives:
+
+- **prisma, drizzle, sqlalchemy, spring-data** — a SQL `NULL` is a stored value, so the default
+  translation genuinely returns the five rows the PDP denies. The harnesses pin that over-grant.
+- **mongoose** — already discriminates per attribute: `nullable: true` on a mapper entry means "a
+  stored null is a missing Cerbos attribute" and makes `eq(field, null)` contradictory. Its
+  harness asserts the aligned empty result *and* that `owner` (same column, no `nullable`) still
+  returns its five explicit-null documents, so the empty set is the flag talking.
+- **convex** — a document store, so the seeded shape mirrors the convention directly: the harness
+  omits the field entirely and `q.eq(field, null)` does not match an absent field. Same paired
+  assertion as mongoose. Alignment here comes from the storage layout, not from the plan.
+- **langchain-chromadb, elasticsearch-java** — need no option at all: neither store can represent
+  an explicit null distinguishably from a missing key, so every null-selecting direction already
+  fails closed under both conventions. Their harnesses assert the rejection happens regardless,
+  which is also the tripwire for a future null sentinel introducing a representation dependency.
+
+Because the oracle for these actions is empty by construction, they must **not** join the
+degeneracy guard below — that guard asserts a non-empty, non-total oracle, which is exactly what
+this shape cannot have.
 ### The degeneracy guard
 
 The comparison in step 4 can pass vacuously if the oracle itself is trivial (e.g. the PDP denies
@@ -109,15 +153,16 @@ These are part of the shared contract. Do not replace them with adapter-specific
 ## Adding a new hostile shape
 
 1. Add the action + condition to `policies/adversarial.yaml`.
-2. Add the action name to `actions.json` (`conformance` or `expectedUnsupported`, with a comment
-   in the policy explaining what it probes and which seed rows discriminate it — follow the
-   existing comment style).
+2. Add the action name to `actions.json` — `conformance` or `expectedUnsupported`, or
+   `nullRepresentationOmitted` if it probes `== null` against an attribute the oracle omits for
+   NULL columns — with a comment in the policy explaining what it probes and which seed rows
+   discriminate it (follow the existing comment style).
 3. If the shape needs new seed data to be non-degenerate, add a seed to `seeds.json` with a `note`
    explaining what it witnesses (see `a9`, `b1`-`b6` for examples).
 4. Run `scripts/regenerate-wire-fixtures.sh` and commit the new fixture alongside the policy change.
 5. Every adapter harness picks up the new action automatically from `actions.json` on next run;
    triage any divergence into a per-adapter fix issue rather than special-casing it in the harness.
-6. Each harness pins the corpus size as a tripwire (e.g. `expect(MANIFEST_ACTIONS.size).toBe(126)`
+6. Each harness pins the corpus size as a tripwire (e.g. `expect(MANIFEST_ACTIONS.size).toBe(127)`
    in `prisma/src/adversarial.test.ts`, and the oracle/throwing counts in the convex and
    langchain-chromadb harnesses). Bump them deliberately — that assertion exists so a new action
    cannot slip past an adapter unnoticed.
@@ -127,6 +172,12 @@ These are part of the shared contract. Do not replace them with adapter-specific
    `principal.attr.manyTeams`, the projection dropped it, the plan folded to `ALWAYS_DENIED`, and
    the oracle — built from the same projected principal — agreed. The action passed on both sides
    while testing nothing. Pass corpus data through verbatim.
+
+   The one exception is a `nullRepresentationOmitted` action: its oracle is empty *by
+   construction*, which the degeneracy guard asserts against, so it must stay out of that list.
+   It needs a different anti-vacuity assertion instead — assert why the rejection is required,
+   not merely that one happens. See the `nullRepresentationOmitted` section above for the form
+   that takes in each adapter.
 
 ## Adding a new adapter
 
@@ -145,11 +196,19 @@ unsupported before you have watched it fail is how a translatable shape gets per
    ```
    oracleActions   = conformance - adapterUnsupported[me] + adapterSupportedExpected[me]
    throwingActions = adapterUnsupported[me] + (expectedUnsupported - adapterSupportedExpected[me])
+   nullOmitted     = nullRepresentationOmitted            (translated with the option flipped)
    skipped         = knownDivergences where adapters contains me
    ```
 
    `drizzle/src/adversarial.test.ts` is the cleanest example of this wiring. Every adapter's key
    in `actions.json` is its **directory name** (`langchain-chromadb`, `elasticsearch-java`).
+
+   **Read every group, and derive the manifest from the same expressions.** The manifest assertion
+   ("each action classified exactly once") is what catches a group you forgot — but only if the
+   group feeds both sides. Harnesses that re-validate `actions.json` into a local record
+   (mongoose, langchain-chromadb) must parse each group explicitly: a field the parser does not
+   name is dropped silently, and a dropped group makes its actions vanish from every count and
+   every parameterised case at once. That is the projection trap, and it passes vacuously.
 
 3. **Persist the seeds exactly**, including the NULL conventions and the derived fields above.
    `aOptionalString` is NULL for several seeds and `tags[].name` is NULL for others — those are

@@ -706,6 +706,46 @@ class ElasticsearchQueryPlanAdapterTest {
                 ((Result.Conditional) result).query());
     }
 
+    /**
+     * cerbos/query-plan-adapters#302 pins the other adapters' NULL-column representation to a
+     * caller-declared option, because {@code eq(attr, null)} means "the explicitly-null rows"
+     * under one convention and "no rows at all" under the other, and the wire node is identical.
+     *
+     * <p>This adapter needs no such option: Elasticsearch cannot index an explicit null
+     * distinguishably from a missing field, so every shape that would SELECT null documents
+     * already fails closed, and only the two {@code exists}-shaped directions translate. Those
+     * two are aligned under both conventions — a document whose field is absent is denied either
+     * way. This test is the guard on that claim: if a future change starts emitting a
+     * null-selecting query here, the adapter acquires a representation dependency and must gain
+     * the option.
+     */
+    @Test
+    void nullComparisonsAreRepresentationIndependent() {
+        Operand eqNull = expressionOperand("eq",
+                variableOperand("request.resource.attr.department"), nullValueOperand());
+        Operand neNull = expressionOperand("ne",
+                variableOperand("request.resource.attr.department"), nullValueOperand());
+
+        // Null-SELECTING directions: rejected, so neither convention can be mistranslated.
+        for (Operand rejected : List.of(eqNull, expressionOperand("not", neNull))) {
+            PlanResourcesResponse resp =
+                    buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, rejected);
+            IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                    () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP));
+            assertTrue(error.getMessage().contains("explicit null value from a missing field"));
+        }
+
+        // Presence-SELECTING directions: both translate to `exists`, which denies a document
+        // with no value for the field under either convention.
+        for (Operand accepted : List.of(neNull, expressionOperand("not", eqNull))) {
+            PlanResourcesResponse resp =
+                    buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, accepted);
+            Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
+            assertEquals(Map.of("exists", Map.of("field", "department")),
+                    ((Result.Conditional) result).query());
+        }
+    }
+
     @Test
     void hasIntersectionProducesTermsQuery() {
         Operand condition = expressionOperand("hasIntersection",

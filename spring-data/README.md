@@ -252,6 +252,34 @@ the construct: rows marked **no** are rejected while resolving an operand,
 | `eq`/`ne` against a list constant               | `R.attr.tags == ["a", "b"]`                       | no          | Whole-list equality has no scalar-column translation (the plan arrives as `eq(variable, value-list)` verbatim); rejected before path resolution. Map the attribute as a Relation and use `in`/`hasIntersection`, or compare elements individually. |
 | `except` (list difference)                      | `size(R.attr.tags.except(["archived"])) > 0`      | no          | Cerbos `except(list, list)` is a two-list function (the wire shape is `except(variable, value-list)`, typically inside `size()` — PDP-verified); list difference has no JPA Criteria translation. Rewrite with an equivalent macro: `size(coll.except([...])) > 0` ≡ `coll.exists(x, !(x in [...]))`. |
 
+## NULL attribute representation
+
+`R.attr.x == null` compiles to the same `eq(x, null)` plan node however your application represents
+a NULL column in the attributes it sends to `check()`, so the adapter cannot infer the convention
+and has to be told which one you use.
+
+| attributes you send for a NULL column | `check()` on that row | `IS NULL` filter |
+| --- | --- | --- |
+| `{"x": null}` — explicit null | allow | selects it — aligned |
+| `{}` — attribute omitted | **deny** (CEL missing-attribute error) | selects it — **over-grants** |
+
+`NullAttributeRepresentation` defaults to `EXPLICIT`, preserving the historical `IS NULL`
+translation. If your application omits attributes for NULL columns, pass `OMITTED`: the adapter
+then rejects every null comparison operand instead of emitting a filter that returns rows the PDP
+denies. Unlike the rest of the translation, this check runs eagerly from `toSpecification` rather
+than when the Specification is first evaluated.
+
+```java
+Result<ResourceEntity> result = SpringDataQueryPlanAdapter.toSpecification(
+        planResult, mapper, Map.of(), NullAttributeRepresentation.OMITTED);
+```
+
+The rejection is deliberately wider than the shapes that actually over-grant — `x != null` and
+`!(x == null)` are aligned under both conventions — because negation is applied around the built
+predicate rather than pushed into the leaf, so a leaf cannot tell whether an enclosing `not` will
+flip `IS NOT NULL` back into a NULL-selecting predicate. Rejecting every null operand is correct
+under any nesting. See [#302](https://github.com/cerbos/query-plan-adapters/issues/302).
+
 ## Conformance contract
 
 The adapter is differentially tested against Cerbos PDP 0.54.0 `check()` decisions using 20 hostile seed rows on H2, PostgreSQL, and MySQL. This Spring Data implementation defines the reference semantics that the other adapters follow.
@@ -260,6 +288,7 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `check()` decisio
 | --- | --- |
 | Oracle-tested | All 122 reference conformance actions |
 | Fail-closed corpus shapes | Regex `matches()`, ordered list indexing/`get-field`, and `timestamp()` over an ambiguous string column (3 actions) |
+| Representation-dependent | `null-eq-missing` — rejected under `NullAttributeRepresentation.OMITTED`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute rows; this is pinned separately as an upstream divergence |
 
 The oracle coverage includes value-first and field-to-field comparisons, literal-safe string matching, nested and correlated collection macros, three-valued null/error propagation, arithmetic and ternaries, hierarchy operations, timestamp comparisons on supported absolute-instant columns, and multi-hop relations. Unsupported shapes throw before a predicate can be used.

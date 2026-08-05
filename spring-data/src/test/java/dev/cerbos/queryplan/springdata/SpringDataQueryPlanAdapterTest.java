@@ -1246,6 +1246,92 @@ class SpringDataQueryPlanAdapterTest {
         }
     }
 
+    // -- NULL attribute representation (issue #302) --
+
+    /**
+     * Both NULL-column conventions produce the identical {@code eq(attr, null)} wire node, so
+     * the adapter cannot infer which one the caller uses. Under {@code OMITTED} a NULL column
+     * carries no attribute at all, CEL raises a missing-attribute error, and {@code check()}
+     * denies every row — {@code IS NULL} would return precisely the rows the PDP refuses.
+     */
+    @Nested
+    class NullAttributeRepresentationTest {
+
+        private Result<ResourceEntity> translate(
+                Operand condition, NullAttributeRepresentation representation) {
+            PlanResourcesResponse resp =
+                    buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+            return SpringDataQueryPlanAdapter.toSpecification(
+                    resp, MAPPER, Map.of(), representation);
+        }
+
+        private Operand nullEq() {
+            return exprOp("eq", var("request.resource.attr.aOptionalString"), nullVal());
+        }
+
+        @Test
+        void explicitIsTheDefaultAndKeepsIsNull() {
+            // The three-arg overload and an EXPLICIT fourth argument agree, and both still
+            // translate rather than throw.
+            assertEquals(0, runCount(nullEq()));
+            assertInstanceOf(
+                    Result.Conditional.class,
+                    translate(nullEq(), NullAttributeRepresentation.EXPLICIT));
+        }
+
+        @Test
+        void omittedRejectsEqAgainstNull() {
+            IllegalArgumentException thrown = assertThrows(
+                    IllegalArgumentException.class,
+                    () -> translate(nullEq(), NullAttributeRepresentation.OMITTED));
+            assertTrue(thrown.getMessage().contains("missing-attribute error"));
+        }
+
+        /**
+         * Conservatively rejected too: {@code ne} alone is aligned under {@code OMITTED}, but
+         * negation wraps the built predicate, so a leaf cannot see whether an enclosing
+         * {@code not} will flip {@code IS NOT NULL} back into {@code IS NULL}.
+         */
+        @Test
+        void omittedRejectsNeAgainstNull() {
+            Operand condition =
+                    exprOp("ne", var("request.resource.attr.aOptionalString"), nullVal());
+            assertThrows(
+                    IllegalArgumentException.class,
+                    () -> translate(condition, NullAttributeRepresentation.OMITTED));
+        }
+
+        @Test
+        void omittedRejectsNullElementInInList() {
+            Operand condition = exprOp("in",
+                    var("request.resource.attr.aOptionalString"),
+                    listOpNullable("x", null));
+            assertThrows(
+                    IllegalArgumentException.class,
+                    () -> translate(condition, NullAttributeRepresentation.OMITTED));
+        }
+
+        /** The scan walks the whole tree, not just the root. */
+        @Test
+        void omittedRejectsNullOperandNestedUnderAnd() {
+            Operand condition = exprOp("and",
+                    exprOp("not", nullEq()),
+                    exprOp("eq", var("request.resource.attr.aString"), sval("x")));
+            assertThrows(
+                    IllegalArgumentException.class,
+                    () -> translate(condition, NullAttributeRepresentation.OMITTED));
+        }
+
+        @Test
+        void omittedLeavesNullFreeComparisonsUntouched() {
+            Operand condition =
+                    exprOp("eq", var("request.resource.attr.aString"), sval("x"));
+            assertInstanceOf(
+                    Result.Conditional.class,
+                    translate(condition, NullAttributeRepresentation.OMITTED));
+        }
+    }
+
     // -- Minor operator/comparison shapes (PR #234) --
 
     @Nested
