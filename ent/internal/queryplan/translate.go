@@ -5,6 +5,7 @@ package queryplan
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -46,6 +47,15 @@ func Build(cond *enginev1.PlanResourcesFilter_Expression_Operand, m Mapper, opts
 		return nil, err
 	}
 
+	if strings.HasPrefix(opts.RootTable, aliasPrefix) {
+		return nil, fmt.Errorf(
+			"resource table %q collides with the %q prefix reserved for generated subquery aliases",
+			opts.RootTable, aliasPrefix,
+		)
+	}
+
+	m = guardedMapper{parent: m}
+
 	if opts.NullRepresentation == NullOmitted {
 		if err := assertNoNullOperands(root); err != nil {
 			return nil, err
@@ -61,9 +71,15 @@ type builder struct {
 	aliasN int
 }
 
+// aliasPrefix names the aliases generated for correlated subqueries. A caller whose resource table
+// is itself named with this prefix is rejected up front: an inner alias would shadow the outer
+// table, the correlation would compare the subquery's own row against itself, and the filter would
+// match rows the PDP denies — silently, since the SQL stays valid.
+const aliasPrefix = "cerbos_rel_"
+
 func (b *builder) newAlias() string {
 	b.aliasN++
-	return "cerbos_rel_" + strconv.Itoa(b.aliasN)
+	return aliasPrefix + strconv.Itoa(b.aliasN)
 }
 
 // Operand counts the planner emits for the shapes this translator understands. Naming them keeps
@@ -312,7 +328,7 @@ func (b *builder) membershipOverRelation(needle *node, rel *Relation, parent str
 	alias := b.newAlias()
 	elementCol := Column{Qualifier: alias, Name: rel.Field.Column}
 
-	body, err := elementMatches(elementCol, needleValue)
+	body, err := b.elementMatches(elementCol, needleValue)
 	if err != nil {
 		return nil, err
 	}
@@ -329,7 +345,7 @@ func (b *builder) membershipOverRelation(needle *node, rel *Relation, parent str
 // so a NULL element is a real null member rather than a missing one and `null in tagNames` has to
 // be true. SQL equality never matches two NULLs, so the both-null case is spelled out — and only
 // when the needle is itself a column, since a literal null needle collapses to a plain IS NULL.
-func elementMatches(element Column, needle value) (Expr, error) {
+func (b *builder) elementMatches(element Column, needle value) (Expr, error) {
 	if needle == nil {
 		return IsNull{X: element}, nil
 	}
@@ -339,9 +355,18 @@ func elementMatches(element Column, needle value) (Expr, error) {
 		return compare(OpEq, element, needle)
 	}
 
-	// Null-safe: a null element and a null needle are equal, and a null on one side alone is a
-	// mismatch rather than UNKNOWN. Plain `=` would leave those rows UNKNOWN, which survives the
+	// Null-safe equality is only correct under the EXPLICIT convention, where a null is a real
+	// value: a null element and a null needle are equal, and a null on one side alone is a
+	// mismatch rather than UNKNOWN. Plain `=` would leave those rows UNKNOWN, which survives an
 	// enclosing negation and would drop them from `!(x in coll)` even though CEL allows them.
+	//
+	// Under NullOmitted a NULL column carries no attribute at all, so CEL raises a
+	// missing-attribute error and denies. Treating it as a definite non-match would make the
+	// macro FALSE and the negation TRUE — returning exactly the rows the PDP refuses. Plain
+	// equality keeps it UNKNOWN, which is the deny.
+	if b.opts.NullRepresentation == NullOmitted {
+		return Cmp{Op: OpEq, L: element, R: needleExpr}, nil
+	}
 	return NotDistinct{L: element, R: needleExpr}, nil
 }
 
@@ -894,24 +919,15 @@ func (b *builder) arithmetic(n *node, m Mapper) (value, error) {
 
 	// Fold constant arithmetic in double precision, matching CEL's number model exactly rather
 	// than deferring to the dialect's numeric type.
-	if lf, ok := asFloat(lv); ok {
-		if rf, ok := asFloat(rv); ok {
-			switch op {
-			case OpAdd:
-				return lf + rf, nil
-			case OpSub:
-				return lf - rf, nil
-			case OpMult:
-				return lf * rf, nil
-			case OpMod:
-				if rf == 0 {
-					return nil, fmt.Errorf("modulus by zero in query plan")
-				}
-				return float64(int64(lf) % int64(rf)), nil
-			case OpDiv:
-				// Unreachable: division is routed to floatDiv above so that the IEEE cases stay
-				// symbolic. Named explicitly so a new operator cannot silently fall through.
-			}
+	lf, lok := asFloat(lv)
+	rf, rok := asFloat(rv)
+	if lok && rok {
+		folded, err := foldArithmetic(op, lf, rf)
+		if err != nil {
+			return nil, err
+		}
+		if folded != nil {
+			return *folded, nil
 		}
 	}
 
@@ -924,6 +940,36 @@ func (b *builder) arithmetic(n *node, m Mapper) (value, error) {
 		return nil, err
 	}
 	return Arith{Op: op, L: lExpr, R: rExpr}, nil
+}
+
+// foldArithmetic evaluates a binary operation over two constants, returning nil when the operator
+// has no constant folding of its own (division stays symbolic so its IEEE cases survive).
+func foldArithmetic(op ArithOp, l, r float64) (*float64, error) {
+	var out float64
+	switch op {
+	case OpAdd:
+		out = l + r
+	case OpSub:
+		out = l - r
+	case OpMult:
+		out = l * r
+	case OpMod:
+		// CEL's % is integer-only. Truncating a fractional operand here would be a silent
+		// semantic change, and truncating a divisor in (-1, 1) to zero would panic outright, so
+		// anything non-integral is rejected.
+		if l != math.Trunc(l) || r != math.Trunc(r) {
+			return nil, fmt.Errorf("modulus requires integer operands, got %v %% %v", l, r)
+		}
+		if r == 0 {
+			return nil, fmt.Errorf("modulus by zero in query plan")
+		}
+		out = float64(int64(l) % int64(r))
+	case OpDiv:
+		// Routed to floatDiv above so the IEEE cases stay symbolic; named so a new operator
+		// cannot silently fall through.
+		return nil, nil
+	}
+	return &out, nil
 }
 
 func castValue(operator string, v value) (value, error) {
@@ -1059,17 +1105,26 @@ func assertNoNullOperands(n *node) error {
 	return nil
 }
 
+// carriesNull reports whether a literal contains a null anywhere inside it.
+//
+// The recursion is load-bearing: a macro over a literal list of objects has its lambda body
+// substituted with each element's fields, so a null nested in `[{"v": null}]` reaches a comparison
+// as a bare null operand long after this scan has run.
 func carriesNull(v any) bool {
-	if v == nil {
+	switch t := v.(type) {
+	case nil:
 		return true
-	}
-	list, ok := v.([]any)
-	if !ok {
-		return false
-	}
-	for _, item := range list {
-		if item == nil {
-			return true
+	case []any:
+		for _, item := range t {
+			if carriesNull(item) {
+				return true
+			}
+		}
+	case map[string]any:
+		for _, item := range t {
+			if carriesNull(item) {
+				return true
+			}
 		}
 	}
 	return false

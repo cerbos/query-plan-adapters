@@ -50,14 +50,31 @@ func decodeOperand(op *enginev1.PlanResourcesFilter_Expression_Operand) (*node, 
 		return nil, fmt.Errorf("nil operand in query plan")
 	}
 
+	// A oneof wrapper can be a typed nil — the type switch still matches it, so each arm has to
+	// check before dereferencing. Protobuf's own decoder does not produce these, but a plan can
+	// be built by hand, and a panic in a library on the authorization path takes the caller's
+	// process down.
 	switch t := op.GetNode().(type) {
 	case *enginev1.PlanResourcesFilter_Expression_Operand_Expression:
+		if t == nil {
+			return nil, fmt.Errorf("nil expression operand in query plan")
+		}
 		return decodeExpression(t.Expression)
 
 	case *enginev1.PlanResourcesFilter_Expression_Operand_Variable:
+		if t == nil {
+			return nil, fmt.Errorf("nil variable operand in query plan")
+		}
 		return &node{kind: nodeVariable, variable: t.Variable}, nil
 
 	case *enginev1.PlanResourcesFilter_Expression_Operand_Value:
+		if t == nil {
+			return nil, fmt.Errorf("nil value operand in query plan")
+		}
+		if t.Value == nil {
+			// An unset Value would decode to Go nil and silently become an IS NULL test.
+			return nil, fmt.Errorf("value operand carries no value in query plan")
+		}
 		return &node{kind: nodeValue, value: decodeValue(t.Value)}, nil
 
 	default:

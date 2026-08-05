@@ -166,3 +166,21 @@ func requireRelation(m Mapper, reference string) (Entry, error) {
 	}
 	return entry, nil
 }
+
+// guardedMapper rejects a caller-supplied qualifier that collides with the prefix used for
+// generated subquery aliases.
+//
+// RootTable is checked once up front, but an Entry may name its own qualifier, and a colliding one
+// would let an inner subquery alias shadow it — the correlation would compare the subquery's row
+// against itself and the filter would match rows the PDP denies, with no SQL error to notice.
+type guardedMapper struct {
+	parent Mapper
+}
+
+func (g guardedMapper) Resolve(reference string) (Entry, bool) {
+	entry, ok := g.parent.Resolve(reference)
+	if !ok || strings.HasPrefix(entry.Qualifier, aliasPrefix) {
+		return Entry{}, false
+	}
+	return entry, true
+}

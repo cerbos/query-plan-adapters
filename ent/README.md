@@ -138,6 +138,26 @@ operator and different cast spellings. Running both is what makes `WithDialect` 
 
 MySQL goes through the same code paths, but until it joins the suite treat it as untested.
 
+### Known gaps
+
+An adversarial review found these. They are real but unfixed here, because each either needs a
+corpus action first (this repository's rule is that translation changes start in the shared corpus,
+not in one adapter) or is shared with the reference adapters and should be fixed across all of them
+at once. Treat them as constraints on the policies you write.
+
+| Gap | Effect |
+| --- | --- |
+| An absent to-one parent is indistinguishable from an empty collection | `R.attr.parent.children.all(...)`, `!exists(...)` or `size(...) == 0` on a row with no parent returns TRUE/zero, while CEL raises a missing-path error and denies. Affects every relational adapter in this repository, not just this one. |
+| `int()` over a non-numeric string | CEL raises a conversion error and denies; SQL coerces (SQLite yields 0, PostgreSQL errors). Avoid `int()` on free-text columns. |
+| A NaN stored in a floating-point column | Ordered comparisons follow the database's NaN ordering rather than IEEE's. Only NaNs the adapter folds itself are handled exactly. |
+| Division by a stored negative zero | The sign of the resulting infinity is taken from the numerator alone, so `1.0 / -0.0` classifies as `+Inf` where CEL gives `-Inf`. |
+| `!=` / `not in` against an explicit null under `NullExplicit` | CEL evaluates `null != "x"` as true; SQL leaves it UNKNOWN and excludes the row. This under-grants — it fails closed — but is not exact equivalence. |
+
+MySQL additionally goes untested by the differential suite: it needs `CONCAT` rather than `||`
+(which MySQL reads as logical OR outside `PIPES_AS_CONCAT`), `CHAR_LENGTH` rather than `LENGTH`
+(which counts bytes), and `TRUNCATE` before an integer cast. All three are implemented, none are
+proved.
+
 ### Collation
 
 CEL string comparison and matching are case-sensitive and byte-exact, while `LIKE` collation is

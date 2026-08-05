@@ -318,25 +318,27 @@ func writeCase(b *sql.Builder, t queryplan.Case) error {
 }
 
 func writeCall(b *sql.Builder, c queryplan.Call) error {
-	// `concat` is spelled with `||` rather than the concat() function on purpose: MySQL's
-	// concat() and SQLite's treat NULL differently, and `||` propagates NULL on the dialects
-	// that have it — which is what keeps a missing attribute from becoming a match.
+	// Concatenation must propagate NULL, so that a missing attribute in a dynamic LIKE pattern
+	// leaves the match UNKNOWN rather than becoming an empty string that matches.
+	//
+	// SQLite and PostgreSQL spell that `||`. MySQL does NOT: outside PIPES_AS_CONCAT mode `||`
+	// is logical OR, so the pattern would collapse to a boolean and the match would silently
+	// fail. Its CONCAT() is NULL-propagating (unlike PostgreSQL's, which skips NULLs), so it is
+	// the right spelling there and only there.
 	if c.Name == queryplan.FuncConcat {
-		return wrap(b, func(b *sql.Builder) error {
-			for i, arg := range c.Args {
-				if i > 0 {
-					b.WriteString(" || ")
-				}
-				if err := write(b, arg); err != nil {
-					return err
-				}
-			}
-			return nil
-		})
+		return writeConcat(b, c.Args)
+	}
+
+	// CEL's size() counts Unicode code points. SQLite's and PostgreSQL's length() do too, but
+	// MySQL's LENGTH() counts bytes — "héllo🚀" is 6 to CEL and 10 to MySQL — so it needs
+	// CHAR_LENGTH instead.
+	charLength := "length"
+	if b.Dialect() == dialect.MySQL {
+		charLength = "char_length"
 	}
 
 	name := map[queryplan.FuncName]string{
-		queryplan.FuncCharLength: "length",
+		queryplan.FuncCharLength: charLength,
 		queryplan.FuncReplace:    "replace",
 		queryplan.FuncNullIf:     "nullif",
 	}[c.Name]
@@ -358,7 +360,52 @@ func writeCall(b *sql.Builder, c queryplan.Call) error {
 	})
 }
 
+// writeConcat joins strings, propagating NULL.
+func writeConcat(b *sql.Builder, args []queryplan.Expr) error {
+	if b.Dialect() == dialect.MySQL {
+		b.WriteString("CONCAT")
+		return wrap(b, func(b *sql.Builder) error {
+			return writeSeparated(b, args, ", ")
+		})
+	}
+	return wrap(b, func(b *sql.Builder) error {
+		return writeSeparated(b, args, " || ")
+	})
+}
+
+func writeSeparated(b *sql.Builder, args []queryplan.Expr, separator string) error {
+	for i, arg := range args {
+		if i > 0 {
+			b.WriteString(separator)
+		}
+		if err := write(b, arg); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func writeCast(b *sql.Builder, t queryplan.Cast) error {
+	// CEL's int() truncates toward zero. SQLite's CAST does the same, but PostgreSQL and MySQL
+	// round to nearest — `int(1.9)` is 1 in CEL and 2 there — so truncate explicitly first.
+	if t.To == queryplan.CastInt && b.Dialect() != dialect.SQLite {
+		if b.Dialect() == dialect.MySQL {
+			b.WriteString("CAST(TRUNCATE(")
+			if err := write(b, t.X); err != nil {
+				return err
+			}
+			b.WriteString(", 0) AS ").WriteString(castType(b.Dialect(), t.To)).WriteString(")")
+			return nil
+		}
+
+		b.WriteString("CAST(trunc(")
+		if err := write(b, t.X); err != nil {
+			return err
+		}
+		b.WriteString(") AS ").WriteString(castType(b.Dialect(), t.To)).WriteString(")")
+		return nil
+	}
+
 	b.WriteString("CAST")
 	return wrap(b, func(b *sql.Builder) error {
 		if err := write(b, t.X); err != nil {

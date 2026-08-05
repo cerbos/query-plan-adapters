@@ -220,19 +220,7 @@ func (r *renderer) write(e queryplan.Expr) error {
 		return r.writeCall(t)
 
 	case queryplan.Cast:
-		r.sb.WriteString("CAST(")
-		if err := r.write(t.X); err != nil {
-			return err
-		}
-		switch t.To {
-		case queryplan.CastText:
-			r.sb.WriteString(" AS text)")
-		case queryplan.CastFloat:
-			r.sb.WriteString(" AS double precision)")
-		default:
-			r.sb.WriteString(" AS bigint)")
-		}
-		return nil
+		return r.writeCast(t)
 
 	case queryplan.Subquery:
 		return r.writeSubquery(t)
@@ -254,6 +242,33 @@ func (r *renderer) writeBinary(symbol string, l, right queryplan.Expr) error {
 		return err
 	}
 	r.sb.WriteString(")")
+	return nil
+}
+
+// writeCast lowers a CEL type conversion.
+//
+// CEL's int() truncates toward zero, while PostgreSQL's float-to-integer cast rounds to nearest —
+// `int(1.9)` is 1 in CEL and 2 in SQL, which is an over-grant on a `== 2` threshold. Truncating
+// first makes the cast mean what the policy means.
+func (r *renderer) writeCast(c queryplan.Cast) error {
+	if c.To == queryplan.CastInt {
+		r.sb.WriteString("CAST(trunc(")
+		if err := r.write(c.X); err != nil {
+			return err
+		}
+		r.sb.WriteString(") AS bigint)")
+		return nil
+	}
+
+	r.sb.WriteString("CAST(")
+	if err := r.write(c.X); err != nil {
+		return err
+	}
+	if c.To == queryplan.CastText {
+		r.sb.WriteString(" AS text)")
+	} else {
+		r.sb.WriteString(" AS double precision)")
+	}
 	return nil
 }
 
