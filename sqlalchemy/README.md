@@ -54,6 +54,18 @@ The conformance harness supplies the same public `operator_override_fns` mechani
 - Cerbos > v0.16
 - SQLAlchemy >= 1.4 / 2.0
 
+### Model styles
+
+`get_query`'s `table` argument accepts a Core `Table`, a legacy
+`declarative_base()` model, or a SQLAlchemy 2.0 `DeclarativeBase` subclass. The
+2.0 style is not a relabelling of the legacy one — its metaclass sits outside the
+`DeclarativeMeta` hierarchy — so both are named explicitly in the accepted type.
+
+Passing an ORM model returns `Select[Tuple[Model]]` and passing a Core `Table`
+returns `Select[Any]`, so the row type reaches the caller instead of being erased
+to a bare `Select`. `DeclarativeBase` exists only on SQLAlchemy >= 2.0; on 1.4 the
+member is inert and the legacy style is unaffected.
+
 ### Database collation requirements
 
 Cerbos CEL string and hierarchy comparisons are case-sensitive. The database
@@ -119,15 +131,18 @@ attr_map = {
 
 
 # `get_query` supports both `Table` instances and ORM entities:
-# ORM entity - honouring object level relationships via the sqlalchemy ORM
-query: Select = get_query(plan, LeaveRequest, attr_map)
-# Alternatively it can generate legacy queries by passing the Table instance
+# ORM entity - honouring object level relationships via the sqlalchemy ORM.
+# Passing a model returns `Select[Tuple[LeaveRequest]]`, so the row type survives
+# into `session.execute(query).scalars()` without a manual annotation.
+query = get_query(plan, LeaveRequest, attr_map)
+# Alternatively it can generate legacy queries by passing the Table instance,
+# which returns `Select[Any]` — a Core table carries no row type.
 query: Select = get_query(plan, LeaveRequest.__table__, attr_map)
 
 
 # NOTE: if columns defined within the attr_map originate from more than one table, we need to define a mapping as the optional 4th positional arg to `get_query`.
 # The argument is in the form:
-#   `list[tuple[Table | DeclarativeMeta, BinaryExpression | ColumnOperators]]`
+#   `list[tuple[Table | DeclarativeMeta | type[DeclarativeBase], BinaryExpression | ColumnOperators]]`
 # e.g.:
 query: Select = get_query(
     plan,

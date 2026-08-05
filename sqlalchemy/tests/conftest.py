@@ -63,6 +63,67 @@ class Resource(Base):
     creator = relationship("User", foreign_keys=[createdBy])
 
 
+# The SQLAlchemy 2.0 declarative style, mapped onto parallel tables holding the
+# same rows. `DeclarativeBase` subclasses are not `DeclarativeMeta` instances, so
+# they exercise a genuinely different arm of `GenericTable` — see
+# https://github.com/cerbos/query-plan-adapters/issues/181.
+try:
+    from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+    class ModernBase(DeclarativeBase):
+        pass
+
+    class ModernUser(ModernBase):
+        __tablename__ = "modern_user"
+
+        id: Mapped[int] = mapped_column(primary_key=True)
+
+    class ModernResource(ModernBase):
+        __tablename__ = "modern_resource"
+
+        id: Mapped[int] = mapped_column(primary_key=True)
+        name: Mapped[str] = mapped_column(String(30))
+        aBool: Mapped[bool] = mapped_column(Boolean)
+        aString: Mapped[str] = mapped_column(String)
+        aNumber: Mapped[int] = mapped_column(Integer)
+
+        ownedBy: Mapped[str] = mapped_column(String, ForeignKey("modern_user.id"))
+        createdBy: Mapped[str] = mapped_column(String, ForeignKey("modern_user.id"))
+
+    HAS_DECLARATIVE_BASE = True
+except ImportError:  # SQLAlchemy 1.4
+    ModernBase = ModernUser = ModernResource = None
+    HAS_DECLARATIVE_BASE = False
+
+
+_RESOURCE_ROWS = [
+    {
+        "name": "resource1",
+        "aBool": True,
+        "aString": "string",
+        "aNumber": 1,
+        "ownedBy": "1",
+        "createdBy": "1",
+    },
+    {
+        "name": "resource2",
+        "aBool": False,
+        "aString": "amIAString?",
+        "aNumber": 2,
+        "ownedBy": "1",
+        "createdBy": "2",
+    },
+    {
+        "name": "resource3",
+        "aBool": True,
+        "aString": "anotherString",
+        "aNumber": 3,
+        "ownedBy": "2",
+        "createdBy": "2",
+    },
+]
+
+
 @pytest.fixture(scope="module")
 def engine():
     # in-memory database
@@ -78,6 +139,8 @@ def engine():
 
     # generate tables from sqla metadata
     Base.metadata.create_all(engine)
+    if HAS_DECLARATIVE_BASE:
+        ModernBase.metadata.create_all(engine)
 
     # Populate with test data
     with engine.connect() as conn:
@@ -88,35 +151,14 @@ def engine():
                 {"id": "2", "name": "user2", "role": "user"},
             ],
         )
-        conn.execute(
-            insert(Resource.__table__),
-            [
-                {
-                    "name": "resource1",
-                    "aBool": True,
-                    "aString": "string",
-                    "aNumber": 1,
-                    "ownedBy": "1",
-                    "createdBy": "1",
-                },
-                {
-                    "name": "resource2",
-                    "aBool": False,
-                    "aString": "amIAString?",
-                    "aNumber": 2,
-                    "ownedBy": "1",
-                    "createdBy": "2",
-                },
-                {
-                    "name": "resource3",
-                    "aBool": True,
-                    "aString": "anotherString",
-                    "aNumber": 3,
-                    "ownedBy": "2",
-                    "createdBy": "2",
-                },
-            ],
-        )
+        conn.execute(insert(Resource.__table__), _RESOURCE_ROWS)
+
+        if HAS_DECLARATIVE_BASE:
+            conn.execute(
+                insert(ModernUser.__table__),
+                [{"id": "1"}, {"id": "2"}],
+            )
+            conn.execute(insert(ModernResource.__table__), _RESOURCE_ROWS)
 
         if not _is_sqla_14():
             conn.commit()
@@ -138,6 +180,20 @@ def user_table():
 @pytest.fixture
 def resource_table():
     return Resource
+
+
+@pytest.fixture
+def modern_user_table():
+    if not HAS_DECLARATIVE_BASE:
+        pytest.skip("DeclarativeBase requires SQLAlchemy >= 2.0")
+    return ModernUser
+
+
+@pytest.fixture
+def modern_resource_table():
+    if not HAS_DECLARATIVE_BASE:
+        pytest.skip("DeclarativeBase requires SQLAlchemy >= 2.0")
+    return ModernResource
 
 
 @contextmanager

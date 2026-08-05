@@ -1,9 +1,22 @@
+from __future__ import annotations
+
 import math
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from types import MappingProxyType
-from typing import Any, Callable, Dict, List, Literal, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Literal,
+    Tuple,
+    Type,
+    TypeVar,
+    Union,
+    overload,
+)
 
 from cerbos.engine.v1 import engine_pb2
 from cerbos.response.v1 import response_pb2
@@ -33,7 +46,26 @@ from sqlalchemy.orm import DeclarativeMeta, InstrumentedAttribute
 from sqlalchemy.sql import Select
 from sqlalchemy.sql.expression import BinaryExpression, ColumnOperators
 
-GenericTable = Union[Table, DeclarativeMeta]
+try:  # SQLAlchemy >= 2.0
+    from sqlalchemy.orm import DeclarativeBase
+except ImportError:  # SQLAlchemy 1.4 predates the class-based declarative base.
+
+    class DeclarativeBase:  # type: ignore[no-redef]
+        """Stand-in so ``GenericTable`` stays constructible under SQLAlchemy 1.4.
+
+        Nothing subclasses it there, so including it in the union is inert; it
+        exists only to keep this module importable on the older release the
+        package still supports.
+        """
+
+
+_ORMModel = TypeVar("_ORMModel")
+
+# A model declared the 2.0 way subclasses `DeclarativeBase`, whose metaclass
+# (`DeclarativeAttributeIntercept`) is *not* a `DeclarativeMeta`, so the legacy
+# `declarative_base()` member alone does not admit it. Both spellings are
+# accepted, alongside a Core `Table`.
+GenericTable = Union[Table, DeclarativeMeta, Type[DeclarativeBase]]
 GenericColumn = Union[Column, InstrumentedAttribute]
 GenericExpression = Union[BinaryExpression, ColumnOperators]
 OperatorFnMap = Dict[str, Callable[[GenericColumn, Any], GenericExpression]]
@@ -583,10 +615,11 @@ _allow_types = frozenset(
 
 def _get_table_name(t: GenericTable) -> str:
     try:
-        # `DeclarativeMeta` type
+        # ORM model, declared either way: both `DeclarativeMeta` and
+        # `DeclarativeBase` styles carry the mapped `Table` on `__table__`.
         return t.__table__.name
     except AttributeError:
-        # `Table` type
+        # Core `Table` type
         return t.name
 
 
@@ -620,6 +653,33 @@ def _variables_outside_overrides(
     return variables
 
 
+# An ORM model class carries its row type; a Core `Table` does not. Overloading on
+# that distinction lets `session.execute(...).scalars()` infer the model instead of
+# `Any`, without asking the caller to annotate the result.
+@overload
+def get_query(
+    query_plan: Union[PlanResourcesResponse, response_pb2.PlanResourcesResponse],  # type: ignore (https://github.com/microsoft/pyright/issues/1035)
+    table: Type[_ORMModel],
+    attr_map: Dict[str, GenericColumn],
+    table_mapping: Union[List[Tuple[GenericTable, GenericExpression]], None] = ...,
+    operator_override_fns: Union[OperatorFnMap, None] = ...,
+    null_attribute_representation: NullAttributeRepresentation = ...,
+) -> Select[Tuple[_ORMModel]]:
+    ...
+
+
+@overload
+def get_query(
+    query_plan: Union[PlanResourcesResponse, response_pb2.PlanResourcesResponse],  # type: ignore (https://github.com/microsoft/pyright/issues/1035)
+    table: Table,
+    attr_map: Dict[str, GenericColumn],
+    table_mapping: Union[List[Tuple[GenericTable, GenericExpression]], None] = ...,
+    operator_override_fns: Union[OperatorFnMap, None] = ...,
+    null_attribute_representation: NullAttributeRepresentation = ...,
+) -> Select[Any]:
+    ...
+
+
 def get_query(
     query_plan: Union[PlanResourcesResponse, response_pb2.PlanResourcesResponse],  # type: ignore (https://github.com/microsoft/pyright/issues/1035)
     table: GenericTable,
@@ -627,7 +687,7 @@ def get_query(
     table_mapping: Union[List[Tuple[GenericTable, GenericExpression]], None] = None,
     operator_override_fns: Union[OperatorFnMap, None] = None,
     null_attribute_representation: NullAttributeRepresentation = "explicit",
-) -> Select:
+) -> Select[Any]:
     """Translate a Cerbos query plan into a SQLAlchemy ``Select``.
 
     ``null_attribute_representation`` declares how the caller represents a NULL
