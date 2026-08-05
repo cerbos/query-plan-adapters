@@ -74,6 +74,36 @@ const { kind, filter, postFilter } = queryPlanToConvex({
 
 If your Cerbos policies only use operators that Convex supports natively (comparisons, `in`, null checks, logical combinators), you don't need this flag — `filter` alone will enforce the full policy at the DB level.
 
+## NULL attribute representation
+
+`R.attr.x == null` compiles to the same `eq(x, null)` plan node however your application represents
+a NULL field in the attributes it sends to `check()`, so the adapter cannot infer the convention
+and has to be told which one you use.
+
+| attributes you send for a NULL field | `check()` on that document | `q.eq(field, null)` |
+| --- | --- | --- |
+| `{"x": null}` — explicit null | allow | selects it — aligned |
+| `{}` — attribute omitted | **deny** (CEL missing-attribute error) | selects it if the field is stored as null — **over-grants** |
+
+`nullAttributeRepresentation` defaults to `"explicit"`, preserving the historical translation. If
+your application omits attributes for NULL fields, set it to `"omitted"`: the adapter then rejects
+every null comparison operand — in the pushed-down filter *and* in the in-memory `postFilter` —
+instead of returning documents the PDP denies.
+
+```ts
+queryPlanToConvex({ queryPlan, mapper, nullAttributeRepresentation: "omitted" });
+```
+
+Storing the field as absent rather than as an explicit `null` also aligns the two, since
+`q.eq(field, null)` does not match an absent field — but that is a property of your document
+shape, not of the plan, so the option remains the reliable guard.
+
+The rejection is deliberately wider than the shapes that actually over-grant — `x != null` and
+`!(x == null)` are aligned under both conventions — because negation is applied around the built
+predicate rather than pushed into the leaf, so a leaf cannot tell whether an enclosing `not` will
+flip a not-null predicate back into a null-selecting one. Rejecting every null operand is correct
+under any nesting. See [#302](https://github.com/cerbos/query-plan-adapters/issues/302).
+
 ## Conformance contract
 
 The adapter is differentially tested with 20 hostile seed documents against Cerbos PDP 0.54.0 `checkResource` decisions: each query plan is executed by Convex, and the returned document IDs must equal the PDP's per-document decisions. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
@@ -83,6 +113,7 @@ The adapter is differentially tested with 20 hostile seed documents against Cerb
 | Oracle-tested | All 122 reference conformance actions, plus `matches()`, list indexing/`get-field`, and `timestamp()` plans that the Spring Data reference adapter rejects (125 actions total) |
 | Fail-closed | No corpus shape when `allowPostFilter: true`; unknown operators and invalid expression structures still throw |
 | Explicit opt-in | Any plan that cannot be represented entirely as a Convex database filter requires `allowPostFilter: true` |
+| Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`. Under the default it already returns the empty set the PDP demands *when the document omits the field for a NULL value*, which is what the conformance harness seeds; a deployment that stores explicit nulls while omitting the attribute would over-grant |
 | Known planner divergence | `has()` on a missing attribute is currently folded by the Cerbos planner to `ALWAYS_ALLOWED`; `checkResource` still denies documents where the attribute is missing. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 
 This support statement includes value-first comparisons, field-to-field expressions, null and missing-attribute behavior, nested lambdas, collection macros, string and arithmetic expressions, timestamps, hierarchy operations, and chained nested fields. Fields that may be absent must be marked `nullable: true` in the mapper so the adapter evaluates their predicates with CEL-compatible missing-value semantics instead of pushing them to a Convex filter.

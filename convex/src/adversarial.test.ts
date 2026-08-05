@@ -54,6 +54,7 @@ interface ActionsFile {
   adapterUnsupported: Record<string, AdapterOutcome[]>;
   adapterSupportedExpected: Record<string, AdapterOutcome[]>;
   expectedUnsupported: ExpectedUnsupported[];
+  nullRepresentationOmitted: AdapterOutcome[];
   knownDivergences: KnownDivergence[];
 }
 
@@ -192,6 +193,16 @@ const KNOWN_DIVERGENCES = new Set(
     .filter((entry) => entry.adapters.includes("convex"))
     .map((entry) => entry.action),
 );
+// Actions whose `== null` probe targets an attribute the oracle OMITS for NULL columns. They
+// carry no oracle comparison: under the omitted representation check() denies every document, so
+// the adapter must reject the shape rather than emit a filter (#302).
+const NULL_REPRESENTATION_OMITTED = actionsFile.nullRepresentationOmitted;
+const MANIFEST_ACTIONS = new Set([
+  ...actionsFile.conformance,
+  ...actionsFile.expectedUnsupported.map((entry) => entry.action),
+  ...NULL_REPRESENTATION_OMITTED.map((entry) => entry.action),
+  ...KNOWN_DIVERGENCES,
+]);
 
 function doubleFor(seed: Seed): number | null {
   switch (seed.id) {
@@ -370,7 +381,10 @@ async function oracleAllowedIds(action: string): Promise<string[]> {
   return ids.sort();
 }
 
-async function adapterFilteredIds(action: string): Promise<string[]> {
+async function adapterFilteredIds(
+  action: string,
+  nullAttributeRepresentation: "explicit" | "omitted" = "explicit",
+): Promise<string[]> {
   const queryPlan = await cerbos.planResources({
     principal: seedsFile.principal,
     resource: { kind: seedsFile.resourceKind },
@@ -379,6 +393,7 @@ async function adapterFilteredIds(action: string): Promise<string[]> {
   if (queryPlan.kind === PlanKind.ALWAYS_DENIED) return [];
   return convex.query(api.adversarial.executePlan, {
     queryPlan: JSON.parse(JSON.stringify(queryPlan)),
+    nullAttributeRepresentation,
   });
 }
 
@@ -393,25 +408,37 @@ afterAll(async () => {
   await convex.mutation(api.adversarial.deleteAll, {});
 });
 
+/** Whether any operand anywhere in the plan is a literal null, or a list containing one. */
+function planCarriesNullLiteral(operand: unknown): boolean {
+  if (typeof operand !== "object" || operand === null) return false;
+  const node = operand as Record<string, unknown>;
+  if ("value" in node) {
+    const value = node["value"];
+    return value === null || (Array.isArray(value) && value.includes(null));
+  }
+  const operands = node["operands"];
+  return Array.isArray(operands) && operands.some(planCarriesNullLiteral);
+}
+
 describe("adversarial conformance corpus", () => {
   test("assigns all policy actions exactly one Convex outcome", () => {
-    const allActions = new Set([
-      ...actionsFile.conformance,
-      ...actionsFile.expectedUnsupported.map((entry) => entry.action),
-      ...KNOWN_DIVERGENCES,
-    ]);
+    const allActions = MANIFEST_ACTIONS;
     const oracle = new Set(ORACLE_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS);
+    const nullOmitted = new Set(
+      NULL_REPRESENTATION_OMITTED.map((entry) => entry.action),
+    );
     const misclassified = [...allActions].filter(
       (action) =>
         [
           oracle.has(action),
           throwing.has(action),
+          nullOmitted.has(action),
           KNOWN_DIVERGENCES.has(action),
         ].filter(Boolean).length !== 1,
     );
 
-    expect(allActions.size).toBe(126);
+    expect(allActions.size).toBe(127);
     expect(CONVEX_UNSUPPORTED).toHaveLength(0);
     expect(CONVEX_SUPPORTED_EXPECTED).toHaveLength(3);
     expect(ORACLE_ACTIONS).toHaveLength(125);
@@ -425,6 +452,71 @@ describe("adversarial conformance corpus", () => {
       adapterFilteredIds(action),
     ]);
     expect(filtered).toEqual(oracle);
+  });
+
+  // #302. `null-eq-missing` probes `aOptionalString == null`, and `aOptionalString` follows the
+  // corpus default: a NULL column sends NO attribute, so check() denies every document.
+  //
+  // Convex is a document store, so the SEEDED SHAPE can mirror that convention directly: this
+  // harness omits `aOptionalString` entirely for a NULL column, and `q.eq(field, null)` does not
+  // match an absent field. The default translation therefore already returns the empty set the
+  // oracle demands — alignment that comes from the storage layout, not from anything the adapter
+  // knows about the plan. A deployment that stored explicit nulls while omitting the attribute at
+  // check time would over-grant exactly as a SQL adapter does, which is what the option guards.
+  test.each(NULL_REPRESENTATION_OMITTED)(
+    "$action aligns via the omitted document shape and is rejected under omitted ($reason)",
+    async ({ action }) => {
+      expect(await oracleAllowedIds(action)).toEqual([]);
+      expect(await adapterFilteredIds(action, "explicit")).toEqual([]);
+
+      // `owner` maps to the same seed field but IS stored as an explicit null, so the empty
+      // result above is the document shape talking, not a filter that matches nothing everywhere.
+      const explicitNullOracle = await oracleAllowedIds("null-eq");
+      expect(explicitNullOracle.length).toBeGreaterThan(0);
+      expect(await adapterFilteredIds("null-eq", "explicit")).toEqual(
+        explicitNullOracle,
+      );
+
+      await expect(adapterFilteredIds(action, "omitted")).rejects.toThrow(
+        /missing-attribute error/,
+      );
+    },
+  );
+
+  // #302 completeness guard. The rejection must key off the null OPERAND, not off a list of
+  // operators: `hasIntersection(tagNames, ["public", null])` carries one in its value list, and
+  // an allowlist of eq/ne/in silently misses it. Enumerating the corpus rather than naming
+  // shapes means a newly added action carrying a null constant is covered automatically.
+  test("every corpus action carrying a null literal is rejected under omitted", async () => {
+    const nullCarrying: string[] = [];
+    for (const action of [...MANIFEST_ACTIONS].sort()) {
+      const queryPlan = await cerbos.planResources({
+        principal: seedsFile.principal,
+        resource: { kind: seedsFile.resourceKind },
+        action,
+      });
+      if (
+        queryPlan.kind === PlanKind.CONDITIONAL &&
+        planCarriesNullLiteral(queryPlan.condition)
+      ) {
+        nullCarrying.push(action);
+      }
+    }
+
+    // Guard the guard: if the walk stopped finding null operands the loop below is vacuous.
+    expect(nullCarrying).toContain("null-eq-missing");
+    expect(nullCarrying).toContain("in-null-elem-hasint");
+
+    const notRejected: string[] = [];
+    for (const action of nullCarrying) {
+      try {
+        await adapterFilteredIds(action, "omitted");
+        notRejected.push(action);
+      } catch {
+        // expected: the shape must be rejected under this representation
+      }
+    }
+    expect(notRejected).toEqual([]);
   });
 
   test("pins the upstream has() planner over-grant", async () => {

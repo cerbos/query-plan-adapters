@@ -245,6 +245,84 @@ const checkedConversion = (
   },
 });
 
+// cerbos/query-plan-adapters#302. Both NULL-field conventions produce the identical
+// `eq(attr, null)` wire node, so the adapter cannot infer which one the caller uses. Under
+// "omitted" a NULL field carries no attribute at all, CEL raises a missing-attribute error, and
+// check() denies every document — a null-matching filter would return precisely the documents
+// the PDP refuses.
+describe("nullAttributeRepresentation", () => {
+  const mapper: Mapper = {
+    "request.resource.attr.aOptionalString": { field: "aOptionalString" },
+  };
+
+  const planFor = (operator: string, value: unknown): PlanResourcesResponse =>
+    ({
+      kind: PlanKind.CONDITIONAL,
+      condition: new PlanExpression(operator, [
+        new PlanExpressionVariable("request.resource.attr.aOptionalString"),
+        new PlanExpressionValue(value as never),
+      ]),
+    }) as PlanResourcesResponse;
+
+  test('"explicit" is the default and keeps the null-matching translation', () => {
+    const queryPlan = planFor("eq", null);
+
+    expect(queryPlanToMongoose({ queryPlan, mapper })).toStrictEqual(
+      queryPlanToMongoose({
+        queryPlan,
+        mapper,
+        nullAttributeRepresentation: "explicit",
+      })
+    );
+  });
+
+  test('"omitted" rejects eq against a null operand', () => {
+    expect(() =>
+      queryPlanToMongoose({
+        queryPlan: planFor("eq", null),
+        mapper,
+        nullAttributeRepresentation: "omitted",
+      })
+    ).toThrow(/missing-attribute error/);
+  });
+
+  // Conservatively rejected too: `ne` alone is aligned under "omitted", but negation is applied
+  // by wrapping the built filter, so a leaf cannot see whether an enclosing `not` will flip a
+  // not-null predicate back into a null-selecting one.
+  test('"omitted" rejects ne against a null operand', () => {
+    expect(() =>
+      queryPlanToMongoose({
+        queryPlan: planFor("ne", null),
+        mapper,
+        nullAttributeRepresentation: "omitted",
+      })
+    ).toThrow(/missing-attribute error/);
+  });
+
+  test('"omitted" rejects a null element in an in-list', () => {
+    expect(() =>
+      queryPlanToMongoose({
+        queryPlan: planFor("in", ["x", null]),
+        mapper,
+        nullAttributeRepresentation: "omitted",
+      })
+    ).toThrow(/missing-attribute error/);
+  });
+
+  test('"omitted" leaves null-free comparisons untouched', () => {
+    expect(
+      queryPlanToMongoose({
+        queryPlan: planFor("eq", "x"),
+        mapper,
+        nullAttributeRepresentation: "omitted",
+      })
+    ).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { aOptionalString: { $eq: "x" } },
+    });
+  });
+});
+
 describe("Adapter Unit Behavior", () => {
   test("maps single-object relations without elemMatch", async () => {
     const queryPlan = {

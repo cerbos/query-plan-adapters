@@ -110,6 +110,37 @@ public final class SpringDataQueryPlanAdapter {
             PlanResourcesResult planResult,
             Map<String, AttributeMapping> mapper,
             Map<String, OperatorFunction> overrides) {
+        return toSpecification(
+                planResult, mapper, overrides, NullAttributeRepresentation.EXPLICIT);
+    }
+
+    /**
+     * Translates a Cerbos query plan into a {@link Result}, declaring how the caller represents
+     * a NULL column in the attributes it sends to {@code check()}.
+     *
+     * <p>The planner emits the same {@code eq(attr, null)} node under both conventions, so the
+     * plan cannot reveal which one is in use. Under
+     * {@link NullAttributeRepresentation#OMITTED} a NULL column carries no attribute, CEL
+     * raises a missing-attribute error, and {@code check()} denies the row — {@code IS NULL}
+     * would return exactly the rows the PDP refuses. Every null comparison operand in the plan
+     * is therefore rejected eagerly, from this call rather than at Specification evaluation.
+     *
+     * @param <T> the entity type the Specification will be executed against
+     * @param planResult the SDK plan result
+     * @param mapper maps each plan variable to a JPA path or relation
+     * @param overrides per-operator replacement translations, keyed by Cerbos operator name
+     * @param nullAttributeRepresentation the caller's NULL-column convention
+     * @return {@link Result.AlwaysAllowed}, {@link Result.AlwaysDenied}, or a
+     *         {@link Result.Conditional} wrapping the translated Specification
+     * @throws IllegalArgumentException if the conditional plan carries no condition, or if the
+     *         plan carries a null comparison operand under
+     *         {@link NullAttributeRepresentation#OMITTED}
+     */
+    public static <T> Result<T> toSpecification(
+            PlanResourcesResult planResult,
+            Map<String, AttributeMapping> mapper,
+            Map<String, OperatorFunction> overrides,
+            NullAttributeRepresentation nullAttributeRepresentation) {
         if (planResult.isAlwaysAllowed()) {
             return new Result.AlwaysAllowed<>();
         }
@@ -118,6 +149,9 @@ public final class SpringDataQueryPlanAdapter {
         }
         Operand condition = planResult.getCondition()
                 .orElseThrow(() -> new IllegalArgumentException("Conditional plan has no condition"));
+        if (nullAttributeRepresentation == NullAttributeRepresentation.OMITTED) {
+            assertNoNullComparisonOperands(condition);
+        }
         // Defensive copies: the returned Specification is re-invoked fresh per query execution
         // (see Result), so capturing the caller's maps by reference would let post-construction
         // mutation silently change which columns the authorization filter resolves.
@@ -178,6 +212,33 @@ public final class SpringDataQueryPlanAdapter {
             PlanResourcesResponse response,
             Map<String, AttributeMapping> mapper,
             Map<String, OperatorFunction> overrides) {
+        return toSpecification(
+                response, mapper, overrides, NullAttributeRepresentation.EXPLICIT);
+    }
+
+    /**
+     * Translates a raw {@link PlanResourcesResponse} protobuf into a {@link Result}, declaring
+     * how the caller represents a NULL column in the attributes it sends to {@code check()}.
+     *
+     * <p>See {@link #toSpecification(PlanResourcesResult, Map, Map,
+     * NullAttributeRepresentation)} for what the representation changes.
+     *
+     * @param <T> the entity type the Specification will be executed against
+     * @param response the raw {@code PlanResources} RPC response
+     * @param mapper maps each plan variable to a JPA path or relation
+     * @param overrides per-operator replacement translations, keyed by Cerbos operator name
+     * @param nullAttributeRepresentation the caller's NULL-column convention
+     * @return {@link Result.AlwaysAllowed}, {@link Result.AlwaysDenied}, or a
+     *         {@link Result.Conditional} wrapping the translated Specification
+     * @throws IllegalArgumentException if the filter kind is unknown, a conditional filter
+     *         carries no condition, or the plan carries a null comparison operand under
+     *         {@link NullAttributeRepresentation#OMITTED}
+     */
+    public static <T> Result<T> toSpecification(
+            PlanResourcesResponse response,
+            Map<String, AttributeMapping> mapper,
+            Map<String, OperatorFunction> overrides,
+            NullAttributeRepresentation nullAttributeRepresentation) {
         PlanResourcesFilter filter = response.getFilter();
         return switch (filter.getKind()) {
             case KIND_ALWAYS_ALLOWED -> new Result.AlwaysAllowed<>();
@@ -187,6 +248,9 @@ public final class SpringDataQueryPlanAdapter {
                 if (cond.getNodeCase() == Operand.NodeCase.NODE_NOT_SET) {
                     throw new IllegalArgumentException("Conditional plan has no condition");
                 }
+                if (nullAttributeRepresentation == NullAttributeRepresentation.OMITTED) {
+                    assertNoNullComparisonOperands(cond);
+                }
                 // Defensive copies — same rationale as the PlanResourcesResult overload.
                 Map<String, AttributeMapping> mapperCopy = Map.copyOf(mapper);
                 Map<String, OperatorFunction> overridesCopy = Map.copyOf(overrides);
@@ -195,6 +259,62 @@ public final class SpringDataQueryPlanAdapter {
                                 .traverse(cond, Scope.root(root, query, mapperCopy)));
             }
             default -> throw new IllegalArgumentException("Unknown filter kind: " + filter.getKind());
+        };
+    }
+
+    // -- NULL representation guard --
+
+    /**
+     * Rejects every null literal operand in the plan under
+     * {@link NullAttributeRepresentation#OMITTED}.
+     *
+     * <p>A NULL column then carries no attribute at all, so CEL raises a missing-attribute
+     * error and {@code check()} denies the row — {@code IS NULL} would return exactly the rows
+     * the PDP refuses (cerbos/query-plan-adapters#302).
+     *
+     * <p>The scan runs over the plan tree rather than at each emission site because the
+     * translator lowers a null constant to {@code IS NULL} from several places (scalar leaf,
+     * scalar {@code in} with null elements, relation membership, {@code hasIntersection}). For
+     * the same reason it matches on the OPERAND and never on an allowlist of operators: a null
+     * constant reaches a NULL-selecting predicate through more shapes than the obvious
+     * {@code eq}/{@code ne}/{@code in}, and any operator added later would silently escape a
+     * list that has to be maintained by hand.
+     *
+     * <p>The rejection is also deliberately wider than the over-granting shapes:
+     * {@code ne(x, null)} on its own is aligned, but negation is applied around the built
+     * predicate rather than pushed into the leaf, so a leaf cannot tell whether an enclosing
+     * {@code not} will flip {@code IS NOT NULL} back into a NULL-selecting predicate. Rejecting
+     * every null operand is correct under any nesting; narrowing it requires negation-parity
+     * tracking.
+     */
+    private static void assertNoNullComparisonOperands(Operand operand) {
+        if (operand.getNodeCase() != Operand.NodeCase.EXPRESSION) {
+            return;
+        }
+        var expression = operand.getExpression();
+        List<Operand> operands = expression.getOperandsList();
+        if (operands.stream().anyMatch(SpringDataQueryPlanAdapter::carriesNull)) {
+            throw new IllegalArgumentException(
+                    "Cannot translate `" + expression.getOperator() + "` against a null operand"
+                            + " under NullAttributeRepresentation.OMITTED: a NULL column sends no"
+                            + " attribute, so Cerbos evaluates the comparison as a"
+                            + " missing-attribute error (deny) while a NULL-selecting filter"
+                            + " would return those rows. Send NULL columns as explicit nulls and"
+                            + " use EXPLICIT, or keep this shape out of the policy.");
+        }
+        operands.forEach(SpringDataQueryPlanAdapter::assertNoNullComparisonOperands);
+    }
+
+    private static boolean carriesNull(Operand operand) {
+        if (operand.getNodeCase() != Operand.NodeCase.VALUE) {
+            return false;
+        }
+        Value value = operand.getValue();
+        return switch (value.getKindCase()) {
+            case NULL_VALUE -> true;
+            case LIST_VALUE -> value.getListValue().getValuesList().stream()
+                    .anyMatch(element -> element.getKindCase() == Value.KindCase.NULL_VALUE);
+            default -> false;
         };
     }
 

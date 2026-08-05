@@ -352,6 +352,21 @@ CEL timestamp range, rejects sub-millisecond precision, and callers must also en
 attributes sent to Cerbos and the corresponding indexed values are millisecond-exact. This adapter
 has no `date_nanos` mapping mode.
 
+### NULL attribute representation
+
+Other adapters in this repo take a NULL-representation option, because `R.attr.x == null` compiles
+to the same `eq(x, null)` plan node whether the caller sends a NULL column as an explicit `null`
+attribute (where `check()` allows the document) or omits the attribute entirely (where CEL raises a
+missing-attribute error and `check()` denies it) — and a null-selecting filter over-grants in the
+second case.
+
+**This adapter needs no such option.** Elasticsearch cannot index an explicit null distinguishably
+from a missing field, so every direction that would *select* null documents already fails closed
+(`x == null`, and `!(x != null)`), and the two that translate both lower to `exists`, which denies
+a document with no value for the field under either convention. `null-eq` and `null-eq-missing` are
+fail-closed for the same underlying reason. See
+[#302](https://github.com/cerbos/query-plan-adapters/issues/302).
+
 ### Conformance contract
 
 The adapter is differentially tested against Cerbos PDP 0.54.0 `check()` decisions using 20 hostile seed documents and real Elasticsearch queries. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
@@ -360,6 +375,7 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `check()` decisio
 | --- | --- |
 | Oracle-tested | 41 reference conformance actions plus regex and timestamp probes (43 actions) |
 | Fail-closed | 81 reference actions plus ordered list indexing/`get-field` (82 actions total) |
+| Representation-independent | `null-eq-missing` — rejected like every other null-selecting comparison, so no NULL-representation option is required |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute documents. Until the planner is fixed, use `R.attr.x != null` for indexed attributes instead of `has(R.attr.x)` |
 
 The oracle-tested set covers value-first comparisons, literal-safe wildcard matching, safe

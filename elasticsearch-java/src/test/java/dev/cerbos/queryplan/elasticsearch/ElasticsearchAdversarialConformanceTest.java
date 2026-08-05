@@ -102,6 +102,7 @@ class ElasticsearchAdversarialConformanceTest {
                                Map<String, List<AdapterOutcome>> adapterUnsupported,
                                Map<String, List<AdapterOutcome>> adapterSupportedExpected,
                                List<UnsupportedShape> expectedUnsupported,
+                               List<AdapterOutcome> nullRepresentationOmitted,
                                List<KnownDivergence> knownDivergences) {}
 
     private static SeedsFile seedsFile;
@@ -109,6 +110,7 @@ class ElasticsearchAdversarialConformanceTest {
     private static List<Seed> seeds;
     private static List<String> oracleActions;
     private static List<String> throwingActions;
+    private static List<String> nullRepresentationOmittedActions;
 
     private static GenericContainer<?> cerbos;
     private static ElasticsearchContainer elasticsearch;
@@ -122,6 +124,10 @@ class ElasticsearchAdversarialConformanceTest {
 
     static Stream<String> throwingActions() {
         return throwingActions.stream();
+    }
+
+    static Stream<String> nullRepresentationOmittedActions() {
+        return nullRepresentationOmittedActions.stream();
     }
 
     @BeforeAll
@@ -173,6 +179,12 @@ class ElasticsearchAdversarialConformanceTest {
         Set<String> divergences = actionsFile.knownDivergences().stream()
                 .filter(divergence -> divergence.adapters().contains("elasticsearch-java"))
                 .map(KnownDivergence::action).collect(java.util.stream.Collectors.toSet());
+        // Actions whose `== null` probe targets an attribute the oracle OMITS for NULL columns.
+        // Elasticsearch needs no representation option — it cannot index an explicit null
+        // distinguishably from a missing field, so every null-SELECTING direction already fails
+        // closed — but the action still has to be classified somewhere (#302).
+        nullRepresentationOmittedActions = actionsFile.nullRepresentationOmitted().stream()
+                .map(AdapterOutcome::action).sorted().toList();
 
         assertTrue(conformance.containsAll(unsupported),
                 "adapterUnsupported.elasticsearch-java contains non-conformance actions");
@@ -198,14 +210,17 @@ class ElasticsearchAdversarialConformanceTest {
         Set<String> classified = new LinkedHashSet<>();
         classified.addAll(oracleActions);
         classified.addAll(throwingActions);
+        classified.addAll(nullRepresentationOmittedActions);
         classified.addAll(divergences);
         Set<String> manifest = new LinkedHashSet<>();
         manifest.addAll(conformance);
         manifest.addAll(expected);
+        manifest.addAll(nullRepresentationOmittedActions);
         manifest.addAll(divergences);
         assertEquals(43, oracleActions.size());
         assertEquals(82, throwingActions.size());
-        assertEquals(126, classified.size());
+        assertEquals(1, nullRepresentationOmittedActions.size());
+        assertEquals(127, classified.size());
         assertEquals(manifest, classified, "every manifest action must be classified locally");
     }
 
@@ -450,6 +465,26 @@ class ElasticsearchAdversarialConformanceTest {
     void unsupportedShapesThrow(String action) {
         assertThrows(IllegalArgumentException.class, () -> adapterFilteredIds(action),
                 "unsupported action must fail during translation: " + action);
+    }
+
+    /**
+     * #302. Elasticsearch is one of two adapters that need no NULL-representation option: it
+     * cannot index an explicit null distinguishably from a missing field, so every shape that
+     * would SELECT null documents already fails closed and only the {@code exists}-shaped
+     * directions translate. {@code null-eq} (explicit null) is already in
+     * {@code adapterUnsupported} for that reason; {@code null-eq-missing} must fail the same way.
+     * If Elasticsearch ever gains a null sentinel, this stops throwing and the adapter acquires a
+     * representation dependency it must then declare.
+     */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("nullRepresentationOmittedActions")
+    void nullRepresentationOmittedIsRejectedRegardless(String action) throws Exception {
+        assertEquals(List.of(), oracleAllowedIds(action),
+                "the omitted representation must deny every seed for " + action);
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> adapterFilteredIds(action));
+        assertTrue(ex.getMessage().contains("explicit null value from a missing field"),
+                ex.getMessage());
     }
 
     @Test

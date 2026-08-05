@@ -3,7 +3,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from types import MappingProxyType
-from typing import Any, Callable, Dict, List, Tuple, Union
+from typing import Any, Callable, Dict, List, Literal, Tuple, Union
 
 from cerbos.engine.v1 import engine_pb2
 from cerbos.response.v1 import response_pb2
@@ -37,6 +37,11 @@ GenericTable = Union[Table, DeclarativeMeta]
 GenericColumn = Union[Column, InstrumentedAttribute]
 GenericExpression = Union[BinaryExpression, ColumnOperators]
 OperatorFnMap = Dict[str, Callable[[GenericColumn, Any], GenericExpression]]
+
+# How the caller represents a NULL column when building the attributes it sends
+# to check(). See get_query() and
+# https://github.com/cerbos/query-plan-adapters/issues/302.
+NullAttributeRepresentation = Literal["explicit", "omitted"]
 
 
 _LIKE_ESCAPE_CHAR = "\\"
@@ -447,6 +452,51 @@ def _unwrap_expression(operand: dict) -> dict:
     return operand if expression is None else expression
 
 
+def _carries_null_operand(operand: dict) -> bool:
+    if "value" not in operand:
+        return False
+    value = operand["value"]
+    if value is None:
+        return True
+    return isinstance(value, list) and any(member is None for member in value)
+
+
+def _assert_no_null_comparison_operands(node: dict) -> None:
+    """Reject every null literal operand under the ``omitted`` representation.
+
+    A NULL column then carries no attribute at all, so CEL raises a
+    missing-attribute error and ``check()`` denies the row -- ``IS NULL`` would
+    return exactly the rows the PDP refuses (cerbos/query-plan-adapters#302).
+
+    The scan matches on the OPERAND, never on an allowlist of operators. A null
+    constant reaches a NULL-selecting predicate through more shapes than the
+    obvious ``eq``/``ne``/``in`` -- ``hasIntersection`` carries one in its value
+    list too -- and any operator added later would silently escape a list that
+    has to be maintained by hand.
+
+    The rejection is also deliberately wider than the over-granting shapes:
+    ``ne(x, null)`` on its own is aligned, but negation is applied around the
+    built predicate rather than pushed into the leaf, so a leaf cannot tell
+    whether an enclosing ``not`` will flip ``IS NOT NULL`` back into a
+    NULL-selecting predicate. Rejecting every null operand is correct under any
+    nesting; narrowing it requires negation-parity tracking.
+    """
+    expression = _unwrap_expression(node)
+    operator = expression.get("operator")
+    operands = expression.get("operands", [])
+    if any(_carries_null_operand(_unwrap_expression(operand)) for operand in operands):
+        raise ValueError(
+            f"Cannot translate `{operator}` against a null operand under "
+            'null_attribute_representation="omitted": a NULL column sends no '
+            "attribute, so Cerbos evaluates the comparison as a missing-attribute "
+            "error (deny) while a NULL-selecting filter would return those rows. "
+            'Send NULL columns as explicit nulls and use "explicit", or keep this '
+            "shape out of the policy."
+        )
+    for operand in operands:
+        _assert_no_null_comparison_operands(operand)
+
+
 def _substitute_lambda_variable(
     operand: dict, variable_name: str, element: Any
 ) -> dict:
@@ -576,7 +626,31 @@ def get_query(
     attr_map: Dict[str, GenericColumn],
     table_mapping: Union[List[Tuple[GenericTable, GenericExpression]], None] = None,
     operator_override_fns: Union[OperatorFnMap, None] = None,
+    null_attribute_representation: NullAttributeRepresentation = "explicit",
 ) -> Select:
+    """Translate a Cerbos query plan into a SQLAlchemy ``Select``.
+
+    ``null_attribute_representation`` declares how the caller represents a NULL
+    column when building the attributes it sends to ``check()``. The planner
+    emits the same ``eq(attr, null)`` node either way, so the plan cannot reveal
+    which convention is in use and the adapter has to be told.
+
+    - ``"explicit"`` (default) -- a NULL column is sent as an explicit ``null``
+      attribute. CEL compares ``null == null``, so ``IS NULL`` selects exactly
+      the rows ``check()`` allows.
+    - ``"omitted"`` -- a NULL column sends no attribute at all. CEL then raises a
+      missing-attribute error, which Cerbos treats as a deny, so a filter that
+      *selects* NULL rows returns rows the PDP denies. Null comparison operands
+      are rejected instead of translated.
+
+    See https://github.com/cerbos/query-plan-adapters/issues/302.
+    """
+    if null_attribute_representation not in ("explicit", "omitted"):
+        raise ValueError(
+            "null_attribute_representation must be 'explicit' or 'omitted', got "
+            f"{null_attribute_representation!r}"
+        )
+
     if query_plan.filter is None or query_plan.filter.kind in _deny_types:
         return select(table).where(False)
 
@@ -588,6 +662,9 @@ def get_query(
         if isinstance(query_plan, response_pb2.PlanResourcesResponse)
         else query_plan.filter.condition.to_dict()
     )
+
+    if null_attribute_representation == "omitted":
+        _assert_no_null_comparison_operands(cond)
 
     # Inspect columns that the normal translator owns. Override-owned operands
     # may legitimately be relation markers or columns translated into

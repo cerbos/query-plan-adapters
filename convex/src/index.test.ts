@@ -2886,3 +2886,103 @@ describe("Known-Value Collections (planner unroll cliff)", () => {
     ).toBe(true);
   });
 });
+
+// cerbos/query-plan-adapters#302. Both NULL-field conventions produce the identical
+// `eq(attr, null)` wire node, so the adapter cannot infer which one the caller uses. Under
+// "omitted" a NULL field carries no attribute at all, CEL raises a missing-attribute error, and
+// check() denies every document — a null-matching filter would return precisely the documents
+// the PDP refuses.
+describe("nullAttributeRepresentation", () => {
+  const planFor = (
+    operator: string,
+    value: unknown,
+  ): PlanResourcesConditionalResponse =>
+    ({
+      kind: PlanKind.CONDITIONAL,
+      condition: new PlanExpression(operator, [
+        new PlanExpressionVariable("request.resource.attr.aOptionalString"),
+        { value } as PlanExpressionOperand,
+      ]),
+    }) as PlanResourcesConditionalResponse;
+
+  test('"explicit" is the default and keeps the null-matching translation', () => {
+    const queryPlan = planFor("eq", null);
+
+    expect(
+      queryPlanToConvex({ queryPlan, mapper: defaultMapper }).kind,
+    ).toEqual(PlanKind.CONDITIONAL);
+    expect(() =>
+      queryPlanToConvex({
+        queryPlan,
+        mapper: defaultMapper,
+        nullAttributeRepresentation: "explicit",
+      }),
+    ).not.toThrow();
+  });
+
+  test('"omitted" rejects eq against a null operand', () => {
+    expect(() =>
+      queryPlanToConvex({
+        queryPlan: planFor("eq", null),
+        mapper: defaultMapper,
+        nullAttributeRepresentation: "omitted",
+      }),
+    ).toThrow(/missing-attribute error/);
+  });
+
+  // Conservatively rejected too: `ne` alone is aligned under "omitted", but negation is applied
+  // around the built predicate, so a leaf cannot see whether an enclosing `not` will flip a
+  // not-null predicate back into a null-selecting one.
+  test('"omitted" rejects ne against a null operand', () => {
+    expect(() =>
+      queryPlanToConvex({
+        queryPlan: planFor("ne", null),
+        mapper: defaultMapper,
+        nullAttributeRepresentation: "omitted",
+      }),
+    ).toThrow(/missing-attribute error/);
+  });
+
+  test('"omitted" rejects a null element in an in-list', () => {
+    expect(() =>
+      queryPlanToConvex({
+        queryPlan: planFor("in", ["x", null]),
+        mapper: defaultMapper,
+        nullAttributeRepresentation: "omitted",
+      }),
+    ).toThrow(/missing-attribute error/);
+  });
+
+  // The scan walks the whole tree, not just the root: a null operand nested under a logical
+  // operator is the same over-grant.
+  test('"omitted" rejects a null operand nested under and/not', () => {
+    const queryPlan = {
+      kind: PlanKind.CONDITIONAL,
+      condition: new PlanExpression("and", [
+        new PlanExpression("not", [planFor("eq", null).condition]),
+        new PlanExpression("eq", [
+          new PlanExpressionVariable("request.resource.attr.aString"),
+          { value: "x" } as PlanExpressionOperand,
+        ]),
+      ]),
+    } as PlanResourcesConditionalResponse;
+
+    expect(() =>
+      queryPlanToConvex({
+        queryPlan,
+        mapper: defaultMapper,
+        nullAttributeRepresentation: "omitted",
+      }),
+    ).toThrow(/missing-attribute error/);
+  });
+
+  test('"omitted" leaves null-free comparisons untouched', () => {
+    expect(() =>
+      queryPlanToConvex({
+        queryPlan: planFor("eq", "x"),
+        mapper: defaultMapper,
+        nullAttributeRepresentation: "omitted",
+      }),
+    ).not.toThrow();
+  });
+});

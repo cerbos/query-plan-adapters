@@ -59,6 +59,7 @@ mkdir -p wire-fixtures
 ACTIONS="$(jq -r '
   .conformance[],
   .expectedUnsupported[].action,
+  .nullRepresentationOmitted[].action,
   .knownDivergences[].action
 ' actions.json | sort -u)"
 COUNT=0

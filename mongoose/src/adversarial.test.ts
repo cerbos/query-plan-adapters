@@ -53,6 +53,7 @@ interface ActionsFile {
   adapterUnsupported: Record<string, AdapterEntry[]>;
   adapterSupportedExpected: Record<string, AdapterEntry[]>;
   expectedUnsupported: ExpectedUnsupportedEntry[];
+  nullRepresentationOmitted: AdapterEntry[];
   knownDivergences: KnownDivergence[];
 }
 
@@ -218,7 +219,12 @@ function parseActionsFile(value: unknown): ActionsFile {
   const record = expectRecord(value, "actions.json");
   const expected = record["expectedUnsupported"];
   const divergences = record["knownDivergences"];
-  if (!Array.isArray(expected) || !Array.isArray(divergences)) {
+  const nullOmitted = record["nullRepresentationOmitted"];
+  if (
+    !Array.isArray(expected) ||
+    !Array.isArray(divergences) ||
+    !Array.isArray(nullOmitted)
+  ) {
     throw new Error("actions.json classifications must be arrays");
   }
   return {
@@ -241,6 +247,22 @@ function parseActionsFile(value: unknown): ActionsFile {
         shape: expectString(
           parsed["shape"],
           `expectedUnsupported[${index}].shape`
+        ),
+      };
+    }),
+    // This parser rebuilds the manifest field by field, so a corpus group it does not name is
+    // silently dropped — and a dropped group makes its actions vanish from every count and
+    // every test.each, passing vacuously. Parse each group explicitly.
+    nullRepresentationOmitted: nullOmitted.map((entry, index) => {
+      const parsed = expectRecord(entry, `nullRepresentationOmitted[${index}]`);
+      return {
+        action: expectString(
+          parsed["action"],
+          `nullRepresentationOmitted[${index}].action`
+        ),
+        reason: expectString(
+          parsed["reason"],
+          `nullRepresentationOmitted[${index}].reason`
         ),
       };
     }),
@@ -293,9 +315,14 @@ const THROWING_ACTIONS = [
     .filter((entry) => !supportedExpectedActions.has(entry.action))
     .map((entry) => ({ action: entry.action, reason: entry.shape })),
 ].sort((left, right) => left.action.localeCompare(right.action));
+// Actions whose `== null` probe targets an attribute the oracle OMITS for NULL columns. They
+// carry no oracle comparison: under the omitted representation check() denies every document, so
+// the adapter must reject the shape rather than emit a filter (#302).
+const NULL_REPRESENTATION_OMITTED = actionsFile.nullRepresentationOmitted;
 const MANIFEST_ACTIONS = new Set([
   ...actionsFile.conformance,
   ...actionsFile.expectedUnsupported.map((entry) => entry.action),
+  ...NULL_REPRESENTATION_OMITTED.map((entry) => entry.action),
   ...actionsFile.knownDivergences.map((entry) => entry.action),
 ]);
 
@@ -673,13 +700,20 @@ async function oracleAllowedIds(action: string): Promise<string[]> {
     .sort();
 }
 
-async function adapterFilteredIds(action: string): Promise<string[]> {
+async function adapterFilteredIds(
+  action: string,
+  nullAttributeRepresentation: "explicit" | "omitted" = "explicit"
+): Promise<string[]> {
   const queryPlan = await cerbos.planResources({
     principal: seedsFile.principal,
     resource: { kind: seedsFile.resourceKind },
     action,
   });
-  const result = queryPlanToMongoose({ queryPlan, mapper: MAPPER });
+  const result = queryPlanToMongoose({
+    queryPlan,
+    mapper: MAPPER,
+    nullAttributeRepresentation,
+  });
   if (result.kind === PlanKind.ALWAYS_DENIED) {
     return [];
   }
@@ -692,20 +726,36 @@ async function adapterFilteredIds(action: string): Promise<string[]> {
   return rows.map((row) => row.resourceId).sort();
 }
 
+/** Whether any operand anywhere in the plan is a literal null, or a list containing one. */
+function planCarriesNullLiteral(operand: unknown): boolean {
+  if (typeof operand !== "object" || operand === null) return false;
+  const node = operand as Record<string, unknown>;
+  if ("value" in node) {
+    const value = node["value"];
+    return value === null || (Array.isArray(value) && value.includes(null));
+  }
+  const operands = node["operands"];
+  return Array.isArray(operands) && operands.some(planCarriesNullLiteral);
+}
+
 describe("adversarial conformance corpus", () => {
-  test("manifest assigns all 120 actions exactly one Mongoose outcome", () => {
+  test("manifest assigns all 127 actions exactly one Mongoose outcome", () => {
     const oracle = new Set(ORACLE_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map((entry) => entry.action));
+    const nullOmitted = new Set(
+      NULL_REPRESENTATION_OMITTED.map((entry) => entry.action)
+    );
     const misclassified = [...MANIFEST_ACTIONS].filter((action) => {
       const count = [
         oracle.has(action),
         throwing.has(action),
+        nullOmitted.has(action),
         divergenceActions.has(action),
       ].filter(Boolean).length;
       return count !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(126);
+    expect(MANIFEST_ACTIONS.size).toBe(127);
     expect(unsupportedEntries).toHaveLength(31);
     expect(supportedExpectedEntries).toHaveLength(3);
     expect(ORACLE_ACTIONS).toHaveLength(94);
@@ -732,6 +782,70 @@ describe("adversarial conformance corpus", () => {
       await expect(adapterFilteredIds(action)).rejects.toThrow();
     }
   );
+
+  // #302. `null-eq-missing` probes `aOptionalString == null`, and `aOptionalString` follows the
+  // corpus default: a NULL column sends NO attribute, so check() denies every document.
+  //
+  // Mongoose is the one adapter that already expresses this PER ATTRIBUTE: `nullable: true` on a
+  // mapper entry declares "a stored null is a missing Cerbos attribute", and the resulting
+  // `$exists`/`$ne: null` guards make `eq(field, null)` contradictory — the empty set the oracle
+  // demands. `owner` maps to the SAME column without `nullable`, so `null-eq` still returns its
+  // five explicit-null documents. Both are asserted here: the pair is what proves the mapper
+  // flag, not the corpus, is doing the discriminating.
+  test.each(NULL_REPRESENTATION_OMITTED)(
+    "$action already aligns via the nullable mapper flag and is rejected under omitted ($reason)",
+    async ({ action }) => {
+      expect(await oracleAllowedIds(action)).toEqual([]);
+      expect(await adapterFilteredIds(action, "explicit")).toEqual([]);
+
+      // The same column WITHOUT `nullable` keeps the explicit-null translation, so the empty
+      // result above is the mapper flag talking, not a filter that matches nothing everywhere.
+      expect(await adapterFilteredIds("null-eq", "explicit")).toEqual(
+        await oracleAllowedIds("null-eq")
+      );
+      expect((await oracleAllowedIds("null-eq")).length).toBeGreaterThan(0);
+
+      // The global switch is still the fail-closed backstop for callers who omit attributes
+      // without declaring `nullable` on every affected mapper entry.
+      await expect(adapterFilteredIds(action, "omitted")).rejects.toThrow(
+        /missing-attribute error/
+      );
+    }
+  );
+
+  // #302 completeness guard. The rejection must key off the null OPERAND, not off a list of
+  // operators: `hasIntersection(tagNames, ["public", null])` carries one in its value list, and
+  // an allowlist of eq/ne/in silently misses it. Enumerating the corpus rather than naming
+  // shapes means a newly added action carrying a null constant is covered automatically.
+  test("every corpus action carrying a null literal is rejected under omitted", async () => {
+    const nullCarrying: string[] = [];
+    for (const action of [...MANIFEST_ACTIONS].sort()) {
+      const queryPlan = await cerbos.planResources({
+        principal: seedsFile.principal,
+        resource: { kind: seedsFile.resourceKind },
+        action,
+      });
+      if (
+        queryPlan.kind === PlanKind.CONDITIONAL &&
+        planCarriesNullLiteral(queryPlan.condition)
+      ) {
+        nullCarrying.push(action);
+      }
+    }
+
+    // Guard the guard: if the walk stopped finding null operands the loop below is vacuous.
+    expect(nullCarrying).toContain("null-eq-missing");
+    expect(nullCarrying).toContain("in-null-elem-hasint");
+
+    const notRejected: string[] = [];
+    for (const action of nullCarrying) {
+      try {
+        await adapterFilteredIds(action, "omitted");
+        notRejected.push(action);
+      } catch { /* expected */ }
+    }
+    expect(notRejected).toEqual([]);
+  });
 
   test("pins the upstream has() planner over-grant", async () => {
     const action = "p-has";

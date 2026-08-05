@@ -1044,6 +1044,25 @@ resourcePolicy:
         match:
           expr: '!(R.attr.owner == null)'
 
+    # The SAME shape against `aOptionalString`, which follows the corpus DEFAULT convention:
+    # a NULL column sends NO attribute at all. CEL then raises a missing-attribute error for
+    # every NULL row, and `"set" == null` is false for every non-NULL row, so check() denies
+    # ALL 20 seeds. The planner emits the identical `eq(a_optional_string, null)` wire node as
+    # `null-eq` — the two are indistinguishable on the wire, which is exactly the point: the
+    # adapter cannot recover the caller's representation from the plan.
+    #
+    # Rendering this as IS NULL returns the five NULL-column rows the PDP denies (#302), so
+    # under `nullAttributeRepresentation: "omitted"` every adapter must reject it instead.
+    # `actions.json` lists it in `nullRepresentationOmitted`: harnesses translate this action
+    # with the option set to "omitted" and assert the throw. Do not add it to `conformance`;
+    # a throwing action has no filter to compare against the oracle.
+    - actions: ["null-eq-missing"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aOptionalString == null'
+
     # ==================== in-lists containing null ====================
     # `R.attr.owner in [..., null]` compiles and the planner emits the null element
     # VERBATIM in the value list; check() ALLOWS an explicitly-null attribute (CEL

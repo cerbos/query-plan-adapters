@@ -1,5 +1,5 @@
 {
-  "description": "Every action defined in policies/adversarial.yaml, grouped against the Spring Data reference harness. 'conformance' actions must match the check() oracle. 'adapterUnsupported' lists conformance actions an adapter cannot express and must reject loudly. 'expectedUnsupported' lists shapes rejected by the reference; 'adapterSupportedExpected' records adapters that intentionally translate one of those shapes. 'knownDivergences' records upstream planner behavior that prevents an oracle comparison.",
+  "description": "Every action defined in policies/adversarial.yaml, grouped against the Spring Data reference harness. 'conformance' actions must match the check() oracle. 'adapterUnsupported' lists conformance actions an adapter cannot express and must reject loudly. 'expectedUnsupported' lists shapes rejected by the reference; 'adapterSupportedExpected' records adapters that intentionally translate one of those shapes. 'nullRepresentationOmitted' lists actions that probe a `== null` comparison against an attribute the oracle OMITS for NULL columns; every adapter must translate these with its null representation set to 'omitted' and reject them. 'knownDivergences' records upstream planner behavior that prevents an oracle comparison.",
   "conformance": [
     "vf-le", "vf-ge", "vf-ne",
     "in-single", "in-empty",
@@ -334,6 +334,13 @@
     { "action": "p-timestamp", "shape": "timestamp() comparison over an ISO-date string column", "springDataMessage": "Unexpected timestamp() expression in leaf operand of lt" },
     { "action": "p-matches",   "shape": "matches() regex", "springDataMessage": "Unsupported operator: matches" },
     { "action": "p-index",     "shape": "list indexing (tags[0].name)", "springDataMessage": "Unexpected get-field() expression in leaf operand of eq" }
+  ],
+  "nullRepresentationOmitted": [
+    {
+      "action": "null-eq-missing",
+      "reason": "`aOptionalString` follows the corpus default: a NULL column sends NO attribute, so `R.attr.aOptionalString == null` is a CEL missing-attribute error and check() denies all 20 seeds. The planner emits the same `eq(var, null)` node as `null-eq` (explicit null, 5 rows allowed), so the wire cannot tell the two conventions apart. Every adapter must be told which one the caller uses. Harnesses translate this action with the adapter's null representation set to `omitted` and assert a throw; under the default `explicit` the adapter would emit IS NULL and return the 5 rows the PDP denies (#302).",
+      "relatedIssue": "https://github.com/cerbos/query-plan-adapters/issues/302"
+    }
   ],
   "knownDivergences": [
     {

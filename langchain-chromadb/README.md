@@ -76,6 +76,20 @@ filter, which is also cheaper for ChromaDB to evaluate than an `or` chain, and
 needs no `required` assertion. All three spellings are pinned across the
 10-element boundary in the adapter's test suite.
 
+## NULL attribute representation
+
+Other adapters in this repo take a `nullAttributeRepresentation` option, because `R.attr.x == null`
+compiles to the same `eq(x, null)` plan node whether the caller sends a NULL column as an explicit
+`null` attribute (where `check()` allows the row) or omits the attribute entirely (where CEL raises
+a missing-attribute error and `check()` denies it) — and an `IS NULL`-shaped filter over-grants in
+the second case.
+
+**This adapter needs no such option.** Chroma metadata holds only finite numbers, strings and
+booleans, so it cannot store an explicit null distinguishably from an absent key: every null
+comparison operand is rejected outright, under either convention. `null-eq`, `null-ne`,
+`vf-null-ne`, `null-not-eq`, the `in-null-elem-*` family and `null-eq-missing` are all fail-closed
+for that reason. See [#302](https://github.com/cerbos/query-plan-adapters/issues/302).
+
 ## Conformance contract
 
 The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 20 hostile seed documents and real ChromaDB metadata queries. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
@@ -84,6 +98,7 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` d
 | --- | --- |
 | Oracle-tested | 15 reference actions: directional and inequality comparisons, single/empty membership, Unicode and empty strings, negative numbers, n-ary/double/triple negation, membership on an optional resource field, mapped nested-field equality, and case-sensitive equality |
 | Fail-closed | 107 reference conformance actions plus regex, ordered indexing/`get-field`, and timestamp probes (110 actions total) |
+| Representation-independent | `null-eq-missing` — rejected like every other null comparison operand, so no `nullAttributeRepresentation` option is required |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute documents. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 
 Chroma metadata filters are limited to flat scalar comparisons and membership. Nested collections, field-to-field and arithmetic expressions, string helpers, hierarchy/timestamp operations, ternaries, nullable inequality, and other shapes that cannot be represented faithfully throw before a filter is returned.

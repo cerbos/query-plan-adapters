@@ -73,6 +73,7 @@ interface ActionsFile {
   adapterUnsupported: Record<string, UnsupportedAction[]>;
   adapterSupportedExpected: Record<string, UnsupportedAction[]>;
   expectedUnsupported: UnsupportedShape[];
+  nullRepresentationOmitted: UnsupportedAction[];
   knownDivergences: KnownDivergence[];
 }
 
@@ -248,6 +249,15 @@ function parseActionsFile(value: unknown): ActionsFile {
       file["expectedUnsupported"],
       "expectedUnsupported",
     ).map(parseUnsupportedShape),
+    // This parser rebuilds the manifest field by field, so a corpus group it does not name is
+    // silently dropped — and a dropped group makes its actions vanish from every count and every
+    // test.each, passing vacuously. Parse each group explicitly.
+    nullRepresentationOmitted: requireArray(
+      file["nullRepresentationOmitted"],
+      "nullRepresentationOmitted",
+    ).map((entry, index) =>
+      parseUnsupportedAction(entry, `nullRepresentationOmitted[${index}]`),
+    ),
     knownDivergences: requireArray(
       file["knownDivergences"],
       "knownDivergences",
@@ -293,9 +303,14 @@ const THROWING_ACTIONS: UnsupportedAction[] = [
       reason: shape,
     })),
 ];
+// Actions whose `== null` probe targets an attribute the oracle OMITS for NULL columns. Chroma
+// needs no representation option: it cannot index an explicit null distinguishably from a missing
+// key, so every null comparison operand is already rejected outright (#302).
+const NULL_REPRESENTATION_OMITTED = actionsFile.nullRepresentationOmitted;
 const MANIFEST_ACTIONS = new Set([
   ...actionsFile.conformance,
   ...actionsFile.expectedUnsupported.map(({ action }) => action),
+  ...NULL_REPRESENTATION_OMITTED.map(({ action }) => action),
   ...CHROMA_DIVERGENCES,
 ]);
 
@@ -563,19 +578,23 @@ async function adapterFilteredIds(action: string): Promise<string[]> {
 }
 
 describe("adversarial conformance corpus", () => {
-  test("manifest assigns all 126 policy actions exactly one Chroma outcome", () => {
+  test("manifest assigns all 127 policy actions exactly one Chroma outcome", () => {
     const oracle = new Set(CHROMA_SUPPORTED_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map(({ action }) => action));
+    const nullOmitted = new Set(
+      NULL_REPRESENTATION_OMITTED.map(({ action }) => action),
+    );
     const misclassified = [...MANIFEST_ACTIONS].filter((action) => {
       const classificationCount = [
         oracle.has(action),
         throwing.has(action),
+        nullOmitted.has(action),
         CHROMA_DIVERGENCES.has(action),
       ].filter(Boolean).length;
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(126);
+    expect(MANIFEST_ACTIONS.size).toBe(127);
     expect(CHROMA_SUPPORTED_ACTIONS).toHaveLength(15);
     expect(oracle.size).toBe(CHROMA_SUPPORTED_ACTIONS.length);
     expect(CHROMA_UNSUPPORTED).toHaveLength(107);
@@ -605,6 +624,27 @@ describe("adversarial conformance corpus", () => {
           fieldNameMapper: FIELD_NAME_MAPPER,
         }),
       ).toThrow();
+    },
+  );
+
+  // #302. Chroma is one of two adapters that need no `nullAttributeRepresentation` option: its
+  // metadata filters accept only finite numbers, strings and booleans, so a null comparison
+  // operand is rejected before the representation could matter. `null-eq` (explicit null) is
+  // already in `adapterUnsupported` for the same reason, and `null-eq-missing` must fail the same
+  // way. This test guards that equivalence: if Chroma ever gains a null sentinel, the shape stops
+  // throwing here and the adapter acquires a representation dependency it must then declare.
+  test.each(NULL_REPRESENTATION_OMITTED)(
+    "$action is rejected regardless of representation ($reason)",
+    async ({ action }) => {
+      expect(await oracleAllowedIds(action)).toEqual([]);
+
+      const queryPlan = await planFor(action);
+      expect(() =>
+        queryPlanToChromaDB({
+          queryPlan,
+          fieldNameMapper: FIELD_NAME_MAPPER,
+        }),
+      ).toThrow(/finite number, string, or boolean literal/);
     },
   );
 

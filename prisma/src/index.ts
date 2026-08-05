@@ -142,6 +142,22 @@ export type Mapper =
   | Record<string, MapperConfig>
   | ((key: string) => MapperConfig);
 
+/**
+ * How the caller represents a NULL column when building the attributes it sends to `check()`.
+ *
+ * The planner emits the same `eq(attr, null)` node either way, so the plan cannot reveal which
+ * convention is in use and the adapter has to be told.
+ *
+ * - `"explicit"` (default) — a NULL column is sent as an explicit `null` attribute. CEL compares
+ *   `null == null`, so `IS NULL` selects exactly the rows `check()` allows.
+ * - `"omitted"` — a NULL column sends no attribute at all. CEL then raises a missing-attribute
+ *   error, which Cerbos treats as a deny, so a filter that *selects* NULL rows returns rows the
+ *   PDP denies. Null comparison operands are rejected instead of translated.
+ *
+ * See https://github.com/cerbos/query-plan-adapters/issues/302.
+ */
+export type NullAttributeRepresentation = "explicit" | "omitted";
+
 export interface QueryPlanToPrismaArgs {
   queryPlan: PlanResourcesResponse;
   mapper?: Mapper;
@@ -151,6 +167,11 @@ export interface QueryPlanToPrismaArgs {
    * references and need the model name as their container.
    */
   model?: string;
+  /**
+   * Which NULL-column representation the caller uses when building `check()` attributes.
+   * Defaults to `"explicit"`, preserving the historical `IS NULL` translation.
+   */
+  nullAttributeRepresentation?: NullAttributeRepresentation;
 }
 
 export type QueryPlanToPrismaResult =
@@ -495,6 +516,9 @@ function buildMembershipFilter(
   values: Value[]
 ): PrismaFilter {
   const nonNullValues = values.filter((value) => value !== null);
+  if (nonNullValues.length !== values.length) {
+    assertNullOperandTranslatable("a null element in an `in` list");
+  }
   const filters: PrismaFilter[] = [];
 
   if (nonNullValues.length > 0 || values.length === 0) {
@@ -531,6 +555,30 @@ type LambdaScope = {
 };
 let lambdaScopes: LambdaScope[] = [];
 let rootModelName: string | undefined;
+let nullRepresentation: NullAttributeRepresentation = "explicit";
+
+/**
+ * Guards every site that would emit a NULL-selecting predicate out of a `null` comparison
+ * operand.
+ *
+ * Under the `"omitted"` representation a NULL column carries no attribute, so CEL raises a
+ * missing-attribute error and `check()` denies the row — `IS NULL` would return exactly the rows
+ * the PDP refuses. The rejection is deliberately wider than the over-granting shapes: `ne(x,
+ * null)` on its own is aligned, but Prisma applies negation by wrapping (`{ NOT: ... }`) rather
+ * than by pushing it into the leaf, so a leaf cannot tell whether an enclosing `not` will flip
+ * `IS NOT NULL` back into a NULL-selecting predicate. Rejecting every null operand is correct
+ * under any nesting; narrowing it requires negation-parity tracking.
+ */
+function assertNullOperandTranslatable(context: string): void {
+  if (nullRepresentation === "omitted") {
+    throw new Error(
+      `Cannot translate ${context} under nullAttributeRepresentation "omitted": a NULL column ` +
+        "sends no attribute, so Cerbos evaluates the comparison as a missing-attribute error " +
+        "(deny) while a NULL-selecting filter would return those rows. Send NULL columns as " +
+        'explicit nulls and use "explicit", or keep this shape out of the policy.'
+    );
+  }
+}
 
 /**
  * Converts a Cerbos query plan to a Prisma filter.
@@ -539,7 +587,9 @@ export function queryPlanToPrisma({
   queryPlan,
   mapper = {},
   model,
+  nullAttributeRepresentation = "explicit",
 }: QueryPlanToPrismaArgs): QueryPlanToPrismaResult {
+  nullRepresentation = nullAttributeRepresentation;
   switch (queryPlan.kind) {
     case PlanKind.ALWAYS_ALLOWED:
       return { kind: PlanKind.ALWAYS_ALLOWED };
@@ -1986,6 +2036,10 @@ function buildComparisonFilter(
     CERBOS_TO_PRISMA_OPERATOR[operator],
     `Unsupported operator: ${operator}`
   );
+
+  if (value === null) {
+    assertNullOperandTranslatable(`\`${operator}\` against a null operand`);
+  }
 
   if (typeof value === "number" && !Number.isInteger(value)) {
     const fieldName = getLeafField(fieldRef.path);

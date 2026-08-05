@@ -716,6 +716,159 @@ class TestGetQuery:
             get_query(plan, resource_table, attr)
 
 
+class TestNullAttributeRepresentation:
+    """cerbos/query-plan-adapters#302.
+
+    Both NULL-column conventions produce the identical ``eq(attr, null)`` wire
+    node, so the adapter cannot infer which one the caller uses. Under
+    ``"omitted"`` a NULL column carries no attribute at all, CEL raises a
+    missing-attribute error, and ``check()`` denies every row -- an ``IS NULL``
+    filter would return precisely the rows the PDP refuses.
+    """
+
+    @staticmethod
+    def _null_eq_plan():
+        return _conditional_plan(
+            {
+                "operator": "eq",
+                "operands": [
+                    {"variable": "request.resource.attr.name"},
+                    {"value": None},
+                ],
+            }
+        )
+
+    def test_explicit_is_the_default_and_keeps_is_null(self, resource_table):
+        attr = {"request.resource.attr.name": resource_table.name}
+        default = get_query(self._null_eq_plan(), resource_table, attr)
+        explicit = get_query(
+            self._null_eq_plan(),
+            resource_table,
+            attr,
+            null_attribute_representation="explicit",
+        )
+
+        compiled = str(default.compile(compile_kwargs={"literal_binds": True}))
+        assert " IS NULL" in compiled
+        assert compiled == str(explicit.compile(compile_kwargs={"literal_binds": True}))
+
+    def test_omitted_rejects_eq_against_null(self, resource_table):
+        with pytest.raises(ValueError, match="missing-attribute"):
+            get_query(
+                self._null_eq_plan(),
+                resource_table,
+                {"request.resource.attr.name": resource_table.name},
+                null_attribute_representation="omitted",
+            )
+
+    def test_omitted_rejects_ne_against_null(self, resource_table):
+        # Conservatively rejected too: `ne` alone is aligned under "omitted",
+        # but negation wraps the built predicate, so a leaf cannot see whether
+        # an enclosing `not` will flip IS NOT NULL back into IS NULL.
+        plan = _conditional_plan(
+            {
+                "operator": "ne",
+                "operands": [
+                    {"variable": "request.resource.attr.name"},
+                    {"value": None},
+                ],
+            }
+        )
+        with pytest.raises(ValueError, match="missing-attribute"):
+            get_query(
+                plan,
+                resource_table,
+                {"request.resource.attr.name": resource_table.name},
+                null_attribute_representation="omitted",
+            )
+
+    def test_omitted_rejects_null_element_in_in_list(self, resource_table):
+        plan = _conditional_plan(
+            {
+                "operator": "in",
+                "operands": [
+                    {"variable": "request.resource.attr.name"},
+                    {"value": ["resource1", None]},
+                ],
+            }
+        )
+        with pytest.raises(ValueError, match="missing-attribute"):
+            get_query(
+                plan,
+                resource_table,
+                {"request.resource.attr.name": resource_table.name},
+                null_attribute_representation="omitted",
+            )
+
+    def test_omitted_rejects_a_null_operand_nested_under_and(self, resource_table):
+        plan = _conditional_plan(
+            {
+                "operator": "and",
+                "operands": [
+                    {
+                        "expression": {
+                            "operator": "not",
+                            "operands": [
+                                {
+                                    "expression": {
+                                        "operator": "eq",
+                                        "operands": [
+                                            {"variable": "request.resource.attr.name"},
+                                            {"value": None},
+                                        ],
+                                    }
+                                }
+                            ],
+                        }
+                    },
+                    {
+                        "expression": {
+                            "operator": "eq",
+                            "operands": [
+                                {"variable": "request.resource.attr.name"},
+                                {"value": "resource1"},
+                            ],
+                        }
+                    },
+                ],
+            }
+        )
+        with pytest.raises(ValueError, match="missing-attribute"):
+            get_query(
+                plan,
+                resource_table,
+                {"request.resource.attr.name": resource_table.name},
+                null_attribute_representation="omitted",
+            )
+
+    def test_omitted_leaves_null_free_comparisons_untouched(self, resource_table, conn):
+        plan = _conditional_plan(
+            {
+                "operator": "eq",
+                "operands": [
+                    {"variable": "request.resource.attr.name"},
+                    {"value": "resource1"},
+                ],
+            }
+        )
+        query = get_query(
+            plan,
+            resource_table,
+            {"request.resource.attr.name": resource_table.name},
+            null_attribute_representation="omitted",
+        )
+        assert [row.name for row in conn.execute(query)] == ["resource1"]
+
+    def test_unknown_representation_is_rejected(self, resource_table):
+        with pytest.raises(ValueError, match="must be 'explicit' or 'omitted'"):
+            get_query(
+                self._null_eq_plan(),
+                resource_table,
+                {"request.resource.attr.name": resource_table.name},
+                null_attribute_representation="sometimes",
+            )
+
+
 class TestSemanticEdgeTranslations:
     def test_in_list_with_explicit_null_uses_is_null_disjunct(
         self, resource_table, conn

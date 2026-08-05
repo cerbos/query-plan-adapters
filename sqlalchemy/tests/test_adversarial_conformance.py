@@ -98,6 +98,15 @@ THROWING_ACTIONS = sorted(
     - SQLALCHEMY_SUPPORTED_EXPECTED
 )
 
+# Actions whose `== null` probe targets an attribute the oracle OMITS for NULL
+# columns. They carry no oracle comparison: under the omitted representation
+# check() denies every row, so the adapter must reject the shape rather than
+# emit a filter (#302).
+NULL_REPRESENTATION_OMITTED = [
+    (item["action"], item["reason"])
+    for item in ACTIONS_FILE["nullRepresentationOmitted"]
+]
+
 
 def _iso_for(seed: Dict[str, Any]) -> str:
     """Deterministic ISO instant per seed for the timestamp probe (see
@@ -671,16 +680,38 @@ def _oracle_allowed_ids(client: CerbosClient, action: str) -> Set[str]:
     }
 
 
+def _plan_carries_null_literal(node) -> bool:
+    """Whether any operand anywhere in the plan is a literal null, or a list containing one."""
+    if not isinstance(node, dict):
+        return False
+    if "value" in node:
+        value = node["value"]
+        return value is None or (
+            isinstance(value, list) and any(member is None for member in value)
+        )
+    expression = node.get("expression", node)
+    return any(
+        _plan_carries_null_literal(operand)
+        for operand in expression.get("operands", [])
+    )
+
+
 # -- adapter execution through the public get_query path --
 
 
-def _adapter_filtered_ids(client: CerbosClient, conn, action: str) -> Set[str]:
+def _adapter_filtered_ids(
+    client: CerbosClient,
+    conn,
+    action: str,
+    null_attribute_representation: str = "explicit",
+) -> Set[str]:
     plan = client.plan_resources(action, _principal(), ResourceDesc(RESOURCE_KIND))
     query = get_query(
         plan,
         AdvResource,
         ATTR_MAP,
         operator_override_fns=OPERATOR_OVERRIDES,
+        null_attribute_representation=null_attribute_representation,
     )
     return {row.id for row in conn.execute(query).fetchall()}
 
@@ -702,6 +733,75 @@ class TestAdversarialConformance:
         # a silently-wrong filter is the only unacceptable outcome.
         with pytest.raises(Exception):
             _adapter_filtered_ids(adv_cerbos_client, adv_conn, action)
+
+    # #302. `null-eq-missing` probes `aOptionalString == null`, and
+    # `aOptionalString` follows the corpus default: a NULL column sends NO
+    # attribute. Both halves are asserted because the rejection alone would pass
+    # vacuously if the adapter raised for an unrelated reason — the over-grant
+    # under the default representation is what makes the rejection necessary.
+    @pytest.mark.parametrize("action,reason", NULL_REPRESENTATION_OMITTED)
+    def test_null_representation_omitted_is_rejected(
+        self, action, reason, adv_cerbos_client, adv_conn
+    ):
+        assert _oracle_allowed_ids(adv_cerbos_client, action) == set()
+
+        # The default translation emits IS NULL and returns exactly the rows the
+        # PDP denies.
+        over_granted = _adapter_filtered_ids(adv_cerbos_client, adv_conn, action)
+        assert len(over_granted) > 0, reason
+
+        with pytest.raises(ValueError, match="missing-attribute"):
+            _adapter_filtered_ids(
+                adv_cerbos_client,
+                adv_conn,
+                action,
+                null_attribute_representation="omitted",
+            )
+
+    # #302 completeness guard. The rejection must key off the null OPERAND, not off a
+    # list of operators: `hasIntersection(tagNames, ["public", None])` carries one in
+    # its value list, and an allowlist of eq/ne/in silently misses it. Enumerating the
+    # corpus rather than naming shapes means a newly added action carrying a null
+    # constant is covered automatically.
+    def test_every_null_carrying_action_is_rejected_under_omitted(
+        self, adv_cerbos_client, adv_conn
+    ):
+        manifest = (
+            set(ACTIONS_FILE["conformance"])
+            | {u["action"] for u in ACTIONS_FILE["expectedUnsupported"]}
+            | {n["action"] for n in ACTIONS_FILE["nullRepresentationOmitted"]}
+            | {d["action"] for d in ACTIONS_FILE["knownDivergences"]}
+        )
+        null_carrying = []
+        for action in sorted(manifest):
+            plan = adv_cerbos_client.plan_resources(
+                action, _principal(), ResourceDesc(RESOURCE_KIND)
+            )
+            if (
+                plan.filter is None
+                or plan.filter.kind != PlanResourcesFilterKind.CONDITIONAL
+            ):
+                continue
+            if _plan_carries_null_literal(plan.filter.condition.to_dict()):
+                null_carrying.append(action)
+
+        # Guard the guard: if the walk stopped finding null operands the loop is vacuous.
+        assert "null-eq-missing" in null_carrying
+        assert "in-null-elem-hasint" in null_carrying
+
+        not_rejected = []
+        for action in null_carrying:
+            try:
+                _adapter_filtered_ids(
+                    adv_cerbos_client,
+                    adv_conn,
+                    action,
+                    null_attribute_representation="omitted",
+                )
+                not_rejected.append(action)
+            except Exception:
+                pass  # expected: the shape must be rejected under this representation
+        assert not_rejected == []
 
     @pytest.mark.parametrize(
         "action",
@@ -755,6 +855,14 @@ class TestAdversarialConformance:
         # Guard the guard: these actions must produce a non-empty, non-total
         # oracle set, otherwise the differential comparison could pass
         # vacuously (e.g. a PDP that denies everything).
-        for action in ("vf-le", "like-percent", "all-on-empty", "pv-exists", "pv-all", "null-eq", "null-ne"):
+        for action in (
+            "vf-le",
+            "like-percent",
+            "all-on-empty",
+            "pv-exists",
+            "pv-all",
+            "null-eq",
+            "null-ne",
+        ):
             ids = _oracle_allowed_ids(adv_cerbos_client, action)
             assert 0 < len(ids) < len(SEEDS)

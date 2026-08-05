@@ -3,6 +3,7 @@ package dev.cerbos.queryplan.springdata;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand;
 import dev.cerbos.queryplan.springdata.testmodel.CategoryEntity;
 import dev.cerbos.queryplan.springdata.testmodel.LabelEntity;
 import dev.cerbos.queryplan.springdata.testmodel.ResourceEntity;
@@ -43,13 +44,18 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import com.google.protobuf.Value;
+
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -148,7 +154,13 @@ class AdversarialConformanceTest {
     private record UnsupportedShape(String action, String shape, String springDataMessage) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    private record ActionsFile(List<String> conformance, List<UnsupportedShape> expectedUnsupported) {}
+    private record NullRepresentationOmitted(String action, String reason) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record ActionsFile(
+            List<String> conformance,
+            List<UnsupportedShape> expectedUnsupported,
+            List<NullRepresentationOmitted> nullRepresentationOmitted) {}
 
     private static SeedsFile seedsFile;
     private static ActionsFile actionsFile;
@@ -162,6 +174,16 @@ class AdversarialConformanceTest {
         return actionsFile.expectedUnsupported().stream()
                 .filter(u -> !u.action().equals("p-timestamp"))
                 .map(u -> Arguments.of(u.action(), u.springDataMessage()));
+    }
+
+    /**
+     * Actions whose {@code == null} probe targets an attribute the oracle OMITS for NULL
+     * columns. They carry no oracle comparison: under the omitted representation check() denies
+     * every row, so the adapter must reject the shape rather than emit a filter (#302).
+     */
+    static Stream<Arguments> nullRepresentationOmitted() {
+        return actionsFile.nullRepresentationOmitted().stream()
+                .map(n -> Arguments.of(n.action(), n.reason()));
     }
     /**
      * Deterministic label names per seed for the {@code macro-depth3-*} actions — the third
@@ -558,10 +580,16 @@ class AdversarialConformanceTest {
     // -- adapter execution through the public Specification path --
 
     private static List<String> adapterFilteredIds(String action) {
+        return adapterFilteredIds(action, NullAttributeRepresentation.EXPLICIT);
+    }
+
+    private static List<String> adapterFilteredIds(
+            String action, NullAttributeRepresentation representation) {
         PlanResourcesResult plan = client.plan(
                 principal(), Resource.newInstance(seedsFile.resourceKind()), action);
         Specification<ResourceEntity> spec =
-                SpringDataQueryPlanAdapter.<ResourceEntity>toSpecification(plan, MAPPING).toSpecification();
+                SpringDataQueryPlanAdapter.<ResourceEntity>toSpecification(
+                        plan, MAPPING, Map.of(), representation).toSpecification();
 
         EntityManager em = emf.createEntityManager();
         try {
@@ -599,6 +627,80 @@ class AdversarialConformanceTest {
         IllegalArgumentException ex = assertThrows(
                 IllegalArgumentException.class, () -> adapterFilteredIds(action));
         assertEquals(expectedMessage, ex.getMessage());
+    }
+
+    /**
+     * #302. {@code null-eq-missing} probes {@code aOptionalString == null}, and
+     * {@code aOptionalString} follows the corpus default: a NULL column sends NO attribute. Both
+     * halves are asserted because the rejection alone would pass vacuously if the adapter threw
+     * for an unrelated reason — the over-grant under the default representation is what makes the
+     * rejection necessary.
+     */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("nullRepresentationOmitted")
+    void nullRepresentationOmittedIsRejected(String action, String reason) {
+        assertEquals(List.of(), oracleAllowedIds(action), reason);
+
+        // The default translation emits IS NULL and returns exactly the rows the PDP denies.
+        assertFalse(adapterFilteredIds(action).isEmpty(), reason);
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> adapterFilteredIds(action, NullAttributeRepresentation.OMITTED));
+        assertTrue(ex.getMessage().contains("missing-attribute error"), ex.getMessage());
+    }
+
+    /**
+     * #302 completeness guard. The rejection must key off the null OPERAND, not off a list of
+     * operators: {@code hasIntersection(tagNames, ["public", null])} carries one in its value
+     * list, and an allowlist of eq/ne/in silently misses it. Enumerating the corpus rather than
+     * naming shapes means a newly added action carrying a null constant is covered automatically.
+     */
+    @Test
+    void everyNullCarryingActionIsRejectedUnderOmitted() {
+        Set<String> manifest = new LinkedHashSet<>(actionsFile.conformance());
+        actionsFile.expectedUnsupported().forEach(u -> manifest.add(u.action()));
+        actionsFile.nullRepresentationOmitted().forEach(n -> manifest.add(n.action()));
+
+        List<String> nullCarrying = new ArrayList<>();
+        for (String action : manifest.stream().sorted().toList()) {
+            PlanResourcesResult plan = client.plan(
+                    principal(), Resource.newInstance(seedsFile.resourceKind()), action);
+            plan.getCondition()
+                    .filter(AdversarialConformanceTest::planCarriesNullLiteral)
+                    .ifPresent(c -> nullCarrying.add(action));
+        }
+
+        // Guard the guard: if the walk stopped finding null operands the loop below is vacuous.
+        assertTrue(nullCarrying.contains("null-eq-missing"), nullCarrying.toString());
+        assertTrue(nullCarrying.contains("in-null-elem-hasint"), nullCarrying.toString());
+
+        List<String> notRejected = new ArrayList<>();
+        for (String action : nullCarrying) {
+            try {
+                adapterFilteredIds(action, NullAttributeRepresentation.OMITTED);
+                notRejected.add(action);
+            } catch (IllegalArgumentException expected) {
+                // the shape must be rejected under this representation
+            }
+        }
+        assertEquals(List.of(), notRejected);
+    }
+
+    /** Whether any operand anywhere in the plan is a literal null, or a list containing one. */
+    private static boolean planCarriesNullLiteral(Operand operand) {
+        return switch (operand.getNodeCase()) {
+            case VALUE -> {
+                Value value = operand.getValue();
+                yield value.getKindCase() == Value.KindCase.NULL_VALUE
+                        || (value.getKindCase() == Value.KindCase.LIST_VALUE
+                                && value.getListValue().getValuesList().stream()
+                                        .anyMatch(e -> e.getKindCase()
+                                                == Value.KindCase.NULL_VALUE));
+            }
+            case EXPRESSION -> operand.getExpression().getOperandsList().stream()
+                    .anyMatch(AdversarialConformanceTest::planCarriesNullLiteral);
+            default -> false;
+        };
     }
 
     /**

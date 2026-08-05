@@ -20,10 +20,31 @@ export type Mapper =
   | Record<string, MapperConfig>
   | ((key: string) => MapperConfig);
 
+/**
+ * How the caller represents a NULL field when building the attributes it sends to `check()`.
+ *
+ * The planner emits the same `eq(attr, null)` node either way, so the plan cannot reveal which
+ * convention is in use and the adapter has to be told.
+ *
+ * - `"explicit"` (default) — a NULL field is sent as an explicit `null` attribute. CEL compares
+ *   `null == null`, so matching null selects exactly the documents `check()` allows.
+ * - `"omitted"` — a NULL field sends no attribute at all. CEL then raises a missing-attribute
+ *   error, which Cerbos treats as a deny, so a filter that *selects* null documents returns
+ *   documents the PDP denies. Null comparison operands are rejected instead of translated.
+ *
+ * See https://github.com/cerbos/query-plan-adapters/issues/302.
+ */
+export type NullAttributeRepresentation = "explicit" | "omitted";
+
 export interface QueryPlanToConvexArgs {
   queryPlan: PlanResourcesResponse;
   mapper?: Mapper;
   allowPostFilter?: boolean;
+  /**
+   * Which NULL-field representation the caller uses when building `check()` attributes.
+   * Defaults to `"explicit"`, preserving the historical null-matching translation.
+   */
+  nullAttributeRepresentation?: NullAttributeRepresentation;
 }
 
 export interface QueryPlanToConvexResult<Q = unknown, R = unknown> {
@@ -1037,10 +1058,56 @@ const buildFilters = (
   };
 };
 
+/**
+ * Rejects every null literal operand in the plan when the caller omits attributes for NULL
+ * fields.
+ *
+ * Under the `"omitted"` representation a NULL field carries no attribute, so CEL raises a
+ * missing-attribute error and `check()` denies the document; matching null would return exactly
+ * the documents the PDP refuses. Convex translates a plan down two paths — a pushed-down
+ * `q.eq(...)` filter and an in-memory `postFilter` — so the check runs once over the plan tree
+ * rather than at each emission site.
+ *
+ * The scan matches on the OPERAND, never on an allowlist of operators. A null constant reaches a
+ * null-selecting predicate through more shapes than the obvious `eq`/`ne`/`in` — `hasIntersection`
+ * carries one in its value list too — and any operator added later would silently escape a list
+ * that has to be maintained by hand.
+ *
+ * The rejection is also deliberately wider than the over-granting shapes: `ne(x, null)` on its own
+ * is aligned, but negation is applied around the built predicate, so a leaf cannot tell whether an
+ * enclosing `not` will flip a not-null predicate back into a null-selecting one. Rejecting every
+ * null operand is correct under any nesting; narrowing it requires negation-parity tracking.
+ */
+const carriesNullLiteral = (operand: PlanExpressionOperand): boolean =>
+  isValue(operand) &&
+  (operand.value === null ||
+    (Array.isArray(operand.value) && operand.value.includes(null)));
+
+const assertNoNullComparisonOperands = (
+  expression: PlanExpressionOperand,
+): void => {
+  if (!isExpression(expression)) return;
+
+  if (expression.operands.some(carriesNullLiteral)) {
+    throw new Error(
+      `Cannot translate \`${expression.operator}\` against a null operand under ` +
+      'nullAttributeRepresentation "omitted": a NULL field sends no attribute, so Cerbos ' +
+      "evaluates the comparison as a missing-attribute error (deny) while a null-selecting " +
+      'filter would return those documents. Send NULL fields as explicit nulls and use ' +
+      '"explicit", or keep this shape out of the policy.',
+    );
+  }
+
+  for (const operand of expression.operands) {
+    assertNoNullComparisonOperands(operand);
+  }
+};
+
 export function queryPlanToConvex<Q = unknown, R = unknown>({
   queryPlan,
   mapper = {},
   allowPostFilter = false,
+  nullAttributeRepresentation = "explicit",
 }: QueryPlanToConvexArgs): QueryPlanToConvexResult<Q, R> {
   switch (queryPlan.kind) {
     case PlanKind.ALWAYS_ALLOWED:
@@ -1048,6 +1115,9 @@ export function queryPlanToConvex<Q = unknown, R = unknown>({
     case PlanKind.ALWAYS_DENIED:
       return { kind: PlanKind.ALWAYS_DENIED };
     case PlanKind.CONDITIONAL: {
+      if (nullAttributeRepresentation === "omitted") {
+        assertNoNullComparisonOperands(queryPlan.condition);
+      }
       const { filter, postFilter } = buildFilters(queryPlan.condition, mapper);
 
       if (postFilter && !allowPostFilter) {

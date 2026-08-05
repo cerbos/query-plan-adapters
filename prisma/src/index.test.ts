@@ -1516,6 +1516,106 @@ describe("Field Operations", () => {
           .sort()
       );
     });
+
+    // cerbos/query-plan-adapters#302. Both conventions produce the identical `eq(attr, null)`
+    // wire node, so the adapter cannot infer which one the caller uses. Under "omitted" a NULL
+    // column carries no attribute at all, CEL raises a missing-attribute error, and check()
+    // denies every row — an IS NULL filter would return precisely the rows the PDP refuses.
+    describe("nullAttributeRepresentation", () => {
+      const mapper = {
+        "request.resource.attr.aOptionalString": { field: "aOptionalString" },
+      };
+
+      async function planFor(action: string) {
+        return cerbos.planResources({
+          principal: { id: "user1", roles: ["USER"] },
+          resource: { kind: "resource" },
+          action,
+        });
+      }
+
+      test('"explicit" is the default and keeps the IS NULL translation', async () => {
+        const queryPlan = await planFor("is-not-set");
+
+        expect(queryPlanToPrisma({ queryPlan, mapper })).toStrictEqual(
+          queryPlanToPrisma({
+            queryPlan,
+            mapper,
+            nullAttributeRepresentation: "explicit",
+          })
+        );
+      });
+
+      test('"omitted" rejects eq against a null operand', async () => {
+        const queryPlan = await planFor("is-not-set");
+
+        expect(() =>
+          queryPlanToPrisma({
+            queryPlan,
+            mapper,
+            nullAttributeRepresentation: "omitted",
+          })
+        ).toThrow(/missing-attribute error/);
+      });
+
+      // Conservatively rejected too: `ne` alone is aligned under "omitted", but Prisma negates
+      // by wrapping (`{ NOT: ... }`), so a leaf cannot see whether an enclosing `not` will flip
+      // IS NOT NULL back into a NULL-selecting predicate.
+      test('"omitted" rejects ne against a null operand', async () => {
+        const queryPlan = await planFor("is-set");
+
+        expect(() =>
+          queryPlanToPrisma({
+            queryPlan,
+            mapper,
+            nullAttributeRepresentation: "omitted",
+          })
+        ).toThrow(/missing-attribute error/);
+      });
+
+      test('"omitted" rejects a null element in an in-list', () => {
+        expect(() =>
+          queryPlanToPrisma({
+            queryPlan: {
+              kind: PlanKind.CONDITIONAL,
+              condition: {
+                operator: "in",
+                operands: [
+                  { name: "request.resource.attr.aOptionalString" },
+                  { value: ["x", null] },
+                ],
+              },
+            } as PlanResourcesConditionalResponse,
+            mapper,
+            nullAttributeRepresentation: "omitted",
+          })
+        ).toThrow(/null element in an `in` list/);
+      });
+
+      test('"omitted" leaves null-free comparisons untouched', () => {
+        const queryPlan = {
+          kind: PlanKind.CONDITIONAL,
+          condition: {
+            operator: "eq",
+            operands: [
+              { name: "request.resource.attr.aOptionalString" },
+              { value: "x" },
+            ],
+          },
+        } as PlanResourcesConditionalResponse;
+
+        expect(
+          queryPlanToPrisma({
+            queryPlan,
+            mapper,
+            nullAttributeRepresentation: "omitted",
+          })
+        ).toStrictEqual({
+          kind: PlanKind.CONDITIONAL,
+          filters: { aOptionalString: { equals: "x" } },
+        });
+      });
+    });
   });
 });
 
