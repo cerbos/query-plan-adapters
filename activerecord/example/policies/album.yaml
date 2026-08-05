@@ -1,0 +1,29 @@
+# yaml-language-server: $schema=https://api.cerbos.dev/latest/cerbos/policy/v1/Policy.schema.json
+#
+# The rules for an album.
+
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: album
+  rules:
+    # The owner sees the album. Any user sees a shared album. A collaborator also sees the
+    # album. The collaborators are a many-to-many association, and the adapter changes the
+    # membership test into a correlated EXISTS subquery.
+    - actions: ["view"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          any:
+            of:
+              - expr: R.attr.ownerId == P.id
+              - expr: R.attr.shared == true
+              - expr: P.id in R.attr.collaboratorIds
+
+    - actions: ["edit"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          expr: R.attr.ownerId == P.id

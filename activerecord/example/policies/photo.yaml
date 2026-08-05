@@ -1,0 +1,57 @@
+# yaml-language-server: $schema=https://api.cerbos.dev/latest/cerbos/policy/v1/Policy.schema.json
+#
+# The rules for a photo. Change this file to change which photos the application shows. The
+# Ruby code does not contain a copy of these rules.
+
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: photo
+  rules:
+    # The owner sees the photo. Any user sees a published photo. A user also sees a photo
+    # that has a tag in the list of permitted tags for that user.
+    - actions: ["view"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          any:
+            of:
+              - expr: R.attr.ownerId == P.id
+              - expr: R.attr.published == true
+              - expr: R.attr.tags.exists(t, t.name in P.attr.allowedTags)
+
+    # Only the owner changes the photo.
+    - actions: ["edit"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          expr: R.attr.ownerId == P.id
+
+    # A user sees the photos of the other users in the same department. The department of the
+    # owner is not a column of the photo. It is on the user, and the adapter reads it through
+    # a belongs_to association.
+    - actions: ["view-same-department"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          expr: R.attr.ownerDepartment == P.attr.department
+
+    # An administrator moderates all the photos. This rule has no condition. Thus the planner
+    # gives KIND_ALWAYS_ALLOWED, and the adapter gives every row. The application adds the
+    # tenant boundary after the translation, and that boundary also applies here.
+    - actions: ["moderate"]
+      effect: EFFECT_ALLOW
+      roles: ["admin"]
+
+    # This rule uses a regular expression. No SQL dialect gives the behaviour of RE2. Thus the
+    # adapter raises an error, and the application gives HTTP 422 with no rows. This shows the
+    # fail-closed guarantee from end to end.
+    - actions: ["search-regex"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          expr: R.attr.title.matches("^H.*")

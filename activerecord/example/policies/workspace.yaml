@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=https://api.cerbos.dev/latest/cerbos/policy/v1/Policy.schema.json
+#
+# The rules for a workspace.
+
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: workspace
+  rules:
+    # The owner sees the workspace. A user also sees a workspace below their own scope in the
+    # hierarchy. The adapter changes the hierarchy test into a LIKE with an ESCAPE clause, or
+    # into a comparison with the known list of ancestors.
+    - actions: ["view"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          any:
+            of:
+              - expr: R.attr.ownerId == P.id
+              - expr: hierarchy(R.attr.scope).descendentOf(hierarchy(P.attr.scope))

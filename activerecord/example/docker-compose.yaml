@@ -1,0 +1,45 @@
+# The example application and its PDP.
+#
+#   ./scripts/smoke.sh          # start the components, do the tests, stop the components
+#   ./scripts/run.sh            # start the components and keep them in operation
+#
+# The version of the PDP comes from conformance/CERBOS_VERSION. The scripts put it into the
+# environment. Do not write the version in this file.
+
+services:
+  cerbos:
+    image: ghcr.io/cerbos/cerbos:${CERBOS_VERSION:?set CERBOS_VERSION - run via scripts/smoke.sh}
+    command: ["server", "--set=storage.disk.directory=/policies", "--set=storage.driver=disk", "--set=telemetry.disabled=true", "--log-level=error"]
+    environment:
+      CERBOS_NO_TELEMETRY: "1"
+    volumes:
+      - ./policies:/policies:ro
+    healthcheck:
+      test: ["CMD", "/cerbos", "healthcheck", "--insecure"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 3s
+
+  app:
+    build:
+      # The build context is the adapter directory, because the Gemfile of the example gets
+      # the adapter from the parent directory.
+      context: ..
+      dockerfile: example/Dockerfile
+      args:
+        RUBY_VERSION: ${RUBY_VERSION:-3.4}
+    depends_on:
+      cerbos:
+        condition: service_healthy
+    environment:
+      CERBOS_HOST: cerbos:3593
+      PORT: "4567"
+    ports:
+      - "${EXAMPLE_PORT:-4567}:4567"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:4567/healthz"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 3s

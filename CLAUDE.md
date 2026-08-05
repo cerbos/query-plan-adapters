@@ -31,6 +31,17 @@ npm run test:adversarial  # differential suite against the shared conformance co
 
 Prisma has version-specific tests: `npm run test:v6`, `npm run test:v7`
 
+### Ruby (ActiveRecord)
+```bash
+# Everything runs in Docker against a PDP pinned to conformance/CERBOS_VERSION.
+cd activerecord
+./scripts/test.sh                                     # all three suites
+./scripts/test.sh spec/adversarial_conformance_spec.rb
+RUBY_VERSION=3.2 ACTIVERECORD_VERSION=7.1 ./scripts/test.sh
+./scripts/lint.sh
+./example/scripts/smoke.sh                            # end-to-end example app
+```
+
 ### Python (SQLAlchemy)
 ```bash
 pdm install

@@ -16,6 +16,9 @@ defaults:
   run:
     working-directory: activerecord
 
+permissions:
+  contents: read
+
 jobs:
   test:
     strategy:
@@ -24,15 +27,16 @@ jobs:
         ruby-version: ["3.2", "3.3", "3.4"]
         activerecord-version: ["8.0"]
         include:
-          # Both ends of the ActiveRecord range the gemspec declares.
+          # The first version and the last version of the ActiveRecord range in the gemspec.
           - ruby-version: "3.2"
             activerecord-version: "7.1"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # The suites run in Docker against a PDP pinned to conformance/CERBOS_VERSION, which
-      # scripts/test.sh reads. Never hardcode the version here.
+      # The suites run in Docker. The version of the PDP comes from
+      # conformance/CERBOS_VERSION, and scripts/test.sh reads that file. Do not write the
+      # version in this file.
       - name: Run the shared policy and translation suites
         env:
           RUBY_VERSION: ${{ matrix.ruby-version }}
@@ -53,3 +57,15 @@ jobs:
 
       - name: Run the adversarial differential suite
         run: ./scripts/test.sh spec/adversarial_conformance_spec.rb
+
+  # Starts the example application with a live PDP and sends real HTTP requests to it. The
+  # example gets the adapter from the parent directory. Thus a change that breaks the example
+  # also fails here. If a check fails, the script writes the logs of the application and of
+  # the PDP.
+  example:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Run the example smoke tests
+        run: ./example/scripts/smoke.sh

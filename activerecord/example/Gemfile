@@ -1,0 +1,14 @@
+# frozen_string_literal: true
+
+source "https://rubygems.org"
+
+# The adapter comes from the parent directory. Thus a change to the adapter changes this
+# application immediately, and the smoke tests find a break in the adapter.
+gem "cerbos-activerecord", path: ".."
+
+gem "activerecord", "~> 8.0"
+gem "cerbos", "~> 0.13"
+gem "puma", "~> 6.6"
+gem "rackup", "~> 2.2"
+gem "sinatra", "~> 4.1"
+gem "sqlite3", "~> 2.6"
