@@ -830,11 +830,31 @@ class ElasticsearchQueryPlanAdapterTest {
                 ((Result.Conditional) result).query());
     }
 
+    /**
+     * The planner has no existence operator. {@code R.attr.x != null} arrives as {@code ne}
+     * against a null value, and {@code isSet} is not a registered CEL function, so a policy
+     * naming it does not compile and the operator can never reach the wire — see
+     * cerbos/query-plan-adapters#261. These pin IS NOT NULL / IS NULL through that path.
+     */
     @Test
-    void isSetTrueProducesExists() {
-        Operand condition = expressionOperand("isSet",
+    void neAgainstNullProducesExists() {
+        Operand condition = expressionOperand("ne",
                 variableOperand("request.resource.attr.department"),
-                boolValueOperand(true));
+                nullValueOperand());
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
+
+        Map<String, Object> query = ((Result.Conditional) result).query();
+        assertEquals(Map.of("exists", Map.of("field", "department")), query);
+    }
+
+    /** Value-first: the planner preserves source order, so {@code null != R.attr.x} inverts operands. */
+    @Test
+    void valueFirstNeAgainstNullProducesExists() {
+        Operand condition = expressionOperand("ne",
+                nullValueOperand(),
+                variableOperand("request.resource.attr.department"));
         PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
 
         Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
@@ -844,19 +864,16 @@ class ElasticsearchQueryPlanAdapterTest {
     }
 
     @Test
-    void isSetFalseProducesNotExists() {
+    void isSetIsRejectedRatherThanTranslated() {
         Operand condition = expressionOperand("isSet",
                 variableOperand("request.resource.attr.department"),
-                boolValueOperand(false));
+                boolValueOperand(true));
         PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
 
-        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP);
-
-        Map<String, Object> query = ((Result.Conditional) result).query();
-        assertEquals(
-                Map.of("bool", Map.of("must_not", List.of(
-                        Map.of("exists", Map.of("field", "department"))))),
-                query);
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP));
+        assertTrue(e.getMessage().contains("isSet"),
+                "unknown operator must be named in the error, got: " + e.getMessage());
     }
 
     @Test

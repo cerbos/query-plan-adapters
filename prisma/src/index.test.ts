@@ -1423,7 +1423,10 @@ describe("Field Operations", () => {
       );
     });
 
-    test("conditional - isSet", async () => {
+    // The planner has no existence operator: `!= null` arrives as `ne` against a null
+    // value, never `isSet` (cerbos/query-plan-adapters#261). A policy that writes `isSet`
+    // does not even compile, so the operator is unreachable rather than merely unused.
+    test("conditional - IS NOT NULL via ne against null", async () => {
       const queryPlan = await cerbos.planResources({
         principal: { id: "user1", roles: ["USER"] },
         resource: { kind: "resource" },
@@ -1469,7 +1472,7 @@ describe("Field Operations", () => {
       );
     });
 
-    test("conditional - isNotSet", async () => {
+    test("conditional - IS NULL via eq against null", async () => {
       const queryPlan = await cerbos.planResources({
         principal: { id: "user1", roles: ["USER"] },
         resource: { kind: "resource" },
@@ -5271,7 +5274,7 @@ describe("Complex Operations", () => {
       );
     });
 
-    test("isSet with nested relation", async () => {
+    test("IS NOT NULL through a nested relation", async () => {
       const queryPlan = await cerbos.planResources({
         principal: { id: "user1", roles: ["USER"] },
         resource: { kind: "resource" },

@@ -174,7 +174,9 @@ export const filteredQuery = query({
             ),
           )
           .collect();
-      case "isSet":
+      // Named for the SQL-ish shape, not a Cerbos operator: the planner has no existence
+      // operator, it emits ne(field, null) (cerbos/query-plan-adapters#261).
+      case "notNull":
         return await q
           .filter((f) =>
             f.neq(

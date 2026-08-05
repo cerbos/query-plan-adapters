@@ -37,7 +37,8 @@ ChromaDB's `Where` filter does not support `$not` or `$nor`. The adapter handles
 ChromaDB stores flat scalar metadata, so the following Cerbos operators cannot be mapped:
 
 - String helpers: `contains`, `startsWith`, `endsWith`
-- Existence: `isSet`
+- Null checks: `eq`/`ne` against a null value (Chroma metadata values are non-null scalars, so a
+  comparison against null cannot be represented)
 - Array/collection: `hasIntersection`, `exists`, `exists_one`, `all`, `filter`, `map`, `lambda`, `size`
 
 Any unsupported operator in the plan causes `queryPlanToChromaDB` to throw an error.
@@ -82,7 +83,7 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` d
 | Classification | Coverage |
 | --- | --- |
 | Oracle-tested | 15 reference actions: directional and inequality comparisons, single/empty membership, Unicode and empty strings, negative numbers, n-ary/double/triple negation, membership on an optional resource field, mapped nested-field equality, and case-sensitive equality |
-| Fail-closed | 103 reference conformance actions plus regex, ordered indexing/`get-field`, and timestamp probes (106 actions total) |
+| Fail-closed | 107 reference conformance actions plus regex, ordered indexing/`get-field`, and timestamp probes (110 actions total) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute documents. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 
 Chroma metadata filters are limited to flat scalar comparisons and membership. Nested collections, field-to-field and arithmetic expressions, string helpers, hierarchy/timestamp operations, ternaries, nullable inequality, and other shapes that cannot be represented faithfully throw before a filter is returned.

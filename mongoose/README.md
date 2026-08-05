@@ -22,7 +22,7 @@ You can merge the adapter output with existing application filters (for example,
 | Comparisons | `eq`, `ne`, `lt`, `le`, `gt`, `ge` | Emits `$eq`, `$ne`, `$lt`, `$lte`, `$gt`, `$gte` checks against the mapped field. |
 | Membership | `in`, `hasIntersection` | `$in` on simple lists, or `$elemMatch` when targeting array relations; `hasIntersection` supports either a direct array field or a `map` projection inside the plan. |
 | String helpers | `contains`, `startsWith`, `endsWith` | Generates escaped regular expressions that target substrings, prefixes, or suffixes. |
-| Existence helpers | `isSet`, `exists` | Uses `$exists`/`$ne: null` for scalars and `$elemMatch` for collections. |
+| Existence helpers | `eq`/`ne` against `null`, `exists` | Null checks arrive as `eq`/`ne` against a null value — the planner emits no existence operator. Uses `$eq: null`/`$ne: null` for scalars and `$elemMatch` for collections. |
 | Collection helpers | `filter`, `lambda`, `map`, `all` | Translates Cerbos collection expressions into scoped `$elemMatch` filters and maps lambda variables to the correct nested paths. `all` requires the stored field to be an array. `exists`/`all` over a *literal* value-list collection (a folded principal attribute above the planner's 10-element unroll cap) fold to `$or`/`$and` of the substituted lambda body instead — no relation mapping needed. |
 | Arithmetic and values | `add`, `sub`, `mult`, `div`, `mod`, `if`, `size`, `index`, `get-field` | Uses document-level MongoDB `$expr` expressions. Division requires a non-zero constant denominator; indexing requires a non-negative integer constant and adds a per-document bounds check. |
 | Conversions and matching | `string`, `double`, `int`, `timestamp`, `matches` | Uses guarded MongoDB conversion and regular-expression expressions. Timestamps accept BSON dates or millisecond-exact RFC 3339 strings in the CEL instant range. Regex matching accepts a validated common RE2/PCRE2 subset. |
@@ -44,7 +44,7 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` d
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 87 reference conformance actions plus regex, ordered indexing/`get-field`, and timestamp probes (90 actions) |
+| Oracle-tested | 91 reference conformance actions plus regex, ordered indexing/`get-field`, and timestamp probes (94 actions) |
 | Fail-closed | 31 reference actions |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute documents. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 

@@ -450,38 +450,6 @@ function isResolvedValue(operand: ResolvedOperand): operand is ResolvedValue {
   return "value" in operand;
 }
 
-function getNamedOperand(
-  operands: PlanExpressionOperand[],
-  message: string
-): NamedOperand {
-  const operand = operands.find(isNamedOperand);
-  if (!operand) {
-    throw new Error(message);
-  }
-  return operand;
-}
-
-function getValueOperand(
-  operands: PlanExpressionOperand[],
-  message: string
-): ValueOperand {
-  const operand = operands.find(isValueOperand);
-  if (!operand) {
-    throw new Error(message);
-  }
-  return operand;
-}
-
-function requireResolvedFieldReference(
-  operand: ResolvedOperand,
-  message: string
-): ResolvedFieldReference {
-  if (!isResolvedFieldReference(operand)) {
-    throw new Error(message);
-  }
-  return operand;
-}
-
 function requireResolvedValue(
   operand: ResolvedOperand,
   message: string
@@ -1337,10 +1305,6 @@ function buildPrismaFilterFromCerbosExpression(
     case "startsWith":
     case "endsWith": {
       return handleStringOperator(operator, operands, mapper);
-    }
-
-    case "isSet": {
-      return handleIsSetOperator(operands, mapper);
     }
 
     case "hasIntersection": {
@@ -2280,30 +2244,6 @@ function handleStringOperator(
   throw new Error(
     `${operator} between two constants must be folded by the Cerbos planner`
   );
-}
-
-/**
- * Helper function to handle "isSet" operator
- */
-function handleIsSetOperator(
-  operands: PlanExpressionOperand[],
-  mapper: Mapper
-): PrismaFilter {
-  const nameOperand = getNamedOperand(operands, "Name operand is undefined");
-  const valueOperand = getValueOperand(operands, "Value operand is undefined");
-  const fieldRef = requireResolvedFieldReference(
-    resolveOperand(nameOperand, mapper),
-    "Name operand must resolve to a field reference"
-  );
-  const resolvedValue = requireResolvedValue(
-    resolveOperand(valueOperand, mapper),
-    "Value operand must resolve to a value"
-  );
-
-  const fieldName = getLeafField(fieldRef.path);
-  return wrapRelations(fieldRef.relations, {
-    [fieldName]: resolvedValue.value ? { not: null } : { equals: null },
-  });
 }
 
 /**

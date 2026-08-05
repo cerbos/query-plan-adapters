@@ -72,12 +72,7 @@ public class ElasticsearchQueryPlanAdapter {
                     Map.of("wildcard", Map.of(field, Map.of("value", "*" + escapeWildcard(value))))),
             Map.entry("matches", ElasticsearchQueryPlanAdapter::matchesQuery),
             Map.entry("hasIntersection", (field, value) ->
-                    Map.of("terms", Map.of(field, value instanceof List<?> l ? l : List.of(value)))),
-            Map.entry("isSet", (field, value) ->
-                    Boolean.TRUE.equals(value)
-                            ? Map.of("exists", Map.of("field", field))
-                            : Map.of("bool", Map.of("must_not", List.of(
-                                    Map.of("exists", Map.of("field", field))))))
+                    Map.of("terms", Map.of(field, value instanceof List<?> l ? l : List.of(value))))
     );
 
     /** Operators whose second operand is a lambda that binds an iteration variable. */
@@ -936,7 +931,6 @@ public class ElasticsearchQueryPlanAdapter {
             case "ge" -> range(field, "lt", value);
             case "in", "contains", "startsWith", "endsWith", "matches" ->
                     definedAndNot(field, positive);
-            case "isSet" -> Boolean.TRUE.equals(value) ? notExists(field) : exists(field);
             default -> throw new IllegalArgumentException(
                     "Cannot safely negate operator without scripts: " + normalizedOperator);
         };

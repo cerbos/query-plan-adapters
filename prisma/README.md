@@ -10,7 +10,9 @@ An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanRe
 
 - Logical operators: `and`, `or`, `not`
 - Comparison operators: `eq`, `ne`, `lt`, `gt`, `lte`, `gte`, `in`
-- String operations: `startsWith`, `endsWith`, `contains`, `isSet`
+- String operations: `startsWith`, `endsWith`, `contains`
+- Null checks: `eq`/`ne` against a null value map to `{ equals: null }` / `{ not: null }`. The
+  Cerbos planner emits no existence operator — `R.attr.x != null` arrives as a plain `ne`.
 
 #### Relation Operators
 
@@ -106,7 +108,7 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` d
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 85 reference actions |
+| Oracle-tested | 89 reference actions |
 | Fail-closed | 33 reference actions plus the 3 reference-unsupported shapes (36 actions total) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 

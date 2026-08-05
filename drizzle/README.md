@@ -7,7 +7,8 @@ An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanRe
 - Supports logical operators: `and`, `or`, `not`
 - Supports comparison operators: `eq`, `ne`, `lt`, `gt`, `le`, `ge`, `in`
 - Supports string operators: `contains`, `startsWith`, `endsWith`
-- Supports nullability checks via the `isSet` operator
+- Supports nullability checks: `eq`/`ne` against a null value map to `IS NULL` / `IS NOT NULL`
+  (the planner emits no existence operator)
 - Supports set-aware operators such as `hasIntersection`, `exists`, `exists_one`, and `all`
 - Supports relation-aware mappings, including nested relations and many-to-many joins
 - Works with Drizzle SQLite, PostgreSQL, MySQL and PlanetScale drivers
@@ -18,7 +19,7 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` d
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 116 reference conformance actions |
+| Oracle-tested | 120 reference conformance actions |
 | Fail-closed corpus shapes | Sub-millisecond `now()` thresholds plus regex `matches()`, ordered list indexing/`get-field`, and `timestamp()` over an untyped string field (5 actions) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 

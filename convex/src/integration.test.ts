@@ -226,7 +226,7 @@ describe("Integration: Convex + Cerbos", () => {
     );
   });
 
-  test("isSet filter against real Convex DB", async () => {
+  test("IS NOT NULL filter against real Convex DB", async () => {
     const queryPlan = await cerbos.planResources({
       principal: { id: "user1", roles: ["USER"] },
       resource: { kind: "resource" },
@@ -237,7 +237,7 @@ describe("Integration: Convex + Cerbos", () => {
     expect(result.kind).toBe(PlanKind.CONDITIONAL);
 
     const docs = await convex.query(api.resources.filteredQuery, {
-      filterType: "isSet",
+      filterType: "notNull",
       filterField: "aOptionalString",
     });
 

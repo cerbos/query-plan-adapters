@@ -865,7 +865,7 @@ describe("Bare Boolean Operands", () => {
   });
 });
 
-describe("isSet", () => {
+describe("null existence checks", () => {
   test("conditional - is-set produces ne(field, null)", async () => {
     // #given - Cerbos translates `!= null` to ne(field, null)
     const queryPlan = await cerbos.planResources({
@@ -893,8 +893,12 @@ describe("isSet", () => {
     expect(result.filter!(qMissing)).toBe(true);
   });
 
-  test("isSet operator compares against undefined", () => {
-    // #given - isSet operator checks for field existence (undefined in Convex)
+  test("isSet is rejected rather than translated", () => {
+    // #given - a synthetic isSet plan. The PDP cannot produce this: `isSet` is not a
+    // registered CEL function, so a policy naming it fails to compile and the operator
+    // never reaches the wire (cerbos/query-plan-adapters#261). The adapter carried a
+    // dedicated isSet branch for it anyway; now it must fail closed like any unknown
+    // operator rather than guess at an existence filter.
     const queryPlan = {
       kind: PlanKind.CONDITIONAL,
       condition: {
@@ -906,21 +910,10 @@ describe("isSet", () => {
       },
     } as unknown as PlanResourcesResponse;
 
-    // #when
-    const result = queryPlanToConvex({ queryPlan, mapper: defaultMapper });
-
-    // #then - isSet checks undefined (missing), not null
-    const docWithValue = { aOptionalString: "hello" } as Record<string, unknown>;
-    const docWithNull = { aOptionalString: null } as Record<string, unknown>;
-    const docMissing = {} as Record<string, unknown>;
-
-    const qValue = createMockFilterBuilder(docWithValue);
-    const qNull = createMockFilterBuilder(docWithNull);
-    const qMissing = createMockFilterBuilder(docMissing);
-
-    expect(result.filter!(qValue)).toBe(true);
-    expect(result.filter!(qNull)).toBe(true);
-    expect(result.filter!(qMissing)).toBe(false);
+    // #when / #then
+    expect(() =>
+      queryPlanToConvex({ queryPlan, mapper: defaultMapper }),
+    ).toThrow(/Unsupported operator: isSet/);
   });
 });
 

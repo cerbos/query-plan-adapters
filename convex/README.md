@@ -21,7 +21,7 @@ An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanRe
 | Logical | `and`, `or`, `not` | Builds `q.and(...)`, `q.or(...)`, `q.not(...)` groups. |
 | Comparisons | `eq`, `ne`, `lt`, `le`, `gt`, `ge` | Emits `q.eq`, `q.neq`, `q.lt`, `q.lte`, `q.gt`, `q.gte` against the mapped field. |
 | Membership | `in` | Composed as `q.or(q.eq(field, v1), q.eq(field, v2), ...)`. |
-| Existence | `isSet` | Uses `q.neq(field, undefined)` for set, `q.eq(field, undefined)` for unset. |
+| Existence | `eq`/`ne` against `null` | Null checks arrive as `eq`/`ne` against a null value — the planner emits no existence operator. |
 
 ### Post-filter operators
 
@@ -72,7 +72,7 @@ const { kind, filter, postFilter } = queryPlanToConvex({
 
 > **Security requirement:** `postFilter` is part of the authorization predicate. Run it in the same trusted Convex/backend function and apply it to every candidate before serialization or return. Never send unfiltered candidates to a browser or other untrusted client for filtering.
 
-If your Cerbos policies only use operators that Convex supports natively (comparisons, `in`, `isSet`, logical combinators), you don't need this flag — `filter` alone will enforce the full policy at the DB level.
+If your Cerbos policies only use operators that Convex supports natively (comparisons, `in`, null checks, logical combinators), you don't need this flag — `filter` alone will enforce the full policy at the DB level.
 
 ## Conformance contract
 
@@ -80,7 +80,7 @@ The adapter is differentially tested with 20 hostile seed documents against Cerb
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | All 118 reference conformance actions, plus `matches()`, list indexing/`get-field`, and `timestamp()` plans that the Spring Data reference adapter rejects (121 actions total) |
+| Oracle-tested | All 122 reference conformance actions, plus `matches()`, list indexing/`get-field`, and `timestamp()` plans that the Spring Data reference adapter rejects (125 actions total) |
 | Fail-closed | No corpus shape when `allowPostFilter: true`; unknown operators and invalid expression structures still throw |
 | Explicit opt-in | Any plan that cannot be represented entirely as a Convex database filter requires `allowPostFilter: true` |
 | Known planner divergence | `has()` on a missing attribute is currently folded by the Cerbos planner to `ALWAYS_ALLOWED`; `checkResource` still denies documents where the attribute is missing. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |

@@ -705,10 +705,10 @@ describe("adversarial conformance corpus", () => {
       return count !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(122);
+    expect(MANIFEST_ACTIONS.size).toBe(126);
     expect(unsupportedEntries).toHaveLength(31);
     expect(supportedExpectedEntries).toHaveLength(3);
-    expect(ORACLE_ACTIONS).toHaveLength(90);
+    expect(ORACLE_ACTIONS).toHaveLength(94);
     expect(THROWING_ACTIONS).toHaveLength(31);
     expect(misclassified).toEqual([]);
     expect(
@@ -751,7 +751,7 @@ describe("adversarial conformance corpus", () => {
   });
 
   test("oracle is not degenerate", async () => {
-    for (const action of ["vf-le", "like-percent", "all-on-empty", "pv-exists", "pv-all"]) {
+    for (const action of ["vf-le", "like-percent", "all-on-empty", "pv-exists", "pv-all", "null-eq", "null-ne"]) {
       const ids = await oracleAllowedIds(action);
       expect(ids.length).toBeGreaterThan(0);
       expect(ids.length).toBeLessThan(SEEDS.length);

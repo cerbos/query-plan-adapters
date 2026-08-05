@@ -41,7 +41,8 @@
     "in-null-elem-mixed", "in-null-elem-neg",
     "in-null-elem-only", "in-null-elem-only-neg",
     "in-null-elem-rel", "in-null-elem-rel-neg", "in-null-elem-hasint",
-    "in-var-var", "in-var-var-neg"
+    "in-var-var", "in-var-var-neg",
+    "null-eq", "null-ne", "vf-null-ne", "null-not-eq"
   ],
   "adapterUnsupported": {
     "prisma": [
@@ -223,7 +224,11 @@
       { "action": "in-null-elem-rel-neg", "reason": "Chroma's $in tests a metadata field against a literal list; it cannot test whether a literal is a member of a list-valued metadata field, and Chroma metadata values are scalars anyway" },
       { "action": "in-null-elem-hasint", "reason": "Chroma metadata values are scalars with no list-intersection operator, so hasIntersection has no Where equivalent" },
       { "action": "in-var-var", "reason": "Chroma Where documents compare a metadata field against a literal only; there is no field-to-field operand, so a comparison of two metadata keys cannot be translated" },
-      { "action": "in-var-var-neg", "reason": "Chroma Where documents compare a metadata field against a literal only; there is no field-to-field operand, so a comparison of two metadata keys cannot be translated" }
+      { "action": "in-var-var-neg", "reason": "Chroma Where documents compare a metadata field against a literal only; there is no field-to-field operand, so a comparison of two metadata keys cannot be translated" },
+      { "action": "null-eq", "reason": "Chroma $eq accepts only a finite number, string or boolean literal, and Chroma metadata has no null value, so an equality against null cannot be represented" },
+      { "action": "null-ne", "reason": "Chroma $ne matches records whose metadata key is absent, unlike Cerbos missing-attribute error semantics, and this field is not declared required" },
+      { "action": "vf-null-ne", "reason": "Value-first form of null-ne; the same $ne absent-key mismatch applies after the planner mirrors the operands" },
+      { "action": "null-not-eq", "reason": "Negating the null equality routes through the same $ne absent-key mismatch as null-ne" }
     ],
     "elasticsearch-java": [
       { "action": "all-on-empty", "reason": "Elasticsearch does not index empty nested arrays, so a positive all predicate cannot distinguish an empty collection (true) from a missing collection (CEL error)" },
@@ -305,7 +310,8 @@
       { "action": "in-null-elem-rel-neg", "reason": "Elasticsearch nested fields do not retain explicit null array elements, so negated null membership cannot be represented faithfully" },
       { "action": "in-null-elem-hasint", "reason": "Elasticsearch nested fields do not retain explicit null array elements, so intersection with null cannot be represented faithfully" },
       { "action": "in-var-var", "reason": "Elasticsearch Query DSL cannot test membership of one document field in another without scripts" },
-      { "action": "in-var-var-neg", "reason": "Elasticsearch Query DSL cannot test negated membership of one document field in another without scripts" }
+      { "action": "in-var-var-neg", "reason": "Elasticsearch Query DSL cannot test negated membership of one document field in another without scripts" },
+      { "action": "null-eq", "reason": "Elasticsearch does not index explicit null scalar values, so positive equality against null cannot distinguish an explicit null attribute (check() allows) from a missing field (CEL error, denies) without an indexed null_value sentinel. The negated forms (null-ne, vf-null-ne, null-not-eq) are expressible as exists and stay in the oracle set" }
     ]
   },
   "adapterSupportedExpected": {

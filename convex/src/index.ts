@@ -33,7 +33,7 @@ export interface QueryPlanToConvexResult<Q = unknown, R = unknown> {
 }
 
 const DB_PUSHABLE_OPERATORS = new Set([
-  "and", "or", "not", "eq", "ne", "lt", "le", "gt", "ge", "in", "isSet",
+  "and", "or", "not", "eq", "ne", "lt", "le", "gt", "ge", "in",
 ]);
 
 const ALL_KNOWN_OPERATORS = new Set([
@@ -216,11 +216,6 @@ const canPushToDb = (
           !isNullableField(needle.name, mapper),
       );
     }
-    case "isSet": {
-      const [field, expected] = expression.operands;
-      if (!field || !expected) return false;
-      return isVariable(field) && isValue(expected);
-    }
     default:
       return expression.operands.every((operand) =>
         canPushToDb(operand, mapper),
@@ -380,28 +375,6 @@ const translateExpression = (
       return q.or(
         ...values.map((v: unknown) => q.eq(q.field(field), v)),
       );
-    }
-
-    case "isSet": {
-      const fieldOperand = requireOperandMatching(
-        (o) => isVariable(o),
-        "isSet operator requires a field operand",
-      );
-      const valueOperand = requireOperandMatching(
-        (o) => isValue(o),
-        "isSet operator requires a boolean operand",
-      );
-
-      if (!isVariable(fieldOperand) || !isValue(valueOperand)) {
-        throw new Error("isSet operator requires one field and one boolean");
-      }
-
-      const field = resolveField(fieldOperand.name, mapper);
-
-      if (valueOperand.value) {
-        return q.neq(q.field(field), undefined);
-      }
-      return q.eq(q.field(field), undefined);
     }
 
     default:
@@ -769,15 +742,6 @@ const evaluateExpression = (
       }
       if (!Array.isArray(haystack)) return EVALUATION_ERROR;
       return haystack.some((value) => valuesEqual(value, needle));
-    }
-
-    case "isSet": {
-      const fieldValue = resolve(getOperandAt(operands, 0, "isSet field"));
-      const expected = resolve(getOperandAt(operands, 1, "isSet expected"));
-      if (typeof expected !== "boolean") return EVALUATION_ERROR;
-      return expected
-        ? !isEvaluationError(fieldValue)
-        : isEvaluationError(fieldValue);
     }
 
     case "contains": {
