@@ -693,7 +693,7 @@ async function adapterFilteredIds(action: string): Promise<string[]> {
 }
 
 describe("adversarial conformance corpus", () => {
-  test("manifest assigns all 118 actions exactly one Mongoose outcome", () => {
+  test("manifest assigns all 120 actions exactly one Mongoose outcome", () => {
     const oracle = new Set(ORACLE_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map((entry) => entry.action));
     const misclassified = [...MANIFEST_ACTIONS].filter((action) => {
@@ -705,10 +705,10 @@ describe("adversarial conformance corpus", () => {
       return count !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(120);
+    expect(MANIFEST_ACTIONS.size).toBe(122);
     expect(unsupportedEntries).toHaveLength(31);
     expect(supportedExpectedEntries).toHaveLength(3);
-    expect(ORACLE_ACTIONS).toHaveLength(88);
+    expect(ORACLE_ACTIONS).toHaveLength(90);
     expect(THROWING_ACTIONS).toHaveLength(31);
     expect(misclassified).toEqual([]);
     expect(
@@ -751,7 +751,7 @@ describe("adversarial conformance corpus", () => {
   });
 
   test("oracle is not degenerate", async () => {
-    for (const action of ["vf-le", "like-percent", "all-on-empty"]) {
+    for (const action of ["vf-le", "like-percent", "all-on-empty", "pv-exists", "pv-all"]) {
       const ids = await oracleAllowedIds(action);
       expect(ids.length).toBeGreaterThan(0);
       expect(ids.length).toBeLessThan(SEEDS.length);

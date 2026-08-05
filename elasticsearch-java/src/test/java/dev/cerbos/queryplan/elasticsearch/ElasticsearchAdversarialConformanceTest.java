@@ -203,9 +203,9 @@ class ElasticsearchAdversarialConformanceTest {
         manifest.addAll(conformance);
         manifest.addAll(expected);
         manifest.addAll(divergences);
-        assertEquals(38, oracleActions.size());
+        assertEquals(40, oracleActions.size());
         assertEquals(81, throwingActions.size());
-        assertEquals(120, classified.size());
+        assertEquals(122, classified.size());
         assertEquals(manifest, classified, "every manifest action must be classified locally");
     }
 
@@ -464,7 +464,7 @@ class ElasticsearchAdversarialConformanceTest {
 
     @Test
     void oracleIsNotDegenerate() {
-        for (String action : List.of("vf-le", "like-percent", "all-on-empty")) {
+        for (String action : List.of("vf-le", "like-percent", "all-on-empty", "pv-exists", "pv-all")) {
             List<String> ids = oracleAllowedIds(action);
             assertTrue(!ids.isEmpty() && ids.size() < seeds.size(),
                     "oracle for '" + action + "' is degenerate: " + ids);

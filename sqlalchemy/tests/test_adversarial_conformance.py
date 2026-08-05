@@ -755,6 +755,6 @@ class TestAdversarialConformance:
         # Guard the guard: these actions must produce a non-empty, non-total
         # oracle set, otherwise the differential comparison could pass
         # vacuously (e.g. a PDP that denies everything).
-        for action in ("vf-le", "like-percent", "all-on-empty"):
+        for action in ("vf-le", "like-percent", "all-on-empty", "pv-exists", "pv-all"):
             ids = _oracle_allowed_ids(adv_cerbos_client, action)
             assert 0 < len(ids) < len(SEEDS)

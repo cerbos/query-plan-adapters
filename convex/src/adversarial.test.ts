@@ -411,10 +411,10 @@ describe("adversarial conformance corpus", () => {
         ].filter(Boolean).length !== 1,
     );
 
-    expect(allActions.size).toBe(120);
+    expect(allActions.size).toBe(122);
     expect(CONVEX_UNSUPPORTED).toHaveLength(0);
     expect(CONVEX_SUPPORTED_EXPECTED).toHaveLength(3);
-    expect(ORACLE_ACTIONS).toHaveLength(119);
+    expect(ORACLE_ACTIONS).toHaveLength(121);
     expect(THROWING_ACTIONS).toHaveLength(0);
     expect(misclassified).toEqual([]);
   });
@@ -444,7 +444,7 @@ describe("adversarial conformance corpus", () => {
   });
 
   test("oracle is not degenerate", async () => {
-    for (const action of ["vf-le", "like-percent", "all-on-empty"]) {
+    for (const action of ["vf-le", "like-percent", "all-on-empty", "pv-exists", "pv-all"]) {
       const ids = await oracleAllowedIds(action);
       expect(ids.length).toBeGreaterThan(0);
       expect(ids.length).toBeLessThan(seedsFile.seeds.length);

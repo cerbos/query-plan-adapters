@@ -106,7 +106,7 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` d
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 83 reference actions |
+| Oracle-tested | 85 reference actions |
 | Fail-closed | 33 reference actions plus the 3 reference-unsupported shapes (36 actions total) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 
