@@ -182,17 +182,31 @@ def resource_table():
     return Resource
 
 
+def _require_declarative_base() -> None:
+    """Skip on 1.4, but fail loudly if 2.0 could not build the models.
+
+    Keyed on the installed version rather than on `HAS_DECLARATIVE_BASE`: were it
+    keyed on the import result, a typo or an upstream rename would turn the whole
+    2.0 leg into silent skips and CI would stay green with the models never
+    exercised.
+    """
+    if _is_sqla_14():
+        pytest.skip("DeclarativeBase requires SQLAlchemy >= 2.0")
+    assert HAS_DECLARATIVE_BASE, (
+        "SQLAlchemy >= 2.0 is installed but the DeclarativeBase models failed to "
+        "import — the 2.0 declarative tests would otherwise skip silently"
+    )
+
+
 @pytest.fixture
 def modern_user_table():
-    if not HAS_DECLARATIVE_BASE:
-        pytest.skip("DeclarativeBase requires SQLAlchemy >= 2.0")
+    _require_declarative_base()
     return ModernUser
 
 
 @pytest.fixture
 def modern_resource_table():
-    if not HAS_DECLARATIVE_BASE:
-        pytest.skip("DeclarativeBase requires SQLAlchemy >= 2.0")
+    _require_declarative_base()
     return ModernResource
 
 

@@ -17,8 +17,21 @@ defaults:
 
 jobs:
   test-sqla:
-    name: SQLA test
+    name: SQLA ${{ matrix.sqlalchemy.name }} test
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # `pyproject.toml` declares `sqlalchemy>=1.4`, so both major lines are
+        # supported and both must be proven. 1.4 and 2.0 differ in ways this
+        # adapter touches directly — `DeclarativeBase` exists only on 2.0, and
+        # 1.4 connections need an explicit commit — so a single-version job
+        # leaves half the supported range untested.
+        sqlalchemy:
+          - name: "1.4"
+            constraint: "sqlalchemy<2"
+          - name: "2.x"
+            constraint: ""
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -29,7 +42,7 @@ jobs:
         with:
           path: |
             ./__pypackages__
-          key: ${{ runner.os }}-python-${{ hashFiles('**/pdm.lock') }}
+          key: ${{ runner.os }}-python-${{ matrix.sqlalchemy.name }}-${{ hashFiles('**/pdm.lock') }}
 
       - uses: pdm-project/setup-pdm@973541a5febeafcfdadf8a51211435be6ecfd90f # v4.5
         name: Setup PDM
@@ -38,6 +51,30 @@ jobs:
           prerelease: true # Allow prerelease versions to be installed
           enable-pep582: true # Enable PEP 582 package loading globally
 
-      - run: pdm install -G testcontainers
+      # The 2.x leg installs straight from the committed lockfile. The 1.4 leg
+      # re-resolves under a constraint into a throwaway lockfile, so pdm.lock
+      # stays the single pinned source of truth and no second lockfile has to be
+      # kept in step with it.
+      - if: matrix.sqlalchemy.constraint == ''
+        run: pdm install -G testcontainers
+
+      - if: matrix.sqlalchemy.constraint != ''
+        run: |
+          echo "${{ matrix.sqlalchemy.constraint }}" > /tmp/sqlalchemy-constraint.txt
+          pdm install -G testcontainers \
+            --override /tmp/sqlalchemy-constraint.txt \
+            --lockfile /tmp/sqlalchemy-${{ matrix.sqlalchemy.name }}.lock
+
+      # Fails the job if the constraint did not take, rather than silently
+      # running the same version twice.
+      - name: Assert SQLAlchemy version
+        run: |
+          pdm run python - <<'PY'
+          import sqlalchemy
+          installed = sqlalchemy.__version__
+          expected = "${{ matrix.sqlalchemy.name }}".rstrip("x")
+          assert installed.startswith(expected), f"expected {expected}*, got {installed}"
+          print(f"SQLAlchemy {installed}")
+          PY
 
       - run: pdm run test
