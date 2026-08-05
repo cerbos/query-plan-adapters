@@ -12,12 +12,15 @@ import dev.cerbos.api.v1.response.Response.PlanResourcesResponse;
 import dev.cerbos.sdk.CerbosBlockingClient;
 import dev.cerbos.sdk.CerbosClientBuilder;
 import dev.cerbos.sdk.PlanResourcesResult;
+import dev.cerbos.sdk.builders.AttributeValue;
 import dev.cerbos.sdk.builders.Principal;
 import dev.cerbos.sdk.builders.Resource;
 import dev.cerbos.queryplan.elasticsearch.ElasticsearchQueryPlanAdapter.Result;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.elasticsearch.ElasticsearchContainer;
@@ -1072,5 +1075,75 @@ class ElasticsearchIntegrationTest {
         //   Doc 2: aBool=false AND tagObjects=[{tag3,private}] → no match
         //   Doc 3: aBool=true OR public-tag → match
         assertEquals(List.of("1", "3"), executeNestedQuery("or-leaf-exists"));
+    }
+
+    // -- known-value principal collections across the planner's 10-item unroll cliff --
+
+    /**
+     * {@code P.attr.teams} is folded to a known value at plan time, so the planner unrolls
+     * {@code principal-exists}/{@code principal-all} into an or/and chain at <= 10 elements
+     * (cerbos/cerbos#2570, #2817) and ships the lambda with a literal value-list collection
+     * above that. These tests straddle the cliff (9/10/11 elements) so both wire shapes stay
+     * exercised against the pinned PDP — and keep returning identical document sets.
+     */
+    @Nested
+    class KnownValuePrincipalCollections {
+
+        private Principal principalWithTeams(int size) {
+            List<AttributeValue> teams = new java.util.ArrayList<>(
+                    List.of(AttributeValue.stringValue("string"),
+                            AttributeValue.stringValue("anotherString")));
+            while (teams.size() < size) {
+                teams.add(AttributeValue.stringValue("filler-" + teams.size()));
+            }
+            return Principal.newInstance("user1", "USER")
+                    .withAttribute("teams", AttributeValue.listValue(
+                            teams.toArray(AttributeValue[]::new)));
+        }
+
+        private PlanResourcesResult planFor(int size, String action) {
+            return cerbosClient.plan(
+                    principalWithTeams(size), Resource.newInstance("resource"), action);
+        }
+
+        /**
+         * Pin the wire shape each leg exercises: supported PDPs are >= 0.54, where both macros
+         * unroll at <= 10 elements ({@code or}/{@code and} chain) and ship the value-list
+         * lambda ({@code exists}/{@code all}) above that. Without this, a planner that moves
+         * the threshold would silently leave one side of the cliff untested while the document
+         * assertions stay green.
+         */
+        private void assertPlanShape(int size, String action,
+                                     String unrolledOperator, String macroOperator) {
+            String operator = planFor(size, action)
+                    .getCondition()
+                    .orElseThrow(() -> new AssertionError(action + " plan has no condition"))
+                    .getExpression()
+                    .getOperator();
+            assertEquals(size <= 10 ? unrolledOperator : macroOperator, operator);
+        }
+
+        private List<String> execute(int size, String action) throws Exception {
+            Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
+                    planFor(size, action), FIELD_MAP);
+            assertInstanceOf(Result.Conditional.class, result);
+            return search(((Result.Conditional) result).query());
+        }
+
+        @ParameterizedTest
+        @ValueSource(ints = {9, 10, 11})
+        void principalExistsMatchesAnyTeam(int size) throws Exception {
+            assertPlanShape(size, "principal-exists", "or", "exists");
+            // doc 1 aString = "string", doc 3 aString = "anotherString" — both in teams.
+            assertEquals(List.of("1", "3"), execute(size, "principal-exists"));
+        }
+
+        @ParameterizedTest
+        @ValueSource(ints = {9, 10, 11})
+        void principalAllExcludesEveryTeam(int size) throws Exception {
+            assertPlanShape(size, "principal-all", "and", "all");
+            // doc 2 aString = "amIAString?" — the only document matching none of the teams.
+            assertEquals(List.of("2"), execute(size, "principal-all"));
+        }
     }
 }

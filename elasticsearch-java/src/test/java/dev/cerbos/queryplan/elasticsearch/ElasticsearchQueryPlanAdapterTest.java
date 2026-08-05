@@ -2,6 +2,7 @@ package dev.cerbos.queryplan.elasticsearch;
 
 import com.google.protobuf.ListValue;
 import com.google.protobuf.NullValue;
+import com.google.protobuf.Struct;
 import com.google.protobuf.Value;
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter;
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression;
@@ -9,6 +10,8 @@ import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand;
 import dev.cerbos.api.v1.response.Response.PlanResourcesResponse;
 import dev.cerbos.queryplan.elasticsearch.ElasticsearchQueryPlanAdapter.Result;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.List;
 import java.util.Map;
@@ -1464,5 +1467,217 @@ class ElasticsearchQueryPlanAdapterTest {
                                         "query", Map.of("term", Map.of("tagObjects.name", Map.of("value", "public")))))),
                         "minimum_should_match", 1)),
                 query);
+    }
+
+    // --- Known-value collections (planner unroll cliff) ---
+    //
+    // The planner unrolls exists/all over a known collection into an or/and chain at <= 10
+    // elements (cerbos/cerbos#2570, #2817) and ships the lambda with a literal value-list
+    // collection above that. A literal list is fully known at plan time, so — unlike a nested
+    // field — there is no missing-versus-empty ambiguity and the fold is exact under negation.
+
+    private static Operand emptyListValueOperand() {
+        return Operand.newBuilder()
+                .setValue(Value.newBuilder().setListValue(ListValue.newBuilder()))
+                .build();
+    }
+
+    private static Operand structListValueOperand(String field, String... values) {
+        ListValue.Builder list = ListValue.newBuilder();
+        for (String value : values) {
+            list.addValues(Value.newBuilder().setStructValue(
+                    Struct.newBuilder().putFields(
+                            field, Value.newBuilder().setStringValue(value).build())));
+        }
+        return Operand.newBuilder()
+                .setValue(Value.newBuilder().setListValue(list))
+                .build();
+    }
+
+    private static Operand valueListMacro(String operator, Operand collection, Operand body) {
+        return expressionOperand(operator, collection, lambdaOperand("t", body));
+    }
+
+    private static Map<String, Object> translate(Operand condition) {
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP, NESTED_PATHS);
+        return ((Result.Conditional) result).query();
+    }
+
+    @Test
+    void existsOverValueListFoldsToBoolShould() {
+        Map<String, Object> query = translate(valueListMacro("exists",
+                listValueOperand("string", "anotherString"),
+                expressionOperand("eq",
+                        variableOperand("request.resource.attr.aString"),
+                        variableOperand("t"))));
+
+        assertEquals(
+                Map.of("bool", Map.of(
+                        "should", List.of(
+                                Map.of("term", Map.of("aString", Map.of("value", "string"))),
+                                Map.of("term", Map.of("aString", Map.of("value", "anotherString")))),
+                        "minimum_should_match", 1)),
+                query);
+    }
+
+    @Test
+    void allOverValueListFoldsToBoolMust() {
+        // `all` over a *nested field* fails closed because a missing collection and an empty
+        // one are indistinguishable; a literal list has neither problem.
+        Map<String, Object> query = translate(valueListMacro("all",
+                listValueOperand("string", "anotherString"),
+                expressionOperand("eq",
+                        variableOperand("request.resource.attr.aString"),
+                        variableOperand("t"))));
+
+        assertEquals(
+                Map.of("bool", Map.of("must", List.of(
+                        Map.of("term", Map.of("aString", Map.of("value", "string"))),
+                        Map.of("term", Map.of("aString", Map.of("value", "anotherString")))))),
+                query);
+    }
+
+    @Test
+    void negatedExistsOverValueListFoldsToBoolMustOfNegations() {
+        // Negated exists over a nested field fails closed; over a literal list it is exactly
+        // "every element's comparison is false".
+        Map<String, Object> query = translate(expressionOperand("not",
+                valueListMacro("exists",
+                        listValueOperand("string", "anotherString"),
+                        expressionOperand("eq",
+                                variableOperand("request.resource.attr.aString"),
+                                variableOperand("t")))));
+
+        // The invariant that matters: the fold is indistinguishable from the or-chain the
+        // planner emits below the threshold, under negation as well as positively.
+        assertEquals(translate(expressionOperand("not",
+                expressionOperand("or",
+                        expressionOperand("eq",
+                                variableOperand("request.resource.attr.aString"),
+                                stringValueOperand("string")),
+                        expressionOperand("eq",
+                                variableOperand("request.resource.attr.aString"),
+                                stringValueOperand("anotherString"))))),
+                query);
+    }
+
+    @Test
+    void variablePathDrillsIntoElementFields() {
+        Map<String, Object> query = translate(valueListMacro("exists",
+                structListValueOperand("name", "string", "anotherString"),
+                expressionOperand("eq",
+                        variableOperand("request.resource.attr.aString"),
+                        variableOperand("t.name"))));
+
+        assertEquals(
+                Map.of("bool", Map.of(
+                        "should", List.of(
+                                Map.of("term", Map.of("aString", Map.of("value", "string"))),
+                                Map.of("term", Map.of("aString", Map.of("value", "anotherString")))),
+                        "minimum_should_match", 1)),
+                query);
+    }
+
+    @Test
+    void emptyValueListKeepsCelIdentitySemantics() {
+        Operand body = expressionOperand("eq",
+                variableOperand("request.resource.attr.aString"),
+                variableOperand("t"));
+
+        // exists over [] is false; all over [] is true.
+        assertEquals(Map.of("match_none", Map.of()),
+                translate(valueListMacro("exists", emptyListValueOperand(), body)));
+        assertEquals(Map.of("match_all", Map.of()),
+                translate(valueListMacro("all", emptyListValueOperand(), body)));
+
+        // ...and each flips under negation.
+        assertEquals(Map.of("match_all", Map.of()),
+                translate(expressionOperand("not",
+                        valueListMacro("exists", emptyListValueOperand(), body))));
+        assertEquals(Map.of("match_none", Map.of()),
+                translate(expressionOperand("not",
+                        valueListMacro("all", emptyListValueOperand(), body))));
+    }
+
+    @Test
+    void nestedLambdaRebindingTheVariableShadowsSubstitution() {
+        // The outer t is substituted; the inner exists rebinds t over a nested path, so its
+        // body must keep referencing the inner binding untouched.
+        Operand condition = valueListMacro("exists",
+                listValueOperand("ignored-a", "ignored-b"),
+                expressionOperand("exists",
+                        variableOperand("request.resource.attr.tagObjects"),
+                        lambdaOperand("t",
+                                expressionOperand("eq",
+                                        variableOperand("t.name"),
+                                        stringValueOperand("public")))));
+
+        Map<String, Object> nested = Map.of("nested", Map.of(
+                "path", "tagObjects",
+                "query", Map.of("term", Map.of("tagObjects.name", Map.of("value", "public")))));
+        assertEquals(
+                Map.of("bool", Map.of(
+                        "should", List.of(nested, nested),
+                        "minimum_should_match", 1)),
+                translate(condition));
+    }
+
+    @Test
+    void missingElementFieldFailsClosed() {
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> translate(valueListMacro("exists",
+                        structListValueOperand("name", "string"),
+                        expressionOperand("eq",
+                                variableOperand("request.resource.attr.aString"),
+                                variableOperand("t.missing")))));
+        assertTrue(error.getMessage().contains("Cannot resolve \"t.missing\""));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"exists_one", "filter", "map", "except"})
+    void unfoldableMacroOverValueListFailsClosed(String operator) {
+        // `filter` and `map` reach the leaf traversal rather than the collection handler, so
+        // this also pins that they name the real limitation instead of an operand-shape error.
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> translate(valueListMacro(operator,
+                        listValueOperand("string"),
+                        expressionOperand("eq",
+                                variableOperand("request.resource.attr.aString"),
+                                variableOperand("t")))));
+        assertTrue(error.getMessage()
+                        .contains(operator + " over a literal collection value is not supported"),
+                "unexpected message: " + error.getMessage());
+    }
+
+    @Test
+    void nonListCollectionValueFailsClosed() {
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> translate(valueListMacro("exists",
+                        stringValueOperand("not a list"),
+                        expressionOperand("eq",
+                                variableOperand("request.resource.attr.aString"),
+                                variableOperand("t")))));
+        assertTrue(error.getMessage()
+                .contains("exists over a literal collection requires a list value"));
+    }
+
+    @Test
+    void valueListMacroNeedsNoNestedPathDeclaration() {
+        // The nested-path requirement exists to reach relation documents; a literal list has
+        // no document to reach, so translation must succeed with an empty nestedPaths set.
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL,
+                valueListMacro("exists",
+                        listValueOperand("string"),
+                        expressionOperand("eq",
+                                variableOperand("request.resource.attr.aString"),
+                                variableOperand("t"))));
+
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(resp, FIELD_MAP, Set.of());
+        assertEquals(
+                Map.of("bool", Map.of(
+                        "should", List.of(Map.of("term", Map.of("aString", Map.of("value", "string")))),
+                        "minimum_should_match", 1)),
+                ((Result.Conditional) result).query());
     }
 }

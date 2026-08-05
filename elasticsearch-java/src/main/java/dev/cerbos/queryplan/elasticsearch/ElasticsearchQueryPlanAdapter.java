@@ -80,6 +80,10 @@ public class ElasticsearchQueryPlanAdapter {
                                     Map.of("exists", Map.of("field", field))))))
     );
 
+    /** Operators whose second operand is a lambda that binds an iteration variable. */
+    private static final Set<String> LAMBDA_BINDING_OPERATORS =
+            Set.of("exists", "exists_one", "all", "filter", "map", "except");
+
     private ElasticsearchQueryPlanAdapter() {}
 
     // --- PlanResourcesResult overloads ---
@@ -232,11 +236,15 @@ public class ElasticsearchQueryPlanAdapter {
             case "exists", "all", "except" ->
                     handleCollectionOperator(
                             operator, operands, fieldMap, overrides, nestedPaths, true);
-            case "exists_one" -> throw new IllegalArgumentException(
-                    "exists_one cannot be expressed by Elasticsearch nested queries without scripts");
+            case "exists_one" -> {
+                rejectUnfoldableValueListMacro(operator, operands);
+                throw new IllegalArgumentException(
+                        "exists_one cannot be expressed by Elasticsearch nested queries without scripts");
+            }
             case "hasIntersection" ->
                     handleHasIntersection(operands, fieldMap, overrides, nestedPaths);
             default -> {
+                rejectUnfoldableValueListMacro(operator, operands);
                 Map<String, Object> sizeResult =
                         trySizeComparison(operator, operands, fieldMap, nestedPaths);
                 if (sizeResult != null) {
@@ -267,11 +275,15 @@ public class ElasticsearchQueryPlanAdapter {
             case "exists", "all", "except" ->
                     handleCollectionOperator(
                             operator, operands, fieldMap, overrides, nestedPaths, false);
-            case "exists_one" -> throw new IllegalArgumentException(
-                    "exists_one cannot be expressed by Elasticsearch nested queries without scripts");
+            case "exists_one" -> {
+                rejectUnfoldableValueListMacro(operator, operands);
+                throw new IllegalArgumentException(
+                        "exists_one cannot be expressed by Elasticsearch nested queries without scripts");
+            }
             case "hasIntersection" -> throw new IllegalArgumentException(
                     "Negated hasIntersection cannot distinguish a missing collection from an empty collection in Elasticsearch");
             default -> {
+                rejectUnfoldableValueListMacro(operator, operands);
                 Map<String, Object> sizeResult =
                         trySizeComparisonFalse(operator, operands, fieldMap, nestedPaths);
                 if (sizeResult != null) {
@@ -298,6 +310,18 @@ public class ElasticsearchQueryPlanAdapter {
 
         Operand listOperand = operands.get(0);
         Operand lambdaOperand = operands.get(1);
+
+        // A literal value-list collection arrives when the planner could not unroll a macro
+        // over a known collection: at <= 10 elements it folds exists/all into an or/and chain
+        // itself (cerbos/cerbos#2570, #2817; maxItems = 10 in the planner's struct matcher),
+        // above that the lambda ships with the folded value list as its collection operand.
+        // Apply the same fold here instead of demanding a nested mapping that cannot exist
+        // for a literal.
+        if (listOperand.getNodeCase() == Operand.NodeCase.VALUE) {
+            return handleKnownValueCollection(
+                    operator, listOperand.getValue(), lambdaOperand,
+                    fieldMap, overrides, nestedPaths, whenTrue);
+        }
 
         if (listOperand.getNodeCase() != Operand.NodeCase.VARIABLE) {
             throw new IllegalArgumentException(
@@ -371,6 +395,160 @@ public class ElasticsearchQueryPlanAdapter {
                     "Negated except cannot be expressed safely without element error tracking");
             default -> throw new IllegalArgumentException("Unknown collection operator: " + operator);
         };
+    }
+
+    /**
+     * Fold a collection macro whose collection operand is a literal value list: substitute each
+     * element into the lambda body and combine the per-element expressions with {@code or}
+     * ({@code exists}) or {@code and} ({@code all}), then translate the combined expression
+     * through the normal traversal — the same fold the planner itself applies to known
+     * collections of 10 or fewer elements, so the emitted query does not depend on which side
+     * of that threshold the collection lands.
+     *
+     * <p>Unlike a nested-field collection, a literal list is fully known at plan time: there is
+     * no missing-versus-empty ambiguity, so the fold is exact under negation too and none of
+     * the nested-query restrictions on {@code all} or negated {@code exists} apply. The empty
+     * collection keeps CEL identity semantics: {@code exists} over {@code []} is false,
+     * {@code all} over {@code []} is true.
+     */
+    private static Map<String, Object> handleKnownValueCollection(
+            String operator,
+            Value collectionValue,
+            Operand lambdaOperand,
+            Map<String, String> fieldMap,
+            Map<String, OperatorFunction> overrides,
+            Set<String> nestedPaths,
+            boolean whenTrue) {
+        if (!"exists".equals(operator) && !"all".equals(operator)) {
+            throw new IllegalArgumentException(operator
+                    + " over a literal collection value is not supported. "
+                    + "Only exists() and all() can be folded into a flat query.");
+        }
+        if (collectionValue.getKindCase() != Value.KindCase.LIST_VALUE) {
+            throw new IllegalArgumentException(operator
+                    + " over a literal collection requires a list value");
+        }
+
+        if (lambdaOperand.getNodeCase() != Operand.NodeCase.EXPRESSION
+                || !"lambda".equals(lambdaOperand.getExpression().getOperator())) {
+            throw new IllegalArgumentException(
+                    operator + " second operand must be a lambda expression");
+        }
+        List<Operand> lambdaOperands = lambdaOperand.getExpression().getOperandsList();
+        if (lambdaOperands.size() != 2) {
+            throw new IllegalArgumentException(operator
+                    + " over a literal collection supports single-variable lambdas only");
+        }
+        Operand bodyOperand = lambdaOperands.get(0);
+        Operand lambdaVarOperand = lambdaOperands.get(1);
+        if (lambdaVarOperand.getNodeCase() != Operand.NodeCase.VARIABLE) {
+            throw new IllegalArgumentException("lambda second operand must be a variable");
+        }
+        String lambdaVar = lambdaVarOperand.getVariable();
+
+        List<Value> elements = collectionValue.getListValue().getValuesList();
+        if (elements.isEmpty()) {
+            boolean holds = "all".equals(operator);
+            return holds == whenTrue ? matchAll() : matchNone();
+        }
+
+        Expression.Builder combined = Expression.newBuilder()
+                .setOperator("exists".equals(operator) ? "or" : "and");
+        for (Value element : elements) {
+            combined.addOperands(substituteLambdaVariable(bodyOperand, lambdaVar, element));
+        }
+        Expression folded = combined.build();
+        return whenTrue
+                ? traverseExpression(folded, fieldMap, overrides, nestedPaths)
+                : traverseExpressionFalse(folded, fieldMap, overrides, nestedPaths);
+    }
+
+    /**
+     * Fail closed, by name, for a collection macro over a literal value list that has no flat
+     * translation. {@code filter} and {@code map} reach the leaf traversal rather than
+     * {@link #handleCollectionOperator}, so without this they would surface an unrelated
+     * operand-shape error instead of naming the real limitation.
+     */
+    private static void rejectUnfoldableValueListMacro(String operator, List<Operand> operands) {
+        if (LAMBDA_BINDING_OPERATORS.contains(operator)
+                && operands.size() == 2
+                && operands.get(0).getNodeCase() == Operand.NodeCase.VALUE) {
+            throw new IllegalArgumentException(operator
+                    + " over a literal collection value is not supported. "
+                    + "Only exists() and all() can be folded into a flat query.");
+        }
+    }
+
+    /**
+     * Substitute a lambda iteration variable with a concrete collection element inside a lambda
+     * body. A bare reference to the variable becomes the element itself; a
+     * {@code variable.path.to.field} reference drills into the element (failing closed when the
+     * path is missing — the CEL evaluation of that element would error). A nested macro whose
+     * lambda rebinds the same variable name shadows the outer variable, so substitution only
+     * descends into its collection operand.
+     */
+    private static Operand substituteLambdaVariable(
+            Operand operand, String varName, Value element) {
+        switch (operand.getNodeCase()) {
+            case VARIABLE -> {
+                String name = operand.getVariable();
+                if (name.equals(varName)) {
+                    return Operand.newBuilder().setValue(element).build();
+                }
+                if (name.startsWith(varName + ".")) {
+                    return Operand.newBuilder()
+                            .setValue(resolveElementPath(
+                                    name, name.substring(varName.length() + 1), element))
+                            .build();
+                }
+                return operand;
+            }
+            case EXPRESSION -> {
+                Expression expr = operand.getExpression();
+                List<Operand> ops = expr.getOperandsList();
+                Expression.Builder rebuilt = expr.toBuilder();
+                if (LAMBDA_BINDING_OPERATORS.contains(expr.getOperator()) && ops.size() == 2
+                        && shadowsVariable(ops.get(1), varName)) {
+                    // The nested lambda rebinds our variable: substitute only in the
+                    // collection operand.
+                    rebuilt.setOperands(0, substituteLambdaVariable(ops.get(0), varName, element));
+                    return Operand.newBuilder().setExpression(rebuilt).build();
+                }
+                for (int i = 0; i < ops.size(); i++) {
+                    rebuilt.setOperands(i, substituteLambdaVariable(ops.get(i), varName, element));
+                }
+                return Operand.newBuilder().setExpression(rebuilt).build();
+            }
+            default -> {
+                return operand;
+            }
+        }
+    }
+
+    /** True when {@code lambdaOperand} is a lambda whose iteration variable is {@code varName}. */
+    private static boolean shadowsVariable(Operand lambdaOperand, String varName) {
+        if (lambdaOperand.getNodeCase() != Operand.NodeCase.EXPRESSION
+                || !"lambda".equals(lambdaOperand.getExpression().getOperator())) {
+            return false;
+        }
+        List<Operand> ops = lambdaOperand.getExpression().getOperandsList();
+        return ops.size() == 2
+                && ops.get(1).getNodeCase() == Operand.NodeCase.VARIABLE
+                && varName.equals(ops.get(1).getVariable());
+    }
+
+    /** Drill a dotted path into a struct element, failing closed on a missing field. */
+    private static Value resolveElementPath(String fullRef, String path, Value element) {
+        Value current = element;
+        for (String segment : path.split("\\.")) {
+            if (current.getKindCase() != Value.KindCase.STRUCT_VALUE
+                    || !current.getStructValue().containsFields(segment)) {
+                throw new IllegalArgumentException("Cannot resolve \"" + fullRef
+                        + "\": collection element has no field \"" + segment + "\"");
+            }
+            current = current.getStructValue().getFieldsOrThrow(segment);
+        }
+        return current;
     }
 
     // --- hasIntersection (flat + nested/map) ---
@@ -913,6 +1091,14 @@ public class ElasticsearchQueryPlanAdapter {
 
     private static Map<String, Object> notQuery(Map<String, Object> query) {
         return Map.of("bool", Map.of("must_not", List.of(query)));
+    }
+
+    private static Map<String, Object> matchAll() {
+        return Map.of("match_all", Map.of());
+    }
+
+    private static Map<String, Object> matchNone() {
+        return Map.of("match_none", Map.of());
     }
 
     private static Map<String, Object> exists(String field) {

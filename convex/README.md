@@ -31,7 +31,7 @@ The following operators cannot be expressed as Convex DB filters. When the adapt
 | --- | --- | --- |
 | String | `contains`, `startsWith`, `endsWith` | `String.prototype.includes` / `startsWith` / `endsWith` |
 | Collection | `hasIntersection`, `index`, `get-field`, `size` | CEL-compatible collection and nested-field evaluation |
-| Quantifiers | `exists`, `exists_one`, `all` | CEL-compatible lambda evaluation, including empty collections and missing members |
+| Quantifiers | `exists`, `exists_one`, `all` | CEL-compatible lambda evaluation, including empty collections, missing members, and literal value-list collections |
 | Higher-order | `filter`, `map`, `lambda` | Collection filtering and projection inside larger expressions |
 | Arithmetic | `add`, `sub`, `mult`, `div`, `mod` | Numeric evaluation with CEL error propagation |
 | Conversion | `string`, `double`, `int`, `timestamp` | Scalar conversion and RFC 3339 timestamp comparison |
@@ -40,6 +40,21 @@ The following operators cannot be expressed as Convex DB filters. When the adapt
 | Hierarchy | `hierarchy`, `ancestorOf`, `descendentOf`, `overlaps` | Delimiter-aware hierarchy comparison |
 
 For mixed expressions (e.g. `and(eq(...), contains(...))`), the adapter splits the tree: DB-pushable children go to `filter`, the rest go to `postFilter`. For `or(...)` with any unsupported child, the entire expression goes to `postFilter` (partial OR push-down would miss results).
+
+#### Quantifiers over known collections
+
+A quantifier whose collection the PDP resolves at plan time — typically a
+principal attribute, as in `P.attr.teams.exists(t, R.attr.team == t)` — reaches
+the adapter in one of two wire shapes. The Cerbos planner unrolls it into a
+plain `or`/`and` chain at 10 elements or fewer, which pushes into the DB filter,
+and ships the lambda with a literal value-list collection above that
+(`maxItems = 10` in the planner's struct matcher; cerbos/cerbos#2570,
+cerbos/cerbos#2817), which evaluates as a `postFilter`. Because the adapter is
+an interpreter rather than a compiler, the literal collection is bound
+per-element like any other, so both shapes yield the same decisions — including
+`exists_one` cardinality, which compiling adapters cannot express. Only the
+push-down changes: above the threshold the predicate no longer reduces the
+documents read, so `allowPostFilter: true` is required.
 
 ### `allowPostFilter` opt-in
 

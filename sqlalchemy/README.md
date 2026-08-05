@@ -156,3 +156,35 @@ GenericExpression = BinaryExpression | ColumnOperators
 # and the actual map arg to `get_query` ⬇️
 OperatorFnMap = dict[str, Callable[[GenericColumn, Any], GenericExpression]]
 ```
+
+### Collection macros over known values
+
+`exists`/`all` over a *known* collection — one whose elements the PDP resolves
+at plan time, typically a principal attribute — is translated without any
+override or relation mapping:
+
+```yaml
+condition:
+  match:
+    expr: P.attr.teams.exists(t, R.attr.team == t)
+```
+
+The Cerbos planner unrolls this into a plain `or`/`and` chain at 10 elements or
+fewer and ships the lambda with a literal value-list collection above that
+(`maxItems = 10` in the planner's struct matcher; cerbos/cerbos#2570,
+cerbos/cerbos#2817). The adapter applies the same fold, uncapped, so the
+generated SQL is equivalent on both sides of that threshold rather than
+depending on how many teams a given principal happens to hold. Elements are
+substituted into the lambda body — a bare `t` becomes the element, `t.name`
+drills into it — and each substituted body is translated through the ordinary
+pipeline, so overrides and NULL handling apply exactly as they do to a
+planner-unrolled chain. An empty collection keeps CEL identity semantics:
+`exists` matches nothing, `all` matches everything.
+
+`exists_one`, `filter`, `map` and `except` have no flat equivalent and raise
+over a literal value list, as does a `t.path` reference that the element does
+not carry.
+
+Macros over a collection *column or relation* (`R.attr.tags.exists(...)`) still
+require an `operator_override_fns` entry — the adapter has no portable
+correlated-subquery translation for them.

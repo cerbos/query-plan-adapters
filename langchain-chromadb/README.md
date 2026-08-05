@@ -42,6 +42,39 @@ ChromaDB stores flat scalar metadata, so the following Cerbos operators cannot b
 
 Any unsupported operator in the plan causes `queryPlanToChromaDB` to throw an error.
 
+### Write membership as `in`, not as a collection macro
+
+A policy that checks a resource field against a principal collection has two
+equivalent spellings, and only one of them translates reliably here:
+
+```yaml
+# Fragile — translates for some principals and throws for others
+expr: P.attr.teams.exists(t, R.attr.team == t)
+
+# Portable — always a single $in
+expr: R.attr.team in P.attr.teams
+```
+
+The macro form is a trap on ChromaDB. `P.attr.*` is folded to a known value at
+plan time, and the Cerbos planner unrolls the macro into a plain `or` chain of
+equality comparisons — which this adapter translates — but only up to 10
+elements (`maxItems = 10` in the planner's struct matcher; cerbos/cerbos#2570,
+cerbos/cerbos#2817). Above that it ships the lambda with a literal value-list
+collection, which has no ChromaDB metadata translation and throws. The result is
+a data-dependent cliff: the same policy works for a principal with 10 teams and
+fails for one with 11.
+
+`all` is worse still: below the cap it unrolls to a chain of `ne`, which this
+adapter only accepts when the mapper declares `required: true` for the field,
+because a document missing the metadata key would otherwise match `$ne` and be
+over-granted.
+
+The membership form has no such threshold. It reaches the adapter as `in`
+against a literal list at every collection size and maps to a single `$in`
+filter, which is also cheaper for ChromaDB to evaluate than an `or` chain, and
+needs no `required` assertion. All three spellings are pinned across the
+10-element boundary in the adapter's test suite.
+
 ## Conformance contract
 
 The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 20 hostile seed documents and real ChromaDB metadata queries. The Spring Data adapter defines the reference semantics for this compatibility snapshot.

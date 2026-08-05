@@ -291,6 +291,7 @@ The `OperatorFunction` interface takes a field name and value, and returns a `Ma
 | Negated `all` (collection) | `nested` + a definitely-false inner query |
 | `except` (collection) | `nested` + `bool.must_not` |
 | `hasIntersection` + `map` | `nested` + `terms` |
+| `exists`/`all` over a literal value list | `bool.should` / `bool.must` of the substituted lambda body (see below) |
 
 `ne`, negated leaf queries, and safe negated membership containing `null` include an `exists` guard.
 Cerbos treats a missing attribute as an evaluation error, so a document with no mapped field must
@@ -308,15 +309,36 @@ interior anchors, empty-string-only patterns, and unescaped `.`. Lucene optional
 disabled (`flags: NONE`), so characters such as `@` remain literals. Dot is rejected because RE2
 excludes a newline while Lucene's dot includes it.
 
+### Collection macros over known values
+
+A macro whose collection the PDP resolves at plan time — typically a principal attribute, as in
+`P.attr.teams.exists(t, R.attr.team == t)` — needs no `nestedPaths` declaration. The Cerbos planner
+unrolls it into a plain `or`/`and` chain at 10 elements or fewer and ships the lambda with a literal
+value-list collection above that (`maxItems = 10` in the planner's struct matcher;
+cerbos/cerbos#2570, cerbos/cerbos#2817). The adapter applies the same fold, uncapped, so the emitted
+query is equivalent on both sides of that threshold rather than depending on how many teams a given
+principal happens to hold. Elements are substituted into the lambda body — a bare `t` becomes the
+element, `t.name` drills into it — and the per-element queries combine into `bool.should`
+(`exists`) or `bool.must` (`all`).
+
+The restrictions that apply to macros over a `nested` field do **not** apply here. Positive `all`
+and negated `exists` fail closed on a nested collection because Elasticsearch cannot distinguish a
+missing collection from an empty one; a literal list is fully known at plan time, so both
+translate exactly, including under negation. An empty list keeps CEL identity semantics: `exists`
+emits `match_none` and `all` emits `match_all`, each flipping under negation.
+
+`exists_one`, `filter`, `map` and `except` have no flat equivalent and throw over a literal value
+list, as does a `t.path` reference that the element does not carry.
+
 ### Unsupported query-plan shapes
 
 The adapter fails closed with `IllegalArgumentException` for shapes that Elasticsearch Query DSL
 cannot express safely without scripts, including field-to-field comparisons, a constant string
 receiver with a document-field argument, arithmetic over document fields, conditional values,
-arbitrary collection counts, string lengths, ordered array indexing, positive `all`, negated
-`exists`, negated membership in a document collection, negated intersection, collection-empty
-checks, and membership tests that need to distinguish an explicit null value or array element from
-a missing field. Unsupported regex
+arbitrary collection counts, string lengths, ordered array indexing, positive `all` and negated
+`exists` over a document collection, negated membership in a document collection, negated
+intersection, collection-empty checks, and membership tests that need to distinguish an explicit
+null value or array element from a missing field. Unsupported regex
 syntax and sub-millisecond timestamp literals also fail closed. Painless scripts are not generated
 by this adapter because they would change the security and performance profile of every
 authorization filter.
