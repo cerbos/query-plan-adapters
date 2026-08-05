@@ -69,7 +69,6 @@ unmapped reference is an error, never a guessed column name.
 
 ```go
 tags := &cerbosent.Relation{
-    Kind:         cerbosent.RelationMany,
     Table:        "contact_tag",
     SourceColumn: "id",         // column on the parent row
     TargetColumn: "contact_id", // matching column on contact_tag
@@ -105,12 +104,13 @@ See [#302](https://github.com/cerbos/query-plan-adapters/issues/302).
 ## Conformance contract
 
 The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 20
-hostile seed rows and real Ent-built queries on SQLite. The Spring Data adapter defines the
-reference semantics for this compatibility snapshot.
+hostile seed rows and real Ent-built queries. The whole corpus is replayed against **both SQLite
+and PostgreSQL**, so the dialect-sensitive choices this adapter makes are proved rather than
+assumed. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 122 reference conformance actions — every conformance shape in the corpus |
+| Oracle-tested | 122 reference conformance actions — every conformance shape in the corpus, on SQLite and PostgreSQL |
 | Fail-closed corpus shapes | Regex `matches()`, ordered list indexing/`get-field`, and `timestamp()` over an untyped string field (3 actions) |
 | Representation-dependent | `null-eq-missing` — rejected under `NullOmitted`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
@@ -124,18 +124,27 @@ Go's `time.Time` carries nanoseconds, so those instants survive translation exac
 The three fail-closed shapes return an error wrapping `ErrUnsupported` rather than a broader
 predicate. `matches()` is rejected because SQL regex dialects do not guarantee CEL/RE2 semantics.
 
-### Dialect coverage and collation
+### Dialect coverage
 
-The corpus is proved on SQLite. PostgreSQL and MySQL are supported by construction — Ent's builder
-owns quoting and placeholders, and the only dialect-sensitive choices the adapter makes (cast
-spellings, null-safe equality, timestamp binding) are selected by `WithDialect` — but they are not
-exercised by the differential suite, so treat them as untested paths.
+| Dialect | Status |
+| --- | --- |
+| SQLite | Proved — full corpus, text timestamps compared lexicographically |
+| PostgreSQL | Proved — full corpus, native `boolean` and `timestamptz` columns |
+| MySQL | Supported by construction, **not** exercised by the differential suite |
+
+The two proved dialects are not the same test twice: SQLite stores instants as text and booleans
+as integers, PostgreSQL has real types for both, and each needs a different null-safe equality
+operator and different cast spellings. Running both is what makes `WithDialect` a checked claim.
+
+MySQL goes through the same code paths, but until it joins the suite treat it as untested.
+
+### Collation
 
 CEL string comparison and matching are case-sensitive and byte-exact, while `LIKE` collation is
-controlled by the database. The suite sets `PRAGMA case_sensitive_like = ON`; on MySQL's default
-`utf8mb4_0900_ai_ci` or a `_CI_` SQL Server collation, string predicates will match strings CEL
-would reject — an over-grant the adapter cannot detect. Treat collation as part of your policy
-contract.
+controlled by the database. The suite sets `PRAGMA case_sensitive_like = ON` on SQLite and relies
+on PostgreSQL's default deterministic collation; on MySQL's default `utf8mb4_0900_ai_ci` or a
+`_CI_` SQL Server collation, string predicates will match strings CEL would reject — an over-grant
+the adapter cannot detect. Treat collation as part of your policy contract.
 
 ## Development
 
@@ -145,8 +154,9 @@ golangci-lint run ./...
 golangci-lint fmt ./...
 ```
 
-The suite starts its own Cerbos container, reading the pinned PDP version from
-`conformance/CERBOS_VERSION`, and seeds an in-memory SQLite database.
+The suite starts one Cerbos container, reading the pinned PDP version from
+`conformance/CERBOS_VERSION`, then replays the whole corpus against an in-memory SQLite database
+and a PostgreSQL testcontainer in turn.
 
 ## License
 

@@ -3,16 +3,9 @@
 
 package queryplan
 
-import "fmt"
-
-// RelationKind distinguishes a to-one hop from a to-many collection.
-type RelationKind uint8
-
-const (
-	// RelationOne is a to-one hop: `R.attr.owner.name` reads a column on a single related row.
-	RelationOne RelationKind = iota
-	// RelationMany is a to-many collection: `R.attr.tags` is what a collection macro iterates.
-	RelationMany
+import (
+	"fmt"
+	"strings"
 )
 
 // Relation describes how a collection- or object-valued attribute reaches another table.
@@ -22,13 +15,23 @@ const (
 // inside a nested lambda. Getting that rebase wrong is what the corpus's `outer-attr-depth2` and
 // `w2-outer-relation` actions exist to catch.
 type Relation struct {
-	Field        *Entry
-	Fields       map[string]Entry
-	Table        string
+	// Field maps a scalar collection's element to its single column, e.g. `subCategoryNames`
+	// where each element is the string itself rather than an object.
+	Field *Entry
+	// Fields maps an object collection's element fields, e.g. `tags` where `t.name` reads the
+	// related table's `name` column.
+	Fields map[string]Entry
+	// Table is the element table — the one a lambda body reads its fields from.
+	Table string
+	// SourceColumn is the column on the parent scope's row that the outermost table matches.
 	SourceColumn string
+	// TargetColumn is the matching column on the outermost table — Table itself when Via is
+	// empty, otherwise the last hop's table.
 	TargetColumn string
-	Via          []Hop
-	Kind         RelationKind
+	// Via lists intermediate tables between Table and the parent, innermost first. It is empty
+	// for a direct relation and non-empty for a flattened chain such as
+	// `mainCategory.subCategories`, which reaches the resource through its category table.
+	Via []Hop
 }
 
 // Hop is one intermediate table in a flattened relation chain.
@@ -55,11 +58,16 @@ const (
 
 // Entry is what a plan variable resolves to.
 type Entry struct {
-	Relation         *Relation
-	Column           string
-	Qualifier        string
-	ValueType        ValueType
-	ScalarCollection bool
+	// Relation is set when the attribute reaches another table, and Column is empty.
+	Relation *Relation
+	// Column names a column on the row this entry is read from.
+	Column string
+	// Qualifier is the table or alias the column is read from. Callers normally leave it empty
+	// and let the translator fill it in — the resource table at the top level, a collection
+	// element's alias inside a lambda. Set it to read a column from somewhere else.
+	Qualifier string
+	// ValueType marks a column whose stored representation needs special handling.
+	ValueType ValueType
 }
 
 // Mapper resolves a plan variable — the full reference as the planner emits it, e.g.
@@ -132,8 +140,7 @@ func (s scopedMapper) Resolve(reference string) (Entry, bool) {
 		return Entry{}, false
 	}
 
-	if prefix := s.variable + "."; len(reference) > len(prefix) && reference[:len(prefix)] == prefix {
-		field := reference[len(prefix):]
+	if field, ok := strings.CutPrefix(reference, s.variable+"."); ok {
 		e, ok := s.relation.Fields[field]
 		if !ok {
 			return Entry{}, false

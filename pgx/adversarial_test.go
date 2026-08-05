@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"strings"
 	"testing"
 	"time"
 
@@ -94,21 +93,21 @@ func buildMapper() cerbospgx.Mapper {
 		"name": {Column: "name"},
 	}
 	tags := &cerbospgx.Relation{
-		Kind: cerbospgx.RelationMany, Table: tagTable,
+		Table:        tagTable,
 		SourceColumn: "id", TargetColumn: "resource_id",
 		Field:  &cerbospgx.Entry{Column: "name"},
 		Fields: tagFields,
 	}
 
 	labels := &cerbospgx.Relation{
-		Kind: cerbospgx.RelationMany, Table: labelTable,
+		Table:        labelTable,
 		SourceColumn: "id", TargetColumn: "sub_category_id",
 		Field:  &cerbospgx.Entry{Column: "name"},
 		Fields: map[string]cerbospgx.Entry{"name": {Column: "name"}},
 	}
 
 	subCategories := &cerbospgx.Relation{
-		Kind: cerbospgx.RelationMany, Table: subCategoryTable,
+		Table:        subCategoryTable,
 		SourceColumn: "id", TargetColumn: "category_id",
 		Field: &cerbospgx.Entry{Column: "name"},
 		Fields: map[string]cerbospgx.Entry{
@@ -118,7 +117,7 @@ func buildMapper() cerbospgx.Mapper {
 	}
 
 	categories := &cerbospgx.Relation{
-		Kind: cerbospgx.RelationMany, Table: categoryTable,
+		Table:        categoryTable,
 		SourceColumn: "id", TargetColumn: "resource_id",
 		Fields: map[string]cerbospgx.Entry{
 			"name":          {Column: "name"},
@@ -132,7 +131,7 @@ func buildMapper() cerbospgx.Mapper {
 		Table: categoryTable, ChildColumn: "category_id", JoinColumn: "id",
 	}}
 	mainSub := &cerbospgx.Relation{
-		Kind: cerbospgx.RelationMany, Table: subCategoryTable,
+		Table:        subCategoryTable,
 		Via:          mainChain,
 		SourceColumn: "id", TargetColumn: "resource_id",
 		Field: &cerbospgx.Entry{Column: "name"},
@@ -157,12 +156,12 @@ func buildMapper() cerbospgx.Mapper {
 		"request.resource.attr.obj.inner": {Column: "a_string"},
 
 		"request.resource.attr.tags":     {Relation: tags},
-		"request.resource.attr.tagNames": {Relation: tags, ScalarCollection: true},
+		"request.resource.attr.tagNames": {Relation: tags},
 
 		"request.resource.attr.categories": {Relation: categories},
 
 		"request.resource.attr.mainCategory.subCategories": {Relation: mainSub},
-		"request.resource.attr.mainCategory.subNames":      {Relation: mainSub, ScalarCollection: true},
+		"request.resource.attr.mainCategory.subNames":      {Relation: mainSub},
 	}
 }
 
@@ -404,7 +403,7 @@ func (h *harness) adapterFilteredIDs(t *testing.T, action string, opts ...cerbos
 		return nil, err
 	}
 
-	query := fmt.Sprintf(`SELECT %s.id FROM %s`, quote(resourceTable), quote(resourceTable))
+	query := `SELECT id FROM ` + resourceTable
 	switch result.Kind {
 	case cerbospgx.KindAlwaysDenied:
 		return nil, nil
@@ -433,10 +432,6 @@ func (h *harness) adapterFilteredIDs(t *testing.T, action string, opts ...cerbos
 
 	sort.Strings(ids)
 	return ids, nil
-}
-
-func quote(ident string) string {
-	return `"` + strings.ReplaceAll(ident, `"`, `""`) + `"`
 }
 
 // -- the suite ----------------------------------------------------------------------------------

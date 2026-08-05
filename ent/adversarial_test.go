@@ -15,8 +15,11 @@ import (
 	"github.com/cerbos/cerbos-sdk-go/cerbos"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 	_ "modernc.org/sqlite"
+
+	_ "github.com/jackc/pgx/v5/stdlib"
 
 	cerbosent "github.com/cerbos/query-plan-adapters/ent"
 )
@@ -45,13 +48,35 @@ const (
 	labelTable       = "adversarial_label"
 )
 
+// -- dialect targets ---------------------------------------------------------------------------
+//
+// The suite runs end to end against every dialect this adapter claims to support. Ent's builder
+// owns quoting and placeholders, but the adapter still makes three dialect-sensitive choices of
+// its own — cast spellings, null-safe equality, and timestamp binding — and a dialect the harness
+// does not exercise is a dialect this adapter does not actually cover.
+
+// target is one database the whole corpus is replayed against.
+type target struct {
+	open    func(t *testing.T) *sql.DB
+	name    string
+	dialect string
+	ddl     string
+}
+
+func targets() []target {
+	return []target{
+		{name: "sqlite", dialect: dialect.SQLite, ddl: sqliteDDL, open: openSQLite},
+		{name: "postgres", dialect: dialect.Postgres, ddl: postgresDDL, open: openPostgres},
+	}
+}
+
 // CEL string matching is case-sensitive; SQLite's LIKE is case-insensitive for ASCII by default,
 // which would over-grant on the `cs-eq` and `hier-*` probes. Foreign keys are on so the seeded
 // relation graph is genuinely referentially valid.
 const sqliteDSN = "file:adversarial?mode=memory&cache=shared" +
 	"&_pragma=case_sensitive_like(1)&_pragma=foreign_keys(1)"
 
-const schemaDDL = `
+const sqliteDDL = `
 CREATE TABLE adversarial_resource (
 	id                 text PRIMARY KEY,
 	a_bool             integer NOT NULL,
@@ -86,6 +111,82 @@ CREATE TABLE adversarial_label (
 );
 `
 
+// The PostgreSQL schema uses native boolean and timestamptz columns, so it exercises the typed
+// path the SQLite schema cannot: on SQLite a timestamp is text compared lexicographically, here it
+// is a real instant.
+const postgresDDL = `
+CREATE TABLE adversarial_resource (
+	id                 text PRIMARY KEY,
+	a_bool             boolean          NOT NULL,
+	a_string           text             NOT NULL,
+	a_number           bigint           NOT NULL,
+	a_double           double precision,
+	a_optional_string  text,
+	created_by         text             NOT NULL,
+	scope              text,
+	created_at         timestamptz
+);
+CREATE TABLE adversarial_tag (
+	pk           bigserial PRIMARY KEY,
+	tag_id       text NOT NULL,
+	name         text,
+	resource_id  text NOT NULL REFERENCES adversarial_resource(id)
+);
+CREATE TABLE adversarial_category (
+	id           text PRIMARY KEY,
+	name         text NOT NULL,
+	resource_id  text NOT NULL REFERENCES adversarial_resource(id)
+);
+CREATE TABLE adversarial_sub_category (
+	id           text PRIMARY KEY,
+	name         text NOT NULL,
+	category_id  text NOT NULL REFERENCES adversarial_category(id)
+);
+CREATE TABLE adversarial_label (
+	id               text PRIMARY KEY,
+	name             text,
+	sub_category_id  text NOT NULL REFERENCES adversarial_sub_category(id)
+);
+`
+
+func openSQLite(t *testing.T) *sql.DB {
+	t.Helper()
+
+	db, err := sql.Open("sqlite", sqliteDSN)
+	require.NoError(t, err, "opening SQLite")
+	t.Cleanup(func() { _ = db.Close() })
+
+	// The shared-cache in-memory database lives only as long as a connection is held, and a
+	// pooled connection closing would drop the schema mid-run.
+	db.SetMaxOpenConns(1)
+	return db
+}
+
+func openPostgres(t *testing.T) *sql.DB {
+	t.Helper()
+
+	container, err := postgres.Run(t.Context(),
+		"postgres:17-alpine",
+		postgres.WithDatabase("conformance"),
+		postgres.WithUsername("conformance"),
+		postgres.WithPassword("conformance"),
+		testcontainers.WithWaitStrategy(
+			wait.ForLog("database system is ready to accept connections").
+				WithOccurrence(2).WithStartupTimeout(2*time.Minute),
+		),
+	)
+	require.NoError(t, err, "starting PostgreSQL")
+	testcontainers.CleanupContainer(t, container)
+
+	dsn, err := container.ConnectionString(t.Context(), "sslmode=disable")
+	require.NoError(t, err)
+
+	db, err := sql.Open("pgx", dsn)
+	require.NoError(t, err, "opening PostgreSQL")
+	t.Cleanup(func() { _ = db.Close() })
+	return db
+}
+
 // buildMapper wires the corpus's attribute references onto the schema above.
 //
 // `owner` and `tagNames` deliberately alias columns that `aOptionalString` and `tags[].name`
@@ -94,7 +195,7 @@ CREATE TABLE adversarial_label (
 // schema exercise both conventions.
 func buildMapper() cerbosent.Mapper {
 	tags := &cerbosent.Relation{
-		Kind: cerbosent.RelationMany, Table: tagTable,
+		Table:        tagTable,
 		SourceColumn: "id", TargetColumn: "resource_id",
 		Field: &cerbosent.Entry{Column: "name"},
 		Fields: map[string]cerbosent.Entry{
@@ -104,14 +205,14 @@ func buildMapper() cerbosent.Mapper {
 	}
 
 	labels := &cerbosent.Relation{
-		Kind: cerbosent.RelationMany, Table: labelTable,
+		Table:        labelTable,
 		SourceColumn: "id", TargetColumn: "sub_category_id",
 		Field:  &cerbosent.Entry{Column: "name"},
 		Fields: map[string]cerbosent.Entry{"name": {Column: "name"}},
 	}
 
 	subCategories := &cerbosent.Relation{
-		Kind: cerbosent.RelationMany, Table: subCategoryTable,
+		Table:        subCategoryTable,
 		SourceColumn: "id", TargetColumn: "category_id",
 		Field: &cerbosent.Entry{Column: "name"},
 		Fields: map[string]cerbosent.Entry{
@@ -121,7 +222,7 @@ func buildMapper() cerbosent.Mapper {
 	}
 
 	categories := &cerbosent.Relation{
-		Kind: cerbosent.RelationMany, Table: categoryTable,
+		Table:        categoryTable,
 		SourceColumn: "id", TargetColumn: "resource_id",
 		Fields: map[string]cerbosent.Entry{
 			"name":          {Column: "name"},
@@ -132,7 +233,7 @@ func buildMapper() cerbosent.Mapper {
 	// mainCategory.* flattens the two-hop chain from the root: the subquery joins through the
 	// intermediate category table while only the resource row correlates outwards.
 	mainSub := &cerbosent.Relation{
-		Kind: cerbosent.RelationMany, Table: subCategoryTable,
+		Table:        subCategoryTable,
 		Via:          []cerbosent.Hop{{Table: categoryTable, ChildColumn: "category_id", JoinColumn: "id"}},
 		SourceColumn: "id", TargetColumn: "resource_id",
 		Field: &cerbosent.Entry{Column: "name"},
@@ -157,42 +258,37 @@ func buildMapper() cerbosent.Mapper {
 		"request.resource.attr.obj.inner": {Column: "a_string"},
 
 		"request.resource.attr.tags":       {Relation: tags},
-		"request.resource.attr.tagNames":   {Relation: tags, ScalarCollection: true},
+		"request.resource.attr.tagNames":   {Relation: tags},
 		"request.resource.attr.categories": {Relation: categories},
 
 		"request.resource.attr.mainCategory.subCategories": {Relation: mainSub},
-		"request.resource.attr.mainCategory.subNames":      {Relation: mainSub, ScalarCollection: true},
+		"request.resource.attr.mainCategory.subNames":      {Relation: mainSub},
 	}
 }
 
 // -- fixtures ---------------------------------------------------------------------------------
+
+// suite holds what every dialect run shares: the corpus and one Cerbos PDP. Planning and checking
+// are dialect-independent, so starting a second PDP per target would only slow the run down.
+type suite struct {
+	client *cerbos.GRPCClient
+	corpus *Corpus
+}
 
 type harness struct {
 	db     *sql.DB
 	client *cerbos.GRPCClient
 	corpus *Corpus
 	mapper cerbosent.Mapper
+	target target
 }
 
-func setup(t *testing.T) *harness {
+func setupSuite(t *testing.T) *suite {
 	t.Helper()
 
 	corpus := loadCorpus(t, adapterName)
-	ctx := t.Context()
 
-	db, err := sql.Open("sqlite", sqliteDSN)
-	require.NoError(t, err, "opening SQLite")
-	t.Cleanup(func() { _ = db.Close() })
-
-	// The shared-cache in-memory database lives only as long as a connection is held, and a
-	// pooled connection closing would drop the schema mid-run.
-	db.SetMaxOpenConns(1)
-
-	_, err = db.ExecContext(ctx, schemaDDL)
-	require.NoError(t, err, "creating schema")
-	seedDatabase(t, db, corpus)
-
-	cerbosContainer, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+	container, err := testcontainers.GenericContainer(t.Context(), testcontainers.GenericContainerRequest{
 		ContainerRequest: testcontainers.ContainerRequest{
 			Image:        "ghcr.io/cerbos/cerbos:" + corpus.CerbosVersion,
 			ExposedPorts: []string{"3593/tcp"},
@@ -207,59 +303,90 @@ func setup(t *testing.T) *harness {
 		Started: true,
 	})
 	require.NoError(t, err, "starting Cerbos")
-	testcontainers.CleanupContainer(t, cerbosContainer)
+	testcontainers.CleanupContainer(t, container)
 
-	endpoint, err := cerbosContainer.PortEndpoint(ctx, "3593/tcp", "")
+	endpoint, err := container.PortEndpoint(t.Context(), "3593/tcp", "")
 	require.NoError(t, err)
 
 	client, err := cerbos.New(endpoint, cerbos.WithPlaintext())
 	require.NoError(t, err, "connecting to Cerbos")
 
-	return &harness{db: db, client: client, corpus: corpus, mapper: buildMapper()}
+	return &suite{client: client, corpus: corpus}
 }
 
-func seedDatabase(t *testing.T, db *sql.DB, corpus *Corpus) {
+func (s *suite) harnessFor(t *testing.T, tgt target) *harness {
 	t.Helper()
 
-	exec := func(query string, args ...any) {
-		_, err := db.ExecContext(t.Context(), query, args...)
-		require.NoError(t, err, "seeding: %s", query)
-	}
+	db := tgt.open(t)
+	_, err := db.ExecContext(t.Context(), tgt.ddl)
+	require.NoError(t, err, "creating %s schema", tgt.name)
 
-	for _, seed := range corpus.Seeds.Seeds {
-		// Timestamps are stored in the adapter's documented SQLite layout: SQLite compares text
-		// lexicographically, so a variable-width fraction would order instants wrongly.
-		var created any
-		if raw := createdAt(seed); raw != nil {
-			parsed, err := time.Parse(time.RFC3339Nano, *raw)
-			require.NoError(t, err, "parsing derived createdAt for %s", seed.ID)
-			created = parsed.UTC().Format(cerbosent.SQLiteTimestampLayout)
-		}
+	h := &harness{db: db, client: s.client, corpus: s.corpus, mapper: buildMapper(), target: tgt}
+	h.seed(t)
+	return h
+}
 
-		exec(`INSERT INTO adversarial_resource
-			(id, a_bool, a_string, a_number, a_double, a_optional_string, created_by, scope, created_at)
-			VALUES (?,?,?,?,?,?,?,?,?)`,
+// exec builds a statement through ent's builder so placeholders match the dialect, then runs it.
+func (h *harness) exec(t *testing.T, table string, columns []string, values ...any) {
+	t.Helper()
+
+	query, args := entsql.Dialect(h.target.dialect).
+		Insert(table).Columns(columns...).Values(values...).Query()
+	_, err := h.db.ExecContext(t.Context(), query, args...)
+	require.NoError(t, err, "seeding %s", table)
+}
+
+func (h *harness) seed(t *testing.T) {
+	t.Helper()
+
+	for _, seed := range h.corpus.Seeds.Seeds {
+		h.exec(t, resourceTable,
+			[]string{
+				"id", "a_bool", "a_string", "a_number", "a_double",
+				"a_optional_string", "created_by", "scope", "created_at",
+			},
 			seed.ID, seed.ABool, seed.AString, seed.ANumber, nullableFloat(aDouble(seed)),
-			nullableString(seed.AOptionalString), createdBy(seed), nullableString(scopeOf(seed)), created)
+			nullableString(seed.AOptionalString), createdBy(seed),
+			nullableString(scopeOf(seed)), h.storedTimestamp(t, seed))
 
 		for _, tag := range seed.Tags {
-			exec(`INSERT INTO adversarial_tag (tag_id, name, resource_id) VALUES (?,?,?)`,
+			h.exec(t, tagTable, []string{"tag_id", "name", "resource_id"},
 				tag.ID, nullableString(tag.Name), seed.ID)
 		}
 
 		for i, subName := range seed.SubCategoryNames {
 			catID, subID := categoryID(seed, i), subCategoryID(seed, i)
-			exec(`INSERT INTO adversarial_category (id, name, resource_id) VALUES (?,?,?)`,
-				catID, "business", seed.ID)
-			exec(`INSERT INTO adversarial_sub_category (id, name, category_id) VALUES (?,?,?)`,
-				subID, subName, catID)
+			h.exec(t, categoryTable, []string{"id", "name", "resource_id"}, catID, "business", seed.ID)
+			h.exec(t, subCategoryTable, []string{"id", "name", "category_id"}, subID, subName, catID)
 
 			for j, label := range labelsOf(seed) {
-				exec(`INSERT INTO adversarial_label (id, name, sub_category_id) VALUES (?,?,?)`,
+				h.exec(t, labelTable, []string{"id", "name", "sub_category_id"},
 					fmt.Sprintf("%s-label%d", subID, j), nullableString(label), subID)
 			}
 		}
 	}
+}
+
+// storedTimestamp writes the derived createdAt in whatever form the dialect compares correctly.
+//
+// PostgreSQL has a real instant type and takes the time.Time directly. SQLite stores text and
+// compares it lexicographically, so it gets the adapter's documented fixed-width layout — the same
+// one the adapter binds its own timestamp parameters in.
+func (h *harness) storedTimestamp(t *testing.T, seed Seed) any {
+	t.Helper()
+
+	raw := createdAt(seed)
+	if raw == nil {
+		return nil
+	}
+
+	parsed, err := time.Parse(time.RFC3339Nano, *raw)
+	require.NoError(t, err, "parsing derived createdAt for %s", seed.ID)
+
+	if h.target.dialect == dialect.SQLite {
+		return parsed.UTC().Format(cerbosent.SQLiteTimestampLayout)
+	}
+	return parsed.UTC()
 }
 
 func nullableString(v *string) any {
@@ -392,7 +519,7 @@ func (h *harness) adapterFilteredIDs(t *testing.T, action string, opts ...cerbos
 		cerbos.NewResource(h.corpus.Seeds.ResourceKind, ""), action)
 	require.NoError(t, err, "planning %s", action)
 
-	opts = append(opts, cerbosent.WithDialect(dialect.SQLite))
+	opts = append(opts, cerbosent.WithDialect(h.target.dialect))
 	result, err := cerbosent.Translate(plan.PlanResourcesResponse, resourceTable, h.mapper, opts...)
 	if err != nil {
 		return nil, err
@@ -403,7 +530,7 @@ func (h *harness) adapterFilteredIDs(t *testing.T, action string, opts ...cerbos
 
 	// The outer FROM holds only the resource table — every relation is reached through a
 	// correlated subquery — so an unqualified `id` is unambiguous here.
-	selector := entsql.Dialect(dialect.SQLite).
+	selector := entsql.Dialect(h.target.dialect).
 		Select("id").
 		From(entsql.Table(resourceTable))
 	if result.Kind == cerbosent.KindConditional {
@@ -436,7 +563,17 @@ func (h *harness) adapterFilteredIDs(t *testing.T, action string, opts ...cerbos
 // -- the suite ----------------------------------------------------------------------------------
 
 func TestAdversarialConformance(t *testing.T) {
-	h := setup(t)
+	s := setupSuite(t)
+
+	for _, tgt := range targets() {
+		t.Run(tgt.name, func(t *testing.T) {
+			runConformance(t, s.harnessFor(t, tgt))
+		})
+	}
+}
+
+func runConformance(t *testing.T, h *harness) {
+	t.Helper()
 
 	t.Run("manifest classifies every action exactly once", func(t *testing.T) {
 		seen := map[string]int{}

@@ -41,12 +41,6 @@ type (
 	NullRepresentation = queryplan.NullRepresentation
 )
 
-// Relation kinds.
-const (
-	RelationOne  = queryplan.RelationOne
-	RelationMany = queryplan.RelationMany
-)
-
 // Value types.
 const (
 	ValueDefault   = queryplan.ValueDefault

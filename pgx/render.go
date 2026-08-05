@@ -300,11 +300,7 @@ func (r *renderer) writeCall(c queryplan.Call) error {
 
 func (r *renderer) writeSubquery(s queryplan.Subquery) error {
 	if s.Kind == queryplan.SubqueryExists {
-		if s.Negate {
-			r.sb.WriteString("(NOT EXISTS (SELECT 1 FROM ")
-		} else {
-			r.sb.WriteString("(EXISTS (SELECT 1 FROM ")
-		}
+		r.sb.WriteString("(EXISTS (SELECT 1 FROM ")
 	} else {
 		r.sb.WriteString("(SELECT count(*) FROM ")
 	}

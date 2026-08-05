@@ -4,6 +4,7 @@
 package queryplan
 
 import (
+	"cmp"
 	"fmt"
 	"math"
 	"regexp"
@@ -280,10 +281,11 @@ func compareLeaf(op CmpOp, l, r value) (Expr, error) {
 		return nil, fmt.Errorf("non-finite numeric constants can only be compared with numeric constants")
 	}
 
-	return BoolConst{V: compareFloats(op, lv, rv)}, nil
+	return BoolConst{V: compareOrdered(op, lv, rv)}, nil
 }
 
-func compareFloats(op CmpOp, l, r float64) bool {
+// compareOrdered folds a comparison between two constants of the same ordered type.
+func compareOrdered[T cmp.Ordered](op CmpOp, l, r T) bool {
 	switch op {
 	case OpEq:
 		return l == r
@@ -309,12 +311,12 @@ func applyComparison(op CmpOp, l, r value) (Expr, error) {
 	// Both sides constant: fold rather than round-tripping through the database.
 	if lf, ok := asFloat(l); ok {
 		if rf, ok := asFloat(r); ok {
-			return BoolConst{V: compareFloats(op, lf, rf)}, nil
+			return BoolConst{V: compareOrdered(op, lf, rf)}, nil
 		}
 	}
 	if ls, ok := l.(string); ok {
 		if rs, ok := r.(string); ok {
-			return BoolConst{V: compareStrings(op, ls, rs)}, nil
+			return BoolConst{V: compareOrdered(op, ls, rs)}, nil
 		}
 	}
 	if lb, ok := l.(bool); ok {
@@ -341,23 +343,6 @@ func applyComparison(op CmpOp, l, r value) (Expr, error) {
 		return nil, err
 	}
 	return Cmp{Op: op, L: lExpr, R: rExpr}, nil
-}
-
-func compareStrings(op CmpOp, l, r string) bool {
-	switch op {
-	case OpEq:
-		return l == r
-	case OpNe:
-		return l != r
-	case OpLt:
-		return l < r
-	case OpLe:
-		return l <= r
-	case OpGt:
-		return l > r
-	default:
-		return l >= r
-	}
 }
 
 // membership implements CEL `in`, including explicit-null list elements.

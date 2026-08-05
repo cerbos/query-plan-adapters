@@ -48,13 +48,46 @@ func render(e queryplan.Expr, d string) (*sql.Predicate, error) {
 	}), nil
 }
 
-// bindValue records a parameter, normalising the types whose storage differs by dialect.
+// bindValue records a parameter, applying the two dialect-specific adjustments a bound plan value
+// needs.
 func bindValue(b *sql.Builder, v any) {
-	if ts, ok := v.(time.Time); ok && b.Dialect() == dialect.SQLite {
-		b.Arg(ts.UTC().Format(SQLiteTimestampLayout))
-		return
+	if b.Dialect() == dialect.SQLite {
+		// SQLite has no temporal type, so an instant is stored and compared as text.
+		if ts, ok := v.(time.Time); ok {
+			b.Arg(ts.UTC().Format(SQLiteTimestampLayout))
+			return
+		}
 	}
+
 	b.Arg(v)
+
+	// PostgreSQL infers an untyped `$n` from the context it appears in, and in an expression such
+	// as `CAST(col AS double precision) / $1` there is nothing to infer from — it falls back to
+	// text and the query dies with "operator does not exist". Since CEL numbers are doubles and
+	// the plan is the only thing that knows a literal's type, say it explicitly. SQLite and MySQL
+	// infer from the bound value itself and need no annotation.
+	if b.Dialect() == dialect.Postgres {
+		if t := postgresParamType(v); t != "" {
+			b.WriteString("::").WriteString(t)
+		}
+	}
+}
+
+func postgresParamType(v any) string {
+	switch v.(type) {
+	case bool:
+		return "boolean"
+	case float32, float64:
+		return "double precision"
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		return "bigint"
+	case time.Time:
+		return "timestamptz"
+	case string:
+		return "text"
+	default:
+		return ""
+	}
 }
 
 // write emits one expression node. A single type switch over the tree is clearer here than
@@ -339,9 +372,6 @@ func writeCast(b *sql.Builder, t queryplan.Cast) error {
 func writeSubquery(b *sql.Builder, s queryplan.Subquery) error {
 	return wrap(b, func(b *sql.Builder) error {
 		if s.Kind == queryplan.SubqueryExists {
-			if s.Negate {
-				b.WriteString("NOT ")
-			}
 			b.WriteString("EXISTS ")
 		}
 

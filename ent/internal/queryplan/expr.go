@@ -235,7 +235,6 @@ type Subquery struct {
 	Where     Expr
 	From      []FromItem
 	Kind      SubqueryKind
-	Negate    bool
 }
 
 func (Column) isExpr()      {}

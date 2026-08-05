@@ -56,7 +56,6 @@ unmapped reference is an error, never a guessed column name.
 
 ```go
 tags := &cerbospgx.Relation{
-    Kind:         cerbospgx.RelationMany,
     Table:        "contact_tag",
     SourceColumn: "id",         // column on the parent row
     TargetColumn: "contact_id", // matching column on contact_tag

@@ -6,6 +6,7 @@ package queryplan
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	enginev1 "github.com/cerbos/cerbos/api/genpb/cerbos/engine/v1"
 )
@@ -52,13 +53,7 @@ func Build(cond *enginev1.PlanResourcesFilter_Expression_Operand, m Mapper, opts
 	}
 
 	b := &builder{opts: opts}
-	return b.predicate(root, rootMapper{parent: m, table: opts.RootTable}, scope{qualifier: opts.RootTable}, false)
-}
-
-// scope is the row the current expression reads columns from: the resource table at the top
-// level, or a collection element's alias inside a lambda body.
-type scope struct {
-	qualifier string
+	return b.predicate(root, rootMapper{parent: m, table: opts.RootTable}, false)
 }
 
 type builder struct {
@@ -107,7 +102,7 @@ var foldable = map[string]bool{"exists": true, "all": true}
 // around the result so that collection macros can push the polarity through the macro itself:
 // !exists(body) == all(!body). Applying a SQL NOT around a macro that had already decayed an
 // evaluation error to FALSE would turn a deny into an allow.
-func (b *builder) predicate(n *node, m Mapper, sc scope, negated bool) (Expr, error) {
+func (b *builder) predicate(n *node, m Mapper, negated bool) (Expr, error) {
 	switch {
 	case n.isVariable():
 		// A bare boolean attribute used as a conjunct, e.g. `R.attr.aBool`.
@@ -136,7 +131,7 @@ func (b *builder) predicate(n *node, m Mapper, sc scope, negated bool) (Expr, er
 		}
 		parts := make([]Expr, 0, len(n.operands))
 		for _, child := range n.operands {
-			p, err := b.predicate(child, m, sc, negated)
+			p, err := b.predicate(child, m, negated)
 			if err != nil {
 				return nil, err
 			}
@@ -152,26 +147,26 @@ func (b *builder) predicate(n *node, m Mapper, sc scope, negated bool) (Expr, er
 		if len(n.operands) != unaryOperands {
 			return nil, fmt.Errorf("'not' requires exactly one operand")
 		}
-		return b.predicate(n.operands[0], m, sc, !negated)
+		return b.predicate(n.operands[0], m, !negated)
 
 	case "if":
-		return b.ternaryPredicate(n, m, sc, negated)
+		return b.ternaryPredicate(n, m, negated)
 	}
 
 	if lambdaBinding[n.operator] {
-		return b.collectionMacro(n, m, sc, negated)
+		return b.collectionMacro(n, m, negated)
 	}
 
 	if _, ok := comparisonOps[n.operator]; ok {
-		return b.binaryPredicate(n, m, sc, negated)
+		return b.binaryPredicate(n, m, negated)
 	}
 
 	switch n.operator {
 	case "in", "contains", "startsWith", "endsWith", "ancestorOf", "descendentOf", "overlaps":
-		return b.binaryPredicate(n, m, sc, negated)
+		return b.binaryPredicate(n, m, negated)
 
 	case "hasIntersection":
-		return b.hasIntersection(n, m, sc, negated)
+		return b.hasIntersection(n, m, negated)
 
 	case "matches":
 		return nil, fmt.Errorf(
@@ -192,19 +187,19 @@ func (b *builder) predicate(n *node, m Mapper, sc scope, negated bool) (Expr, er
 // Each branch is guarded by the (un)satisfied condition rather than using ELSE, so an UNKNOWN
 // condition leaves both arms unselected and the CASE yields NULL. That keeps the row excluded
 // under both polarities, matching CEL treating the missing attribute as an error (a deny).
-func (b *builder) ternaryPredicate(n *node, m Mapper, sc scope, negated bool) (Expr, error) {
+func (b *builder) ternaryPredicate(n *node, m Mapper, negated bool) (Expr, error) {
 	if len(n.operands) != ternaryOperands {
 		return nil, fmt.Errorf("'if' requires exactly three operands")
 	}
-	cond, err := b.predicate(n.operands[0], m, sc, false)
+	cond, err := b.predicate(n.operands[0], m, false)
 	if err != nil {
 		return nil, err
 	}
-	thenExpr, err := b.predicate(n.operands[1], m, sc, negated)
+	thenExpr, err := b.predicate(n.operands[1], m, negated)
 	if err != nil {
 		return nil, err
 	}
-	elseExpr, err := b.predicate(n.operands[2], m, sc, negated)
+	elseExpr, err := b.predicate(n.operands[2], m, negated)
 	if err != nil {
 		return nil, err
 	}
@@ -215,7 +210,7 @@ func (b *builder) ternaryPredicate(n *node, m Mapper, sc scope, negated bool) (E
 }
 
 // binaryPredicate lowers the comparison, membership, string-match and hierarchy operators.
-func (b *builder) binaryPredicate(n *node, m Mapper, sc scope, negated bool) (Expr, error) {
+func (b *builder) binaryPredicate(n *node, m Mapper, negated bool) (Expr, error) {
 	if len(n.operands) != binaryOperands {
 		return nil, fmt.Errorf(
 			"expected a binary operation: op = %q, # of operands = %d", n.operator, len(n.operands),
@@ -231,10 +226,10 @@ func (b *builder) binaryPredicate(n *node, m Mapper, sc scope, negated bool) (Ex
 	// leave the relation unrecognised (`null in R.attr.tagNames`).
 	if operator == "in" {
 		if rel, parent, ok := relationFor(m, right); ok {
-			return b.membershipOverRelation(left, rel, parent, m, sc, negated)
+			return b.membershipOverRelation(left, rel, parent, m, negated)
 		}
 		if rel, parent, ok := relationFor(m, left); ok {
-			return b.membershipOverRelation(right, rel, parent, m, sc, negated)
+			return b.membershipOverRelation(right, rel, parent, m, negated)
 		}
 	}
 
@@ -249,11 +244,11 @@ func (b *builder) binaryPredicate(n *node, m Mapper, sc scope, negated bool) (Ex
 		}
 	}
 
-	lv, err := b.value(left, m, sc)
+	lv, err := b.value(left, m)
 	if err != nil {
 		return nil, err
 	}
-	rv, err := b.value(right, m, sc)
+	rv, err := b.value(right, m)
 	if err != nil {
 		return nil, err
 	}
@@ -301,7 +296,7 @@ func mirroredName(op string) string {
 
 // membershipOverRelation lowers `<value> in R.attr.<collection>` where the collection is stored in
 // a related table.
-func (b *builder) membershipOverRelation(needle *node, rel *Relation, parent string, m Mapper, sc scope, negated bool) (Expr, error) {
+func (b *builder) membershipOverRelation(needle *node, rel *Relation, parent string, m Mapper, negated bool) (Expr, error) {
 	if rel.Field == nil {
 		return nil, fmt.Errorf(
 			"membership against a relation requires the relation to map its element column " +
@@ -309,7 +304,7 @@ func (b *builder) membershipOverRelation(needle *node, rel *Relation, parent str
 		)
 	}
 
-	needleValue, err := b.value(needle, m, sc)
+	needleValue, err := b.value(needle, m)
 	if err != nil {
 		return nil, err
 	}
@@ -422,7 +417,7 @@ func (b *builder) triStateExists(rel *Relation, alias, parent string, body Expr,
 }
 
 // collectionMacro lowers exists/all/exists_one/except (and rejects filter/map).
-func (b *builder) collectionMacro(n *node, m Mapper, sc scope, negated bool) (Expr, error) {
+func (b *builder) collectionMacro(n *node, m Mapper, negated bool) (Expr, error) {
 	if len(n.operands) != binaryOperands {
 		return nil, fmt.Errorf("'%s' requires exactly two operands", n.operator)
 	}
@@ -432,7 +427,7 @@ func (b *builder) collectionMacro(n *node, m Mapper, sc scope, negated bool) (Ex
 	// collection (more than 10 elements; cerbos/cerbos#2570, #2817). Fold it here so the
 	// translation does not depend on which side of that threshold the collection landed.
 	if collection.isValue() {
-		return b.foldValueListMacro(n.operator, collection.value, lambda, m, sc, negated)
+		return b.foldValueListMacro(n.operator, collection.value, lambda, m, negated)
 	}
 
 	if !collection.isVariable() {
@@ -452,9 +447,8 @@ func (b *builder) collectionMacro(n *node, m Mapper, sc scope, negated bool) (Ex
 
 	alias := b.newAlias()
 	inner := scopedMapper{variable: variable, relation: rel, alias: alias, parent: m}
-	innerScope := scope{qualifier: alias}
 
-	bodyExpr, err := b.predicate(body, inner, innerScope, false)
+	bodyExpr, err := b.predicate(body, inner, false)
 	if err != nil {
 		return nil, err
 	}
@@ -511,7 +505,7 @@ func (b *builder) collectionMacro(n *node, m Mapper, sc scope, negated bool) (Ex
 // Each substituted body goes back through the ordinary traversal, so comparison semantics —
 // three-valued NULL handling, value-first mirroring — are identical to a chain the planner
 // unrolled itself.
-func (b *builder) foldValueListMacro(operator string, elements any, lambda *node, m Mapper, sc scope, negated bool) (Expr, error) {
+func (b *builder) foldValueListMacro(operator string, elements any, lambda *node, m Mapper, negated bool) (Expr, error) {
 	if !foldable[operator] {
 		return nil, fmt.Errorf(
 			"%s over a literal collection value is not supported; only exists() and all() can be "+
@@ -544,7 +538,7 @@ func (b *builder) foldValueListMacro(operator string, elements any, lambda *node
 		if err != nil {
 			return nil, err
 		}
-		p, err := b.predicate(substituted, m, sc, negated)
+		p, err := b.predicate(substituted, m, negated)
 		if err != nil {
 			return nil, err
 		}
@@ -558,7 +552,7 @@ func (b *builder) foldValueListMacro(operator string, elements any, lambda *node
 }
 
 // hasIntersection lowers `a.hasIntersection(b)`.
-func (b *builder) hasIntersection(n *node, m Mapper, sc scope, negated bool) (Expr, error) {
+func (b *builder) hasIntersection(n *node, m Mapper, negated bool) (Expr, error) {
 	if len(n.operands) != binaryOperands {
 		return nil, fmt.Errorf("'hasIntersection' requires exactly two operands")
 	}
@@ -599,7 +593,7 @@ func (b *builder) hasIntersection(n *node, m Mapper, sc scope, negated bool) (Ex
 		return b.triStateExists(rel, alias, parent, body, existsSemantics, negated), nil
 	}
 
-	otherValue, err := b.value(otherNode, m, sc)
+	otherValue, err := b.value(otherNode, m)
 	if err != nil {
 		return nil, err
 	}
@@ -661,7 +655,10 @@ func (b *builder) deferredCollection(n *node, m Mapper) (value, error) {
 	}
 	collection, lambda := n.operands[0], n.operands[1]
 
-	entry, err := requireRelation(m, collectionReference(collection))
+	if !collection.isVariable() {
+		return nil, fmt.Errorf("'%s' requires a collection attribute", n.operator)
+	}
+	entry, err := requireRelation(m, collection.variable)
 	if err != nil {
 		return nil, err
 	}
@@ -674,18 +671,17 @@ func (b *builder) deferredCollection(n *node, m Mapper) (value, error) {
 
 	alias := b.newAlias()
 	inner := scopedMapper{variable: variable, relation: rel, alias: alias, parent: m}
-	innerScope := scope{qualifier: alias}
 
 	var bodyExpr Expr
 	if n.operator == "map" {
-		projected, err := b.value(body, inner, innerScope)
+		projected, err := b.value(body, inner)
 		if err != nil {
 			return nil, err
 		}
 		if bodyExpr, err = asExpr(projected); err != nil {
 			return nil, err
 		}
-	} else if bodyExpr, err = b.predicate(body, inner, innerScope, false); err != nil {
+	} else if bodyExpr, err = b.predicate(body, inner, false); err != nil {
 		return nil, err
 	}
 
@@ -695,16 +691,8 @@ func (b *builder) deferredCollection(n *node, m Mapper) (value, error) {
 	}, nil
 }
 
-// collectionReference names the attribute a macro iterates, for error messages and lookup.
-func collectionReference(n *node) string {
-	if n.isVariable() {
-		return n.variable
-	}
-	return ""
-}
-
 // value lowers a node in value position.
-func (b *builder) value(n *node, m Mapper, sc scope) (value, error) {
+func (b *builder) value(n *node, m Mapper) (value, error) {
 	switch {
 	case n.isValue():
 		return n.value, nil
@@ -714,29 +702,29 @@ func (b *builder) value(n *node, m Mapper, sc scope) (value, error) {
 
 	switch n.operator {
 	case "and", "or", "not":
-		return b.predicate(n, m, sc, false)
+		return b.predicate(n, m, false)
 
 	case "if":
-		return b.ternaryValue(n, m, sc)
+		return b.ternaryValue(n, m)
 
 	case "hierarchy":
 		if len(n.operands) == 0 || len(n.operands) > binaryOperands {
 			return nil, fmt.Errorf("'hierarchy' requires one or two operands")
 		}
-		target, err := b.value(n.operands[0], m, sc)
+		target, err := b.value(n.operands[0], m)
 		if err != nil {
 			return nil, err
 		}
 		var delimiter value
 		if len(n.operands) == binaryOperands {
-			if delimiter, err = b.value(n.operands[1], m, sc); err != nil {
+			if delimiter, err = b.value(n.operands[1], m); err != nil {
 				return nil, err
 			}
 		}
 		return newHierarchy(target, delimiter)
 
 	case "size":
-		return b.size(n, m, sc)
+		return b.size(n, m)
 
 	case "filter", "map":
 		// Neither produces a boolean, so both are held back until the operator that consumes
@@ -754,7 +742,7 @@ func (b *builder) value(n *node, m Mapper, sc scope) (value, error) {
 				temporal = true
 			}
 		}
-		v, err := b.value(operand, m, sc)
+		v, err := b.value(operand, m)
 		if err != nil {
 			return nil, err
 		}
@@ -764,7 +752,7 @@ func (b *builder) value(n *node, m Mapper, sc scope) (value, error) {
 		if len(n.operands) != unaryOperands {
 			return nil, fmt.Errorf("'%s' requires exactly one operand", n.operator)
 		}
-		v, err := b.value(n.operands[0], m, sc)
+		v, err := b.value(n.operands[0], m)
 		if err != nil {
 			return nil, err
 		}
@@ -772,31 +760,31 @@ func (b *builder) value(n *node, m Mapper, sc scope) (value, error) {
 	}
 
 	if _, ok := arithmeticOps[n.operator]; ok {
-		return b.arithmetic(n, m, sc)
+		return b.arithmetic(n, m)
 	}
 
 	if lambdaBinding[n.operator] {
 		// A macro can appear in value position when it is the condition of a ternary.
-		return b.collectionMacro(n, m, sc, false)
+		return b.collectionMacro(n, m, false)
 	}
 
 	// Anything else in value position is a predicate embedded in a value slot.
-	return b.predicate(n, m, sc, false)
+	return b.predicate(n, m, false)
 }
 
-func (b *builder) ternaryValue(n *node, m Mapper, sc scope) (value, error) {
+func (b *builder) ternaryValue(n *node, m Mapper) (value, error) {
 	if len(n.operands) != ternaryOperands {
 		return nil, fmt.Errorf("'if' requires exactly three operands")
 	}
-	cond, err := b.predicate(n.operands[0], m, sc, false)
+	cond, err := b.predicate(n.operands[0], m, false)
 	if err != nil {
 		return nil, err
 	}
-	thenValue, err := b.value(n.operands[1], m, sc)
+	thenValue, err := b.value(n.operands[1], m)
 	if err != nil {
 		return nil, err
 	}
-	elseValue, err := b.value(n.operands[2], m, sc)
+	elseValue, err := b.value(n.operands[2], m)
 	if err != nil {
 		return nil, err
 	}
@@ -831,7 +819,7 @@ func isSymbolic(v value) bool {
 }
 
 // size lowers size() over either a relation (a correlated count) or a string column.
-func (b *builder) size(n *node, m Mapper, sc scope) (value, error) {
+func (b *builder) size(n *node, m Mapper) (value, error) {
 	if len(n.operands) != unaryOperands {
 		return nil, fmt.Errorf("'size' requires exactly one operand")
 	}
@@ -846,7 +834,7 @@ func (b *builder) size(n *node, m Mapper, sc scope) (value, error) {
 		}
 	}
 
-	v, err := b.value(operand, m, sc)
+	v, err := b.value(operand, m)
 	if err != nil {
 		return nil, err
 	}
@@ -885,15 +873,15 @@ func (b *builder) size(n *node, m Mapper, sc scope) (value, error) {
 	return Call{Name: FuncCharLength, Args: []Expr{e}}, nil
 }
 
-func (b *builder) arithmetic(n *node, m Mapper, sc scope) (value, error) {
+func (b *builder) arithmetic(n *node, m Mapper) (value, error) {
 	if len(n.operands) != binaryOperands {
 		return nil, fmt.Errorf("'%s' requires exactly two operands", n.operator)
 	}
-	lv, err := b.value(n.operands[0], m, sc)
+	lv, err := b.value(n.operands[0], m)
 	if err != nil {
 		return nil, err
 	}
-	rv, err := b.value(n.operands[1], m, sc)
+	rv, err := b.value(n.operands[1], m)
 	if err != nil {
 		return nil, err
 	}
@@ -997,10 +985,9 @@ func substituteLambdaVariable(n *node, variable string, element any) (*node, err
 		if n.variable == variable {
 			return cloneWithValue(element), nil
 		}
-		prefix := variable + "."
-		if len(n.variable) > len(prefix) && n.variable[:len(prefix)] == prefix {
+		if rest, ok := strings.CutPrefix(n.variable, variable+"."); ok && rest != "" {
 			current := element
-			for _, segment := range splitPath(n.variable[len(prefix):]) {
+			for _, segment := range strings.Split(rest, ".") {
 				obj, ok := current.(map[string]any)
 				if !ok {
 					return nil, fmt.Errorf(
@@ -1039,18 +1026,6 @@ func substituteLambdaVariable(n *node, variable string, element any) (*node, err
 		out.operands = append(out.operands, substituted)
 	}
 	return out, nil
-}
-
-func splitPath(path string) []string {
-	var out []string
-	start := 0
-	for i := 0; i < len(path); i++ {
-		if path[i] == '.' {
-			out = append(out, path[start:i])
-			start = i + 1
-		}
-	}
-	return append(out, path[start:])
 }
 
 // assertNoNullOperands rejects every null literal operand under the omitted representation.
