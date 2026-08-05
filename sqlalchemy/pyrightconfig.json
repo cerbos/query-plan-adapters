@@ -1,0 +1,7 @@
+{
+  "include": ["tests/typing"],
+  "venvPath": ".",
+  "venv": ".venv",
+  "typeCheckingMode": "basic",
+  "reportUnnecessaryTypeIgnoreComment": "error"
+}

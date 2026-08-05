@@ -75,4 +75,12 @@ jobs:
           print(f"SQLAlchemy {installed}")
           PY
 
+      # `get_query`'s overloads are a static contract the runtime suite cannot
+      # reach, so pyright checks them separately. 2.x only: 1.4's stubs declare
+      # neither `DeclarativeBase` nor `__table__`, so none of the inferences the
+      # fixture pins exist there.
+      - name: Type-check the public signature
+        if: matrix.sqlalchemy.constraint == ''
+        run: npx -y pyright@1.1.411
+
       - run: pdm run test

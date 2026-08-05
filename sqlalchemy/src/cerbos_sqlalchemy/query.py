@@ -8,9 +8,11 @@ from types import MappingProxyType
 from typing import (
     Any,
     Callable,
+    ClassVar,
     Dict,
     List,
     Literal,
+    Protocol,
     Tuple,
     Type,
     TypeVar,
@@ -44,7 +46,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeMeta, InstrumentedAttribute
 from sqlalchemy.sql import Select
-from sqlalchemy.sql.expression import BinaryExpression, ColumnOperators
+from sqlalchemy.sql.expression import BinaryExpression, ColumnOperators, FromClause
 
 try:  # SQLAlchemy >= 2.0
     from sqlalchemy.orm import DeclarativeBase
@@ -54,7 +56,19 @@ except ImportError:  # SQLAlchemy 1.4 predates the class-based declarative base.
         """Stand-in so ``GenericTable`` stays constructible under SQLAlchemy 1.4."""
 
 
-_ORMModel = TypeVar("_ORMModel")
+class _MappedClass(Protocol):
+    """What `get_query` actually needs of an ORM model: a mapped `__table__`.
+
+    Structural rather than nominal because the two declarative styles share no
+    base class. Bounding the overload's TypeVar on it keeps unmapped classes out
+    — unbounded, `Type[_ORMModel]` would admit any class at all, which is looser
+    than the union it replaced.
+    """
+
+    __table__: ClassVar[FromClause]
+
+
+_ORMModel = TypeVar("_ORMModel", bound=_MappedClass)
 
 # A 2.0-style model's metaclass (`DeclarativeAttributeIntercept`) is *not* a
 # `DeclarativeMeta`, so the legacy member alone does not admit it.
@@ -659,10 +673,14 @@ def get_query(
     ...
 
 
+# Everything else `GenericTable` admits — a Core `Table`, and a legacy model
+# under 1.4, whose stubs do not declare `__table__` so it cannot match the bound
+# above. Row type unknown, but the call is still accepted: without this arm the
+# overloads would be narrower than the union they replaced.
 @overload
 def get_query(
     query_plan: Union[PlanResourcesResponse, response_pb2.PlanResourcesResponse],  # type: ignore (https://github.com/microsoft/pyright/issues/1035)
-    table: Table,
+    table: GenericTable,
     attr_map: Dict[str, GenericColumn],
     table_mapping: Union[List[Tuple[GenericTable, GenericExpression]], None] = ...,
     operator_override_fns: Union[OperatorFnMap, None] = ...,
