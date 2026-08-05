@@ -2,6 +2,7 @@ import { test, expect, describe } from "@jest/globals";
 import { queryPlanToConvex, PlanKind, Mapper } from ".";
 import {
   PlanExpression,
+  PlanExpressionOperand,
   PlanExpressionVariable,
   PlanResourcesConditionalResponse,
   PlanResourcesResponse,
@@ -2662,5 +2663,233 @@ describe("Post-filter CEL semantics", () => {
 
     expect(postFilter({ left: Number.NaN, right: Number.NaN })).toBe(false);
     expect(postFilter({ left: -0, right: 0 })).toBe(true);
+  });
+});
+
+describe("Known-Value Collections (planner unroll cliff)", () => {
+  // The planner unrolls exists/all over a known collection (e.g. a folded
+  // principal attribute) into an or/and chain at <= 10 elements
+  // (cerbos/cerbos#2570, #2817) and emits the lambda with a literal value-list
+  // collection above that. Convex evaluates lambda bodies per document with
+  // per-element bindings, so the value-list shape needs no dedicated fold —
+  // these tests pin that, and straddle the cliff so neither wire shape can
+  // regress unnoticed.
+  const buildTeams = (size: number): string[] => {
+    const teams = ["string", "string3"];
+    while (teams.length < size) {
+      teams.push(`filler-${teams.length}`);
+    }
+    return teams;
+  };
+
+  // Supported PDPs are >= 0.54, where both macros unroll at <= 10 elements and
+  // ship the value-list lambda above that. Pin the wire shape so each leg
+  // provably exercises its side of the cliff — if a future planner moves the
+  // threshold, this fails loudly instead of silently testing one shape only.
+  const expectShape = (
+    queryPlan: PlanResourcesResponse,
+    size: number,
+    unrolledOperator: string,
+    macroOperator: string,
+  ): void => {
+    const condition = (queryPlan as PlanResourcesConditionalResponse).condition;
+    expect((condition as PlanExpression).operator).toEqual(
+      size <= 10 ? unrolledOperator : macroOperator,
+    );
+  };
+
+  // Below the cliff the plan is a plain or/and chain that Convex pushes into
+  // the database; above it the macro is evaluated per document as a postFilter.
+  const applyResult = (
+    result: ReturnType<typeof queryPlanToConvex>,
+  ): Resource[] => {
+    if (result.filter) {
+      return applyFilter(
+        fixtureResources,
+        result.filter as (
+          q: ReturnType<typeof createMockFilterBuilder>,
+        ) => unknown,
+      );
+    }
+    if (result.postFilter) {
+      return fixtureResources.filter((r) =>
+        result.postFilter!(r as unknown as Record<string, unknown>),
+      );
+    }
+    throw new Error("Expected either a filter or a postFilter");
+  };
+
+  describe.each([9, 10, 11])("with %i-element principal collection", (size) => {
+    test("conditional - principal-exists", async () => {
+      const teams = buildTeams(size);
+      const queryPlan = await cerbos.planResources({
+        principal: { id: "user1", roles: ["USER"], attr: { teams } },
+        resource: { kind: "resource" },
+        action: "principal-exists",
+      });
+
+      expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+      expectShape(queryPlan, size, "or", "exists");
+
+      const result = queryPlanToConvex({
+        queryPlan,
+        mapper: defaultMapper,
+        allowPostFilter: true,
+      });
+
+      expect(result.kind).toBe(PlanKind.CONDITIONAL);
+      expect(applyResult(result).map((r) => r.key)).toEqual(
+        fixtureResources
+          .filter((r) => teams.includes(r.aString))
+          .map((r) => r.key),
+      );
+    });
+
+    test("conditional - principal-all", async () => {
+      const teams = buildTeams(size);
+      const queryPlan = await cerbos.planResources({
+        principal: { id: "user1", roles: ["USER"], attr: { teams } },
+        resource: { kind: "resource" },
+        action: "principal-all",
+      });
+
+      expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+      expectShape(queryPlan, size, "and", "all");
+
+      const result = queryPlanToConvex({
+        queryPlan,
+        mapper: defaultMapper,
+        allowPostFilter: true,
+      });
+
+      expect(result.kind).toBe(PlanKind.CONDITIONAL);
+      expect(applyResult(result).map((r) => r.key)).toEqual(
+        fixtureResources
+          .filter((r) => !teams.includes(r.aString))
+          .map((r) => r.key),
+      );
+    });
+  });
+
+  test("above the cliff the macro needs the allowPostFilter opt-in", async () => {
+    // Convex evaluates the value-list macro correctly, but only as a postFilter:
+    // it reads documents before the predicate applies, so the adapter demands an
+    // explicit opt-in. The 9/10 legs push into the DB filter and need no opt-in,
+    // so the *opt-in requirement* — not the translation — is what moves at the
+    // cliff. Pin it so the remaining consumer-visible step is never silent.
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"], attr: { teams: buildTeams(11) } },
+      resource: { kind: "resource" },
+      action: "principal-exists",
+    });
+
+    expect(() =>
+      queryPlanToConvex({ queryPlan, mapper: defaultMapper }),
+    ).toThrow(/allowPostFilter/);
+
+    const belowCliff = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"], attr: { teams: buildTeams(10) } },
+      resource: { kind: "resource" },
+      action: "principal-exists",
+    });
+
+    expect(
+      queryPlanToConvex({ queryPlan: belowCliff, mapper: defaultMapper }).filter,
+    ).toBeDefined();
+  });
+
+  const valueListPostFilter = (
+    operator: string,
+    elements: unknown[],
+    body: PlanExpressionOperand,
+    variable = "t",
+  ): ((doc: Record<string, unknown>) => boolean) => {
+    const result = queryPlanToConvex({
+      queryPlan: {
+        kind: PlanKind.CONDITIONAL,
+        condition: {
+          operator,
+          operands: [
+            { value: elements },
+            { operator: "lambda", operands: [body, { name: variable }] },
+          ],
+        },
+      } as unknown as PlanResourcesResponse,
+      mapper: defaultMapper,
+      allowPostFilter: true,
+    });
+    if (!result.postFilter) throw new Error("Expected a postFilter");
+    return result.postFilter;
+  };
+
+  const compareBody = (operator: string): PlanExpressionOperand => ({
+    operator,
+    operands: [{ name: "request.resource.attr.aString" }, { name: "t" }],
+  });
+
+  test("exists binds each element of a literal collection", () => {
+    const postFilter = valueListPostFilter(
+      "exists",
+      ["string", "string3"],
+      compareBody("eq"),
+    );
+    expect(postFilter({ aString: "string" })).toBe(true);
+    expect(postFilter({ aString: "string3" })).toBe(true);
+    expect(postFilter({ aString: "string2" })).toBe(false);
+  });
+
+  test("all binds each element of a literal collection", () => {
+    const postFilter = valueListPostFilter(
+      "all",
+      ["string", "string3"],
+      compareBody("ne"),
+    );
+    expect(postFilter({ aString: "string2" })).toBe(true);
+    expect(postFilter({ aString: "string" })).toBe(false);
+  });
+
+  test("variable paths drill into element fields", () => {
+    const postFilter = valueListPostFilter(
+      "exists",
+      [{ name: "string" }, { name: "string3" }],
+      {
+        operator: "eq",
+        operands: [
+          { name: "request.resource.attr.aString" },
+          { name: "t.name" },
+        ],
+      },
+    );
+    expect(postFilter({ aString: "string3" })).toBe(true);
+    expect(postFilter({ aString: "string2" })).toBe(false);
+  });
+
+  test("empty literal collection keeps CEL identity semantics", () => {
+    expect(
+      valueListPostFilter("exists", [], compareBody("eq"))({
+        aString: "string",
+      }),
+    ).toBe(false);
+    expect(
+      valueListPostFilter("all", [], compareBody("ne"))({ aString: "string" }),
+    ).toBe(true);
+  });
+
+  test("exists_one over a literal collection keeps exact cardinality", () => {
+    const postFilter = valueListPostFilter(
+      "exists_one",
+      ["string", "string"],
+      compareBody("eq"),
+    );
+    // Both elements match "string", so exists_one is false; exactly one
+    // element matches "string3".
+    expect(postFilter({ aString: "string" })).toBe(false);
+    expect(
+      valueListPostFilter(
+        "exists_one",
+        ["string", "string3"],
+        compareBody("eq"),
+      )({ aString: "string3" }),
+    ).toBe(true);
   });
 });

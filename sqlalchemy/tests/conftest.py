@@ -2,7 +2,7 @@ import os
 import re
 from contextlib import contextmanager
 from importlib.metadata import version
-from typing import Generator
+from typing import Any, Callable, Dict, Generator
 
 import pytest
 from cerbos.engine.v1 import engine_pb2
@@ -10,6 +10,8 @@ from cerbos.sdk.client import CerbosClient
 from cerbos.sdk.container import CerbosContainer
 from cerbos.sdk.grpc.client import CerbosClient as GrpcCerbosClient
 from cerbos.sdk.model import Principal, ResourceDesc
+from google.protobuf.json_format import ParseDict
+from google.protobuf.struct_pb2 import Value
 
 from sqlalchemy import (
     Boolean,
@@ -173,6 +175,28 @@ def principal(cerbos_client):
         else Principal
     )
     return principal_cls(id="1", roles={USER_ROLE})
+
+
+@pytest.fixture
+def principal_with_attr(cerbos_client) -> Callable[[Dict[str, Any]], Any]:
+    """Build a principal carrying attributes, for whichever transport is active.
+
+    The gRPC client takes `map<string, google.protobuf.Value>`, so plain Python
+    containers have to be parsed into `Value` first; the HTTP client takes them
+    as-is.
+    """
+    is_grpc = isinstance(cerbos_client, GrpcCerbosClient)
+
+    def build(attr: Dict[str, Any]) -> Any:
+        if is_grpc:
+            return engine_pb2.Principal(
+                id="1",
+                roles={USER_ROLE},
+                attr={k: ParseDict(v, Value()) for k, v in attr.items()},
+            )
+        return Principal(id="1", roles={USER_ROLE}, attr=attr)
+
+    return build
 
 
 @pytest.fixture

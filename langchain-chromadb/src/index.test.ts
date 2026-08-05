@@ -1,5 +1,10 @@
 import { beforeAll, afterAll, test, expect, jest } from "@jest/globals";
 import { GRPC as Cerbos } from "@cerbos/grpc";
+import type {
+  PlanExpression,
+  PlanResourcesConditionalResponse,
+  PlanResourcesResponse,
+} from "@cerbos/core";
 import { ChromaClient, ChromaNotFoundError } from "chromadb";
 import type { Collection, Metadata, Where } from "chromadb";
 import { queryPlanToChromaDB, PlanKind } from ".";
@@ -1166,5 +1171,162 @@ test("conditional - filter-count-gt (unsupported)", async () => {
         "request.resource.attr.tags": "tags",
       },
     }),
+  ).toThrow();
+});
+
+// Known-value collection macros and the portable membership spelling.
+//
+// The planner unrolls exists/all over a known collection (e.g. a folded
+// principal attribute) into an or/and chain at <= 10 elements
+// (cerbos/cerbos#2570, #2817) and emits the lambda with a literal value-list
+// collection above that. ChromaDB metadata filters have no collection macro,
+// so the unrolled chain translates and the lambda does not — a data-dependent
+// cliff. `R.attr.x in P.attr.xs` expresses the same policy as a single `$in`
+// at every collection size and is the spelling to reach for here.
+const buildTeams = (size: number): string[] => {
+  const teams = ["string", "string3"];
+  while (teams.length < size) {
+    teams.push(`filler-${teams.length}`);
+  }
+  return teams;
+};
+
+const stringMapper = { "request.resource.attr.aString": "aString" };
+
+// `principal-all` unrolls to a chain of `ne`, which Chroma can only express
+// safely when the integrator asserts the metadata key is always present: a
+// missing key would otherwise match `$ne` and over-grant.
+const requiredStringMapper = {
+  "request.resource.attr.aString": { field: "aString", required: true },
+};
+
+const conditionOperator = (queryPlan: PlanResourcesResponse): string => {
+  const condition = (queryPlan as PlanResourcesConditionalResponse).condition;
+  return (condition as PlanExpression).operator;
+};
+
+test.each([9, 10])(
+  "conditional - principal-exists translates below the %i-element unroll cap",
+  async (size) => {
+    const teams = buildTeams(size);
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"], attr: { teams } },
+      resource: { kind: "resource" },
+      action: "principal-exists",
+    });
+
+    // Pinned: at or below the cap the planner hands us a plain or-chain.
+    expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+    expect(conditionOperator(queryPlan)).toBe("or");
+
+    const result = queryPlanToChromaDB({
+      queryPlan,
+      fieldNameMapper: stringMapper,
+    });
+
+    const matches = await queryResourceIds(result.filters);
+    expect(matches.sort()).toEqual(
+      fixtureResources
+        .filter((r) => teams.includes(r.aString))
+        .map((r) => r.key)
+        .sort(),
+    );
+  },
+);
+
+test("conditional - principal-exists above the unroll cap (unsupported)", async () => {
+  const teams = buildTeams(11);
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"], attr: { teams } },
+    resource: { kind: "resource" },
+    action: "principal-exists",
+  });
+
+  // Pinned: above the cap the macro ships as a lambda over a literal value
+  // list, which has no ChromaDB metadata translation and must fail closed.
+  expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+  expect(conditionOperator(queryPlan)).toBe("exists");
+
+  expect(() =>
+    queryPlanToChromaDB({ queryPlan, fieldNameMapper: stringMapper }),
+  ).toThrow();
+});
+
+test.each([9, 10, 11, 40])(
+  "conditional - principal-in is size-independent at %i elements",
+  async (size) => {
+    const teams = buildTeams(size);
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"], attr: { teams } },
+      resource: { kind: "resource" },
+      action: "principal-in",
+    });
+
+    // The membership spelling never becomes a macro: one `in` against a
+    // literal list regardless of how many teams the principal holds.
+    expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+    expect(conditionOperator(queryPlan)).toBe("in");
+
+    const result = queryPlanToChromaDB({
+      queryPlan,
+      fieldNameMapper: stringMapper,
+    });
+
+    expect(result).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { aString: { $in: teams } },
+    });
+
+    const matches = await queryResourceIds(result.filters);
+    expect(matches.sort()).toEqual(
+      fixtureResources
+        .filter((r) => teams.includes(r.aString))
+        .map((r) => r.key)
+        .sort(),
+    );
+  },
+);
+
+test.each([9, 10])(
+  "conditional - principal-all translates below the %i-element unroll cap",
+  async (size) => {
+    const teams = buildTeams(size);
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"], attr: { teams } },
+      resource: { kind: "resource" },
+      action: "principal-all",
+    });
+
+    expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+    expect(conditionOperator(queryPlan)).toBe("and");
+
+    const result = queryPlanToChromaDB({
+      queryPlan,
+      fieldNameMapper: requiredStringMapper,
+    });
+
+    const matches = await queryResourceIds(result.filters);
+    expect(matches.sort()).toEqual(
+      fixtureResources
+        .filter((r) => !teams.includes(r.aString))
+        .map((r) => r.key)
+        .sort(),
+    );
+  },
+);
+
+test("conditional - principal-all above the unroll cap (unsupported)", async () => {
+  const teams = buildTeams(11);
+  const queryPlan = await cerbos.planResources({
+    principal: { id: "user1", roles: ["USER"], attr: { teams } },
+    resource: { kind: "resource" },
+    action: "principal-all",
+  });
+
+  expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+  expect(conditionOperator(queryPlan)).toBe("all");
+
+  expect(() =>
+    queryPlanToChromaDB({ queryPlan, fieldNameMapper: requiredStringMapper }),
   ).toThrow();
 });

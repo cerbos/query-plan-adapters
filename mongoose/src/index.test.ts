@@ -3009,3 +3009,322 @@ describe("Missing operator shapes (issue #229)", () => {
     );
   });
 });
+
+describe("Known-Value Collections (planner unroll cliff)", () => {
+  // The planner unrolls exists/all over a known collection (e.g. a folded
+  // principal attribute) into an or/and chain at <= 10 elements
+  // (cerbos/cerbos#2570, #2817) and emits the lambda with a literal value-list
+  // collection above that. These tests straddle the 10-item cliff so both wire
+  // shapes stay exercised regardless of the PDP version behind the sidecar.
+  describe("live plans across the 10-item threshold", () => {
+    const buildTeams = (size: number): string[] => {
+      const teams = ["string", "string3"];
+      while (teams.length < size) {
+        teams.push(`filler-${teams.length}`);
+      }
+      return teams;
+    };
+
+    // Supported PDPs are >= 0.54, where both macros unroll at <= 10 elements
+    // and ship the value-list lambda above that. Pin the wire shape so each
+    // leg provably exercises its side of the cliff — if a future planner moves
+    // the threshold, this fails loudly instead of silently testing one shape.
+    const expectShape = (
+      queryPlan: PlanResourcesResponse,
+      size: number,
+      unrolledOperator: string,
+      macroOperator: string
+    ): void => {
+      const condition = (queryPlan as PlanResourcesConditionalResponse)
+        .condition;
+      expect((condition as PlanExpression).operator).toEqual(
+        size <= 10 ? unrolledOperator : macroOperator
+      );
+    };
+
+    describe.each([9, 10, 11])(
+      "with %i-element principal collection",
+      (size) => {
+        test("conditional - principal-exists", async () => {
+          const teams = buildTeams(size);
+          const queryPlan = await cerbos.planResources({
+            principal: { id: "user1", roles: ["USER"], attr: { teams } },
+            resource: { kind: "resource" },
+            action: "principal-exists",
+          });
+
+          expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+          expectShape(queryPlan, size, "or", "exists");
+
+          const result = queryPlanToMongoose({
+            queryPlan,
+            mapper: { "request.resource.attr.aString": { field: "aString" } },
+          });
+
+          const query = await Resource.find(result.filters || {});
+          expect(query.map((r) => r.key).sort()).toEqual(
+            fixtureResources
+              .filter((r) => teams.includes(r.aString as string))
+              .map((r) => r.key)
+              .sort()
+          );
+        });
+
+        test("conditional - principal-all", async () => {
+          const teams = buildTeams(size);
+          const queryPlan = await cerbos.planResources({
+            principal: { id: "user1", roles: ["USER"], attr: { teams } },
+            resource: { kind: "resource" },
+            action: "principal-all",
+          });
+
+          expect(queryPlan.kind).toEqual(PlanKind.CONDITIONAL);
+          expectShape(queryPlan, size, "and", "all");
+
+          const result = queryPlanToMongoose({
+            queryPlan,
+            mapper: { "request.resource.attr.aString": { field: "aString" } },
+          });
+
+          const query = await Resource.find(result.filters || {});
+          expect(query.map((r) => r.key).sort()).toEqual(
+            fixtureResources
+              .filter((r) => !teams.includes(r.aString as string))
+              .map((r) => r.key)
+              .sort()
+          );
+        });
+      }
+    );
+  });
+
+  describe("value-list lambda fold", () => {
+    const valueListPlan = (
+      operator: string,
+      elements: unknown[] | Record<string, unknown>,
+      body: PlanExpression | PlanExpressionVariable,
+      variable = "t"
+    ): PlanResourcesResponse =>
+      conditionalPlan(
+        new PlanExpression(operator, [
+          new PlanExpressionValue(elements as never),
+          new PlanExpression("lambda", [
+            body,
+            new PlanExpressionVariable(variable),
+          ]),
+        ])
+      );
+
+    const compareBody = (operator: string, variable = "t"): PlanExpression =>
+      new PlanExpression(operator, [
+        new PlanExpressionVariable("request.resource.attr.aString"),
+        new PlanExpressionVariable(variable),
+      ]);
+
+    const stringMapper: Mapper = {
+      "request.resource.attr.aString": { field: "aString" },
+    };
+
+    test("exists over a value list folds to $or of the substituted body", async () => {
+      const result = queryPlanToMongoose({
+        queryPlan: valueListPlan("exists", ["string", "string3"], compareBody("eq")),
+        mapper: stringMapper,
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          $or: [{ aString: { $eq: "string" } }, { aString: { $eq: "string3" } }],
+        },
+      });
+
+      const query = await Resource.find(result.filters || {});
+      expect(query.map((r) => r.key).sort()).toEqual(["a", "c"]);
+    });
+
+    test("all over a value list folds to $and of the substituted body", async () => {
+      const result = queryPlanToMongoose({
+        queryPlan: valueListPlan("all", ["string", "string3"], compareBody("ne")),
+        mapper: stringMapper,
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          $and: [{ aString: { $ne: "string" } }, { aString: { $ne: "string3" } }],
+        },
+      });
+
+      const query = await Resource.find(result.filters || {});
+      expect(query.map((r) => r.key).sort()).toEqual(["b"]);
+    });
+
+    test("substitutes variable path references into element fields", async () => {
+      const result = queryPlanToMongoose({
+        queryPlan: valueListPlan(
+          "exists",
+          [
+            { name: "string", meta: { rank: 1 } },
+            { name: "string3", meta: { rank: 2 } },
+          ],
+          new PlanExpression("eq", [
+            new PlanExpressionVariable("request.resource.attr.aString"),
+            new PlanExpressionVariable("t.name"),
+          ])
+        ),
+        mapper: stringMapper,
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          $or: [{ aString: { $eq: "string" } }, { aString: { $eq: "string3" } }],
+        },
+      });
+
+      const query = await Resource.find(result.filters || {});
+      expect(query.map((r) => r.key).sort()).toEqual(["a", "c"]);
+    });
+
+    test("empty value list yields CEL identity semantics", async () => {
+      // exists over [] is false; all over [] is true. MongoDB rejects an empty
+      // $or/$and, so the constant is stated through $expr.
+      const existsResult = queryPlanToMongoose({
+        queryPlan: valueListPlan("exists", [], compareBody("eq")),
+        mapper: stringMapper,
+      });
+      expect(existsResult).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: { $expr: false },
+      });
+      expect(await Resource.find(existsResult.filters || {})).toHaveLength(0);
+
+      const allResult = queryPlanToMongoose({
+        queryPlan: valueListPlan("all", [], compareBody("ne")),
+        mapper: stringMapper,
+      });
+      expect(allResult).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: { $expr: true },
+      });
+      expect(await Resource.find(allResult.filters || {})).toHaveLength(
+        fixtureResources.length
+      );
+    });
+
+    test("nested lambda rebinding the variable shadows the outer substitution", async () => {
+      // The outer t is substituted; the inner exists rebinds t over a relation,
+      // so its body must keep referencing the inner binding untouched.
+      const result = queryPlanToMongoose({
+        queryPlan: valueListPlan(
+          "exists",
+          ["public", "private"],
+          new PlanExpression("exists", [
+            new PlanExpressionVariable("request.resource.attr.tags"),
+            new PlanExpression("lambda", [
+              new PlanExpression("eq", [
+                new PlanExpressionVariable("t.name"),
+                new PlanExpressionValue("public"),
+              ]),
+              new PlanExpressionVariable("t"),
+            ]),
+          ])
+        ),
+        mapper: {
+          "request.resource.attr.tags": {
+            relation: { name: "tags", type: "many", field: "name" },
+          },
+        },
+      });
+
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: {
+          $or: [
+            { tags: { $elemMatch: { name: { $eq: "public" } } } },
+            { tags: { $elemMatch: { name: { $eq: "public" } } } },
+          ],
+        },
+      });
+    });
+
+    test("keeps the enclosing collection scope when nested in another macro", () => {
+      // A fold inside another macro's lambda must still reject outer-document
+      // references: $elemMatch resolves paths against the element, so emitting
+      // a filter here would silently compare the wrong field.
+      const queryPlan = conditionalPlan(
+        new PlanExpression("exists", [
+          new PlanExpressionVariable("request.resource.attr.tags"),
+          new PlanExpression("lambda", [
+            new PlanExpression("exists", [
+              new PlanExpressionValue(["public"]),
+              new PlanExpression("lambda", [
+                new PlanExpression("eq", [
+                  new PlanExpressionVariable("request.resource.attr.aBool"),
+                  new PlanExpressionVariable("t"),
+                ]),
+                new PlanExpressionVariable("t"),
+              ]),
+            ]),
+            new PlanExpressionVariable("tag"),
+          ]),
+        ])
+      );
+
+      expect(() =>
+        queryPlanToMongoose({
+          queryPlan,
+          mapper: {
+            ...defaultMapper,
+            "request.resource.attr.tags": {
+              relation: { name: "tags", type: "many", field: "name" },
+            },
+          },
+        })
+      ).toThrow("Outer reference request.resource.attr.aBool");
+    });
+
+    test("throws when a variable path is missing on an element", () => {
+      expect(() =>
+        queryPlanToMongoose({
+          queryPlan: valueListPlan(
+            "exists",
+            [{ name: "string" }],
+            new PlanExpression("eq", [
+              new PlanExpressionVariable("request.resource.attr.aString"),
+              new PlanExpressionVariable("t.missing"),
+            ])
+          ),
+          mapper: stringMapper,
+        })
+      ).toThrow('Cannot resolve "t.missing"');
+    });
+
+    test.each(["exists_one", "filter", "map", "except"])(
+      "throws for %s over a value list",
+      (operator) => {
+        expect(() =>
+          queryPlanToMongoose({
+            queryPlan: valueListPlan(operator, ["string"], compareBody("eq")),
+            mapper: stringMapper,
+          })
+        ).toThrow(
+          `${operator} over a literal collection value is not supported`
+        );
+      }
+    );
+
+    test("throws for a non-list collection value", () => {
+      expect(() =>
+        queryPlanToMongoose({
+          queryPlan: valueListPlan(
+            "exists",
+            { not: "a list" },
+            compareBody("eq")
+          ),
+          mapper: stringMapper,
+        })
+      ).toThrow("exists over a literal collection requires a list value");
+    });
+  });
+});

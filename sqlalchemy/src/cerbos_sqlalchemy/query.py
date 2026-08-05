@@ -27,6 +27,7 @@ from sqlalchemy import (
     null,
     or_,
     select,
+    true,
 )
 from sqlalchemy.orm import DeclarativeMeta, InstrumentedAttribute
 from sqlalchemy.sql import Select
@@ -429,6 +430,92 @@ _ORDER_INSENSITIVE_OPERATORS = frozenset({"eq", "ne", "in"})
 # Unary value-returning operators take a single non-value input.
 _UNARY_VALUE_OPERATORS = frozenset({"string", "double", "int", "size", "timestamp"})
 
+# Operators whose second operand is a lambda that binds an iteration variable.
+_LAMBDA_BINDING_OPERATORS = frozenset(
+    {"exists", "exists_one", "all", "filter", "map", "except"}
+)
+
+# Collection macros that fold into a flat boolean combination of their
+# per-element bodies. `exists_one`/`filter`/`map` have no such flattening and
+# fail closed instead.
+_FOLDABLE_COLLECTION_OPERATORS = frozenset({"exists", "all"})
+
+
+def _unwrap_expression(operand: dict) -> dict:
+    """Return the `{operator, operands}` node an operand carries, if any."""
+    expression = operand.get("expression")
+    return operand if expression is None else expression
+
+
+def _substitute_lambda_variable(
+    operand: dict, variable_name: str, element: Any
+) -> dict:
+    """Substitute a lambda iteration variable with a concrete collection element.
+
+    A bare reference to the variable becomes the element itself; a
+    ``variable.path.to.field`` reference drills into the element and fails
+    closed when the path is missing. A nested collection macro whose lambda
+    rebinds the same variable name shadows the outer variable, so substitution
+    only descends into its collection operand.
+    """
+    if (expression := operand.get("expression")) is not None:
+        return {
+            "expression": _substitute_lambda_variable(
+                expression, variable_name, element
+            )
+        }
+
+    if (name := operand.get("variable")) is not None:
+        if name == variable_name:
+            return {"value": element}
+        if name.startswith(f"{variable_name}."):
+            current = element
+            for segment in name[len(variable_name) + 1 :].split("."):
+                if not isinstance(current, dict) or segment not in current:
+                    raise ValueError(
+                        f'Cannot resolve "{name}": collection element has no field '
+                        f'"{segment}"'
+                    )
+                current = current[segment]
+            return {"value": current}
+        return operand
+
+    if "operator" not in operand:
+        return operand
+
+    operator = operand["operator"]
+    child_operands = operand.get("operands", [])
+
+    if operator in _LAMBDA_BINDING_OPERATORS and len(child_operands) == 2:
+        nested_collection, nested_lambda = child_operands
+        nested_expression = _unwrap_expression(nested_lambda)
+        nested_lambda_operands = nested_expression.get("operands", [])
+        if (
+            nested_expression.get("operator") == "lambda"
+            and len(nested_lambda_operands) == 2
+            and nested_lambda_operands[1].get("variable") == variable_name
+        ):
+            # The nested lambda rebinds our variable: it shadows the outer
+            # binding, so only its collection operand may be substituted.
+            return {
+                "operator": operator,
+                "operands": [
+                    _substitute_lambda_variable(
+                        nested_collection, variable_name, element
+                    ),
+                    nested_lambda,
+                ],
+            }
+
+    return {
+        "operator": operator,
+        "operands": [
+            _substitute_lambda_variable(child, variable_name, element)
+            for child in child_operands
+        ],
+    }
+
+
 # We support both the legacy HTTP and gRPC clients, so therefore we need to accept both input types
 _deny_types = frozenset(
     [
@@ -568,6 +655,74 @@ def get_query(
                 f"Attribute does not exist in the attribute column map: {variable}"
             )
 
+    def fold_value_list_macro(operator: str, elements: Any, lambda_operand: dict):
+        """Fold a collection macro whose collection operand is a literal value list.
+
+        The planner emits this shape when a known-value collection (typically a
+        folded principal attribute) has more than 10 elements — at 10 or fewer
+        it unrolls `exists`/`all` into an or/and chain itself
+        (cerbos/cerbos#2570, cerbos/cerbos#2817; `maxItems = 10` in the
+        planner's struct matcher). Apply the same fold here, uncapped, so the
+        translated query does not depend on which side of that threshold the
+        collection lands: substitute each element into the lambda body and
+        combine the per-element predicates with OR (`exists`) or AND (`all`).
+
+        Each substituted body goes back through the ordinary traversal, so
+        comparison semantics — operator overrides, three-valued NULL handling,
+        value-first mirroring — are identical to a planner-unrolled chain of
+        the same comparisons.
+        """
+        if operator not in _FOLDABLE_COLLECTION_OPERATORS:
+            raise ValueError(
+                f"{operator} over a literal collection value is not supported. "
+                "Only exists() and all() can be folded into a flat filter."
+            )
+        if not isinstance(elements, list):
+            raise ValueError(
+                f"{operator} over a literal collection requires a list value"
+            )
+
+        lambda_expression = _unwrap_expression(lambda_operand)
+        if lambda_expression.get("operator") != "lambda":
+            raise ValueError(
+                f"Second operand of {operator} must be a lambda expression"
+            )
+        lambda_operands = lambda_expression.get("operands", [])
+        if len(lambda_operands) != 2:
+            raise ValueError(
+                f"{operator} over a literal collection supports single-variable "
+                "lambdas only"
+            )
+        body, variable = lambda_operands
+        variable_name = variable.get("variable")
+        if not variable_name:
+            raise ValueError("Lambda variable must have a name")
+
+        predicates = [
+            traverse_and_map_operands(
+                _substitute_lambda_variable(body, variable_name, element)
+            )
+            for element in elements
+        ]
+        if not predicates:
+            # CEL identity semantics over an empty collection: exists() matches
+            # nothing, all() matches everything.
+            return false() if operator == "exists" else true()
+        return or_(*predicates) if operator == "exists" else and_(*predicates)
+
+    def try_fold_value_list_macro(operator: str, child_operands: list):
+        """Return the folded predicate for a value-list macro, else None.
+
+        A literal value list can never be a relation marker or a column, so no
+        operator override can meaningfully consume it — fold it here instead.
+        """
+        if operator not in _LAMBDA_BINDING_OPERATORS or len(child_operands) != 2:
+            return None
+        collection, lambda_operand = child_operands
+        if "value" not in collection:
+            return None
+        return fold_value_list_macro(operator, collection["value"], lambda_operand)
+
     def resolve_operand(operand: dict) -> Any:
         """Resolve an operand to a SQL value/expression, descending into nested
         `expression` operands so that value-returning operators (arithmetic,
@@ -617,6 +772,10 @@ def get_query(
                 return _ConditionalValue(cond, then_value, else_value)
             return case((cond, then_value), (not_(cond), else_value))
 
+        folded = try_fold_value_list_macro(operator, child_operands)
+        if folded is not None:
+            return folded
+
         if operator == "hierarchy":
             target = resolve_operand(child_operands[0])
             delimiter = (
@@ -664,6 +823,14 @@ def get_query(
         if operator == "if":
             # A bare boolean-result ternary used directly as a predicate.
             return evaluate_expression(operand)
+
+        # A literal value list arrives when the planner could not unroll a
+        # macro over a known collection (more than 10 elements). Fold it before
+        # override dispatch: overrides exist to translate relation/column
+        # collections, which a literal can never be.
+        folded = try_fold_value_list_macro(operator, child_operands)
+        if folded is not None:
+            return folded
 
         has_nested_expression = any("expression" in o for o in child_operands)
 

@@ -5,9 +5,23 @@
     "id": "u1",
     "roles": ["USER"],
     "attr": {
-      "allowedTags": ["public", "special"]
+      "allowedTags": ["public", "special"],
+      "manyTeams": [
+        "set",
+        "same",
+        "",
+        "%_o",
+        "X",
+        "Y",
+        "MIRROR",
+        "filler-1",
+        "filler-2",
+        "filler-3",
+        "filler-4"
+      ]
     }
   },
+  "principalNote": "`manyTeams` has ELEVEN elements on purpose. The planner unrolls exists/all over a known collection into an or/and chain at <= 10 elements and ships the lambda with a literal value-list collection above that (maxItems = 10 in its struct matcher; cerbos/cerbos#2570, #2817). Eleven is the smallest count that forces the value-list wire shape, which is what the `pv-*` actions exist to pin — dropping an element silently reverts them to testing an ordinary or-chain. The wire fixtures guard that. Elements are chosen against `aOptionalString`: 'set'/'same'/''/'%_o' match a1/a9/a6/b2, 'X'/'Y'/'MIRROR' are case and near-miss traps that must match nothing, and the NULL-aOptionalString seeds (a2, a4, a8, c2, e1) are missing-attribute errors under both polarities.",
   "resourceKind": "adversarial",
   "seeds": [
     { "id": "a1", "aBool": true,  "aString": "one",        "aNumber": 5,  "aOptionalString": "set",  "tags": [{"id": "t1a", "name": "public"}], "subCategoryNames": ["finance"] },

@@ -480,6 +480,19 @@ resourcePolicy:
         match:
           expr: P.attr.teams.all(t, R.attr.aString != t)
 
+    # Semantically equivalent to `principal-exists`, but written as membership
+    # rather than a macro: the planner emits `in` against a literal value list
+    # at every collection size, so there is no unroll cliff to straddle. This is
+    # the portable spelling for adapters that cannot express collection macros.
+    - actions:
+        - "principal-in"
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString in P.attr.teams
+
     - actions:
         - "filter"
       effect: EFFECT_ALLOW

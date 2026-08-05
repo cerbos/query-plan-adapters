@@ -1231,3 +1231,296 @@ class TestGetQueryOverrides:
         )
         query = query.with_only_columns(resource_table.id)
         assert "= ANY (" in str(query)
+
+
+class TestKnownValueCollections:
+    """The planner unroll cliff (cerbos/cerbos#2570, #2817).
+
+    `exists`/`all` over a known collection — typically a folded principal
+    attribute — is unrolled by the planner into an or/and chain at 10 elements
+    or fewer, and shipped as a lambda over a literal value list above that
+    (`maxItems = 10` in the planner's struct matcher). The adapter must
+    translate both shapes identically, or support becomes a data-dependent
+    cliff that small-seed tests never cross.
+    """
+
+    @staticmethod
+    def _teams(size):
+        # "string" and "anotherString" match seeded rows; the rest are filler
+        # that only moves the collection across the unroll threshold.
+        teams = ["string", "anotherString"]
+        while len(teams) < size:
+            teams.append(f"filler-{len(teams)}")
+        return teams
+
+    @staticmethod
+    def _assert_wire_shape(plan, size, unrolled_operator, macro_operator):
+        # Supported PDPs are >= 0.54, where both macros unroll at <= 10
+        # elements and ship the value-list lambda above that. Pinning the
+        # shape per leg keeps each side of the cliff provably exercised: a
+        # future planner threshold change fails here instead of silently
+        # leaving one shape untested.
+        expression = _condition_to_dict(plan)["expression"]
+        assert expression["operator"] == (
+            unrolled_operator if size <= 10 else macro_operator
+        )
+
+    @pytest.mark.parametrize("size", [9, 10, 11])
+    def test_principal_exists_across_unroll_threshold(
+        self,
+        cerbos_client,
+        principal_with_attr,
+        resource_desc,
+        resource_table,
+        conn,
+        size,
+    ):
+        teams = self._teams(size)
+        plan = cerbos_client.plan_resources(
+            "principal-exists", principal_with_attr({"teams": teams}), resource_desc
+        )
+        self._assert_wire_shape(plan, size, "or", "exists")
+
+        query = get_query(
+            plan,
+            resource_table,
+            {"request.resource.attr.aString": resource_table.aString},
+        )
+        assert sorted(row.name for row in conn.execute(query)) == [
+            "resource1",
+            "resource3",
+        ]
+
+    @pytest.mark.parametrize("size", [9, 10, 11])
+    def test_principal_all_across_unroll_threshold(
+        self,
+        cerbos_client,
+        principal_with_attr,
+        resource_desc,
+        resource_table,
+        conn,
+        size,
+    ):
+        teams = self._teams(size)
+        plan = cerbos_client.plan_resources(
+            "principal-all", principal_with_attr({"teams": teams}), resource_desc
+        )
+        self._assert_wire_shape(plan, size, "and", "all")
+
+        query = get_query(
+            plan,
+            resource_table,
+            {"request.resource.attr.aString": resource_table.aString},
+        )
+        assert sorted(row.name for row in conn.execute(query)) == ["resource2"]
+
+    @staticmethod
+    def _value_list_plan(operator, elements, body, variable="t"):
+        return _conditional_plan(
+            {
+                "operator": operator,
+                "operands": [
+                    {"value": elements},
+                    {
+                        "expression": {
+                            "operator": "lambda",
+                            "operands": [body, {"variable": variable}],
+                        }
+                    },
+                ],
+            }
+        )
+
+    @staticmethod
+    def _eq_body(variable="t"):
+        return {
+            "expression": {
+                "operator": "eq",
+                "operands": [
+                    {"variable": "request.resource.attr.aString"},
+                    {"variable": variable},
+                ],
+            }
+        }
+
+    def test_exists_over_value_list_folds_to_or(self, resource_table, conn):
+        plan = self._value_list_plan(
+            "exists", ["string", "anotherString"], self._eq_body()
+        )
+        query = get_query(
+            plan,
+            resource_table,
+            {"request.resource.attr.aString": resource_table.aString},
+        )
+        assert sorted(row.name for row in conn.execute(query)) == [
+            "resource1",
+            "resource3",
+        ]
+
+    def test_all_over_value_list_folds_to_and(self, resource_table, conn):
+        plan = self._value_list_plan(
+            "all",
+            ["string", "anotherString"],
+            {
+                "expression": {
+                    "operator": "ne",
+                    "operands": [
+                        {"variable": "request.resource.attr.aString"},
+                        {"variable": "t"},
+                    ],
+                }
+            },
+        )
+        query = get_query(
+            plan,
+            resource_table,
+            {"request.resource.attr.aString": resource_table.aString},
+        )
+        assert sorted(row.name for row in conn.execute(query)) == ["resource2"]
+
+    def test_variable_path_drills_into_element_fields(self, resource_table, conn):
+        plan = self._value_list_plan(
+            "exists",
+            [{"name": "string", "meta": {"rank": 1}}, {"name": "nope"}],
+            {
+                "expression": {
+                    "operator": "eq",
+                    "operands": [
+                        {"variable": "request.resource.attr.aString"},
+                        {"variable": "t.name"},
+                    ],
+                }
+            },
+        )
+        query = get_query(
+            plan,
+            resource_table,
+            {"request.resource.attr.aString": resource_table.aString},
+        )
+        assert [row.name for row in conn.execute(query)] == ["resource1"]
+
+    def test_empty_value_list_keeps_cel_identity_semantics(self, resource_table, conn):
+        # exists over [] matches nothing; all over [] matches everything.
+        exists_query = get_query(
+            self._value_list_plan("exists", [], self._eq_body()),
+            resource_table,
+            {"request.resource.attr.aString": resource_table.aString},
+        )
+        assert conn.execute(exists_query).fetchall() == []
+
+        all_query = get_query(
+            self._value_list_plan("all", [], self._eq_body()),
+            resource_table,
+            {"request.resource.attr.aString": resource_table.aString},
+        )
+        assert len(conn.execute(all_query).fetchall()) == 3
+
+    def test_nested_lambda_rebinding_the_variable_shadows_substitution(
+        self, resource_table
+    ):
+        # The inner lambda rebinds `t`, so its body must keep referencing the
+        # inner binding; only the inner collection operand is substituted.
+        plan = self._value_list_plan(
+            "exists",
+            [["a"], ["b"]],
+            {
+                "expression": {
+                    "operator": "exists",
+                    "operands": [
+                        {"variable": "t"},
+                        {
+                            "expression": {
+                                "operator": "lambda",
+                                "operands": [
+                                    {
+                                        "expression": {
+                                            "operator": "eq",
+                                            "operands": [
+                                                {
+                                                    "variable": (
+                                                        "request.resource.attr.aString"
+                                                    )
+                                                },
+                                                {"variable": "t"},
+                                            ],
+                                        }
+                                    },
+                                    {"variable": "t"},
+                                ],
+                            }
+                        },
+                    ],
+                }
+            },
+        )
+        query = get_query(
+            plan,
+            resource_table,
+            {"request.resource.attr.aString": resource_table.aString},
+        )
+        compiled = str(query.compile(compile_kwargs={"literal_binds": True}))
+        assert "'a'" in compiled and "'b'" in compiled
+
+    def test_missing_element_field_fails_closed(self, resource_table):
+        plan = self._value_list_plan(
+            "exists",
+            [{"name": "string"}],
+            {
+                "expression": {
+                    "operator": "eq",
+                    "operands": [
+                        {"variable": "request.resource.attr.aString"},
+                        {"variable": "t.missing"},
+                    ],
+                }
+            },
+        )
+        with pytest.raises(ValueError) as exc_info:
+            get_query(
+                plan,
+                resource_table,
+                {"request.resource.attr.aString": resource_table.aString},
+            )
+        assert 'Cannot resolve "t.missing"' in exc_info.value.args[0]
+
+    @pytest.mark.parametrize("operator", ["exists_one", "filter", "map"])
+    def test_unfoldable_macros_over_value_lists_fail_closed(
+        self, resource_table, operator
+    ):
+        plan = self._value_list_plan(operator, ["string"], self._eq_body())
+        with pytest.raises(ValueError) as exc_info:
+            get_query(
+                plan,
+                resource_table,
+                {"request.resource.attr.aString": resource_table.aString},
+            )
+        assert (
+            f"{operator} over a literal collection value is not supported"
+            in exc_info.value.args[0]
+        )
+
+    def test_non_list_collection_value_fails_closed(self, resource_table):
+        plan = self._value_list_plan("exists", {"not": "a list"}, self._eq_body())
+        with pytest.raises(ValueError) as exc_info:
+            get_query(
+                plan,
+                resource_table,
+                {"request.resource.attr.aString": resource_table.aString},
+            )
+        assert (
+            "exists over a literal collection requires a list value"
+            in exc_info.value.args[0]
+        )
+
+    def test_value_list_fold_precedes_operator_overrides(self, resource_table, conn):
+        # An override exists to translate relation/column collections; a
+        # literal value list can never be one, so the fold must win rather
+        # than handing the override an unresolvable lambda.
+        plan = self._value_list_plan("exists", ["string"], self._eq_body())
+        query = get_query(
+            plan,
+            resource_table,
+            {"request.resource.attr.aString": resource_table.aString},
+            operator_override_fns={"exists": lambda c, v: literal(True)},
+        )
+        assert [row.name for row in conn.execute(query)] == ["resource1"]

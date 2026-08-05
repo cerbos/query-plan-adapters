@@ -23,7 +23,7 @@ You can merge the adapter output with existing application filters (for example,
 | Membership | `in`, `hasIntersection` | `$in` on simple lists, or `$elemMatch` when targeting array relations; `hasIntersection` supports either a direct array field or a `map` projection inside the plan. |
 | String helpers | `contains`, `startsWith`, `endsWith` | Generates escaped regular expressions that target substrings, prefixes, or suffixes. |
 | Existence helpers | `isSet`, `exists` | Uses `$exists`/`$ne: null` for scalars and `$elemMatch` for collections. |
-| Collection helpers | `filter`, `lambda`, `map`, `all` | Translates Cerbos collection expressions into scoped `$elemMatch` filters and maps lambda variables to the correct nested paths. `all` requires the stored field to be an array. |
+| Collection helpers | `filter`, `lambda`, `map`, `all` | Translates Cerbos collection expressions into scoped `$elemMatch` filters and maps lambda variables to the correct nested paths. `all` requires the stored field to be an array. `exists`/`all` over a *literal* value-list collection (a folded principal attribute above the planner's 10-element unroll cap) fold to `$or`/`$and` of the substituted lambda body instead — no relation mapping needed. |
 | Arithmetic and values | `add`, `sub`, `mult`, `div`, `mod`, `if`, `size`, `index`, `get-field` | Uses document-level MongoDB `$expr` expressions. Division requires a non-zero constant denominator; indexing requires a non-negative integer constant and adds a per-document bounds check. |
 | Conversions and matching | `string`, `double`, `int`, `timestamp`, `matches` | Uses guarded MongoDB conversion and regular-expression expressions. Timestamps accept BSON dates or millisecond-exact RFC 3339 strings in the CEL instant range. Regex matching accepts a validated common RE2/PCRE2 subset. |
 | Hierarchies | `hierarchy`, `ancestorOf`, `descendentOf`, `overlaps` | Translates a mapped scalar hierarchy path using literal prefix and ancestor-list filters. |
@@ -44,7 +44,7 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` d
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 85 reference conformance actions plus regex, ordered indexing/`get-field`, and timestamp probes (88 actions) |
+| Oracle-tested | 87 reference conformance actions plus regex, ordered indexing/`get-field`, and timestamp probes (90 actions) |
 | Fail-closed | 31 reference actions |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute documents. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 
@@ -163,7 +163,7 @@ const mapper: Mapper = {
 
 #### Collection operators in practice
 
-Collection-aware operators (`filter`, `exists`, `hasIntersection`, `map`, and `all`) require the mapper to declare the relation with `type: "many"`. The adapter automatically scopes lambda variables and uses the `fields` map when translating expressions such as `tag.name`:
+Collection-aware operators (`filter`, `exists`, `hasIntersection`, `map`, and `all`) over a *resource* collection require the mapper to declare the relation with `type: "many"`. The adapter automatically scopes lambda variables and uses the `fields` map when translating expressions such as `tag.name`:
 
 ```ts
 const mapper: Mapper = {
@@ -183,6 +183,26 @@ const mapper: Mapper = {
 - `hasIntersection` works for both scalar arrays and arrays of objects; when the plan uses `map(lambda(tag.name))` the adapter projects `tag.name` to `tags.$elemMatch.name`.
 - `all` converts the lambda condition into a negated `$elemMatch` so that all elements must satisfy the predicate.
 - A bare `map` expression verifies that the referenced nested path exists inside each element.
+
+#### Collection macros over known values
+
+`exists`/`all` over a collection the PDP resolves at plan time — typically a
+principal attribute, as in `P.attr.teams.exists(t, R.attr.team == t)` — needs no
+relation mapping. The Cerbos planner unrolls it into a plain `or`/`and` chain at
+10 elements or fewer and ships the lambda with a literal value-list collection
+above that (`maxItems = 10` in the planner's struct matcher; cerbos/cerbos#2570,
+cerbos/cerbos#2817). The adapter applies the same fold, uncapped, so the emitted
+filter is equivalent on both sides of that threshold rather than depending on how
+many teams a given principal happens to hold.
+
+Each element is substituted into the lambda body — a bare `t` becomes the
+element, `t.name` drills into it — and the per-element filters combine with
+`$or` (`exists`) or `$and` (`all`). An empty collection keeps CEL identity
+semantics: `exists` emits `{ $expr: false }` (matches nothing) and `all` emits
+`{ $expr: true }` (matches everything), since MongoDB rejects an empty
+`$or`/`$and`. `exists_one`, `filter`, `map` and `except` have no flat equivalent
+and throw over a literal value list, as does a `t.path` reference the element
+does not carry.
 
 #### Mapper functions
 

@@ -112,6 +112,41 @@ Each adapter has its own GitHub Actions workflow triggered by changes in its dir
 
 Tag-based publishing: `prisma/v*` -> npm, `sqla/v*` -> PyPI, `elasticsearch-java/v*` and `spring-data/v*` -> Maven Central.
 
+## Changing how a condition is translated
+
+**Any change to how an operator, condition, or expression shape is translated starts in the
+shared corpus, not in one adapter.** The same semantic bug has repeatedly shipped identically to
+several adapters because each re-derives the planner's wire contract by hand. A fix proven only
+against the adapter you happened to be looking at leaves the identical bug live in the other seven.
+
+So when you add, fix, or change the handling of any shape:
+
+1. **Add the shape to `conformance/policies/adversarial.yaml`** as a new action, with seed data
+   that discriminates it (see `conformance/README.md`, "Adding a new hostile shape"). If it needs a
+   principal attribute or column that does not exist yet, add it to `conformance/seeds.json`.
+2. **Classify it in `conformance/actions.json` for all eight adapters** — but only *after* running
+   the harnesses. The classification is an output of the run, not an input: declaring an action
+   unsupported before watching it fail is how a translatable shape gets permanently skipped.
+3. **Regenerate the wire fixtures** (`conformance/scripts/regenerate-wire-fixtures.sh`) and confirm
+   the diff adds only the new action. An unrelated fixture changing means the corpus edit
+   perturbed an existing shape.
+4. **Run every adapter's adversarial suite and triage each divergence** into exactly one of: a
+   translation bug (fix it), a shape that adapter's query language genuinely cannot express (add
+   to `adapterUnsupported` with a reason naming the real mechanism, and make it throw), or an
+   upstream planner bug (`knownDivergences`).
+5. **Bump the per-harness tripwires deliberately** — corpus size, oracle/throwing counts, and the
+   degeneracy-guard action list. Add the new action to that guard so it cannot pass vacuously.
+6. **Update the affected READMEs' `Conformance contract` tables** in the same commit.
+
+A per-adapter unit test is not a substitute for a corpus action. Unit tests pin the filter an
+adapter emits; only the corpus proves that filter returns the rows the PDP actually allows, and
+only the corpus asks the same question of every other adapter.
+
+Watch for harnesses that hand-project corpus data into a narrower local shape (a principal
+attribute allowlist, a fixed column list). A projection silently drops anything a new action
+depends on, and because the same projected input feeds both the plan and the check() oracle, the
+two agree and the action passes vacuously. Pass corpus data through verbatim.
+
 ## Working with Adapters
 
 - Edit only `src/` — never commit `lib/` until tests pass

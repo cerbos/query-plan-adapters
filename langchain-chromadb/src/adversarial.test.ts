@@ -169,17 +169,17 @@ function parseSeed(value: unknown, index: number): Seed {
 function parseSeedsFile(value: unknown): SeedsFile {
   const file = requireRecord(value, "seeds file");
   const principal = requireRecord(file["principal"], "principal");
+  // Carry every principal attribute through verbatim. Projecting to a known
+  // subset here would silently drop any attribute a newly added corpus action
+  // depends on: the plan would fold to ALWAYS_DENIED and the oracle — built
+  // from the same projected principal — would agree, so the action would pass
+  // vacuously instead of exercising the shape it was added for.
   const principalAttr = requireRecord(principal["attr"], "principal.attr");
   return {
     principal: {
       id: requireString(principal["id"], "principal.id"),
       roles: parseStringArray(principal["roles"], "principal.roles"),
-      attr: {
-        allowedTags: parseStringArray(
-          principalAttr["allowedTags"],
-          "principal.attr.allowedTags",
-        ),
-      },
+      attr: principalAttr as Record<string, Value>,
     },
     resourceKind: requireString(file["resourceKind"], "resourceKind"),
     seeds: requireArray(file["seeds"], "seeds").map(parseSeed),
@@ -575,12 +575,12 @@ describe("adversarial conformance corpus", () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(120);
+    expect(MANIFEST_ACTIONS.size).toBe(122);
     expect(CHROMA_SUPPORTED_ACTIONS).toHaveLength(15);
     expect(oracle.size).toBe(CHROMA_SUPPORTED_ACTIONS.length);
-    expect(CHROMA_UNSUPPORTED).toHaveLength(101);
+    expect(CHROMA_UNSUPPORTED).toHaveLength(103);
     expect(CHROMA_SUPPORTED_EXPECTED).toHaveLength(0);
-    expect(THROWING_ACTIONS).toHaveLength(104);
+    expect(THROWING_ACTIONS).toHaveLength(106);
     expect(misclassified).toEqual([]);
   });
 
@@ -622,7 +622,7 @@ describe("adversarial conformance corpus", () => {
   });
 
   test("oracle is not degenerate", async () => {
-    for (const action of ["vf-le", "nary-and", "p-in-null-multi"]) {
+    for (const action of ["vf-le", "nary-and", "p-in-null-multi", "pv-exists", "pv-all"]) {
       const ids = await oracleAllowedIds(action);
       expect(ids.length).toBeGreaterThan(0);
       expect(ids.length).toBeLessThan(SEEDS.length);

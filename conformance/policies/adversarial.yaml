@@ -1124,3 +1124,34 @@ resourcePolicy:
       condition:
         match:
           expr: 'R.attr.categories.exists(c, c.subCategories.all(s, s.labels.exists(l, l.name == "gold")))'
+
+    # -- collection macros over a KNOWN (principal) collection: the planner unroll cliff --
+    #
+    # P.attr.* is folded to a known value at plan time, so the planner unrolls exists/all over
+    # it into an or/and chain at <= 10 elements and ships the lambda with a literal value-list
+    # collection above that (maxItems = 10 in its struct matcher; cerbos/cerbos#2570 for exists,
+    # #2817 for all). `manyTeams` holds ELEVEN elements precisely so these two actions exercise
+    # the value-list shape — an adapter that only handles the unrolled chain has a
+    # data-dependent cliff, working for a principal with 10 teams and failing at 11.
+    #
+    # The lambda body compares `aOptionalString`, which is NULL for a2/a4/a8/c2/e1: those rows
+    # are missing-attribute errors that must deny under BOTH polarities, so the fold cannot be
+    # implemented as a plain IN/NOT IN. 'set' matches a1 but 'Set' (c1) must not — the case
+    # witness; '' matches a6 (empty string); '%_o' matches b2 as an equality operand, not a
+    # LIKE pattern.
+    - actions: ["pv-exists"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: P.attr.manyTeams.exists(t, R.attr.aOptionalString == t)
+
+    # The all() dual. Determined-true only for rows whose aOptionalString is present and matches
+    # no element; the NULL rows error on the first comparison and stay denied, which is what
+    # separates a correct fold from a NOT IN that silently admits NULLs.
+    - actions: ["pv-all"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: P.attr.manyTeams.all(t, R.attr.aOptionalString != t)
