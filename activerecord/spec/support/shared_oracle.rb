@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
-# Oracle for the shared policy suite: the same differential technique the adversarial
-# harness uses, applied to /policies/resource.yaml. Expected id sets are computed by asking
-# the PDP about each fixture row rather than being written by hand.
+# The oracle for the shared policy suite. It uses the same differential technique as the
+# adversarial harness, but with /policies/resource.yaml. It gets the expected sets of ids from
+# the PDP, with one question for each row. No person writes them.
 module SharedOracle
   KIND = "resource"
 

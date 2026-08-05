@@ -5,7 +5,7 @@ require_relative "errors"
 
 module Cerbos
   module ActiveRecord
-    # Parsing for +timestamp()+ literals in a query plan.
+    # Reads the +timestamp()+ literals in a query plan.
     module Timestamps
       RFC3339 = /\A
         (?!0000)(\d{4})-(\d{2})-(\d{2})[Tt]
@@ -14,8 +14,8 @@ module Cerbos
         (?:[Zz]|[+-](?:[01]\d|2[0-3]):[0-5]\d)
       \z/x
 
-      # ActiveRecord quotes a Time with at most microsecond precision, and every database
-      # this adapter targets stores datetimes to microseconds at best.
+      # ActiveRecord puts a Time into SQL with a maximum of six decimal places. Each database
+      # that this adapter supports keeps a datetime with six decimal places or fewer.
       MAX_SUBSECOND_DIGITS = 6
 
       module_function
@@ -36,9 +36,12 @@ module Cerbos
         end
       end
 
-      # Sub-microsecond digits would be silently dropped when the literal is bound into SQL,
-      # moving the instant the policy actually compares against. The planner emits them for
-      # +now()+, so this is a real shape, not a theoretical one — it must fail loudly.
+      # Examines the decimal places of the literal.
+      #
+      # If a literal has more than six decimal places, ActiveRecord removes the last digits
+      # when it puts the literal into SQL. Thus the query compares with a different instant
+      # from the instant in the policy. The planner makes such a literal for +now()+, and thus
+      # this is a real shape and not only a theoretical one. The adapter must raise an error.
       #
       # @api private
       def assert_representable_precision(literal)

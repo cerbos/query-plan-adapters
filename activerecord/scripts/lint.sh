@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run the linter in the same container the suites use.
+# Runs the linter in the same container as the suites.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -10,5 +10,5 @@ export RUBY_VERSION="${RUBY_VERSION:-3.4}"
 export ACTIVERECORD_VERSION="${ACTIVERECORD_VERSION:-8.0}"
 
 docker compose build tests
-# No PDP needed: standardrb only reads source.
+# No PDP is necessary, because standardrb reads only the source.
 docker compose run --rm --no-deps tests bundle exec standardrb "$@"

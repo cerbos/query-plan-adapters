@@ -4,9 +4,10 @@ require_relative "errors"
 
 module Cerbos
   module ActiveRecord
-    # Maps one Cerbos attribute reference — the +variable+ name in a query plan, e.g.
-    # <tt>"request.resource.attr.ownerId"</tt> — onto the ActiveRecord model, either as a
-    # scalar {Field} or as a collection {Relation}.
+    # Maps one Cerbos attribute reference to the ActiveRecord model. The attribute reference
+    # is the +variable+ name in a query plan, for example
+    # <tt>"request.resource.attr.ownerId"</tt>. The mapping is a scalar {Field} or a
+    # collection {Relation}.
     #
     #   MAPPING = {
     #     "request.resource.attr.ownerId"    => Cerbos::ActiveRecord.field("owner_id"),
@@ -16,22 +17,23 @@ module Cerbos
     #     )
     #   }
     #
-    # Plan variables missing from the mapping, or mapped to something the surrounding
-    # operator cannot use, raise {UnmappedAttributeError} — the adapter never guesses a
-    # column.
+    # If the attribute map does not contain a plan variable, the adapter raises
+    # {UnmappedAttributeError}. It also raises that error if the operator around the variable
+    # cannot use the mapping. The adapter never selects a column by itself.
     module AttributeMapping
       # A scalar mapping.
       #
-      # +path+ is a column on the model, or a dot-separated path through +belongs_to+ /
-      # +has_one+ associations (<tt>"owner.department"</tt>), which the adapter resolves as a
-      # correlated scalar subquery so it can never multiply result rows.
+      # +path+ is a column on the model. It can also be a path with dots through +belongs_to+
+      # or +has_one+ associations, for example <tt>"owner.department"</tt>. The adapter
+      # translates such a path into a correlated scalar subquery. Thus the path cannot
+      # increase the number of rows in the result.
       Field = Struct.new(:path) do
         def initialize(path:)
           raise ArgumentError, "path is required" if path.nil?
           super(path: path.to_s)
         end
 
-        # @return [Array<String>] the path split into association hops plus a final column.
+        # @return [Array<String>] the path in parts: the association hops and then the column.
         def segments
           @segments ||= path.split(".").freeze
         end
@@ -39,18 +41,19 @@ module Cerbos
 
       # A collection mapping.
       #
-      # +association+ names a +has_many+ / +has_one+ association on the owning model
-      # (including +through:+ chains, which the adapter expands into joins inside one
-      # correlated subquery).
+      # +association+ is the name of a +has_many+ or +has_one+ association on the model that
+      # owns it. A +through:+ chain is also permitted. The adapter opens such a chain into
+      # joins in one correlated subquery.
       #
-      # +member_field+ stands in for the element wherever the policy treats the collection as
-      # a list of bare values — <tt>"urgent" in R.attr.tags</tt> compares against
-      # <tt>tag.name</tt> rather than the +Tag+ record.
+      # +member_field+ replaces the element when the policy uses the collection as a list of
+      # simple values. Thus <tt>"urgent" in R.attr.tags</tt> compares with <tt>tag.name</tt>
+      # and not with the +Tag+ record.
       #
-      # +fields+ maps the policy-facing member names used inside lambda bodies
-      # (<tt>R.attr.tags.exists(t, t.name == "x")</tt> needs <tt>"name"</tt>) onto the member
-      # model. Entries may themselves be relations, which is how multi-hop chains such as
-      # <tt>R.attr.categories.exists(c, c.subCategories.exists(s, ...))</tt> resolve.
+      # +fields+ maps the member names in the bodies of lambdas. For example,
+      # <tt>R.attr.tags.exists(t, t.name == "x")</tt> needs <tt>"name"</tt>. An entry in
+      # +fields+ can be a relation. This is how the adapter resolves a chain with more than
+      # one hop, for example
+      # <tt>R.attr.categories.exists(c, c.subCategories.exists(s, ...))</tt>.
       Relation = Struct.new(:association, :member_field, :fields) do
         def initialize(association:, member_field: nil, fields: {})
           raise ArgumentError, "association is required" if association.nil?
@@ -70,20 +73,22 @@ module Cerbos
       end
     end
 
-    # Build a scalar {AttributeMapping::Field} mapping.
+    # Makes a scalar {AttributeMapping::Field} mapping.
     #
-    # @param path [String, Symbol] column name, or a dotted path through to-one associations
+    # @param path [String, Symbol] a column name, or a path with dots through to-one
+    #   associations
     # @return [AttributeMapping::Field]
     def self.field(path)
       AttributeMapping::Field.new(path: path)
     end
 
-    # Build a collection {AttributeMapping::Relation} mapping.
+    # Makes a collection {AttributeMapping::Relation} mapping.
     #
-    # @param association [String, Symbol] the owning model's association name
-    # @param member_field [String, Symbol, nil] member column standing in for a bare element
+    # @param association [String, Symbol] the association name on the model that owns it
+    # @param member_field [String, Symbol, nil] the member column that replaces a simple
+    #   element value
     # @param fields [Hash{String => AttributeMapping::Field, AttributeMapping::Relation}]
-    #   policy-facing member names referenced inside lambda bodies
+    #   the member names that the bodies of lambdas use
     # @return [AttributeMapping::Relation]
     def self.relation(association, member_field: nil, fields: {})
       AttributeMapping::Relation.new(association: association, member_field: member_field, fields: fields)

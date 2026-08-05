@@ -2,13 +2,14 @@
 
 require "yaml"
 
-# The shared policy suite every adapter in this repository is exercised against
+# The shared policy suite for all the adapters in this repository
 # (/policies/resource.yaml).
 #
-# Actions are discovered from the policy file itself, so an action added there cannot
-# silently go untested here. Each one is planned against a real PDP, translated, executed
-# against seeded rows, and compared with a per-row check() oracle — the same differential
-# technique the adversarial harness uses, rather than hand-written expectations.
+# This file reads the actions from the policy file. Thus a new action in that file cannot stay
+# without a test here. For each action, the suite makes a plan with a real PDP, translates the
+# plan, runs the query against the rows, and compares the result with an oracle. To make the
+# oracle, it calls check() for each row. This is the same differential technique as the
+# adversarial harness. No person calculates the expected results.
 
 RSpec.describe "shared policy suite" do
   before(:all) do
@@ -38,8 +39,9 @@ RSpec.describe "shared policy suite" do
     "request.resource.attr.scope" => field("scope"),
     "request.resource.attr.createdBy" => field("creator_id"),
 
-    # Dotted scalar paths resolved through belongs_to chains, as correlated scalar
-    # subqueries rather than joins, so they cannot multiply the result set.
+    # These scalar paths with dots go through belongs_to chains. The adapter makes correlated
+    # scalar subqueries for them and does not make joins. Thus they cannot increase the number
+    # of rows in the result.
     "request.resource.attr.nested.aString" => field("nested.a_string"),
     "request.resource.attr.nested.aNumber" => field("nested.a_number"),
     "request.resource.attr.nested.aBool" => field("nested.a_bool"),
@@ -58,15 +60,15 @@ RSpec.describe "shared policy suite" do
         "labels" => relation(:labels, fields: {"name" => field("name")})
       })
     }),
-    # The same chain flattened from the root, for the `categories.subCategories.map(...)`
-    # shapes the policy addresses directly.
+    # The same chain, but from the root. The policy uses the shape
+    # `categories.subCategories.map(...)` directly.
     "request.resource.attr.categories.subCategories" => relation(
       :sub_categories, fields: {"name" => field("name")}
     )
   }.freeze
 
-  # Shapes SQL cannot express faithfully. Each must raise, never emit a filter — the entries
-  # here are an output of running the suite, not an input to it.
+  # SQL cannot show these shapes correctly. Each one must raise an error and must not make a
+  # filter. These entries are a result of a run of the suite. They are not an input to it.
   UNSUPPORTED = {
     "matches-regex" => "RE2 regex semantics are not portable to SQL LIKE or a dialect regex",
     "index-list" => "list indexing has no positional equivalent over an unordered relation",
@@ -75,14 +77,15 @@ RSpec.describe "shared policy suite" do
     "kitchensink" => "embeds a bare filter() as a conjunct"
   }.freeze
 
-  # Actions whose policy expression cannot be evaluated by check() against any single
-  # attribute shape, so no oracle exists to compare against. The plans are still well formed
-  # and every adapter translates them, so the executed row set is asserted directly.
+  # check() cannot evaluate the expressions of these actions with one shape of attributes.
+  # Thus no oracle is available for a comparison. The plans are still correct, and each adapter
+  # translates them. For this reason, the tests below compare the rows from the query directly.
   #
-  # * The `categories.subCategories` shapes read a field off a LIST, which CEL rejects.
-  # * The `tags` shapes address R.attr.tags as a list of bare names, while the exists/all
-  #   shapes address the same attribute as a list of objects. No single check() payload
-  #   satisfies both; a relation mapping does, because member_field and fields coexist.
+  # * The `categories.subCategories` shapes read a field from a LIST, and CEL refuses that.
+  # * The `tags` shapes use R.attr.tags as a list of simple names. But the exists and all
+  #   shapes use the same attribute as a list of objects. No single set of check() attributes
+  #   can satisfy both. A relation mapping can satisfy both, because it has a member_field and
+  #   a fields map together.
   EXECUTED_RESULT_ONLY = {
     "has-intersection-nested" => %w[507f1f77bcf86cd799439011 resource4 resource5],
     "map-deeply-nested" => %w[507f1f77bcf86cd799439011 resource4 resource5],
@@ -113,8 +116,9 @@ RSpec.describe "shared policy suite" do
   end
 
   it "produces a non-degenerate oracle" do
-    # Guard the guard: if the PDP denied everything (a policy that failed to load, a broken
-    # connection) every comparison below would pass while proving nothing.
+    # This test protects the other tests. If the PDP denied all the rows, because a policy did
+    # not load or the connection was bad, each comparison below would agree but would prove
+    # nothing.
     %w[equal gt in exists contains].each do |action|
       ids = SharedOracle.allowed_ids(action)
       expect(ids).not_to be_empty, "#{action}: oracle allowed nothing"

@@ -14,24 +14,29 @@ require_relative "values"
 
 module Cerbos
   module ActiveRecord
-    # Walks a normalised query plan and builds the equivalent Arel predicate.
+    # Goes through a query plan after a normalise operation, and makes the equivalent Arel
+    # predicate.
     #
-    # Two rules shape almost every decision here:
+    # Two rules control almost all the decisions in this class:
     #
-    # * *Wire order is source order.* The planner preserves the order operands appear in the
-    #   policy, so <tt>1 < R.attr.x</tt> arrives as <tt>lt(value(1), variable(x))</tt>. This
-    #   adapter emits comparisons in that same order (+1 < x+), which is already correct SQL;
-    #   adapters that instead assumed a column always comes first, and swapped operands to
-    #   restore that, inverted directional comparisons (cerbos/query-plan-adapters#257).
+    # * *The order on the wire is the order in the source.* The planner keeps the order of the
+    #   operands in the policy. Thus <tt>1 < R.attr.x</tt> comes as
+    #   <tt>lt(value(1), variable(x))</tt>. This adapter makes the comparison in the same
+    #   order (+1 < x+), and that SQL is already correct. Some adapters made a different
+    #   assumption: that a column is always first. They moved the operands to get that order,
+    #   and thus they turned the directional comparisons around
+    #   (cerbos/query-plan-adapters#257).
     #
-    # * *An error is not a false.* CEL denies a resource when evaluating its condition raises
-    #   — a missing attribute, an element whose field is absent. SQL's UNKNOWN behaves the
-    #   same way: it is excluded by a predicate *and* by that predicate's negation. The
-    #   translation preserves UNKNOWN rather than collapsing it, which is why collection
-    #   macros are CASE expressions rather than bare EXISTS.
+    # * *An error is not a false.* CEL denies a resource if the evaluation of its condition
+    #   makes an error. A missing attribute is one cause. An element without a field is
+    #   another. The UNKNOWN value of SQL has the same behaviour: a predicate does not select
+    #   it, and the negation of that predicate does not select it. This translation keeps
+    #   UNKNOWN and does not change it into a boolean. For this reason, the collection macros
+    #   become CASE expressions and not only EXISTS subqueries.
     class Translator
-      # Operators whose operands must NOT be resolved before the operator runs: they either
-      # bind an iterator variable, or must preserve UNKNOWN across a branch.
+      # The adapter must not resolve the operands of these operators before the operator runs.
+      # Each of these operators does one of two things: it connects an iterator variable to a
+      # scope, or it must keep UNKNOWN through a branch.
       STRUCTURAL_OPERATORS = %w[and or not if lambda exists all exists_one filter map].freeze
 
       COMPARISONS = %w[eq ne lt gt le ge].freeze
@@ -70,8 +75,9 @@ module Cerbos
         return model.all if normalised.always_allowed?
 
         @aliaser = Relations::Aliaser.new
-        # Identity-keyed: every resolved column is a freshly built Arel node that flows
-        # through the translation unchanged, so identity is exactly the right notion here.
+        # The keys are object identities. Each column that the adapter resolves is a new Arel
+        # node, and that same node goes through the translation without a change. Thus
+        # identity is the correct comparison here.
         @column_types = {}.compare_by_identity
         environment = Environment.new(translator: self, bindings: {})
         model.where(predicate(normalised.condition, environment))
@@ -97,8 +103,8 @@ module Cerbos
         model.arel_table
       end
 
-      # Resolve an operand to a value: an Arel node, a Ruby constant, or one of the
-      # intermediate {Values} the surrounding operator consumes.
+      # Resolves an operand to a value. The value is an Arel node, a Ruby constant, or one of
+      # the intermediate {Values} that the operator around it uses.
       #
       # @api private
       def evaluate(node, environment)
@@ -140,9 +146,10 @@ module Cerbos
             "such as filter() and map() evaluate to a list, not to a boolean"
         end
 
-        # A bare boolean column is a valid CEL condition, but ActiveRecord's `where` rejects a
-        # naked column reference, and PostgreSQL needs a boolean expression rather than a
-        # value. Comparing against TRUE is equivalent, including for NULL.
+        # A boolean column alone is a correct CEL condition. But the `where` method of
+        # ActiveRecord refuses a column reference alone, and PostgreSQL needs a boolean
+        # expression and not a value. A comparison with TRUE has the same result, and this is
+        # also true for NULL.
         return ArelSupport.comparison("eq", value, true) if column_type(value) == :boolean
 
         ArelSupport.to_predicate(value)
@@ -159,10 +166,11 @@ module Cerbos
 
       # +if(condition, then, else)+.
       #
-      # The generated CASE deliberately has no ELSE. When the condition is UNKNOWN — a NULL
-      # column, an absent attribute — CEL raises, which is a deny; a CASE with no matching
-      # WHEN evaluates to NULL, so the row stays excluded under both polarities of an
-      # enclosing NOT. An +ELSE+ would leak those rows into the else-branch instead.
+      # The CASE that this method makes has no ELSE clause. This is necessary. If the
+      # condition is UNKNOWN, because of a NULL column or a missing attribute, CEL makes an
+      # error and denies the row. A CASE without a WHEN clause that agrees gives NULL. Thus
+      # the row stays out of the result, and it also stays out when a NOT operator is around
+      # the CASE. An +ELSE+ clause would put those rows into the else branch.
       def ternary(operands, environment)
         unless operands.length == 3
           raise InvalidPlanError, "if takes exactly three operands, got #{operands.length}"
@@ -172,8 +180,8 @@ module Cerbos
         then_value = evaluate(operands[1], environment)
         else_value = evaluate(operands[2], environment)
 
-        # A non-finite arm must not reach the database, so keep the ternary symbolic and let
-        # the enclosing comparison fold each branch arithmetically instead.
+        # An arm with a value that is not finite must not go to the database. Thus the
+        # translator keeps the ternary, and the comparison around it calculates each branch.
         if deferred_value?(then_value) || deferred_value?(else_value)
           return Values::ConditionalValue.new(
             condition: condition, then_value: then_value, else_value: else_value
@@ -211,12 +219,13 @@ module Cerbos
         end
       end
 
-      # CEL's three quantifiers differ precisely in how they treat an element whose body
-      # errored, so each gets its own error guard rather than a shared one:
+      # The three CEL quantifiers are different in one important way. Each one has different
+      # behaviour for an element whose body made an error. Thus each one gets its own guard
+      # for that error, and they do not share one guard:
       #
-      # * +exists+ absorbs errors behind a true witness;
-      # * +all+ absorbs them behind a false witness;
-      # * +exists_one+ never absorbs them — it has to count every element.
+      # * +exists+ ignores the errors if one element gives true;
+      # * +all+ ignores the errors if one element gives false;
+      # * +exists_one+ never ignores them, because it must count all the elements.
       def quantifier(operator, scope, body)
         error_witness = scope.exists(ArelSupport.is_null(body))
 
@@ -294,8 +303,9 @@ module Cerbos
       # --- comparison -----------------------------------------------------------------
 
       def compare(operator, left, right)
-        # A ternary held back for folding: compare each arm, then re-branch. The CASE again
-        # has no ELSE, so an UNKNOWN condition stays UNKNOWN.
+        # This is a ternary that the translator kept. It compares each arm and then makes the
+        # branches again. This CASE also has no ELSE clause. Thus an UNKNOWN condition stays
+        # UNKNOWN.
         if left.is_a?(Values::ConditionalValue)
           return ArelSupport.case_node([
             [left.condition, compare(operator, left.then_value, right)],
@@ -316,13 +326,14 @@ module Cerbos
         reject_collection(operator, left)
         reject_collection(operator, right)
 
-        # Both sides constant: fold rather than emitting a tautology.
+        # Both sides are constants. The translator calculates the result here. It does not
+        # make SQL that is always true or always false.
         if constant?(left) && constant?(right)
           return fold_comparison(operator, left, right)
         end
 
-        # `= NULL` is never true. CEL's `null == x` is an ordinary equality, so put the
-        # comparable side on the left and let Arel emit IS [NOT] NULL.
+        # `= NULL` is never true. In CEL, `null == x` is a usual equality. Thus the adapter
+        # puts the other side on the left, and Arel makes IS NULL or IS NOT NULL.
         if left.nil? && %w[eq ne].include?(operator)
           return ArelSupport.comparison(operator, right, nil)
         end
@@ -330,9 +341,10 @@ module Cerbos
         ArelSupport.comparison(operator, left, right)
       end
 
-      # CEL follows IEEE-754: NaN is unequal to everything (including itself) and unordered
-      # against everything. PostgreSQL does not — it sorts NaN above every other double — so
-      # these comparisons are folded here instead of being bound into dialect SQL.
+      # CEL obeys IEEE-754. NaN is not equal to any value, and it is not equal to itself. It
+      # also has no order against any value. PostgreSQL is different, because it puts NaN
+      # above all the other doubles. Thus the translator calculates these comparisons here
+      # and does not put them into the SQL of the dialect.
       def compare_non_finite(operator, left, right)
         left_value = left.is_a?(Values::IEEEConstant) ? left.value : left
         right_value = right.is_a?(Values::IEEEConstant) ? right.value : right
@@ -344,8 +356,8 @@ module Cerbos
 
           return result if other.is_a?(Numeric)
           if ArelSupport.arel_node?(other)
-            # Fold the comparison for every present value, but keep a missing attribute an
-            # error rather than turning it into `ne`'s true.
+            # The translator calculates the comparison for each value that is present. But a
+            # missing attribute stays an error. It does not become the true result of `ne`.
             return ArelSupport.case_node([[ArelSupport.is_null(other), nil]], else_value: result)
           end
 
@@ -382,8 +394,8 @@ module Cerbos
         scalar_membership(left, right)
       end
 
-      # +value in R.attr.<relation>+. A row whose relation is empty is simply excluded,
-      # matching CEL's missing-attribute deny.
+      # +value in R.attr.<relation>+. If the relation of a row is empty, the row stays out of
+      # the result. This agrees with the CEL deny for a missing attribute.
       def relation_membership(scope, value)
         member = scope.member_column
 
@@ -391,7 +403,8 @@ module Cerbos
           if value.nil?
             ArelSupport.comparison("eq", member, nil)
           elsif ArelSupport.arel_node?(value)
-            # Two explicit nulls are equal in CEL but UNKNOWN in SQL, so spell that case out.
+            # Two explicit nulls are equal in CEL, but the result in SQL is UNKNOWN. Thus the
+            # adapter writes that condition.
             ArelSupport.or_node([
               ArelSupport.comparison("eq", member, value),
               ArelSupport.and_node([
@@ -416,7 +429,8 @@ module Cerbos
             ArelSupport.quote(column), present.map { |v| ArelSupport.quote(v) }
           )
         end
-        # A null element makes membership true for a null (not merely missing) attribute.
+        # A null element makes the membership test true for an attribute that is null. The
+        # attribute must be null and not only missing.
         predicates << ArelSupport.comparison("eq", column, nil) if present.length != members.length
 
         predicates.empty? ? false : ArelSupport.or_node(predicates)
@@ -428,9 +442,9 @@ module Cerbos
         reject_collection(operator, left)
         reject_collection(operator, right)
 
-        # CEL overloads `+` for strings. SQL does not: `'a' + 'b'` is a numeric addition
-        # that coerces both sides to 0 on SQLite and MySQL, so string operands need the
-        # dialect's concatenation instead.
+        # CEL uses `+` for strings and for numbers. SQL does not. On SQLite and MySQL,
+        # `'a' + 'b'` is an addition of numbers, and it changes both sides into 0. Thus string
+        # operands need the concatenation operation of the dialect.
         if operator == "add" && (string_valued?(left) || string_valued?(right))
           return left + right if left.is_a?(::String) && right.is_a?(::String)
 
@@ -450,9 +464,9 @@ module Cerbos
         %i[string text].include?(column_type(value))
       end
 
-      # Cerbos transports every number as a double and CEL attribute arithmetic is
-      # double-typed, so division must be too: SQLite and PostgreSQL would otherwise apply
-      # integer division and truncate +5 / 2+ to +2+.
+      # Cerbos sends each number as a double, and CEL arithmetic on attributes uses doubles.
+      # Thus the division must also use doubles. If it did not, SQLite and PostgreSQL would do
+      # an integer division and change +5 / 2+ into +2+.
       def divide(numerator, denominator)
         reject_collection("div", numerator)
         reject_collection("div", denominator)
@@ -461,9 +475,9 @@ module Cerbos
           return divide_constants(numerator.to_f, denominator.to_f)
         end
 
-        # Dialects disagree on division by zero (NULL versus a raised error). NULL filters
-        # identically to CEL's NaN for every comparison the planner emits here, and it keeps
-        # a database exception from aborting the whole query.
+        # The dialects are different for a division by zero. Some give NULL and some make an
+        # error. For each comparison that the planner makes here, NULL selects the same rows
+        # as the NaN of CEL. NULL also prevents a database error that would stop the query.
         ArelSupport.infix(
           "/",
           as_double(numerator),
@@ -506,12 +520,12 @@ module Cerbos
       def size(target)
         case target
         when Values::Collection
-          # size() counts elements without evaluating them, so a NULL member column still
-          # counts — there is nothing to error on and no guard is needed.
+          # size() counts the elements and does not evaluate them. Thus it also counts a
+          # member column that is NULL. No error is possible, and no guard is necessary.
           target.scope.count
         when Values::FilteredCollection
-          # filter(), unlike exists(), never absorbs an erroring element: one UNKNOWN body
-          # poisons the whole count.
+          # filter() is different from exists(). It never ignores an element that made an
+          # error. Thus one body with an UNKNOWN result makes the full count unknown.
           ArelSupport.case_node(
             [[target.scope.exists(ArelSupport.is_null(target.body)), nil]],
             else_value: target.scope.count(target.body)
@@ -524,8 +538,8 @@ module Cerbos
       end
 
       def has_intersection(left, right)
-        # hasIntersection is symmetric, and the planner preserves source order, so the
-        # literal list may arrive on either side.
+        # hasIntersection gives the same result if the operands change sides. The planner
+        # keeps the order of the source. Thus the list of literals can come on each side.
         left, right = right, left if left.is_a?(Array) && !right.is_a?(Array)
         values = right.is_a?(Array) ? right : [right]
 
@@ -533,8 +547,9 @@ module Cerbos
         when Values::Collection
           left.scope.exists(scalar_membership(left.scope.member_column, values))
         when Values::MappedCollection
-          # map() errors on any erroring element, with no absorption, so the error guard has
-          # to come before the true-witness check.
+          # map() makes an error for each element that makes an error, and it ignores no
+          # errors. Thus the guard for the error must come before the test for a true
+          # element.
           ArelSupport.case_node(
             [
               [left.scope.exists(ArelSupport.is_null(left.projection)), nil],
@@ -562,10 +577,10 @@ module Cerbos
         type = column_type(value)
         return value if TEMPORAL_COLUMN_TYPES.include?(type)
 
-        # Comparing a string column against a bound Time compares two *different* textual
-        # formats — ActiveRecord renders `2025-01-01 00:00:00`, an RFC-3339 column holds
-        # `2025-01-01T00:00:00Z` — so the ordering it produces is lexicographic accident,
-        # not an instant comparison. Refuse rather than emit it.
+        # A comparison between a string column and a Time compares two different text
+        # formats. ActiveRecord makes `2025-01-01 00:00:00`, but an RFC-3339 column holds
+        # `2025-01-01T00:00:00Z`. Thus the order of the results comes from the text and not
+        # from the instants. The adapter refuses this shape and does not make the SQL.
         raise UnsupportedOperatorError,
           "timestamp() applied to a #{type.inspect} column: this adapter compares instants " \
           "using the database's own temporal type, so the attribute must map to a datetime " \
@@ -593,8 +608,8 @@ module Cerbos
         unless left.is_a?(Values::Hierarchy) && right.is_a?(Values::Hierarchy)
           raise UnsupportedOperatorError, "Hierarchy operators need hierarchy() operands"
         end
-        # A list-built hierarchy is already split, so its delimiter carries no meaning and
-        # comparing it against a differently-delimited path is well defined.
+        # A hierarchy from a list is already in segments. Thus its delimiter has no meaning,
+        # and a comparison with a path that has a different delimiter is correct.
         if left.segments.nil? && right.segments.nil? && left.delimiter != right.delimiter
           raise UnsupportedOperatorError,
             "Hierarchy operands use different delimiters: " \
@@ -604,8 +619,9 @@ module Cerbos
         [left, right]
       end
 
-      # The segments of a hierarchy, when they can be known at translation time. A column is
-      # an opaque delimited string until the query runs, so it has none.
+      # Gives the segments of a hierarchy, if the adapter can know them during the
+      # translation. A column is a string with a delimiter until the query runs. Thus a column
+      # has no segments here.
       def segments_of(hierarchy)
         return hierarchy.segments if hierarchy.segments
         return hierarchy.value.split(hierarchy.delimiter, -1) if hierarchy.value.is_a?(::String)
@@ -613,8 +629,9 @@ module Cerbos
         nil
       end
 
-      # Segment-wise comparison, used whenever either side came from a list. Both sides must
-      # be segmentable; a column cannot be split into segments in SQL.
+      # Compares the segments one by one. The adapter uses this when one side or the other
+      # side came from a list. It must be possible to get the segments of both sides. SQL
+      # cannot divide a column into segments.
       def require_segments(hierarchy)
         segments = segments_of(hierarchy)
         return segments if segments
@@ -651,7 +668,8 @@ module Cerbos
         if segment_wise?(ancestor, descendent)
           above_segments = require_segments(ancestor)
           below_segments = require_segments(descendent)
-          # A strict ancestor is a strictly shorter path that agrees on every segment it has.
+          # An ancestor is a shorter path, and each of its segments agrees with the segment in
+          # the same position in the other path.
           return false if above_segments.length >= below_segments.length
 
           return ArelSupport.and_node(
@@ -666,8 +684,9 @@ module Cerbos
         end
 
         if below.is_a?(::String)
-          # A constant descendant has a known, finite set of ancestors: match them exactly
-          # rather than with a LIKE whose metacharacters would have to be escaped.
+          # A descendant that is a constant has a known and limited set of ancestors. The
+          # adapter compares them exactly. A LIKE operation would need an escape character for
+          # its metacharacters.
           parts = below.split(delimiter, -1)
           prefixes = (1...parts.length).map { |i| parts[0, i].join(delimiter) }
           return scalar_membership(above, prefixes)
@@ -721,8 +740,8 @@ module Cerbos
         end
       end
 
-      # Resolves plan variables against the caller's mapping, plus whatever iterator
-      # variables the enclosing collection macros have bound.
+      # Resolves the plan variables with the attribute map from the caller. It also resolves
+      # the iterator variables that the collection macros around them connected to a scope.
       class Environment
         def initialize(translator:, bindings:)
           @translator = translator

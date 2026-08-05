@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
-# The oracle side of the differential harness: for each seeded row, ask the SAME PDP that
-# produced the query plan whether it allows the action, with attributes mirroring that row
-# exactly. There are no hand-written expectations on either side.
+# The oracle part of the differential harness. For each row, it asks the same PDP that made
+# the query plan if the action is permitted. The attributes in that question are the same as
+# the data in the row. No person writes the expected results for either side.
 module AdversarialOracle
   module_function
 
@@ -28,13 +28,13 @@ module AdversarialOracle
     )
   end
 
-  # A DB NULL is a MISSING attribute on the check side. CEL raises a missing-attribute error
-  # for a condition that touches one, which Cerbos treats as a deny — the same three-valued
-  # logic SQL applies when a NULL participates in a comparison. In particular `NOT (NULL = x)`
-  # stays UNKNOWN, not TRUE.
+  # A NULL in the database is a missing attribute for the check call. If a condition uses a
+  # missing attribute, CEL makes an error, and Cerbos denies the row. SQL has the same
+  # three-valued logic when a NULL is in a comparison. Note that `NOT (NULL = x)` stays
+  # UNKNOWN and does not become TRUE.
   #
-  # `owner` and `tagNames` are the deliberate exceptions: they carry EXPLICIT nulls, because
-  # CEL membership distinguishes a null element from an absent one.
+  # `owner` and `tagNames` are the two exceptions. They hold explicit nulls, because a CEL
+  # membership test finds a difference between a null element and a missing element.
   def check_resource(seed)
     attr = {
       "aBool" => seed.fetch("aBool"),
@@ -60,9 +60,10 @@ module AdversarialOracle
     created_at = ConformanceCorpus.created_at(seed)
     attr["createdAt"] = created_at unless created_at.nil?
 
-    # mainCategory mirrors the row's category graph as ONE nested object (the seeder creates
-    # at most one category per seed). A row with no category gets NO attribute at all — a
-    # missing-attribute deny, matching the adapter's empty join chain excluding the row.
+    # mainCategory shows the category graph of the row as one nested object. The seed code
+    # makes a maximum of one category for each row. A row without a category gets no attribute.
+    # Thus CEL denies it because the attribute is missing. The adapter also keeps that row out
+    # of the result, because its chain of joins is empty.
     unless seed.fetch("subCategoryNames").empty?
       attr["mainCategory"] = {
         "name" => "business",
@@ -74,7 +75,7 @@ module AdversarialOracle
     {kind: ConformanceCorpus::RESOURCE_KIND, id: seed.fetch("id"), attr: attr}
   end
 
-  # A NULL tag name in the database is a MISSING element attribute on the check side.
+  # A NULL tag name in the database is a missing element attribute for the check call.
   def tag_attr(tag)
     attr = {"id" => tag.fetch("id")}
     name = tag.fetch("name")

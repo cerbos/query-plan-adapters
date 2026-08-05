@@ -4,8 +4,9 @@ require_relative "arel_support"
 
 module Cerbos
   module ActiveRecord
-    # The handful of places where portable SQL does not exist and guessing would change
-    # filter semantics rather than merely the generated text.
+    # The small number of operations for which no portable SQL is available. For each of them,
+    # an incorrect selection changes the meaning of the filter. It does not change only the
+    # text of the SQL.
     class Dialect
       MYSQL_ADAPTERS = %w[mysql mysql2 trilogy].freeze
 
@@ -22,15 +23,16 @@ module Cerbos
       def self.for(model)
         new(model.connection.adapter_name)
       rescue => e
-        # A model without a live connection can still be translated: only the two helpers
-        # below need the dialect, and both have a sane majority default.
+        # The adapter can translate a plan for a model that has no open connection. Only the
+        # two functions below need the dialect, and each has a safe default for most
+        # databases.
         raise e if e.is_a?(Error)
         new("unknown")
       end
 
-      # MySQL has no +||+ string concatenation operator under its default
-      # +sql_mode+; everything else this adapter supports lacks +CONCAT+ (SQLite gained it
-      # only in 3.44).
+      # MySQL has no +||+ operator for the concatenation of strings with its default
+      # +sql_mode+. The other databases that this adapter supports have no +CONCAT+ function.
+      # SQLite got +CONCAT+ only in version 3.44.
       def concat(left, right)
         if mysql?
           ArelSupport.function("CONCAT", [left, right])
@@ -39,16 +41,17 @@ module Cerbos
         end
       end
 
-      # CEL +size()+ over a string counts characters. MySQL's +LENGTH+ counts bytes, so a
-      # multi-byte string would report the wrong size; +CHAR_LENGTH+ is its character-wise
-      # equivalent. SQLite and PostgreSQL +LENGTH+ already count characters.
+      # CEL +size()+ counts the characters of a string. The +LENGTH+ function of MySQL counts
+      # the bytes. Thus it gives the wrong size for a string with multi-byte characters. The
+      # +CHAR_LENGTH+ function of MySQL counts the characters. The +LENGTH+ function of SQLite
+      # and PostgreSQL counts the characters.
       def char_length(expression)
         ArelSupport.function(mysql? ? "CHAR_LENGTH" : "LENGTH", [expression])
       end
 
-      # The type name a CAST must use to reach an IEEE-754 binary64. Spelling this wrong is
-      # not cosmetic: PostgreSQL's +numeric+ is exact decimal, so casting to it would make
-      # fractional arithmetic disagree with CEL's doubles.
+      # The type name that a CAST must use to get an IEEE-754 binary64 value. The correct name
+      # is important. The +numeric+ type of PostgreSQL is an exact decimal type. If the
+      # adapter used it, arithmetic with fractions would not agree with the doubles of CEL.
       def double_type
         case adapter_name
         when "sqlite", "sqlite3" then "REAL"

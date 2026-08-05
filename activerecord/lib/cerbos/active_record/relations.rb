@@ -6,19 +6,19 @@ require_relative "errors"
 
 module Cerbos
   module ActiveRecord
-    # Turns an association mapping into a *correlated subquery scope*: the aliased tables, the
-    # joins between them, and the predicates tying the whole thing back to the row in the
-    # enclosing query.
+    # Changes an association mapping into a correlated subquery scope. The scope holds the
+    # tables with their aliases, the joins between those tables, and the predicates that
+    # connect the subquery to the row in the query around it.
     #
-    # Every scope gets fresh table aliases. That is not cosmetic — a policy may nest a macro
-    # over the same association inside itself, and an unaliased inner subquery would silently
-    # correlate against its own row instead of the outer one.
+    # Each scope gets new table aliases. This is necessary and not only a preference. A policy
+    # can put a macro on an association inside another macro on the same association. If the
+    # inner subquery had no alias, it would connect to its own row and not to the outer row.
     module Relations
-      # One association hop: the aliased table it introduces, and the predicates linking it to
-      # whatever came before.
+      # One association hop. It has the table with its alias, and the predicates that connect
+      # that table to the tables before it.
       Hop = Struct.new(:table, :predicates, :model)
 
-      # Generates collision-free table aliases for one translation.
+      # Makes table aliases that are all different, for one translation.
       class Aliaser
         def initialize
           @counter = 0
@@ -30,7 +30,8 @@ module Cerbos
         end
       end
 
-      # A resolved collection, ready to be turned into EXISTS / COUNT subqueries.
+      # A collection after the adapter resolves it. The adapter can change it into an EXISTS
+      # subquery or a COUNT subquery.
       class Scope
         def initialize(hops:, model:, mapping: nil)
           @hops = hops
@@ -40,13 +41,14 @@ module Cerbos
 
         attr_reader :hops, :mapping, :model
 
-        # The aliased table of the last hop — where member columns live.
+        # The table with its alias for the last hop. The member columns are on this table.
         def table
           hops.last.table
         end
 
-        # Predicates tying this scope to the enclosing query. They belong in the subquery's
-        # WHERE clause, not in a join, so the subquery correlates rather than cross-joining.
+        # The predicates that connect this scope to the query around it. They belong in the
+        # WHERE clause of the subquery and not in a join. Thus the subquery correlates and it
+        # does not make a cross join.
         def correlation
           hops.first.predicates
         end
@@ -61,23 +63,25 @@ module Cerbos
           table[field]
         end
 
-        # +(SELECT <column> FROM ... WHERE <correlation>)+ as a scalar value, used for
-        # dotted field paths through to-one associations. A scalar subquery cannot multiply
-        # the outer result set the way a JOIN can.
-        def scalar(column_name)
-          Arel::Nodes::Grouping.new(select_manager(table[column_name], []).ast)
-        end
-
-        # +SELECT 1 FROM ... WHERE <correlation> [AND <conditions>]+, wrapped in EXISTS.
+        # Makes +SELECT 1 FROM ... WHERE <correlation> [AND <conditions>]+ in an EXISTS node.
         def exists(*conditions)
-          # `.ast`, not the manager: a SelectManager renders its own parentheses, and
-          # `EXISTS ((SELECT ...))` is a parenthesised expression rather than a subquery.
+          # The adapter gives the AST to the EXISTS node and not the manager. A SelectManager
+          # makes its own parentheses, and +EXISTS ((SELECT ...))+ is an expression in
+          # parentheses and not a subquery.
           Arel::Nodes::Exists.new(select_manager(Arel.sql("1"), conditions).ast)
         end
 
-        # +(SELECT COUNT(*) FROM ... WHERE <correlation> [AND <conditions>])+ as a scalar.
+        # Makes +(SELECT COUNT(*) FROM ... WHERE <correlation> [AND <conditions>])+ as a
+        # scalar value.
         def count(*conditions)
           Arel::Nodes::Grouping.new(select_manager(Arel.star.count, conditions).ast)
+        end
+
+        # Makes +(SELECT <column> FROM ... WHERE <correlation>)+ as a scalar value. A field
+        # path with dots through to-one associations uses this. A scalar subquery cannot
+        # increase the number of rows in the result. A JOIN can do that.
+        def scalar(column_name)
+          Arel::Nodes::Grouping.new(select_manager(table[column_name], []).ast)
         end
 
         private
@@ -98,8 +102,8 @@ module Cerbos
 
       module_function
 
-      # @param owner_model [Class] the ActiveRecord model the association hangs off
-      # @param owner_table [Arel::Table] that model's table in the enclosing query
+      # @param owner_model [Class] the ActiveRecord model that has the association
+      # @param owner_table [Arel::Table] the table of that model in the query around it
       # @param mapping [AttributeMapping::Relation]
       # @param aliaser [Aliaser]
       # @return [Scope]
@@ -114,10 +118,12 @@ module Cerbos
         Scope.new(hops: hops, mapping: mapping, model: hops.last.model)
       end
 
-      # Resolve a chain of to-one associations for a dotted {AttributeMapping::Field} path.
+      # Resolves a chain of to-one associations for an {AttributeMapping::Field} path with
+      # dots.
       #
-      # Collections are rejected here rather than silently reduced to one of their rows: a
-      # scalar comparison against "some element" is not what the policy asked for.
+      # The adapter refuses a collection here. It does not select one row of the collection by
+      # itself. A scalar comparison with "one of the elements" is not the request of the
+      # policy.
       #
       # @return [Scope]
       def build_path(owner_model:, owner_table:, association_names:, aliaser:)
@@ -184,8 +190,8 @@ module Cerbos
           predicates << table[reflection.foreign_key].eq(
             owner_table[reflection.active_record_primary_key]
           )
-          # `as:` associations discriminate on a type column; without it the subquery would
-          # match rows belonging to a different owner class.
+          # An `as:` association uses a type column to select its rows. Without a condition on
+          # that column, the subquery also finds the rows of a different owner class.
           if reflection.type
             predicates << table[reflection.type].eq(owner_model.polymorphic_name)
           end

@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# Small models for the association shapes the adapter must refuse to guess at.
+# Small models for the association shapes that the adapter must refuse.
 module EdgeCaseModels
   module_function
 

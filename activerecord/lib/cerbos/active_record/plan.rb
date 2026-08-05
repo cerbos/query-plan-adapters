@@ -4,10 +4,11 @@ require_relative "errors"
 
 module Cerbos
   module ActiveRecord
-    # Normalises the several shapes a +PlanResources+ response arrives in — the output objects
-    # of the official Ruby SDK (https://github.com/cerbos/cerbos-sdk-ruby), or the raw
-    # JSON/protobuf-JSON a REST or gRPC call produces — into one abstract syntax tree the
-    # translator walks.
+    # Changes a +PlanResources+ response into one abstract syntax tree for the translator.
+    #
+    # A response can have more than one shape. It can be an output object of the official Ruby
+    # SDK (https://github.com/cerbos/cerbos-sdk-ruby). It can also be the JSON or the
+    # protobuf-JSON from a REST call or a gRPC call.
     module Plan
       Expression = Struct.new(:operator, :operands)
       Value = Struct.new(:value)
@@ -29,8 +30,8 @@ module Cerbos
 
       module_function
 
-      # @param plan [Object] a +Cerbos::Output::PlanResources+, a Hash, or anything exposing
-      #   +kind+/+condition+ (or +filter+) in one of those shapes
+      # @param plan [Object] a +Cerbos::Output::PlanResources+, a Hash, or an object that has
+      #   +kind+ and +condition+ (or +filter+) in one of those shapes
       # @return [Normalised]
       def normalise(plan)
         kind, condition = extract(plan)
@@ -56,8 +57,8 @@ module Cerbos
           return [plan[:kind], plan[:condition]]
         end
 
-        # A protobuf response wraps the plan in `filter`; the Ruby SDK's output object
-        # flattens `kind`/`condition` onto itself.
+        # A protobuf response holds the plan in `filter`. The output object of the Ruby SDK
+        # has `kind` and `condition` on itself.
         return extract(plan.filter) if plan.respond_to?(:filter) && !plan.respond_to?(:kind)
 
         unless plan.respond_to?(:kind) && plan.respond_to?(:condition)
@@ -87,7 +88,8 @@ module Cerbos
         if operand.key?(:expression)
           return node(operand[:expression])
         end
-        # `{"value": null}` is a legitimate constant, so test key presence, not truthiness.
+        # `{"value": null}` is a correct constant. Thus the adapter looks for the key and does
+        # not look at the value.
         if operand.key?(:value) && !operand.key?(:operator)
           return Value.new(value: normalise_value(operand[:value]))
         end
@@ -122,7 +124,7 @@ module Cerbos
         raise InvalidPlanError, "Unrecognised query plan operand: #{operand.inspect}"
       end
 
-      # Protobuf JSON transports every number as a double; a list keeps its element types.
+      # Protobuf JSON sends each number as a double. The elements of a list keep their types.
       # @api private
       def normalise_value(value)
         case value

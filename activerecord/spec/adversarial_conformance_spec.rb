@@ -1,19 +1,23 @@
 # frozen_string_literal: true
 
-# Adversarial differential conformance harness (cerbos/query-plan-adapters#263).
+# The adversarial differential conformance harness (cerbos/query-plan-adapters#263).
 #
-# Every action in the shared repo-level conformance/ corpus is planned against a REAL Cerbos
-# PDP pinned to conformance/CERBOS_VERSION and loaded with conformance/policies/, translated
-# through this adapter's public API, and executed against seeded SQLite rows — then the
-# filtered id set is compared with an oracle computed by calling the check API for each seed
-# row with attributes mirroring that row exactly.
+# This harness does four steps for each action in the shared conformance/ corpus. First, it
+# makes a plan with a real Cerbos PDP. The version of that PDP is in
+# conformance/CERBOS_VERSION, and it loads the policies in conformance/policies/. Second, it
+# translates the plan with the public interface of this adapter. Third, it runs the query
+# against the SQLite rows from the corpus. Fourth, it compares the set of ids with an oracle.
 #
-# No hand-computed expectations: if this adapter's filter semantics diverge from Cerbos's own
-# evaluation for any row, the mismatch surfaces mechanically. See conformance/README.md for
-# the oracle recipe, the NULL conventions and the degeneracy guard.
+# To make the oracle, the harness calls the check interface of the same PDP for each row. The
+# attributes in that call are the same as the data in the row.
 #
-# This file owns only the ActiveRecord-specific configuration: the schema (spec/support/
-# adversarial_models.rb) and the attribute mapping below.
+# No person calculates the expected results. If the filter of this adapter does not agree with
+# the evaluation of Cerbos for one row, the test shows the difference. Refer to
+# conformance/README.md for the oracle procedure, the NULL conventions and the degeneracy
+# guard.
+#
+# This file contains only the configuration for ActiveRecord: the schema is in
+# spec/support/adversarial_models.rb, and the attribute map is below.
 
 RSpec.describe "adversarial conformance" do
   before(:all) { AdversarialModels.establish! }
@@ -31,17 +35,19 @@ RSpec.describe "adversarial conformance" do
     "request.resource.attr.createdBy" => field("created_by"),
     "request.resource.attr.scope" => field("scope"),
     "request.resource.attr.createdAt" => field("created_at"),
-    # `owner` aliases the same column as aOptionalString, but the corpus sends it as an
-    # EXPLICIT null rather than omitting it — that is what the membership probes discriminate.
+    # `owner` uses the same column as aOptionalString. But the corpus sends `owner` as an
+    # explicit null, and it does not remove the attribute. The membership tests find this
+    # difference.
     "request.resource.attr.owner" => field("a_optional_string"),
-    # obj.inner is not a real nested column; it mirrors aString, the same stand-in the
-    # spring-data, prisma and sqlalchemy reference harnesses use for the p-struct probe.
+    # obj.inner is not a true nested column. It uses the same column as aString. The
+    # spring-data, prisma and sqlalchemy harnesses use the same substitute for the p-struct
+    # test.
     "request.resource.attr.obj.inner" => field("a_string"),
 
     "request.resource.attr.tags" => relation(
       :tags, fields: {"id" => field("tag_id"), "name" => field("name")}
     ),
-    # The scalar projection of tags[].name, with NULL names retained as null elements.
+    # The scalar values of tags[].name. A NULL name stays in the list as a null element.
     "request.resource.attr.tagNames" => relation(:tags, member_field: "name"),
 
     "request.resource.attr.categories" => relation(:categories, fields: {
@@ -51,7 +57,7 @@ RSpec.describe "adversarial conformance" do
       })
     }),
 
-    # The same two-hop chain flattened from the root, through a has_many :through.
+    # The same chain with two hops, but from the root, through a has_many :through.
     "request.resource.attr.mainCategory.subCategories" => relation(
       :sub_categories, fields: {"name" => field("name")}
     ),
@@ -69,8 +75,9 @@ RSpec.describe "adversarial conformance" do
   end
 
   describe "corpus" do
-    # A tripwire, not a formality: a new corpus action must not slip past this adapter
-    # unnoticed. Bump these deliberately when conformance/actions.json grows.
+    # This test is a control and not a formality. A new action in the corpus must not go past
+    # this adapter without a test. Increase these numbers only when you know why
+    # conformance/actions.json is larger.
     it "pins the corpus size" do
       expect(ConformanceCorpus::ACTIONS_FILE.fetch("conformance").size).to eq(114)
       expect(ConformanceCorpus::EXPECTED_UNSUPPORTED.size).to eq(3)
@@ -81,9 +88,10 @@ RSpec.describe "adversarial conformance" do
       expect(overlap).to be_empty
     end
 
-    # Guard the guard. Every comparison below could pass vacuously if the oracle itself were
-    # trivial — a PDP that denied every row, or a policy that failed to load. These actions
-    # must produce a non-empty, non-total allowed set.
+    # This test protects the other tests. If the oracle gave the same result for all the rows,
+    # each comparison below would agree but would prove nothing. A PDP that denies all the rows
+    # is one cause. A policy that does not load is another cause. For these actions, the set of
+    # permitted rows must not be empty, and it must not contain all the rows.
     it "produces a non-degenerate oracle" do
       %w[vf-le like-percent all-on-empty].each do |action|
         ids = AdversarialOracle.allowed_ids(action)
@@ -103,8 +111,9 @@ RSpec.describe "adversarial conformance" do
   end
 
   describe "fails loudly" do
-    # A loud failure — at translation or at execution — is required. A silently-wrong filter
-    # is the only unacceptable outcome, because it returns rows the PDP denies.
+    # An error is necessary, during the translation or during the query. A filter that is
+    # incorrect but makes no error is the only result that we cannot accept, because it gives
+    # rows that the PDP denies.
     ConformanceCorpus::THROWING_ACTIONS.each do |action|
       it action do
         expect { adapter_filtered_ids(action) }.to raise_error(StandardError)
@@ -113,11 +122,11 @@ RSpec.describe "adversarial conformance" do
   end
 
   describe "known divergences" do
-    # Pin the planner's has() fold until the upstream fix lands: the check API denies rows
-    # where aOptionalString is missing, while the planner folds the same condition to
-    # ALWAYS_ALLOWED. The adapter must translate that plan faithfully. This keeps the one
-    # intentional oracle divergence visible, and fails when the pinned image changes so
-    # p-has can move back into the differential run.
+    # This test holds the current behaviour of has() in the planner until the correction comes
+    # from the Cerbos project. The check interface denies the rows in which aOptionalString is
+    # missing. But the planner changes the same condition into ALWAYS_ALLOWED. The adapter must
+    # translate that plan correctly. This test keeps the one permitted difference visible. It
+    # fails if the pinned image changes. Then p-has can go back into the differential run.
     it "p-has is an upstream planner over-grant, not an adapter bug" do
       plan = AdversarialOracle.plan("p-has")
       oracle = AdversarialOracle.allowed_ids("p-has")

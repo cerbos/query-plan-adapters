@@ -18,7 +18,8 @@ jobs:
     environment: rubygems
     permissions:
       contents: read
-      # Trusted publishing to RubyGems: no long-lived API key in repository secrets.
+      # Trusted publishing to RubyGems. Thus the repository secrets hold no permanent API
+      # key.
       id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

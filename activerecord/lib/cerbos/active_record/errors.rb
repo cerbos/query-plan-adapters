@@ -2,27 +2,28 @@
 
 module Cerbos
   module ActiveRecord
-    # Base class for every error this adapter raises.
+    # The parent class of all the errors from this adapter.
     #
-    # The adapter fails closed: a query plan shape it cannot translate faithfully raises
-    # rather than emitting a best-effort filter. A wrong filter is an authorization bug that
-    # returns rows the PDP denies; a raise is a bug report.
+    # The adapter is fail-closed. If it cannot translate a query plan correctly, it raises an
+    # error. It does not make a filter that is only approximately correct. An incorrect filter
+    # is an authorization bug, because it gives rows that the PDP denies. An error is a bug
+    # report.
     class Error < StandardError; end
 
-    # A plan referenced an attribute that the caller's mapping does not cover, or mapped it
-    # to something the surrounding operator cannot use (a relation where a column is
-    # required, or vice versa).
+    # The plan refers to an attribute that the attribute map does not contain. Or the plan
+    # uses that attribute in a position that its mapping cannot fill. For example, it uses a
+    # relation where a column is necessary.
     class UnmappedAttributeError < Error; end
 
-    # The plan uses an operator, or an operand shape, that this adapter cannot express as a
-    # faithful SQL filter.
+    # The plan uses an operator, or a shape of operand, that this adapter cannot translate
+    # into a correct SQL filter.
     class UnsupportedOperatorError < Error; end
 
-    # The plan is structurally malformed, or a literal it carries (a timestamp, a hierarchy
-    # delimiter) is not representable.
+    # The structure of the plan is bad. Or the plan contains a literal value that the adapter
+    # cannot show correctly, such as a timestamp or a hierarchy delimiter.
     class InvalidPlanError < Error; end
 
-    # An attribute maps onto an association this adapter cannot turn into a correlated
+    # An attribute maps to an association that the adapter cannot change into a correlated
     # subquery.
     class UnsupportedAssociationError < Error; end
   end

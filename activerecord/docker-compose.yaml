@@ -1,14 +1,15 @@
-# Everything the ActiveRecord adapter needs to run its suites, with no host toolchain
-# beyond Docker.
+# All the components that the suites of the ActiveRecord adapter need. Docker is the only
+# software that you must install on your computer.
 #
-#   ./scripts/test.sh                 # unit suite + adversarial suite
+#   ./scripts/test.sh                 # all the suites
 #   ./scripts/test.sh spec/adversarial_conformance_spec.rb
 #
-# The `tests` service mounts the REPOSITORY ROOT because the adversarial harness reads the
-# shared corpus at ../conformance/ (seeds.json, actions.json, CERBOS_VERSION).
+# The `tests` service mounts the root directory of the repository, because the adversarial
+# harness reads the shared corpus at ../conformance/ (seeds.json, actions.json,
+# CERBOS_VERSION).
 #
-# The PDP is pinned to conformance/CERBOS_VERSION — scripts/test.sh exports it. Never
-# hardcode the version here.
+# The version of the PDP comes from conformance/CERBOS_VERSION. scripts/test.sh puts it into
+# the environment. Do not write the version in this file.
 
 services:
   cerbos:
@@ -17,8 +18,9 @@ services:
     environment:
       CERBOS_NO_TELEMETRY: "1"
     volumes:
-      # Both policy sets live under one disk store: the shared suite drives resource kind
-      # `resource`, the adversarial corpus drives kind `adversarial`, so they never collide.
+      # The two sets of policies are in one disk store. The shared suite uses the resource
+      # kind `resource`, and the adversarial corpus uses the kind `adversarial`. Thus they
+      # cannot interfere with each other.
       - ../policies:/policies/shared:ro
       - ../conformance/policies:/policies/conformance:ro
     healthcheck:
@@ -40,8 +42,8 @@ services:
     environment:
       CERBOS_HOST: cerbos:3593
     volumes:
-      # Only the repo is mounted: the bundle lives at /bundle inside the image, so a volume
-      # here would mask it and leave `bundle exec` without its gems.
+      # Only the repository is mounted. The gems are at /bundle in the image. A volume at that
+      # position would hide them, and then `bundle exec` would have no gems.
       - ..:/repo
     working_dir: /repo/activerecord
     command: ["bundle", "exec", "rspec"]

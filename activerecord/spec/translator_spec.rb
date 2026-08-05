@@ -1,9 +1,10 @@
 # frozen_string_literal: true
 
-# Translation-level tests: the public API surface, the plan shapes accepted, the generated
-# SQL, and — most importantly — the shapes the adapter must refuse rather than guess at.
+# Tests for the translation. They examine the public interface, the shapes of plan that the
+# adapter accepts, and the SQL that it makes. Most importantly, they examine the shapes that
+# the adapter must refuse.
 #
-# These need no PDP; the differential suites cover semantics against a real one.
+# These tests need no PDP. The differential suites compare the behaviour with a real PDP.
 
 RSpec.describe Cerbos::ActiveRecord do
   before(:all) do
@@ -80,11 +81,11 @@ RSpec.describe Cerbos::ActiveRecord do
       expect(translate(plan).count).to eq(2)
     end
 
-    # The official Ruby SDK (https://github.com/cerbos/cerbos-sdk-ruby) is the primary source
-    # of plans, so its output types are asserted directly rather than through a stand-in. The
-    # differential suites already drive real client responses end to end; this pins the
-    # contract as a named test, so an SDK shape change fails here rather than somewhere deep
-    # in a harness.
+    # The official Ruby SDK (https://github.com/cerbos/cerbos-sdk-ruby) is the usual source of
+    # plans. Thus these tests use its output types directly and do not use a substitute. The
+    # differential suites already use real responses from the client. This test holds the
+    # contract with a name. Thus a change in the SDK makes this test fail, and it does not make
+    # an unclear failure in a harness.
     def sdk_plan(kind, condition)
       Cerbos::Output::PlanResources.new(
         request_id: "test", kind: kind, condition: condition,
@@ -151,9 +152,10 @@ RSpec.describe Cerbos::ActiveRecord do
   end
 
   describe "operand order" do
-    # The planner preserves policy source order, so `1 < R.attr.aNumber` arrives value-first.
-    # Adapters that assumed a column always comes first, and swapped operands to restore that,
-    # inverted the comparison (cerbos/query-plan-adapters#257).
+    # The planner keeps the order of the policy source. Thus `1 < R.attr.aNumber` comes with
+    # the value first. Some adapters made the assumption that a column is always first. They
+    # moved the operands to get that order, and thus they turned the comparison around
+    # (cerbos/query-plan-adapters#257).
     it "keeps a value-first comparison in source order" do
       sql = translate(conditional(
         expression("lt", value(1), variable("request.resource.attr.aNumber"))
@@ -273,8 +275,8 @@ RSpec.describe Cerbos::ActiveRecord do
     end
 
     it "discriminates on the type column for an `as:` association" do
-      # Without the type condition the subquery would match comments belonging to a
-      # different owner class that happens to share an id.
+      # Without the condition on the type column, the subquery would also find the comments of
+      # a different owner class that has the same id.
       sql = described_class.query_plan_to_relation(
         plan: conditional(expression("in", value("hello"), variable("c"))),
         model: EdgeDocument,
@@ -305,8 +307,8 @@ RSpec.describe Cerbos::ActiveRecord do
     end
 
     it "raises for a sub-microsecond timestamp literal" do
-      # The planner emits nanoseconds for now(); binding that through ActiveRecord would
-      # silently truncate it and move the instant the policy compares against.
+      # The planner makes nanoseconds for now(). ActiveRecord would remove the last digits of
+      # that value, and thus it would change the instant in the comparison.
       expect { Cerbos::ActiveRecord::Timestamps.parse("2026-08-04T08:55:39.185020547Z") }
         .to raise_error(Cerbos::ActiveRecord::UnsupportedOperatorError, /sub-microsecond/)
     end

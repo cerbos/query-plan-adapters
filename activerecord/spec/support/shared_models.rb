@@ -1,11 +1,11 @@
 # frozen_string_literal: true
 
-# Schema and fixtures for the shared policy suite (/policies/resource.yaml), which every
-# adapter in this repository is exercised against.
+# The schema and the rows for the shared policy suite (/policies/resource.yaml). All the
+# adapters in this repository use that policy file.
 #
-# Collections are modelled as explicit join tables reached through `has_many :through`, and
-# the `nested` / `nextlevel` attributes as `belongs_to` chains, so the suite covers both
-# relation traversals and dotted scalar paths.
+# The collections use join tables and `has_many :through` associations. The `nested` and
+# `nextlevel` attributes use `belongs_to` chains. Thus the suite examines the relation
+# traversals and the scalar paths with dots.
 module SharedModels
   module_function
 
@@ -102,9 +102,9 @@ module SharedModels
     end
   end
 
-  # One row per interesting combination, chosen so that most policy actions allow some
-  # resources and deny others — a suite where every oracle came back empty would pass
-  # without proving anything.
+  # There is one row for each important combination of values. With these rows, most of the
+  # policy actions permit some resources and deny others. If each oracle gave an empty set, the
+  # suite would agree but would prove nothing.
   FIXTURES = [
     {
       id: "507f1f77bcf86cd799439011", a_string: "string", a_number: 1, a_bool: true,
@@ -131,7 +131,8 @@ module SharedModels
       nested: "nested3", categories: %w[cat-business cat-tech]
     },
     {
-      # aString == id, so the field-to-field probes discriminate.
+      # Here aString is equal to id. Thus the tests that compare two fields give a result that
+      # is not the same for all the rows.
       id: "resource5", a_string: "resource5", a_number: 4, a_bool: false,
       a_optional_string: "set", scope: nil, creator_id: "user2",
       owners: %w[user1 user2 user3], tags: %w[tag1],
@@ -271,6 +272,6 @@ class SharedResource < ActiveRecord::Base
   has_many :resource_categories, class_name: "SharedResourceCategory", foreign_key: :resource_id, primary_key: :id
   has_many :categories, through: :resource_categories, source: :category
 
-  # The flattened two-hop chain `R.attr.categories.subCategories` addresses.
+  # The chain of two hops that `R.attr.categories.subCategories` uses, but from the root.
   has_many :sub_categories, through: :categories, source: :sub_categories
 end

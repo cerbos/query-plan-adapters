@@ -4,25 +4,29 @@ require "arel"
 
 module Cerbos
   module ActiveRecord
-    # Arel construction helpers, kept in one place because several of them paper over Arel
-    # API differences across the supported Rails versions (7.0 – 8.x) or over SQL dialect
-    # differences that would otherwise silently change filter semantics.
+    # Helper functions that make Arel nodes.
+    #
+    # They are together in one module for two reasons. Some of them hide a difference between
+    # the Arel interfaces of the supported Rails versions (7.0 to 8.x). The others hide a
+    # difference between the SQL dialects. If the adapter did not hide these differences, the
+    # meaning of a filter could change.
     module ArelSupport
       module_function
 
-      # Rails 7.1 made +Arel::Nodes::Or+ n-ary (one array argument); before that it was
-      # binary. Detect rather than rescue, so a genuine argument error still surfaces.
+      # Rails 7.1 made +Arel::Nodes::Or+ n-ary, with one array argument. Before that version
+      # it was binary. The adapter examines the interface and does not use a rescue clause.
+      # Thus a true argument error is still visible.
       OR_IS_NARY = (Arel::Nodes::Or.instance_method(:initialize).arity == 1)
 
       TRUE_SQL = Arel.sql("TRUE")
       FALSE_SQL = Arel.sql("FALSE")
       NULL_SQL = Arel.sql("NULL")
 
-      # Wrap a Ruby value as an Arel node, leaving existing nodes untouched.
+      # Puts a Ruby value into an Arel node. A node that already exists does not change.
       #
-      # +nil+ stays +nil+: Arel's Equality/NotEqual visitors turn a literal +nil+ right-hand
-      # side into +IS NULL+ / +IS NOT NULL+, whereas a quoted +nil+ would emit the always-
-      # unknown +\= NULL+.
+      # A +nil+ stays a +nil+. The Arel visitors for Equality and NotEqual change a +nil+ on
+      # the right side into +IS NULL+ or +IS NOT NULL+. A quoted +nil+ would make
+      # +\= NULL+ instead, and the result of that comparison is always unknown.
       def quote(value)
         return value if value.nil? || arel_node?(value)
 
@@ -35,9 +39,9 @@ module Cerbos
           value.is_a?(Arel::Nodes::SqlLiteral)
       end
 
-      # Convert a translated operand into something usable in a boolean position. Constant
-      # folding can reduce a whole subtree to a Ruby boolean (two constant hierarchies, for
-      # example), which must still render as SQL.
+      # Changes an operand into a value that a boolean position can use. The translator can
+      # calculate a full subtree and get a Ruby boolean. Two constant hierarchies are an
+      # example. Such a result must become SQL.
       def to_predicate(value)
         case value
         when true then TRUE_SQL
@@ -73,11 +77,12 @@ module Cerbos
         Arel::Nodes::Not.new(Arel::Nodes::Grouping.new(to_predicate(value)))
       end
 
-      # +CASE WHEN c1 THEN v1 [WHEN c2 THEN v2 ...] [ELSE e] END+.
+      # Makes +CASE WHEN c1 THEN v1 [WHEN c2 THEN v2 ...] [ELSE e] END+.
       #
-      # Omitting ELSE is load-bearing: a CASE whose conditions are all UNKNOWN evaluates to
-      # NULL, which is exactly CEL's "this element errored" outcome and stays excluded under
-      # both polarities of a surrounding NOT.
+      # The absence of the ELSE clause is important. If all the conditions of a CASE are
+      # unknown, the result of the CASE is NULL. This is the same result as a CEL error for an
+      # element. Thus the row stays out of the result, and it also stays out when a NOT
+      # operator is around the CASE. An ELSE clause would put those rows into the else branch.
       def case_node(whens, else_value: :__omitted__)
         node = Arel::Nodes::Case.new
         whens.each do |condition, result|
@@ -113,8 +118,8 @@ module Cerbos
         Arel::Nodes::NamedFunction.new(name, args.map { |arg| quote(arg) })
       end
 
-      # +IS NULL+ against an arbitrary expression, used to detect "this element's lambda body
-      # errored" inside collection macros.
+      # Makes +IS NULL+ for an expression of any type. A collection macro uses this to find
+      # the elements for which the body of the lambda made an error.
       def is_null(expression)
         Arel::Nodes::Equality.new(Arel::Nodes::Grouping.new(to_predicate(expression)), nil)
       end

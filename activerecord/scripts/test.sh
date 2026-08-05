@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Run the ActiveRecord adapter's suites in Docker against a PDP pinned to
+# Runs the suites of the ActiveRecord adapter in Docker. The version of the PDP comes from
 # conformance/CERBOS_VERSION.
 #
-#   ./scripts/test.sh                                    # every spec
+#   ./scripts/test.sh                                    # all the specs
 #   ./scripts/test.sh spec/adversarial_conformance_spec.rb
-#   RUBY_VERSION=3.2 ./scripts/test.sh                   # a different Ruby
+#   RUBY_VERSION=3.2 ./scripts/test.sh                   # a different version of Ruby
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

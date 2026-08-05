@@ -1,11 +1,12 @@
 # frozen_string_literal: true
 
-# Loads the repo-level shared corpus (cerbos/query-plan-adapters#263) and the deterministic
-# derived fields documented in conformance/README.md.
+# Reads the shared corpus of the repository (cerbos/query-plan-adapters#263) and calculates
+# the derived fields. conformance/README.md gives the rules for those fields, and the rules
+# always give the same result.
 #
-# These derivations are part of the shared contract, not adapter-specific fixtures: the same
-# rows and the same attributes drive both sides of the differential comparison, so getting
-# one wrong makes the oracle agree with the adapter for the wrong reason.
+# These rules are part of the shared contract. They are not data only for this adapter. The
+# same rows and the same attributes go to both sides of the differential comparison. Thus an
+# error in one rule makes the oracle agree with the adapter for an incorrect reason.
 module ConformanceCorpus
   DIR = File.expand_path("../../../conformance", __dir__)
 
@@ -17,7 +18,7 @@ module ConformanceCorpus
   RESOURCE_KIND = SEEDS_FILE.fetch("resourceKind").freeze
   PRINCIPAL = SEEDS_FILE.fetch("principal").freeze
 
-  # This adapter's key in the manifest is its directory name.
+  # The key of this adapter in the manifest is the name of its directory.
   ADAPTER = "activerecord"
 
   UNSUPPORTED = ACTIONS_FILE
@@ -43,8 +44,8 @@ module ConformanceCorpus
     .map { |entry| entry.fetch("action") }
     .freeze
 
-  # The classification is derived from the manifest at runtime, never copied into the
-  # harness — a new corpus action then reaches this adapter automatically.
+  # The harness reads the classification from the manifest when it runs. It does not keep a
+  # copy. Thus a new action in the corpus comes to this adapter automatically.
   ORACLE_ACTIONS = (
     (ACTIONS_FILE.fetch("conformance") - UNSUPPORTED.keys) + SUPPORTED_EXPECTED - SKIPPED
   ).freeze

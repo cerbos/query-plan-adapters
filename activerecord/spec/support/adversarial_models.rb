@@ -2,8 +2,9 @@
 
 require "time"
 
-# Dedicated tables so every hostile seed is representable: NULL element columns, duplicate
-# and mirrored names, LIKE metacharacters, empty strings and empty collections.
+# These tables are only for this suite. Thus each difficult row from the corpus is possible:
+# NULL element columns, names that are the same or that are a mirror of each other, LIKE
+# metacharacters, empty strings and empty collections.
 module AdversarialModels
   module_function
 
@@ -57,8 +58,9 @@ module AdversarialModels
     end
   end
 
-  # Distinct category graphs per seed (one category per sub-name, the same shape the prisma
-  # and sqlalchemy reference harnesses seed) so that no two resources share relation rows.
+  # Each row gets its own category graph, with one category for each sub-name. The prisma and
+  # sqlalchemy harnesses make the same shape. Thus no two resources use the same relation
+  # rows.
   def seed!
     ConformanceCorpus::SEEDS.each do |seed|
       id = seed.fetch("id")
@@ -116,14 +118,16 @@ end
 
 class AdvResource < ActiveRecord::Base
   self.table_name = "adversarial_resources"
-  # `created_at` is a corpus attribute here, not a row-creation timestamp: without this,
-  # ActiveRecord's automatic timestamps would overwrite the seeded value — including the
-  # deliberate NULL on a3 that the three-valued-logic probes discriminate on.
+  # Here `created_at` is an attribute from the corpus. It is not the time of the creation of
+  # the row. Without this line, the automatic timestamps of ActiveRecord would write over the
+  # value from the corpus. That includes the NULL on a3, which the three-valued-logic tests
+  # need.
   self.record_timestamps = false
   has_many :tags, class_name: "AdvTag", foreign_key: :resource_id, primary_key: :id
   has_many :categories, class_name: "AdvCategory", foreign_key: :resource_id, primary_key: :id
-  # The flattened two-hop chain the `mainCategory.*` attributes address: one correlated
-  # subquery joining through the intermediate category, not an EXISTS inside an EXISTS
-  # (which would count leaf rows per-category rather than per-resource).
+  # The `mainCategory.*` attributes use this chain of two hops from the root. It becomes one
+  # correlated subquery with a join through the category between the two ends. It does not
+  # become an EXISTS inside an EXISTS, because that shape would count the last rows for each
+  # category and not for each resource.
   has_many :sub_categories, through: :categories, source: :sub_categories
 end

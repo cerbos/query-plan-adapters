@@ -1,11 +1,11 @@
 # Cerbos ActiveRecord Query Plan Adapter
 
-An adapter to convert a [Cerbos](https://cerbos.dev) query plan (`PlanResources`) into an
-`ActiveRecord::Relation`, so authorization rules written as Cerbos policies are enforced by the
-database instead of by application code.
+An adapter that changes a [Cerbos](https://cerbos.dev) query plan (`PlanResources`) into an
+`ActiveRecord::Relation`. Thus the database applies the authorization rules from your Cerbos
+policies, and your application code does not.
 
-The result is an ordinary relation, so it composes with scopes, ordering, pagination and eager
-loading:
+The result is a usual relation. Thus you can add scopes, an order, pagination and eager loading
+to it:
 
 ```ruby
 documents = Cerbos::ActiveRecord.query_plan_to_relation(
@@ -15,70 +15,77 @@ documents = Cerbos::ActiveRecord.query_plan_to_relation(
 documents.where(archived: false).order(:created_at).limit(20)
 ```
 
-## Fail-closed by design
+## The adapter is fail-closed
 
-A plan shape this adapter cannot express faithfully **raises** rather than returning a
-best-effort filter. That is the central guarantee: a wrong filter is an authorization bug that
-returns rows the PDP denies, whereas a raise is a bug report. The adapter never degrades an
-operator into a weaker one — `exists_one` never becomes `exists`, an inexpressible `LIKE`
-needle never becomes an unescaped wildcard.
+If the adapter cannot translate a shape of plan correctly, it **raises an error**. It does not
+give a filter that is only approximately correct. This is the primary guarantee of the adapter.
+An incorrect filter is an authorization bug, because it gives rows that the PDP denies. An
+error is a bug report.
+
+The adapter never changes an operator into a weaker operator. It never changes `exists_one`
+into `exists`. If it cannot escape a `LIKE` needle, it never lets the wildcards stay.
 
 ### Conformance contract
 
-The adapter is differentially tested against Cerbos PDP `0.54.0`: every action is planned
-against a real PDP, translated, executed against 20 hostile seed rows, and the returned ids are
-compared with per-row `checkResource` decisions. The PDP is the oracle for both sides — there
-are no hand-written expectations. The Spring Data adapter defines the reference semantics.
+The tests compare this adapter with Cerbos PDP `0.54.0`. For each action, the test makes a
+plan with a real PDP, translates the plan, runs the query against 20 difficult rows, and
+compares the ids in the result with the decisions of `checkResource` for each row. The PDP
+gives the results for both sides. No person writes the expected results. The Spring Data
+adapter gives the reference behaviour.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 112 reference actions |
-| Fail-closed | 2 reference actions plus the 3 reference-unsupported shapes (5 actions total) |
-| Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
+| Tested against the oracle | 112 reference actions |
+| Fail-closed | 2 reference actions, and the 3 shapes that the reference adapter does not support (5 actions in total) |
+| Known difference in the planner | The Cerbos planner changes `has()` on a missing attribute into `ALWAYS_ALLOWED`, but `checkResource` denies the rows in which the attribute is missing. Until the planner has a correction, use `R.attr.x != null` and not `has(R.attr.x)` for the attributes in your database |
 
-The fail-closed set is small because SQL can express most of the corpus directly: `LIKE` is
-emitted with an explicit `ESCAPE` clause, relation counts and `exists_one` become correlated
-`COUNT` subqueries, column arithmetic and string lengths are computed in the database, and
-cross-model comparisons are ordinary correlated predicates. What remains:
+The fail-closed set is small, because SQL can show most of the corpus directly. The adapter
+makes `LIKE` with an ESCAPE clause. It makes correlated `COUNT` subqueries for the relation
+counts and for `exists_one`. The database calculates the arithmetic on columns and the lengths
+of the strings. A comparison between two models is a usual correlated predicate. These shapes
+stay:
 
-| Action | Why it raises |
+| Action | Why the adapter raises an error |
 | --- | --- |
-| `ts-window`, `ts-vf` | The planner emits a nanosecond-precision `now()` literal. ActiveRecord binds a `Time` into SQL at microsecond precision, so translating it would compare against a different instant than the policy specifies. |
-| `p-matches` | `matches()` is RE2. No SQL dialect guarantees RE2 semantics, and `LIKE` cannot express a regex. |
-| `p-index` | `tags[0]` indexes a list positionally; a relation has no inherent order. |
-| `p-timestamp` | `timestamp()` over a column holding a *formatted timestamp string*. Comparing that against a bound `Time` compares two different textual formats, so the ordering would be lexicographic accident. Map the attribute to a `datetime` column instead. |
+| `ts-window`, `ts-vf` | The planner makes a `now()` literal with nanoseconds. ActiveRecord puts a `Time` into SQL with microseconds. Thus the query would compare with a different instant from the instant in the policy. |
+| `p-matches` | `matches()` uses RE2. No SQL dialect gives the behaviour of RE2, and `LIKE` cannot show a regular expression. |
+| `p-index` | `tags[0]` selects an element of a list by its position. A relation has no order of its own. |
+| `p-timestamp` | `timestamp()` on a column that holds a timestamp in text. A comparison between that column and a `Time` compares two different text formats. Thus the order of the results comes from the text and not from the instants. Map the attribute to a `datetime` column. |
 
-The adapter also raises for a bare `filter()` or `map()` used as a condition, which evaluate to
-a list rather than a boolean.
+The adapter also raises an error for a `filter()` or a `map()` that a policy uses as a
+condition. Those operations give a list and not a boolean.
 
-### Collation is part of the contract
+### The collation is part of the contract
 
-CEL string matching is case-sensitive. `LIKE` collation is dialect-controlled, so a
-case-insensitive configuration will make `contains`/`startsWith`/`endsWith` match more rows
-than the policy allows. On SQLite, set `PRAGMA case_sensitive_like = ON`; on MySQL, use a
-`_bin` or `_cs` collation for the columns a policy matches against.
+CEL compares strings with attention to the case of the letters. The dialect controls the
+collation of `LIKE`. Thus a collation without attention to the case makes `contains`,
+`startsWith` and `endsWith` select more rows than the policy permits. On SQLite, set
+`PRAGMA case_sensitive_like = ON`. On MySQL, use a `_bin` collation or a `_cs` collation for
+the columns in your policies.
 
-The suites here run on SQLite only. A dialect the suite does not exercise is not covered.
+The suites here use SQLite only. This adapter has no test coverage for the other dialects.
 
 ## Requirements
 
-- Ruby >= 3.2
-- ActiveRecord >= 7.0, < 9.0 (CI exercises 7.1 and 8.0)
-- Cerbos > v0.40
+- Ruby 3.2 or a later version
+- ActiveRecord 7.0 or a later version, but before 9.0 (CI tests 7.1 and 8.0)
+- Cerbos after v0.40
 - The official [Cerbos Ruby SDK](https://github.com/cerbos/cerbos-sdk-ruby)
-  ([`cerbos`](https://rubygems.org/gems/cerbos) gem)
+  (the [`cerbos`](https://rubygems.org/gems/cerbos) gem)
 
 ### Why the SDK is not a hard dependency
 
-This gem declares no runtime dependency on `cerbos`, because that SDK is gRPC-based and would
-pull a native `grpc` build into applications that talk to the PDP over REST instead. The SDK
-is nonetheless the expected client and the shape the adapter is built around: `plan:` accepts
-a `Cerbos::Output::PlanResources` directly, both test suites drive real
-`Cerbos::Client#plan_resources` responses through the adapter, and the SDK's output types are
-asserted against by name in `spec/translator_spec.rb`.
+This gem has no runtime dependency on `cerbos`. That SDK uses gRPC. Thus a dependency on it
+would install a native `grpc` build in the applications that speak to the PDP with REST.
 
-If you obtain plans another way — the REST API, a cached response — pass the decoded JSON, or
-any object exposing `kind` and `condition`, and it will translate identically.
+But the SDK is the expected client, and the adapter is built around its shapes. The `plan:`
+parameter accepts a `Cerbos::Output::PlanResources` directly. The two test suites send real
+responses from `Cerbos::Client#plan_resources` through the adapter. The tests in
+`spec/translator_spec.rb` also use the output types of the SDK by name.
+
+If you get your plans in a different way, from the REST interface or from a cache, give the
+JSON after a parse operation. You can also give an object that has `kind` and `condition`. The
+result of the translation is the same.
 
 ## Installation
 
@@ -116,37 +123,35 @@ documents = Cerbos::ActiveRecord.query_plan_to_relation(
 )
 ```
 
-`plan` may be a `Cerbos::Output::PlanResources` from the
-[Ruby SDK](https://github.com/cerbos/cerbos-sdk-ruby), the decoded JSON of a `PlanResources`
-response, or any object exposing `kind` and `condition` in those shapes.
+For a full application that uses the adapter, refer to [`example/`](example/).
 
-The three plan kinds map onto relations directly:
+The three kinds of plan become relations directly:
 
-| Plan kind | Result |
+| Kind of plan | Result |
 | --- | --- |
 | `KIND_ALWAYS_ALLOWED` | `model.all` |
 | `KIND_ALWAYS_DENIED` | `model.none` |
-| `KIND_CONDITIONAL` | `model.where(<translated condition>)` |
+| `KIND_CONDITIONAL` | `model.where(<the condition after the translation>)` |
 
-### Mapping attributes
+### The attribute map
 
-Every plan variable must be mapped, or translation raises. Nothing is inferred from column
-names, because guessing a column is how an authorization filter silently starts matching the
-wrong data.
+The map must contain each plan variable. If it does not, the translation raises an error. The
+adapter does not select a column from the name of an attribute. If it did that, an
+authorization filter could quietly use the wrong data.
 
-#### `field` — scalar columns
+#### `field` for scalar columns
 
 ```ruby
 Cerbos::ActiveRecord.field("status")            # a column on the model
-Cerbos::ActiveRecord.field("owner.department")  # through a belongs_to / has_one
+Cerbos::ActiveRecord.field("owner.department")  # through a belongs_to or a has_one
 ```
 
-A dotted path traverses to-one associations and is emitted as a **correlated scalar
-subquery**, so it can never multiply the result set the way a join can. A collection
-association in a dotted path raises — a scalar comparison against "some element" is not what
-the policy asked for.
+A path with dots goes through to-one associations. The adapter makes a **correlated scalar
+subquery** for it. Thus the path cannot increase the number of rows in the result, but a join
+can do that. If a path with dots contains a collection association, the adapter raises an
+error. A scalar comparison with "one of the elements" is not the request of the policy.
 
-#### `relation` — collections
+#### `relation` for collections
 
 ```ruby
 Cerbos::ActiveRecord.relation(
@@ -157,11 +162,11 @@ Cerbos::ActiveRecord.relation(
 )
 ```
 
-- `member_field` stands in for the element wherever the policy treats the collection as a list
-  of bare values, so `"urgent" in R.attr.tags` compares against `tag.name`.
-- `fields` maps the member names used inside lambda bodies, so
-  `R.attr.tags.exists(t, t.name == "x")` can resolve `t.name`. Entries may themselves be
-  relations, which is how multi-hop chains resolve:
+- `member_field` replaces the element when the policy uses the collection as a list of simple
+  values. Thus `"urgent" in R.attr.tags` compares with `tag.name`.
+- `fields` maps the member names in the bodies of the lambdas. Thus
+  `R.attr.tags.exists(t, t.name == "x")` can resolve `t.name`. An entry in `fields` can be a
+  relation. This is how the adapter resolves a chain with more than one hop:
 
 ```ruby
 "request.resource.attr.categories" => Cerbos::ActiveRecord.relation(:categories, fields: {
@@ -171,19 +176,21 @@ Cerbos::ActiveRecord.relation(
 })
 ```
 
-`has_many :through` is supported and expands into joins **inside one correlated subquery**,
-rather than an `EXISTS` nested in an `EXISTS`. That distinction matters for counting operators:
-`size(R.attr.categories.subCategories)` must count leaf rows per resource, not per category.
+A `has_many :through` association is permitted. The adapter opens it into joins **in one
+correlated subquery**. It does not make an `EXISTS` inside an `EXISTS`. This difference is
+important for the operators that count. `size(R.attr.categories.subCategories)` must count the
+last rows for each resource and not for each category.
 
-Every subquery gets fresh table aliases, so a macro nested over the same association as its
-parent correlates against the outer row rather than its own.
+Each subquery gets new table aliases. Thus a macro on an association inside another macro on
+the same association correlates to the outer row.
 
-Two association shapes raise rather than guess: a polymorphic `belongs_to` (its target table
-is unknown until a row is read) and an association carrying a scope (whose conditions cannot be
-re-bound onto the generated alias). Map the attribute onto a concrete, unscoped association, or
-supply an operator override.
+The adapter refuses two shapes of association and does not select a table by itself. The first
+is a polymorphic `belongs_to`, because its target table is not known until the query reads a
+row. The second is an association with a scope, because the adapter cannot put the conditions
+of that scope onto the alias that it makes. Map the attribute to a concrete association without
+a scope, or give an operator override.
 
-#### `operator_overrides` — schema-specific translations
+#### `operator_overrides` for translations that are specific to your schema
 
 ```ruby
 Cerbos::ActiveRecord.query_plan_to_relation(
@@ -194,50 +201,59 @@ Cerbos::ActiveRecord.query_plan_to_relation(
 )
 ```
 
-An override receives the resolved operands and returns an Arel node. Use it where a particular
-database can express a shape faithfully that portable SQL cannot — a dialect regex, a JSON
-containment operator, a full-text index. Structural operators (`and`, `or`, `not`, `if`,
-`lambda`, and the collection macros) cannot be overridden, because their operands are
-deliberately not resolved before they run.
+The adapter gives the operands to an override after it resolves them, and the override gives an
+Arel node. Use an override when your database can show a shape correctly but portable SQL
+cannot. A regular expression of a dialect, a JSON containment operator and a full-text index
+are three examples.
 
-## How three-valued logic is preserved
+You cannot override the structural operators: `and`, `or`, `not`, `if`, `lambda` and the
+collection macros. The adapter does not resolve their operands before they run, and this is
+necessary for their behaviour.
 
-CEL denies a resource when evaluating its condition raises — a missing attribute, an element
-whose field is absent. SQL's `UNKNOWN` behaves the same way: it is excluded by a predicate
-*and* by that predicate's negation, so `NOT (NULL = x)` stays `UNKNOWN` rather than becoming
-true.
+## How the adapter keeps the three-valued logic
 
-The translation preserves `UNKNOWN` rather than collapsing it. Two consequences are visible in
-the generated SQL:
+CEL denies a resource if the evaluation of its condition makes an error. A missing attribute is
+one cause. An element without a field is another cause. The UNKNOWN value of SQL has the same
+behaviour: a predicate does not select it, and the negation of that predicate does not select
+it. Thus `NOT (NULL = x)` stays UNKNOWN and does not become true.
 
-- **Ternaries compile to a `CASE` with no `ELSE`.** When the condition is `UNKNOWN`, the
-  `CASE` yields `NULL`, keeping the row excluded under both polarities. An `ELSE` would leak
-  those rows into the else-branch.
-- **Collection macros compile to `CASE` expressions, not bare `EXISTS`.** CEL's quantifiers
-  differ precisely in how they treat an element whose body errored: `exists` absorbs errors
-  behind a true witness, `all` absorbs them behind a false witness, and `exists_one` never
-  absorbs them. Each gets its own error guard.
+The translation keeps UNKNOWN and does not change it into a boolean. You can see two results of
+this rule in the SQL:
+
+- **A ternary becomes a `CASE` without an `ELSE` clause.** If the condition is UNKNOWN, the
+  `CASE` gives NULL. Thus the row stays out of the result, and it also stays out when a NOT
+  operator is around the `CASE`. An `ELSE` clause would put those rows into the else branch.
+- **A collection macro becomes a `CASE` expression and not only an `EXISTS` subquery.** The
+  three CEL quantifiers have different behaviour for an element whose body made an error.
+  `exists` ignores the errors if one element gives true. `all` ignores them if one element
+  gives false. `exists_one` never ignores them. Thus each quantifier gets its own guard for the
+  error.
 
 ## Development
 
-Everything runs in Docker against a PDP pinned to `conformance/CERBOS_VERSION` — no Ruby
-toolchain on the host is needed.
+All the components run in Docker. The version of the PDP comes from
+`conformance/CERBOS_VERSION`. You do not need Ruby on your computer.
 
 ```bash
-./scripts/test.sh                                   # both suites
+./scripts/test.sh                                   # all the suites
 ./scripts/test.sh spec/adversarial_conformance_spec.rb
-RUBY_VERSION=3.2 ./scripts/test.sh                  # a different Ruby
+RUBY_VERSION=3.2 ./scripts/test.sh                  # a different version of Ruby
 ./scripts/lint.sh
 ```
 
-The `tests` service mounts the **repository root**, because the adversarial harness reads the
-shared corpus at `../conformance/` (`seeds.json`, `actions.json`, `CERBOS_VERSION`).
+The `tests` service mounts the **root directory of the repository**, because the adversarial
+harness reads the shared corpus at `../conformance/` (`seeds.json`, `actions.json`,
+`CERBOS_VERSION`).
 
-Two suites run:
+There are three suites:
 
-- `spec/shared_policy_spec.rb` — the shared policy suite (`/policies/resource.yaml`) that every
-  adapter in this repository is exercised against. Actions are discovered from the policy file,
-  so an action added there cannot silently go untested.
-- `spec/adversarial_conformance_spec.rb` — the shared adversarial corpus (`/conformance/`),
-  implementing the oracle recipe in
-  [conformance/README.md](../conformance/README.md).
+- `spec/translator_spec.rb` examines the public interface, the shapes of plan that the adapter
+  accepts, the SQL that it makes, and the shapes that it must refuse. It needs no PDP.
+- `spec/shared_policy_spec.rb` is the shared policy suite (`/policies/resource.yaml`) for all
+  the adapters in this repository. It reads the actions from the policy file. Thus a new action
+  in that file cannot stay without a test.
+- `spec/adversarial_conformance_spec.rb` is the shared adversarial corpus (`/conformance/`). It
+  obeys the oracle procedure in [conformance/README.md](../conformance/README.md).
+
+The example application in [`example/`](example/) has its own smoke tests. Refer to
+[example/README.md](example/README.md).

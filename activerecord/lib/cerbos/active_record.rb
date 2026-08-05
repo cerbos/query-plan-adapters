@@ -9,9 +9,9 @@ require_relative "active_record/translator"
 require_relative "active_record/version"
 
 module Cerbos
-  # Translates a Cerbos +PlanResources+ response into an +ActiveRecord::Relation+, so
-  # authorization rules written as Cerbos policies are enforced by the database instead of
-  # by application code.
+  # Changes a Cerbos +PlanResources+ response into an +ActiveRecord::Relation+. Thus the
+  # database applies the authorization rules from the Cerbos policies, and the application
+  # code does not.
   #
   #   plan = cerbos.plan_resources(principal: principal, resource: {kind: "document"}, action: "view")
   #
@@ -29,26 +29,27 @@ module Cerbos
   #
   #   documents.order(:created_at).limit(20)
   #
-  # The result is an ordinary relation, so it composes with scopes, ordering, pagination and
-  # eager loading.
+  # The result is a usual relation. Thus you can add scopes, an order, pagination and eager
+  # loading to it.
   #
-  # A plan shape this adapter cannot express faithfully raises an {ActiveRecord::Error}
-  # rather than returning a best-effort filter — a wrong filter would return rows the PDP
-  # denies.
+  # If the adapter cannot translate a shape of plan correctly, it raises an
+  # {ActiveRecord::Error}. It does not give a filter that is only approximately correct,
+  # because such a filter gives rows that the PDP denies.
   module ActiveRecord
     # @param plan [Object] a +Cerbos::Output::PlanResources+ from the official Ruby SDK
-    #   (https://github.com/cerbos/cerbos-sdk-ruby), the decoded JSON of a +PlanResources+
-    #   response, or any object exposing +kind+ and +condition+ in those shapes
-    # @param model [Class] the +ActiveRecord::Base+ subclass being filtered
+    #   (https://github.com/cerbos/cerbos-sdk-ruby), the JSON of a +PlanResources+ response
+    #   after a parse, or an object that has +kind+ and +condition+ in those shapes
+    # @param model [Class] the subclass of +ActiveRecord::Base+ to filter
     # @param attributes [Hash{String => AttributeMapping::Field, AttributeMapping::Relation}]
-    #   plan variable name → mapping onto the model. Build values with
-    #   {Cerbos::ActiveRecord.field} and {Cerbos::ActiveRecord.relation}
-    # @param operator_overrides [Hash{String => #call}] operator name → callable receiving
-    #   the resolved operands, for shapes a particular schema can express better than the
-    #   default translation (a JSON containment operator, a full-text index, ...)
-    # @return [ActiveRecord::Relation] +model.none+ when the plan always denies,
-    #   +model.all+ when it always allows, and a filtered relation otherwise
-    # @raise [Error] when the plan cannot be translated faithfully
+    #   the plan variable name and its mapping to the model. Make the values with
+    #   {Cerbos::ActiveRecord.field} and {Cerbos::ActiveRecord.relation}.
+    # @param operator_overrides [Hash{String => #call}] the operator name and a callable
+    #   object. The adapter gives the operands to that object after it resolves them. Use this
+    #   for a shape that your database can translate correctly but portable SQL cannot. A JSON
+    #   containment operator and a full-text index are two examples.
+    # @return [ActiveRecord::Relation] +model.none+ if the plan always denies, +model.all+ if
+    #   the plan always allows, and a filtered relation for all the other plans
+    # @raise [Error] if the adapter cannot translate the plan correctly
     def self.query_plan_to_relation(plan:, model:, attributes:, operator_overrides: {})
       Translator.new(
         model: model,
