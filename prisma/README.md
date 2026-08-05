@@ -107,7 +107,7 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` d
 | Classification | Coverage |
 | --- | --- |
 | Oracle-tested | 83 reference actions |
-| Fail-closed | 31 reference actions plus the 3 reference-unsupported shapes (34 actions total) |
+| Fail-closed | 33 reference actions plus the 3 reference-unsupported shapes (36 actions total) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 
 The fail-closed set consists of literal `LIKE` cases Prisma cannot escape safely, cross-model field references, arbitrary relation counts and string lengths, `exists_one`, unsolved column arithmetic, sub-millisecond `now()` thresholds, and the reference probes for regex, ordered indexing, and `timestamp()` over a string field. Supported timestamp plans require a mapper entry with `valueType: "dateTime"` and a strict, millisecond-exact RFC 3339 literal in CEL's supported instant range. These shapes throw instead of producing a broader authorization filter.

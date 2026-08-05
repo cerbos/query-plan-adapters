@@ -1405,6 +1405,13 @@ public final class SpringDataQueryPlanAdapter {
              * eq/ne concat solve — those never enter double space.
              */
             private Predicate numericComparison(String op, List<Operand> operands, Scope scope) {
+                // A zero-divisor division must be folded against the comparison, not lowered to
+                // NULL: `NaN != x` is TRUE in CEL while `NULL != x` is UNKNOWN (see
+                // #divisionByZeroComparison).
+                Predicate folded = tryDivisionByZeroComparison(op, operands, scope);
+                if (folded != null) {
+                    return folded;
+                }
                 NumericOperand left = resolveNumericOperand(operands.get(0), scope);
                 NumericOperand right = resolveNumericOperand(operands.get(1), scope);
 
@@ -1451,6 +1458,131 @@ public final class SpringDataQueryPlanAdapter {
             }
 
             /**
+             * Fold a comparison whose operand is a division that can divide by zero, returning
+             * {@code null} when the shape does not apply so the caller falls through.
+             *
+             * <p>CEL attribute arithmetic is double-typed, so {@code 0/0} is NaN and {@code x/0}
+             * is a signed infinity. Lowering the division to SQL NULL (the {@code NULLIF} guard in
+             * {@link #divisionSql}) makes every comparison UNKNOWN, which agrees with CEL for
+             * ORDERED comparisons — NaN and NULL both exclude the row, which is why
+             * {@code cr-div-zero} passed — but diverges for an INEQUALITY: {@code NaN != 1.0} is
+             * TRUE and the PDP allows the row, while {@code NULL != 1.0} is UNKNOWN and the
+             * adapter denies it. Under-inclusive rather than a bypass, but it still breaks the
+             * oracle equality (corpus actions {@code cr-div-zero-ne}, {@code cr-div-zero-eq-neg}).
+             *
+             * <p>Rewritten as nested ternaries rather than {@code CASE WHEN}, matching this
+             * translator's predicate-only design (see {@link #tryTernaryComparison}):
+             *
+             * <pre>{@code
+             * if (d == 0) { if (n == 0) NaN op v else if (n > 0) +Inf op v else -Inf op v }
+             * else { n / d op v }
+             * }</pre>
+             *
+             * <p>Each non-finite arm folds statically through {@link #constantComparison}, so no
+             * NaN or Infinity is ever bound as a parameter. {@link TriPredicate#ternary} owns the
+             * UNKNOWN arms: a NULL numerator or denominator drives every condition UNKNOWN, so the
+             * row stays excluded under BOTH polarities — the CEL missing-attribute deny.
+             */
+            private Predicate tryDivisionByZeroComparison(
+                    String op, List<Operand> operands, Scope scope) {
+                for (int side = 0; side < 2; side++) {
+                    Operand candidate = operands.get(side);
+                    if (candidate.getNodeCase() != Operand.NodeCase.EXPRESSION) {
+                        continue;
+                    }
+                    PlanResourcesFilter.Expression division = candidate.getExpression();
+                    if (!"div".equals(division.getOperator())
+                            || division.getOperandsCount() != 2) {
+                        continue;
+                    }
+                    // A constant divisor is already decided statically, and a fully constant
+                    // subtree folds to an exact IEEE value — neither needs the rewrite.
+                    NumericOperand divisor = resolveNumericOperand(division.getOperands(1), scope);
+                    if (divisor instanceof NumericOperand.Constant) {
+                        continue;
+                    }
+                    NumericOperand dividend =
+                            resolveNumericOperand(division.getOperands(0), scope);
+
+                    // The comparison as written, with the division on the side it appeared.
+                    boolean divisionIsLeft = side == 0;
+                    Operand other = operands.get(divisionIsLeft ? 1 : 0);
+
+                    // Fold `nonFinite op other` (or the mirrored order) in Java. A non-finite
+                    // compares the same way against every PRESENT value, so a column operand only
+                    // needs its NULL-ness preserved — baseUnlessUnknown drives the arm to UNKNOWN
+                    // when the operand is NULL, keeping the row excluded under both polarities.
+                    java.util.function.Function<Double, Predicate> arm = nonFinite -> {
+                        NumericOperand o = resolveNumericOperand(other, scope);
+                        if (o instanceof NumericOperand.Constant oc) {
+                            return divisionIsLeft
+                                    ? constantComparison(op, nonFinite, oc.value())
+                                    : constantComparison(op, oc.value(), nonFinite);
+                        }
+                        Predicate folded = divisionIsLeft
+                                ? constantComparison(op, nonFinite, 0.0)
+                                : constantComparison(op, 0.0, nonFinite);
+                        return tri.baseUnlessUnknown(folded, () -> cb.isNull(sqlOf(o)));
+                    };
+
+                    Supplier<Predicate> zeroDivisor = () -> cb.equal(sqlOf(divisor), 0.0);
+                    Supplier<Predicate> zeroDividend = () -> cb.equal(sqlOf(dividend), 0.0);
+                    Supplier<Predicate> positiveDividend = () -> cb.gt(sqlOf(dividend), 0.0);
+
+                    return tri.ternary(
+                            zeroDivisor,
+                            () -> tri.ternary(
+                                    zeroDividend,
+                                    () -> arm.apply(Double.NaN),
+                                    () -> tri.ternary(
+                                            positiveDividend,
+                                            () -> arm.apply(Double.POSITIVE_INFINITY),
+                                            () -> arm.apply(Double.NEGATIVE_INFINITY))),
+                            () -> numericComparisonWithoutZeroGuard(op, operands, scope));
+                }
+                return null;
+            }
+
+            /** The plain arithmetic comparison, bypassing the zero-divisor rewrite. */
+            private Predicate numericComparisonWithoutZeroGuard(
+                    String op, List<Operand> operands, Scope scope) {
+                NumericOperand left = resolveNumericOperand(operands.get(0), scope);
+                NumericOperand right = resolveNumericOperand(operands.get(1), scope);
+                if (left instanceof NumericOperand.Constant lc
+                        && right instanceof NumericOperand.Constant rc) {
+                    return constantComparison(op, lc.value(), rc.value());
+                }
+                if (left instanceof NumericOperand.Constant) {
+                    NumericOperand tmp = left;
+                    left = right;
+                    right = tmp;
+                    op = NormalizedBinary.mirror(op);
+                }
+                jakarta.persistence.criteria.Expression<Double> lhs =
+                        ((NumericOperand.Sql) left).expr();
+                if (right instanceof NumericOperand.Constant rc) {
+                    String cmpOp = op;
+                    double v = rc.value();
+                    return withOverride(cmpOp, lhs, rc.value(), () -> switch (cmpOp) {
+                        case "eq" -> cb.equal(lhs, v);
+                        case "ne" -> cb.notEqual(lhs, v);
+                        case "lt" -> cb.lt(lhs, v);
+                        case "gt" -> cb.gt(lhs, v);
+                        case "le" -> cb.le(lhs, v);
+                        case "ge" -> cb.ge(lhs, v);
+                        default -> throw new IllegalArgumentException(
+                                "Unsupported arithmetic comparison operator: " + cmpOp);
+                    });
+                }
+                return comparePredicate(op, lhs,
+                        ((NumericOperand.Sql) right).expr());
+            }
+
+            private jakarta.persistence.criteria.Expression<Double> sqlOf(NumericOperand o) {
+                return ((NumericOperand.Sql) o).expr();
+            }
+
+            /**
              * A resolved arithmetic operand: either a pure-constant subtree folded in Java —
              * genuine IEEE double semantics, exactly matching CEL, including division by zero
              * yielding ±Infinity/NaN — or a SQL expression forced into double space.
@@ -1489,14 +1621,18 @@ public final class SpringDataQueryPlanAdapter {
              *
              * <p>Division guard: SQL raises an error on a zero divisor — a data-dependent runtime
              * failure of the WHOLE query — while CEL double division is defined (±Infinity, or NaN
-             * for 0/0). Portable Infinity semantics are not expressible in SQL, so a column
-             * divisor is wrapped in {@code NULLIF(d, 0)}: zero-divisor rows become UNKNOWN →
-             * EXCLUDED. Documented divergence, under-inclusive in the safe direction: CEL would
-             * ALLOW rows where the comparison against ±Infinity holds (e.g. {@code x/0 > 1} with
-             * {@code x > 0}); the adapter denies them, and the query survives. For 0/0 CEL yields
-             * NaN, whose comparisons are all false (deny) — the exclusion matches exactly.
+             * for 0/0). A column divisor is wrapped in {@code NULLIF(d, 0)} so the query survives.
              * Constant divisors are decided statically: non-zero skips the guard, zero collapses
              * the division to a NULL literal (UNKNOWN for every row).
+             *
+             * <p>That guard alone is NOT semantically faithful, and this method is not the whole
+             * story: mapping a zero divisor to UNKNOWN agrees with CEL only for ORDERED
+             * comparisons, where NaN and NULL both exclude the row. It diverges for equality —
+             * {@code NaN != 1.0} is TRUE in CEL but {@code NULL != 1.0} is UNKNOWN. Comparisons
+             * over a possibly-zero divisor are therefore intercepted before they reach here and
+             * rewritten into IEEE-exact branches; see
+             * {@link #tryDivisionByZeroComparison}. The guard below survives only as the finite
+             * arm of that rewrite, and for value positions no comparison folds.
              */
             private NumericOperand resolveNumericOperand(Operand operand, Scope scope) {
                 switch (operand.getNodeCase()) {

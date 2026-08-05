@@ -45,7 +45,7 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` d
 | Classification | Coverage |
 | --- | --- |
 | Oracle-tested | 85 reference conformance actions plus regex, ordered indexing/`get-field`, and timestamp probes (88 actions) |
-| Fail-closed | 29 reference actions |
+| Fail-closed | 31 reference actions |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute documents. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 
 The fail-closed set covers exact-one cardinality, aggregation expressions or outer-document references inside `$elemMatch`, nested collection counts, correlated variable-in-variable membership, unsafe division/non-finite arithmetic, and negated nullable collection predicates that cannot preserve CEL's three-valued error semantics. These plans throw instead of silently degrading to a weaker MongoDB filter.

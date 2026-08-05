@@ -705,11 +705,11 @@ describe("adversarial conformance corpus", () => {
       return count !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(118);
-    expect(unsupportedEntries).toHaveLength(29);
+    expect(MANIFEST_ACTIONS.size).toBe(120);
+    expect(unsupportedEntries).toHaveLength(31);
     expect(supportedExpectedEntries).toHaveLength(3);
     expect(ORACLE_ACTIONS).toHaveLength(88);
-    expect(THROWING_ACTIONS).toHaveLength(29);
+    expect(THROWING_ACTIONS).toHaveLength(31);
     expect(misclassified).toEqual([]);
     expect(
       [...supportedExpectedActions].filter(
