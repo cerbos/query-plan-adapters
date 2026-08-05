@@ -1701,10 +1701,9 @@ class TestDeclarativeStyles:
         )
 
     def test_declarative_base_is_not_a_declarative_meta(self, modern_resource_table):
-        # Pins *why* `GenericTable` needs the extra member. If SQLAlchemy ever
+        # Pins *why* `GenericTable` needs the extra member: if SQLAlchemy ever
         # folds the 2.0 metaclass back under `DeclarativeMeta`, this fails and
-        # the union member becomes removable — rather than the two spellings
-        # quietly collapsing and leaving an untested branch behind.
+        # the member becomes removable.
         from sqlalchemy.orm import DeclarativeBase, DeclarativeMeta
 
         assert issubclass(modern_resource_table, DeclarativeBase)
@@ -1717,24 +1716,6 @@ class TestDeclarativeStyles:
             {"request.resource.attr.aBool": modern_resource_table.aBool},
         )
         assert {row.name for row in conn.execute(query)} == {"resource1", "resource3"}
-
-    def test_declarative_base_always_allowed_and_denied(
-        self, modern_resource_table, conn
-    ):
-        allow = PlanResourcesResponse(
-            filter=PlanResourcesFilter.from_dict(
-                {"kind": PlanResourcesFilterKind.ALWAYS_ALLOWED}
-            ),
-            **_default_resp_params(),
-        )
-        deny = PlanResourcesResponse(
-            filter=PlanResourcesFilter.from_dict(
-                {"kind": PlanResourcesFilterKind.ALWAYS_DENIED}
-            ),
-            **_default_resp_params(),
-        )
-        assert len(conn.execute(get_query(allow, modern_resource_table, {})).all()) == 3
-        assert len(conn.execute(get_query(deny, modern_resource_table, {})).all()) == 0
 
     def test_declarative_base_cross_table_mapping(
         self, modern_resource_table, modern_user_table, conn

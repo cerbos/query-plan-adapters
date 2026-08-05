@@ -51,20 +51,13 @@ try:  # SQLAlchemy >= 2.0
 except ImportError:  # SQLAlchemy 1.4 predates the class-based declarative base.
 
     class DeclarativeBase:  # type: ignore[no-redef]
-        """Stand-in so ``GenericTable`` stays constructible under SQLAlchemy 1.4.
-
-        Nothing subclasses it there, so including it in the union is inert; it
-        exists only to keep this module importable on the older release the
-        package still supports.
-        """
+        """Stand-in so ``GenericTable`` stays constructible under SQLAlchemy 1.4."""
 
 
 _ORMModel = TypeVar("_ORMModel")
 
-# A model declared the 2.0 way subclasses `DeclarativeBase`, whose metaclass
-# (`DeclarativeAttributeIntercept`) is *not* a `DeclarativeMeta`, so the legacy
-# `declarative_base()` member alone does not admit it. Both spellings are
-# accepted, alongside a Core `Table`.
+# A 2.0-style model's metaclass (`DeclarativeAttributeIntercept`) is *not* a
+# `DeclarativeMeta`, so the legacy member alone does not admit it.
 GenericTable = Union[Table, DeclarativeMeta, Type[DeclarativeBase]]
 GenericColumn = Union[Column, InstrumentedAttribute]
 GenericExpression = Union[BinaryExpression, ColumnOperators]
@@ -615,8 +608,7 @@ _allow_types = frozenset(
 
 def _get_table_name(t: GenericTable) -> str:
     try:
-        # ORM model, declared either way: both `DeclarativeMeta` and
-        # `DeclarativeBase` styles carry the mapped `Table` on `__table__`.
+        # ORM model — both declarative styles carry the mapped `Table` here
         return t.__table__.name
     except AttributeError:
         # Core `Table` type
@@ -654,8 +646,7 @@ def _variables_outside_overrides(
 
 
 # An ORM model class carries its row type; a Core `Table` does not. Overloading on
-# that distinction lets `session.execute(...).scalars()` infer the model instead of
-# `Any`, without asking the caller to annotate the result.
+# that distinction lets callers infer the model rather than annotate the result.
 @overload
 def get_query(
     query_plan: Union[PlanResourcesResponse, response_pb2.PlanResourcesResponse],  # type: ignore (https://github.com/microsoft/pyright/issues/1035)

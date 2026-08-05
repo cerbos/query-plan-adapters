@@ -64,9 +64,8 @@ class Resource(Base):
 
 
 # The SQLAlchemy 2.0 declarative style, mapped onto parallel tables holding the
-# same rows. `DeclarativeBase` subclasses are not `DeclarativeMeta` instances, so
-# they exercise a genuinely different arm of `GenericTable` — see
-# https://github.com/cerbos/query-plan-adapters/issues/181.
+# same rows. These are not `DeclarativeMeta` instances, so they exercise a
+# different arm of `GenericTable` (#181).
 try:
     from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -185,10 +184,9 @@ def resource_table():
 def _require_declarative_base() -> None:
     """Skip on 1.4, but fail loudly if 2.0 could not build the models.
 
-    Keyed on the installed version rather than on `HAS_DECLARATIVE_BASE`: were it
-    keyed on the import result, a typo or an upstream rename would turn the whole
-    2.0 leg into silent skips and CI would stay green with the models never
-    exercised.
+    Keyed on the installed version, not on `HAS_DECLARATIVE_BASE`: keyed on the
+    import result, a rename upstream would turn the whole 2.0 leg into silent
+    skips and leave CI green with the models never exercised.
     """
     if _is_sqla_14():
         pytest.skip("DeclarativeBase requires SQLAlchemy >= 2.0")

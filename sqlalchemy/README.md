@@ -63,8 +63,7 @@ The conformance harness supplies the same public `operator_override_fns` mechani
 
 Passing an ORM model returns `Select[Tuple[Model]]` and passing a Core `Table`
 returns `Select[Any]`, so the row type reaches the caller instead of being erased
-to a bare `Select`. `DeclarativeBase` exists only on SQLAlchemy >= 2.0; on 1.4 the
-member is inert and the legacy style is unaffected.
+to a bare `Select`.
 
 ### Database collation requirements
 

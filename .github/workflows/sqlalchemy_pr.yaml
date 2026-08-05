@@ -22,11 +22,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # `pyproject.toml` declares `sqlalchemy>=1.4`, so both major lines are
-        # supported and both must be proven. 1.4 and 2.0 differ in ways this
-        # adapter touches directly — `DeclarativeBase` exists only on 2.0, and
-        # 1.4 connections need an explicit commit — so a single-version job
-        # leaves half the supported range untested.
+        # `pyproject.toml` declares `sqlalchemy>=1.4`, and the two major lines
+        # differ where this adapter reaches — `DeclarativeBase` exists only on
+        # 2.0 — so a single-version job leaves half the supported range unproven.
         sqlalchemy:
           - name: "1.4"
             constraint: "sqlalchemy<2"
