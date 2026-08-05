@@ -1,0 +1,7 @@
+ruby_version: 3.2
+
+ignore:
+  - "spec/**/*":
+      # RSpec example groups are blocks, and shared fixtures/mappings read far better as
+      # constants inside the group they belong to than as globals above it.
+      - Lint/ConstantDefinitionInBlock

@@ -45,6 +45,10 @@
     "null-eq", "null-ne", "vf-null-ne", "null-not-eq"
   ],
   "adapterUnsupported": {
+    "activerecord": [
+      { "action": "ts-window", "reason": "The planner emits a nanosecond-precision now() literal, but ActiveRecord binds a Time into SQL at microsecond precision, so translating it would compare against a different instant than the policy specifies" },
+      { "action": "ts-vf", "reason": "Same sub-microsecond now() limitation in value-first form" }
+    ],
     "prisma": [
       { "action": "like-percent", "reason": "Prisma emits LIKE without an ESCAPE clause and does not escape wildcards, so a needle containing % or _ cannot be matched literally; the adapter throws instead of filtering wrong" },
       { "action": "like-underscore", "reason": "Same LIKE-wildcard limitation as like-percent" },
@@ -345,7 +349,7 @@
   "knownDivergences": [
     {
       "action": "p-has",
-      "adapters": ["spring-data", "prisma", "drizzle", "sqlalchemy", "mongoose", "langchain-chromadb", "elasticsearch-java", "convex"],
+      "adapters": ["spring-data", "prisma", "drizzle", "sqlalchemy", "mongoose", "langchain-chromadb", "elasticsearch-java", "convex", "activerecord"],
       "reason": "The planner folds has(unknown attr) to KIND_ALWAYS_ALLOWED (a Cerbos planner bug, not an adapter bug), so the adapter returns all rows while check() denies rows where the attribute is missing. Excluded from the oracle run rather than asserted against.",
       "relatedIssue": null
     }

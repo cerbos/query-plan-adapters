@@ -1,0 +1,15 @@
+# frozen_string_literal: true
+
+source "https://rubygems.org"
+
+gemspec
+
+group :development, :test do
+  # CI exercises both ends of the range the gemspec declares.
+  gem "activerecord", "~> #{ENV.fetch("ACTIVERECORD_VERSION", "8.0")}"
+  gem "cerbos", "~> 0.13"
+  gem "rake", "~> 13.2"
+  gem "rspec", "~> 3.13"
+  gem "sqlite3", "~> 2.6"
+  gem "standard", "~> 1.50"
+end

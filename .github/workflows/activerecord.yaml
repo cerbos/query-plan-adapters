@@ -1,0 +1,55 @@
+name: ActiveRecord Test
+
+on:
+  pull_request:
+    paths:
+      - "activerecord/**"
+      - "conformance/**"
+      - "policies/**"
+      - ".github/workflows/activerecord.yaml"
+      - ".github/workflows/activerecord-publish.yaml"
+  push:
+    tags:
+      - activerecord/v*
+
+defaults:
+  run:
+    working-directory: activerecord
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby-version: ["3.2", "3.3", "3.4"]
+        activerecord-version: ["8.0"]
+        include:
+          # Both ends of the ActiveRecord range the gemspec declares.
+          - ruby-version: "3.2"
+            activerecord-version: "7.1"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The suites run in Docker against a PDP pinned to conformance/CERBOS_VERSION, which
+      # scripts/test.sh reads. Never hardcode the version here.
+      - name: Run the shared policy and translation suites
+        env:
+          RUBY_VERSION: ${{ matrix.ruby-version }}
+          ACTIVERECORD_VERSION: ${{ matrix.activerecord-version }}
+        run: ./scripts/test.sh spec/shared_policy_spec.rb spec/translator_spec.rb
+
+      - name: Lint
+        if: matrix.ruby-version == '3.4' && matrix.activerecord-version == '8.0'
+        run: ./scripts/lint.sh
+
+  adversarial:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate conformance corpus
+        run: ../conformance/scripts/validate-corpus.sh
+
+      - name: Run the adversarial differential suite
+        run: ./scripts/test.sh spec/adversarial_conformance_spec.rb

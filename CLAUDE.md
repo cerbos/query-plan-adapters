@@ -6,6 +6,7 @@ Multi-language ORM adapters that translate Cerbos query plan responses into data
 
 | Adapter | Language | Package | ORM/DB |
 |---------|----------|---------|--------|
+| activerecord | Ruby | `cerbos-activerecord` | ActiveRecord 7/8 |
 | prisma | TypeScript | `@cerbos/orm-prisma` | Prisma v5/v6/v7 |
 | mongoose | TypeScript | `@cerbos/orm-mongoose` | Mongoose v9 |
 | drizzle | TypeScript | `@cerbos/orm-drizzle` | Drizzle ORM |
