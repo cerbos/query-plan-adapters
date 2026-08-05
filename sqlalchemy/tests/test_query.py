@@ -10,7 +10,7 @@ from cerbos.sdk.model import (
 from google.protobuf.json_format import MessageToDict
 
 from cerbos_sqlalchemy import get_query
-from sqlalchemy import DateTime, String, any_, column, func, literal, table
+from sqlalchemy import Boolean, DateTime, String, any_, column, func, literal, table
 from sqlalchemy.dialects import postgresql
 
 
@@ -1677,3 +1677,101 @@ class TestKnownValueCollections:
             operator_override_fns={"exists": lambda c, v: literal(True)},
         )
         assert [row.name for row in conn.execute(query)] == ["resource1"]
+
+
+class TestDeclarativeStyles:
+    """`get_query` accepts a model declared either declarative way, plus a Core `Table`.
+
+    SQLAlchemy 2.0's `DeclarativeBase` is not a `declarative_base()` model in
+    disguise: its metaclass sits outside the `DeclarativeMeta` hierarchy, so a
+    2.0-style model is a distinct arm of `GenericTable` rather than a relabelled
+    one (cerbos/query-plan-adapters#181).
+    """
+
+    @staticmethod
+    def _eq_bool_plan():
+        return _conditional_plan(
+            {
+                "operator": "eq",
+                "operands": [
+                    {"variable": "request.resource.attr.aBool"},
+                    {"value": True},
+                ],
+            }
+        )
+
+    def test_declarative_base_is_not_a_declarative_meta(self, modern_resource_table):
+        # Pins *why* `GenericTable` needs the extra member: if SQLAlchemy ever
+        # folds the 2.0 metaclass back under `DeclarativeMeta`, this fails and
+        # the member becomes removable.
+        from sqlalchemy.orm import DeclarativeBase, DeclarativeMeta
+
+        assert issubclass(modern_resource_table, DeclarativeBase)
+        assert not isinstance(modern_resource_table, DeclarativeMeta)
+
+    def test_declarative_base_model_filters(self, modern_resource_table, conn):
+        query = get_query(
+            self._eq_bool_plan(),
+            modern_resource_table,
+            {"request.resource.attr.aBool": modern_resource_table.aBool},
+        )
+        assert {row.name for row in conn.execute(query)} == {"resource1", "resource3"}
+
+    def test_declarative_base_cross_table_mapping(
+        self, modern_resource_table, modern_user_table, conn
+    ):
+        # Exercises `_get_table_name` on both sides of the mapping: the root
+        # model and the joined one are both 2.0-style.
+        plan = _conditional_plan(
+            {
+                "operator": "eq",
+                "operands": [
+                    {"variable": "request.resource.attr.ownerId"},
+                    {"value": 1},
+                ],
+            }
+        )
+        query = get_query(
+            plan,
+            modern_resource_table,
+            {"request.resource.attr.ownerId": modern_user_table.id},
+            [
+                (
+                    modern_user_table,
+                    modern_resource_table.ownedBy == modern_user_table.id,
+                )
+            ],
+        )
+        assert {row.name for row in conn.execute(query)} == {"resource1", "resource2"}
+
+    def test_declarative_base_missing_table_mapping_still_fails_closed(
+        self, modern_resource_table, modern_user_table
+    ):
+        plan = _conditional_plan(
+            {
+                "operator": "eq",
+                "operands": [
+                    {"variable": "request.resource.attr.ownerId"},
+                    {"value": 1},
+                ],
+            }
+        )
+        with pytest.raises(TypeError, match="table_mapping"):
+            get_query(
+                plan,
+                modern_resource_table,
+                {"request.resource.attr.ownerId": modern_user_table.id},
+            )
+
+    def test_core_table_still_supported(self, conn):
+        core_resource = table(
+            "resource",
+            column("name", String),
+            column("aBool", Boolean),
+        )
+        query = get_query(
+            self._eq_bool_plan(),
+            core_resource,
+            {"request.resource.attr.aBool": core_resource.c.aBool},
+        )
+        assert {row.name for row in conn.execute(query)} == {"resource1", "resource3"}
