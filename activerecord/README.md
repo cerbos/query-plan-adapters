@@ -65,13 +65,25 @@ The suites here run on SQLite only. A dialect the suite does not exercise is not
 - Ruby >= 3.2
 - ActiveRecord >= 7.0, < 9.0 (CI exercises 7.1 and 8.0)
 - Cerbos > v0.40
-- The [`cerbos`](https://rubygems.org/gems/cerbos) gem, or any other way of obtaining a
-  `PlanResources` response
+- The official [Cerbos Ruby SDK](https://github.com/cerbos/cerbos-sdk-ruby)
+  ([`cerbos`](https://rubygems.org/gems/cerbos) gem)
+
+### Why the SDK is not a hard dependency
+
+This gem declares no runtime dependency on `cerbos`, because that SDK is gRPC-based and would
+pull a native `grpc` build into applications that talk to the PDP over REST instead. The SDK
+is nonetheless the expected client and the shape the adapter is built around: `plan:` accepts
+a `Cerbos::Output::PlanResources` directly, both test suites drive real
+`Cerbos::Client#plan_resources` responses through the adapter, and the SDK's output types are
+asserted against by name in `spec/translator_spec.rb`.
+
+If you obtain plans another way — the REST API, a cached response — pass the decoded JSON, or
+any object exposing `kind` and `condition`, and it will translate identically.
 
 ## Installation
 
 ```bash
-bundle add cerbos-activerecord
+bundle add cerbos-activerecord cerbos
 ```
 
 ## Usage
@@ -104,8 +116,9 @@ documents = Cerbos::ActiveRecord.query_plan_to_relation(
 )
 ```
 
-`plan` may be a `Cerbos::Output::PlanResources` from the `cerbos` gem, the decoded JSON of a
-`PlanResources` response, or any object exposing `kind` and `condition` in those shapes.
+`plan` may be a `Cerbos::Output::PlanResources` from the
+[Ruby SDK](https://github.com/cerbos/cerbos-sdk-ruby), the decoded JSON of a `PlanResources`
+response, or any object exposing `kind` and `condition` in those shapes.
 
 The three plan kinds map onto relations directly:
 

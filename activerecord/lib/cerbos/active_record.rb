@@ -36,9 +36,9 @@ module Cerbos
   # rather than returning a best-effort filter — a wrong filter would return rows the PDP
   # denies.
   module ActiveRecord
-    # @param plan [Object] a +Cerbos::Output::PlanResources+ (from the +cerbos+ gem), the
-    #   decoded JSON of a +PlanResources+ response, or any object exposing +kind+ and
-    #   +condition+ in those shapes
+    # @param plan [Object] a +Cerbos::Output::PlanResources+ from the official Ruby SDK
+    #   (https://github.com/cerbos/cerbos-sdk-ruby), the decoded JSON of a +PlanResources+
+    #   response, or any object exposing +kind+ and +condition+ in those shapes
     # @param model [Class] the +ActiveRecord::Base+ subclass being filtered
     # @param attributes [Hash{String => AttributeMapping::Field, AttributeMapping::Relation}]
     #   plan variable name → mapping onto the model. Build values with

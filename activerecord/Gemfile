@@ -7,6 +7,9 @@ gemspec
 group :development, :test do
   # CI exercises both ends of the range the gemspec declares.
   gem "activerecord", "~> #{ENV.fetch("ACTIVERECORD_VERSION", "8.0")}"
+  # The official Cerbos Ruby SDK (https://github.com/cerbos/cerbos-sdk-ruby). Both suites
+  # plan and check against a real PDP through it, so its output types are what the adapter
+  # is proved against.
   gem "cerbos", "~> 0.13"
   gem "rake", "~> 13.2"
   gem "rspec", "~> 3.13"

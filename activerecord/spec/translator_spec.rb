@@ -80,7 +80,58 @@ RSpec.describe Cerbos::ActiveRecord do
       expect(translate(plan).count).to eq(2)
     end
 
-    it "accepts an object exposing kind and condition, as the cerbos gem's output does" do
+    # The official Ruby SDK (https://github.com/cerbos/cerbos-sdk-ruby) is the primary source
+    # of plans, so its output types are asserted directly rather than through a stand-in. The
+    # differential suites already drive real client responses end to end; this pins the
+    # contract as a named test, so an SDK shape change fails here rather than somewhere deep
+    # in a harness.
+    def sdk_plan(kind, condition)
+      Cerbos::Output::PlanResources.new(
+        request_id: "test", kind: kind, condition: condition,
+        validation_errors: [], metadata: nil
+      )
+    end
+
+    it "accepts a Cerbos::Output::PlanResources from the official Ruby SDK" do
+      plan = sdk_plan(
+        :KIND_CONDITIONAL,
+        Cerbos::Output::PlanResources::Expression.new(operator: "eq", operands: [
+          Cerbos::Output::PlanResources::Expression::Variable.new(name: "request.resource.attr.aString"),
+          Cerbos::Output::PlanResources::Expression::Value.new(value: "string")
+        ])
+      )
+
+      expect(plan).to be_conditional
+      expect(translate(plan).pluck(:id))
+        .to contain_exactly("507f1f77bcf86cd799439011", "resource3")
+    end
+
+    it "maps the SDK's unconditional kinds onto whole and empty relations" do
+      expect(translate(sdk_plan(:KIND_ALWAYS_ALLOWED, nil)).count)
+        .to eq(SharedModels::FIXTURES.size)
+      expect(translate(sdk_plan(:KIND_ALWAYS_DENIED, nil))).to be_empty
+    end
+
+    it "resolves a nested SDK lambda over a relation" do
+      plan = sdk_plan(
+        :KIND_CONDITIONAL,
+        Cerbos::Output::PlanResources::Expression.new(operator: "exists", operands: [
+          Cerbos::Output::PlanResources::Expression::Variable.new(name: "request.resource.attr.tags"),
+          Cerbos::Output::PlanResources::Expression.new(operator: "lambda", operands: [
+            Cerbos::Output::PlanResources::Expression.new(operator: "eq", operands: [
+              Cerbos::Output::PlanResources::Expression::Variable.new(name: "t.name"),
+              Cerbos::Output::PlanResources::Expression::Value.new(value: "public")
+            ]),
+            Cerbos::Output::PlanResources::Expression::Variable.new(name: "t")
+          ])
+        ])
+      )
+
+      expect(translate(plan).pluck(:id))
+        .to contain_exactly("507f1f77bcf86cd799439011", "resource4", "resource5")
+    end
+
+    it "accepts any object exposing kind and condition, for non-SDK clients" do
       expression_node = Struct.new(:operator, :operands)
       variable_node = Struct.new(:name)
       value_node = Struct.new(:value)

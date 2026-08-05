@@ -4,9 +4,10 @@ require_relative "errors"
 
 module Cerbos
   module ActiveRecord
-    # Normalises the several shapes a +PlanResources+ response arrives in — the official
-    # +cerbos+ gem's output objects, or the raw JSON/protobuf-JSON a REST or gRPC call
-    # produces — into one abstract syntax tree the translator walks.
+    # Normalises the several shapes a +PlanResources+ response arrives in — the output objects
+    # of the official Ruby SDK (https://github.com/cerbos/cerbos-sdk-ruby), or the raw
+    # JSON/protobuf-JSON a REST or gRPC call produces — into one abstract syntax tree the
+    # translator walks.
     module Plan
       Expression = Struct.new(:operator, :operands)
       Value = Struct.new(:value)
