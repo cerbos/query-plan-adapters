@@ -91,7 +91,7 @@ module Cerbos
         # `{"value": null}` is a correct constant. Thus the adapter looks for the key and does
         # not look at the value.
         if operand.key?(:value) && !operand.key?(:operator)
-          return Value.new(value: normalise_value(operand[:value]))
+          return Value.new(value: operand[:value])
         end
         if operand.key?(:variable)
           return Variable.new(name: operand[:variable].to_s)
@@ -118,19 +118,10 @@ module Cerbos
           return Variable.new(name: operand.name.to_s)
         end
         if operand.respond_to?(:value)
-          return Value.new(value: normalise_value(operand.value))
+          return Value.new(value: operand.value)
         end
 
         raise InvalidPlanError, "Unrecognised query plan operand: #{operand.inspect}"
-      end
-
-      # Protobuf JSON sends each number as a double. The elements of a list keep their types.
-      # @api private
-      def normalise_value(value)
-        case value
-        when Array then value.map { |element| normalise_value(element) }
-        else value
-        end
       end
 
       # @api private

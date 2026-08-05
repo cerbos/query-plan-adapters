@@ -22,12 +22,6 @@ module Cerbos
 
       def self.for(model)
         new(model.connection.adapter_name)
-      rescue => e
-        # The adapter can translate a plan for a model that has no open connection. Only the
-        # two functions below need the dialect, and each has a safe default for most
-        # databases.
-        raise e if e.is_a?(Error)
-        new("unknown")
       end
 
       # MySQL has no +||+ operator for the concatenation of strings with its default
