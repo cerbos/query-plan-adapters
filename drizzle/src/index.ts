@@ -2031,11 +2031,102 @@ const buildComparisonFilter = (
     return combined;
   };
 
+  /**
+   * Fold a division whose denominator may be zero, at the comparison site.
+   *
+   * CEL attribute arithmetic is double-typed, so `0/0` is NaN and `x/0` is a
+   * signed infinity — neither of which SQL can represent. Lowering the division
+   * to NULL (SQLite's division-by-zero result) makes every comparison UNKNOWN.
+   * That agrees with CEL for ORDERED comparisons, which is why `cr-div-zero`
+   * passed, but it silently denies rows an INEQUALITY allows: `NaN != 1.0` is
+   * TRUE in CEL while `NULL != 1.0` is UNKNOWN.
+   *
+   * Keep the three IEEE cases as CASE arms and fold each against the other
+   * operand in JavaScript's own IEEE space, so no NaN or Infinity is ever bound
+   * as a driver parameter. Comparing a non-finite against the finite sentinel 0
+   * gives the same answer as against any finite comparand, which is the same
+   * trick `buildDynamicNaNComparison` uses.
+   *
+   * A NULL numerator, denominator or comparand leaves the result NULL, so the
+   * row stays excluded under BOTH polarities — CEL's missing-attribute deny.
+   */
+  const buildDivision = (
+    division: PlanExpressionOperand & {
+      operator: string;
+      operands: PlanExpressionOperand[];
+    },
+    other: PlanExpressionOperand,
+    divisionIsLeft: boolean
+  ): SQL => {
+    const [numeratorOperand, denominatorOperand] = division.operands;
+    if (!numeratorOperand || !denominatorOperand) {
+      throw new Error("'div' operator is missing operands");
+    }
+    const numerator = buildValueExpression(numeratorOperand, mapper, options);
+    const denominator = buildValueExpression(
+      denominatorOperand,
+      mapper,
+      options
+    );
+    const otherExpr = buildValueExpression(other, mapper, options);
+
+    const arm = (nonFinite: number): SQL => {
+      const result = divisionIsLeft
+        ? evaluateConstantNumberComparison(operator, nonFinite, 0)
+        : evaluateConstantNumberComparison(operator, 0, nonFinite);
+      return result !== negated ? sql`true` : sql`false`;
+    };
+
+    const quotient = sql`(cast(${numerator} as float(53)) / ${denominator})`;
+    const finite = divisionIsLeft
+      ? applyComparisonWithExpression(operator, quotient, otherExpr)
+      : applyComparisonWithExpression(operator, otherExpr, quotient);
+
+    return sql`(case
+      when ${numerator} is null or ${denominator} is null or ${otherExpr} is null then null
+      when ${denominator} = 0 and ${numerator} = 0 then ${arm(Number.NaN)}
+      when ${denominator} = 0 and ${numerator} > 0 then ${arm(Number.POSITIVE_INFINITY)}
+      when ${denominator} = 0 then ${arm(Number.NEGATIVE_INFINITY)}
+      else ${negated ? not(finite) : finite}
+    end)`;
+  };
+
   if (isExpressionOperand(left) && left.operator === "if") {
     return buildTernary(left, right, true);
   }
   if (isExpressionOperand(right) && right.operator === "if") {
     return buildTernary(right, left, false);
+  }
+
+  // A zero denominator is only reachable when it is not a known non-zero
+  // constant; otherwise fall through to the plain arithmetic path.
+  const canDivideByZero = (
+    operand: PlanExpressionOperand
+  ): operand is PlanExpressionOperand & {
+    operator: string;
+    operands: PlanExpressionOperand[];
+  } => {
+    if (!isExpressionOperand(operand) || operand.operator !== "div") {
+      return false;
+    }
+    // A division of two constants already folds to an exact IEEE value, and
+    // the constant/NaN paths below render it more tightly than a CASE can.
+    if (resolveConstantNumber(operand).kind === "constant") {
+      return false;
+    }
+    const denominatorOperand = operand.operands[1];
+    if (!denominatorOperand) {
+      return false;
+    }
+    const denominator = resolveConstantNumber(denominatorOperand);
+    return denominator.kind !== "constant" || denominator.value === 0;
+  };
+
+  if (canDivideByZero(left)) {
+    return buildDivision(left, right, true);
+  }
+  if (canDivideByZero(right)) {
+    return buildDivision(right, left, false);
   }
 
   const leftConstant = resolveConstantNumber(left);

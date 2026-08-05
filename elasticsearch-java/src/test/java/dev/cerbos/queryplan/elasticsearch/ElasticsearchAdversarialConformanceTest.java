@@ -178,7 +178,7 @@ class ElasticsearchAdversarialConformanceTest {
                 "adapterUnsupported.elasticsearch-java contains non-conformance actions");
         assertTrue(expected.containsAll(supportedExpected),
                 "adapterSupportedExpected.elasticsearch-java contains non-expected actions");
-        assertEquals(78, unsupported.size(),
+        assertEquals(80, unsupported.size(),
                 "Elasticsearch unsupported coverage changed without updating the ledger assertion");
         assertEquals(2, supportedExpected.size(),
                 "Elasticsearch supported-expected coverage changed without updating the ledger assertion");
@@ -204,8 +204,8 @@ class ElasticsearchAdversarialConformanceTest {
         manifest.addAll(expected);
         manifest.addAll(divergences);
         assertEquals(38, oracleActions.size());
-        assertEquals(79, throwingActions.size());
-        assertEquals(118, classified.size());
+        assertEquals(81, throwingActions.size());
+        assertEquals(120, classified.size());
         assertEquals(manifest, classified, "every manifest action must be classified locally");
     }
 

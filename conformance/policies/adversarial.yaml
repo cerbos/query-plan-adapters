@@ -681,15 +681,40 @@ resourcePolicy:
 
     # ==================== arithmetic edge probes ====================
 
-    # Column divisor with a zero row (a7 aNumber=0): CEL 0.0/0.0 is NaN → all comparisons
-    # false → deny; the SQL must not abort on division by zero (NULLIF guard → UNKNOWN →
-    # excluded, which matches the NaN denial exactly).
+    # Column divisor with a zero row (a7 aNumber=0): CEL 0.0/0.0 is NaN → an ORDERED
+    # comparison against NaN is false → deny; the SQL must not abort on division by zero.
+    # A NULLIF guard yields UNKNOWN, which also excludes the row, so this probe agrees with
+    # a NULL lowering and CANNOT discriminate the two. cr-div-zero-ne below is what does.
     - actions: ["cr-div-zero"]
       effect: EFFECT_ALLOW
       roles: ["USER"]
       condition:
         match:
           expr: 'R.attr.aNumber / R.attr.aNumber > 0.5'
+
+    # The discriminator cr-div-zero cannot be: an INEQUALITY against NaN. CEL attribute
+    # arithmetic is double-typed, so 0/0 is NaN and `NaN != 1.0` is TRUE — a7 is ALLOWED.
+    # An adapter that lowers the division to SQL NULL (a NULLIF divide-by-zero guard) gets
+    # `NULL != 1.0` → UNKNOWN and wrongly EXCLUDES a7, denying a row the PDP permits.
+    # Over-restrictive rather than a bypass, but it still breaks the oracle equality.
+    # a7 (aNumber=0) is the sole witness; every other numeric seed divides to exactly 1.0.
+    - actions: ["cr-div-zero-ne"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aNumber / R.attr.aNumber != 1.0'
+
+    # Same NaN witness reached through negated equality instead of a bare inequality, so an
+    # adapter cannot pass by special-casing `ne`. Under CEL, `0/0 == 1.0` is false and the
+    # negation is TRUE, so a7 is allowed. Under SQL three-valued logic a NULL lowering gives
+    # UNKNOWN, and NOT UNKNOWN is still UNKNOWN — a7 stays excluded under BOTH polarities.
+    - actions: ["cr-div-zero-eq-neg"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(R.attr.aNumber / R.attr.aNumber == 1.0)'
 
     # ==================== multi-hop relation chains (W1) ====================
     # Direct dotted-chain syntax. mainCategory is a SINGLE nested object on the check side

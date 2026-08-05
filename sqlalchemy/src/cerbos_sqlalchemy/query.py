@@ -150,10 +150,35 @@ def _float_div(c: Any, v: Any) -> Any:
         if not isinstance(v, bool) and isinstance(v, (int, float))
         else cast(v, Float)
     )
-    # SQL dialects disagree on division-by-zero (NULL vs exception). NULL has
-    # the same filtering behaviour as CEL NaN for the supported comparison
-    # plans, and prevents a database exception from aborting the query.
-    return numerator / func.nullif(denominator, 0.0)
+
+    # A zero denominator is NOT an error in CEL: attribute arithmetic is
+    # double-typed, so `0/0` is NaN and `x/0` is a signed infinity. Lowering
+    # that to SQL NULL loses the distinction — `NULL != 1.0` is UNKNOWN and
+    # excludes the row, while `NaN != 1.0` is TRUE and the PDP allows it.
+    # Keep the three IEEE cases symbolic and let the enclosing comparison fold
+    # each arm (see `_compare`/`_compare_leaf`), which is exact for ordered and
+    # equality comparisons alike.
+    #
+    # A NULL numerator or denominator makes every branch condition UNKNOWN, so
+    # the folded CASE yields NULL and the row stays excluded under BOTH
+    # polarities — the correct outcome for a CEL missing-attribute error.
+    #
+    # The finite arm keeps a NULLIF guard: it can never be selected when the
+    # denominator is zero, but dialects that evaluate CASE arms eagerly would
+    # otherwise abort the whole query on a division by zero.
+    return _ConditionalValue(
+        condition=denominator == 0.0,
+        then_value=_ConditionalValue(
+            condition=numerator == 0.0,
+            then_value=_IEEEConstant(math.nan),
+            else_value=_ConditionalValue(
+                condition=numerator > 0.0,
+                then_value=_IEEEConstant(math.inf),
+                else_value=_IEEEConstant(-math.inf),
+            ),
+        ),
+        else_value=numerator / func.nullif(denominator, 0.0),
+    )
 
 
 def _apply_comparison(operator: str, left: Any, right: Any) -> Any:

@@ -117,7 +117,7 @@ These are part of the shared contract. Do not replace them with adapter-specific
 4. Run `scripts/regenerate-wire-fixtures.sh` and commit the new fixture alongside the policy change.
 5. Every adapter harness picks up the new action automatically from `actions.json` on next run;
    triage any divergence into a per-adapter fix issue rather than special-casing it in the harness.
-6. Each harness pins the corpus size as a tripwire (e.g. `expect(MANIFEST_ACTIONS.size).toBe(118)`
+6. Each harness pins the corpus size as a tripwire (e.g. `expect(MANIFEST_ACTIONS.size).toBe(120)`
    in `prisma/src/adversarial.test.ts`, and the oracle/throwing counts in the convex and
    langchain-chromadb harnesses). Bump them deliberately — that assertion exists so a new action
    cannot slip past an adapter unnoticed.

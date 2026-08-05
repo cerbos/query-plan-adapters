@@ -563,7 +563,7 @@ async function adapterFilteredIds(action: string): Promise<string[]> {
 }
 
 describe("adversarial conformance corpus", () => {
-  test("manifest assigns all 118 policy actions exactly one Chroma outcome", () => {
+  test("manifest assigns all 120 policy actions exactly one Chroma outcome", () => {
     const oracle = new Set(CHROMA_SUPPORTED_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map(({ action }) => action));
     const misclassified = [...MANIFEST_ACTIONS].filter((action) => {
@@ -575,12 +575,12 @@ describe("adversarial conformance corpus", () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(118);
+    expect(MANIFEST_ACTIONS.size).toBe(120);
     expect(CHROMA_SUPPORTED_ACTIONS).toHaveLength(15);
     expect(oracle.size).toBe(CHROMA_SUPPORTED_ACTIONS.length);
-    expect(CHROMA_UNSUPPORTED).toHaveLength(99);
+    expect(CHROMA_UNSUPPORTED).toHaveLength(101);
     expect(CHROMA_SUPPORTED_EXPECTED).toHaveLength(0);
-    expect(THROWING_ACTIONS).toHaveLength(102);
+    expect(THROWING_ACTIONS).toHaveLength(104);
     expect(misclassified).toEqual([]);
   });
 

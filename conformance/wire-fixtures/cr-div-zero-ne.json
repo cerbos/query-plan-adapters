@@ -1,0 +1,30 @@
+{
+  "action": "cr-div-zero-ne",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "ne",
+        "operands": [
+          {
+            "expression": {
+              "operator": "div",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "variable": "request.resource.attr.aNumber"
+                }
+              ]
+            }
+          },
+          {
+            "value": 1
+          }
+        ]
+      }
+    }
+  }
+}
