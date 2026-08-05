@@ -64,11 +64,12 @@ expect_status() {
   local name="$1" path="$2" query="$3" expected_status="$4" expected_error="$5"
   CHECKS=$((CHECKS + 1))
 
-  local body status
-  body="$(curl -sS -o /tmp/smoke-body -w '%{http_code}' "${BASE}${path}?${query}")"
-  status="${body}"
-  local error
-  error="$(jq -r '.error // ""' </tmp/smoke-body)"
+  local status error
+  local body_file
+  body_file="$(mktemp)"
+  status="$(curl -sS -o "${body_file}" -w '%{http_code}' "${BASE}${path}?${query}")"
+  error="$(jq -r '.error // ""' <"${body_file}")"
+  rm -f "${body_file}"
 
   if [[ "${status}" == "${expected_status}" && "${error}" == "${expected_error}" ]]; then
     echo "ok    ${name}"
@@ -158,9 +159,27 @@ expect_status "a regular expression raises an error" /photos \
   "action=search-regex&user=ana&tenant=acme" "422" "Cerbos::ActiveRecord::UnsupportedOperatorError"
 
 echo
+echo "== a parameter that selects rows must be one value =="
+# Rack reads `tenant[]=a&tenant[]=b` as an array, and an array in `where(tenant: ...)` becomes
+# an IN clause across both tenants. That would open the boundary that this example teaches.
+expect_status "an array-shaped tenant is refused" /photos \
+  "action=moderate&role=admin&tenant%5B%5D=acme&tenant%5B%5D=globex" "400" "InvalidParameter"
+expect_status "an array-shaped user is refused" /photos \
+  "action=view&user%5B%5D=ana&user%5B%5D=ben&tenant=acme" "400" "InvalidParameter"
+
+echo
+# A count of zero must not report success. If the checks below were removed, or an early exit
+# skipped them, "all checks passed" would be true and would prove nothing. Raise this number
+# with the checks.
+EXPECTED_CHECKS=19
+if [[ "${CHECKS}" -ne "${EXPECTED_CHECKS}" ]]; then
+  echo "Expected ${EXPECTED_CHECKS} checks to run, but ${CHECKS} ran."
+  FAILURES=$((FAILURES + 1))
+fi
+
 if [[ "${FAILURES}" -eq 0 ]]; then
   echo "All ${CHECKS} checks passed."
 else
-  echo "${FAILURES} of ${CHECKS} checks failed."
+  echo "${FAILURES} failure(s) across ${CHECKS} checks."
   exit 1
 fi

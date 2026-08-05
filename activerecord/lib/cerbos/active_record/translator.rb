@@ -371,7 +371,21 @@ module Cerbos
 
       # --- eagerly-resolved operators -------------------------------------------------
 
+      # How many operands each operator takes. A plan that carries more is malformed, and this
+      # adapter accepts a plan from any source. If it read only the positions it expected, an
+      # extra operand would disappear and the filter would be wider than the condition.
+      ARITY = {
+        "eq" => 2, "ne" => 2, "lt" => 2, "gt" => 2, "le" => 2, "ge" => 2,
+        "in" => 2, "add" => 2, "sub" => 2, "mult" => 2, "div" => 2, "mod" => 2,
+        "contains" => 2, "startsWith" => 2, "endsWith" => 2, "hasIntersection" => 2,
+        "ancestorOf" => 2, "descendentOf" => 2, "overlaps" => 2,
+        "size" => 1, "string" => 1, "double" => 1, "int" => 1, "timestamp" => 1,
+        "hierarchy" => 1..2
+      }.freeze
+
       def apply(operator, values)
+        assert_arity(operator, values)
+
         override = operator_overrides[operator]
         return override.call(*values) if override
 
@@ -397,6 +411,15 @@ module Cerbos
             "Unsupported operator: #{operator}. Supply an operator override if the database " \
             "can express it faithfully."
         end
+      end
+
+      def assert_arity(operator, values)
+        expected = ARITY[operator]
+        return if expected.nil?
+        return if expected.is_a?(Range) ? expected.cover?(values.length) : expected == values.length
+
+        raise InvalidPlanError,
+          "#{operator} takes #{expected} operands, but the plan gives #{values.length}"
       end
 
       # --- comparison -----------------------------------------------------------------
@@ -518,21 +541,55 @@ module Cerbos
         scope.exists(condition)
       end
 
-      def scalar_membership(column, values)
+      def scalar_membership(needle, values)
         members = values.is_a?(Array) ? values : [values]
-        present = members.reject(&:nil?)
+        return false if members.empty?
 
-        predicates = []
-        unless present.empty?
-          predicates << Arel::Nodes::In.new(
-            ArelSupport.quote(column), present.map { |v| ArelSupport.quote(v) }
-          )
+        # The usual shape: a column against a list of constants. An IN clause reads better than
+        # a chain of equality tests.
+        if ArelSupport.arel_node?(needle) && members.none? { |member| ArelSupport.arel_node?(member) }
+          present = members.reject(&:nil?)
+
+          predicates = []
+          unless present.empty?
+            predicates << Arel::Nodes::In.new(
+              ArelSupport.quote(needle), present.map { |value| ArelSupport.quote(value) }
+            )
+          end
+          # A null element makes the membership test true for an attribute that is null. The
+          # attribute must be null and not only missing.
+          predicates << ArelSupport.comparison("eq", needle, nil) if present.length != members.length
+
+          return predicates.empty? ? false : ArelSupport.or_node(predicates)
         end
-        # A null element makes the membership test true for an attribute that is null. The
-        # attribute must be null and not only missing.
-        predicates << ArelSupport.comparison("eq", column, nil) if present.length != members.length
 
-        predicates.empty? ? false : ArelSupport.or_node(predicates)
+        # A list that holds a column, or a needle that is a constant, needs one comparison for
+        # each element. `null in [R.attr.x]` is the example: it is true when the column is null.
+        ArelSupport.or_node(members.map { |member| member_equality(needle, member) })
+      end
+
+      # CEL equality for one element of a membership test. Two nulls are equal in CEL, but the
+      # result of that comparison in SQL is UNKNOWN, so the adapter writes it out.
+      def member_equality(needle, member)
+        needle_is_node = ArelSupport.arel_node?(needle)
+        member_is_node = ArelSupport.arel_node?(member)
+
+        return ArelSupport.comparison("eq", member, nil) if needle.nil? && member_is_node
+        return ArelSupport.comparison("eq", needle, nil) if member.nil? && needle_is_node
+
+        if needle_is_node && member_is_node
+          return ArelSupport.or_node([
+            ArelSupport.comparison("eq", needle, member),
+            ArelSupport.and_node([
+              ArelSupport.comparison("eq", needle, nil),
+              ArelSupport.comparison("eq", member, nil)
+            ])
+          ])
+        end
+
+        return needle.nil? == member.nil? if needle.nil? || member.nil?
+
+        ArelSupport.to_predicate(compare("eq", needle, member))
       end
 
       # --- arithmetic -----------------------------------------------------------------
@@ -590,6 +647,14 @@ module Cerbos
         divide_with_zero_denominator(numerator, denominator)
       end
 
+      # IEEE-754 keeps the sign of a zero. `2.0 / -0.0` is -Infinity, not +Infinity, because the
+      # sign of the result is the sign of the numerator against the sign of the denominator.
+      def zero_sign(denominator)
+        return 1.0 unless denominator.is_a?(Numeric)
+
+        (1.0 / denominator.to_f).negative? ? -1.0 : 1.0
+      end
+
       # A division by zero is not an error in CEL, because CEL arithmetic on attributes uses
       # doubles. IEEE-754 gives NaN for 0/0, +Infinity for a positive numerator, and -Infinity
       # for a negative one. SQL cannot hold those three values, and NULL is not equal to any of
@@ -599,27 +664,40 @@ module Cerbos
       # The translator keeps the three cases as branches. The comparison around the division
       # then calculates each branch, in the same way as any other constant that is not finite.
       def divide_with_zero_denominator(numerator, denominator)
-        by_zero = zero_denominator_value(numerator)
-        # The denominator is the constant zero, so no other branch is possible.
-        return by_zero if denominator.is_a?(Numeric)
+        # The denominator is a constant zero, so the sign of that zero is known.
+        return zero_denominator_value(numerator, zero_sign(denominator)) if denominator.is_a?(Numeric)
+
+        # The denominator is row-dependent. SQL cannot tell -0.0 from 0.0 — both satisfy
+        # `= 0` and no portable function reads the sign bit — so the sign of an Infinity is
+        # unknowable here. The one shape that stays safe is a division of a value by itself:
+        # the denominator can only be zero when the numerator is zero too, which gives NaN,
+        # and NaN has no sign question.
+        unless numerator == denominator
+          raise UnsupportedOperatorError,
+            "Cannot divide by a column that may be zero: IEEE-754 keeps the sign of a zero, " \
+            "SQL cannot tell -0.0 from 0.0, and thus the sign of the Infinity is unknown. " \
+            "Divide by a constant, or keep this shape out of the policy."
+        end
 
         Values::ConditionalValue.new(
           condition: ArelSupport.comparison("eq", as_double(denominator), 0.0),
-          then_value: by_zero,
+          then_value: Values::IEEEConstant.new(value: Float::NAN),
           else_value: ArelSupport.infix("/", as_double(numerator), as_double(denominator))
         )
       end
 
-      def zero_denominator_value(numerator)
-        return Values::IEEEConstant.new(value: numerator.to_f / 0.0) if numerator.is_a?(Numeric)
+      def zero_denominator_value(numerator, sign)
+        if numerator.is_a?(Numeric)
+          return Values::IEEEConstant.new(value: numerator.to_f / (sign * 0.0))
+        end
 
         Values::ConditionalValue.new(
           condition: ArelSupport.comparison("eq", as_double(numerator), 0.0),
           then_value: Values::IEEEConstant.new(value: Float::NAN),
           else_value: Values::ConditionalValue.new(
             condition: ArelSupport.comparison("gt", as_double(numerator), 0.0),
-            then_value: Values::IEEEConstant.new(value: Float::INFINITY),
-            else_value: Values::IEEEConstant.new(value: -Float::INFINITY)
+            then_value: Values::IEEEConstant.new(value: sign * Float::INFINITY),
+            else_value: Values::IEEEConstant.new(value: -sign * Float::INFINITY)
           )
         )
       end

@@ -27,16 +27,31 @@ require_relative "models"
 class ExampleApp < Sinatra::Base
   set :host_authorization, permitted_hosts: []
 
+  # Reads one query parameter as a string.
+  #
+  # Rack reads `tenant[]=acme&tenant[]=globex` as an array. Such an array goes into
+  # `where(tenant: [...])`, which becomes `tenant IN ('acme', 'globex')` and thus opens the
+  # tenant boundary to more than one tenant. A parameter that selects rows must be one value.
+  def scalar_param(name, default)
+    value = params.fetch(name, default)
+    return value if value.is_a?(String)
+
+    halt 400, json(
+      error: "InvalidParameter",
+      message: "The parameter #{name.inspect} must be one value, but it was a #{value.class}."
+    )
+  end
+
   # The application makes the principal one time for each request.
   def principal
     {
-      id: params.fetch("user", "ana"),
-      roles: params.fetch("role", "user").split(","),
+      id: scalar_param("user", "ana"),
+      roles: scalar_param("role", "user").split(","),
       attr: {
-        "tenant" => params.fetch("tenant", "acme"),
-        "department" => params.fetch("department", "engineering"),
-        "scope" => params.fetch("scope", "acme"),
-        "allowedTags" => params.fetch("tags", "").split(",").reject(&:empty?)
+        "tenant" => scalar_param("tenant", "acme"),
+        "department" => scalar_param("department", "engineering"),
+        "scope" => scalar_param("scope", "acme"),
+        "allowedTags" => scalar_param("tags", "").split(",").reject(&:empty?)
       }
     }
   end

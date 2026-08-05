@@ -60,6 +60,22 @@ RSpec.describe Cerbos::ActiveRecord do
     # An `and` with no operands would give TRUE, and thus the filter would permit every row.
     # The planner does not make that shape, but a plan that lost its operands on the way here
     # must not become "permit everything".
+    # A plan that carries an extra operand is malformed. If the adapter read only the positions
+    # it expected, the extra operand would disappear and the filter would be wider than the
+    # condition. A malformed plan must fail closed.
+    it "rejects an operator that carries the wrong number of operands" do
+      expect {
+        translate(conditional(expression("eq",
+          variable("request.resource.attr.aString"), value("string"), value("extra"))))
+      }.to raise_error(Cerbos::ActiveRecord::InvalidPlanError, /eq takes 2 operands/)
+
+      expect {
+        translate(conditional(expression("gt",
+          expression("size", variable("request.resource.attr.aString"), value("extra")),
+          value(1))))
+      }.to raise_error(Cerbos::ActiveRecord::InvalidPlanError, /size takes 1 operands/)
+    end
+
     it "rejects an and or an or with no operands" do
       %w[and or].each do |operator|
         expect { translate(conditional(expression(operator))) }
@@ -207,6 +223,20 @@ RSpec.describe Cerbos::ActiveRecord do
     end
   end
 
+  describe "membership with a column inside the list" do
+    # `null in [R.attr.x]` is true when the column is null. An earlier version built
+    # `NULL IN (x)`, which is always UNKNOWN, and Arel could not even render it.
+    it "translates a null needle against a list holding a column" do
+      relation = described_class.query_plan_to_relation(
+        plan: conditional(expression("in", value(nil),
+          expression("list", variable("s")))),
+        model: EdgeDocument,
+        attributes: {"s" => field("title")}
+      )
+      expect(relation.to_sql).to match(/"title" IS NULL/)
+    end
+  end
+
   describe "unmapped attributes" do
     it "raises rather than guessing a column" do
       expect {
@@ -346,6 +376,33 @@ RSpec.describe Cerbos::ActiveRecord do
         attributes: {"n" => field("n")}
       )
       expect(relation.order(:id).pluck(:title)).to eq(%w[two])
+    end
+
+    it "keeps the sign of a negative zero denominator" do
+      # IEEE-754 keeps the sign of a zero, so 2.0 / -0.0 is -Infinity and -3.0 / -0.0 is
+      # +Infinity. A PDP confirmed this before the fix: the adapter returned the positive row
+      # where Cerbos allows only the negative one.
+      relation = described_class.query_plan_to_relation(
+        plan: conditional(expression("gt",
+          expression("div", variable("n"), value(-0.0)), value(0.0))),
+        model: EdgeDocument,
+        attributes: {"n" => field("n")}
+      )
+      expect(relation.order(:id).pluck(:title)).to eq(%w[negative])
+    end
+
+    it "refuses a division by a column that may be zero" do
+      # The sign of a zero column cannot be read in SQL, so the sign of the Infinity is
+      # unknown. Only a division of a value by itself stays safe, because then a zero
+      # denominator means a zero numerator, which gives NaN.
+      expect {
+        described_class.query_plan_to_relation(
+          plan: conditional(expression("gt",
+            expression("div", variable("n"), variable("author")), value(0.0))),
+          model: EdgeDocument,
+          attributes: {"n" => field("n"), "author" => field("author_id")}
+        )
+      }.to raise_error(Cerbos::ActiveRecord::UnsupportedOperatorError, /sign of the Infinity/)
     end
 
     it "raises for more arithmetic on a value that may not be finite" do
