@@ -110,7 +110,7 @@ RSpec.describe "shared policy suite" do
   end
 
   it "covers every action in the shared policy" do
-    expect(POLICY_ACTIONS.size).to eq(103)
+    expect(POLICY_ACTIONS.size).to eq(104)
     expect(ORACLE_ACTIONS.size + UNSUPPORTED.size + EXECUTED_RESULT_ONLY.size)
       .to eq(POLICY_ACTIONS.size)
   end

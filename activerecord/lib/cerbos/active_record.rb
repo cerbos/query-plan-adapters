@@ -47,14 +47,24 @@ module Cerbos
     #   object. The adapter gives the operands to that object after it resolves them. Use this
     #   for a shape that your database can translate correctly but portable SQL cannot. A JSON
     #   containment operator and a full-text index are two examples.
+    # @param null_attribute_representation [Symbol] how the caller sends a NULL column to
+    #   Cerbos. With +:explicit+, the default, a NULL column sends an attribute whose value is
+    #   null, and thus <tt>R.attr.x == null</tt> is true for that row and +IS NULL+ agrees with
+    #   the PDP. With +:omitted+, a NULL column sends no attribute at all. CEL then raises a
+    #   missing-attribute error and the PDP denies the row, but +IS NULL+ would give that row.
+    #   Thus the adapter refuses each null constant in the plan under +:omitted+.
     # @return [ActiveRecord::Relation] +model.none+ if the plan always denies, +model.all+ if
     #   the plan always allows, and a filtered relation for all the other plans
     # @raise [Error] if the adapter cannot translate the plan correctly
-    def self.query_plan_to_relation(plan:, model:, attributes:, operator_overrides: {})
+    def self.query_plan_to_relation(
+      plan:, model:, attributes:,
+      operator_overrides: {}, null_attribute_representation: :explicit
+    )
       Translator.new(
         model: model,
         attributes: attributes,
-        operator_overrides: operator_overrides
+        operator_overrides: operator_overrides,
+        null_attribute_representation: null_attribute_representation
       ).translate(plan)
     end
   end

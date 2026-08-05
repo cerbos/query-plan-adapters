@@ -35,8 +35,9 @@ adapter gives the reference behaviour.
 
 | Classification | Coverage |
 | --- | --- |
-| Tested against the oracle | 112 reference actions |
+| Tested against the oracle | 120 reference actions |
 | Fail-closed | 2 reference actions, and the 3 shapes that the reference adapter does not support (5 actions in total) |
+| Refused under the `omitted` NULL convention | 1 action — see [The NULL convention of the caller](#the-null-convention-of-the-caller) |
 | Known difference in the planner | The Cerbos planner changes `has()` on a missing attribute into `ALWAYS_ALLOWED`, but `checkResource` denies the rows in which the attribute is missing. Until the planner has a correction, use `R.attr.x != null` and not `has(R.attr.x)` for the attributes in your database |
 
 The fail-closed set is small, because SQL can show most of the corpus directly. The adapter
@@ -54,6 +55,35 @@ stay:
 
 The adapter also raises an error for a `filter()` or a `map()` that a policy uses as a
 condition. Those operations give a list and not a boolean.
+
+### The NULL convention of the caller
+
+There are two ways to send a NULL column to Cerbos, and the query plan looks the same for both.
+You must tell the adapter which one your application uses.
+
+| `null_attribute_representation:` | What your application sends for a NULL column | `R.attr.x == null` |
+| --- | --- | --- |
+| `:explicit` (the default) | An attribute whose value is null | Cerbos gives true, and `IS NULL` agrees |
+| `:omitted` | No attribute at all | CEL raises a missing-attribute error, and Cerbos denies the row |
+
+With `:omitted`, a filter that selects NULL would give exactly the rows that the PDP denies.
+The adapter cannot read the convention from the plan, because the planner makes the same
+`eq(attr, null)` node for both. Thus the adapter refuses each null constant in the plan under
+`:omitted`:
+
+```ruby
+Cerbos::ActiveRecord.query_plan_to_relation(
+  plan: plan, model: Document, attributes: MAPPING,
+  null_attribute_representation: :omitted
+)
+# => Cerbos::ActiveRecord::UnsupportedOperatorError
+```
+
+The refusal is wider than the shapes that give too many rows. `R.attr.x != null` is correct by
+itself, but this adapter puts a negation around a predicate and does not push it into the leaf.
+Thus a leaf cannot know that a `not` above it will make `IS NOT NULL` into a predicate that
+selects NULL again. To refuse each null constant is correct for all the shapes. Refer to
+[cerbos/query-plan-adapters#302](https://github.com/cerbos/query-plan-adapters/issues/302).
 
 ### The collation is part of the contract
 
@@ -175,6 +205,20 @@ Cerbos::ActiveRecord.relation(
   })
 })
 ```
+
+#### A macro over a principal attribute
+
+When a collection is a principal attribute, the planner knows its values and sends the list
+itself. The adapter evaluates the body of the lambda one time for each element and joins the
+results with OR for `exists`, or with AND for `all`. SQL gives the correct answer without more
+work, because OR and AND obey the same three-valued logic as the CEL quantifiers.
+
+```cel
+P.attr.teams.exists(t, R.attr.owner == t)
+```
+
+becomes `owner = 'team-a' OR owner = 'team-b' OR ...`. You need no mapping for such a
+collection, because the values are in the plan.
 
 A `has_many :through` association is permitted. The adapter opens it into joins **in one
 correlated subquery**. It does not make an `EXISTS` inside an `EXISTS`. This difference is

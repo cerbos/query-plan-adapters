@@ -79,8 +79,9 @@ RSpec.describe "adversarial conformance" do
     # this adapter without a test. Increase these numbers only when you know why
     # conformance/actions.json is larger.
     it "pins the corpus size" do
-      expect(ConformanceCorpus::ACTIONS_FILE.fetch("conformance").size).to eq(114)
+      expect(ConformanceCorpus::ACTIONS_FILE.fetch("conformance").size).to eq(122)
       expect(ConformanceCorpus::EXPECTED_UNSUPPORTED.size).to eq(3)
+      expect(ConformanceCorpus::NULL_REPRESENTATION_OMITTED.size).to eq(1)
     end
 
     it "classifies every action exactly once" do
@@ -117,6 +118,33 @@ RSpec.describe "adversarial conformance" do
     ConformanceCorpus::THROWING_ACTIONS.each do |action|
       it action do
         expect { adapter_filtered_ids(action) }.to raise_error(StandardError)
+      end
+    end
+  end
+
+  # The two conventions for a NULL column look the same on the wire. The planner sends the same
+  # `eq(attr, null)` node for `null-eq`, where the oracle sends an explicit null, and for
+  # `null-eq-missing`, where the oracle omits the attribute. But their oracles do not agree.
+  # Thus the caller must tell the adapter which convention it uses.
+  describe "null attribute representation" do
+    ConformanceCorpus::NULL_REPRESENTATION_OMITTED.each do |action|
+      it "#{action} is refused when the representation is omitted" do
+        expect {
+          Cerbos::ActiveRecord.query_plan_to_relation(
+            plan: AdversarialOracle.plan(action),
+            model: AdvResource,
+            attributes: ATTRIBUTES,
+            null_attribute_representation: :omitted
+          ).pluck(:id)
+        }.to raise_error(Cerbos::ActiveRecord::Error, /omitted/)
+      end
+
+      # The reason the rejection is necessary. A SQL NULL is a stored value, so the default
+      # translation gives exactly the rows that the PDP denies. This test holds that difference
+      # so the test above cannot pass because of an unrelated error.
+      it "#{action} would give the rows the PDP denies under the default representation" do
+        expect(AdversarialOracle.allowed_ids(action)).to be_empty
+        expect(adapter_filtered_ids(action)).to eq(%w[a2 a4 a8 c2 e1])
       end
     end
   end

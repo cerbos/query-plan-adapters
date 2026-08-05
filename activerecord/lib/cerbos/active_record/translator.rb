@@ -49,12 +49,21 @@ module Cerbos
         "endsWith" => {prefix: true, suffix: false}
       }.freeze
 
-      def initialize(model:, attributes:, operator_overrides: {})
+      NULL_REPRESENTATIONS = %i[explicit omitted].freeze
+
+      def initialize(model:, attributes:, operator_overrides: {}, null_attribute_representation: :explicit)
         @model = model
         @attributes = attributes.transform_keys(&:to_s)
         @operator_overrides = operator_overrides.transform_keys(&:to_s)
+        @null_attribute_representation = null_attribute_representation.to_sym
         @dialect = Dialect.for(model)
         @matcher = StringMatcher.new(@dialect)
+
+        unless NULL_REPRESENTATIONS.include?(@null_attribute_representation)
+          raise ArgumentError,
+            "null_attribute_representation must be :explicit or :omitted, got " \
+            "#{null_attribute_representation.inspect}"
+        end
 
         @operator_overrides.each_key do |operator|
           if STRUCTURAL_OPERATORS.include?(operator)
@@ -65,7 +74,8 @@ module Cerbos
         end
       end
 
-      attr_reader :model, :attributes, :operator_overrides, :dialect, :matcher
+      attr_reader :model, :attributes, :operator_overrides, :dialect, :matcher,
+        :null_attribute_representation
 
       # @param plan [Object] anything {Plan.normalise} accepts
       # @return [ActiveRecord::Relation]
@@ -73,6 +83,8 @@ module Cerbos
         normalised = Plan.normalise(plan)
         return model.none if normalised.always_denied?
         return model.all if normalised.always_allowed?
+
+        assert_no_null_operands(normalised.condition) if null_attribute_representation == :omitted
 
         @aliaser = Relations::Aliaser.new
         # The keys are object identities. Each column that the adapter resolves is a new Arel
@@ -117,6 +129,38 @@ module Cerbos
       end
 
       private
+
+      # Refuses each null constant in the plan under the `omitted` representation.
+      #
+      # With that convention a NULL column sends no attribute. Thus CEL raises a
+      # missing-attribute error and the PDP denies the row, but `IS NULL` would give exactly
+      # those rows (cerbos/query-plan-adapters#302).
+      #
+      # The scan examines the OPERANDS and not a list of operators. A null constant can reach
+      # a predicate that selects NULL through more shapes than `eq` and `ne`: `in` and
+      # `hasIntersection` carry one in a list. A list of operators would also need a change
+      # for each new operator.
+      #
+      # The scan is wider than the shapes that give too many rows. `ne(x, null)` is correct
+      # by itself, but this adapter puts a negation around a predicate and does not push it
+      # into the leaf. Thus a leaf cannot know that a `not` above it will make `IS NOT NULL`
+      # into a predicate that selects NULL again. To refuse each null constant is correct for
+      # all the shapes; a smaller rule needs the adapter to count the negations.
+      def assert_no_null_operands(node)
+        case node
+        when Plan::Value
+          if node.value.nil? || (node.value.is_a?(Array) && node.value.any?(&:nil?))
+            raise UnsupportedOperatorError,
+              "Cannot translate a null constant with null_attribute_representation: :omitted. " \
+              "A NULL column then sends no attribute, so Cerbos evaluates the comparison as a " \
+              "missing-attribute error and denies the row, but a filter that selects NULL " \
+              "would return that row. Send a NULL column as an explicit null and use " \
+              ":explicit, or keep this shape out of the policy."
+          end
+        when Plan::Expression
+          node.operands.each { |operand| assert_no_null_operands(operand) }
+        end
+      end
 
       def evaluate_expression(node, environment)
         operator = node.operator
@@ -217,6 +261,10 @@ module Cerbos
         end
 
         collection = evaluate(operands[0], environment)
+        if collection.is_a?(Array)
+          return value_list_macro(operator, collection, operands[1], environment)
+        end
+
         scope = require_collection(operator, collection)
         body_node, iterator = lambda_parts(operands[1])
         inner = environment.bind(iterator, scope)
@@ -259,6 +307,45 @@ module Cerbos
         else
           raise UnsupportedOperatorError, "Unsupported collection macro: #{operator}"
         end
+      end
+
+      # A macro over a list of constants. The planner sends the list itself when the collection
+      # is a principal attribute, because it knows those values when it makes the plan.
+      #
+      # The elements are known here, so the translator evaluates the body one time for each
+      # element and joins the results. SQL gives the correct answer without more work: OR and
+      # AND obey the same three-valued logic as the CEL quantifiers. OR is TRUE if one element
+      # is true, UNKNOWN if no element is true and one is unknown, and FALSE if all are false.
+      # That is exactly `exists`. AND is the same for `all`.
+      def value_list_macro(operator, values, lambda_node, environment)
+        body_node, iterator = lambda_parts(lambda_node)
+        bodies = values.map { |value| predicate(body_node, environment.bind(iterator, value)) }
+
+        case operator
+        when "exists" then ArelSupport.or_node(bodies)
+        when "all" then ArelSupport.and_node(bodies)
+        when "exists_one" then exactly_one_of(bodies)
+        else
+          # `filter` and `map` give a list, and the operator that uses it — `size` or
+          # `hasIntersection` — would need a second list-valued form. No corpus shape needs it,
+          # so the adapter refuses instead of keeping code that nothing proves.
+          raise UnsupportedOperatorError,
+            "#{operator} over a list of constants is not supported: only exists, all and " \
+            "exists_one have a translation for that shape"
+        end
+      end
+
+      # `exists_one` never ignores an element that made an error, so the guard for the error
+      # comes first. After that it is an exact count of the elements that are true.
+      def exactly_one_of(bodies)
+        matches = bodies
+          .map { |body| ArelSupport.case_node([[body, 1]], else_value: 0) }
+          .reduce { |left, right| ArelSupport.infix("+", left, right) }
+
+        ArelSupport.case_node(
+          [[ArelSupport.or_node(bodies.map { |body| ArelSupport.is_null(body) }), nil]],
+          else_value: ArelSupport.comparison("eq", matches, 1)
+        )
       end
 
       def lambda_parts(node)
@@ -819,11 +906,22 @@ module Cerbos
           return resolve_mapping(mapping, translator.model, translator.root_table) if mapping
 
           head, rest = name.split(".", 2)
-          scope = bindings[head]
-          unless scope
+          unless bindings.key?(head)
             raise UnmappedAttributeError,
               "No mapping for attribute #{name.inspect}. Add it to the attributes hash " \
               "passed to Cerbos::ActiveRecord.query_plan_to_relation."
+          end
+
+          scope = bindings[head]
+
+          # A macro over a list of constants binds the iterator to an element of that list.
+          # An element is a value and has no fields, so a reference with a dot is an error.
+          unless scope.is_a?(Relations::Scope)
+            return scope if rest.nil?
+
+            raise UnmappedAttributeError,
+              "#{name.inspect} reads the field #{rest.inspect} from #{head.inspect}, but " \
+              "#{head.inspect} is an element of a list of constants and has no fields"
           end
 
           return element(scope) if rest.nil?
