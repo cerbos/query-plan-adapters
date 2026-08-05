@@ -576,7 +576,8 @@ class SpringDataIntegrationTest {
     // -- null checks --
 
     @Test
-    void isSet() {
+    void isNotNull() {
+        // aOptionalString != null → ne(field, null); the planner has no existence operator (#261)
         assertEquals(List.of("1", "3"), run("is-set"));
     }
 
@@ -815,7 +816,7 @@ class SpringDataIntegrationTest {
         }
 
         @Test
-        void isSetNested() {
+        void isNotNullNested() {
             // request.resource.attr.nested.aOptionalString != null
             // No seeded row sets nested.aOptionalString, so the result is empty: this verifies
             // the nested-path predicate translates and executes, not a positive match.

@@ -728,6 +728,8 @@ class AdversarialConformanceTest {
         samples.put("vf-le", oracleAllowedIds("vf-le"));
         samples.put("like-percent", oracleAllowedIds("like-percent"));
         samples.put("all-on-empty", oracleAllowedIds("all-on-empty"));
+        samples.put("null-eq", oracleAllowedIds("null-eq"));
+        samples.put("null-ne", oracleAllowedIds("null-ne"));
         samples.forEach((action, ids) -> assertTrue(
                 !ids.isEmpty() && ids.size() < SEEDS.size(),
                 "oracle for '" + action + "' is degenerate: " + ids));

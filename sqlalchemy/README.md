@@ -10,7 +10,7 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `check()` decisio
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 116 reference conformance actions |
+| Oracle-tested | 120 reference conformance actions |
 | Fail-closed corpus shapes | Nanosecond `now()` thresholds plus regex `matches()`, ordered list indexing/`get-field`, and `timestamp()` over an ambiguous string column (5 actions) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 

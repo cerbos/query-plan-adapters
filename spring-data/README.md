@@ -185,7 +185,7 @@ Map each `request.resource.attr.<name>` to a JPA path or a relation:
 | `in`                             | `path.in(values)` or correlated `EXISTS` for collections            |
 | `in(R.attr.x, R.attr.coll)` (attribute-in-attribute) | Correlated `EXISTS` comparing the collection's member column to the outer scalar column; a `NULL` scalar matches a `NULL` member element (CEL `null in [..., null]` is true) |
 | `contains` / `startsWith` / `endsWith` | `cb.like(...)` with proper `_`/`%`/`\`/`[` escaping (`[` guards SQL Server character classes — see Gotchas) — incl. the constant-receiver form (`"a,b".contains(R.attr.x)`: the constant is the haystack, the column the needle) |
-| `isSet(field, true/false)`       | `cb.isNotNull` / `cb.isNull`                                        |
+| `ne(field, null)` / `eq(field, null)` | `cb.isNotNull` / `cb.isNull`. The planner has no existence operator — `R.attr.x != null` arrives as `ne` against a null value |
 | `hasIntersection(coll, [values])` | Correlated `EXISTS` with `IN`                                      |
 | `hasIntersection(coll.map(x, x.f), [values])` | Correlated `EXISTS` with projected `IN`             |
 | `size(coll) > 0` / `>= 1`        | Correlated `EXISTS`                                                 |
@@ -258,7 +258,7 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `check()` decisio
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | All 118 reference conformance actions |
+| Oracle-tested | All 122 reference conformance actions |
 | Fail-closed corpus shapes | Regex `matches()`, ordered list indexing/`get-field`, and `timestamp()` over an ambiguous string column (3 actions) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute rows; this is pinned separately as an upstream divergence |
 

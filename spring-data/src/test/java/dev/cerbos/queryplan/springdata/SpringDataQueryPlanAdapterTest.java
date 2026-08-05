@@ -346,16 +346,27 @@ class SpringDataQueryPlanAdapterTest {
         assertEquals(0, runCount(var("request.resource.attr.aBool")));
     }
 
+    /**
+     * The planner has no existence operator: {@code isSet} is not a registered CEL function,
+     * so a policy naming it fails to compile and it can never reach the wire. The adapter
+     * carried a dedicated branch for it regardless; it must now fail closed like any unknown
+     * operator rather than guess at IS NULL / IS NOT NULL. See
+     * cerbos/query-plan-adapters#261 — the eq/ne-null tests below are the live path.
+     */
     @Test
-    void isSetTrueBuildsIsNotNull() {
-        assertEquals(0, runCount(exprOp("isSet",
-                var("request.resource.attr.aOptionalString"), bval(true))));
+    void isSetIsRejectedRatherThanTranslated() {
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                () -> runCount(exprOp("isSet",
+                        var("request.resource.attr.aOptionalString"), bval(true))));
+        assertTrue(e.getMessage().contains("isSet"),
+                "unknown operator must be named in the error, got: " + e.getMessage());
     }
 
+    /** Value-first: the planner preserves source order, so {@code null != R.attr.x} inverts operands. */
     @Test
-    void isSetFalseBuildsIsNull() {
-        assertEquals(0, runCount(exprOp("isSet",
-                var("request.resource.attr.aOptionalString"), bval(false))));
+    void valueFirstNeNullBuildsIsNotNull() {
+        assertEquals(0, runCount(exprOp("ne",
+                nullVal(), var("request.resource.attr.aOptionalString"))));
     }
 
     @Test
@@ -824,11 +835,19 @@ class SpringDataQueryPlanAdapterTest {
                 () -> runCount(cond, Map.of("in", THROWING_OVERRIDE)));
     }
 
+    /** Null existence reaches overrides as ne/eq against a null value, not as isSet (#261). */
     @Test
-    void overrideAppliesToIsSet() {
-        Operand cond = exprOp("isSet", var("request.resource.attr.aOptionalString"), bval(true));
+    void overrideAppliesToNeNull() {
+        Operand cond = exprOp("ne", var("request.resource.attr.aOptionalString"), nullVal());
         assertThrows(OverrideInvoked.class,
-                () -> runCount(cond, Map.of("isSet", THROWING_OVERRIDE)));
+                () -> runCount(cond, Map.of("ne", THROWING_OVERRIDE)));
+    }
+
+    @Test
+    void overrideAppliesToEqNull() {
+        Operand cond = exprOp("eq", var("request.resource.attr.aOptionalString"), nullVal());
+        assertThrows(OverrideInvoked.class,
+                () -> runCount(cond, Map.of("eq", THROWING_OVERRIDE)));
     }
 
     @Test
@@ -3574,20 +3593,18 @@ class SpringDataQueryPlanAdapterTest {
     }
 
     @Test
-    void invalidIsSetOperandsReportBothNodeCases() {
-        // Missing boolean flag (two variables): the bare "Invalid isSet operands" gave an
-        // on-call engineer nothing; the message must describe both operands.
+    void isSetReportsUnsupportedOperator() {
+        // isSet had bespoke operand-shape diagnostics; it is not a wire operator at all
+        // (#261), so every shape of it must now surface as a plain unsupported-operator
+        // error rather than a message implying the adapter was close to translating it.
         assertConditionThrows(
                 exprOp("isSet",
                         var("request.resource.attr.aString"),
                         var("request.resource.attr.createdBy")),
-                "Invalid isSet operands",
-                "VARIABLE 'request.resource.attr.aString'",
-                "VARIABLE 'request.resource.attr.createdBy'");
-        // Missing variable (two booleans).
+                "isSet");
         assertConditionThrows(
                 exprOp("isSet", bval(true), bval(false)),
-                "Invalid isSet operands", "VALUE (BOOL_VALUE)");
+                "isSet");
     }
 
     @Test

@@ -996,6 +996,54 @@ resourcePolicy:
         match:
           expr: 'timestamp(R.attr.createdAt) != timestamp("2024-06-01T00:00:00Z")'
 
+    # ==================== direct null comparisons ====================
+    # The planner has NO existence operator: `R.attr.x != null` arrives as a plain `ne`
+    # with a `{"value": null}` operand, never an `isSet`. Verified against the pinned PDP
+    # (the wire fixtures below are the record) and structurally guaranteed — the wire
+    # operator is the CEL function name, and Cerbos registers no `isSet` function; `has()`
+    # is folded away at plan time to ALWAYS_ALLOWED/DENIED and can never reach the wire.
+    # Six adapters carried dead `isSet` branches until cerbos/query-plan-adapters#261;
+    # these actions pin IS NULL / IS NOT NULL through the eq/ne-null path instead.
+    #
+    # `owner` (not aOptionalString) is deliberate: it is the explicit-null alias, so the
+    # oracle sends `null` rather than omitting the attribute. Under the default
+    # missing-attribute convention `== null` would deny every row at check time while the
+    # adapter's IS NULL returned five, which probes attribute representation rather than
+    # the operator. NULL owners: a2/a4/a8/c2/e1 (5 of 20) — non-degenerate either way.
+
+    - actions: ["null-eq"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.owner == null'
+
+    - actions: ["null-ne"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.owner != null'
+
+    # Value-first: the planner preserves source order, so the null lands in operand 0 and
+    # the column in operand 1. An adapter that assumes variable-first reads the null as the
+    # column and the column as the value — the inversion class of #258/#259.
+    - actions: ["vf-null-ne"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'null != R.attr.owner'
+
+    # Negation over IS NULL. Unlike `NOT (col = x)`, `NOT (col IS NULL)` is never UNKNOWN,
+    # so this must return every non-null row rather than collapsing to the empty set.
+    - actions: ["null-not-eq"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(R.attr.owner == null)'
+
     # ==================== in-lists containing null ====================
     # `R.attr.owner in [..., null]` compiles and the planner emits the null element
     # VERBATIM in the value list; check() ALLOWS an explicitly-null attribute (CEL

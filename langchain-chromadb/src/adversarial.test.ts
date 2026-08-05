@@ -563,7 +563,7 @@ async function adapterFilteredIds(action: string): Promise<string[]> {
 }
 
 describe("adversarial conformance corpus", () => {
-  test("manifest assigns all 120 policy actions exactly one Chroma outcome", () => {
+  test("manifest assigns all 126 policy actions exactly one Chroma outcome", () => {
     const oracle = new Set(CHROMA_SUPPORTED_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map(({ action }) => action));
     const misclassified = [...MANIFEST_ACTIONS].filter((action) => {
@@ -575,12 +575,12 @@ describe("adversarial conformance corpus", () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(122);
+    expect(MANIFEST_ACTIONS.size).toBe(126);
     expect(CHROMA_SUPPORTED_ACTIONS).toHaveLength(15);
     expect(oracle.size).toBe(CHROMA_SUPPORTED_ACTIONS.length);
-    expect(CHROMA_UNSUPPORTED).toHaveLength(103);
+    expect(CHROMA_UNSUPPORTED).toHaveLength(107);
     expect(CHROMA_SUPPORTED_EXPECTED).toHaveLength(0);
-    expect(THROWING_ACTIONS).toHaveLength(106);
+    expect(THROWING_ACTIONS).toHaveLength(110);
     expect(misclassified).toEqual([]);
   });
 
@@ -622,7 +622,7 @@ describe("adversarial conformance corpus", () => {
   });
 
   test("oracle is not degenerate", async () => {
-    for (const action of ["vf-le", "nary-and", "p-in-null-multi", "pv-exists", "pv-all"]) {
+    for (const action of ["vf-le", "nary-and", "p-in-null-multi", "pv-exists", "pv-all", "null-eq", "null-ne"]) {
       const ids = await oracleAllowedIds(action);
       expect(ids.length).toBeGreaterThan(0);
       expect(ids.length).toBeLessThan(SEEDS.length);

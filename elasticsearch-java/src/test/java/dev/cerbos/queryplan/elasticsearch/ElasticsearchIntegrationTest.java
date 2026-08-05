@@ -665,8 +665,8 @@ class ElasticsearchIntegrationTest {
     // --- Null checks (field existence) ---
 
     @Test
-    void isSet() throws Exception {
-        // aOptionalString != null → docs 1, 3 (field present)
+    void isNotNull() throws Exception {
+        // aOptionalString != null → ne(field, null) → docs 1, 3 (field present)
         assertEquals(List.of("1", "3"), executeQuery("is-set"));
     }
 

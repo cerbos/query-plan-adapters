@@ -348,7 +348,6 @@ public final class SpringDataQueryPlanAdapter {
                 case "except" -> throw exceptUnsupported();
                 // has_intersection is the deprecated pre-camelCase alias still accepted by the PDP.
                 case "hasIntersection", "has_intersection" -> handleHasIntersection(operands, scope);
-                case "isSet" -> handleIsSet(operands, scope);
                 case "in" -> handleIn(operands, scope);
                 case "if" -> comparisons.handleBareTernary(operands, scope);
                 case "overlaps" -> hierarchy.handleOverlaps(operands, scope);
@@ -1966,36 +1965,6 @@ public final class SpringDataQueryPlanAdapter {
             }
         }
         // -- end ComparisonTranslator --
-
-        // -- isSet --
-
-        private Predicate handleIsSet(List<Operand> operands, Scope scope) {
-            if (operands.size() != 2) {
-                throw new IllegalArgumentException("isSet requires exactly 2 operands");
-            }
-            String variable = null;
-            Boolean flag = null;
-            for (Operand o : operands) {
-                if (o.getNodeCase() == Operand.NodeCase.VARIABLE) variable = o.getVariable();
-                else if (o.getNodeCase() == Operand.NodeCase.VALUE) {
-                    Object v = PlanValues.protoValueToJava(o.getValue());
-                    if (!(v instanceof Boolean b)) {
-                        throw new IllegalArgumentException("isSet second operand must be a boolean");
-                    }
-                    flag = b;
-                }
-            }
-            if (variable == null || flag == null) {
-                throw new IllegalArgumentException(
-                        "Invalid isSet operands: expected one attribute variable and one boolean "
-                                + "value, got " + describeOperand(operands.get(0)) + " / "
-                                + describeOperand(operands.get(1)));
-            }
-            Path<?> path = scope.resolvePath(variable);
-            boolean isSet = flag;
-            return withOverride("isSet", path, isSet,
-                    () -> isSet ? cb.isNotNull(path) : cb.isNull(path));
-        }
 
         // -- in (set membership or collection membership) --
 

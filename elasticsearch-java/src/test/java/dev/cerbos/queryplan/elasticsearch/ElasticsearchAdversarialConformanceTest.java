@@ -178,7 +178,7 @@ class ElasticsearchAdversarialConformanceTest {
                 "adapterUnsupported.elasticsearch-java contains non-conformance actions");
         assertTrue(expected.containsAll(supportedExpected),
                 "adapterSupportedExpected.elasticsearch-java contains non-expected actions");
-        assertEquals(80, unsupported.size(),
+        assertEquals(81, unsupported.size(),
                 "Elasticsearch unsupported coverage changed without updating the ledger assertion");
         assertEquals(2, supportedExpected.size(),
                 "Elasticsearch supported-expected coverage changed without updating the ledger assertion");
@@ -203,9 +203,9 @@ class ElasticsearchAdversarialConformanceTest {
         manifest.addAll(conformance);
         manifest.addAll(expected);
         manifest.addAll(divergences);
-        assertEquals(40, oracleActions.size());
-        assertEquals(81, throwingActions.size());
-        assertEquals(122, classified.size());
+        assertEquals(43, oracleActions.size());
+        assertEquals(82, throwingActions.size());
+        assertEquals(126, classified.size());
         assertEquals(manifest, classified, "every manifest action must be classified locally");
     }
 
@@ -464,7 +464,7 @@ class ElasticsearchAdversarialConformanceTest {
 
     @Test
     void oracleIsNotDegenerate() {
-        for (String action : List.of("vf-le", "like-percent", "all-on-empty", "pv-exists", "pv-all")) {
+        for (String action : List.of("vf-le", "like-percent", "all-on-empty", "pv-exists", "pv-all", "null-eq", "null-ne")) {
             List<String> ids = oracleAllowedIds(action);
             assertTrue(!ids.isEmpty() && ids.size() < seeds.size(),
                     "oracle for '" + action + "' is degenerate: " + ids);

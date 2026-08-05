@@ -89,8 +89,7 @@ type ComparisonOperator =
   | "in"
   | "contains"
   | "startsWith"
-  | "endsWith"
-  | "isSet";
+  | "endsWith";
 
 type MapperTransform = (args: {
   operator: ComparisonOperator;
@@ -1172,11 +1171,6 @@ const applyComparison = (
         throw new Error(`The '${operator}' operator requires a string value`);
       }
       return buildStringMatchCondition(operator, sql`${column}`, sql`${value}`);
-    case "isSet":
-      if (typeof value !== "boolean") {
-        throw new Error("The 'isSet' operator requires a boolean value");
-      }
-      return value ? not(isNull(column)) : isNull(column);
     default:
       throw new Error(`Unsupported operator: ${operator}`);
   }
@@ -2377,7 +2371,7 @@ const buildFilterFromExpression = (
         const filter = buildVariableMembershipFilter(operands, mapper, options);
         return negated ? not(filter) : filter;
       }
-      // Membership/isSet: whichever side is the name operand is the column — the planner
+      // Membership: whichever side is the name operand is the column — the planner
       // emits both `R.attr.x in [..]` (name, values) and `"v" in R.attr.list`
       // (value, name), and both mean membership against the column.
       const fieldOperand = operands.find(isNameOperand);
@@ -2396,28 +2390,6 @@ const buildFilterFromExpression = (
         entry.collectionValueType === "scalar"
           ? resolveRelationDefaultField(unresolved, fieldOperand.name)
           : unresolved;
-      const comparison = applyComparison(
-        resolved.mapping,
-        operator,
-        valueOperand.value
-      );
-      const filter = resolved.relations.length
-        ? wrapWithRelations(
-            resolved.relations,
-            comparison,
-            fieldOperand.name,
-            options
-          )
-        : comparison;
-      return negated ? not(filter) : filter;
-    }
-    case "isSet": {
-      const fieldOperand = operands.find(isNameOperand);
-      const valueOperand = operands.find(isValueOperand);
-      if (!fieldOperand || !valueOperand) {
-        throw new Error("'isSet' requires field and boolean value operands");
-      }
-      const resolved = resolveFieldReference(fieldOperand.name, mapper);
       const comparison = applyComparison(
         resolved.mapping,
         operator,

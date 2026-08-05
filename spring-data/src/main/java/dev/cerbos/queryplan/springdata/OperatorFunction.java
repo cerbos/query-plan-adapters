@@ -12,9 +12,10 @@ import jakarta.persistence.criteria.Predicate;
  * translation of that operator: {@code eq}, {@code ne}, {@code lt}, {@code gt}, {@code le},
  * {@code ge}, {@code contains}, {@code startsWith}, {@code endsWith} (including the {@code add}-folded
  * forms such as {@code field == "p:" + R.id}, and the null-RHS form where {@code value} is
- * {@code null}), the bare-boolean attribute (looked up as {@code eq}), {@code isSet} (where
- * {@code value} is the {@link Boolean} flag), and the scalar {@code in} (where {@code value} is the
- * resolved value or {@link java.util.List}).
+ * {@code null} — the planner has no existence operator, so {@code IS NULL} / {@code IS NOT NULL}
+ * arrive as {@code eq} / {@code ne} against a null value), the bare-boolean attribute (looked up as
+ * {@code eq}), and the scalar {@code in} (where {@code value} is the resolved value or
+ * {@link java.util.List}).
  *
  * <p>Operand order is normalized before overrides are consulted: a value-first comparison such as
  * {@code 5 < R.attr.x} is mirrored to field-first form, so the override is looked up (and invoked)

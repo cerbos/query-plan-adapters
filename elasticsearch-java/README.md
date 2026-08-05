@@ -9,7 +9,8 @@ An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanRe
 - Supports string operators: `contains`, `startsWith`, `endsWith`, and the safe
   `matches` subset described below
 - Supports `hasIntersection` for array overlap checks
-- Supports `isSet` for field existence checks
+- Supports field existence checks via `eq`/`ne` against a null value (the planner emits no
+  existence operator)
 - Supports polarity-safe `size` checks for array emptiness
 - Supports polarity-safe collection operators for nested object arrays
 - Supports `hasIntersection` + `map` for projecting and matching nested object fields
@@ -285,7 +286,7 @@ The `OperatorFunction` interface takes a field name and value, and returns a `Ma
 | `matches` | `prefix` for `^literal`; `regexp` with Lucene optional flags disabled for fully anchored patterns in the validated common subset |
 | `timestamp` in comparisons | `term` / `range` against a mapped Elasticsearch `date` field, for millisecond-exact values |
 | `hasIntersection` | `terms` (array overlap) |
-| `isSet` | `exists` (true) / `bool.must_not` + `exists` (false) |
+| `ne`/`eq` against `null` | `exists` (ne) / `bool.must_not` + `exists` (eq) |
 | Positive non-empty `size` checks; negated empty checks | `exists` or `nested` + `match_all` |
 | Positive `exists` (collection) | `nested` + inner query |
 | Negated `all` (collection) | `nested` + a definitely-false inner query |
@@ -357,8 +358,8 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `check()` decisio
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 38 reference conformance actions plus regex and timestamp probes (40 actions) |
-| Fail-closed | 80 reference actions plus ordered list indexing/`get-field` (81 actions total) |
+| Oracle-tested | 41 reference conformance actions plus regex and timestamp probes (43 actions) |
+| Fail-closed | 81 reference actions plus ordered list indexing/`get-field` (82 actions total) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute documents. Until the planner is fixed, use `R.attr.x != null` for indexed attributes instead of `has(R.attr.x)` |
 
 The oracle-tested set covers value-first comparisons, literal-safe wildcard matching, safe

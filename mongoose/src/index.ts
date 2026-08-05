@@ -868,18 +868,6 @@ const getOperandAt = (
   return operand;
 };
 
-const findOperand = (
-  operands: PlanExpressionOperand[],
-  predicate: (operand: PlanExpressionOperand) => boolean,
-  errorMessage: string
-): PlanExpressionOperand => {
-  const operand = operands.find(predicate);
-  if (!operand) {
-    throw new Error(errorMessage);
-  }
-  return operand;
-};
-
 /**
  * Creates a scoped mapper for collection operations
  */
@@ -1245,11 +1233,6 @@ const buildMongooseFilterFromCerbosExpression = (
   const { operator, operands } = expression;
   const requireOperandAt = (index: number, message: string) =>
     getOperandAt(operands, index, message);
-  const requireOperandMatching = (
-    predicate: (operand: PlanExpressionOperand) => boolean,
-    message: string
-  ) => findOperand(operands, predicate, message);
-
   const resolveOperand = (operand: PlanExpressionOperand): any => {
     if (isVariable(operand)) {
       return resolveFieldReference(operand.name, mapper);
@@ -1645,38 +1628,6 @@ const buildMongooseFilterFromCerbosExpression = (
         { $regex: regexStr },
         nullable
       );
-    }
-
-    case "isSet": {
-      const { path, relation } = resolveOperand(
-        requireOperandMatching(
-          (o) => isVariable(o),
-          "isSet operator requires a field operand"
-        )
-      );
-      const { value } = resolveOperand(
-        requireOperandMatching(
-          (o) => isValue(o),
-          "isSet operator requires a boolean operand"
-        )
-      );
-
-      const existsFilter = value
-        ? { $exists: true, $ne: null }
-        : { $exists: false };
-
-      if (relation) {
-        if (relation.type === "many") {
-          return {
-            [relation.name]: {
-              $elemMatch: buildFieldFilter(path.slice(1), existsFilter),
-            },
-          };
-        }
-        return buildFieldFilter(path, existsFilter);
-      }
-
-      return buildFieldFilter(path, existsFilter);
     }
 
     case "hasIntersection": {
