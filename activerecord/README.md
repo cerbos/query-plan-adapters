@@ -53,8 +53,21 @@ stay:
 | `p-index` | `tags[0]` selects an element of a list by its position. A relation has no order of its own. |
 | `p-timestamp` | `timestamp()` on a column that holds a timestamp in text. A comparison between that column and a `Time` compares two different text formats. Thus the order of the results comes from the text and not from the instants. Map the attribute to a `datetime` column. |
 
-The adapter also raises an error for a `filter()` or a `map()` that a policy uses as a
-condition. Those operations give a list and not a boolean.
+The adapter also raises an error for these shapes, which no corpus action covers:
+
+- A `filter()` or a `map()` that a policy uses as a condition. Those operations give a list
+  and not a boolean.
+- A division whose denominator is a column, unless the numerator is the same column. IEEE-754
+  keeps the sign of a zero, and `2.0 / -0.0` is -Infinity while `2.0 / 0.0` is +Infinity. SQL
+  cannot tell `-0.0` from `0.0`, because both satisfy `= 0` and no portable function reads the
+  sign bit. Thus the sign of the Infinity is unknown. A division of a value by itself stays
+  safe: the denominator can only be zero when the numerator is zero too, and that gives NaN,
+  which has no sign. Divide by a constant to keep the shape.
+- More arithmetic on the result of a division that can give a value which is not finite. Only
+  a comparison can resolve NaN or an Infinity without putting it into SQL.
+- An `and` or an `or` that carries no operands, and any operator that carries the wrong number
+  of operands. The planner does not make those shapes, but this adapter accepts a plan from
+  any source, and a plan that lost or gained an operand must not become a wider filter.
 
 ### The NULL convention of the caller
 
