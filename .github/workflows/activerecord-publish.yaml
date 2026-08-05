@@ -24,11 +24,16 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # `defaults.run.working-directory` applies only to `run` steps. An action step reads its
+      # own input. Without these, both steps look for the Gemfile in the root of the
+      # repository, which has none, and the release fails.
       - uses: ruby/setup-ruby@bb6434c747fa7022e12fa1cae9c0542717d0dc2a # v1.253.0
         with:
           ruby-version: "3.4"
           bundler-cache: true
+          working-directory: activerecord
 
       - uses: rubygems/release-gem@612653d273a73bdae1df8453e090060bb4db5019 # v1.0.0
         with:
           await-release: false
+          working-directory: activerecord

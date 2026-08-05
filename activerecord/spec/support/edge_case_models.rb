@@ -14,6 +14,10 @@ module EdgeCaseModels
       create_table :edge_documents, force: true do |t|
         t.string :title
         t.integer :author_id
+        # A zero, a positive number and a negative number, for the division tests. IEEE-754
+        # gives NaN for 0/0, +Infinity for a positive numerator and -Infinity for a negative
+        # one, and each of the three needs a row.
+        t.integer :n
       end
 
       create_table :edge_comments, force: true do |t|
@@ -27,6 +31,10 @@ module EdgeCaseModels
         t.string :name
       end
     end
+
+    EdgeDocument.create!(id: 1, title: "zero", n: 0)
+    EdgeDocument.create!(id: 2, title: "two", n: 2)
+    EdgeDocument.create!(id: 3, title: "negative", n: -3)
   end
 end
 

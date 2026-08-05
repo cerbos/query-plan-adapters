@@ -57,6 +57,16 @@ RSpec.describe Cerbos::ActiveRecord do
         .to raise_error(Cerbos::ActiveRecord::InvalidPlanError, /Unrecognised query plan kind/)
     end
 
+    # An `and` with no operands would give TRUE, and thus the filter would permit every row.
+    # The planner does not make that shape, but a plan that lost its operands on the way here
+    # must not become "permit everything".
+    it "rejects an and or an or with no operands" do
+      %w[and or].each do |operator|
+        expect { translate(conditional(expression(operator))) }
+          .to raise_error(Cerbos::ActiveRecord::InvalidPlanError, /has no operands/)
+      end
+    end
+
     it "rejects a conditional plan with no condition" do
       expect { translate({"kind" => "KIND_CONDITIONAL"}) }
         .to raise_error(Cerbos::ActiveRecord::InvalidPlanError, /no condition/)
@@ -288,6 +298,69 @@ RSpec.describe Cerbos::ActiveRecord do
     end
   end
 
+  # A division by zero is not an error in CEL: arithmetic on attributes uses doubles, and
+  # IEEE-754 gives NaN or an Infinity. An earlier version of this adapter made the result NULL
+  # with NULLIF. That is correct for an ordered comparison, but not for `!=`: `NaN != 1.0` is
+  # TRUE in CEL, while `NULL != 1.0` is UNKNOWN in SQL. Thus the filter removed a row that the
+  # PDP permits. A live PDP confirmed the difference before this test was written.
+  describe "division by a row-dependent denominator" do
+    def divide_compare(operator, constant)
+      described_class.query_plan_to_relation(
+        plan: conditional(expression(operator,
+          expression("div", variable("n"), variable("n")), value(constant))),
+        model: EdgeDocument,
+        attributes: {"n" => field("n")}
+      ).order(:id).pluck(:title)
+    end
+
+    it "keeps the NaN row for a not-equal comparison" do
+      # 0/0 is NaN, and NaN is not equal to any value, so CEL permits the zero row.
+      expect(divide_compare("ne", 1.0)).to eq(%w[zero])
+    end
+
+    it "removes the NaN row from an ordered comparison" do
+      # NaN has no order against any value, so the comparison is false for the zero row.
+      expect(divide_compare("gt", 0.5)).to eq(%w[two negative])
+    end
+
+    it "removes the NaN row from an equality" do
+      expect(divide_compare("eq", 1.0)).to eq(%w[two negative])
+    end
+
+    it "keeps the NaN row under a negated equality" do
+      relation = described_class.query_plan_to_relation(
+        plan: conditional(expression("not",
+          expression("eq", expression("div", variable("n"), variable("n")), value(1.0)))),
+        model: EdgeDocument,
+        attributes: {"n" => field("n")}
+      )
+      expect(relation.order(:id).pluck(:title)).to eq(%w[zero])
+    end
+
+    it "resolves an Infinity from a constant zero denominator" do
+      # 2/0 is +Infinity, and -3/0 is -Infinity.
+      relation = described_class.query_plan_to_relation(
+        plan: conditional(expression("gt",
+          expression("div", variable("n"), value(0.0)), value(0.0))),
+        model: EdgeDocument,
+        attributes: {"n" => field("n")}
+      )
+      expect(relation.order(:id).pluck(:title)).to eq(%w[two])
+    end
+
+    it "raises for more arithmetic on a value that may not be finite" do
+      expect {
+        described_class.query_plan_to_relation(
+          plan: conditional(expression("gt",
+            expression("add", expression("div", variable("n"), variable("n")), value(1.0)),
+            value(0.0))),
+          model: EdgeDocument,
+          attributes: {"n" => field("n")}
+        )
+      }.to raise_error(Cerbos::ActiveRecord::UnsupportedOperatorError, /NaN or Infinity/)
+    end
+  end
+
   describe "unsupported operators" do
     it "raises for an operator it does not implement" do
       expect {
@@ -376,6 +449,25 @@ RSpec.describe Cerbos::ActiveRecord do
       expect(sql).to match(/EXISTS \(SELECT 1 FROM/)
       expect(sql).to include("cerbos_shared_resource_tags_1")
       expect(sql).to include("cerbos_shared_tags_2")
+    end
+
+    # The shared corpus never nests a macro over the SAME association inside itself. Without
+    # a new alias for each scope, the inner subquery would correlate to its own row and not to
+    # the element of the outer scope. Then the condition would be true for each row that has
+    # one tag, and thus it would permit rows that Cerbos denies.
+    it "correlates a macro nested over the same association to the outer element" do
+      inner = expression("exists", variable("request.resource.attr.tags"),
+        expression("lambda",
+          expression("ne", variable("u.name"), variable("t.name")), variable("u")))
+
+      sql = translate(conditional(expression("exists",
+        variable("request.resource.attr.tags"),
+        expression("lambda", inner, variable("t"))))).to_sql
+
+      # Two different aliases, and the inner subquery compares with the outer alias.
+      expect(sql).to include("cerbos_shared_tags_2")
+      expect(sql).to include("cerbos_shared_tags_4")
+      expect(sql).to match(/"cerbos_shared_tags_4"\."name" != "cerbos_shared_tags_2"\."name"/)
     end
 
     it "resolves a dotted path as a correlated scalar subquery, not a join" do

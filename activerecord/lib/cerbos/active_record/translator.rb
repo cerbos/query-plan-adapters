@@ -123,8 +123,7 @@ module Cerbos
         operands = node.operands
 
         case operator
-        when "and" then ArelSupport.and_node(operands.map { |o| predicate(o, environment) })
-        when "or" then ArelSupport.or_node(operands.map { |o| predicate(o, environment) })
+        when "and", "or" then combine(operator, operands, environment)
         when "not" then negate(operands, environment)
         when "if" then ternary(operands, environment)
         when "exists", "all", "exists_one", "filter", "map" then macro(operator, operands, environment)
@@ -153,6 +152,19 @@ module Cerbos
         return ArelSupport.comparison("eq", value, true) if column_type(value) == :boolean
 
         ArelSupport.to_predicate(value)
+      end
+
+      # An `and` with no operands would give TRUE, and thus the filter would permit every row.
+      # The Cerbos planner does not make that shape, but this adapter accepts a plan from any
+      # source. A plan that lost its operands — an incomplete JSON body, a bad conversion —
+      # must not become "permit everything". Thus an empty operand list is an error.
+      def combine(operator, operands, environment)
+        if operands.empty?
+          raise InvalidPlanError, "#{operator} has no operands"
+        end
+
+        predicates = operands.map { |operand| predicate(operand, environment) }
+        (operator == "and") ? ArelSupport.and_node(predicates) : ArelSupport.or_node(predicates)
       end
 
       def negate(operands, environment)
@@ -441,6 +453,11 @@ module Cerbos
       def arithmetic(operator, left, right)
         reject_collection(operator, left)
         reject_collection(operator, right)
+        # A division that can give a value which is not finite stays as branches until a
+        # comparison calculates it. More arithmetic on those branches has no SQL equivalent,
+        # so the adapter raises instead of making an incorrect filter.
+        reject_deferred(operator, left)
+        reject_deferred(operator, right)
 
         # CEL uses `+` for strings and for numbers. SQL does not. On SQLite and MySQL,
         # `'a' + 'b'` is an addition of numbers, and it changes both sides into 0. Thus string
@@ -470,18 +487,53 @@ module Cerbos
       def divide(numerator, denominator)
         reject_collection("div", numerator)
         reject_collection("div", denominator)
+        reject_deferred("div", numerator)
+        reject_deferred("div", denominator)
 
         if numerator.is_a?(Numeric) && denominator.is_a?(Numeric)
           return divide_constants(numerator.to_f, denominator.to_f)
         end
 
-        # The dialects are different for a division by zero. Some give NULL and some make an
-        # error. For each comparison that the planner makes here, NULL selects the same rows
-        # as the NaN of CEL. NULL also prevents a database error that would stop the query.
-        ArelSupport.infix(
-          "/",
-          as_double(numerator),
-          ArelSupport.function("NULLIF", [as_double(denominator), 0.0])
+        # A constant denominator that is not zero can never divide by zero. Thus a plain
+        # division is exact, and it keeps the SQL small.
+        if denominator.is_a?(Numeric) && !denominator.to_f.zero?
+          return ArelSupport.infix("/", as_double(numerator), denominator.to_f)
+        end
+
+        divide_with_zero_denominator(numerator, denominator)
+      end
+
+      # A division by zero is not an error in CEL, because CEL arithmetic on attributes uses
+      # doubles. IEEE-754 gives NaN for 0/0, +Infinity for a positive numerator, and -Infinity
+      # for a negative one. SQL cannot hold those three values, and NULL is not equal to any of
+      # them: `NaN != 1.0` is TRUE in CEL, but `NULL != 1.0` is UNKNOWN in SQL, and thus a
+      # NULL would remove a row that the PDP permits.
+      #
+      # The translator keeps the three cases as branches. The comparison around the division
+      # then calculates each branch, in the same way as any other constant that is not finite.
+      def divide_with_zero_denominator(numerator, denominator)
+        by_zero = zero_denominator_value(numerator)
+        # The denominator is the constant zero, so no other branch is possible.
+        return by_zero if denominator.is_a?(Numeric)
+
+        Values::ConditionalValue.new(
+          condition: ArelSupport.comparison("eq", as_double(denominator), 0.0),
+          then_value: by_zero,
+          else_value: ArelSupport.infix("/", as_double(numerator), as_double(denominator))
+        )
+      end
+
+      def zero_denominator_value(numerator)
+        return Values::IEEEConstant.new(value: numerator.to_f / 0.0) if numerator.is_a?(Numeric)
+
+        Values::ConditionalValue.new(
+          condition: ArelSupport.comparison("eq", as_double(numerator), 0.0),
+          then_value: Values::IEEEConstant.new(value: Float::NAN),
+          else_value: Values::ConditionalValue.new(
+            condition: ArelSupport.comparison("gt", as_double(numerator), 0.0),
+            then_value: Values::IEEEConstant.new(value: Float::INFINITY),
+            else_value: Values::IEEEConstant.new(value: -Float::INFINITY)
+          )
         )
       end
 
@@ -721,6 +773,14 @@ module Cerbos
         value.is_a?(Values::Collection) ||
           value.is_a?(Values::FilteredCollection) ||
           value.is_a?(Values::MappedCollection)
+      end
+
+      def reject_deferred(operator, value)
+        return unless deferred_value?(value)
+
+        raise UnsupportedOperatorError,
+          "#{operator} cannot take an operand that may be NaN or Infinity: only a comparison " \
+          "can resolve those values without binding them into SQL"
       end
 
       def reject_collection(operator, value)
