@@ -190,10 +190,12 @@ how a transcription error becomes invisible: the same copy feeds the stored row 
 oracle, so a wrong value makes both sides of the differential agree for the wrong reason and
 nothing downstream can catch it (#318).
 
-`scripts/validate-corpus.sh` asserts that the file carries exactly one entry per seed id, that
-every entry carries exactly the fields it declares, and re-derives `createdBy`, `aDouble` and
-`createdAt` from `seeds.json` using the rules below — that re-derivation is the only independent
-restatement of the rules, and it is a checker, never an input to a harness.
+`scripts/validate-corpus.sh` asserts that the file carries exactly one entry per seed id and that
+every entry carries exactly the fields it declares, re-derives `createdBy`, `aDouble` and
+`createdAt` from `seeds.json` using the rules below, and diffs `scope` and `labels` — which have no
+rule to re-derive from — against a restatement of their tables. That check is the only independent
+statement of these values, and it is a checker, never an input to a harness: unlike the ten copies
+it replaced it can only fail loudly, never make both sides of a differential agree.
 
 The rules the file materialises:
 
@@ -221,7 +223,9 @@ check() oracle simultaneously, so the differential still agrees and the new fiel
 Every harness therefore declares the exact seed key set it consumes and asserts equality against
 the JSON — not merely that unknown keys are rejected, because that direction says nothing about a
 key the corpus stops carrying, which would decode to its zero value on both sides. `note` is the
-one permitted exclusion: it is corpus prose no harness reads.
+one permitted exclusion: it is corpus prose no harness reads. The same assertion covers `tags[]`,
+the one nested object array a seed carries; a key added inside an element is dropped just as
+silently as a top-level one.
 
 The same assertion covers `derived-fields.json`: each harness declares the five fields it consumes
 and fails if the file's `fields` list, or any entry's key set, differs. Concretely this is

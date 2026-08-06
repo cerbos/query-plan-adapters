@@ -212,6 +212,10 @@ const SEED_KEYS = [
 /** Corpus prose, never read by a harness: the one documented exclusion from SEED_KEYS. */
 const SEED_NOTE_KEY = "note";
 
+/** The one nested object array a seed carries. A key added inside an element is dropped from both
+ * sides of the differential just as silently as a top-level one, so it is guarded the same way. */
+const TAG_KEYS = ["id", "name"] as const;
+
 const DERIVED_KEYS = [
   "createdBy",
   "aDouble",
@@ -268,9 +272,11 @@ const derivedFile = parsedDerived;
 // Keep it that way: a parser that rebuilt each row field by field could only ever report the keys
 // this harness already names, and the assertion would pass vacuously.
 seedsFile.seeds.forEach((seed, index) => {
-  assertKeys(`seeds.json seeds[${index}]`, Object.keys(seed), SEED_KEYS, [
-    SEED_NOTE_KEY,
-  ]);
+  const label = `seeds.json seeds[${index}]`;
+  assertKeys(label, Object.keys(seed), SEED_KEYS, [SEED_NOTE_KEY]);
+  seed.tags.forEach((tag, tagIndex) => {
+    assertKeys(`${label}.tags[${tagIndex}]`, Object.keys(tag), TAG_KEYS);
+  });
 });
 
 assertKeys("derived-fields.json fields", derivedFile.fields, DERIVED_KEYS);

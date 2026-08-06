@@ -188,6 +188,10 @@ const SEED_KEYS = [
 /** Corpus prose, never read by a harness: the one documented exclusion from SEED_KEYS. */
 const SEED_NOTE_KEY = "note";
 
+/** The one nested object array a seed carries. A key added inside an element is dropped from both
+ * sides of the differential just as silently as a top-level one, so it is guarded the same way. */
+const TAG_KEYS = ["id", "name"] as const;
+
 const DERIVED_KEYS = [
   "createdBy",
   "aDouble",
@@ -232,9 +236,16 @@ function assertSeedKeyCoverage(value: unknown): void {
   }
   seeds.forEach((seed, index) => {
     const label = `seeds.json seeds[${index}]`;
-    assertKeys(label, Object.keys(expectRecord(seed, label)), SEED_KEYS, [
-      SEED_NOTE_KEY,
-    ]);
+    const record = expectRecord(seed, label);
+    assertKeys(label, Object.keys(record), SEED_KEYS, [SEED_NOTE_KEY]);
+    const tags = record["tags"];
+    if (!Array.isArray(tags)) {
+      throw new Error(`${label}.tags must be an array`);
+    }
+    tags.forEach((tag, tagIndex) => {
+      const tagLabel = `${label}.tags[${tagIndex}]`;
+      assertKeys(tagLabel, Object.keys(expectRecord(tag, tagLabel)), TAG_KEYS);
+    });
   });
 }
 

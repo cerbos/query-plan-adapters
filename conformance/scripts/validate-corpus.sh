@@ -258,4 +258,41 @@ if [[ -n "${derived_drift}" ]]; then
   exit 1
 fi
 
+# `scope` and `labels` are per-seed tables with no rule to re-derive from, so they are restated
+# here instead. A restatement inside a checker is not a second source of truth: unlike the ten
+# harness copies it replaced, it never feeds a stored row or an oracle, so it cannot make both
+# sides of a differential agree for the wrong reason — it can only fail loudly. Without it these
+# forty values, which drive the hier-* and label oracles on every adapter at once, are checked by
+# nothing.
+cat >"${VALIDATION_TMP}/expected-tables" <<'JSON'
+{
+  "a1": { "scope": "dept",                  "labels": ["gold", "silver"] },
+  "a2": { "scope": "dept.eng",              "labels": [] },
+  "a3": { "scope": "dept.eng.platform",     "labels": [] },
+  "a4": { "scope": "dept.eng.platform.obs", "labels": [] },
+  "a5": { "scope": "dept.engineering",      "labels": [] },
+  "a6": { "scope": "dept.sales",            "labels": [null, "silver"] },
+  "a7": { "scope": null,                    "labels": [] },
+  "a8": { "scope": "",                      "labels": ["silver"] },
+  "a9": { "scope": "50%",                   "labels": [] },
+  "b1": { "scope": "50%:a_b:x",             "labels": [] },
+  "b2": { "scope": "50x:a_b:y",             "labels": [] },
+  "b3": { "scope": "50%:aXb:y",             "labels": [] },
+  "b4": { "scope": "50%:a_b",               "labels": [] },
+  "b5": { "scope": "dept.eng.platform2",    "labels": [] },
+  "b6": { "scope": "50%.a_b",               "labels": [] },
+  "c1": { "scope": "Dept.Eng",              "labels": ["Gold"] },
+  "c2": { "scope": "dept.eng.",             "labels": [] },
+  "d1": { "scope": "[env]:prod:eu",         "labels": [] },
+  "d2": { "scope": "e:prod:eu",             "labels": [] },
+  "e1": { "scope": null,                    "labels": [] }
+}
+JSON
+jq -S '.derived | map_values({scope, labels})' derived-fields.json \
+  >"${VALIDATION_TMP}/actual-tables"
+if ! diff -u <(jq -S . "${VALIDATION_TMP}/expected-tables") "${VALIDATION_TMP}/actual-tables"; then
+  echo "derived-fields.json scope/labels disagree with the tables in README.md"
+  exit 1
+fi
+
 echo "Corpus valid: $(wc -l <"${VALIDATION_TMP}/policy-actions" | tr -d '[:space:]') actions, ${seed_count} seeds"

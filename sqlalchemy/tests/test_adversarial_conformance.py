@@ -90,6 +90,10 @@ SEED_KEYS = {
 }
 # Corpus prose, never read by a harness: the one documented exclusion.
 SEED_NOTE_KEY = "note"
+# The one nested object array a seed carries. A key added inside an element is
+# dropped from both sides of the differential just as silently as a top-level
+# one, so it is guarded the same way.
+TAG_KEYS = {"id", "name"}
 DERIVED_KEYS = {"createdBy", "aDouble", "createdAt", "scope", "labels"}
 
 
@@ -114,7 +118,10 @@ def _assert_keys(
 
 
 for _index, _seed in enumerate(SEEDS):
-    _assert_keys(f"seeds.json seeds[{_index}]", set(_seed), SEED_KEYS, {SEED_NOTE_KEY})
+    _label = f"seeds.json seeds[{_index}]"
+    _assert_keys(_label, set(_seed), SEED_KEYS, {SEED_NOTE_KEY})
+    for _tag_index, _tag in enumerate(_seed["tags"]):
+        _assert_keys(f"{_label}.tags[{_tag_index}]", set(_tag), TAG_KEYS)
 
 DERIVED: Dict[str, Dict[str, Any]] = DERIVED_FILE["derived"]
 _assert_keys("derived-fields.json fields", set(DERIVED_FILE["fields"]), DERIVED_KEYS)

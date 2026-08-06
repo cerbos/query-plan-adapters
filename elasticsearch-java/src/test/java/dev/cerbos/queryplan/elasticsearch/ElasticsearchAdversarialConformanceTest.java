@@ -147,6 +147,13 @@ class ElasticsearchAdversarialConformanceTest {
     /** Corpus prose, never read by a harness: the one documented exclusion from SEED_KEYS. */
     private static final String SEED_NOTE_KEY = "note";
 
+    /**
+     * The one nested object array a seed carries. A key added inside an element is dropped from
+     * both sides of the differential just as silently as a top-level one, so it is guarded the
+     * same way.
+     */
+    private static final List<String> TAG_KEYS = List.of("id", "name");
+
     private static final List<String> DERIVED_KEYS =
             List.of("createdBy", "aDouble", "createdAt", "scope", "labels");
 
@@ -578,8 +585,13 @@ class ElasticsearchAdversarialConformanceTest {
         JsonNode rawSeeds = MAPPER.readTree(conformance.resolve("seeds.json").toFile()).get("seeds");
         assertEquals(seeds.size(), rawSeeds.size(), "seeds.json rows lost in decoding");
         for (int i = 0; i < rawSeeds.size(); i++) {
-            assertKeys("seeds.json seeds[" + i + "]", keysOf(rawSeeds.get(i)),
-                    SEED_KEYS, List.of(SEED_NOTE_KEY));
+            String label = "seeds.json seeds[" + i + "]";
+            assertKeys(label, keysOf(rawSeeds.get(i)), SEED_KEYS, List.of(SEED_NOTE_KEY));
+            JsonNode rawTags = rawSeeds.get(i).get("tags");
+            for (int j = 0; j < rawTags.size(); j++) {
+                assertKeys(label + ".tags[" + j + "]", keysOf(rawTags.get(j)), TAG_KEYS,
+                        List.of());
+            }
         }
 
         assertKeys("derived-fields.json fields", derivedFile.fields(), DERIVED_KEYS, List.of());

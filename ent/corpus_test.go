@@ -11,8 +11,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/stretchr/testify/require"
 )
 
 // The shared adversarial corpus. Everything about what is tested — the hostile rows, the action
@@ -144,6 +142,11 @@ var seedKeys = []string{
 
 // seedNoteKey is documentation, never read by any harness.
 const seedNoteKey = "note"
+
+// tagKeys guards the one nested object array a seed carries. The top-level guard says nothing
+// about a key added inside an element, and an element key is dropped from both sides just as
+// silently.
+var tagKeys = []string{"id", "name"}
 
 // derivedKeys is the exact set of per-seed derived fields this harness consumes, guarded the same
 // way and for the same reason as seedKeys.
@@ -301,7 +304,16 @@ func assertCorpusCoverage(tb testing.TB, dir string, c *Corpus) {
 		tb.Fatalf("seeds.json decoded %d rows but carries %d", len(c.Seeds.Seeds), len(raw.Seeds))
 	}
 	for i, seed := range raw.Seeds {
-		assertKeys(tb, fmt.Sprintf("seeds.json seeds[%d]", i), keysOf(seed), seedKeys, seedNoteKey)
+		label := fmt.Sprintf("seeds.json seeds[%d]", i)
+		assertKeys(tb, label, keysOf(seed), seedKeys, seedNoteKey)
+
+		var tags []map[string]json.RawMessage
+		if err := json.Unmarshal(seed["tags"], &tags); err != nil {
+			tb.Fatalf("parsing %s.tags: %v", label, err)
+		}
+		for j, tag := range tags {
+			assertKeys(tb, fmt.Sprintf("%s.tags[%d]", label, j), keysOf(tag), tagKeys)
+		}
 	}
 
 	assertKeys(tb, "derived-fields.json fields", c.Derived.Fields, derivedKeys)
@@ -358,16 +370,18 @@ func keysOf(m map[string]json.RawMessage) []string {
 // TestCorpusCoverage runs the corpus consistency guards on their own, without the containers the
 // differential suite needs. A corpus field this harness stopped consuming — on either side of the
 // differential at once — fails here in milliseconds rather than after a PDP and a database have
-// started.
+// started. loadCorpus does the asserting; the only thing left to check is that it had anything to
+// assert against.
+//
+// Run it with -count=1 after editing the corpus: ../conformance is outside this module, so Go's
+// test cache does not track it and will otherwise serve the previous result. CI checks out fresh,
+// so this only bites local runs.
 func TestCorpusCoverage(t *testing.T) {
 	t.Parallel()
 
-	corpus := loadCorpus(t, adapterName)
-	require.NotEmpty(t, corpus.Seeds.Seeds, "corpus has no seeds")
-	require.Len(t, corpus.Derived.Entries, len(corpus.Seeds.Seeds),
-		"every seed needs exactly one derived-fields.json entry")
-	require.ElementsMatch(t, derivedKeys, corpus.Derived.Fields,
-		"derived-fields.json declares fields this harness does not consume")
+	if corpus := loadCorpus(t, adapterName); len(corpus.Seeds.Seeds) == 0 {
+		t.Fatal("corpus has no seeds")
+	}
 }
 
 // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") -------
