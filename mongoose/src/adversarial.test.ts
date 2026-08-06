@@ -784,10 +784,26 @@ describe("adversarial conformance corpus", () => {
     expect(filtered).toEqual(oracle);
   });
 
+  // The plan is fetched OUTSIDE the assertion so a PDP failure fails the test instead of
+  // passing it, and no query executes — the invariant is that the shape throws BEFORE a
+  // filter exists, so MongoDB aborting a wrongly emitted pipeline at query time must not be
+  // able to masquerade as the adapter refusing to translate.
   test.each(THROWING_ACTIONS)(
-    "$action fails loudly instead of silently mistranslating ($reason)",
+    "$action fails during translation, before any filter exists ($reason)",
     async ({ action }) => {
-      await expect(adapterFilteredIds(action)).rejects.toThrow();
+      const queryPlan = await cerbos.planResources({
+        principal: seedsFile.principal,
+        resource: { kind: seedsFile.resourceKind },
+        action,
+      });
+      expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+      expect(() =>
+        queryPlanToMongoose({
+          queryPlan,
+          mapper: MAPPER,
+          nullAttributeRepresentation: "explicit",
+        })
+      ).toThrow();
     }
   );
 

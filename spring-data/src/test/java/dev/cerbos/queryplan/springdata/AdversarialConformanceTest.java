@@ -160,11 +160,22 @@ class AdversarialConformanceTest {
     private record AdapterUnsupported(String action, String reason) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
+    private record KnownDivergence(String action, String reason, List<String> adapters) {}
+
+    /**
+     * Every group in actions.json must be named here: Jackson silently drops a field this
+     * record does not declare, and a dropped group makes its actions vanish from every count
+     * and every parameterised case at once — the projection trap conformance/README.md warns
+     * about. The manifest tripwire test below is what makes an undropped group load-bearing.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
     private record ActionsFile(
             List<String> conformance,
             Map<String, List<AdapterUnsupported>> adapterUnsupported,
+            Map<String, List<AdapterUnsupported>> adapterSupportedExpected,
             List<UnsupportedShape> expectedUnsupported,
-            List<NullRepresentationOmitted> nullRepresentationOmitted) {}
+            List<NullRepresentationOmitted> nullRepresentationOmitted,
+            List<KnownDivergence> knownDivergences) {}
 
     /** The corpus key for this adapter — its directory name, as every other harness uses. */
     private static final String ADAPTER = "spring-data";
@@ -188,10 +199,24 @@ class AdversarialConformanceTest {
                 : actionsFile.adapterUnsupported().getOrDefault(ADAPTER, List.of());
     }
 
+    /** Reference-unsupported shapes this adapter deliberately translates anyway (normally empty). */
+    private static List<AdapterUnsupported> adapterSupportedExpected() {
+        return actionsFile.adapterSupportedExpected() == null
+                ? List.of()
+                : actionsFile.adapterSupportedExpected().getOrDefault(ADAPTER, List.of());
+    }
+
+    private static Set<String> adapterSupportedExpectedActions() {
+        return adapterSupportedExpected().stream()
+                .map(AdapterUnsupported::action).collect(java.util.stream.Collectors.toSet());
+    }
+
     static Stream<String> conformanceActions() {
         Set<String> unsupported = adapterUnsupported().stream()
                 .map(AdapterUnsupported::action).collect(java.util.stream.Collectors.toSet());
-        return actionsFile.conformance().stream().filter(a -> !unsupported.contains(a));
+        return Stream.concat(
+                actionsFile.conformance().stream().filter(a -> !unsupported.contains(a)),
+                adapterSupportedExpectedActions().stream().sorted());
     }
 
     static Stream<Arguments> adapterUnsupportedActions() {
@@ -199,8 +224,10 @@ class AdversarialConformanceTest {
     }
 
     static Stream<Arguments> unsupportedShapes() {
+        Set<String> promoted = adapterSupportedExpectedActions();
         return actionsFile.expectedUnsupported().stream()
                 .filter(u -> !u.action().equals("p-timestamp"))
+                .filter(u -> !promoted.contains(u.action()))
                 .map(u -> Arguments.of(u.action(), u.springDataMessage()));
     }
 
@@ -859,6 +886,57 @@ class AdversarialConformanceTest {
         assertEquals(allIds, adapterFilteredIds("p-has"),
                 "the adapter is expected to translate KIND_ALWAYS_ALLOWED faithfully into all "
                         + "rows — if this fails the adapter started second-guessing plan kinds");
+    }
+
+    /**
+     * Corpus-size tripwire and exactly-once partition. A corpus edit must bump the pinned
+     * counts in the same change — without this, a new hostile action silently joins the
+     * oracle run, and a group dropped by the {@code ActionsFile} parser above would make its
+     * actions vanish from every parameterised case with nothing failing.
+     */
+    @Test
+    void manifestAssignsEveryActionExactlyOneOutcome() {
+        Set<String> supportedExpected = adapterSupportedExpectedActions();
+        Set<String> oracle = conformanceActions().collect(java.util.stream.Collectors.toSet());
+        Set<String> throwing = adapterUnsupported().stream()
+                .map(AdapterUnsupported::action)
+                .collect(java.util.stream.Collectors.toCollection(java.util.HashSet::new));
+        actionsFile.expectedUnsupported().stream()
+                .map(UnsupportedShape::action)
+                .filter(a -> !supportedExpected.contains(a))
+                .forEach(throwing::add);
+        Set<String> nullOmitted = actionsFile.nullRepresentationOmitted().stream()
+                .map(NullRepresentationOmitted::action)
+                .collect(java.util.stream.Collectors.toSet());
+        Set<String> skipped = actionsFile.knownDivergences().stream()
+                .filter(d -> d.adapters().contains(ADAPTER))
+                .map(KnownDivergence::action)
+                .collect(java.util.stream.Collectors.toSet());
+
+        Set<String> manifest = new java.util.TreeSet<>(actionsFile.conformance());
+        actionsFile.expectedUnsupported().forEach(u -> manifest.add(u.action()));
+        actionsFile.nullRepresentationOmitted().forEach(n -> manifest.add(n.action()));
+        actionsFile.knownDivergences().forEach(d -> manifest.add(d.action()));
+
+        List<String> misclassified = manifest.stream()
+                .filter(action -> Stream.of(
+                                oracle.contains(action),
+                                throwing.contains(action),
+                                nullOmitted.contains(action),
+                                skipped.contains(action))
+                        .filter(Boolean::booleanValue).count() != 1)
+                .toList();
+
+        assertEquals(140, manifest.size(),
+                "corpus size changed; triage the new action(s) before bumping this pin");
+        assertEquals(20, SEEDS.size(), "seed count changed");
+        assertEquals(List.of(), misclassified,
+                "every manifest action must have exactly one spring-data outcome");
+        assertTrue(actionsFile.expectedUnsupported().stream()
+                        .map(UnsupportedShape::action)
+                        .collect(java.util.stream.Collectors.toSet())
+                        .containsAll(supportedExpected),
+                "every promoted action must exist in expectedUnsupported");
     }
 
     @Test

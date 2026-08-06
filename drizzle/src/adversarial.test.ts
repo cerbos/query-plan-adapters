@@ -135,7 +135,11 @@ const MANIFEST_ACTIONS = new Set([
   ...actionsFile.expectedUnsupported.map((entry) => entry.action),
   ...NULL_REPRESENTATION_OMITTED.map(([action]) => action),
   ...DRIZZLE_SUPPORTED_EXPECTED,
-  ...DRIZZLE_DIVERGENCES,
+  // ALL divergences, not just Drizzle's: a divergence registered solely for another adapter
+  // must still enter this manifest, so the size tripwire and the classified-exactly-once
+  // check flag it for triage here instead of letting the action silently vanish from this
+  // harness. Classification/skipping still uses the Drizzle-filtered set.
+  ...actionsFile.knownDivergences.map((entry) => entry.action),
 ]);
 
 /** Deterministic ISO instant per seed for the timestamp probe: split around 2025-01-01. */
@@ -622,11 +626,26 @@ describe("adversarial conformance corpus", () => {
   );
 
   // Shapes the adapter does not support must fail during translation, never produce a
-  // silently-wrong filter.
+  // silently-wrong filter. The plan is fetched OUTSIDE the assertion so a PDP failure fails
+  // the test instead of passing it, and no query executes — SQLite rejecting a wrongly
+  // emitted filter afterwards must not be able to masquerade as the adapter refusing to
+  // translate.
   test.each(THROWING_ACTIONS)(
-    "%s fails loudly instead of silently mistranslating (%s)",
+    "%s fails during translation, before any filter exists (%s)",
     async (action) => {
-      await expect(adapterFilteredIds(action)).rejects.toThrow();
+      const queryPlan = await cerbos.planResources({
+        principal: principal(),
+        resource: { kind: seedsFile.resourceKind },
+        action,
+      });
+      expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+      expect(() =>
+        queryPlanToDrizzle({
+          queryPlan,
+          mapper: MAPPER,
+          nullAttributeRepresentation: "explicit",
+        })
+      ).toThrow();
     }
   );
 
