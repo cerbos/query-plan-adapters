@@ -46,7 +46,12 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeMeta, InstrumentedAttribute
 from sqlalchemy.sql import Select
-from sqlalchemy.sql.expression import BinaryExpression, ColumnOperators, FromClause
+from sqlalchemy.sql.expression import (
+    BinaryExpression,
+    ColumnElement,
+    ColumnOperators,
+    FromClause,
+)
 
 try:  # SQLAlchemy >= 2.0
     from sqlalchemy.orm import DeclarativeBase
@@ -1167,7 +1172,21 @@ def get_query(
         # the operator handlers here are the leaf nodes of the recursion
         return get_operator_fn(operator, column, value)
 
-    q = select(table).where(traverse_and_map_operands(cond))
+    condition = traverse_and_map_operands(cond)
+    # The root of the plan must translate to a boolean SQL expression. A non-boolean root —
+    # filter()/map() as the whole condition, or an operator override's intermediate value that
+    # no enclosing override consumed — must be refused HERE, by the adapter, rather than left
+    # for SQLAlchemy's where() coercion to trip over: a value that happened to coerce would
+    # become a silently-wrong filter.
+    if not isinstance(condition, (ColumnElement, bool)):
+        raise ValueError(
+            f"the plan's condition translated to {type(condition).__name__!r}, which is not "
+            "a boolean SQL expression. filter() and map() return a list, so they cannot be a "
+            "condition on their own (only size(filter(...)) has a boolean meaning), and an "
+            "operator override returning an intermediate value must be consumed by an "
+            "enclosing override before the root"
+        )
+    q = select(table).where(condition)
 
     if table_mapping:
         q = q.select_from(table)
