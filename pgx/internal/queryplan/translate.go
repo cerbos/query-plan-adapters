@@ -567,7 +567,9 @@ func (b *builder) collectionMacro(n *node, m Mapper, negated bool) (Expr, error)
 			},
 			Else: BoolConst{V: false},
 		}
-		return negate(triState, negated), nil
+		// An absent to-one parent must stay UNKNOWN here too, or `!exists_one(chain, ...)` reads
+		// the empty tail as a determined false and inverts into an allow (#309).
+		return negate(b.requireHops(rel, entry.Qualifier, triState), negated), nil
 
 	case "filter", "map":
 		return nil, fmt.Errorf(

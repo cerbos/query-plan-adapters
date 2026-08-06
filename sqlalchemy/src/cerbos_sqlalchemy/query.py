@@ -1047,6 +1047,16 @@ def get_query(
         if isinstance(left, (_ConditionalValue, _IEEEConstant)) or isinstance(
             right, (_ConditionalValue, _IEEEConstant)
         ):
+            if operator == "mod":
+                # CEL's % is integer-only while Cerbos attribute values are always
+                # doubles, so a modulus over this arithmetic is a no-overload error
+                # that denies every row at check time. Folding it with Python's %
+                # would answer a question CEL refused.
+                raise ValueError(
+                    "modulus over a division whose denominator may be zero is not "
+                    "supported: CEL's % is integer-only and attribute values are "
+                    "always doubles, so the condition can never be satisfied by the PDP"
+                )
             # A retained ternary (a division that may be non-finite) must keep
             # propagating symbolically through the surrounding arithmetic.
             return _arith_over_conditional(

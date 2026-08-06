@@ -1611,6 +1611,15 @@ public final class SpringDataQueryPlanAdapter {
              */
             private Predicate tryDivisionByZeroComparison(
                     String op, List<Operand> operands, Scope scope) {
+                if (isZeroCapableDivisionOperand(operands.get(0), scope)
+                        && isZeroCapableDivisionOperand(operands.get(1), scope)) {
+                    // Only one side can be folded into IEEE arms; the other would still lower to
+                    // NULL, turning `NaN != NaN` (TRUE in CEL) into UNKNOWN. Fail closed.
+                    throw new IllegalArgumentException(
+                            "a comparison with a zero-capable division on BOTH sides is not "
+                                    + "supported: only one side can be folded into IEEE arms and "
+                                    + "the other would lower to SQL NULL");
+                }
                 for (int side = 0; side < 2; side++) {
                     Operand candidate = operands.get(side);
                     if (candidate.getNodeCase() != Operand.NodeCase.EXPRESSION) {
@@ -1784,6 +1793,24 @@ public final class SpringDataQueryPlanAdapter {
              * {@link #tryDivisionByZeroComparison}. The guard below survives only as the finite
              * arm of that rewrite, and for value positions no comparison folds.
              */
+            /** Whether an operand IS a division that can divide by zero. */
+            private boolean isZeroCapableDivisionOperand(Operand operand, Scope scope) {
+                if (operand.getNodeCase() != Operand.NodeCase.EXPRESSION) {
+                    return false;
+                }
+                PlanResourcesFilter.Expression expr = operand.getExpression();
+                if (!"div".equals(expr.getOperator()) || expr.getOperandsCount() != 2) {
+                    return false;
+                }
+                NumericOperand divisor = resolveNumericOperand(expr.getOperands(1), scope);
+                NumericOperand dividend = resolveNumericOperand(expr.getOperands(0), scope);
+                if (divisor instanceof NumericOperand.Constant dc && dc.value() != 0.0) {
+                    return false;
+                }
+                return !(divisor instanceof NumericOperand.Constant
+                        && dividend instanceof NumericOperand.Constant);
+            }
+
             /** Whether an arithmetic subtree holds a division that can divide by zero. */
             private boolean containsZeroCapableDivision(
                     PlanResourcesFilter.Expression expr, Scope scope) {
@@ -2099,9 +2126,14 @@ public final class SpringDataQueryPlanAdapter {
                     // size(collection) counts rows without evaluating a lambda — no element can
                     // be UNKNOWN, so the plain EXISTS/COUNT comparisons are already exact.
                     if (fractionalCollapse != null) {
-                        // A Relation count is always defined (an empty join is count 0), so the
-                        // fractional eq/ne collapse is unconditional here.
-                        return fractionalCollapse ? cb.conjunction() : cb.disjunction();
+                        // A COUNT is never fractional, so the comparison is statically decided.
+                        // It is not unconditional though: an absent to-one parent is a CEL
+                        // missing-path error (deny), and folding to TRUE would return every
+                        // parentless row (#309).
+                        Predicate hops = leadingHopsExist(scope, ref);
+                        Predicate collapsed =
+                                fractionalCollapse ? cb.conjunction() : cb.disjunction();
+                        return hops == null ? collapsed : cb.and(hops, collapsed);
                     }
                     boolean nonEmpty = ("gt".equals(cmpOp) && numValue == 0L)
                             || ("ge".equals(cmpOp) && numValue == 1L);
@@ -2144,8 +2176,14 @@ public final class SpringDataQueryPlanAdapter {
                         // fractional), but an erroring lambda body must still deny the row: the
                         // poison term is 0 when every element body is determined and SQL NULL
                         // otherwise, making the collapse UNKNOWN exactly when CEL errors.
+                        // An absent to-one parent denies for a different reason and needs its
+                        // own guard (#309).
                         Subquery<Long> poison = undeterminedPoisonSubquery(scope, ref, bodyBuilder);
-                        return finalCollapse ? cb.equal(poison, 0L) : cb.notEqual(poison, 0L);
+                        Predicate collapsed = finalCollapse
+                                ? cb.equal(poison, 0L)
+                                : cb.notEqual(poison, 0L);
+                        Predicate hops = leadingHopsExist(scope, ref);
+                        return hops == null ? collapsed : cb.and(hops, collapsed);
                     }
                     return compareCount(strictMatchCountSubquery(scope, ref, bodyBuilder),
                             finalCmpOp, finalNumValue);

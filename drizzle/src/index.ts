@@ -2127,6 +2127,12 @@ const foldWithSubstitution = (
   if (!(operand.operator in ARITHMETIC_OPERATORS)) {
     return undefined;
   }
+  // CEL's % is integer-only while Cerbos attribute values are always doubles, so a modulus
+  // over this arithmetic is a no-overload error that denies every row at check time. Folding
+  // it with JavaScript's % would answer a question CEL refused — fail closed instead.
+  if (operand.operator === "mod") {
+    return undefined;
+  }
   const left = foldWithSubstitution(operand.operands[0]!, target, substitute);
   const right = foldWithSubstitution(operand.operands[1]!, target, substitute);
   if (left === undefined || right === undefined) {
@@ -2365,10 +2371,19 @@ const buildComparisonFilter = (
   // otherwise fall through to the plain arithmetic path. The division may be nested inside
   // further arithmetic, so search the whole tree rather than only the comparison operand.
   const leftDivision = findZeroCapableDivision(left);
+  const rightDivision = findZeroCapableDivision(right);
+  if (leftDivision && rightDivision) {
+    // Both sides can go non-finite, and each CASE rewrite only folds its own side — the other
+    // would still lower to NULL, turning `NaN != NaN` (TRUE in CEL) into UNKNOWN. Fail closed
+    // rather than emit the under-granting filter.
+    throw new Error(
+      "Cannot translate a comparison with a zero-capable division on BOTH sides: only one " +
+        "side can be folded into IEEE arms, and the other would lower to SQL NULL"
+    );
+  }
   if (leftDivision) {
     return buildDivision(left, leftDivision, right, true);
   }
-  const rightDivision = findZeroCapableDivision(right);
   if (rightDivision) {
     return buildDivision(right, rightDivision, left, false);
   }

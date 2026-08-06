@@ -225,6 +225,16 @@ func arithOverConditional(op ArithOp, l, r value) (value, bool, error) {
 				}
 			}
 		}
+		if op == OpMod {
+			// CEL's % is integer-only while Cerbos attribute values are always doubles, so a
+			// modulus over this arithmetic is a no-overload error that denies every row at check
+			// time. Folding it would answer a question CEL refused.
+			return nil, fmt.Errorf(
+				"modulus over a division whose denominator may be zero is not supported: CEL's " +
+					"%% is integer-only and attribute values are always doubles, so the condition " +
+					"can never be satisfied by the PDP",
+			)
+		}
 		if inner, ok, err := arithOverConditional(op, left, right); err != nil || ok {
 			return inner, err
 		}
@@ -294,7 +304,8 @@ func applyIEEE(op ArithOp, l, r float64) float64 {
 	case OpDiv:
 		return l / r
 	case OpMod:
-		return math.Mod(l, r)
+		// Unreachable: arithOverConditional rejects OpMod before substituting an arm.
+		return math.NaN()
 	}
 	return math.NaN()
 }
