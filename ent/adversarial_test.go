@@ -695,9 +695,20 @@ func runConformance(t *testing.T, h *harness) {
 	t.Run("unsupported shapes fail loudly", func(t *testing.T) {
 		for _, entry := range h.corpus.ThrowingActions {
 			t.Run(entry.Action, func(t *testing.T) {
-				_, err := h.adapterFilteredIDs(t, entry.Action)
+				// Translate directly rather than through adapterFilteredIDs: the plan is
+				// fetched with its own error check and no query executes, so the database
+				// rejecting a wrongly emitted predicate cannot masquerade as the adapter
+				// refusing to translate.
+				plan, err := h.client.PlanResources(t.Context(), h.principal(),
+					cerbos.NewResource(h.corpus.Seeds.ResourceKind, ""), entry.Action)
+				require.NoError(t, err, "planning %s", entry.Action)
+
+				_, err = cerbosent.Translate(plan.PlanResourcesResponse, resourceTable, h.mapper,
+					cerbosent.WithDialect(h.target.dialect))
 				require.Error(t, err,
 					"%s must fail translation rather than emit a predicate (%s)", entry.Action, entry.Reason)
+				require.ErrorIs(t, err, cerbosent.ErrUnsupported,
+					"%s must be refused as unsupported, not fail incidentally", entry.Action)
 			})
 		}
 	})

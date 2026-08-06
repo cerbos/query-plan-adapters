@@ -366,7 +366,10 @@
     "convex": [
       { "action": "p-index", "reason": "Convex queries can apply the adapter's explicit post-filter for list indexing" },
       { "action": "p-matches", "reason": "Convex queries can apply the adapter's explicit post-filter for regular-expression matching" },
-      { "action": "p-timestamp", "reason": "Convex queries can apply the adapter's explicit post-filter for timestamp comparisons" }
+      { "action": "p-timestamp", "reason": "Convex queries can apply the adapter's explicit post-filter for timestamp comparisons" },
+      { "action": "cast-int-string", "reason": "The adapter's explicit post-filter reimplements CEL int() over strings exactly (whole-string parse or error-deny), so the SQL leading-digits divergence does not apply" },
+      { "action": "cast-double-string", "reason": "The adapter's explicit post-filter reimplements CEL double() over strings exactly (whole-string parse or error-deny), so the SQL leading-digits divergence does not apply" },
+      { "action": "cast-int-double", "reason": "The adapter's explicit post-filter reimplements CEL int() truncation toward zero, so the SQL CAST round-to-nearest divergence does not apply" }
     ]
   },
   "expectedUnsupported": [

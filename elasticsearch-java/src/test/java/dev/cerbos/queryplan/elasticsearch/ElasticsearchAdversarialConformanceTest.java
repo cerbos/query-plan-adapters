@@ -40,6 +40,7 @@ import java.util.TreeSet;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -65,11 +66,17 @@ class ElasticsearchAdversarialConformanceTest {
             Map.entry("request.resource.attr.obj.inner", "obj.inner"),
             Map.entry("request.resource.attr.tags", "tags"),
             Map.entry("request.resource.attr.tagNames", "tagNames"),
+            // `categories` must be mapped even though every action touching it is fail-closed:
+            // an unmapped field makes those actions throw "Unknown attribute" instead of the
+            // mechanism their actions.json reasons name, so the throw tests pass for the wrong
+            // reason and the claimed limitation is never actually exercised.
+            Map.entry("request.resource.attr.categories", "categories"),
             Map.entry("request.resource.attr.mainCategory.subCategories", "mainCategory.subCategories"),
             Map.entry("request.resource.attr.mainCategory.subNames", "mainCategory.subNames"));
 
     private static final Set<String> NESTED_PATHS = Set.of(
-            "tags", "mainCategory.subCategories");
+            "tags", "mainCategory.subCategories",
+            "categories", "categories.subCategories", "categories.subCategories.labels");
 
     private static Path conformanceDir() {
         return Path.of(System.getProperty("user.dir"), "..", "conformance").normalize();
@@ -462,9 +469,22 @@ class ElasticsearchAdversarialConformanceTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("throwingActions")
-    void unsupportedShapesThrow(String action) {
-        assertThrows(IllegalArgumentException.class, () -> adapterFilteredIds(action),
+    void unsupportedShapesThrow(String action) throws Exception {
+        // The plan is fetched OUTSIDE the assertion (a PDP failure fails the test rather than
+        // passing it) and no search executes: the invariant is that an inexpressible shape
+        // must throw during translation, before any query exists.
+        PlanResourcesResult plan = client.plan(
+                principal(), Resource.newInstance(seedsFile.resourceKind()), action);
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(plan, FIELD_MAP, NESTED_PATHS),
                 "unsupported action must fail during translation: " + action);
+        // "Unknown attribute" is the one rejection that indicts the HARNESS (a FIELD_MAP gap)
+        // rather than the adapter: an unmapped `categories` once let six actions throw here
+        // while never reaching the mechanism their actions.json reasons claim. Every real
+        // limitation throws a different message, so pin the distinction.
+        assertFalse(ex.getMessage().startsWith("Unknown attribute:"),
+                "action '" + action + "' was rejected by an unmapped field, not the declared "
+                        + "mechanism: " + ex.getMessage());
     }
 
     /**

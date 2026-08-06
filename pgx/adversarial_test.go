@@ -471,9 +471,19 @@ func TestAdversarialConformance(t *testing.T) {
 	t.Run("unsupported shapes fail loudly", func(t *testing.T) {
 		for _, entry := range h.corpus.ThrowingActions {
 			t.Run(entry.Action, func(t *testing.T) {
-				_, err := h.adapterFilteredIDs(t, entry.Action)
+				// Translate directly rather than through adapterFilteredIDs: the plan is
+				// fetched with its own error check and no query executes, so Postgres
+				// rejecting a wrongly emitted filter cannot masquerade as the adapter
+				// refusing to translate.
+				plan, err := h.client.PlanResources(t.Context(), h.principal(),
+					cerbos.NewResource(h.corpus.Seeds.ResourceKind, ""), entry.Action)
+				require.NoError(t, err, "planning %s", entry.Action)
+
+				_, err = cerbospgx.Translate(plan.PlanResourcesResponse, resourceTable, h.mapper)
 				require.Error(t, err,
 					"%s must fail translation rather than emit a filter (%s)", entry.Action, entry.Reason)
+				require.ErrorIs(t, err, cerbospgx.ErrUnsupported,
+					"%s must be refused as unsupported, not fail incidentally", entry.Action)
 			})
 		}
 	})

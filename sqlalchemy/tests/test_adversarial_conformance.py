@@ -107,6 +107,22 @@ NULL_REPRESENTATION_OMITTED = [
     for item in ACTIONS_FILE["nullRepresentationOmitted"]
 ]
 
+# Every classified action across all four manifest groups. Read each group
+# explicitly: a group this expression does not name is dropped silently, and a
+# dropped group makes its actions vanish from every count at once (the
+# projection trap conformance/README.md warns about).
+MANIFEST_ACTIONS = (
+    set(ACTIONS_FILE["conformance"])
+    | {u["action"] for u in ACTIONS_FILE["expectedUnsupported"]}
+    | {n["action"] for n in ACTIONS_FILE["nullRepresentationOmitted"]}
+    | {d["action"] for d in ACTIONS_FILE["knownDivergences"]}
+)
+SQLALCHEMY_SKIPPED_DIVERGENCES = {
+    d["action"]
+    for d in ACTIONS_FILE["knownDivergences"]
+    if "sqlalchemy" in d["adapters"]
+}
+
 
 def _iso_for(seed: Dict[str, Any]) -> str:
     """Deterministic ISO instant per seed for the timestamp probe (see
@@ -775,6 +791,31 @@ def _adapter_filtered_ids(
 # one) — a silent-wrongness bug class, so escalate it to an error.
 @pytest.mark.filterwarnings("error::sqlalchemy.exc.SAWarning")
 class TestAdversarialConformance:
+    def test_manifest_assigns_every_action_exactly_one_outcome(self):
+        oracle = set(ORACLE_ACTIONS)
+        throwing = set(THROWING_ACTIONS)
+        null_omitted = {action for action, _ in NULL_REPRESENTATION_OMITTED}
+        misclassified = [
+            action
+            for action in sorted(MANIFEST_ACTIONS)
+            if [
+                action in oracle,
+                action in throwing,
+                action in null_omitted,
+                action in SQLALCHEMY_SKIPPED_DIVERGENCES,
+            ].count(True)
+            != 1
+        ]
+
+        # Deliberate tripwires: a corpus edit must bump these in the same
+        # change, so a new hostile action cannot join (or vanish) silently.
+        assert len(MANIFEST_ACTIONS) == 140
+        assert len(SEEDS) == 20
+        assert misclassified == []
+        assert SQLALCHEMY_SUPPORTED_EXPECTED <= {
+            u["action"] for u in ACTIONS_FILE["expectedUnsupported"]
+        }
+
     @pytest.mark.parametrize("action", ORACLE_ACTIONS)
     def test_matches_check_oracle(self, action, adv_cerbos_client, adv_conn):
         oracle = _oracle_allowed_ids(adv_cerbos_client, action)
@@ -782,11 +823,28 @@ class TestAdversarialConformance:
         assert sorted(filtered) == sorted(oracle)
 
     @pytest.mark.parametrize("action", THROWING_ACTIONS)
-    def test_fails_loudly(self, action, adv_cerbos_client, adv_conn):
-        # A loud failure — at translation or at query execution — is required;
-        # a silently-wrong filter is the only unacceptable outcome.
-        with pytest.raises(Exception):
-            _adapter_filtered_ids(adv_cerbos_client, adv_conn, action)
+    def test_fails_loudly(self, action, adv_cerbos_client):
+        # The plan is fetched OUTSIDE the assertion so a PDP failure fails the
+        # test instead of passing it, and nothing executes — the invariant is
+        # that the shape throws during translation, BEFORE a filter exists, so
+        # the database rejecting a wrongly emitted query afterwards cannot
+        # masquerade as the adapter refusing to translate.
+        plan = adv_cerbos_client.plan_resources(
+            action, _principal(), ResourceDesc(RESOURCE_KIND)
+        )
+        # The adapter's translation-time refusals: ValueError (unsupported
+        # operator/cast/timestamp shapes), KeyError (attribute missing from the
+        # map), TypeError (attribute needs an operator override to be
+        # expressible). Anything else — connection errors, SQLAlchemy runtime
+        # errors — must fail the test, not satisfy it.
+        with pytest.raises((ValueError, KeyError, TypeError)):
+            get_query(
+                plan,
+                AdvResource,
+                ATTR_MAP,
+                operator_override_fns=OPERATOR_OVERRIDES,
+                null_attribute_representation="explicit",
+            )
 
     # #302. `null-eq-missing` probes `aOptionalString == null`, and
     # `aOptionalString` follows the corpus default: a NULL column sends NO
@@ -820,14 +878,8 @@ class TestAdversarialConformance:
     def test_every_null_carrying_action_is_rejected_under_omitted(
         self, adv_cerbos_client, adv_conn
     ):
-        manifest = (
-            set(ACTIONS_FILE["conformance"])
-            | {u["action"] for u in ACTIONS_FILE["expectedUnsupported"]}
-            | {n["action"] for n in ACTIONS_FILE["nullRepresentationOmitted"]}
-            | {d["action"] for d in ACTIONS_FILE["knownDivergences"]}
-        )
         null_carrying = []
-        for action in sorted(manifest):
+        for action in sorted(MANIFEST_ACTIONS):
             plan = adv_cerbos_client.plan_resources(
                 action, _principal(), ResourceDesc(RESOURCE_KIND)
             )
@@ -853,8 +905,15 @@ class TestAdversarialConformance:
                     null_attribute_representation="omitted",
                 )
                 not_rejected.append(action)
-            except Exception:
-                pass  # expected: the shape must be rejected under this representation
+            except Exception as exc:  # noqa: BLE001 - triaged below
+                # The rejection must be the null-operand check talking, not an
+                # incidental failure: a transport error or attr-map typo counting
+                # as the required rejection is the silent pass the corpus README
+                # warns about.
+                if "missing-attribute" not in str(exc):
+                    not_rejected.append(
+                        f"{action} (rejected for the wrong reason: {exc})"
+                    )
         assert not_rejected == []
 
     # nan-ord-inf is absent: its 1.0/0.0 and -1.0/0.0 branches carry a CONSTANT zero
