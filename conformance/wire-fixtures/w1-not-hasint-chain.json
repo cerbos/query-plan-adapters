@@ -1,0 +1,29 @@
+{
+  "action": "w1-not-hasint-chain",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "not",
+        "operands": [
+          {
+            "expression": {
+              "operator": "hasIntersection",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.mainCategory.subNames"
+                },
+                {
+                  "value": [
+                    "finance"
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

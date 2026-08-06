@@ -2,7 +2,17 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { afterAll, beforeAll, describe, expect, test } from "@jest/globals";
-import type { Principal, Resource, Value } from "@cerbos/core";
+import {
+  PlanExpression,
+  PlanExpressionValue,
+  PlanExpressionVariable,
+} from "@cerbos/core";
+import type {
+  PlanExpressionOperand,
+  Principal,
+  Resource,
+  Value,
+} from "@cerbos/core";
 import { GRPC as Cerbos } from "@cerbos/grpc";
 import mongoose, { model, Schema } from "mongoose";
 
@@ -747,7 +757,7 @@ function planCarriesNullLiteral(operand: unknown): boolean {
 }
 
 describe("adversarial conformance corpus", () => {
-  test("manifest assigns all 140 actions exactly one Mongoose outcome", () => {
+  test("manifest assigns all 143 actions exactly one Mongoose outcome", () => {
     const oracle = new Set(ORACLE_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map((entry) => entry.action));
     const nullOmitted = new Set(
@@ -763,10 +773,10 @@ describe("adversarial conformance corpus", () => {
       return count !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(140);
+    expect(MANIFEST_ACTIONS.size).toBe(143);
     expect(unsupportedEntries).toHaveLength(36);
     expect(supportedExpectedEntries).toHaveLength(3);
-    expect(ORACLE_ACTIONS).toHaveLength(97);
+    expect(ORACLE_ACTIONS).toHaveLength(100);
     expect(THROWING_ACTIONS).toHaveLength(41);
     expect(misclassified).toEqual([]);
     expect(
@@ -888,14 +898,80 @@ describe("adversarial conformance corpus", () => {
     expect(await adapterFilteredIds(action)).toEqual(allIds);
   });
 
+  // The corpus pins two count spellings over the chain — `size(...) == 0` and
+  // `!(size(...) > 0)` — but the guard has to be a property of the chain rather than of the
+  // two spellings that happen to be pinned. These synthesise the remaining
+  // threshold/polarity combinations onto the same seeded collection and assert the parentless
+  // documents stay out of every one, including an arbitrary-N threshold neither corpus action
+  // reaches (cerbos/query-plan-adapters#316).
+  test("every count threshold over the chain inherits the absent-parent guard", async () => {
+    const chain = new PlanExpressionVariable(
+      "request.resource.attr.mainCategory.subCategories"
+    );
+    const size = new PlanExpression("size", [chain]);
+    const compare = (operator: string, threshold: number) =>
+      new PlanExpression(operator, [size, new PlanExpressionValue(threshold)]);
+    const negate = (condition: PlanExpressionOperand) =>
+      new PlanExpression("not", [condition]);
+
+    const filteredIdsFor = async (
+      condition: PlanExpressionOperand
+    ): Promise<string[]> => {
+      const result = queryPlanToMongoose({
+        queryPlan: {
+          kind: PlanKind.CONDITIONAL,
+          condition,
+          cerbosCallId: "synthetic",
+          requestId: "synthetic",
+          validationErrors: [],
+          metadata: undefined,
+        },
+        mapper: MAPPER,
+      });
+      expect(result.kind).toBe(PlanKind.CONDITIONAL);
+      const rows = await AdversarialResource.find(
+        result.kind === PlanKind.CONDITIONAL ? result.filters : {}
+      )
+        .select({ resourceId: 1, _id: 0 })
+        .lean()
+        .exec();
+      return rows.map((row) => row.resourceId).sort();
+    };
+
+    // Every seed that HAS a mainCategory holds at least one subCategory, and the 16 without
+    // it are CEL missing-path errors — so each of these is empty unless the guard leaks.
+    const emptyByConstruction: [string, PlanExpressionOperand][] = [
+      ["size(chain) == 0", compare("eq", 0)],
+      ["size(chain) <= 0", compare("le", 0)],
+      ["size(chain) >= 2", compare("ge", 2)],
+      ["!(size(chain) > 0)", negate(compare("gt", 0))],
+      ["!(size(chain) >= 1)", negate(compare("ge", 1))],
+      ["!(size(chain) < 2)", negate(compare("lt", 2))],
+    ];
+
+    for (const [shape, condition] of emptyByConstruction) {
+      expect([shape, await filteredIdsFor(condition)]).toEqual([shape, []]);
+    }
+
+    // The mirror image, so the loop above cannot pass by denying everything: `>= 0` and `< 2`
+    // are TRUE for exactly the documents that HAVE the parent.
+    const withParent = await oracleAllowedIds("w1-size-nonneg-chain");
+    expect(withParent.length).toBeGreaterThan(0);
+    expect(withParent.length).toBeLessThan(SEEDS.length);
+    expect(await filteredIdsFor(compare("ge", 0))).toEqual(withParent);
+    expect(await filteredIdsFor(compare("lt", 2))).toEqual(withParent);
+  });
+
   test("oracle is not degenerate", async () => {
-    // The #309/#312/#311 additions. w1-size-zero-chain and the two string-cast actions are
-    // deliberately absent: their oracles are empty by CONSTRUCTION (no seed holds a to-one
-    // parent with zero children; every seed's aString raises in int()/double()), so they
-    // cannot satisfy this guard. cast-int-double is the cast group's non-degenerate
-    // stand-in, and the w1/cr actions below carry it for their groups.
+    // The #309/#312/#311/#315/#316 additions. w1-size-zero-chain, w1-not-size-chain and the
+    // two string-cast actions are deliberately absent: their oracles are empty by
+    // CONSTRUCTION (no seed holds a to-one parent with zero children; every seed's aString
+    // raises in int()/double()), so they cannot satisfy this guard. cast-int-double is the
+    // cast group's non-degenerate stand-in, and the w1/cr actions below carry it for their
+    // groups.
     for (const action of ["vf-le", "like-percent", "all-on-empty", "pv-exists", "pv-all", "null-eq", "null-ne",
       "w1-all-chain", "w1-not-exists-chain", "w1-size-nonneg-chain",
+      "w1-not-in-chain", "w1-not-hasint-chain",
       "cr-div-neg-zero", "cr-div-other-column", "cr-div-then-add", "cr-div-then-add-ne",
       "cast-int-double"]) {
       const ids = await oracleAllowedIds(action);

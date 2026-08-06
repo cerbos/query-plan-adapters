@@ -465,6 +465,32 @@ const requireLeadingHops = (
   return sql`(case when ${hopsExist} then ${inner} end)`;
 };
 
+/**
+ * Evaluate `filter` over a whole relation chain reached from the root: the correlated
+ * EXISTS of `wrapWithRelations`, made UNKNOWN rather than FALSE when an intermediate to-one
+ * hop is absent.
+ *
+ * Every operator that reaches a collection through a dotted path must go through here
+ * rather than calling `wrapWithRelations` directly. The collection macros used to carry the
+ * hop guard themselves, which left the sibling operators built on the same chain — plain
+ * membership and `hasIntersection` — unguarded: a bare `NOT EXISTS` over an absent parent is
+ * TRUE, so `!("x" in R.attr.parent.names)` returned every parentless row
+ * (cerbos/query-plan-adapters#315). Guarding the chain construction instead of each operator
+ * is what ent and pgx already do, and is why they never had the hole.
+ */
+const wrapRelationChain = (
+  relations: RelationMapping[],
+  filter: SQL,
+  reference: string,
+  options?: BuildFilterOptions
+): SQL =>
+  requireLeadingHops(
+    relations.slice(0, -1),
+    wrapWithRelations(relations, filter, reference, options),
+    reference,
+    options
+  );
+
 const wrapWithRelations = (
   relations: RelationMapping[],
   filter: SQL,
@@ -1357,7 +1383,7 @@ const buildVariableMembershipFilter = (
   if (!match) {
     throw new Error("Unable to combine variable membership conditions");
   }
-  return wrapWithRelations(
+  return wrapRelationChain(
     collection.relations,
     match,
     collectionOperand.name,
@@ -1567,7 +1593,7 @@ const buildHasIntersectionFilter = (
     if (!normalized.relations.length) {
       return filter;
     }
-    const wrapped = wrapWithRelations(
+    const wrapped = wrapRelationChain(
       normalized.relations,
       filter,
       reference,
@@ -2646,7 +2672,7 @@ const buildFilterFromExpression = (
         valueOperand.value
       );
       const filter = resolved.relations.length
-        ? wrapWithRelations(
+        ? wrapRelationChain(
             resolved.relations,
             comparison,
             fieldOperand.name,

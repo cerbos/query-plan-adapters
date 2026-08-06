@@ -394,6 +394,55 @@ const referencesNullableField = (
     isNullableReference(name, mapper)
   );
 
+/**
+ * "Every to-one parent this expression dots through is present", as a Mongoose filter, or
+ * undefined when it dots through none.
+ *
+ * CEL cannot dot through a list, so each intermediate segment of `a.b.c` is a to-ONE parent:
+ * absent, the application sends no attribute at all and CEL raises a missing-path error,
+ * which denies. The flattened `a.b` path a Mongo filter matches against cannot see that — an
+ * absent parent and a childless parent both fail the match — so any `$nor` over it is TRUE
+ * for a parentless document and returns rows the PDP denies.
+ *
+ * `requiresParent` already carried this for the `$size` aggregation (#309); membership,
+ * `hasIntersection` and the negated count spelling reach the same chain without ever passing
+ * through it (cerbos/query-plan-adapters#315, #316). Requiring the parent OUTSIDE the `$nor`
+ * fixes all of them at once, and is unconditionally faithful to CEL rather than a
+ * per-operator patch: a missing parent denies under BOTH polarities regardless of which
+ * operator sits above the chain.
+ *
+ * `<parent>.0` exists exactly when the parent array is non-empty, which is how the document
+ * model spells "the to-one parent was serialised" — the same test the `$size` guard makes
+ * with `$ifNull`. That `$size` guard alone is not enough: it makes the count `null`, and BSON
+ * orders `null` BELOW every number, so `$eq`/`$gt`/`$gte` against it are false but `$lte`/`$lt`
+ * are TRUE — `size(chain) <= 0` admitted every parentless document. A filter-level conjunct
+ * has no such ordering to get wrong.
+ *
+ * `requiresParent` only ever appears on a top-level mapping, so the paths produced here are
+ * always rooted at the document. A nested `fields` entry that declared one would need its
+ * path rebased onto the enclosing `$elemMatch` scope instead.
+ */
+const buildRequiredParentsFilter = (
+  operand: PlanExpressionOperand,
+  mapper: Mapper
+): MongooseFilter | undefined => {
+  const parents = new Set<string>();
+  for (const name of collectVariableNames(operand)) {
+    const parentPath = resolveFieldReference(name, mapper).relation
+      ?.requiresParent;
+    if (parentPath !== undefined) {
+      parents.add(parentPath);
+    }
+  }
+  if (parents.size === 0) {
+    return undefined;
+  }
+  const clauses = [...parents].map((parentPath) => ({
+    [`${parentPath}.0`]: { $exists: true },
+  }));
+  return clauses.length === 1 ? clauses[0]! : { $and: clauses };
+};
+
 const buildNestedObject = (path: string[], value: any) =>
   path.reduceRight(
     (acc: any, key: string, index: number) =>
@@ -932,9 +981,16 @@ const withEvaluationGuards = (
   const guards = operands
     .flatMap(collectGuardedExpressions)
     .map((expression) => buildEvaluationGuard(expression, mapper));
-  return guards.length === 0
+  // The absent to-one parent is the other way an operand can be undefined, and it belongs
+  // here with the rest: a filter-level conjunct applies to whatever `filter` already is, so
+  // both the plain comparison and the `$nor` a negation wraps it in inherit it (#315, #316).
+  const requiredParents = operands
+    .map((operand) => buildRequiredParentsFilter(operand, mapper))
+    .filter((parents): parents is MongooseFilter => parents !== undefined);
+  const conjuncts = [...guards, ...requiredParents];
+  return conjuncts.length === 0
     ? guardedFilter
-    : { $and: [...guards, guardedFilter] };
+    : { $and: [...conjuncts, guardedFilter] };
 };
 
 const getOperandAt = (
@@ -1401,6 +1457,9 @@ const buildMongooseFilterFromCerbosExpression = (
           ),
         ],
       };
+      // withEvaluationGuards ANDs its conjuncts OUTSIDE this $nor, which is where the
+      // absent-parent requirement has to sit: inside, the negation would flip it along with
+      // the predicate and readmit every parentless document (#315, #316).
       return withEvaluationGuards(negatedFilter, [operand], mapper);
     }
 

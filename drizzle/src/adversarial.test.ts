@@ -3,7 +3,17 @@ import * as path from "path";
 
 import { afterAll, beforeAll, describe, expect, test } from "@jest/globals";
 import { GRPC as Cerbos } from "@cerbos/grpc";
-import type { Principal, Resource, Value } from "@cerbos/core";
+import {
+  PlanExpression,
+  PlanExpressionValue,
+  PlanExpressionVariable,
+} from "@cerbos/core";
+import type {
+  PlanExpressionOperand,
+  Principal,
+  Resource,
+  Value,
+} from "@cerbos/core";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
@@ -604,7 +614,7 @@ describe("adversarial conformance corpus", () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(140);
+    expect(MANIFEST_ACTIONS.size).toBe(143);
     expect(NULL_REPRESENTATION_OMITTED).toHaveLength(1);
     expect(misclassified).toEqual([]);
     expect(
@@ -723,14 +733,78 @@ describe("adversarial conformance corpus", () => {
     expect(await adapterFilteredIds(action)).toEqual(allIds);
   });
 
+  // The corpus pins two count spellings over the chain — `size(...) == 0` and
+  // `!(size(...) > 0)` — but the guard has to be a property of the chain rather than of the
+  // two spellings that happen to be pinned. These synthesise the remaining
+  // threshold/polarity combinations onto the same seeded store and assert the parentless rows
+  // stay out of every one, including an arbitrary-N threshold neither corpus action reaches
+  // (cerbos/query-plan-adapters#316). This adapter guards the COUNT expression itself, so it
+  // was already aligned — the assertion pins that it stays that way.
+  test("every count threshold over the chain inherits the absent-parent guard", async () => {
+    const chain = new PlanExpressionVariable(
+      "request.resource.attr.mainCategory.subCategories"
+    );
+    const size = new PlanExpression("size", [chain]);
+    const compare = (operator: string, threshold: number) =>
+      new PlanExpression(operator, [size, new PlanExpressionValue(threshold)]);
+    const negate = (condition: PlanExpressionOperand) =>
+      new PlanExpression("not", [condition]);
+
+    const filteredIdsFor = (condition: PlanExpressionOperand): string[] => {
+      const result = queryPlanToDrizzle({
+        queryPlan: {
+          kind: PlanKind.CONDITIONAL,
+          condition,
+          cerbosCallId: "synthetic",
+          requestId: "synthetic",
+          validationErrors: [],
+          metadata: undefined,
+        },
+        mapper: MAPPER,
+      });
+      expect(result.kind).toBe(PlanKind.CONDITIONAL);
+      const rows = db
+        .select({ id: adversarialResources.id })
+        .from(adversarialResources)
+        .where(result.kind === PlanKind.CONDITIONAL ? result.filter : undefined)
+        .all();
+      return rows.map((row) => row.id).sort();
+    };
+
+    // Every seed that HAS a mainCategory holds at least one subCategory, and the 16 without
+    // it are CEL missing-path errors — so each of these is empty unless the guard leaks.
+    const emptyByConstruction: [string, PlanExpressionOperand][] = [
+      ["size(chain) == 0", compare("eq", 0)],
+      ["size(chain) <= 0", compare("le", 0)],
+      ["size(chain) >= 2", compare("ge", 2)],
+      ["!(size(chain) > 0)", negate(compare("gt", 0))],
+      ["!(size(chain) >= 1)", negate(compare("ge", 1))],
+      ["!(size(chain) < 2)", negate(compare("lt", 2))],
+    ];
+
+    for (const [shape, condition] of emptyByConstruction) {
+      expect([shape, filteredIdsFor(condition)]).toEqual([shape, []]);
+    }
+
+    // The mirror image, so the loop above cannot pass by denying everything: `>= 0` and `< 2`
+    // are TRUE for exactly the rows that HAVE the parent.
+    const withParent = await oracleAllowedIds("w1-size-nonneg-chain");
+    expect(withParent.length).toBeGreaterThan(0);
+    expect(withParent.length).toBeLessThan(SEEDS.length);
+    expect(filteredIdsFor(compare("ge", 0))).toEqual(withParent);
+    expect(filteredIdsFor(compare("lt", 2))).toEqual(withParent);
+  });
+
   test("oracle is not degenerate", async () => {
     // Guard the guard: at least one action must produce a non-empty, non-total oracle set,
     // otherwise the differential comparison could pass vacuously (e.g. PDP denying all).
-    // w1-size-zero-chain is deliberately absent: its oracle is empty by construction (no
-    // seed holds a to-one parent with zero children), so it cannot satisfy this guard. Its
-    // three siblings below carry the anti-vacuity assertion for that group.
+    // w1-size-zero-chain and w1-not-size-chain are deliberately absent: their oracles are
+    // empty by construction (no seed holds a to-one parent with zero children), so they
+    // cannot satisfy this guard. Their siblings below carry the anti-vacuity assertion for
+    // that group.
     for (const action of ["vf-le", "like-percent", "all-on-empty", "pv-exists", "pv-all", "null-eq", "null-ne",
       "w1-all-chain", "w1-not-exists-chain", "w1-size-nonneg-chain",
+      "w1-not-in-chain", "w1-not-hasint-chain",
       "cr-div-neg-zero", "cr-div-other-column", "cr-div-then-add", "cr-div-then-add-ne"]) {
       const ids = await oracleAllowedIds(action);
       expect(ids.length).toBeGreaterThan(0);

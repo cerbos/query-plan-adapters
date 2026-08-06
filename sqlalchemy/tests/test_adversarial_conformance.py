@@ -384,6 +384,12 @@ def _require_hops(rel: _Relation, expr: Any):
     The CASE has no ELSE on purpose: a missing hop yields NULL, and NOT NULL is
     still NULL, so the row stays excluded under BOTH polarities — matching CEL
     treating the missing path as an error (a deny).
+
+    EVERY operator whose answer comes off a chain has to go through here, not
+    just the collection macros. A bare ``_exists_where`` is two-valued, so it is
+    FALSE for an absent to-one parent and its negation is TRUE — which is how
+    membership and ``hasIntersection`` kept readmitting every parentless row
+    after the macros were fixed (cerbos/query-plan-adapters#315).
     """
     guard = _hop_exists(rel)
     if guard is None:
@@ -474,17 +480,23 @@ def _has_intersection_fn(mapped: Any, values: Any):
             raise ValueError(
                 f"hasIntersection over relation without member field: {mapped!r}"
             )
-        return _exists_where(mapped, _scalar_membership(mapped.member_field, values))
+        return _require_hops(
+            mapped,
+            _exists_where(mapped, _scalar_membership(mapped.member_field, values)),
+        )
 
     # hasIntersection(map(coll, x), list): map errors on any erroring element
     # (no absorption), so the error guard comes FIRST.
     if not (isinstance(mapped, tuple) and mapped[0] == "map"):
         raise ValueError(f"hasIntersection over unsupported operand: {mapped!r}")
     _, rel, projected = mapped
-    return case(
-        (_exists_where(rel, projected.is_(None)), null()),
-        (_exists_where(rel, _scalar_membership(projected, values)), true()),
-        else_=false(),
+    return _require_hops(
+        rel,
+        case(
+            (_exists_where(rel, projected.is_(None)), null()),
+            (_exists_where(rel, _scalar_membership(projected, values)), true()),
+            else_=false(),
+        ),
     )
 
 
@@ -512,7 +524,7 @@ def _relation_membership(relation: _Relation, value: Any):
         )
     else:
         predicate = member == value
-    return _exists_where(relation, predicate)
+    return _require_hops(relation, _exists_where(relation, predicate))
 
 
 def _in_fn(column: Any, value: Any):
@@ -809,7 +821,7 @@ class TestAdversarialConformance:
 
         # Deliberate tripwires: a corpus edit must bump these in the same
         # change, so a new hostile action cannot join (or vanish) silently.
-        assert len(MANIFEST_ACTIONS) == 140
+        assert len(MANIFEST_ACTIONS) == 143
         assert len(SEEDS) == 20
         assert misclassified == []
         assert SQLALCHEMY_SUPPORTED_EXPECTED <= {
@@ -980,12 +992,15 @@ class TestAdversarialConformance:
             "pv-all",
             "null-eq",
             "null-ne",
-            # #309/#312/#311. w1-size-zero-chain and the two string casts are absent
-            # on purpose: their oracles are empty by CONSTRUCTION, so they cannot
-            # satisfy this guard; cast-int-double stands in for the cast group.
+            # #309/#312/#311/#315/#316. w1-size-zero-chain, w1-not-size-chain and
+            # the two string casts are absent on purpose: their oracles are empty by
+            # CONSTRUCTION, so they cannot satisfy this guard; cast-int-double stands
+            # in for the cast group.
             "w1-all-chain",
             "w1-not-exists-chain",
             "w1-size-nonneg-chain",
+            "w1-not-in-chain",
+            "w1-not-hasint-chain",
             "cr-div-neg-zero",
             "cr-div-other-column",
             "cr-div-then-add",

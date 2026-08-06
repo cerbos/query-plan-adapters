@@ -286,7 +286,7 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `check()` decisio
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 128 of the 130 reference conformance actions |
+| Oracle-tested | 131 of the 133 reference conformance actions |
 | Fail-closed corpus shapes | Regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an ambiguous string column, `int()`/`double()` casts, `filter()`/`map()` used as a condition, and arithmetic composed on a division whose denominator may be zero (10 actions) |
 | Representation-dependent | `null-eq-missing` — rejected under `NullAttributeRepresentation.OMITTED`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute rows; this is pinned separately as an upstream divergence |
