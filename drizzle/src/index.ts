@@ -434,8 +434,8 @@ const resolveTableName = (table: Table, reference: string): string => {
 };
 
 /**
- * The hops a dotted path traverses BEFORE its final collection, minus any the enclosing
- * lambda scope already established.
+ * Make `inner` UNKNOWN (SQL NULL) unless every intermediate to-one hop of a dotted path
+ * exists.
  *
  * CEL cannot dot through a list, so every intermediate segment of `a.b.c` is a to-ONE
  * parent: when it is absent the caller sends no attribute at all and CEL raises a
@@ -444,22 +444,10 @@ const resolveTableName = (table: Table, reference: string): string => {
  * `all` goes vacuously TRUE, `!exists` goes TRUE and the count goes 0, each returning rows
  * the PDP denies (cerbos/query-plan-adapters#309).
  *
- * Hops listed in `skipRelations` are already correlated by an enclosing subquery and exist
- * there by construction, so they must not be re-required off the root.
- */
-const unskippedLeadingRelations = (
-  leadingRelations: RelationMapping[],
-  options?: BuildFilterOptions
-): RelationMapping[] =>
-  leadingRelations.filter(
-    (relation) => !options?.skipRelations?.has(relation)
-  );
-
-/**
- * Make `inner` UNKNOWN (SQL NULL) unless every intermediate to-one hop exists, so an
- * absent parent stays excluded under BOTH polarities instead of collapsing onto the
- * empty-collection case. The CASE has no ELSE on purpose: a missing hop yields NULL, and
- * `NOT NULL` is still NULL.
+ * The CASE has no ELSE on purpose: a missing hop yields NULL, and `NOT NULL` is still
+ * NULL, so the row stays excluded under BOTH polarities. Hops listed in `skipRelations`
+ * are already correlated by an enclosing subquery and exist there by construction, so they
+ * must not be re-required off the root.
  */
 const requireLeadingHops = (
   leadingRelations: RelationMapping[],
@@ -467,7 +455,9 @@ const requireLeadingHops = (
   reference: string,
   options?: BuildFilterOptions
 ): SQL => {
-  const required = unskippedLeadingRelations(leadingRelations, options);
+  const required = leadingRelations.filter(
+    (relation) => !options?.skipRelations?.has(relation)
+  );
   if (required.length === 0) {
     return inner;
   }
@@ -834,10 +824,7 @@ const CONVERSION_TARGETS: Record<string, string> = {
  * Nothing in the plan says what type the column holds, so the adapter cannot pick a
  * faithful lowering per row. Fail closed instead (cerbos/query-plan-adapters#311).
  */
-const UNSUPPORTED_CONVERSIONS: Record<string, string> = {
-  int: "int()",
-  double: "double()",
-};
+const UNSUPPORTED_CONVERSIONS = new Set(["int", "double"]);
 
 const buildValueExpressionFromValue = (value: Value): SQL => sql`${value}`;
 
@@ -1083,9 +1070,9 @@ const buildValueExpression = (
     return sql`(${left} ${sql.raw(op)} ${right})`;
   }
 
-  if (operator in UNSUPPORTED_CONVERSIONS) {
+  if (UNSUPPORTED_CONVERSIONS.has(operator)) {
     throw new Error(
-      `Cannot translate ${UNSUPPORTED_CONVERSIONS[operator]}: SQL CAST does not reproduce ` +
+      `Cannot translate ${operator}(): SQL CAST does not reproduce ` +
         `CEL conversion semantics — it reads a numeric prefix where CEL requires the whole ` +
         `string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates ` +
         `toward zero. The adapter rejects the shape instead of returning rows the PDP denies`
@@ -2147,8 +2134,6 @@ const foldWithSubstitution = (
       return left * right;
     case "div":
       return left / right;
-    case "mod":
-      return left % right;
     default:
       return undefined;
   }

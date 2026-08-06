@@ -12,6 +12,7 @@ from typing import (
     Dict,
     List,
     Literal,
+    NoReturn,
     Protocol,
     Tuple,
     Type,
@@ -29,7 +30,6 @@ from sqlalchemy import (
     Column,
     DateTime,
     Float,
-    Integer,
     String,
     Table,
     and_,
@@ -239,6 +239,7 @@ def _float_div(c: Any, v: Any) -> Any:
     # The finite arm keeps a NULLIF guard: it can never be selected when the
     # denominator is zero, but dialects that evaluate CASE arms eagerly would
     # otherwise abort the whole query on a division by zero.
+    #
     # IEEE-754 keeps the sign of a zero, so `n / -0.0` is the OPPOSITE infinity from
     # `n / 0.0`. A CONSTANT denominator carries its sign on the wire (the planner ships
     # `-0` verbatim and protobuf doubles preserve the sign bit), so it must be applied.
@@ -308,7 +309,7 @@ def _arith_over_conditional(op_fn: Any, left: Any, right: Any) -> Any:
     return op_fn(left, right)
 
 
-def _reject_numeric_cast(operator: str) -> Any:
+def _reject_numeric_cast(operator: str) -> NoReturn:
     """Fail closed on CEL's int()/double().
 
     CEL reads a WHOLE string or raises, and an error denies the row; SQL reads

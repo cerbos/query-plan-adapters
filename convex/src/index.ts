@@ -881,10 +881,8 @@ const evaluateExpression = (
     case "mult":
     case "div":
     case "mod": {
-      const leftOperand = getOperandAt(operands, 0, `${operator} left`);
-      const rightOperand = getOperandAt(operands, 1, `${operator} right`);
-      const left = resolve(leftOperand);
-      const right = resolve(rightOperand);
+      const left = resolve(getOperandAt(operands, 0, `${operator} left`));
+      const right = resolve(getOperandAt(operands, 1, `${operator} right`));
       if (typeof left !== "number" || typeof right !== "number") {
         return EVALUATION_ERROR;
       }

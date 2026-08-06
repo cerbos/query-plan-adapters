@@ -1683,7 +1683,7 @@ public final class SpringDataQueryPlanAdapter {
                     };
 
                     Supplier<Predicate> zeroDivisor = divisor instanceof NumericOperand.Constant
-                            ? () -> cb.and()
+                            ? () -> cb.conjunction()
                             : () -> cb.equal(sqlOf(divisor), 0.0);
                     Supplier<Predicate> zeroDividend = () -> cb.equal(sqlOf(dividend), 0.0);
                     Supplier<Predicate> positiveDividend = () -> cb.gt(sqlOf(dividend), 0.0);
@@ -1818,13 +1818,10 @@ public final class SpringDataQueryPlanAdapter {
                 if (!ARITHMETIC_OPS.contains(op)) {
                     return false;
                 }
-                if ("div".equals(op) && expr.getOperandsCount() == 2) {
-                    NumericOperand divisor = resolveNumericOperand(expr.getOperands(1), scope);
-                    if (!(divisor instanceof NumericOperand.Constant dc) || dc.value() == 0.0) {
+                for (Operand child : expr.getOperandsList()) {
+                    if (isZeroCapableDivisionOperand(child, scope)) {
                         return true;
                     }
-                }
-                for (Operand child : expr.getOperandsList()) {
                     if (child.getNodeCase() == Operand.NodeCase.EXPRESSION
                             && containsZeroCapableDivision(child.getExpression(), scope)) {
                         return true;

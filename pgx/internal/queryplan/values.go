@@ -5,6 +5,7 @@ package queryplan
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"math"
 	"regexp"
@@ -205,6 +206,12 @@ func floatDiv(l, r value) (value, error) {
 	}, nil
 }
 
+// errNonFiniteWithColumn is returned when a NaN or infinity would have to be combined with a
+// column value: SQL has no literal for either, so there is nothing to bind.
+var errNonFiniteWithColumn = errors.New(
+	"arithmetic combines a non-finite value with a column, which SQL cannot carry",
+)
+
 // arithOverConditional distributes a binary arithmetic operator across a retained ternary, so a
 // non-finite arm keeps propagating symbolically instead of being lowered to SQL.
 //
@@ -214,15 +221,15 @@ func floatDiv(l, r value) (value, error) {
 // when neither operand is conditional.
 func arithOverConditional(op ArithOp, l, r value) (value, bool, error) {
 	combine := func(left, right value) (value, error) {
-		if lf, ok := asFloat(left); ok {
-			if rf, ok := asFloat(right); ok {
-				folded, err := foldArithmetic(op, lf, rf)
-				if err != nil {
-					return nil, err
-				}
-				if folded != nil {
-					return *folded, nil
-				}
+		lf, lok := asFloat(left)
+		rf, rok := asFloat(right)
+		if lok && rok {
+			folded, err := foldArithmetic(op, lf, rf)
+			if err != nil {
+				return nil, err
+			}
+			if folded != nil {
+				return *folded, nil
 			}
 		}
 		if op == OpMod {
@@ -241,20 +248,18 @@ func arithOverConditional(op ArithOp, l, r value) (value, bool, error) {
 		// A non-finite operand absorbs every finite one under +, -, * and /, so fold it here
 		// rather than asking asExpr for a SQL representation that does not exist.
 		if lc, ok := left.(ieeeConst); ok {
-			if rf, ok := asFloat(right); ok {
-				return ieeeConst{v: applyIEEE(op, lc.v, rf)}, nil
+			rf, ok := asFloat(right)
+			if !ok {
+				return nil, errNonFiniteWithColumn
 			}
-			return nil, fmt.Errorf(
-				"arithmetic combines a non-finite value with a column, which SQL cannot carry",
-			)
+			return ieeeConst{v: applyIEEE(op, lc.v, rf)}, nil
 		}
 		if rc, ok := right.(ieeeConst); ok {
-			if lf, ok := asFloat(left); ok {
-				return ieeeConst{v: applyIEEE(op, lf, rc.v)}, nil
+			lf, ok := asFloat(left)
+			if !ok {
+				return nil, errNonFiniteWithColumn
 			}
-			return nil, fmt.Errorf(
-				"arithmetic combines a non-finite value with a column, which SQL cannot carry",
-			)
+			return ieeeConst{v: applyIEEE(op, lf, rc.v)}, nil
 		}
 		lExpr, err := asExpr(left)
 		if err != nil {
@@ -304,8 +309,8 @@ func applyIEEE(op ArithOp, l, r float64) float64 {
 	case OpDiv:
 		return l / r
 	case OpMod:
-		// Unreachable: arithOverConditional rejects OpMod before substituting an arm.
-		return math.NaN()
+		// arithOverConditional rejects OpMod before substituting an arm: CEL's % is
+		// integer-only over doubles, so there is no IEEE answer to give.
 	}
 	return math.NaN()
 }
