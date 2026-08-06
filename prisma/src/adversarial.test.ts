@@ -148,7 +148,7 @@ const MANIFEST_ACTIONS = new Set([
   // must still enter this manifest, so the size tripwire and the classified-exactly-once
   // check flag it for triage here instead of letting the action silently vanish from this
   // harness. Classification/skipping still uses the Prisma-filtered set.
-  ...actionsFile.knownDivergences.map((entry) => entry.action),
+  ...(actionsFile.knownDivergences ?? []).map((entry) => entry.action),
 ]);
 
 function doubleFor(seed: Seed): number | null {
