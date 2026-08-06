@@ -174,3 +174,18 @@ two agree and the action passes vacuously. Pass corpus data through verbatim.
 - Regenerate build artifacts in the same commit as source changes
 - Changing what an adapter can translate means updating its `conformance/actions.json` entry and its README contract table in the same commit
 - When an adapter cannot express a shape, make it throw with a message naming the real mechanism — never emit a best-effort filter
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues on `cerbos/query-plan-adapters`, via the `gh` CLI. Tag every affected adapter with its
+per-adapter label, or `conformance` for corpus-wide work. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical roles, each label string equal to its name. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
