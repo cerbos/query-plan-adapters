@@ -79,7 +79,8 @@ Some adapters need additional services:
 ## Conformance
 
 `conformance/` is the shared adversarial corpus every adapter is proved against: one hostile policy
-suite, one set of hostile seed rows, one classification ledger, and golden planner wire fixtures.
+suite, one set of hostile seed rows, one derived-field table, one classification ledger, and golden
+planner wire fixtures.
 It exists because the same semantic bug — value-first operand inversion, LIKE metacharacter leaks,
 three-valued logic under negation — has historically shipped identically to more than one adapter.
 
@@ -166,11 +167,19 @@ attribute allowlist, a fixed column list). A projection silently drops anything 
 depends on, and because the same projected input feeds both the plan and the check() oracle, the
 two agree and the action passes vacuously. Pass corpus data through verbatim.
 
+Every harness declares the exact `seeds.json` keys and `derived-fields.json` fields it consumes and
+asserts set equality against the corpus, so adding a seed field fails all ten loudly instead of
+being dropped from both sides at once. Adding a field means updating those declarations
+deliberately — that is the point of the guard, not an obstacle to route around. The derived fields
+(`createdBy`, `aDouble`, `createdAt`, `scope`, `labels`) live in `conformance/derived-fields.json`;
+never recompute them in a harness.
+
 ## Working with Adapters
 
 - Edit only `src/` — never commit `lib/` until tests pass
 - Shared policies in `/policies/` affect all adapters; edit carefully
 - `conformance/` affects all adapters too: a change there re-runs every adapter's CI, and adding an action requires classifying it for all ten
+- Adding a seed row means adding its `conformance/derived-fields.json` entry in the same commit; adding a seed *field* also means widening every harness's declared key set — both are enforced, not optional
 - Regenerate build artifacts in the same commit as source changes
 - Changing what an adapter can translate means updating its `conformance/actions.json` entry and its README contract table in the same commit
 - When an adapter cannot express a shape, make it throw with a message naming the real mechanism — never emit a best-effort filter

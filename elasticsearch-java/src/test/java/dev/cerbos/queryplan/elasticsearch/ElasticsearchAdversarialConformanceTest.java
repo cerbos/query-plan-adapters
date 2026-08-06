@@ -1,7 +1,9 @@
 package dev.cerbos.queryplan.elasticsearch;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.cerbos.queryplan.elasticsearch.ElasticsearchQueryPlanAdapter.Result;
 import dev.cerbos.sdk.CerbosBlockingClient;
@@ -30,17 +32,19 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -82,18 +86,35 @@ class ElasticsearchAdversarialConformanceTest {
         return Path.of(System.getProperty("user.dir"), "..", "conformance").normalize();
     }
 
-    @JsonIgnoreProperties(ignoreUnknown = true)
     private record Tag(String id, String name) {}
 
-    @JsonIgnoreProperties(ignoreUnknown = true)
+    /**
+     * One hostile row. {@code note} is corpus documentation this harness never reads; it is named
+     * so that strict decoding accepts it, and it is the one seed key {@link #SEED_KEYS} omits.
+     */
     private record Seed(String id, boolean aBool, String aString, int aNumber,
-                        String aOptionalString, List<Tag> tags, List<String> subCategoryNames) {}
+                        String aOptionalString, List<Tag> tags, List<String> subCategoryNames,
+                        String note) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record PrincipalSpec(String id, List<String> roles, Map<String, List<String>> attr) {}
 
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    private record SeedsFile(PrincipalSpec principal, String resourceKind, List<Seed> seeds) {}
+    /**
+     * conformance/seeds.json. Every key the file carries is named, including the prose ones,
+     * because unknown properties are rejected rather than ignored: a seed field this harness does
+     * not consume would be dropped from the indexed document AND the check() oracle at once, and
+     * the differential would agree for the wrong reason.
+     */
+    private record SeedsFile(@JsonProperty("$schema") String schema, String description,
+                             PrincipalSpec principal, String resourceKind, String principalNote,
+                             List<Seed> seeds) {}
+
+    /** One seed's derived fields, exactly as conformance/derived-fields.json carries them. */
+    private record DerivedEntry(String createdBy, Double aDouble, String createdAt, String scope,
+                                List<String> labels) {}
+
+    private record DerivedFile(@JsonProperty("$schema") String schema, String description,
+                               List<String> fields, Map<String, DerivedEntry> derived) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record UnsupportedShape(String action) {}
@@ -112,8 +133,33 @@ class ElasticsearchAdversarialConformanceTest {
                                List<AdapterOutcome> nullRepresentationOmitted,
                                List<KnownDivergence> knownDivergences) {}
 
+    // -- corpus coverage guards -----------------------------------------------------------------
+    //
+    // The same parsed seed feeds the indexed document AND the check() oracle, so a corpus field
+    // this harness does not consume is dropped from both sides at once and the differential agrees
+    // for the wrong reason — the projection trap conformance/README.md describes for actions.json,
+    // applied to the seeds. Asserting set equality catches both directions: a corpus key nothing
+    // here reads, and a key this harness reads that the corpus no longer carries.
+
+    private static final List<String> SEED_KEYS = List.of(
+            "id", "aBool", "aString", "aNumber", "aOptionalString", "tags", "subCategoryNames");
+
+    /** Corpus prose, never read by a harness: the one documented exclusion from SEED_KEYS. */
+    private static final String SEED_NOTE_KEY = "note";
+
+    /**
+     * The one nested object array a seed carries. A key added inside an element is dropped from
+     * both sides of the differential just as silently as a top-level one, so it is guarded the
+     * same way.
+     */
+    private static final List<String> TAG_KEYS = List.of("id", "name");
+
+    private static final List<String> DERIVED_KEYS =
+            List.of("createdBy", "aDouble", "createdAt", "scope", "labels");
+
     private static SeedsFile seedsFile;
     private static ActionsFile actionsFile;
+    private static DerivedFile derivedFile;
     private static List<Seed> seeds;
     private static List<String> oracleActions;
     private static List<String> throwingActions;
@@ -142,7 +188,10 @@ class ElasticsearchAdversarialConformanceTest {
         Path conformance = conformanceDir();
         seedsFile = MAPPER.readValue(conformance.resolve("seeds.json").toFile(), SeedsFile.class);
         actionsFile = MAPPER.readValue(conformance.resolve("actions.json").toFile(), ActionsFile.class);
+        derivedFile = MAPPER.readValue(
+                conformance.resolve("derived-fields.json").toFile(), DerivedFile.class);
         seeds = seedsFile.seeds();
+        assertCorpusCoverage(conformance);
         classifyActions();
 
         cerbos = new GenericContainer<>(CerbosTestImage.IMAGE)
@@ -526,63 +575,87 @@ class ElasticsearchAdversarialConformanceTest {
         }
     }
 
+    /**
+     * Proves this harness consumes every seed key and every derived field the corpus defines, and
+     * nothing it does not. Rejecting unknown properties on decode cannot do this alone: it catches
+     * an added key but says nothing about one that disappears, and a disappeared key decodes to its
+     * default on both sides of the differential.
+     */
+    private static void assertCorpusCoverage(Path conformance) throws IOException {
+        JsonNode rawSeeds = MAPPER.readTree(conformance.resolve("seeds.json").toFile()).get("seeds");
+        assertEquals(seeds.size(), rawSeeds.size(), "seeds.json rows lost in decoding");
+        for (int i = 0; i < rawSeeds.size(); i++) {
+            String label = "seeds.json seeds[" + i + "]";
+            assertKeys(label, keysOf(rawSeeds.get(i)), SEED_KEYS, List.of(SEED_NOTE_KEY));
+            JsonNode rawTags = rawSeeds.get(i).get("tags");
+            for (int j = 0; j < rawTags.size(); j++) {
+                assertKeys(label + ".tags[" + j + "]", keysOf(rawTags.get(j)), TAG_KEYS,
+                        List.of());
+            }
+        }
+
+        assertKeys("derived-fields.json fields", derivedFile.fields(), DERIVED_KEYS, List.of());
+        assertEquals(seeds.stream().map(Seed::id).collect(Collectors.toCollection(TreeSet::new)),
+                new TreeSet<>(derivedFile.derived().keySet()),
+                "derived-fields.json must carry exactly one entry per seeds.json id");
+        JsonNode rawDerived =
+                MAPPER.readTree(conformance.resolve("derived-fields.json").toFile()).get("derived");
+        for (Map.Entry<String, JsonNode> entry : rawDerived.properties()) {
+            assertKeys("derived-fields.json derived[\"" + entry.getKey() + "\"]",
+                    keysOf(entry.getValue()), DERIVED_KEYS, List.of());
+        }
+    }
+
+    private static void assertKeys(String label, Collection<String> got, Collection<String> want,
+                                   Collection<String> optional) {
+        Set<String> allowed = new LinkedHashSet<>(want);
+        allowed.addAll(optional);
+        for (String key : got) {
+            assertTrue(allowed.contains(key), () -> label + " carries \"" + key
+                    + "\", which this harness does not consume: an unconsumed corpus field is"
+                    + " dropped from the indexed document and the check() oracle at once");
+        }
+        Set<String> missing = new LinkedHashSet<>(want);
+        missing.removeAll(got);
+        assertTrue(missing.isEmpty(),
+                () -> label + " is missing " + missing + ", which this harness consumes");
+    }
+
+    private static List<String> keysOf(JsonNode node) {
+        return node.properties().stream().map(Map.Entry::getKey).toList();
+    }
+
+    // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") -----
+    //
+    // Read from conformance/derived-fields.json rather than restated here. The same value feeds the
+    // indexed document and the check() oracle, so a transcription error would be self-consistent
+    // and invisible to the differential; one machine-readable definition makes that impossible.
+
+    private static DerivedEntry derivedFor(Seed seed) {
+        DerivedEntry entry = derivedFile.derived().get(seed.id());
+        assertNotNull(entry,
+                () -> "derived-fields.json has no entry for seed \"" + seed.id() + "\"");
+        return entry;
+    }
+
     private static String isoFor(Seed seed) {
-        return seed.aNumber() >= 2 ? "2024-06-01T00:00:00Z" : "2026-06-01T00:00:00Z";
+        return derivedFor(seed).createdBy();
     }
 
     private static Double doubleFor(Seed seed) {
-        return switch (seed.id()) {
-            case "a1" -> -0.6;
-            case "a2" -> 0.25;
-            case "a3" -> null;
-            default -> seed.aNumber() + 0.3;
-        };
+        return derivedFor(seed).aDouble();
     }
 
     private static Instant timestampFor(Seed seed) {
-        return switch (seed.id()) {
-            case "a1" -> Instant.parse("2020-03-15T10:30:00Z");
-            case "a2" -> Instant.parse("2037-01-01T00:00:00Z");
-            case "a3" -> null;
-            case "a4" -> Instant.parse("2024-06-01T00:00:00Z");
-            case "a5" -> Instant.parse("2020-03-15T10:30:00.123456Z");
-            default -> seed.aNumber() >= 2
-                    ? Instant.parse("2036-06-06T06:06:06Z")
-                    : Instant.parse("2021-05-05T05:05:05Z");
-        };
+        String value = derivedFor(seed).createdAt();
+        return value == null ? null : Instant.parse(value);
     }
 
     private static List<String> labelsFor(Seed seed) {
-        return switch (seed.id()) {
-            case "a1" -> List.of("gold", "silver");
-            case "a6" -> Arrays.asList(null, "silver");
-            case "a8" -> List.of("silver");
-            case "c1" -> List.of("Gold");
-            default -> List.of();
-        };
+        return derivedFor(seed).labels();
     }
 
     private static String scopeFor(Seed seed) {
-        return switch (seed.id()) {
-            case "a1" -> "dept";
-            case "a2" -> "dept.eng";
-            case "a3" -> "dept.eng.platform";
-            case "a4" -> "dept.eng.platform.obs";
-            case "a5" -> "dept.engineering";
-            case "a6" -> "dept.sales";
-            case "a8" -> "";
-            case "a9" -> "50%";
-            case "b1" -> "50%:a_b:x";
-            case "b2" -> "50x:a_b:y";
-            case "b3" -> "50%:aXb:y";
-            case "b4" -> "50%:a_b";
-            case "b5" -> "dept.eng.platform2";
-            case "b6" -> "50%.a_b";
-            case "c1" -> "Dept.Eng";
-            case "c2" -> "dept.eng.";
-            case "d1" -> "[env]:prod:eu";
-            case "d2" -> "e:prod:eu";
-            default -> null;
-        };
+        return derivedFor(seed).scope();
     }
 }

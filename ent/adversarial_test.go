@@ -433,9 +433,9 @@ func (h *harness) seed(t *testing.T) {
 				"id", "a_bool", "a_string", "a_number", "a_double",
 				"a_optional_string", "created_by", "scope", "created_at",
 			},
-			seed.ID, seed.ABool, seed.AString, seed.ANumber, nullableFloat(aDouble(seed)),
-			nullableString(seed.AOptionalString), createdBy(seed),
-			nullableString(scopeOf(seed)), h.storedTimestamp(t, seed))
+			seed.ID, seed.ABool, seed.AString, seed.ANumber, nullableFloat(h.corpus.aDouble(seed)),
+			nullableString(seed.AOptionalString), h.corpus.createdBy(seed),
+			nullableString(h.corpus.scopeOf(seed)), h.storedTimestamp(t, seed))
 
 		for _, tag := range seed.Tags {
 			h.exec(t, tagTable, []string{"tag_id", "name", "resource_id"},
@@ -447,7 +447,7 @@ func (h *harness) seed(t *testing.T) {
 			h.exec(t, categoryTable, []string{"id", "name", "resource_id"}, catID, "business", seed.ID)
 			h.exec(t, subCategoryTable, []string{"id", "name", "category_id"}, subID, subName, catID)
 
-			for j, label := range labelsOf(seed) {
+			for j, label := range h.corpus.labelsOf(seed) {
 				h.exec(t, labelTable, []string{"id", "name", "sub_category_id"},
 					fmt.Sprintf("%s-label%d", subID, j), nullableString(label), subID)
 			}
@@ -463,7 +463,7 @@ func (h *harness) seed(t *testing.T) {
 func (h *harness) storedTimestamp(t *testing.T, seed Seed) any {
 	t.Helper()
 
-	raw := createdAt(seed)
+	raw := h.corpus.createdAt(seed)
 	if raw == nil {
 		return nil
 	}
@@ -521,7 +521,7 @@ func (h *harness) checkResource(seed Seed) *cerbos.Resource {
 	}
 
 	labels := make([]any, 0)
-	for _, label := range labelsOf(seed) {
+	for _, label := range h.corpus.labelsOf(seed) {
 		if label == nil {
 			labels = append(labels, map[string]any{})
 		} else {
@@ -541,7 +541,7 @@ func (h *harness) checkResource(seed Seed) *cerbos.Resource {
 		"aBool":      seed.ABool,
 		"aString":    seed.AString,
 		"aNumber":    seed.ANumber,
-		"createdBy":  createdBy(seed),
+		"createdBy":  h.corpus.createdBy(seed),
 		"obj":        map[string]any{"inner": seed.AString},
 		"tags":       tags,
 		"tagNames":   tagNames,
@@ -556,13 +556,13 @@ func (h *harness) checkResource(seed Seed) *cerbos.Resource {
 		attr["owner"] = nil
 	}
 
-	if d := aDouble(seed); d != nil {
+	if d := h.corpus.aDouble(seed); d != nil {
 		attr["aDouble"] = *d
 	}
-	if s := scopeOf(seed); s != nil {
+	if s := h.corpus.scopeOf(seed); s != nil {
 		attr["scope"] = *s
 	}
-	if ts := createdAt(seed); ts != nil {
+	if ts := h.corpus.createdAt(seed); ts != nil {
 		attr["createdAt"] = *ts
 	}
 

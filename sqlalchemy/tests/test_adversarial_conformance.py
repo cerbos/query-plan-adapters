@@ -63,11 +63,74 @@ with open(os.path.join(CONFORMANCE_DIR, "seeds.json"), encoding="utf-8") as f:
     SEEDS_FILE = json.load(f)
 with open(os.path.join(CONFORMANCE_DIR, "actions.json"), encoding="utf-8") as f:
     ACTIONS_FILE = json.load(f)
+with open(os.path.join(CONFORMANCE_DIR, "derived-fields.json"), encoding="utf-8") as f:
+    DERIVED_FILE = json.load(f)
 with open(os.path.join(CONFORMANCE_DIR, "CERBOS_VERSION"), encoding="utf-8") as f:
     CERBOS_VERSION = f.read().strip()
 
 SEEDS: List[Dict[str, Any]] = SEEDS_FILE["seeds"]
 RESOURCE_KIND: str = SEEDS_FILE["resourceKind"]
+
+# -- corpus coverage guards -------------------------------------------------
+#
+# The same parsed seed feeds the stored row AND the check() oracle, so a corpus
+# field this harness does not consume is dropped from both sides at once and the
+# differential agrees for the wrong reason — the projection trap
+# conformance/README.md describes for actions.json, applied to the seeds.
+# Asserting set equality catches both directions: a corpus key nothing here
+# reads, and a key this harness reads that the corpus no longer carries.
+SEED_KEYS = {
+    "id",
+    "aBool",
+    "aString",
+    "aNumber",
+    "aOptionalString",
+    "tags",
+    "subCategoryNames",
+}
+# Corpus prose, never read by a harness: the one documented exclusion.
+SEED_NOTE_KEY = "note"
+# The one nested object array a seed carries. A key added inside an element is
+# dropped from both sides of the differential just as silently as a top-level
+# one, so it is guarded the same way.
+TAG_KEYS = {"id", "name"}
+DERIVED_KEYS = {"createdBy", "aDouble", "createdAt", "scope", "labels"}
+
+
+def _assert_keys(
+    label: str,
+    got: Set[str],
+    want: Set[str],
+    optional: Set[str] = frozenset(),
+) -> None:
+    unconsumed = got - want - optional
+    if unconsumed:
+        raise AssertionError(
+            f"{label} carries {sorted(unconsumed)}, which this harness does not "
+            "consume: an unconsumed corpus field is dropped from the stored row "
+            "and the check() oracle at once"
+        )
+    missing = want - got
+    if missing:
+        raise AssertionError(
+            f"{label} is missing {sorted(missing)}, which this harness consumes"
+        )
+
+
+for _index, _seed in enumerate(SEEDS):
+    _label = f"seeds.json seeds[{_index}]"
+    _assert_keys(_label, set(_seed), SEED_KEYS, {SEED_NOTE_KEY})
+    for _tag_index, _tag in enumerate(_seed["tags"]):
+        _assert_keys(f"{_label}.tags[{_tag_index}]", set(_tag), TAG_KEYS)
+
+DERIVED: Dict[str, Dict[str, Any]] = DERIVED_FILE["derived"]
+_assert_keys("derived-fields.json fields", set(DERIVED_FILE["fields"]), DERIVED_KEYS)
+if set(DERIVED) != {seed["id"] for seed in SEEDS}:
+    raise AssertionError(
+        "derived-fields.json must carry exactly one entry per seeds.json id"
+    )
+for _id, _entry in DERIVED.items():
+    _assert_keys(f'derived-fields.json derived["{_id}"]', set(_entry), DERIVED_KEYS)
 
 # Capability classifications come from the shared manifest. Unsupported
 # conformance actions must throw; globally-unsupported actions promoted for
@@ -124,67 +187,44 @@ SQLALCHEMY_SKIPPED_DIVERGENCES = {
 }
 
 
+# -- deterministic derived fields (conformance/README.md) --------------------
+#
+# Read from conformance/derived-fields.json rather than restated here. The same
+# value feeds the stored row and the check() oracle, so a transcription error
+# would be self-consistent and invisible to the differential; one
+# machine-readable definition is what makes that impossible.
+
+
+def _derived_for(seed: Dict[str, Any]) -> Dict[str, Any]:
+    entry = DERIVED.get(seed["id"])
+    if entry is None:
+        raise AssertionError(
+            f'derived-fields.json has no entry for seed "{seed["id"]}"'
+        )
+    return entry
+
+
 def _iso_for(seed: Dict[str, Any]) -> str:
     """Deterministic ISO instant per seed for the timestamp probe (see
     conformance/README.md): split around the probe's 2025-01-01 threshold."""
-    return "2024-06-01T00:00:00Z" if seed["aNumber"] >= 2 else "2026-06-01T00:00:00Z"
+    return _derived_for(seed)["createdBy"]
 
 
 def _double_for(seed: Dict[str, Any]):
-    if seed["id"] == "a1":
-        return -0.6
-    if seed["id"] == "a2":
-        return 0.25
-    if seed["id"] == "a3":
-        return None
-    return seed["aNumber"] + 0.3
+    return _derived_for(seed)["aDouble"]
 
 
 def _timestamp_for(seed: Dict[str, Any]):
-    timestamps = {
-        "a1": "2020-03-15T10:30:00Z",
-        "a2": "2037-01-01T00:00:00Z",
-        "a3": None,
-        "a4": "2024-06-01T00:00:00Z",
-        "a5": "2020-03-15T10:30:00.123456Z",
-    }
-    value = timestamps.get(
-        seed["id"],
-        "2036-06-06T06:06:06Z" if seed["aNumber"] >= 2 else "2021-05-05T05:05:05Z",
-    )
+    value = _derived_for(seed)["createdAt"]
     return datetime.fromisoformat(value.replace("Z", "+00:00")) if value else None
 
 
 def _scope_for(seed: Dict[str, Any]):
-    return {
-        "a1": "dept",
-        "a2": "dept.eng",
-        "a3": "dept.eng.platform",
-        "a4": "dept.eng.platform.obs",
-        "a5": "dept.engineering",
-        "a6": "dept.sales",
-        "a8": "",
-        "a9": "50%",
-        "b1": "50%:a_b:x",
-        "b2": "50x:a_b:y",
-        "b3": "50%:aXb:y",
-        "b4": "50%:a_b",
-        "b5": "dept.eng.platform2",
-        "b6": "50%.a_b",
-        "c1": "Dept.Eng",
-        "c2": "dept.eng.",
-        "d1": "[env]:prod:eu",
-        "d2": "e:prod:eu",
-    }.get(seed["id"])
+    return _derived_for(seed)["scope"]
 
 
 def _labels_for(seed: Dict[str, Any]):
-    return {
-        "a1": ["gold", "silver"],
-        "a6": [None, "silver"],
-        "a8": ["silver"],
-        "c1": ["Gold"],
-    }.get(seed["id"], [])
+    return _derived_for(seed)["labels"]
 
 
 # ---------------------------------------------------------------------------

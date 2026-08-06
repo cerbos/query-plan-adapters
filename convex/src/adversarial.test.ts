@@ -36,6 +36,20 @@ interface SeedsFile {
   seeds: Seed[];
 }
 
+/** One seed's derived fields, exactly as conformance/derived-fields.json carries them. */
+interface DerivedEntry {
+  createdBy: string;
+  aDouble: number | null;
+  createdAt: string | null;
+  scope: string | null;
+  labels: (string | null)[];
+}
+
+interface DerivedFile {
+  fields: string[];
+  derived: Record<string, DerivedEntry>;
+}
+
 interface ExpectedUnsupported {
   action: string;
 }
@@ -160,6 +174,80 @@ const isActionsFile = (value: unknown): value is ActionsFile =>
   Array.isArray(value["knownDivergences"]) &&
   value["knownDivergences"].every(isKnownDivergence);
 
+const isDerivedEntry = (value: unknown): value is DerivedEntry =>
+  isRecord(value) &&
+  typeof value["createdBy"] === "string" &&
+  (typeof value["aDouble"] === "number" || value["aDouble"] === null) &&
+  (typeof value["createdAt"] === "string" || value["createdAt"] === null) &&
+  (typeof value["scope"] === "string" || value["scope"] === null) &&
+  Array.isArray(value["labels"]) &&
+  value["labels"].every(
+    (label) => label === null || typeof label === "string",
+  );
+
+const isDerivedFile = (value: unknown): value is DerivedFile =>
+  isRecord(value) &&
+  isStringArray(value["fields"]) &&
+  isRecord(value["derived"]) &&
+  Object.values(value["derived"]).every(isDerivedEntry);
+
+// -- corpus coverage guards ---------------------------------------------------------------------
+//
+// The same parsed seed feeds the stored document AND the check() oracle, so a corpus field this
+// harness does not consume is dropped from both sides at once and the differential agrees for the
+// wrong reason — the projection trap conformance/README.md describes for actions.json, applied to
+// the seeds. Asserting set equality catches both directions: a corpus key nothing here reads, and a
+// key this harness reads that the corpus no longer carries.
+
+const SEED_KEYS = [
+  "id",
+  "aBool",
+  "aString",
+  "aNumber",
+  "aOptionalString",
+  "tags",
+  "subCategoryNames",
+] as const;
+
+/** Corpus prose, never read by a harness: the one documented exclusion from SEED_KEYS. */
+const SEED_NOTE_KEY = "note";
+
+/** The one nested object array a seed carries. A key added inside an element is dropped from both
+ * sides of the differential just as silently as a top-level one, so it is guarded the same way. */
+const TAG_KEYS = ["id", "name"] as const;
+
+const DERIVED_KEYS = [
+  "createdBy",
+  "aDouble",
+  "createdAt",
+  "scope",
+  "labels",
+] as const;
+
+function assertKeys(
+  label: string,
+  got: string[],
+  want: readonly string[],
+  optional: readonly string[] = [],
+): void {
+  const allowed = new Set<string>([...want, ...optional]);
+  for (const key of got) {
+    if (!allowed.has(key)) {
+      throw new Error(
+        `${label} carries "${key}", which this harness does not consume: an unconsumed corpus field is dropped from the stored document and the check() oracle at once`,
+      );
+    }
+  }
+  const present = new Set(got);
+  for (const key of want) {
+    if (!present.has(key)) {
+      throw new Error(
+        `${label} is missing "${key}", which this harness consumes`,
+      );
+    }
+  }
+}
+
 const parsedSeeds: unknown = JSON.parse(
   fs.readFileSync(path.join(CONFORMANCE_DIR, "seeds.json"), "utf8"),
 );
@@ -171,6 +259,39 @@ const parsedActions: unknown = JSON.parse(
 );
 if (!isActionsFile(parsedActions)) throw new Error("Invalid conformance actions");
 const actionsFile = parsedActions;
+
+const parsedDerived: unknown = JSON.parse(
+  fs.readFileSync(path.join(CONFORMANCE_DIR, "derived-fields.json"), "utf8"),
+);
+if (!isDerivedFile(parsedDerived)) {
+  throw new Error("Invalid conformance derived fields");
+}
+const derivedFile = parsedDerived;
+
+// seedsFile.seeds holds the parsed JSON rows verbatim, so Object.keys reports the corpus key set.
+// Keep it that way: a parser that rebuilt each row field by field could only ever report the keys
+// this harness already names, and the assertion would pass vacuously.
+seedsFile.seeds.forEach((seed, index) => {
+  const label = `seeds.json seeds[${index}]`;
+  assertKeys(label, Object.keys(seed), SEED_KEYS, [SEED_NOTE_KEY]);
+  seed.tags.forEach((tag, tagIndex) => {
+    assertKeys(`${label}.tags[${tagIndex}]`, Object.keys(tag), TAG_KEYS);
+  });
+});
+
+assertKeys("derived-fields.json fields", derivedFile.fields, DERIVED_KEYS);
+if (Object.keys(derivedFile.derived).length !== seedsFile.seeds.length) {
+  throw new Error(
+    `derived-fields.json has ${Object.keys(derivedFile.derived).length} entries for ${seedsFile.seeds.length} seeds`,
+  );
+}
+for (const seed of seedsFile.seeds) {
+  assertKeys(
+    `derived-fields.json derived["${seed.id}"]`,
+    Object.keys(derivedFor(seed)),
+    DERIVED_KEYS,
+  );
+}
 
 const CONVEX_UNSUPPORTED = actionsFile.adapterUnsupported["convex"] ?? [];
 const UNSUPPORTED_ACTIONS = new Set(
@@ -213,81 +334,39 @@ const MANIFEST_ACTIONS = new Set([
   ...actionsFile.knownDivergences.map((entry) => entry.action),
 ]);
 
-function doubleFor(seed: Seed): number | null {
-  switch (seed.id) {
-    case "a1":
-      return -0.6;
-    case "a2":
-      return 0.25;
-    case "a3":
-      return null;
-    default:
-      return seed.aNumber + 0.3;
+// -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") --------
+//
+// Read from conformance/derived-fields.json rather than restated here. The same value feeds the
+// stored row and the check() oracle, so a transcription error would be self-consistent and
+// invisible to the differential; one machine-readable definition is what makes that impossible.
+
+function derivedFor(seed: Seed): DerivedEntry {
+  const entry = derivedFile.derived[seed.id];
+  if (entry === undefined) {
+    throw new Error(`derived-fields.json has no entry for seed "${seed.id}"`);
   }
+  return entry;
 }
 
+function doubleFor(seed: Seed): number | null {
+  return derivedFor(seed).aDouble;
+}
+
+/** Third-level label names. A null element is a NULL label name — a missing element attribute. */
 function labelsFor(seed: Seed): (string | null)[] {
-  switch (seed.id) {
-    case "a1":
-      return ["gold", "silver"];
-    case "a6":
-      return [null, "silver"];
-    case "a8":
-      return ["silver"];
-    case "c1":
-      return ["Gold"];
-    default:
-      return [];
-  }
+  return derivedFor(seed).labels;
 }
 
 function createdByFor(seed: Seed): string {
-  return seed.aNumber >= 2
-    ? "2024-06-01T00:00:00Z"
-    : "2026-06-01T00:00:00Z";
+  return derivedFor(seed).createdBy;
 }
 
 function timestampFor(seed: Seed): string | null {
-  switch (seed.id) {
-    case "a1":
-      return "2020-03-15T10:30:00Z";
-    case "a2":
-      return "2037-01-01T00:00:00Z";
-    case "a3":
-      return null;
-    case "a4":
-      return "2024-06-01T00:00:00Z";
-    case "a5":
-      return "2020-03-15T10:30:00.123456Z";
-    default:
-      return seed.aNumber >= 2
-        ? "2036-06-06T06:06:06Z"
-        : "2021-05-05T05:05:05Z";
-  }
+  return derivedFor(seed).createdAt;
 }
 
 function scopeFor(seed: Seed): string | null {
-  const scopes: Record<string, string> = {
-    a1: "dept",
-    a2: "dept.eng",
-    a3: "dept.eng.platform",
-    a4: "dept.eng.platform.obs",
-    a5: "dept.engineering",
-    a6: "dept.sales",
-    a8: "",
-    a9: "50%",
-    b1: "50%:a_b:x",
-    b2: "50x:a_b:y",
-    b3: "50%:aXb:y",
-    b4: "50%:a_b",
-    b5: "dept.eng.platform2",
-    b6: "50%.a_b",
-    c1: "Dept.Eng",
-    c2: "dept.eng.",
-    d1: "[env]:prod:eu",
-    d2: "e:prod:eu",
-  };
-  return scopes[seed.id] ?? null;
+  return derivedFor(seed).scope;
 }
 
 function storedDocument(seed: Seed): StoredDocument {

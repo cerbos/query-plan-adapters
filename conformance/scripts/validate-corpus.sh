@@ -181,4 +181,118 @@ if [[ "${seed_count}" != "${unique_seed_count}" ]]; then
   exit 1
 fi
 
+# derived-fields.json materialises README.md's "Deterministic derived fields" rules once for every
+# harness. Nothing downstream can catch a wrong value there: each harness feeds the same entry to
+# both the stored row and the check() oracle, so a bad value makes both sides agree for the wrong
+# reason. These assertions are the only independent restatement of the rules.
+if ! jq -e '
+  (.fields | type) == "array"
+  and (.fields | length) > 0
+  and (.fields | length) == (.fields | unique | length)
+  and all(.fields[]; type == "string" and length > 0)
+' derived-fields.json >/dev/null; then
+  echo "derived-fields.json must declare a non-empty, duplicate-free fields list"
+  exit 1
+fi
+
+jq -r '.seeds[].id' seeds.json | sort >"${VALIDATION_TMP}/seed-ids"
+jq -r '.derived | keys[]' derived-fields.json | sort >"${VALIDATION_TMP}/derived-ids"
+if ! diff -u "${VALIDATION_TMP}/seed-ids" "${VALIDATION_TMP}/derived-ids"; then
+  echo "derived-fields.json must carry exactly one entry per seed id"
+  exit 1
+fi
+
+if ! jq -e '
+  (.fields | sort) as $fields
+  | all(.derived[]; keys == $fields)
+' derived-fields.json >/dev/null; then
+  echo "Every derived-fields.json entry must carry exactly the fields it declares"
+  exit 1
+fi
+
+if ! jq -e '
+  all(.derived[];
+    ((.createdBy | type) == "string")
+    and ((.aDouble | type) == "number" or .aDouble == null)
+    and ((.createdAt | type) == "string" or .createdAt == null)
+    and ((.scope | type) == "string" or .scope == null)
+    and ((.labels | type) == "array")
+    and all(.labels[]; type == "string" or . == null))
+' derived-fields.json >/dev/null; then
+  echo "derived-fields.json entries have the wrong value types"
+  exit 1
+fi
+
+derived_drift="$(jq -r -s '
+  .[1].derived as $derived
+  | .[0].seeds[]
+  | . as $seed
+  | $derived[$seed.id] as $entry
+  | [
+      (if $entry.createdBy != (
+         if $seed.aNumber >= 2 then "2024-06-01T00:00:00Z" else "2026-06-01T00:00:00Z" end
+       ) then "createdBy" else empty end),
+      (if $entry.aDouble != (
+         {"a1": -0.6, "a2": 0.25, "a3": null} as $fixed
+         | if ($fixed | has($seed.id)) then $fixed[$seed.id] else $seed.aNumber + 0.3 end
+       ) then "aDouble" else empty end),
+      (if $entry.createdAt != (
+         {
+           "a1": "2020-03-15T10:30:00Z",
+           "a2": "2037-01-01T00:00:00Z",
+           "a3": null,
+           "a4": "2024-06-01T00:00:00Z",
+           "a5": "2020-03-15T10:30:00.123456Z"
+         } as $fixed
+         | if ($fixed | has($seed.id)) then $fixed[$seed.id]
+           elif $seed.aNumber >= 2 then "2036-06-06T06:06:06Z"
+           else "2021-05-05T05:05:05Z" end
+       ) then "createdAt" else empty end)
+    ]
+  | select(length > 0)
+  | "  \($seed.id): \(join(", "))"
+' seeds.json derived-fields.json)"
+if [[ -n "${derived_drift}" ]]; then
+  echo "derived-fields.json disagrees with the derived-field rules in README.md:"
+  echo "${derived_drift}"
+  exit 1
+fi
+
+# `scope` and `labels` are per-seed tables with no rule to re-derive from, so they are restated
+# here instead. A restatement inside a checker is not a second source of truth: unlike the ten
+# harness copies it replaced, it never feeds a stored row or an oracle, so it cannot make both
+# sides of a differential agree for the wrong reason — it can only fail loudly. Without it these
+# forty values, which drive the hier-* and label oracles on every adapter at once, are checked by
+# nothing.
+cat >"${VALIDATION_TMP}/expected-tables" <<'JSON'
+{
+  "a1": { "scope": "dept",                  "labels": ["gold", "silver"] },
+  "a2": { "scope": "dept.eng",              "labels": [] },
+  "a3": { "scope": "dept.eng.platform",     "labels": [] },
+  "a4": { "scope": "dept.eng.platform.obs", "labels": [] },
+  "a5": { "scope": "dept.engineering",      "labels": [] },
+  "a6": { "scope": "dept.sales",            "labels": [null, "silver"] },
+  "a7": { "scope": null,                    "labels": [] },
+  "a8": { "scope": "",                      "labels": ["silver"] },
+  "a9": { "scope": "50%",                   "labels": [] },
+  "b1": { "scope": "50%:a_b:x",             "labels": [] },
+  "b2": { "scope": "50x:a_b:y",             "labels": [] },
+  "b3": { "scope": "50%:aXb:y",             "labels": [] },
+  "b4": { "scope": "50%:a_b",               "labels": [] },
+  "b5": { "scope": "dept.eng.platform2",    "labels": [] },
+  "b6": { "scope": "50%.a_b",               "labels": [] },
+  "c1": { "scope": "Dept.Eng",              "labels": ["Gold"] },
+  "c2": { "scope": "dept.eng.",             "labels": [] },
+  "d1": { "scope": "[env]:prod:eu",         "labels": [] },
+  "d2": { "scope": "e:prod:eu",             "labels": [] },
+  "e1": { "scope": null,                    "labels": [] }
+}
+JSON
+jq -S '.derived | map_values({scope, labels})' derived-fields.json \
+  >"${VALIDATION_TMP}/actual-tables"
+if ! diff -u <(jq -S . "${VALIDATION_TMP}/expected-tables") "${VALIDATION_TMP}/actual-tables"; then
+  echo "derived-fields.json scope/labels disagree with the tables in README.md"
+  exit 1
+fi
+
 echo "Corpus valid: $(wc -l <"${VALIDATION_TMP}/policy-actions" | tr -d '[:space:]') actions, ${seed_count} seeds"

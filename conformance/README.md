@@ -24,7 +24,12 @@ rows, and one oracle recipe that every adapter's harness implements against its 
   metacharacters `% _ \`, unicode, duplicate/mirrored names) plus the fixed principal used
   throughout. This is the single source of truth an adapter's harness persists into its own
   schema (SQL rows, Prisma records, whatever) AND mirrors into check() oracle calls — see
-  "The oracle recipe" below.
+  "The oracle recipe" below. Every key except `note` must be consumed by every harness; that is
+  asserted, not assumed (see "Deterministic derived fields").
+- `derived-fields.json` — the five attributes derived from each seed (`createdBy`, `aDouble`,
+  `createdAt`, `scope`, `labels`), materialised once per seed id. Every harness reads this file
+  instead of restating the rules; `scripts/validate-corpus.sh` re-derives the rule-based fields
+  from `seeds.json` and fails on drift. See "Deterministic derived fields" below.
 - `actions.json` — every action in `policies/adversarial.yaml`, grouped into `conformance`
   (must match the check() oracle exactly), `adapterUnsupported` (per-adapter lists of conformance
   actions that adapter's query language genuinely cannot express — LIKE-wildcard escaping,
@@ -178,8 +183,21 @@ harness whose PDP connection or policy load silently failed would still pass eve
 
 ### Deterministic derived fields
 
-The corpus keeps raw relational rows compact; these resource attributes and stored columns are
-derived from each seed exactly as follows:
+The corpus keeps raw relational rows compact; five resource attributes and stored columns are
+derived from each seed. **The values live in `derived-fields.json`, one entry per seed id, and
+every harness reads them from there.** They used to be hand-transcribed once per harness, which is
+how a transcription error becomes invisible: the same copy feeds the stored row *and* the check()
+oracle, so a wrong value makes both sides of the differential agree for the wrong reason and
+nothing downstream can catch it (#318).
+
+`scripts/validate-corpus.sh` asserts that the file carries exactly one entry per seed id and that
+every entry carries exactly the fields it declares, re-derives `createdBy`, `aDouble` and
+`createdAt` from `seeds.json` using the rules below, and diffs `scope` and `labels` — which have no
+rule to re-derive from — against a restatement of their tables. That check is the only independent
+statement of these values, and it is a checker, never an input to a harness: unlike the ten copies
+it replaced it can only fail loudly, never make both sides of a differential agree.
+
+The rules the file materialises:
 
 - `createdBy`: `aNumber >= 2 ? "2024-06-01T00:00:00Z" : "2026-06-01T00:00:00Z"`.
 - `aDouble`: `a1 = -0.6`, `a2 = 0.25`, `a3 = NULL`/missing, otherwise `aNumber + 0.3`.
@@ -194,7 +212,32 @@ derived from each seed exactly as follows:
   `b4=50%:a_b`, `b5=dept.eng.platform2`, `b6=50%.a_b`, `c1=Dept.Eng`,
   `c2=dept.eng.`, `d1=[env]:prod:eu`, `d2=e:prod:eu`; all other seeds use NULL.
 
-These are part of the shared contract. Do not replace them with adapter-specific fixtures.
+These are part of the shared contract. Do not replace them with adapter-specific fixtures, and do
+not recompute them in a harness — read `derived-fields.json`.
+
+### Seed and derived-field coverage
+
+The projection trap this README documents for `actions.json` applies to the seeds too, and it is
+worse there: a seed key a harness does not consume is dropped from the stored row **and** the
+check() oracle simultaneously, so the differential still agrees and the new field tests nothing.
+Every harness therefore declares the exact seed key set it consumes and asserts equality against
+the JSON — not merely that unknown keys are rejected, because that direction says nothing about a
+key the corpus stops carrying, which would decode to its zero value on both sides. `note` is the
+one permitted exclusion: it is corpus prose no harness reads. The same assertion covers `tags[]`,
+the one nested object array a seed carries; a key added inside an element is dropped just as
+silently as a top-level one.
+
+The same assertion covers `derived-fields.json`: each harness declares the five fields it consumes
+and fails if the file's `fields` list, or any entry's key set, differs. Concretely this is
+`DisallowUnknownFields` plus a key-set assertion in Go, records without
+`@JsonIgnoreProperties(ignoreUnknown = true)` plus a key-set assertion in Java, and an explicit
+`assertKeys` in the TypeScript and Python harnesses. The TypeScript harnesses that rebuild each
+seed field by field (mongoose, langchain-chromadb) assert against the *raw* JSON — a rebuilt object
+can only ever report the keys the parser already names, so asserting on it would pass vacuously.
+
+Adding a field to a seed must fail every harness loudly. That is the acceptance test for this
+guard; run it before trusting it.
+
 ## Adding a new hostile shape
 
 1. Add the action + condition to `policies/adversarial.yaml`.
@@ -203,7 +246,10 @@ These are part of the shared contract. Do not replace them with adapter-specific
    NULL columns — with a comment in the policy explaining what it probes and which seed rows
    discriminate it (follow the existing comment style).
 3. If the shape needs new seed data to be non-degenerate, add a seed to `seeds.json` with a `note`
-   explaining what it witnesses (see `a9`, `b1`-`b6` for examples).
+   explaining what it witnesses (see `a9`, `b1`-`b6` for examples), and add its `derived-fields.json`
+   entry in the same commit — `scripts/validate-corpus.sh` names the expected values when it fails.
+   A seed field that is genuinely new (rather than a new row) has to be added to every harness's
+   consumed key set too; the guard described above makes that a loud failure, not a silent drop.
 4. Run `scripts/regenerate-wire-fixtures.sh` and commit the new fixture alongside the policy change.
 5. Every adapter harness picks up the new action automatically from `actions.json` on next run;
    triage any divergence into a per-adapter fix issue rather than special-casing it in the harness.
@@ -255,10 +301,15 @@ unsupported before you have watched it fail is how a translatable shape gets per
    name is dropped silently, and a dropped group makes its actions vanish from every count and
    every parameterised case at once. That is the projection trap, and it passes vacuously.
 
-3. **Persist the seeds exactly**, including the NULL conventions and the derived fields above.
-   `aOptionalString` is NULL for several seeds and `tags[].name` is NULL for others — those are
-   not incidental, they are what the three-valued-logic probes discriminate on. Getting them wrong
-   makes the oracle agree with the adapter for the wrong reason.
+3. **Persist the seeds exactly**, including the NULL conventions, and read the derived fields from
+   `derived-fields.json` rather than recomputing them. `aOptionalString` is NULL for several seeds
+   and `tags[].name` is NULL for others — those are not incidental, they are what the
+   three-valued-logic probes discriminate on. Getting them wrong makes the oracle agree with the
+   adapter for the wrong reason.
+
+   Declare the seed keys and derived fields the harness consumes and assert set equality against
+   the JSON, as "Seed and derived-field coverage" above describes. A harness without that guard
+   silently drops the next corpus field from both sides of its own differential.
 
 4. **Assert the degeneracy guard** (see above) and pin the corpus size, so a silently broken PDP
    connection or a newly added action cannot pass vacuously.
