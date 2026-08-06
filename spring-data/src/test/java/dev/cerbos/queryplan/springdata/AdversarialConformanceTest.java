@@ -3,7 +3,10 @@ package dev.cerbos.queryplan.springdata;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter;
+import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression;
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand;
+import dev.cerbos.api.v1.response.Response.PlanResourcesResponse;
 import dev.cerbos.queryplan.springdata.testmodel.CategoryEntity;
 import dev.cerbos.queryplan.springdata.testmodel.LabelEntity;
 import dev.cerbos.queryplan.springdata.testmodel.ResourceEntity;
@@ -889,6 +892,85 @@ class AdversarialConformanceTest {
     }
 
     /**
+     * The corpus pins two count spellings over the chain — {@code size(...) == 0} and
+     * {@code !(size(...) > 0)} — but the guard has to be a property of the COUNT rather than
+     * of the two spellings that happen to be pinned. These synthesise the remaining
+     * threshold/polarity combinations onto the same seeded store and assert the parentless
+     * rows stay out of every one, including an arbitrary-N threshold that neither corpus
+     * action reaches (cerbos/query-plan-adapters#316).
+     */
+    @Test
+    void everyCountThresholdOverTheChainInheritsTheAbsentParentGuard() {
+        Operand chain = Operand.newBuilder()
+                .setVariable("request.resource.attr.mainCategory.subCategories").build();
+        Operand size = expression("size", chain);
+
+        // Every seed that HAS a mainCategory holds exactly one subCategory, and the 16 without
+        // it are CEL missing-path errors — so each of these is empty unless the guard leaks.
+        Map<String, Operand> emptyByConstruction = new LinkedHashMap<>();
+        emptyByConstruction.put("size(chain) == 0", compare("eq", size, 0));
+        emptyByConstruction.put("size(chain) <= 0", compare("le", size, 0));
+        emptyByConstruction.put("size(chain) < 1", compare("lt", size, 1));
+        emptyByConstruction.put("size(chain) >= 2", compare("ge", size, 2));
+        emptyByConstruction.put("!(size(chain) > 0)", expression("not", compare("gt", size, 0)));
+        emptyByConstruction.put("!(size(chain) >= 1)", expression("not", compare("ge", size, 1)));
+        emptyByConstruction.put("!(size(chain) < 2)", expression("not", compare("lt", size, 2)));
+        emptyByConstruction.forEach((shape, condition) ->
+                assertEquals(List.of(), filteredIdsFor(condition),
+                        "absent-parent guard leaked for " + shape));
+
+        // The mirror image, so the loop above cannot pass by denying everything: `>= 0` and
+        // `< 2` are TRUE for exactly the rows that HAVE the parent.
+        List<String> withParent = oracleAllowedIds("w1-size-nonneg-chain");
+        assertFalse(withParent.isEmpty(), "sanity: some seed must carry a mainCategory");
+        assertTrue(withParent.size() < SEEDS.size(), "sanity: not every seed carries one");
+        assertEquals(withParent, filteredIdsFor(compare("ge", size, 0)));
+        assertEquals(withParent, filteredIdsFor(compare("lt", size, 2)));
+    }
+
+    private static Operand expression(String operator, Operand... operands) {
+        Expression.Builder e = Expression.newBuilder().setOperator(operator);
+        for (Operand operand : operands) {
+            e.addOperands(operand);
+        }
+        return Operand.newBuilder().setExpression(e).build();
+    }
+
+    private static Operand compare(String operator, Operand left, double threshold) {
+        return expression(operator, left,
+                Operand.newBuilder().setValue(Value.newBuilder().setNumberValue(threshold)).build());
+    }
+
+    /** Translate a synthesised CONDITIONAL plan and execute it against the seeded store. */
+    private static List<String> filteredIdsFor(Operand condition) {
+        PlanResourcesResponse response = PlanResourcesResponse.newBuilder()
+                .setFilter(PlanResourcesFilter.newBuilder()
+                        .setKind(PlanResourcesFilter.Kind.KIND_CONDITIONAL)
+                        .setCondition(condition))
+                .build();
+        Result<ResourceEntity> result =
+                SpringDataQueryPlanAdapter.toSpecification(response, MAPPING, Map.of());
+        Specification<ResourceEntity> spec =
+                ((Result.Conditional<ResourceEntity>) result).specification();
+
+        EntityManager em = emf.createEntityManager();
+        try {
+            CriteriaBuilder cb = em.getCriteriaBuilder();
+            CriteriaQuery<String> cq = cb.createQuery(String.class);
+            Root<ResourceEntity> root = cq.from(ResourceEntity.class);
+            cq.select(root.get("id")).distinct(true);
+            Predicate p = spec.toPredicate(root, cq, cb);
+            if (p != null) {
+                cq.where(p);
+            }
+            cq.orderBy(cb.asc(root.get("id")));
+            return em.createQuery(cq).getResultList();
+        } finally {
+            em.close();
+        }
+    }
+
+    /**
      * Corpus-size tripwire and exactly-once partition. A corpus edit must bump the pinned
      * counts in the same change — without this, a new hostile action silently joins the
      * oracle run, and a group dropped by the {@code ActionsFile} parser above would make its
@@ -927,7 +1009,7 @@ class AdversarialConformanceTest {
                         .filter(Boolean::booleanValue).count() != 1)
                 .toList();
 
-        assertEquals(140, manifest.size(),
+        assertEquals(143, manifest.size(),
                 "corpus size changed; triage the new action(s) before bumping this pin");
         assertEquals(20, SEEDS.size(), "seed count changed");
         assertEquals(List.of(), misclassified,
@@ -949,13 +1031,16 @@ class AdversarialConformanceTest {
         samples.put("all-on-empty", oracleAllowedIds("all-on-empty"));
         samples.put("null-eq", oracleAllowedIds("null-eq"));
         samples.put("null-ne", oracleAllowedIds("null-ne"));
-        // #309/#312/#311. w1-size-zero-chain and the two string-cast actions are deliberately
-        // absent: their oracles are empty by CONSTRUCTION (no seed holds a to-one parent with
-        // zero children; every seed's aString raises in int()/double()), so they cannot satisfy
-        // this guard. cast-int-double is the cast group's non-degenerate stand-in.
+        // #309/#312/#311/#315/#316. w1-size-zero-chain, w1-not-size-chain and the two
+        // string-cast actions are deliberately absent: their oracles are empty by CONSTRUCTION
+        // (no seed holds a to-one parent with zero children; every seed's aString raises in
+        // int()/double()), so they cannot satisfy this guard. cast-int-double is the cast
+        // group's non-degenerate stand-in.
         samples.put("w1-all-chain", oracleAllowedIds("w1-all-chain"));
         samples.put("w1-not-exists-chain", oracleAllowedIds("w1-not-exists-chain"));
         samples.put("w1-size-nonneg-chain", oracleAllowedIds("w1-size-nonneg-chain"));
+        samples.put("w1-not-in-chain", oracleAllowedIds("w1-not-in-chain"));
+        samples.put("w1-not-hasint-chain", oracleAllowedIds("w1-not-hasint-chain"));
         samples.put("cr-div-neg-zero", oracleAllowedIds("cr-div-neg-zero"));
         samples.put("cr-div-other-column", oracleAllowedIds("cr-div-other-column"));
         samples.put("cr-div-then-add", oracleAllowedIds("cr-div-then-add"));

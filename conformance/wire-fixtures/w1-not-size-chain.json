@@ -1,0 +1,34 @@
+{
+  "action": "w1-not-size-chain",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "not",
+        "operands": [
+          {
+            "expression": {
+              "operator": "gt",
+              "operands": [
+                {
+                  "expression": {
+                    "operator": "size",
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.mainCategory.subCategories"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "value": 0
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

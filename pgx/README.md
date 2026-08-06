@@ -96,7 +96,7 @@ semantics for this compatibility snapshot.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 130 reference conformance actions — every conformance shape in the corpus |
+| Oracle-tested | 133 reference conformance actions — every conformance shape in the corpus |
 | Fail-closed corpus shapes | Regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an untyped string field, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero) and `filter()`/`map()` used as a condition (both return a list, not a boolean) (8 actions) |
 | Representation-dependent | `null-eq-missing` — rejected under `NullOmitted`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
@@ -127,7 +127,10 @@ at once. Treat them as constraints on the policies you write.
 Two gaps listed here previously are now closed and pinned by the corpus rather than documented as
 constraints: an absent to-one parent is no longer indistinguishable from an empty collection (the
 chain requires its intermediate hop, and `w1-all-chain`/`w1-not-exists-chain`/`w1-size-zero-chain`/
-`w1-size-nonneg-chain` are oracle-compared here), and `int()`/`double()` no longer lower to SQL
+`w1-size-nonneg-chain`/`w1-not-in-chain`/`w1-not-hasint-chain`/`w1-not-size-chain` are
+oracle-compared here — membership and the negated count spelling route through the same guarded
+existence construction as the macros, which is why this adapter needed no change when those holes
+were found elsewhere), and `int()`/`double()` no longer lower to SQL
 `CAST` at all — they fail closed, because CEL reads a whole string or raises where `CAST` reads a
 numeric prefix, and CEL truncates toward zero where PostgreSQL rounds (`cast-int-string`,
 `cast-double-string`, `cast-int-double`).

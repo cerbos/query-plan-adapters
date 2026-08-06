@@ -922,6 +922,55 @@ resourcePolicy:
         match:
           expr: 'size(R.attr.mainCategory.subCategories) >= 0'
 
+    # -- the same hazard through MEMBERSHIP (cerbos/query-plan-adapters#315) --
+    # w1-in-chain above is the only membership probe over the chain and it is POSITIVE, so
+    # "parent absent" and "parent present, no match" both exclude the row and agree for the
+    # wrong reason — the identical blind spot the #309 additions closed for the collection
+    # macros. Membership is not a collection macro in most adapters, so the per-macro guard
+    # never reached it: the guard belongs one level lower, in the shared relation-scope
+    # construction every operator builds on (which is why ent and pgx were already aligned).
+    #
+    # Both oracles are a8 ("tech") and c1 ("Finance") — the present-parent-no-match witnesses.
+    # An unguarded NOT EXISTS wrongly adds the 16 parentless seeds. Non-degenerate, so both
+    # belong in the degeneracy guard.
+
+    # Negated membership over the chained string list.
+    - actions: ["w1-not-in-chain"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!("finance" in R.attr.mainCategory.subNames)'
+
+    # The same operand under a sibling operator: hasIntersection reaches the chain through a
+    # different translation branch in every adapter, so it discriminates the guard separately.
+    - actions: ["w1-not-hasint-chain"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!hasIntersection(R.attr.mainCategory.subNames, ["finance"])'
+
+    # -- the same hazard through the NEGATED count spelling (#316) --
+    # The planner does NOT normalise `!(size(...) > 0)` into `size(...) == 0` — it emits the
+    # negation verbatim — so the two spellings are different wire shapes hitting different
+    # branches. An adapter that special-cases a positive count into an existence check before
+    # the hop guard applies negates that check and readmits every parentless row, even though
+    # w1-size-zero-chain passes. Guarding the COUNT EXPRESSION instead makes `== 0`, `> 0`,
+    # `>= N` and their negations all inherit it.
+    #
+    # Every seed that HAS a mainCategory has at least one subCategory, and the 16 without it
+    # are CEL missing-path errors, so the oracle is EMPTY by construction — like
+    # w1-size-zero-chain it therefore stays OUT of the degeneracy guard, which asserts a
+    # non-empty non-total oracle; w1-all-chain, w1-not-exists-chain and w1-size-nonneg-chain
+    # carry the anti-vacuity assertion for this group.
+    - actions: ["w1-not-size-chain"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(size(R.attr.mainCategory.subCategories) > 0)'
+
     # ==================== root relation inside a lambda body (W2) ====================
     # The inner R.attr.tags.exists(...) is planned INSIDE the categories lambda; its subquery
     # must correlate the ROOT entity (owner of "tags"), not the category join the lambda scope

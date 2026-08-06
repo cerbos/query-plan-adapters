@@ -2,7 +2,17 @@ import * as fs from "fs";
 import * as path from "path";
 
 import { GRPC as Cerbos } from "@cerbos/grpc";
-import type { Principal, Resource, Value } from "@cerbos/core";
+import {
+  PlanExpression,
+  PlanExpressionValue,
+  PlanExpressionVariable,
+} from "@cerbos/core";
+import type {
+  PlanExpressionOperand,
+  Principal,
+  Resource,
+  Value,
+} from "@cerbos/core";
 
 import { queryPlanToPrisma, PlanKind, MapperConfig } from ".";
 import { prisma } from "./test-setup.adversarial";
@@ -543,7 +553,7 @@ describe("adversarial conformance corpus", () => {
     ).not.toContain(promotedAction);
   });
 
-  test("manifest assigns all 140 policy actions exactly one Prisma outcome", () => {
+  test("manifest assigns all 143 policy actions exactly one Prisma outcome", () => {
     const oracle = new Set(ORACLE_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map(([action]) => action));
     const nullOmitted = new Set(
@@ -559,7 +569,7 @@ describe("adversarial conformance corpus", () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(140);
+    expect(MANIFEST_ACTIONS.size).toBe(143);
     expect(misclassified).toEqual([]);
     expect(
       [...PRISMA_SUPPORTED_EXPECTED].filter(
@@ -679,16 +689,83 @@ describe("adversarial conformance corpus", () => {
     expect(await adapterFilteredIds(action)).toEqual(allIds);
   });
 
+  // The corpus pins two count spellings over the chain — `size(...) == 0` and
+  // `!(size(...) > 0)` — and CEL's type checker rules out a third that a real policy could
+  // reach through the planner (`>= 1` and `<= 0` are the only other thresholds this adapter
+  // can express, and no policy needs both spellings). The guard must nonetheless be a
+  // property of the chain rather than of the two spellings that happen to be pinned, so
+  // these synthesise the remaining threshold/polarity combinations directly onto the same
+  // seeded store and assert the parentless rows stay out of every one
+  // (cerbos/query-plan-adapters#316).
+  test("every count threshold over the chain inherits the absent-parent guard", async () => {
+    const chain = new PlanExpressionVariable(
+      "request.resource.attr.mainCategory.subCategories"
+    );
+    const size = new PlanExpression("size", [chain]);
+    const compare = (operator: string, threshold: number) =>
+      new PlanExpression(operator, [size, new PlanExpressionValue(threshold)]);
+    const negate = (condition: PlanExpressionOperand) =>
+      new PlanExpression("not", [condition]);
+
+    const filteredIdsFor = async (
+      condition: PlanExpressionOperand
+    ): Promise<string[]> => {
+      const result = queryPlanToPrisma({
+        queryPlan: {
+          kind: PlanKind.CONDITIONAL,
+          condition,
+          cerbosCallId: "synthetic",
+          requestId: "synthetic",
+          validationErrors: [],
+          metadata: undefined,
+        },
+        mapper: MAPPER,
+        model: "AdversarialResource",
+      });
+      expect(result.kind).toBe(PlanKind.CONDITIONAL);
+      const where = result.kind === PlanKind.CONDITIONAL ? result.filters : {};
+      const rows = await prisma.adversarialResource.findMany({
+        where,
+        select: { id: true },
+      });
+      return rows.map((row) => row.id).sort();
+    };
+
+    // Each of these is TRUE for a row with no mainCategory only if the guard leaks: an
+    // absent to-one parent is a CEL missing-path error, so the PDP denies it outright.
+    const emptyByConstruction: [string, PlanExpressionOperand][] = [
+      ["size(chain) == 0", compare("eq", 0)],
+      ["size(chain) <= 0", compare("le", 0)],
+      ["size(chain) < 1", compare("lt", 1)],
+      ["!(size(chain) >= 1)", negate(compare("ge", 1))],
+      ["!(size(chain) > 0)", negate(compare("gt", 0))],
+    ];
+
+    for (const [shape, condition] of emptyByConstruction) {
+      expect([shape, await filteredIdsFor(condition)]).toEqual([shape, []]);
+    }
+
+    // The mirror image, so the loop above cannot pass by denying everything: the negation of
+    // an emptiness check is TRUE for exactly the rows that HAVE the parent.
+    const withParent = await oracleAllowedIds("w1-size-nonneg-chain");
+    expect(withParent.length).toBeGreaterThan(0);
+    expect(withParent.length).toBeLessThan(SEEDS.length);
+    expect(await filteredIdsFor(negate(compare("eq", 0)))).toEqual(withParent);
+    expect(await filteredIdsFor(negate(compare("lt", 1)))).toEqual(withParent);
+  });
+
   test("oracle is not degenerate", async () => {
     // Guard the guard: at least one action must produce a non-empty, non-total oracle set,
     // otherwise the differential comparison could pass vacuously (e.g. PDP denying all).
-    // The #309/#312/#311 additions. w1-size-zero-chain and the two string-cast actions are
-    // deliberately absent: their oracles are empty by CONSTRUCTION (no seed holds a to-one
-    // parent with zero children; every seed's aString raises in int()/double()), so they
-    // cannot satisfy this guard. cast-int-double is the cast group's non-degenerate
-    // stand-in, and the w1/cr actions below carry it for their groups.
+    // The #309/#312/#311/#315/#316 additions. w1-size-zero-chain, w1-not-size-chain and the
+    // two string-cast actions are deliberately absent: their oracles are empty by
+    // CONSTRUCTION (no seed holds a to-one parent with zero children; every seed's aString
+    // raises in int()/double()), so they cannot satisfy this guard. cast-int-double is the
+    // cast group's non-degenerate stand-in, and the w1/cr actions below carry it for their
+    // groups.
     for (const action of ["vf-le", "like-percent", "all-on-empty", "pv-exists", "pv-all", "null-eq", "null-ne",
       "w1-all-chain", "w1-not-exists-chain", "w1-size-nonneg-chain",
+      "w1-not-in-chain", "w1-not-hasint-chain",
       "cr-div-neg-zero", "cr-div-other-column", "cr-div-then-add", "cr-div-then-add-ne",
       "cast-int-double"]) {
       const ids = await oracleAllowedIds(action);

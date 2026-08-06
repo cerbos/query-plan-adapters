@@ -2137,21 +2137,26 @@ public final class SpringDataQueryPlanAdapter {
                     boolean empty = ("eq".equals(cmpOp) && numValue == 0L)
                             || ("le".equals(cmpOp) && numValue == 0L)
                             || ("lt".equals(cmpOp) && numValue == 1L);
-                    if (nonEmpty) {
-                        // A non-empty count already implies the hop, so no guard is needed.
+                    // The EXISTS emptiness shortcuts below are TWO-valued, so a chain must not
+                    // take them: `NOT EXISTS` is TRUE for an absent to-one parent, which is why
+                    // `!(size(chain) > 0)` readmitted every parentless row even though
+                    // `size(chain) == 0` — guarded by a separate AND — did not
+                    // (cerbos/query-plan-adapters#316). Guarding the COUNT EXPRESSION instead of
+                    // each comparison shortcut is what makes `== 0`, `> 0`, `>= N` and all their
+                    // negations inherit the guard: the count is SQL NULL without the hop, so
+                    // every comparison built on it is UNKNOWN under BOTH polarities.
+                    boolean chained = leadingHopsExist(scope, ref) != null;
+                    if (nonEmpty && !chained) {
                         return existsSubquery(scope, ref, (sub, tailJoin, rebased) -> cb.conjunction());
                     }
-                    if (empty) {
-                        // `size(chain) == 0` is TRUE over an empty count, which is exactly what an
-                        // absent to-one parent produces — require the hop separately (#309).
-                        Predicate emptyTail = tri.not(existsSubquery(scope, ref,
+                    if (empty && !chained) {
+                        return tri.not(existsSubquery(scope, ref,
                                 (sub, tailJoin, rebased) -> cb.conjunction()));
-                        Predicate hops = leadingHopsExist(scope, ref);
-                        return hops == null ? emptyTail : cb.and(hops, emptyTail);
                     }
-                    // Arbitrary N → correlated (SELECT COUNT(...)) <op> N. For a multi-hop chain
-                    // the COUNT joins through every hop, so it counts the FLATTENED tail
-                    // elements — the same element set the EXISTS shortcuts range over.
+                    // Arbitrary N (and every threshold over a chain) → correlated
+                    // (SELECT COUNT(...)) <op> N. For a multi-hop chain the COUNT joins through
+                    // every hop, so it counts the FLATTENED tail elements — the same element set
+                    // the EXISTS shortcuts range over.
                     return compareCount(
                             requireLeadingHops(scope, ref, countSubquery(scope, ref).sub(), Long.class),
                             cmpOp, numValue);
@@ -2293,7 +2298,9 @@ public final class SpringDataQueryPlanAdapter {
          *   <li>NULL scalar vs no null element → FALSE (the equality is UNKNOWN and the
          *       IS NULL conjunct fails on the member side, so no subquery row qualifies).</li>
          * </ul>
-         * EXISTS itself is two-valued, so {@code tri.not} composes exactly. Like field-to-field
+         * A direct relation's EXISTS is two-valued, so {@code tri.not} composes exactly; over a
+         * CHAIN the membership goes through {@link #chainContains}, which is UNKNOWN for an
+         * absent to-one parent so that the negation cannot readmit it. Like field-to-field
          * comparisons, there is no (field, value) pair — {@link OperatorFunction} overrides are
          * not consulted.
          */
@@ -2310,7 +2317,7 @@ public final class SpringDataQueryPlanAdapter {
             // Resolve the member OUTSIDE the subquery first so an unknown/Relation-valued
             // member reports its own resolution error rather than a subquery-build failure.
             scope.resolvePath(memberVar);
-            return existsSubquery(scope, ref, (sub, tailJoin, rebased) -> {
+            return chainContains(scope, ref, (sub, tailJoin, rebased) -> {
                 Path<?> element = Scope.memberPath(tailJoin, ref.tail(), null);
                 // The outer scalar resolves through the REBASED scope so the produced path is
                 // a legal correlation reference inside the subquery.
@@ -2499,7 +2506,7 @@ public final class SpringDataQueryPlanAdapter {
             // attribute → CEL error; see handleMapIntersection.)
             List<?> nonNull = values.stream().filter(Objects::nonNull).toList();
             boolean hasNull = nonNull.size() < values.size();
-            return existsSubquery(scope, ref, (sub, tailJoin, rebased) -> {
+            return chainContains(scope, ref, (sub, tailJoin, rebased) -> {
                 Path<?> field = Scope.memberPath(tailJoin, ref.tail(), null);
                 if (!hasNull) {
                     return values.size() == 1 ? cb.equal(field, values.get(0)) : field.in(values);
@@ -2964,6 +2971,32 @@ public final class SpringDataQueryPlanAdapter {
             cs.sub().select(cb.literal(1));
             cs.sub().where(bodyBuilder.build(cs.sub(), cs.tailJoin(), cs.rebasedOuter()));
             return cb.exists(cs.sub());
+        }
+
+        /**
+         * "Some element of the chain satisfies the body", as a THREE-valued predicate: UNKNOWN
+         * rather than FALSE when an intermediate to-one hop is absent.
+         *
+         * <p>Every operator whose whole answer is an existence test over a chain must build it
+         * here rather than calling {@link #existsSubquery} directly. {@code EXISTS} is
+         * two-valued, so {@code NOT EXISTS} over an absent to-one parent is TRUE and readmits
+         * every parentless row — which is how {@code !("x" in R.attr.parent.names)} and its
+         * {@code hasIntersection} sibling kept over-granting after the collection macros were
+         * fixed (cerbos/query-plan-adapters#315). Counting instead of testing existence lets the
+         * guard live on the count EXPRESSION, so both polarities inherit it.
+         *
+         * <p>A direct relation keeps the plain {@code EXISTS}: it has no hop to require, and its
+         * empty-collection semantics are already correct under both polarities.
+         */
+        private Predicate chainContains(Scope scope, Scope.ResolvedRelation ref,
+                                        SubqueryBodyBuilder bodyBuilder) {
+            if (leadingHopsExist(scope, ref) == null) {
+                return existsSubquery(scope, ref, bodyBuilder);
+            }
+            ChainSubquery<Long> cs = countSubquery(scope, ref);
+            cs.sub().where(bodyBuilder.build(cs.sub(), cs.tailJoin(), cs.rebasedOuter()));
+            return cb.greaterThan(
+                    requireLeadingHops(scope, ref, cs.sub(), Long.class), 0L);
         }
     }
 

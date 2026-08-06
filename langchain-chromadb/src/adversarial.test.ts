@@ -578,7 +578,7 @@ async function adapterFilteredIds(action: string): Promise<string[]> {
 }
 
 describe("adversarial conformance corpus", () => {
-  test("manifest assigns all 140 policy actions exactly one Chroma outcome", () => {
+  test("manifest assigns all 143 policy actions exactly one Chroma outcome", () => {
     const oracle = new Set(CHROMA_SUPPORTED_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map(({ action }) => action));
     const nullOmitted = new Set(
@@ -594,12 +594,12 @@ describe("adversarial conformance corpus", () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(140);
+    expect(MANIFEST_ACTIONS.size).toBe(143);
     expect(CHROMA_SUPPORTED_ACTIONS).toHaveLength(15);
     expect(oracle.size).toBe(CHROMA_SUPPORTED_ACTIONS.length);
-    expect(CHROMA_UNSUPPORTED).toHaveLength(115);
+    expect(CHROMA_UNSUPPORTED).toHaveLength(118);
     expect(CHROMA_SUPPORTED_EXPECTED).toHaveLength(0);
-    expect(THROWING_ACTIONS).toHaveLength(123);
+    expect(THROWING_ACTIONS).toHaveLength(126);
     expect(misclassified).toEqual([]);
   });
 
@@ -662,11 +662,12 @@ describe("adversarial conformance corpus", () => {
   });
 
   test("oracle is not degenerate", async () => {
-    // #309/#312/#311. w1-size-zero-chain and the two string-cast actions are deliberately
-    // absent: their oracles are empty by CONSTRUCTION, so they cannot satisfy this guard;
-    // cast-int-double is the cast group's non-degenerate stand-in.
+    // #309/#312/#311/#315/#316. w1-size-zero-chain, w1-not-size-chain and the two string-cast
+    // actions are deliberately absent: their oracles are empty by CONSTRUCTION, so they
+    // cannot satisfy this guard; cast-int-double is the cast group's non-degenerate stand-in.
     for (const action of ["vf-le", "nary-and", "p-in-null-multi", "pv-exists", "pv-all", "null-eq", "null-ne",
       "w1-all-chain", "w1-not-exists-chain", "w1-size-nonneg-chain",
+      "w1-not-in-chain", "w1-not-hasint-chain",
       "cr-div-neg-zero", "cr-div-other-column", "cr-div-then-add", "cr-div-then-add-ne",
       "cast-int-double"]) {
       const ids = await oracleAllowedIds(action);

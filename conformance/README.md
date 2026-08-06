@@ -140,18 +140,33 @@ resource row, where an absent parent and a childless parent produce the same emp
 | `!mainCategory.subCategories.exists(s, …)` | deny | no rows → `!false` → **over-grants** |
 | `size(mainCategory.subCategories) == 0` | deny | count 0 → **over-grants** |
 | `size(mainCategory.subCategories) >= 0` | deny | count 0 → **over-grants** |
+| `!("finance" in mainCategory.subNames)` | deny | no rows → `!false` → **over-grants** |
+| `!hasIntersection(mainCategory.subNames, […])` | deny | no rows → `!false` → **over-grants** |
+| `!(size(mainCategory.subCategories) > 0)` | deny | count 0 → `!false` → **over-grants** |
 
-Only a universal, a negated existential, or a lower-bound count discriminates them, which is why
+Only a universal, a negation, or a zero/lower-bound count discriminates them, which is why
 `w1-exists-chain`, `w1-size-chain` and `w1-in-chain` passed everywhere while the bug was live
-(cerbos/query-plan-adapters#309). `w1-all-chain`, `w1-not-exists-chain`, `w1-size-zero-chain` and
-`w1-size-nonneg-chain` are the four that discriminate.
+(cerbos/query-plan-adapters#309). `w1-all-chain`, `w1-not-exists-chain`, `w1-size-zero-chain`,
+`w1-size-nonneg-chain`, `w1-not-in-chain`, `w1-not-hasint-chain` and `w1-not-size-chain` are the
+seven that discriminate.
 
 The fix is in the translation, not in the classification: **a chained collection must require its
 intermediate hop to exist**, so an absent parent stays excluded under both polarities instead of
-collapsing onto the empty-collection case. `w1-size-zero-chain` has an empty oracle by
-construction (no seed holds a parent with zero children) and therefore stays out of the degeneracy
-guard; `w1-all-chain`, `w1-not-exists-chain` and `w1-size-nonneg-chain` all have non-degenerate
-oracles and carry the anti-vacuity assertion for the group.
+collapsing onto the empty-collection case. `w1-size-zero-chain` and `w1-not-size-chain` have empty
+oracles by construction (no seed holds a parent with zero children) and therefore stay out of the
+degeneracy guard; `w1-all-chain`, `w1-not-exists-chain`, `w1-size-nonneg-chain`,
+`w1-not-in-chain` and `w1-not-hasint-chain` all have non-degenerate oracles and carry the
+anti-vacuity assertion for the group.
+
+**Put the guard in the shared relation-scope construction, not in each operator.** The #309 round
+guarded the collection macros, which left every sibling operator reached through the same chain
+unguarded — membership and `hasIntersection` (#315), and the negated count spelling `!(size > 0)`,
+which takes a different branch from `size == 0` because the planner emits the negation verbatim
+rather than normalising it (#316). ent and pgx needed no change in either round: their membership
+routes through the same guarded tri-state existence construction as everything else. Adapters with
+no UNKNOWN to represent (Prisma filters, Mongo query documents) get the same result by requiring
+the hops **outside** the negation rather than inside it, so the negation cannot flip the
+requirement along with the predicate.
 
 ### The degeneracy guard
 
@@ -192,7 +207,7 @@ These are part of the shared contract. Do not replace them with adapter-specific
 4. Run `scripts/regenerate-wire-fixtures.sh` and commit the new fixture alongside the policy change.
 5. Every adapter harness picks up the new action automatically from `actions.json` on next run;
    triage any divergence into a per-adapter fix issue rather than special-casing it in the harness.
-6. Each harness pins the corpus size as a tripwire (e.g. `expect(MANIFEST_ACTIONS.size).toBe(140)`
+6. Each harness pins the corpus size as a tripwire (e.g. `expect(MANIFEST_ACTIONS.size).toBe(143)`
    in `prisma/src/adversarial.test.ts`, and the oracle/throwing counts in the convex and
    langchain-chromadb harnesses). Bump them deliberately — that assertion exists so a new action
    cannot slip past an adapter unnoticed.

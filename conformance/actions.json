@@ -29,6 +29,7 @@
     "cr-div-neg-zero", "cr-div-other-column", "cr-div-then-add", "cr-div-then-add-ne",
     "w1-exists-chain", "w1-size-chain", "w1-in-chain", "w2-outer-relation",
     "w1-all-chain", "w1-not-exists-chain", "w1-size-zero-chain", "w1-size-nonneg-chain",
+    "w1-not-in-chain", "w1-not-hasint-chain", "w1-not-size-chain",
     "like-bracket", "cs-eq",
     "arith-add-eq-frac", "arith-add-ne-frac", "arith-add-eq-frac-exact",
     "size-huge-gt", "size-huge-lt",
@@ -212,6 +213,9 @@
       { "action": "w1-exists-chain", "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated" },
       { "action": "w1-size-chain", "reason": "Chroma metadata is a flat scalar map with no relation model and no count function, so a size(...) collection-count operand cannot be translated" },
       { "action": "w1-in-chain", "reason": "Chroma's $in tests a metadata field against a literal list; it cannot test whether a literal is a member of a list-valued metadata field, and Chroma metadata values are scalars anyway" },
+      { "action": "w1-not-in-chain", "reason": "Same literal-in-field limitation as w1-in-chain, reached under a negation: the adapter rejects the membership direction before the negation is even considered" },
+      { "action": "w1-not-hasint-chain", "reason": "Chroma has no operator that intersects a list-valued metadata field with a literal list, so hasIntersection has no Where equivalent to negate; the adapter refuses to invert it" },
+      { "action": "w1-not-size-chain", "reason": "Chroma comparison operands must be a bare field or literal, so the negated size(...) collection count is rejected as a nested expression — the same missing relation model and count function as w1-size-zero-chain" },
       { "action": "w2-outer-relation", "reason": "Chroma metadata is a flat scalar map with no relation model and no count function, so a size(...) collection-count operand cannot be translated" },
       { "action": "like-bracket", "reason": "Chroma metadata filters expose only scalar comparison and membership operators ($eq/$ne/$lt/$lte/$gt/$gte/$in/$nin) \u2014 there is no prefix, substring, or pattern operator \u2014 so startsWith has no faithful Where equivalent and the adapter rejects it" },
       { "action": "arith-add-eq-frac", "reason": "Chroma metadata filters compare a stored field against a literal only \u2014 there is no computed-value or column-arithmetic operand \u2014 so the plan's arithmetic expression cannot be translated" },
@@ -350,7 +354,10 @@
       { "action": "w1-all-chain", "reason": "Elasticsearch does not index empty nested arrays, so a positive all over a chained collection cannot distinguish an absent to-one parent (CEL error, denies) from an empty collection (vacuously true)" },
       { "action": "w1-not-exists-chain", "reason": "Elasticsearch does not index empty nested arrays, so a negated exists over a chained collection cannot distinguish an absent to-one parent from an empty collection" },
       { "action": "w1-size-zero-chain", "reason": "Same missing-versus-empty ambiguity as w1-not-exists-chain, reached through a zero-count emptiness check" },
-      { "action": "w1-size-nonneg-chain", "reason": "Elasticsearch Query DSL expresses only emptiness checks over nested collections, not arbitrary count thresholds, so a >= 0 threshold — which is TRUE exactly when the to-one parent exists — has no equivalent" }
+      { "action": "w1-size-nonneg-chain", "reason": "Elasticsearch Query DSL expresses only emptiness checks over nested collections, not arbitrary count thresholds, so a >= 0 threshold — which is TRUE exactly when the to-one parent exists — has no equivalent" },
+      { "action": "w1-not-in-chain", "reason": "Same missing-versus-empty ambiguity as w1-not-exists-chain, reached through negated membership: a bool must_not over a nested collection matches a document with no nested array at all, and Elasticsearch cannot tell that from a document whose array holds no match" },
+      { "action": "w1-not-hasint-chain", "reason": "Same missing-versus-empty ambiguity as w1-not-in-chain, reached through hasIntersection over the same operand" },
+      { "action": "w1-not-size-chain", "reason": "Same missing-versus-empty ambiguity as w1-size-zero-chain, reached through the negated positive-count spelling rather than the direct zero-count one" }
     ]
   },
   "adapterSupportedExpected": {
