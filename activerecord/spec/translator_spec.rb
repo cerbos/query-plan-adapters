@@ -425,6 +425,23 @@ RSpec.describe Cerbos::ActiveRecord do
       }.not_to raise_error
     end
 
+    it "raises for an association that joins on more than one column" do
+      # ActiveRecord gives an array for the keys of such an association. Before the guard the
+      # array reached table[...] and became one quoted name, and the query then failed with
+      # "no such column" instead of the adapter refusing the mapping.
+      reflection = EdgeCpkParent.reflect_on_association(:kids)
+      skip "this ActiveRecord does not give composite keys" unless reflection.foreign_key.is_a?(Array)
+
+      expect {
+        described_class.query_plan_to_relation(
+          plan: conditional(expression("exists", variable("c"),
+            expression("lambda", value(true), variable("x")))),
+          model: EdgeCpkParent,
+          attributes: {"c" => relation(:kids, member_field: "name")}
+        )
+      }.to raise_error(Cerbos::ActiveRecord::UnsupportedAssociationError, /more than one column/)
+    end
+
     it "raises for an association that does not exist" do
       expect {
         described_class.query_plan_to_relation(

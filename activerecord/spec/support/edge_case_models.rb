@@ -52,6 +52,17 @@ module EdgeCaseModels
         t.string :type
         t.integer :document_id
       end
+
+      create_table :edge_cpk_parents, id: false, force: true do |t|
+        t.string :tenant_id, null: false
+        t.string :code, null: false
+      end
+
+      create_table :edge_cpk_kids, force: true do |t|
+        t.string :tenant_id
+        t.string :parent_code
+        t.string :name
+      end
     end
 
     EdgeDocument.create!(id: 1, title: "zero", n: 0)
@@ -91,6 +102,18 @@ class EdgeKind < ActiveRecord::Base
 end
 
 class EdgeSpecialKind < EdgeKind; end
+
+class EdgeCpkKid < ActiveRecord::Base
+  self.table_name = "edge_cpk_kids"
+end
+
+# A composite primary key. ActiveRecord then gives an ARRAY for the keys of the association,
+# and one equality cannot join on two columns.
+class EdgeCpkParent < ActiveRecord::Base
+  self.table_name = "edge_cpk_parents"
+  self.primary_key = [:tenant_id, :code]
+  has_many :kids, class_name: "EdgeCpkKid", foreign_key: [:tenant_id, :parent_code]
+end
 
 class EdgeDocument < ActiveRecord::Base
   self.table_name = "edge_documents"
