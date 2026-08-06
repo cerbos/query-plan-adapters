@@ -223,6 +223,32 @@ RSpec.describe Cerbos::ActiveRecord do
     end
   end
 
+  describe "membership between two columns under each NULL convention" do
+    let(:plan) do
+      conditional(expression("in", variable("a"), expression("list", variable("b"))))
+    end
+
+    let(:mapping) { {"a" => field("title"), "b" => field("n")} }
+
+    it "treats two explicit nulls as equal" do
+      sql = described_class.query_plan_to_relation(
+        plan: plan, model: EdgeDocument, attributes: mapping
+      ).to_sql
+      expect(sql).to match(/IS NULL AND .*IS NULL/)
+    end
+
+    it "does not treat two omitted attributes as equal" do
+      # A NULL column sends no attribute under this convention. Two NULL columns are then two
+      # MISSING attributes, and CEL raises rather than finding them equal, so the PDP denies
+      # the row. Plain equality gives UNKNOWN and keeps the row out.
+      sql = described_class.query_plan_to_relation(
+        plan: plan, model: EdgeDocument, attributes: mapping,
+        null_attribute_representation: :omitted
+      ).to_sql
+      expect(sql).not_to match(/IS NULL AND .*IS NULL/)
+    end
+  end
+
   describe "membership with a column inside the list" do
     # `null in [R.attr.x]` is true when the column is null. An earlier version built
     # `NULL IN (x)`, which is always UNKNOWN, and Arel could not even render it.
@@ -301,6 +327,45 @@ RSpec.describe Cerbos::ActiveRecord do
           attributes: {"a" => field("comments.body")}
         )
       }.to raise_error(Cerbos::ActiveRecord::UnsupportedAssociationError, /collection association/)
+    end
+
+    # Each of these was found by an adversarial review. In every case the association gives
+    # fewer rows than the table holds, so the attributes that Cerbos evaluates and the rows
+    # that a plain subquery finds do not agree, and the filter selected a row that the
+    # decision did not.
+    it "raises for a scope on the association, including a through chain" do
+      expect {
+        described_class.query_plan_to_relation(
+          plan: conditional(expression("exists", variable("c"),
+            expression("lambda", value(true), variable("x")))),
+          model: EdgeDocument,
+          attributes: {"c" => relation(:visible_tags, member_field: "name")}
+        )
+      }.to raise_error(Cerbos::ActiveRecord::UnsupportedAssociationError, /carries a scope/)
+    end
+
+    it "raises for a default scope on the target model" do
+      expect {
+        described_class.query_plan_to_relation(
+          plan: conditional(expression("exists", variable("c"),
+            expression("lambda", value(true), variable("x")))),
+          model: EdgeDocument,
+          attributes: {"c" => relation(:softs, member_field: "name")}
+        )
+      }.to raise_error(Cerbos::ActiveRecord::UnsupportedAssociationError, /default scope/)
+    end
+
+    it "raises for a has_one mapped as a collection" do
+      # ActiveRecord does not make the database enforce that a has_one has only one row, so
+      # the association gives one row while a subquery would examine every row.
+      expect {
+        described_class.query_plan_to_relation(
+          plan: conditional(expression("exists", variable("c"),
+            expression("lambda", value(true), variable("x")))),
+          model: EdgeDocument,
+          attributes: {"c" => relation(:profile, member_field: "name")}
+        )
+      }.to raise_error(Cerbos::ActiveRecord::UnsupportedAssociationError, /not a collection/)
     end
 
     it "raises for an association that does not exist" do

@@ -30,6 +30,22 @@ module EdgeCaseModels
       create_table :edge_authors, force: true do |t|
         t.string :name
       end
+
+      create_table :edge_tags, force: true do |t|
+        t.string :name
+        t.boolean :visible, default: true
+        t.integer :document_id
+      end
+
+      create_table :edge_softs, force: true do |t|
+        t.string :name
+        t.integer :document_id
+      end
+
+      create_table :edge_profiles, force: true do |t|
+        t.string :name
+        t.integer :document_id
+      end
     end
 
     EdgeDocument.create!(id: 1, title: "zero", n: 0)
@@ -47,10 +63,32 @@ class EdgeComment < ActiveRecord::Base
   belongs_to :commentable, polymorphic: true
 end
 
+# A model with a default scope. The scope removes rows from every association that points at
+# it, and thus from the attributes that Cerbos sees.
+class EdgeSoft < ActiveRecord::Base
+  self.table_name = "edge_softs"
+  default_scope { where("name != 'hidden'") }
+end
+
+class EdgeTag < ActiveRecord::Base
+  self.table_name = "edge_tags"
+end
+
+class EdgeProfile < ActiveRecord::Base
+  self.table_name = "edge_profiles"
+end
+
 class EdgeDocument < ActiveRecord::Base
   self.table_name = "edge_documents"
   belongs_to :author, class_name: "EdgeAuthor", foreign_key: :author_id
   has_many :comments, class_name: "EdgeComment", as: :commentable
   has_many :approved_comments, -> { where(approved: true) },
     class_name: "EdgeComment", as: :commentable
+
+  has_many :tags, class_name: "EdgeTag", foreign_key: :document_id
+  # A scope on the OUTER association of a through chain.
+  has_many :visible_tags, -> { where(visible: true) },
+    class_name: "EdgeTag", foreign_key: :document_id
+  has_many :softs, class_name: "EdgeSoft", foreign_key: :document_id
+  has_one :profile, class_name: "EdgeProfile", foreign_key: :document_id
 end

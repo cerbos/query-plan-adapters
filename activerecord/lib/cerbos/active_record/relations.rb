@@ -114,6 +114,17 @@ module Cerbos
             "#{owner_model.name} has no association #{mapping.association.inspect}"
         end
 
+        # A collection mapping needs a collection. ActiveRecord does not make the database
+        # enforce that a `has_one` has only one row. Thus the association gives one row and
+        # Cerbos sees one element, while a subquery would examine every row with that foreign
+        # key, and the two answers differ.
+        unless reflection.collection?
+          raise UnsupportedAssociationError,
+            "Association #{mapping.association.inspect} on #{owner_model.name} is a " \
+            "#{reflection.macro}, not a collection. Map a to-one association as a field path " \
+            "with dots, for example Cerbos::ActiveRecord.field(\"profile.name\")."
+        end
+
         hops = hops_for(reflection, owner_table, owner_model, aliaser)
         Scope.new(hops: hops, mapping: mapping, model: hops.last.model)
       end
@@ -154,6 +165,8 @@ module Cerbos
 
       # @api private
       def hops_for(reflection, owner_table, owner_model, aliaser)
+        assert_no_scope(reflection, owner_model)
+
         if reflection.respond_to?(:through_reflection) && reflection.through_reflection
           through = hops_for(reflection.through_reflection, owner_table, owner_model, aliaser)
           source = hops_for(
@@ -165,6 +178,24 @@ module Cerbos
         [direct_hop(reflection, owner_table, owner_model, aliaser)]
       end
 
+      # A scope on an association removes rows from it, and thus from the attributes that
+      # Cerbos sees. This adapter cannot put those conditions onto the alias that it makes for
+      # the correlated subquery, so the filter would select rows that the decision did not.
+      #
+      # The check is here and not in +direct_hop+ because a `through` association carries its
+      # own scope, and +hops_for+ opens such an association into its parts before it reaches
+      # +direct_hop+. The scope of the outer association would then be lost.
+      #
+      # @api private
+      def assert_no_scope(reflection, owner_model)
+        return unless reflection.scope
+
+        raise UnsupportedAssociationError,
+          "Association #{reflection.name.inspect} on #{owner_model.name} carries a scope, " \
+          "whose conditions this adapter cannot re-bind onto the correlated alias it " \
+          "generates; map the attribute onto an unscoped association instead"
+      end
+
       # @api private
       def direct_hop(reflection, owner_table, owner_model, aliaser)
         if reflection.respond_to?(:polymorphic?) && reflection.polymorphic?
@@ -174,14 +205,19 @@ module Cerbos
             "attribute onto a concrete association instead"
         end
 
-        if reflection.scope
+        target = reflection.klass
+
+        # A default scope on the model removes rows from the association, and thus from the
+        # attributes that Cerbos sees. The subquery below reads the table and does not apply
+        # that scope, so the two answers would differ.
+        if target.respond_to?(:default_scopes) && target.default_scopes.any?
           raise UnsupportedAssociationError,
-            "Association #{reflection.name.inspect} on #{owner_model.name} carries a scope, " \
-            "whose conditions this adapter cannot re-bind onto the correlated alias it " \
-            "generates; map the attribute onto an unscoped association instead"
+            "#{target.name} has a default scope, whose conditions this adapter cannot put " \
+            "onto the correlated alias that it makes. The rows that the scope removes are " \
+            "absent from the attributes that Cerbos evaluates, so the filter would not agree " \
+            "with the decision. Use unscoped models for the attributes in a policy."
         end
 
-        target = reflection.klass
         table = target.arel_table.alias(aliaser.next_alias(target.table_name))
         predicates = []
 

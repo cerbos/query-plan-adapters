@@ -241,11 +241,19 @@ last rows for each resource and not for each category.
 Each subquery gets new table aliases. Thus a macro on an association inside another macro on
 the same association correlates to the outer row.
 
-The adapter refuses two shapes of association and does not select a table by itself. The first
-is a polymorphic `belongs_to`, because its target table is not known until the query reads a
-row. The second is an association with a scope, because the adapter cannot put the conditions
-of that scope onto the alias that it makes. Map the attribute to a concrete association without
-a scope, or give an operator override.
+The adapter refuses an association whose rows it cannot reproduce exactly. In each case the
+association gives a different set of rows from the table itself. Thus the attributes that
+Cerbos evaluates and the rows that a subquery finds would not agree, and the filter would
+select a row that the decision did not.
+
+| Shape | Why the adapter refuses it |
+| --- | --- |
+| A polymorphic `belongs_to` | The target table is not known until the query reads a row |
+| An association with a scope, including the outer association of a `through` chain | The adapter cannot put the conditions of that scope onto the alias that it makes |
+| A target model with a `default_scope` | The rows that the scope removes are absent from the attributes that Cerbos evaluates |
+| A `has_one` used as a collection | ActiveRecord does not make the database enforce that a `has_one` has only one row, so the association gives one row while a subquery examines every row. Map a to-one association as a field path with dots. |
+
+Map the attribute to a concrete association without a scope, or give an operator override.
 
 #### `operator_overrides` for translations that are specific to your schema
 

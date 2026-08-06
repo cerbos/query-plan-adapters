@@ -525,15 +525,7 @@ module Cerbos
           if value.nil?
             ArelSupport.comparison("eq", member, nil)
           elsif ArelSupport.arel_node?(value)
-            # Two explicit nulls are equal in CEL, but the result in SQL is UNKNOWN. Thus the
-            # adapter writes that condition.
-            ArelSupport.or_node([
-              ArelSupport.comparison("eq", member, value),
-              ArelSupport.and_node([
-                ArelSupport.comparison("eq", member, nil),
-                ArelSupport.comparison("eq", value, nil)
-              ])
-            ])
+            null_equality(member, value)
           else
             ArelSupport.comparison("eq", member, value)
           end
@@ -577,19 +569,34 @@ module Cerbos
         return ArelSupport.comparison("eq", member, nil) if needle.nil? && member_is_node
         return ArelSupport.comparison("eq", needle, nil) if member.nil? && needle_is_node
 
-        if needle_is_node && member_is_node
-          return ArelSupport.or_node([
-            ArelSupport.comparison("eq", needle, member),
-            ArelSupport.and_node([
-              ArelSupport.comparison("eq", needle, nil),
-              ArelSupport.comparison("eq", member, nil)
-            ])
-          ])
-        end
+        return null_equality(needle, member) if needle_is_node && member_is_node
 
         return needle.nil? == member.nil? if needle.nil? || member.nil?
 
         ArelSupport.to_predicate(compare("eq", needle, member))
+      end
+
+      # Equality between two columns for a membership test.
+      #
+      # With the `explicit` convention a NULL column sends an attribute whose value is null,
+      # and two nulls are equal in CEL. The result of that comparison in SQL is UNKNOWN, so
+      # the adapter writes the condition out.
+      #
+      # With the `omitted` convention a NULL column sends no attribute. Two NULL columns are
+      # then two MISSING attributes, CEL raises a missing-attribute error, and the PDP denies
+      # the row. Plain equality gives UNKNOWN for a NULL column and keeps the row out, which
+      # is the correct answer for that convention.
+      def null_equality(left, right)
+        equal = ArelSupport.comparison("eq", left, right)
+        return equal if null_attribute_representation == :omitted
+
+        ArelSupport.or_node([
+          equal,
+          ArelSupport.and_node([
+            ArelSupport.comparison("eq", left, nil),
+            ArelSupport.comparison("eq", right, nil)
+          ])
+        ])
       end
 
       # --- arithmetic -----------------------------------------------------------------
