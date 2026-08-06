@@ -192,7 +192,7 @@ These are part of the shared contract. Do not replace them with adapter-specific
 4. Run `scripts/regenerate-wire-fixtures.sh` and commit the new fixture alongside the policy change.
 5. Every adapter harness picks up the new action automatically from `actions.json` on next run;
    triage any divergence into a per-adapter fix issue rather than special-casing it in the harness.
-6. Each harness pins the corpus size as a tripwire (e.g. `expect(MANIFEST_ACTIONS.size).toBe(127)`
+6. Each harness pins the corpus size as a tripwire (e.g. `expect(MANIFEST_ACTIONS.size).toBe(140)`
    in `prisma/src/adversarial.test.ts`, and the oracle/throwing counts in the convex and
    langchain-chromadb harnesses). Bump them deliberately — that assertion exists so a new action
    cannot slip past an adapter unnoticed.
@@ -266,9 +266,13 @@ unsupported before you have watched it fail is how a translatable shape gets per
    `adapterSupportedExpected` entry names a real `expectedUnsupported` one.
 
 7. **Wire CI.** Copy an existing adapter workflow. It must: read the PDP version from
-   `CERBOS_VERSION` (never hardcode it), run `scripts/validate-corpus.sh`, trigger on
-   `conformance/**` as well as the adapter's own directory, and run the adversarial suite as its
-   own job. Pin any service image by digest.
+   `CERBOS_VERSION` (never hardcode it), run `scripts/validate-corpus.sh` in every job that
+   replays the corpus **or** hardcodes the PDP image — a job that interpolates `CERBOS_VERSION`
+   at runtime cannot drift and does not need it, but a hardcoded pin can, and that assertion is
+   `validate-corpus.sh`'s job — trigger on `conformance/**` as well as the adapter's own
+   directory, and run the adversarial suite **inside the same job as the regular tests**, not as
+   a separate job: the corpus discriminates the translator and the datastore, so a separate job
+   costs runner minutes for no extra coverage. Pin any service image by digest.
 
 8. **Document the contract** in the adapter's README with a `Conformance contract` table
    (oracle-tested / fail-closed / known divergence counts). Each adapter is published

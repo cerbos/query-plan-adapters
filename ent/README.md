@@ -121,7 +121,7 @@ hierarchy operations, typed timestamps, and multi-hop relations. Unlike the Pyth
 adapters, sub-millisecond `now()` thresholds (`ts-window`, `ts-vf`) are **not** fail-closed here:
 Go's `time.Time` carries nanoseconds, so those instants survive translation exactly.
 
-The three fail-closed shapes return an error wrapping `ErrUnsupported` rather than a broader
+The eight fail-closed shapes return an error wrapping `ErrUnsupported` rather than a broader
 predicate. `matches()` is rejected because SQL regex dialects do not guarantee CEL/RE2 semantics.
 
 ### Dialect coverage

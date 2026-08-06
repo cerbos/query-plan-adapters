@@ -107,7 +107,7 @@ hierarchy operations, typed timestamps, and multi-hop relations. Unlike the Pyth
 adapters, sub-millisecond `now()` thresholds (`ts-window`, `ts-vf`) are **not** fail-closed here:
 Go's `time.Time` carries nanoseconds, so those instants survive translation exactly.
 
-The three fail-closed shapes return an error wrapping `ErrUnsupported` rather than a broader SQL
+The eight fail-closed shapes return an error wrapping `ErrUnsupported` rather than a broader SQL
 filter. `matches()` is rejected because SQL regex dialects do not guarantee CEL/RE2 semantics.
 
 ### Known gaps
@@ -119,12 +119,18 @@ at once. Treat them as constraints on the policies you write.
 
 | Gap | Effect |
 | --- | --- |
-| An absent to-one parent is indistinguishable from an empty collection | `R.attr.parent.children.all(...)`, `!exists(...)` or `size(...) == 0` on a row with no parent returns TRUE/zero, while CEL raises a missing-path error and denies. Affects every relational adapter in this repository, not just this one. |
-| `int()` over a non-numeric string | CEL raises a conversion error and denies; SQL coerces (SQLite yields 0, PostgreSQL errors). Avoid `int()` on free-text columns. |
 | A NaN stored in a floating-point column | Ordered comparisons follow the database's NaN ordering rather than IEEE's. Only NaNs the adapter folds itself are handled exactly. |
 | Division by a stored negative zero | The sign of the resulting infinity is taken from the numerator alone, so `1.0 / -0.0` classifies as `+Inf` where CEL gives `-Inf`. |
 | Timestamp literals finer than a microsecond | PostgreSQL stores microsecond resolution, so a sub-microsecond bound is silently truncated and a boundary comparison can flip. Keep policy timestamps at microsecond precision or coarser. |
 | `!=` / `not in` against an explicit null under `NullExplicit` | CEL evaluates `null != "x"` as true; SQL leaves it UNKNOWN and excludes the row. This under-grants — it fails closed — but is not exact equivalence. |
+
+Two gaps listed here previously are now closed and pinned by the corpus rather than documented as
+constraints: an absent to-one parent is no longer indistinguishable from an empty collection (the
+chain requires its intermediate hop, and `w1-all-chain`/`w1-not-exists-chain`/`w1-size-zero-chain`/
+`w1-size-nonneg-chain` are oracle-compared here), and `int()`/`double()` no longer lower to SQL
+`CAST` at all — they fail closed, because CEL reads a whole string or raises where `CAST` reads a
+numeric prefix, and CEL truncates toward zero where PostgreSQL rounds (`cast-int-string`,
+`cast-double-string`, `cast-int-double`).
 
 ### Collation
 

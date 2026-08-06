@@ -64,6 +64,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # This job runs AdversarialConformanceTest against a real database, so it consumes the
+      # shared corpus exactly as the `test` job does — a corrupt corpus must fail here as a
+      # corpus error, not as an unexplained oracle mismatch on Postgres or MySQL.
+      - name: Validate conformance corpus
+        run: ../conformance/scripts/validate-corpus.sh
+
       - name: Setup JDK
         uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
         with:
@@ -91,6 +97,12 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The example's docker-compose.yml hardcodes the PDP image, and validate-corpus.sh is
+      # what asserts that pin still equals conformance/CERBOS_VERSION. Without this step the
+      # smoke tests below would happily run the whole end-to-end flow against a drifted PDP.
+      - name: Validate conformance corpus
+        run: ../conformance/scripts/validate-corpus.sh
 
       - name: Setup JDK
         uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
