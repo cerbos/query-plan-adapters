@@ -235,7 +235,7 @@ func seedDatabase(t *testing.T, ctx context.Context, pool *pgxpool.Pool, corpus 
 
 	for _, seed := range corpus.Seeds.Seeds {
 		var created *time.Time
-		if raw := createdAt(seed); raw != nil {
+		if raw := corpus.createdAt(seed); raw != nil {
 			parsed, err := time.Parse(time.RFC3339Nano, *raw)
 			require.NoError(t, err, "parsing derived createdAt for %s", seed.ID)
 			created = &parsed
@@ -245,8 +245,8 @@ func seedDatabase(t *testing.T, ctx context.Context, pool *pgxpool.Pool, corpus 
 			INSERT INTO adversarial_resource
 				(id, a_bool, a_string, a_number, a_double, a_optional_string, created_by, scope, created_at)
 			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-			seed.ID, seed.ABool, seed.AString, seed.ANumber, aDouble(seed),
-			seed.AOptionalString, createdBy(seed), scopeOf(seed), created)
+			seed.ID, seed.ABool, seed.AString, seed.ANumber, corpus.aDouble(seed),
+			seed.AOptionalString, corpus.createdBy(seed), corpus.scopeOf(seed), created)
 		require.NoError(t, err, "seeding resource %s", seed.ID)
 
 		for _, tag := range seed.Tags {
@@ -269,7 +269,7 @@ func seedDatabase(t *testing.T, ctx context.Context, pool *pgxpool.Pool, corpus 
 				subID, subName, catID)
 			require.NoError(t, err, "seeding sub-category %s", subID)
 
-			for j, label := range labelsOf(seed) {
+			for j, label := range corpus.labelsOf(seed) {
 				_, err := pool.Exec(ctx,
 					`INSERT INTO adversarial_label (id, name, sub_category_id) VALUES ($1,$2,$3)`,
 					fmt.Sprintf("%s-label%d", subID, j), label, subID)
@@ -309,7 +309,7 @@ func (h *harness) checkResource(seed Seed) *cerbos.Resource {
 	}
 
 	labels := make([]any, 0)
-	for _, label := range labelsOf(seed) {
+	for _, label := range h.corpus.labelsOf(seed) {
 		if label == nil {
 			labels = append(labels, map[string]any{})
 		} else {
@@ -331,7 +331,7 @@ func (h *harness) checkResource(seed Seed) *cerbos.Resource {
 		"aBool":      seed.ABool,
 		"aString":    seed.AString,
 		"aNumber":    seed.ANumber,
-		"createdBy":  createdBy(seed),
+		"createdBy":  h.corpus.createdBy(seed),
 		"obj":        map[string]any{"inner": seed.AString},
 		"tags":       tags,
 		"tagNames":   tagNames,
@@ -346,13 +346,13 @@ func (h *harness) checkResource(seed Seed) *cerbos.Resource {
 		attr["owner"] = nil
 	}
 
-	if d := aDouble(seed); d != nil {
+	if d := h.corpus.aDouble(seed); d != nil {
 		attr["aDouble"] = *d
 	}
-	if s := scopeOf(seed); s != nil {
+	if s := h.corpus.scopeOf(seed); s != nil {
 		attr["scope"] = *s
 	}
-	if ts := createdAt(seed); ts != nil {
+	if ts := h.corpus.createdAt(seed); ts != nil {
 		attr["createdAt"] = *ts
 	}
 

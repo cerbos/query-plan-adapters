@@ -43,6 +43,20 @@ interface SeedsFile {
   seeds: Seed[];
 }
 
+/** One seed's derived fields, exactly as conformance/derived-fields.json carries them. */
+interface DerivedEntry {
+  createdBy: string;
+  aDouble: number | null;
+  createdAt: string | null;
+  scope: string | null;
+  labels: (string | null)[];
+}
+
+interface DerivedFile {
+  fields: string[];
+  derived: Record<string, DerivedEntry>;
+}
+
 interface AdapterEntry {
   action: string;
   reason: string;
@@ -151,6 +165,127 @@ function parseTag(value: unknown, label: string): Tag {
     id: expectString(record["id"], `${label}.id`),
     name,
   };
+}
+
+// -- corpus coverage guards ---------------------------------------------------------------------
+//
+// The same parsed seed feeds the stored document AND the check() oracle, so a corpus field this
+// harness does not consume is dropped from both sides at once and the differential agrees for the
+// wrong reason — the projection trap conformance/README.md describes for actions.json, applied to
+// the seeds. Asserting set equality catches both directions: a corpus key nothing here reads, and a
+// key this harness reads that the corpus no longer carries.
+
+const SEED_KEYS = [
+  "id",
+  "aBool",
+  "aString",
+  "aNumber",
+  "aOptionalString",
+  "tags",
+  "subCategoryNames",
+] as const;
+
+/** Corpus prose, never read by a harness: the one documented exclusion from SEED_KEYS. */
+const SEED_NOTE_KEY = "note";
+
+const DERIVED_KEYS = [
+  "createdBy",
+  "aDouble",
+  "createdAt",
+  "scope",
+  "labels",
+] as const;
+
+function assertKeys(
+  label: string,
+  got: string[],
+  want: readonly string[],
+  optional: readonly string[] = []
+): void {
+  const allowed = new Set<string>([...want, ...optional]);
+  for (const key of got) {
+    if (!allowed.has(key)) {
+      throw new Error(
+        `${label} carries "${key}", which this harness does not consume: an unconsumed corpus field is dropped from the stored document and the check() oracle at once`
+      );
+    }
+  }
+  const present = new Set(got);
+  for (const key of want) {
+    if (!present.has(key)) {
+      throw new Error(
+        `${label} is missing "${key}", which this harness consumes`
+      );
+    }
+  }
+}
+
+/**
+ * Asserted against the RAW json rather than the parsed seeds: parseSeed rebuilds each row field by
+ * field, so a parsed seed can only ever carry the keys this harness already names and the
+ * assertion would pass vacuously.
+ */
+function assertSeedKeyCoverage(value: unknown): void {
+  const seeds = expectRecord(value, "seeds.json")["seeds"];
+  if (!Array.isArray(seeds)) {
+    throw new Error("seeds.json.seeds must be an array");
+  }
+  seeds.forEach((seed, index) => {
+    const label = `seeds.json seeds[${index}]`;
+    assertKeys(label, Object.keys(expectRecord(seed, label)), SEED_KEYS, [
+      SEED_NOTE_KEY,
+    ]);
+  });
+}
+
+function parseDerivedEntry(value: unknown, label: string): DerivedEntry {
+  const record = expectRecord(value, label);
+  assertKeys(label, Object.keys(record), DERIVED_KEYS);
+  const aDouble = record["aDouble"];
+  if (aDouble !== null && typeof aDouble !== "number") {
+    throw new Error(`${label}.aDouble must be a number or null`);
+  }
+  const createdAt = record["createdAt"];
+  if (createdAt !== null && typeof createdAt !== "string") {
+    throw new Error(`${label}.createdAt must be a string or null`);
+  }
+  const scope = record["scope"];
+  if (scope !== null && typeof scope !== "string") {
+    throw new Error(`${label}.scope must be a string or null`);
+  }
+  const labels = record["labels"];
+  if (
+    !Array.isArray(labels) ||
+    !labels.every((entry) => entry === null || typeof entry === "string")
+  ) {
+    throw new Error(`${label}.labels must be an array of strings or nulls`);
+  }
+  return {
+    createdBy: expectString(record["createdBy"], `${label}.createdBy`),
+    aDouble,
+    createdAt,
+    scope,
+    labels,
+  };
+}
+
+function parseDerivedFile(value: unknown): DerivedFile {
+  const record = expectRecord(value, "derived-fields.json");
+  const fields = expectStringArray(
+    record["fields"],
+    "derived-fields.json fields"
+  );
+  assertKeys("derived-fields.json fields", fields, DERIVED_KEYS);
+  const derived: Record<string, DerivedEntry> = {};
+  for (const [id, entry] of Object.entries(
+    expectRecord(record["derived"], "derived-fields.json derived")
+  )) {
+    derived[id] = parseDerivedEntry(
+      entry,
+      `derived-fields.json derived["${id}"]`
+    );
+  }
+  return { fields, derived };
 }
 
 function parseSeed(value: unknown, index: number): Seed {
@@ -292,9 +427,24 @@ function parseActionsFile(value: unknown): ActionsFile {
   };
 }
 
-const seedsFile = parseSeedsFile(readJson("seeds.json"));
+const rawSeedsJson = readJson("seeds.json");
+assertSeedKeyCoverage(rawSeedsJson);
+const seedsFile = parseSeedsFile(rawSeedsJson);
 const actionsFile = parseActionsFile(readJson("actions.json"));
+const derivedFile = parseDerivedFile(readJson("derived-fields.json"));
 const SEEDS = seedsFile.seeds;
+
+if (Object.keys(derivedFile.derived).length !== SEEDS.length) {
+  throw new Error(
+    `derived-fields.json has ${
+      Object.keys(derivedFile.derived).length
+    } entries for ${SEEDS.length} seeds`
+  );
+}
+for (const seed of SEEDS) {
+  // Throws when the entry is missing.
+  derivedFor(seed);
+}
 
 const unsupportedEntries = actionsFile.adapterUnsupported["mongoose"] ?? [];
 const unsupportedActions = new Set(
@@ -512,100 +662,39 @@ const MAPPER: Mapper = {
   },
 };
 
-function doubleFor(seed: Seed): number | null {
-  switch (seed.id) {
-    case "a1":
-      return -0.6;
-    case "a2":
-      return 0.25;
-    case "a3":
-      return null;
-    default:
-      return seed.aNumber + 0.3;
+// -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") --------
+//
+// Read from conformance/derived-fields.json rather than restated here. The same value feeds the
+// stored row and the check() oracle, so a transcription error would be self-consistent and
+// invisible to the differential; one machine-readable definition is what makes that impossible.
+
+function derivedFor(seed: Seed): DerivedEntry {
+  const entry = derivedFile.derived[seed.id];
+  if (entry === undefined) {
+    throw new Error(`derived-fields.json has no entry for seed "${seed.id}"`);
   }
+  return entry;
 }
 
+function doubleFor(seed: Seed): number | null {
+  return derivedFor(seed).aDouble;
+}
+
+/** Third-level label names. A null element is a NULL label name — a missing element attribute. */
 function labelsFor(seed: Seed): (string | null)[] {
-  switch (seed.id) {
-    case "a1":
-      return ["gold", "silver"];
-    case "a6":
-      return [null, "silver"];
-    case "a8":
-      return ["silver"];
-    case "c1":
-      return ["Gold"];
-    default:
-      return [];
-  }
+  return derivedFor(seed).labels;
 }
 
 function createdByFor(seed: Seed): string {
-  return seed.aNumber >= 2
-    ? "2024-06-01T00:00:00Z"
-    : "2026-06-01T00:00:00Z";
+  return derivedFor(seed).createdBy;
 }
 
 function timestampFor(seed: Seed): string | null {
-  switch (seed.id) {
-    case "a1":
-      return "2020-03-15T10:30:00Z";
-    case "a2":
-      return "2037-01-01T00:00:00Z";
-    case "a3":
-      return null;
-    case "a4":
-      return "2024-06-01T00:00:00Z";
-    case "a5":
-      return "2020-03-15T10:30:00.123456Z";
-    default:
-      return seed.aNumber >= 2
-        ? "2036-06-06T06:06:06Z"
-        : "2021-05-05T05:05:05Z";
-  }
+  return derivedFor(seed).createdAt;
 }
 
 function scopeFor(seed: Seed): string | null {
-  switch (seed.id) {
-    case "a1":
-      return "dept";
-    case "a2":
-      return "dept.eng";
-    case "a3":
-      return "dept.eng.platform";
-    case "a4":
-      return "dept.eng.platform.obs";
-    case "a5":
-      return "dept.engineering";
-    case "a6":
-      return "dept.sales";
-    case "a8":
-      return "";
-    case "a9":
-      return "50%";
-    case "b1":
-      return "50%:a_b:x";
-    case "b2":
-      return "50x:a_b:y";
-    case "b3":
-      return "50%:aXb:y";
-    case "b4":
-      return "50%:a_b";
-    case "b5":
-      return "dept.eng.platform2";
-    case "b6":
-      return "50%.a_b";
-    case "c1":
-      return "Dept.Eng";
-    case "c2":
-      return "dept.eng.";
-    case "d1":
-      return "[env]:prod:eu";
-    case "d2":
-      return "e:prod:eu";
-    default:
-      return null;
-  }
+  return derivedFor(seed).scope;
 }
 
 function asTagAttribute(tag: Tag): Record<string, Value> {

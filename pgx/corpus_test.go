@@ -4,12 +4,15 @@
 package cerbospgx_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 // The shared adversarial corpus. Everything about what is tested — the hostile rows, the action
@@ -28,11 +31,13 @@ type Tag struct {
 	ID   string  `json:"id"`
 }
 
-// Seed is one hostile row.
+// Seed is one hostile row. Note is corpus documentation this harness never reads; it is named so
+// strict decoding accepts it, and it is the one seed key seedKeys deliberately omits.
 type Seed struct {
 	AOptionalString  *string  `json:"aOptionalString"`
 	ID               string   `json:"id"`
 	AString          string   `json:"aString"`
+	Note             string   `json:"note"`
 	Tags             []Tag    `json:"tags"`
 	SubCategoryNames []string `json:"subCategoryNames"`
 	ANumber          int      `json:"aNumber"`
@@ -46,11 +51,34 @@ type Principal struct {
 	Roles []string       `json:"roles"`
 }
 
-// SeedsFile is conformance/seeds.json.
+// SeedsFile is conformance/seeds.json. Every key the file carries is named, including the prose
+// ones, because it is decoded with unknown fields rejected.
 type SeedsFile struct {
-	ResourceKind string    `json:"resourceKind"`
-	Seeds        []Seed    `json:"seeds"`
-	Principal    Principal `json:"principal"`
+	Schema        string    `json:"$schema"` //nolint:tagliatelle // JSON Schema's reserved key.
+	Description   string    `json:"description"`
+	ResourceKind  string    `json:"resourceKind"`
+	PrincipalNote string    `json:"principalNote"`
+	Seeds         []Seed    `json:"seeds"`
+	Principal     Principal `json:"principal"`
+}
+
+// DerivedEntry is one seed's deterministic derived fields, read from
+// conformance/derived-fields.json rather than recomputed here. A nil value is a NULL column and a
+// missing check() attribute; a nil element of Labels is a NULL label name.
+type DerivedEntry struct {
+	CreatedAt *string   `json:"createdAt"`
+	Scope     *string   `json:"scope"`
+	ADouble   *float64  `json:"aDouble"`
+	CreatedBy string    `json:"createdBy"`
+	Labels    []*string `json:"labels"`
+}
+
+// DerivedFile is conformance/derived-fields.json.
+type DerivedFile struct {
+	Schema      string                  `json:"$schema"` //nolint:tagliatelle // JSON Schema's reserved key.
+	Description string                  `json:"description"`
+	Entries     map[string]DerivedEntry `json:"derived"`
+	Fields      []string                `json:"fields"`
 }
 
 // UnsupportedShape is an entry in expectedUnsupported.
@@ -88,11 +116,32 @@ type ActionsFile struct {
 	KnownDivergences          []KnownDivergence         `json:"knownDivergences"`
 }
 
+// seedKeys is the exact set of seeds.json row keys this harness consumes. `note` is corpus prose
+// and is the one documented exclusion.
+//
+// The same parsed seed feeds the stored row AND the check() oracle, so a key this harness does not
+// know about would vanish from both sides at once and the differential would agree for the wrong
+// reason — the projection trap conformance/README.md describes for actions.json, applied to the
+// seeds. Asserting set equality rather than only rejecting unknown fields catches both directions:
+// a corpus key nothing here consumes, and a consumed key the corpus no longer carries (which would
+// otherwise decode to its zero value on both sides).
+var seedKeys = []string{
+	"aBool", "aNumber", "aOptionalString", "aString", "id", "subCategoryNames", "tags",
+}
+
+// seedNoteKey is documentation, never read by any harness.
+const seedNoteKey = "note"
+
+// derivedKeys is the exact set of per-seed derived fields this harness consumes, guarded the same
+// way and for the same reason as seedKeys.
+var derivedKeys = []string{"aDouble", "createdAt", "createdBy", "labels", "scope"}
+
 // Corpus is the parsed corpus plus this adapter's derived classification.
 type Corpus struct {
 	Dir           string
 	CerbosVersion string
 	Seeds         SeedsFile
+	Derived       DerivedFile
 	Actions       ActionsFile
 
 	// OracleActions must match the check() oracle exactly.
@@ -118,8 +167,10 @@ func loadCorpus(tb testing.TB, adapterName string) *Corpus {
 	dir := findConformanceDir(tb)
 	c := &Corpus{Dir: dir}
 
-	readJSON(tb, filepath.Join(dir, "seeds.json"), &c.Seeds)
+	readJSONStrict(tb, filepath.Join(dir, "seeds.json"), &c.Seeds)
+	readJSONStrict(tb, filepath.Join(dir, "derived-fields.json"), &c.Derived)
 	readJSON(tb, filepath.Join(dir, "actions.json"), &c.Actions)
+	assertCorpusCoverage(tb, dir, c)
 
 	version, err := os.ReadFile(filepath.Join(dir, "CERBOS_VERSION"))
 	if err != nil {
@@ -224,81 +275,134 @@ func readJSON(tb testing.TB, path string, out any) {
 	}
 }
 
+// readJSONStrict decodes a corpus file with unknown fields rejected, so a key the target struct
+// does not name is a build-the-wrong-thing error rather than a silent drop.
+func readJSONStrict(tb testing.TB, path string, out any) {
+	tb.Helper()
+
+	data, err := os.ReadFile(path) //nolint:gosec // corpus paths are derived from the repo layout
+	if err != nil {
+		tb.Fatalf("reading %s: %v", path, err)
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(out); err != nil {
+		tb.Fatalf("parsing %s: %v", path, err)
+	}
+}
+
+// assertCorpusCoverage proves the harness consumes every seed key and every derived field the
+// corpus defines, and nothing it does not. Strict decoding alone cannot do this: it rejects an
+// added key but says nothing about one that disappears, and a disappeared key decodes to its zero
+// value on both sides of the differential.
+func assertCorpusCoverage(tb testing.TB, dir string, c *Corpus) {
+	tb.Helper()
+
+	var raw struct {
+		Seeds []map[string]json.RawMessage `json:"seeds"`
+	}
+	readJSON(tb, filepath.Join(dir, "seeds.json"), &raw)
+	if len(raw.Seeds) != len(c.Seeds.Seeds) {
+		tb.Fatalf("seeds.json decoded %d rows but carries %d", len(c.Seeds.Seeds), len(raw.Seeds))
+	}
+	for i, seed := range raw.Seeds {
+		assertKeys(tb, fmt.Sprintf("seeds.json seeds[%d]", i), keysOf(seed), seedKeys, seedNoteKey)
+	}
+
+	assertKeys(tb, "derived-fields.json fields", c.Derived.Fields, derivedKeys)
+
+	var rawDerived struct {
+		Derived map[string]map[string]json.RawMessage `json:"derived"`
+	}
+	readJSON(tb, filepath.Join(dir, "derived-fields.json"), &rawDerived)
+	for _, seed := range c.Seeds.Seeds {
+		entry, ok := rawDerived.Derived[seed.ID]
+		if !ok {
+			tb.Fatalf("derived-fields.json has no entry for seed %q", seed.ID)
+		}
+		assertKeys(tb, fmt.Sprintf("derived-fields.json derived[%q]", seed.ID), keysOf(entry), derivedKeys)
+	}
+	if len(rawDerived.Derived) != len(c.Seeds.Seeds) {
+		tb.Fatalf("derived-fields.json has %d entries for %d seeds", len(rawDerived.Derived), len(c.Seeds.Seeds))
+	}
+}
+
+// assertKeys fails unless got is exactly want, ignoring order, plus any of the optional keys.
+func assertKeys(tb testing.TB, label string, got, want []string, optional ...string) {
+	tb.Helper()
+
+	allowed := make(map[string]bool, len(want)+len(optional))
+	required := make(map[string]bool, len(want))
+	for _, key := range want {
+		allowed[key] = true
+		required[key] = true
+	}
+	for _, key := range optional {
+		allowed[key] = true
+	}
+
+	for _, key := range got {
+		if !allowed[key] {
+			tb.Fatalf("%s carries %q, which this harness does not consume: an unconsumed corpus field is dropped from the stored row and the check() oracle at once", label, key)
+		}
+		delete(required, key)
+	}
+	for key := range required {
+		tb.Fatalf("%s is missing %q, which this harness consumes", label, key)
+	}
+}
+
+func keysOf(m map[string]json.RawMessage) []string {
+	keys := make([]string, 0, len(m))
+	for key := range m {
+		keys = append(keys, key)
+	}
+	return keys
+}
+
+// TestCorpusCoverage runs the corpus consistency guards on their own, without the containers the
+// differential suite needs. A corpus field this harness stopped consuming — on either side of the
+// differential at once — fails here in milliseconds rather than after a PDP and a database have
+// started.
+func TestCorpusCoverage(t *testing.T) {
+	t.Parallel()
+
+	corpus := loadCorpus(t, adapterName)
+	require.NotEmpty(t, corpus.Seeds.Seeds, "corpus has no seeds")
+	require.Len(t, corpus.Derived.Entries, len(corpus.Seeds.Seeds),
+		"every seed needs exactly one derived-fields.json entry")
+	require.ElementsMatch(t, derivedKeys, corpus.Derived.Fields,
+		"derived-fields.json declares fields this harness does not consume")
+}
+
 // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") -------
 //
 // These are part of the shared contract, not adapter-specific fixtures: the same values feed both
 // the seeded rows and the check() oracle, so an error here would make both sides agree for the
-// wrong reason.
+// wrong reason and nothing downstream could catch it. They are therefore read from
+// conformance/derived-fields.json rather than restated here — restating them is how a
+// transcription error becomes self-consistent and invisible.
 
-func createdBy(s Seed) string {
-	if s.ANumber >= 2 {
-		return "2024-06-01T00:00:00Z"
+func (c *Corpus) derived(s Seed) DerivedEntry {
+	entry, ok := c.Derived.Entries[s.ID]
+	if !ok {
+		// Unreachable: assertCorpusCoverage proves every seed has an entry.
+		panic("no derived-fields.json entry for seed " + s.ID)
 	}
-	return "2026-06-01T00:00:00Z"
+	return entry
 }
 
-func aDouble(s Seed) *float64 {
-	switch s.ID {
-	case "a1":
-		return ptr(-0.6)
-	case "a2":
-		return ptr(0.25)
-	case "a3":
-		return nil
-	default:
-		return ptr(float64(s.ANumber) + 0.3)
-	}
-}
+func (c *Corpus) createdBy(s Seed) string { return c.derived(s).CreatedBy }
 
-func createdAt(s Seed) *string {
-	fixed := map[string]*string{
-		"a1": ptr("2020-03-15T10:30:00Z"),
-		"a2": ptr("2037-01-01T00:00:00Z"),
-		"a3": nil,
-		"a4": ptr("2024-06-01T00:00:00Z"),
-		"a5": ptr("2020-03-15T10:30:00.123456Z"),
-	}
-	if v, ok := fixed[s.ID]; ok {
-		return v
-	}
-	if s.ANumber >= 2 {
-		return ptr("2036-06-06T06:06:06Z")
-	}
-	return ptr("2021-05-05T05:05:05Z")
-}
+func (c *Corpus) aDouble(s Seed) *float64 { return c.derived(s).ADouble }
 
-func scopeOf(s Seed) *string {
-	scopes := map[string]string{
-		"a1": "dept", "a2": "dept.eng", "a3": "dept.eng.platform",
-		"a4": "dept.eng.platform.obs", "a5": "dept.engineering", "a6": "dept.sales",
-		"a8": "", "a9": "50%", "b1": "50%:a_b:x", "b2": "50x:a_b:y", "b3": "50%:aXb:y",
-		"b4": "50%:a_b", "b5": "dept.eng.platform2", "b6": "50%.a_b", "c1": "Dept.Eng",
-		"c2": "dept.eng.", "d1": "[env]:prod:eu", "d2": "e:prod:eu",
-	}
-	if v, ok := scopes[s.ID]; ok {
-		return &v
-	}
-	return nil
-}
+func (c *Corpus) createdAt(s Seed) *string { return c.derived(s).CreatedAt }
+
+func (c *Corpus) scopeOf(s Seed) *string { return c.derived(s).Scope }
 
 // labelsOf returns the third-level label names. A nil element is a NULL label name, which must be
 // a missing element attribute on the check side.
-func labelsOf(s Seed) []*string {
-	switch s.ID {
-	case "a1":
-		return []*string{ptr("gold"), ptr("silver")}
-	case "a6":
-		return []*string{nil, ptr("silver")}
-	case "a8":
-		return []*string{ptr("silver")}
-	case "c1":
-		return []*string{ptr("Gold")}
-	default:
-		return nil
-	}
-}
-
-func ptr[T any](v T) *T { return &v }
+func (c *Corpus) labelsOf(s Seed) []*string { return c.derived(s).Labels }
 
 // categoryID and subCategoryID name the per-seed category graph. Each seed gets its own
 // categories so no two rows share a relation — a shared graph would let a filter match through

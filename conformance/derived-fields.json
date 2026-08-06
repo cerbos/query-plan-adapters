@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Deterministic derived fields for every seed in seeds.json. The corpus keeps the raw relational rows compact, so these five attributes are materialised here rather than restated as rules in each harness. Every harness reads this file for BOTH the stored columns and the check()-oracle attributes; a harness that recomputed them would feed the same transcription error to both sides of the differential and agree for the wrong reason. `null` means NULL column / missing attribute, per README.md's 'NULL is a missing attribute' convention; a `null` element of `labels` is a NULL label name. See README.md, 'Deterministic derived fields', for the rules these values materialise — validate-corpus.sh re-derives createdBy, aDouble and createdAt from seeds.json and fails on drift.",
+  "fields": ["createdBy", "aDouble", "createdAt", "scope", "labels"],
+  "derived": {
+    "a1": { "createdBy": "2024-06-01T00:00:00Z", "aDouble": -0.6,  "createdAt": "2020-03-15T10:30:00Z",        "scope": "dept",                 "labels": ["gold", "silver"] },
+    "a2": { "createdBy": "2026-06-01T00:00:00Z", "aDouble": 0.25,  "createdAt": "2037-01-01T00:00:00Z",        "scope": "dept.eng",             "labels": [] },
+    "a3": { "createdBy": "2024-06-01T00:00:00Z", "aDouble": null,  "createdAt": null,                          "scope": "dept.eng.platform",    "labels": [] },
+    "a4": { "createdBy": "2026-06-01T00:00:00Z", "aDouble": 1.3,   "createdAt": "2024-06-01T00:00:00Z",        "scope": "dept.eng.platform.obs", "labels": [] },
+    "a5": { "createdBy": "2026-06-01T00:00:00Z", "aDouble": -4.7,  "createdAt": "2020-03-15T10:30:00.123456Z", "scope": "dept.engineering",     "labels": [] },
+    "a6": { "createdBy": "2024-06-01T00:00:00Z", "aDouble": 3.3,   "createdAt": "2036-06-06T06:06:06Z",        "scope": "dept.sales",           "labels": [null, "silver"] },
+    "a7": { "createdBy": "2026-06-01T00:00:00Z", "aDouble": 0.3,   "createdAt": "2021-05-05T05:05:05Z",        "scope": null,                   "labels": [] },
+    "a8": { "createdBy": "2024-06-01T00:00:00Z", "aDouble": 2.3,   "createdAt": "2036-06-06T06:06:06Z",        "scope": "",                     "labels": ["silver"] },
+    "a9": { "createdBy": "2024-06-01T00:00:00Z", "aDouble": 4.3,   "createdAt": "2036-06-06T06:06:06Z",        "scope": "50%",                  "labels": [] },
+    "b1": { "createdBy": "2024-06-01T00:00:00Z", "aDouble": 7.3,   "createdAt": "2036-06-06T06:06:06Z",        "scope": "50%:a_b:x",            "labels": [] },
+    "b2": { "createdBy": "2024-06-01T00:00:00Z", "aDouble": 6.3,   "createdAt": "2036-06-06T06:06:06Z",        "scope": "50x:a_b:y",            "labels": [] },
+    "b3": { "createdBy": "2026-06-01T00:00:00Z", "aDouble": -3.7,  "createdAt": "2021-05-05T05:05:05Z",        "scope": "50%:aXb:y",            "labels": [] },
+    "b4": { "createdBy": "2024-06-01T00:00:00Z", "aDouble": 8.3,   "createdAt": "2036-06-06T06:06:06Z",        "scope": "50%:a_b",              "labels": [] },
+    "b5": { "createdBy": "2024-06-01T00:00:00Z", "aDouble": 9.3,   "createdAt": "2036-06-06T06:06:06Z",        "scope": "dept.eng.platform2",   "labels": [] },
+    "b6": { "createdBy": "2024-06-01T00:00:00Z", "aDouble": 10.3,  "createdAt": "2036-06-06T06:06:06Z",        "scope": "50%.a_b",              "labels": [] },
+    "c1": { "createdBy": "2024-06-01T00:00:00Z", "aDouble": 11.3,  "createdAt": "2036-06-06T06:06:06Z",        "scope": "Dept.Eng",             "labels": ["Gold"] },
+    "c2": { "createdBy": "2024-06-01T00:00:00Z", "aDouble": 12.3,  "createdAt": "2036-06-06T06:06:06Z",        "scope": "dept.eng.",            "labels": [] },
+    "d1": { "createdBy": "2024-06-01T00:00:00Z", "aDouble": 13.3,  "createdAt": "2036-06-06T06:06:06Z",        "scope": "[env]:prod:eu",        "labels": [] },
+    "d2": { "createdBy": "2024-06-01T00:00:00Z", "aDouble": 14.3,  "createdAt": "2036-06-06T06:06:06Z",        "scope": "e:prod:eu",            "labels": [] },
+    "e1": { "createdBy": "2024-06-01T00:00:00Z", "aDouble": 15.3,  "createdAt": "2036-06-06T06:06:06Z",        "scope": null,                   "labels": [] }
+  }
+}
