@@ -1878,16 +1878,19 @@ class SpringDataQueryPlanAdapterTest {
             });
         }
 
+        // #313: filter() yields a list, not a boolean, so it has no truth value of its own to
+        // follow the exists family with. Rejected under both polarities.
         @Test
-        void filterFollowsExistsFamilySemantics() {
+        void filterInABooleanPositionFailsClosed() {
             Operand filterPublic = exprOp("filter", var("request.resource.attr.tags"),
                     lambda("t", exprOp("eq", var("t.name"), sval("public"))));
 
             ResourceEntity r = new ResourceEntity("null-elem-fe-1");
             r.addTag("fe1", null);
             withResource(r, () -> {
-                assertEquals(0, runCount(filterPublic));
-                assertEquals(0, runCount(exprOp("not", filterPublic)));
+                assertThrows(IllegalArgumentException.class, () -> runCount(filterPublic));
+                assertThrows(IllegalArgumentException.class,
+                        () -> runCount(exprOp("not", filterPublic)));
             });
         }
 

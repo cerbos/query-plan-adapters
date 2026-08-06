@@ -21,6 +21,19 @@ export type MapperConfig = {
     name: string;
     type: "one" | "many";
     field?: string;
+    /**
+     * The document path of an optional to-ONE parent this collection is reached through.
+     *
+     * CEL cannot dot through a list, so every intermediate segment of `a.b.c` is a to-one
+     * parent: absent, the application sends no attribute at all and CEL raises a
+     * missing-path error, which denies. A flattened Mongo path cannot see the difference —
+     * an absent parent and a childless parent both give an empty array — so
+     * `size(chain) == 0` and `size(chain) >= 0` are TRUE for every parentless document and
+     * return records the PDP denies. Declaring the parent makes those comparisons yield
+     * null, which loses against every number in BSON order and excludes the document
+     * (cerbos/query-plan-adapters#309).
+     */
+    requiresParent?: string;
     fields?: {
       [key: string]: MapperConfig;
     };
@@ -225,6 +238,7 @@ type ResolvedFieldReference = {
     name: string;
     type: "one" | "many";
     field?: string;
+    requiresParent?: string;
     nestedMapper?: {
       [key: string]: MapperConfig;
     };
@@ -247,7 +261,7 @@ const resolveFieldReference = (
     typeof mapper === "function" ? mapper(reference) : mapper[reference];
 
   if (config?.relation) {
-    const { name, field, fields, type } = config.relation;
+    const { name, field, fields, type, requiresParent } = config.relation;
     const path = field
       ? type === "one"
         ? [`${name}.${field}`]
@@ -259,6 +273,7 @@ const resolveFieldReference = (
         name,
         type,
         field,
+        requiresParent,
         nestedMapper: fields,
       },
     };
@@ -275,7 +290,7 @@ const resolveFieldReference = (
       typeof mapper === "function" ? mapper(parentPath) : mapper[parentPath];
 
     if (parentConfig?.relation) {
-      const { name, fields, type } = parentConfig.relation;
+      const { name, fields, type, requiresParent } = parentConfig.relation;
       const fieldConfig = fields?.[lastPart];
       const fieldName = fieldConfig?.field || lastPart;
       return {
@@ -288,6 +303,7 @@ const resolveFieldReference = (
           name,
           type,
           field: fieldName,
+          requiresParent,
           nestedMapper: fields,
         },
       };
@@ -606,28 +622,19 @@ const buildAggregationExpressionFromExpression = (
         "string"
       );
     }
-    case "double": {
-      const operand = operands[0];
-      if (!operand) {
-        throw new Error("double conversion requires an operand");
-      }
-      return buildCheckedConversion(
-        buildAggregationExpression(operand, mapper),
-        ["string", "int", "long", "double", "decimal"],
-        "double"
+    // CEL's int()/double() are not $convert. CEL reads a WHOLE string or raises, and an
+    // error DENIES the row; $convert parses a leading numeric prefix, so "100%_done"
+    // becomes 100 and the filter returns records the PDP denies. The numeric direction is
+    // no safer: CEL truncates toward zero while $convert to "long" ROUNDS, so int(-0.6) is
+    // 0 to CEL and -1 here. Nothing in the plan says what type the field holds, so no
+    // conversion is faithful for every document (cerbos/query-plan-adapters#311).
+    case "double":
+    case "int":
+      throw new Error(
+        `'${operator}()' cannot be translated: $convert parses a numeric prefix where CEL ` +
+          "requires the whole string and raises otherwise, and rounds where CEL truncates " +
+          "toward zero"
       );
-    }
-    case "int": {
-      const operand = operands[0];
-      if (!operand) {
-        throw new Error("int conversion requires an operand");
-      }
-      return buildCheckedConversion(
-        buildAggregationExpression(operand, mapper),
-        ["string", "int", "long", "double", "decimal"],
-        "long"
-      );
-    }
     case "if": {
       const [ifOp, thenOp, elseOp] = operands;
       if (!ifOp || !thenOp || !elseOp) {
@@ -669,8 +676,23 @@ const buildAggregationExpressionFromExpression = (
       }
       const inner = buildAggregationExpression(operand, mapper);
       // Works for both arrays and strings: $size for arrays, $strLenCP otherwise.
-      return {
+      const size = {
         $cond: [{ $isArray: inner }, { $size: inner }, { $strLenCP: inner }],
+      };
+      const parentPath = isVariable(operand)
+        ? resolveFieldReference(operand.name, mapper).relation?.requiresParent
+        : undefined;
+      if (parentPath === undefined) {
+        return size;
+      }
+      // An absent to-one parent counts as UNKNOWN, not 0. null loses against every number
+      // in BSON order, so both `== 0` and `>= 0` exclude the document (#309).
+      return {
+        $cond: [
+          { $gt: [{ $size: { $ifNull: [`$${parentPath}`, []] } }, 0] },
+          size,
+          null,
+        ],
       };
     }
     case "matches": {
@@ -1868,8 +1890,17 @@ const buildMongooseFilterFromCerbosExpression = (
         "exists_one requires exact match cardinality and is unsupported"
       );
 
-    case "exists":
-    case "filter": {
+    // filter() yields a list, not a boolean. Reaching it in a boolean position means the
+    // plan used it as a predicate, and there is no meaning to pick: `filter(...)` is not
+    // `size(filter(...)) > 0`. Fail closed (cerbos/query-plan-adapters#313); the legitimate
+    // `size(filter(...))` form is handled by the size operator before this.
+    case "filter":
+      throw new Error(
+        "filter() returns a list, not a boolean, so it cannot be a condition on its own; " +
+          "only size(filter(...)) has a boolean meaning"
+      );
+
+    case "exists": {
       if (operands.length !== 2) {
         throw new Error(`${operator} requires exactly two operands`);
       }
@@ -1961,73 +1992,16 @@ const buildMongooseFilterFromCerbosExpression = (
       );
     }
 
-    case "map": {
-      if (operands.length !== 2) {
-        throw new Error("map requires exactly two operands");
-      }
-
-      const collectionOperand = requireOperandAt(
-        0,
-        "map operator requires a collection operand"
+    // map() in a BOOLEAN position: the projection is a list, not a predicate. Rendering it
+    // as `$elemMatch: { $exists: true }` silently answers "the projection is non-empty",
+    // which is not what the policy said (cerbos/query-plan-adapters#313). The legitimate
+    // consumer, hasIntersection(map(...), [...]), destructures the map operand itself
+    // before reaching this switch.
+    case "map":
+      throw new Error(
+        "map() returns a list, not a boolean, so it cannot be a condition on its own; " +
+          "only hasIntersection(map(...), [...]) gives the projection a boolean meaning"
       );
-      const lambdaOperand = requireOperandAt(
-        1,
-        "map operator requires a lambda operand"
-      );
-
-      if (
-        !isVariable(collectionOperand) ||
-        !isExpression(lambdaOperand) ||
-        lambdaOperand.operator !== "lambda"
-      ) {
-        throw new Error("Invalid map expression structure");
-      }
-
-      const { relation } = resolveFieldReference(
-        collectionOperand.name,
-        mapper
-      );
-      if (!relation) {
-        throw new Error("map operator requires a relation mapping");
-      }
-      if (relation.type !== "many") {
-        throw new Error("map operator requires a collection relation");
-      }
-
-      const projectionOperand = getOperandAt(
-        lambdaOperand.operands,
-        0,
-        "map lambda requires a projection operand"
-      );
-      const variableOperand = getOperandAt(
-        lambdaOperand.operands,
-        1,
-        "map lambda requires a variable operand"
-      );
-      if (!isVariable(projectionOperand) || !isVariable(variableOperand)) {
-        throw new Error("Invalid map lambda expression structure");
-      }
-
-      const scopedMapper = createScopedMapper(
-        collectionOperand.name,
-        variableOperand.name,
-        mapper
-      );
-
-      const projectionResolved = resolveFieldReference(
-        projectionOperand.name,
-        scopedMapper
-      );
-
-      // Return the field name directly for MongoDB to handle projection
-      return {
-        [relation.name]: {
-          $elemMatch: {
-            ...buildFieldFilter(projectionResolved.path, { $exists: true }),
-          },
-        },
-      };
-    }
 
     case "all": {
       if (operands.length !== 2) {

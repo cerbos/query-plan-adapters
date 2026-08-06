@@ -110,8 +110,8 @@ The adapter is differentially tested with 20 hostile seed documents against Cerb
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | All 122 reference conformance actions, plus `matches()`, list indexing/`get-field`, and `timestamp()` plans that the Spring Data reference adapter rejects (125 actions total) |
-| Fail-closed | No corpus shape when `allowPostFilter: true`; unknown operators and invalid expression structures still throw |
+| Oracle-tested | 128 of the 130 reference conformance actions, plus `matches()`, list indexing/`get-field`, and `timestamp()` plans that the Spring Data reference adapter rejects (131 actions total) |
+| Fail-closed | `int()`/`double()` casts and `filter()`/`map()` used as a condition, plus a constant zero divisor whose sign the JSON hop into a Convex function discards (7 actions); unknown operators and invalid expression structures still throw |
 | Explicit opt-in | Any plan that cannot be represented entirely as a Convex database filter requires `allowPostFilter: true` |
 | Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`. Under the default it already returns the empty set the PDP demands *when the document omits the field for a NULL value*, which is what the conformance harness seeds; a deployment that stores explicit nulls while omitting the attribute would over-grant |
 | Known planner divergence | `has()` on a missing attribute is currently folded by the Cerbos planner to `ALWAYS_ALLOWED`; `checkResource` still denies documents where the attribute is missing. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |

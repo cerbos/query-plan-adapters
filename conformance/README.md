@@ -123,6 +123,36 @@ What that second assertion looks like depends on where the adapter's NULL lives:
 Because the oracle for these actions is empty by construction, they must **not** join the
 degeneracy guard below — that guard asserts a non-empty, non-total oracle, which is exactly what
 this shape cannot have.
+
+#### The absent to-one parent
+
+The other representation mismatch the corpus pins is a *path* that is absent rather than a value
+that is null. `mainCategory` is a to-one parent on the check side: a seed with no
+`subCategoryNames` sends **no `mainCategory` attribute at all**, so CEL raises a missing-path
+error and `check()` denies. An adapter reaches the same data through a join chain rooted at the
+resource row, where an absent parent and a childless parent produce the same empty result set:
+
+| shape | `check()` | a chain that does not require the hop |
+|---|---|---|
+| `mainCategory.subCategories.exists(s, …)` | deny | no rows → false → deny — **agrees, for the wrong reason** |
+| `size(mainCategory.subCategories) > 0` | deny | count 0 → deny — **agrees, for the wrong reason** |
+| `mainCategory.subCategories.all(s, …)` | deny | no rows → vacuously TRUE → **over-grants** |
+| `!mainCategory.subCategories.exists(s, …)` | deny | no rows → `!false` → **over-grants** |
+| `size(mainCategory.subCategories) == 0` | deny | count 0 → **over-grants** |
+| `size(mainCategory.subCategories) >= 0` | deny | count 0 → **over-grants** |
+
+Only a universal, a negated existential, or a lower-bound count discriminates them, which is why
+`w1-exists-chain`, `w1-size-chain` and `w1-in-chain` passed everywhere while the bug was live
+(cerbos/query-plan-adapters#309). `w1-all-chain`, `w1-not-exists-chain`, `w1-size-zero-chain` and
+`w1-size-nonneg-chain` are the four that discriminate.
+
+The fix is in the translation, not in the classification: **a chained collection must require its
+intermediate hop to exist**, so an absent parent stays excluded under both polarities instead of
+collapsing onto the empty-collection case. `w1-size-zero-chain` has an empty oracle by
+construction (no seed holds a parent with zero children) and therefore stays out of the degeneracy
+guard; `w1-all-chain`, `w1-not-exists-chain` and `w1-size-nonneg-chain` all have non-degenerate
+oracles and carry the anti-vacuity assertion for the group.
+
 ### The degeneracy guard
 
 The comparison in step 4 can pass vacuously if the oracle itself is trivial (e.g. the PDP denies
@@ -244,6 +274,42 @@ unsupported before you have watched it fail is how a translatable shape gets per
    (oracle-tested / fail-closed / known divergence counts). Each adapter is published
    independently, so its README must stand alone — a consumer should not need this monorepo to
    understand what the adapter guarantees.
+
+### Mapping hazards: the rows the subquery sees
+
+Everything above proves the **plan** side — given a policy shape, does the adapter's filter return
+the rows `check()` allows. The other half of the contract is the **mapping**, and the corpus
+cannot express it with a policy action because the policy is irrelevant to it:
+
+> **The rows an adapter's subquery sees must equal the rows the application put into the resource
+> attributes.**
+
+When they differ, the filter returns rows the PDP denies and no corpus action notices, because the
+oracle is computed from the attributes and the adapter reads the store. Every hazard below is a
+violation of exactly that one sentence, and every one of them was a real over-grant
+(cerbos/query-plan-adapters#314, found while building the ActiveRecord adapter):
+
+| Hazard | What goes wrong | Where it shows up |
+|---|---|---|
+| A **filtered association** | the application's association applies a predicate the subquery does not, so the subquery matches rows the application never serialised | ActiveRecord `has_many …, -> { where(visible: true) }`; Prisma filtered relations; SQLAlchemy `relationship(primaryjoin=…)`; Hibernate `@Where`/`@Filter` |
+| A **default scope on the target model** | the subquery reads the table directly and skips the scope every application read applies | ActiveRecord `default_scope`; Hibernate `@Where` on the entity; a soft-delete filter |
+| **Subtype discrimination** | the association also filters on a type/discriminator column; the bare table holds the other subtypes too | ActiveRecord STI; Mongoose discriminators; JPA `@DiscriminatorValue` |
+| A **to-one relation used as a collection** | nothing makes the database enforce one row, so the application sees one and the subquery examines all of them | ActiveRecord `has_one`; any unindexed FK-back-reference |
+| A **composite association key** | a multi-column key becomes one quoted identifier and the query fails, or worse joins on the wrong column | ActiveRecord 7.1+ composite keys; any two-column FK |
+| An **absent to-one parent** | see the section above — this one *is* expressible, and `w1-all-chain` and friends pin it | every relational adapter |
+
+Two things follow for an adapter author:
+
+1. **Decide about each hazard explicitly.** Either the mapping reproduces the store-side filtering
+   exactly, or the adapter rejects the mapping with an error naming the mechanism. A best-effort
+   subquery is the one outcome the invariant forbids.
+2. **Say so in the adapter's README**, next to the `Conformance contract` table. A consumer whose
+   ORM offers filtered associations needs to know before they wire one up, not after.
+
+The precedent for handling this without a policy action is `nullRepresentationOmitted`: a
+per-adapter contract asserted by each harness rather than a shape in `adversarial.yaml`. If a
+hazard turns out to be expressible as a plan shape — as the absent to-one parent was — move it into
+the policy suite and classify it like anything else.
 
 ### Gotchas worth knowing up front
 

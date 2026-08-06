@@ -420,14 +420,24 @@ func TestRelationMembershipRespectsNullRepresentation(t *testing.T) {
 	require.Contains(t, omitted.Where, `"cerbos_rel_1"."name" = "resource"."owner"`)
 }
 
-// TestIntCastTruncatesTowardZero pins CEL conversion semantics: int(1.9) is 1, but PostgreSQL's
-// float-to-bigint cast rounds to 2, which over-grants on an equality threshold.
-func TestIntCastTruncatesTowardZero(t *testing.T) {
+// TestNumericCastsAreRejected pins the fail-closed answer to CEL's int()/double()
+// (cerbos/query-plan-adapters#311).
+//
+// The adapter used to render `CAST(trunc(...))`, which is exactly right for a numeric column —
+// int(1.9) is 1 to CEL while PostgreSQL's plain float-to-bigint cast rounds to 2. It is wrong for
+// a string one: CEL reads a WHOLE string or raises, and an error denies the row, while SQL reads
+// whatever numeric prefix parses. Nothing in the plan says which kind of column the operand is,
+// so the corpus actions cast-int-string / cast-double-string cannot be told apart from
+// cast-int-double at translation time and the whole family fails closed. Re-enabling the numeric
+// direction needs a caller-declared numeric ValueType, the way timestamp() already works.
+func TestNumericCastsAreRejected(t *testing.T) {
 	t.Parallel()
 
-	result, err := translate(t, expr("eq", expr("int", variable("request.resource.attr.count")), val(t, 2)))
-	require.NoError(t, err)
-	require.Contains(t, result.Where, "CAST(trunc(")
+	for _, operator := range []string{"int", "double"} {
+		_, err := translate(t, expr("eq", expr(operator, variable("request.resource.attr.count")), val(t, 2)))
+		require.ErrorIs(t, err, cerbospgx.ErrUnsupported)
+		require.ErrorContains(t, err, "cannot be lowered to SQL CAST")
+	}
 }
 
 // TestMapperQualifierCannotShadowGeneratedAliases covers the other half of the alias guard: the

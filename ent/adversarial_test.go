@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"fmt"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,10 +16,12 @@ import (
 	"github.com/cerbos/cerbos-sdk-go/cerbos"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/modules/mysql"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 	_ "modernc.org/sqlite"
 
+	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	cerbosent "github.com/cerbos/query-plan-adapters/ent"
@@ -67,6 +70,7 @@ func targets() []target {
 	return []target{
 		{name: "sqlite", dialect: dialect.SQLite, ddl: sqliteDDL, open: openSQLite},
 		{name: "postgres", dialect: dialect.Postgres, ddl: postgresDDL, open: openPostgres},
+		{name: "mysql", dialect: dialect.MySQL, ddl: mysqlDDL, open: openMySQL},
 	}
 }
 
@@ -159,6 +163,82 @@ func openSQLite(t *testing.T) *sql.DB {
 	// The shared-cache in-memory database lives only as long as a connection is held, and a
 	// pooled connection closing would drop the schema mid-run.
 	db.SetMaxOpenConns(1)
+	return db
+}
+
+// The MySQL schema pins a BINARY collation on every string column. MySQL's default
+// utf8mb4_0900_ai_ci is both case- and accent-INSENSITIVE, which over-grants on `cs-eq`
+// ("One" would match "one"), `unicode-eq` and every `hier-*` prefix probe — CEL string
+// equality is byte-exact, so the collation is part of the policy contract here
+// (cerbos/query-plan-adapters#310).
+//
+// DATETIME(6) is microsecond-resolution, the same caveat PostgreSQL's timestamptz carries:
+// the corpus's a5 seed holds microsecond precision and no finer.
+const mysqlDDL = `
+CREATE TABLE adversarial_resource (
+	id                 varchar(64) COLLATE utf8mb4_bin PRIMARY KEY,
+	a_bool             boolean          NOT NULL,
+	a_string           varchar(255) COLLATE utf8mb4_bin NOT NULL,
+	a_number           bigint           NOT NULL,
+	a_double           double,
+	a_optional_string  varchar(255) COLLATE utf8mb4_bin,
+	created_by         varchar(64) COLLATE utf8mb4_bin NOT NULL,
+	scope              varchar(255) COLLATE utf8mb4_bin,
+	created_at         datetime(6)
+);
+CREATE TABLE adversarial_tag (
+	pk           bigint AUTO_INCREMENT PRIMARY KEY,
+	tag_id       varchar(64) COLLATE utf8mb4_bin NOT NULL,
+	name         varchar(255) COLLATE utf8mb4_bin,
+	resource_id  varchar(64) COLLATE utf8mb4_bin NOT NULL REFERENCES adversarial_resource(id)
+);
+CREATE TABLE adversarial_category (
+	id           varchar(64) COLLATE utf8mb4_bin PRIMARY KEY,
+	name         varchar(255) COLLATE utf8mb4_bin NOT NULL,
+	resource_id  varchar(64) COLLATE utf8mb4_bin NOT NULL REFERENCES adversarial_resource(id)
+);
+CREATE TABLE adversarial_sub_category (
+	id           varchar(64) COLLATE utf8mb4_bin PRIMARY KEY,
+	name         varchar(255) COLLATE utf8mb4_bin NOT NULL,
+	category_id  varchar(64) COLLATE utf8mb4_bin NOT NULL REFERENCES adversarial_category(id)
+);
+CREATE TABLE adversarial_label (
+	id               varchar(64) COLLATE utf8mb4_bin PRIMARY KEY,
+	name             varchar(255) COLLATE utf8mb4_bin,
+	sub_category_id  varchar(64) COLLATE utf8mb4_bin NOT NULL REFERENCES adversarial_sub_category(id)
+);
+`
+
+func openMySQL(t *testing.T) *sql.DB {
+	t.Helper()
+
+	container, err := mysql.Run(t.Context(),
+		"mysql:8.4",
+		mysql.WithDatabase("conformance"),
+		mysql.WithUsername("conformance"),
+		mysql.WithPassword("conformance"),
+	)
+	require.NoError(t, err, "starting MySQL")
+	testcontainers.CleanupContainer(t, container)
+
+	dsn, err := container.ConnectionString(t.Context(), "parseTime=true")
+	require.NoError(t, err)
+
+	db, err := sql.Open("mysql", dsn)
+	require.NoError(t, err, "opening MySQL")
+	t.Cleanup(func() { _ = db.Close() })
+
+	// The module reports readiness from the server log, which MySQL emits once during
+	// initialisation and again when it actually accepts connections — the first sighting can
+	// hand back a socket that closes mid-DDL ("invalid connection"). Ping until it holds.
+	var pingErr error
+	for range 30 {
+		if pingErr = db.PingContext(t.Context()); pingErr == nil {
+			break
+		}
+		time.Sleep(time.Second)
+	}
+	require.NoError(t, pingErr, "waiting for MySQL to accept connections")
 	return db
 }
 
@@ -318,8 +398,16 @@ func (s *suite) harnessFor(t *testing.T, tgt target) *harness {
 	t.Helper()
 
 	db := tgt.open(t)
-	_, err := db.ExecContext(t.Context(), tgt.ddl)
-	require.NoError(t, err, "creating %s schema", tgt.name)
+	// Statement by statement rather than one multi-statement Exec: the MySQL driver rejects
+	// batched DDL unless multiStatements is on, and splitting keeps every dialect on the same
+	// path.
+	for _, stmt := range strings.Split(tgt.ddl, ";") {
+		if strings.TrimSpace(stmt) == "" {
+			continue
+		}
+		_, err := db.ExecContext(t.Context(), stmt)
+		require.NoError(t, err, "creating %s schema", tgt.name)
+	}
 
 	h := &harness{db: db, client: s.client, corpus: s.corpus, mapper: buildMapper(), target: tgt}
 	h.seed(t)
@@ -585,7 +673,7 @@ func runConformance(t *testing.T, h *harness) {
 		}
 		// Corpus-size tripwire: bump deliberately when the corpus grows, so a new hostile shape
 		// cannot slip past this adapter unnoticed.
-		require.Len(t, seen, 127, "corpus size changed; triage the new action(s) before bumping")
+		require.Len(t, seen, 140, "corpus size changed; triage the new action(s) before bumping")
 		require.Len(t, h.corpus.Seeds.Seeds, 20, "seed count changed")
 	})
 
@@ -639,10 +727,17 @@ func runConformance(t *testing.T, h *harness) {
 		// The comparison above can pass vacuously if the oracle itself is trivial. Assert that a
 		// representative spread of actions has an oracle that is neither empty nor the full seed
 		// set — without this, a silently broken PDP connection would still pass every case.
+		// w1-size-zero-chain, cast-int-string and cast-double-string are deliberately absent:
+		// their oracles are empty by CONSTRUCTION (no seed holds a to-one parent with zero
+		// children; every seed's aString raises in int()/double()), so they cannot satisfy this
+		// guard. cast-int-double stands in for the cast group.
 		representative := []string{
 			"vf-le", "in-single", "like-percent", "exists-on-empty", "not-exists",
 			"nary-and", "field-to-field", "ternary-cmp", "arith-add", "size-threshold",
 			"hier-ancestor-cf", "pv-exists", "in-null-elem-mixed", "null-eq", "cs-eq",
+			"w1-all-chain", "w1-not-exists-chain", "w1-size-nonneg-chain",
+			"cr-div-neg-zero", "cr-div-other-column", "cr-div-then-add", "cr-div-then-add-ne",
+			"cast-int-double",
 		}
 		total := len(h.corpus.Seeds.Seeds)
 		for _, action := range representative {

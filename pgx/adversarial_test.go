@@ -449,7 +449,7 @@ func TestAdversarialConformance(t *testing.T) {
 		}
 		// Corpus-size tripwire: bump deliberately when the corpus grows, so a new hostile shape
 		// cannot slip past this adapter unnoticed.
-		require.Len(t, seen, 127, "corpus size changed; triage the new action(s) before bumping")
+		require.Len(t, seen, 140, "corpus size changed; triage the new action(s) before bumping")
 		require.Len(t, h.corpus.Seeds.Seeds, 20, "seed count changed")
 	})
 
@@ -503,10 +503,17 @@ func TestAdversarialConformance(t *testing.T) {
 		// The comparison above can pass vacuously if the oracle itself is trivial. Assert that a
 		// representative spread of actions has an oracle that is neither empty nor the full seed
 		// set — without this, a silently broken PDP connection would still pass every case.
+		// w1-size-zero-chain, cast-int-string and cast-double-string are deliberately absent:
+		// their oracles are empty by CONSTRUCTION (no seed holds a to-one parent with zero
+		// children; every seed's aString raises in int()/double()), so they cannot satisfy this
+		// guard. cast-int-double stands in for the cast group.
 		representative := []string{
 			"vf-le", "in-single", "like-percent", "exists-on-empty", "not-exists",
 			"nary-and", "field-to-field", "ternary-cmp", "arith-add", "size-threshold",
 			"hier-ancestor-cf", "pv-exists", "in-null-elem-mixed", "null-eq", "cs-eq",
+			"w1-all-chain", "w1-not-exists-chain", "w1-size-nonneg-chain",
+			"cr-div-neg-zero", "cr-div-other-column", "cr-div-then-add", "cr-div-then-add-ne",
+			"cast-int-double",
 		}
 		total := len(h.corpus.Seeds.Seeds)
 		for _, action := range representative {

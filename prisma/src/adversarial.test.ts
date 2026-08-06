@@ -539,7 +539,7 @@ describe("adversarial conformance corpus", () => {
     ).not.toContain(promotedAction);
   });
 
-  test("manifest assigns all 127 policy actions exactly one Prisma outcome", () => {
+  test("manifest assigns all 140 policy actions exactly one Prisma outcome", () => {
     const oracle = new Set(ORACLE_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map(([action]) => action));
     const nullOmitted = new Set(
@@ -555,7 +555,7 @@ describe("adversarial conformance corpus", () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(127);
+    expect(MANIFEST_ACTIONS.size).toBe(140);
     expect(misclassified).toEqual([]);
     expect(
       [...PRISMA_SUPPORTED_EXPECTED].filter(
@@ -662,7 +662,15 @@ describe("adversarial conformance corpus", () => {
   test("oracle is not degenerate", async () => {
     // Guard the guard: at least one action must produce a non-empty, non-total oracle set,
     // otherwise the differential comparison could pass vacuously (e.g. PDP denying all).
-    for (const action of ["vf-le", "like-percent", "all-on-empty", "pv-exists", "pv-all", "null-eq", "null-ne"]) {
+    // The #309/#312/#311 additions. w1-size-zero-chain and the two string-cast actions are
+    // deliberately absent: their oracles are empty by CONSTRUCTION (no seed holds a to-one
+    // parent with zero children; every seed's aString raises in int()/double()), so they
+    // cannot satisfy this guard. cast-int-double is the cast group's non-degenerate
+    // stand-in, and the w1/cr actions below carry it for their groups.
+    for (const action of ["vf-le", "like-percent", "all-on-empty", "pv-exists", "pv-all", "null-eq", "null-ne",
+      "w1-all-chain", "w1-not-exists-chain", "w1-size-nonneg-chain",
+      "cr-div-neg-zero", "cr-div-other-column", "cr-div-then-add", "cr-div-then-add-ne",
+      "cast-int-double"]) {
       const ids = await oracleAllowedIds(action);
       expect(ids.length).toBeGreaterThan(0);
       expect(ids.length).toBeLessThan(SEEDS.length);

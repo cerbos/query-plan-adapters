@@ -477,10 +477,17 @@ const MAPPER: Mapper = {
       },
     },
   },
+  // mainCategory is a to-ONE parent on the check side: a seed with no subCategoryNames
+  // sends NO mainCategory attribute, so CEL raises a missing-path error and check()
+  // denies. The flattened `categories.subCategories` path cannot see that on its own —
+  // an absent parent and a childless parent both give an empty array — so the mapping
+  // declares the parent and the adapter makes the count UNKNOWN when it is missing
+  // (cerbos/query-plan-adapters#309).
   "request.resource.attr.mainCategory.subCategories": {
     relation: {
       name: "categories.subCategories",
       type: "many",
+      requiresParent: "categories",
       fields: { name: { field: "name" } },
     },
   },
@@ -489,6 +496,7 @@ const MAPPER: Mapper = {
       name: "categories.subCategories",
       type: "many",
       field: "name",
+      requiresParent: "categories",
       fields: { name: { field: "name" } },
     },
   },
@@ -739,7 +747,7 @@ function planCarriesNullLiteral(operand: unknown): boolean {
 }
 
 describe("adversarial conformance corpus", () => {
-  test("manifest assigns all 127 actions exactly one Mongoose outcome", () => {
+  test("manifest assigns all 140 actions exactly one Mongoose outcome", () => {
     const oracle = new Set(ORACLE_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map((entry) => entry.action));
     const nullOmitted = new Set(
@@ -755,11 +763,11 @@ describe("adversarial conformance corpus", () => {
       return count !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(127);
-    expect(unsupportedEntries).toHaveLength(31);
+    expect(MANIFEST_ACTIONS.size).toBe(140);
+    expect(unsupportedEntries).toHaveLength(36);
     expect(supportedExpectedEntries).toHaveLength(3);
-    expect(ORACLE_ACTIONS).toHaveLength(94);
-    expect(THROWING_ACTIONS).toHaveLength(31);
+    expect(ORACLE_ACTIONS).toHaveLength(97);
+    expect(THROWING_ACTIONS).toHaveLength(41);
     expect(misclassified).toEqual([]);
     expect(
       [...supportedExpectedActions].filter(
@@ -865,7 +873,15 @@ describe("adversarial conformance corpus", () => {
   });
 
   test("oracle is not degenerate", async () => {
-    for (const action of ["vf-le", "like-percent", "all-on-empty", "pv-exists", "pv-all", "null-eq", "null-ne"]) {
+    // The #309/#312/#311 additions. w1-size-zero-chain and the two string-cast actions are
+    // deliberately absent: their oracles are empty by CONSTRUCTION (no seed holds a to-one
+    // parent with zero children; every seed's aString raises in int()/double()), so they
+    // cannot satisfy this guard. cast-int-double is the cast group's non-degenerate
+    // stand-in, and the w1/cr actions below carry it for their groups.
+    for (const action of ["vf-le", "like-percent", "all-on-empty", "pv-exists", "pv-all", "null-eq", "null-ne",
+      "w1-all-chain", "w1-not-exists-chain", "w1-size-nonneg-chain",
+      "cr-div-neg-zero", "cr-div-other-column", "cr-div-then-add", "cr-div-then-add-ne",
+      "cast-int-double"]) {
       const ids = await oracleAllowedIds(action);
       expect(ids.length).toBeGreaterThan(0);
       expect(ids.length).toBeLessThan(SEEDS.length);

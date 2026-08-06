@@ -600,7 +600,7 @@ describe("adversarial conformance corpus", () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(127);
+    expect(MANIFEST_ACTIONS.size).toBe(140);
     expect(NULL_REPRESENTATION_OMITTED).toHaveLength(1);
     expect(misclassified).toEqual([]);
     expect(
@@ -707,7 +707,12 @@ describe("adversarial conformance corpus", () => {
   test("oracle is not degenerate", async () => {
     // Guard the guard: at least one action must produce a non-empty, non-total oracle set,
     // otherwise the differential comparison could pass vacuously (e.g. PDP denying all).
-    for (const action of ["vf-le", "like-percent", "all-on-empty", "pv-exists", "pv-all", "null-eq", "null-ne"]) {
+    // w1-size-zero-chain is deliberately absent: its oracle is empty by construction (no
+    // seed holds a to-one parent with zero children), so it cannot satisfy this guard. Its
+    // three siblings below carry the anti-vacuity assertion for that group.
+    for (const action of ["vf-le", "like-percent", "all-on-empty", "pv-exists", "pv-all", "null-eq", "null-ne",
+      "w1-all-chain", "w1-not-exists-chain", "w1-size-nonneg-chain",
+      "cr-div-neg-zero", "cr-div-other-column", "cr-div-then-add", "cr-div-then-add-ne"]) {
       const ids = await oracleAllowedIds(action);
       expect(ids.length).toBeGreaterThan(0);
       expect(ids.length).toBeLessThan(SEEDS.length);

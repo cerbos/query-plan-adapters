@@ -6,9 +6,11 @@ require (
 	entgo.io/ent v0.14.6
 	github.com/cerbos/cerbos-sdk-go v0.4.2
 	github.com/cerbos/cerbos/api/genpb v0.54.0
+	github.com/go-sql-driver/mysql v1.10.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go v0.43.0
+	github.com/testcontainers/testcontainers-go/modules/mysql v0.43.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.43.0
 	google.golang.org/protobuf v1.36.11
 	modernc.org/sqlite v1.56.0
@@ -21,6 +23,7 @@ require (
 	connectrpc.com/connect v1.20.0 // indirect
 	connectrpc.com/otelconnect v0.9.0 // indirect
 	dario.cat/mergo v1.0.2 // indirect
+	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect

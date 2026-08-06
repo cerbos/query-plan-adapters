@@ -597,6 +597,66 @@ resourcePolicy:
         match:
           expr: 'R.attr.aNumber * 0.1 == 0.3'
 
+    # B19-B21: int()/double() casts (cerbos/query-plan-adapters#311).
+    # CEL reads a WHOLE string or raises; SQL reads the leading digits. `int("100%_done")` is a
+    # CEL error and check() DENIES, while `CAST('100%_done' AS INTEGER)` is 100 on SQLite (and
+    # 0 on MySQL, and a hard error on PostgreSQL) — a direct lowering returns rows the PDP
+    # denies. Both oracles below are EMPTY by construction: every seed's aString raises. The
+    # assertion that matters is therefore the REJECTION, and the over-grant it prevents is
+    # concrete: an adapter that lowers the cast returns a2 ("100%_done"), a3 ("100xdone") and
+    # b2 ("50%_off"), the three seeds whose aString casts to a non-zero number.
+    #
+    # The shared policy suite's `convert-int` looks like it covers this, but its fixtures hold
+    # no string that casts to a non-zero number, so it passes for every adapter without ever
+    # exercising the difference.
+    - actions: ["cast-int-string"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'int(R.attr.aString) > 50'
+
+    - actions: ["cast-double-string"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'double(R.attr.aString) > 50.0'
+
+    # The second, independent cast hazard: rounding. CEL's int() truncates TOWARD ZERO, and so
+    # does SQLite's CAST — but PostgreSQL and MySQL CAST round to nearest. a1 (aDouble = -0.6)
+    # is the sole discriminator: int(-0.6) is 0 and the row is ALLOWED, while a rounding cast
+    # gives -1 and drops it. Oracle a1/a2/a7 (aDouble -0.6 / 0.25 / 0.3). Unlike the string
+    # casts this one has a real oracle, so an adapter that emits an explicit truncation rather
+    # than a bare CAST can be declared in `adapterSupportedExpected` and proved against it.
+    - actions: ["cast-int-double"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'int(R.attr.aDouble) == 0'
+
+    # B22-B23: filter()/map() in a BOOLEAN position (cerbos/query-plan-adapters#313).
+    # Both return a list, not a boolean. Cerbos compiles the policy and the planner emits the
+    # macro verbatim as the whole condition (PDP-verified: KIND_CONDITIONAL with a bare
+    # `filter`/`map` node), but check() cannot evaluate a non-boolean condition, so the oracle
+    # is empty for all 20 seeds. Every adapter must REJECT the shape: translating it means
+    # choosing a meaning the policy never stated — `filter(...)` is not `size(filter(...)) > 0`,
+    # and a `map(...)` projection is not "the projection is non-empty".
+    - actions: ["filter-as-condition"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.tags.filter(t, t.name == "public")'
+
+    - actions: ["map-as-condition"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.tags.map(t, t.name)'
+
     # ==================== NULL element columns under collection macros ====================
     # b5 has ONLY a NULL-name tag; b6 mixes a NULL-name tag with a "public" one. A missing
     # element attribute is a CEL evaluation error: exists/all absorb it only through a
@@ -716,6 +776,62 @@ resourcePolicy:
         match:
           expr: '!(R.attr.aNumber / R.attr.aNumber == 1.0)'
 
+    # IEEE-754 keeps the SIGN of a zero: 2.0 / -0.0 is -Infinity while 2.0 / 0.0 is +Infinity.
+    # The planner ships the denominator verbatim as the double -0.0 (PDP-verified: the wire
+    # operand is `-0`, and protobuf doubles preserve the sign bit), so an adapter that folds the
+    # division has everything it needs — but one that reads the magnitude only, or takes the
+    # sign of the result from the numerator, inverts every row. Oracle: the NEGATIVE-aNumber
+    # seeds a2/a5/b3 (n / -0.0 = +Infinity > 0.0), NOT the positive ones; a7 (aNumber = 0) is
+    # 0.0 / -0.0 = NaN, and every ordering against NaN is false.
+    #
+    # Note the half no adapter can reach: when the denominator is a COLUMN holding zero, SQL
+    # cannot tell -0.0 from 0.0 (both satisfy `= 0`, and no portable function reads the sign
+    # bit), so the sign of the Infinity is unknowable. The existing cr-div-zero* actions all
+    # divide a column by ITSELF, where a zero denominator forces a zero numerator and the result
+    # is the sign-free NaN, so they never reach it either. Pinning that half would need a seed
+    # whose aDouble is a signed zero, which would make column division inexpressible for every
+    # SQL adapter — a separate decision, deliberately not taken here.
+    - actions: ["cr-div-neg-zero"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aNumber / -0.0 > 0.0'
+
+    # A denominator that is a DIFFERENT column. Every existing division probe is x/x, so the
+    # NULL denominator (a3 has no aDouble), the negative denominator (a1 = -0.6, which must not
+    # flip the comparison) and the plain two-column form are all uncovered. Oracle excludes
+    # a1 (5 / -0.6 < 0), a2 (-2 / 0.25 < 0), a3 (missing attribute -> CEL error) and a7
+    # (0 / 0.3 == 0, not > 0).
+    - actions: ["cr-div-other-column"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aNumber / R.attr.aDouble > 0.0'
+
+    # Arithmetic composed ON a division that can be non-finite. a7 divides 0/0 to NaN, and
+    # NaN + 1.0 is NaN. This ORDERING form is the absorbing control — `NaN > 1.0` is false and a
+    # NULL lowering is UNKNOWN, so both exclude a7 and the two cannot be told apart here, the
+    # same way cr-div-zero cannot discriminate what cr-div-zero-ne does.
+    - actions: ["cr-div-then-add"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aNumber / R.attr.aNumber + 1.0 > 1.0'
+
+    # The discriminator: an INEQUALITY over the same sum. CEL gives `NaN != 2.0` -> TRUE, so a7
+    # is the sole ALLOWED row. An adapter that guards the division with NULLIF propagates NULL
+    # through the addition and gets `NULL != 2.0` -> UNKNOWN, excluding the one row the PDP
+    # permits and returning the empty set.
+    - actions: ["cr-div-then-add-ne"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aNumber / R.attr.aNumber + 1.0 != 2.0'
+
     # ==================== multi-hop relation chains (W1) ====================
     # Direct dotted-chain syntax. mainCategory is a SINGLE nested object on the check side
     # (each seed holds at most one category) so CEL evaluates the chain naturally, while the
@@ -746,6 +862,65 @@ resourcePolicy:
       condition:
         match:
           expr: '"finance" in R.attr.mainCategory.subNames'
+
+    # -- the ABSENT to-one parent (cerbos/query-plan-adapters#309) --
+    # The three chain probes above are all POSITIVE (exists / size > 0 / in), where "the parent
+    # is absent" and "the parent is present with no matching child" both exclude the row — so
+    # both sides agree for the wrong reason and the hazard hides. Only a UNIVERSAL, a NEGATED
+    # existential, or a zero/lower-bound count discriminates them:
+    #
+    #   check(): rows with no mainCategory attribute are a CEL missing-path error -> DENY.
+    #   a filter rooted at the resource row: the join chain yields no correlated rows, so
+    #   `all` is vacuously TRUE, `!exists` is TRUE, and the count is 0 -> ALLOW.
+    #
+    # That is an over-grant: rows the PDP denies come back. The adapter's chain must require the
+    # intermediate hop to EXIST, so an absent parent stays excluded under both polarities rather
+    # than collapsing to the empty-collection case.
+    #
+    # Seeds discriminate already — a category graph is created only for a seed with
+    # subCategoryNames, so 16 of the 20 seeds carry NO mainCategory at all: a1/a6 hold
+    # "finance", a8 "tech", c1 "Finance" (the case witness).
+
+    # all() over the chain: oracle a1/a6; a vacuous-TRUE chain adds the 16 parentless rows.
+    - actions: ["w1-all-chain"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.mainCategory.subCategories.all(s, s.name == "finance")'
+
+    # Negated existential over the chain: oracle a8/c1 (present parent, no "finance" child).
+    - actions: ["w1-not-exists-chain"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!R.attr.mainCategory.subCategories.exists(s, s.name == "finance")'
+
+    # Zero-count over the chain. No seed holds a parent with zero children, so the oracle is
+    # EMPTY by construction — deliberately, because the whole assertion is that the 16
+    # parentless rows must NOT come back. Prisma-style relation filters reach this through a
+    # different code path than the ordering thresholds (`none:` rather than a COUNT), which is
+    # why it is worth its own action. Being oracle-empty it stays OUT of the degeneracy guard;
+    # w1-all-chain and w1-not-exists-chain carry the anti-vacuity assertion for this group.
+    - actions: ["w1-size-zero-chain"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'size(R.attr.mainCategory.subCategories) == 0'
+
+    # The lower-bound mirror of w1-size-chain (`> 0`, which agrees for the wrong reason because
+    # a positive count already implies the parent exists). A count is never negative, so `>= 0`
+    # is TRUE for exactly the rows that HAVE the attribute: oracle a1/a6/a8/c1, while a chain
+    # that folds the threshold to always-true returns all 20. Non-degenerate, so this is the
+    # count-path member of the degeneracy guard.
+    - actions: ["w1-size-nonneg-chain"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'size(R.attr.mainCategory.subCategories) >= 0'
 
     # ==================== root relation inside a lambda body (W2) ====================
     # The inner R.attr.tags.exists(...) is planned INSIDE the categories lambda; its subquery

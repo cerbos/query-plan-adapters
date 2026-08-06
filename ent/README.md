@@ -104,14 +104,14 @@ See [#302](https://github.com/cerbos/query-plan-adapters/issues/302).
 ## Conformance contract
 
 The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 20
-hostile seed rows and real Ent-built queries. The whole corpus is replayed against **both SQLite
-and PostgreSQL**, so the dialect-sensitive choices this adapter makes are proved rather than
+hostile seed rows and real Ent-built queries. The whole corpus is replayed against **SQLite,
+PostgreSQL and MySQL**, so the dialect-sensitive choices this adapter makes are proved rather than
 assumed. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 122 reference conformance actions — every conformance shape in the corpus, on SQLite and PostgreSQL |
-| Fail-closed corpus shapes | Regex `matches()`, ordered list indexing/`get-field`, and `timestamp()` over an untyped string field (3 actions) |
+| Oracle-tested | 130 reference conformance actions — every conformance shape in the corpus, on SQLite, PostgreSQL and MySQL |
+| Fail-closed corpus shapes | Regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an untyped string field, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero) and `filter()`/`map()` used as a condition (both return a list, not a boolean) (8 actions) |
 | Representation-dependent | `null-eq-missing` — rejected under `NullOmitted`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 
@@ -130,13 +130,18 @@ predicate. `matches()` is rejected because SQL regex dialects do not guarantee C
 | --- | --- |
 | SQLite | Proved — full corpus, text timestamps compared lexicographically |
 | PostgreSQL | Proved — full corpus, native `boolean` and `timestamptz` columns |
-| MySQL | Supported by construction, **not** exercised by the differential suite |
+| MySQL | Proved — full corpus, `DATETIME(6)` columns, binary collation |
 
-The two proved dialects are not the same test twice: SQLite stores instants as text and booleans
-as integers, PostgreSQL has real types for both, and each needs a different null-safe equality
-operator and different cast spellings. Running both is what makes `WithDialect` a checked claim.
+The three proved dialects are not the same test three times: SQLite stores instants as text and
+booleans as integers, PostgreSQL has real types for both, MySQL needs `CONCAT` rather than `||`
+(which it reads as logical OR outside `PIPES_AS_CONCAT`), `CHAR_LENGTH` rather than `LENGTH` (which
+counts bytes), and `TRUNCATE` before an integer cast — and each needs a different null-safe
+equality operator and different cast spellings. Running all three is what makes `WithDialect` a
+checked claim rather than an assertion.
 
-MySQL goes through the same code paths, but until it joins the suite treat it as untested.
+The MySQL schema pins a **binary collation** on every string column. MySQL's default
+`utf8mb4_0900_ai_ci` is both case- and accent-insensitive, which over-grants on `cs-eq`,
+`unicode-eq` and every hierarchy prefix probe — see [Collation](#collation) below.
 
 ### Known gaps
 
@@ -147,23 +152,25 @@ at once. Treat them as constraints on the policies you write.
 
 | Gap | Effect |
 | --- | --- |
-| An absent to-one parent is indistinguishable from an empty collection | `R.attr.parent.children.all(...)`, `!exists(...)` or `size(...) == 0` on a row with no parent returns TRUE/zero, while CEL raises a missing-path error and denies. Affects every relational adapter in this repository, not just this one. |
-| `int()` over a non-numeric string | CEL raises a conversion error and denies; SQL coerces (SQLite yields 0, PostgreSQL errors). Avoid `int()` on free-text columns. |
 | A NaN stored in a floating-point column | Ordered comparisons follow the database's NaN ordering rather than IEEE's. Only NaNs the adapter folds itself are handled exactly. |
-| Division by a stored negative zero | The sign of the resulting infinity is taken from the numerator alone, so `1.0 / -0.0` classifies as `+Inf` where CEL gives `-Inf`. |
-| `!=` / `not in` against an explicit null under `NullExplicit` | CEL evaluates `null != "x"` as true; SQL leaves it UNKNOWN and excludes the row. This under-grants — it fails closed — but is not exact equivalence. |
+| Division by a **stored** negative zero | SQL cannot tell `-0.0` from `0.0` — both satisfy `= 0` and no portable function reads the sign bit — so the sign of the resulting infinity is unknowable when the denominator is a column. A constant denominator is handled exactly: the planner ships the sign and the adapter applies it (`cr-div-neg-zero`). |
+| `!=` / `not in` against an explicit null under `NullExplicit` | CEL evaluates `null != "x"` as true; SQL leaves it UNKNOWN and excludes the row. This under-grants — it fails closed — but is not exact equivalence. See cerbos/query-plan-adapters#308. |
 
-MySQL additionally goes untested by the differential suite: it needs `CONCAT` rather than `||`
-(which MySQL reads as logical OR outside `PIPES_AS_CONCAT`), `CHAR_LENGTH` rather than `LENGTH`
-(which counts bytes), and `TRUNCATE` before an integer cast. All three are implemented, none are
-proved.
+Two gaps listed here previously are now closed and pinned by the corpus rather than documented as
+constraints: an absent to-one parent is no longer indistinguishable from an empty collection (the
+chain requires its intermediate hop, `w1-all-chain`/`w1-not-exists-chain`/`w1-size-zero-chain`/
+`w1-size-nonneg-chain`), and `int()`/`double()` no longer lower to SQL `CAST` at all — they fail
+closed, because CEL reads a whole string or raises where `CAST` reads a numeric prefix, and CEL
+truncates toward zero where PostgreSQL and MySQL round (`cast-int-string`, `cast-double-string`,
+`cast-int-double`).
 
 ### Collation
 
 CEL string comparison and matching are case-sensitive and byte-exact, while `LIKE` collation is
-controlled by the database. The suite sets `PRAGMA case_sensitive_like = ON` on SQLite and relies
-on PostgreSQL's default deterministic collation; on MySQL's default `utf8mb4_0900_ai_ci` or a
-`_CI_` SQL Server collation, string predicates will match strings CEL would reject — an over-grant
+controlled by the database. The suite sets `PRAGMA case_sensitive_like = ON` on SQLite, relies on
+PostgreSQL's default deterministic collation, and pins `utf8mb4_bin` on every MySQL string column.
+On MySQL's **default** `utf8mb4_0900_ai_ci` — which is both case- and accent-insensitive — or a
+`_CI_` SQL Server collation, string predicates will match strings CEL would reject: an over-grant
 the adapter cannot detect. Treat collation as part of your policy contract.
 
 ## Development

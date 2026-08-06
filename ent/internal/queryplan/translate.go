@@ -417,6 +417,59 @@ func (b *builder) relationScope(rel *Relation, alias, parent string) ([]FromItem
 	return from, and(preds...)
 }
 
+// hopsExist builds "every intermediate table of a flattened chain has a row", or nil when the
+// relation is direct.
+//
+// CEL cannot dot through a list, so each `Via` hop of `mainCategory.subCategories` stands for a
+// to-ONE parent: when it is absent the caller sends no attribute at all and CEL raises a
+// missing-path error, which denies. A subquery rooted at the resource row cannot see the
+// difference — an absent parent and a childless parent both return nothing — so `all` reads TRUE,
+// `!exists` reads TRUE and the count reads 0, each admitting rows the PDP denies
+// (cerbos/query-plan-adapters#309). Requiring the hops separately restores the distinction:
+// guarded expressions become UNKNOWN, which excludes the row under BOTH polarities.
+func (b *builder) hopsExist(rel *Relation, parent string) Expr {
+	if len(rel.Via) == 0 {
+		return nil
+	}
+
+	from := make([]FromItem, 0, len(rel.Via))
+	preds := make([]Expr, 0, len(rel.Via))
+
+	var inner string
+	for i, hop := range rel.Via {
+		hopAlias := b.newAlias()
+		from = append(from, FromItem{Table: hop.Table, Alias: hopAlias})
+		if i > 0 {
+			// Hop i's ChildColumn lives on the table one step further in, which for the hop-only
+			// chain is the previous hop rather than the element table.
+			preds = append(preds, Cmp{
+				Op: OpEq,
+				L:  Column{Qualifier: inner, Name: hop.ChildColumn},
+				R:  Column{Qualifier: hopAlias, Name: hop.JoinColumn},
+			})
+		}
+		inner = hopAlias
+	}
+
+	preds = append(preds, Cmp{
+		Op: OpEq,
+		L:  Column{Qualifier: inner, Name: rel.TargetColumn},
+		R:  Column{Qualifier: parent, Name: rel.SourceColumn},
+	})
+
+	return Subquery{Kind: SubqueryExists, From: from, Correlate: and(preds...)}
+}
+
+// requireHops makes expr UNKNOWN unless every intermediate to-one hop exists. The CASE has no
+// ELSE on purpose: a missing hop yields NULL, and NOT NULL is still NULL.
+func (b *builder) requireHops(rel *Relation, parent string, expr Expr) Expr {
+	guard := b.hopsExist(rel, parent)
+	if guard == nil {
+		return expr
+	}
+	return Case{Whens: []When{{Cond: guard, Then: expr}}}
+}
+
 // triStateExists builds the CASE that preserves CEL's three states across a correlated subquery.
 func (b *builder) triStateExists(rel *Relation, alias, parent string, body Expr, sem macroSemantics, negated bool) Expr {
 	from, correlate := b.relationScope(rel, alias, parent)
@@ -438,7 +491,9 @@ func (b *builder) triStateExists(rel *Relation, alias, parent string, body Expr,
 		Else: BoolConst{V: sem.defaultResult},
 	}
 
-	return negate(triState, negated)
+	// An absent to-one parent must stay UNKNOWN rather than reaching the empty-collection
+	// answer, which `all` reads as TRUE and `!exists` inverts into an allow (#309).
+	return negate(b.requireHops(rel, parent, triState), negated)
 }
 
 // collectionMacro lowers exists/all/exists_one/except (and rejects filter/map).
@@ -492,7 +547,7 @@ func (b *builder) collectionMacro(n *node, m Mapper, negated bool) (Expr, error)
 			Kind: SubqueryExists, From: from, Correlate: correlate,
 			Where: Not{X: bodyExpr},
 		}
-		return negate(sub, negated), nil
+		return negate(b.requireHops(rel, entry.Qualifier, sub), negated), nil
 
 	case "exists_one":
 		// exists_one never absorbs an erroring element, so the UNKNOWN witness is checked first
@@ -512,7 +567,9 @@ func (b *builder) collectionMacro(n *node, m Mapper, negated bool) (Expr, error)
 			},
 			Else: BoolConst{V: false},
 		}
-		return negate(triState, negated), nil
+		// An absent to-one parent must stay UNKNOWN here too, or `!exists_one(chain, ...)` reads
+		// the empty tail as a determined false and inverts into an allow (#309).
+		return negate(b.requireHops(rel, entry.Qualifier, triState), negated), nil
 
 	case "filter", "map":
 		return nil, fmt.Errorf(
@@ -773,7 +830,21 @@ func (b *builder) value(n *node, m Mapper) (value, error) {
 		}
 		return parseTimestamp(v, temporal)
 
-	case "string", "double", "int":
+	case "double", "int":
+		// SQL CAST is not a CEL conversion. CEL reads a WHOLE string or raises (and an error
+		// denies the row), while CAST reads whatever numeric prefix parses: `CAST('100%_done' AS
+		// INTEGER)` is 100 on SQLite and 0 on MySQL, so a direct lowering returns rows the PDP
+		// denies. The numeric direction is no safer — CEL's int() truncates toward zero where
+		// PostgreSQL and MySQL round to nearest, so int(-0.6) is 0 to CEL and -1 to them.
+		// Nothing in the plan says what type the column holds, so fail closed instead
+		// (cerbos/query-plan-adapters#311).
+		return nil, fmt.Errorf(
+			"'%s()' cannot be lowered to SQL CAST: CAST reads a numeric prefix where CEL requires "+
+				"the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL "+
+				"truncates toward zero", n.operator,
+		)
+
+	case "string":
 		if len(n.operands) != unaryOperands {
 			return nil, fmt.Errorf("'%s' requires exactly one operand", n.operator)
 		}
@@ -781,7 +852,7 @@ func (b *builder) value(n *node, m Mapper) (value, error) {
 		if err != nil {
 			return nil, err
 		}
-		return castValue(n.operator, v)
+		return castValue(v)
 	}
 
 	if _, ok := arithmeticOps[n.operator]; ok {
@@ -855,7 +926,13 @@ func (b *builder) size(n *node, m Mapper) (value, error) {
 			// size() counts elements without evaluating them, so a NULL element column still
 			// counts and no error guard is needed.
 			from, correlate := b.relationScope(entry.Relation, b.newAlias(), entry.Qualifier)
-			return Subquery{Kind: SubqueryCount, From: from, Correlate: correlate}, nil
+			// An absent to-one parent counts as UNKNOWN, not 0: `size(chain) == 0` and
+			// `size(chain) >= 0` are both TRUE over an empty count and would return every
+			// parentless row (#309).
+			return b.requireHops(
+				entry.Relation, entry.Qualifier,
+				Subquery{Kind: SubqueryCount, From: from, Correlate: correlate},
+			), nil
 		}
 	}
 
@@ -917,6 +994,12 @@ func (b *builder) arithmetic(n *node, m Mapper) (value, error) {
 
 	op := arithmeticOps[n.operator]
 
+	// A retained ternary (a division that may be non-finite) must keep propagating symbolically
+	// through the surrounding arithmetic rather than being lowered to SQL NULL.
+	if out, ok, err := arithOverConditional(op, lv, rv); err != nil || ok {
+		return out, err
+	}
+
 	// Fold constant arithmetic in double precision, matching CEL's number model exactly rather
 	// than deferring to the dialect's numeric type.
 	lf, lok := asFloat(lv)
@@ -972,19 +1055,14 @@ func foldArithmetic(op ArithOp, l, r float64) (*float64, error) {
 	return &out, nil
 }
 
-func castValue(operator string, v value) (value, error) {
+// castValue lowers CEL's string() conversion. int() and double() are rejected before they reach
+// here — SQL CAST does not reproduce their semantics (#311) — so string() is the only survivor.
+func castValue(v value) (value, error) {
 	e, err := asExpr(v)
 	if err != nil {
 		return nil, err
 	}
-	switch operator {
-	case "string":
-		return Cast{X: e, To: CastText}, nil
-	case "double":
-		return Cast{X: e, To: CastFloat}, nil
-	default:
-		return Cast{X: e, To: CastInt}, nil
-	}
+	return Cast{X: e, To: CastText}, nil
 }
 
 // resolveVariable maps a plan reference onto storage. A relation reached in a value position has
