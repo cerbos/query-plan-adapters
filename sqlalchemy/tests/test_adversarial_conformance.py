@@ -21,7 +21,7 @@ import json
 import math
 import os
 from datetime import datetime
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List, Set, Union
 
 import pytest
 from cerbos.sdk.client import CerbosClient
@@ -247,6 +247,7 @@ class _Relation:
         correlation: List[Any],
         correlate_targets: List[Any],
         member_field=None,
+        hop_correlation: Union[List[Any], None] = None,
     ):
         self.description = description
         self.correlation = correlation
@@ -258,6 +259,21 @@ class _Relation:
         self.correlate_targets = correlate_targets
         # For plain `in` membership over a chained string list (w1-in-chain).
         self.member_field = member_field
+        # Correlation for the INTERMEDIATE hops alone, when the collection is
+        # reached through an optional to-one parent. CEL cannot dot through a
+        # list, so `mainCategory.subCategories` reaches its tail through a to-one
+        # parent: absent, the application sends no `mainCategory` attribute and
+        # CEL raises a missing-path error, which denies. A subquery rooted at the
+        # resource row cannot see that — an absent parent and a childless parent
+        # both return nothing — so `all` reads TRUE, `!exists` reads TRUE and the
+        # count reads 0, each admitting rows the PDP denies
+        # (cerbos/query-plan-adapters#309). Requiring the hop separately restores
+        # the distinction. This lives in the MAPPING because the SQLAlchemy
+        # adapter has no relation model of its own: collection semantics are
+        # entirely caller-supplied through operator overrides, so the caller owns
+        # the invariant that its subquery sees exactly the rows the application
+        # serialised into the resource attributes.
+        self.hop_correlation = hop_correlation or []
 
     def __repr__(self) -> str:  # pragma: no cover - diagnostics only
         return f"_Relation({self.description})"
@@ -304,6 +320,7 @@ MAIN_SUB = _Relation(
         AdvCategory.resource_id == AdvResource.id,
     ],
     correlate_targets=[AdvResource],
+    hop_correlation=[AdvCategory.resource_id == AdvResource.id],
 )
 MAIN_SUBNAMES = _Relation(
     "mainCategory.subNames",
@@ -313,6 +330,7 @@ MAIN_SUBNAMES = _Relation(
     ],
     correlate_targets=[AdvResource],
     member_field=AdvSubCategory.name,
+    hop_correlation=[AdvCategory.resource_id == AdvResource.id],
 )
 
 
@@ -334,6 +352,29 @@ def _count_subquery(rel: _Relation, *conds: Any):
     return q.correlate(*rel.correlate_targets).scalar_subquery()
 
 
+def _hop_exists(rel: _Relation):
+    """EXISTS over the intermediate hops alone, or None for a direct relation."""
+    if not rel.hop_correlation:
+        return None
+    q = select(literal(1))
+    for pred in rel.hop_correlation:
+        q = q.where(pred)
+    return exists(q.correlate(*rel.correlate_targets))
+
+
+def _require_hops(rel: _Relation, expr: Any):
+    """Make ``expr`` UNKNOWN unless every intermediate to-one hop exists.
+
+    The CASE has no ELSE on purpose: a missing hop yields NULL, and NOT NULL is
+    still NULL, so the row stays excluded under BOTH polarities — matching CEL
+    treating the missing path as an error (a deny).
+    """
+    guard = _hop_exists(rel)
+    if guard is None:
+        return expr
+    return case((guard, expr))
+
+
 def _require_relation(op: str, coll: Any) -> _Relation:
     if not isinstance(coll, _Relation):
         raise ValueError(f"{op} over unsupported collection operand: {coll!r}")
@@ -344,10 +385,13 @@ def _exists_fn(coll: Any, body: Any):
     # CEL exists: true on any true witness (absorbing errors), error if any
     # element errors without one, false otherwise (incl. empty).
     rel = _require_relation("exists", coll)
-    return case(
-        (_exists_where(rel, body), true()),
-        (_exists_where(rel, body.is_(None)), null()),
-        else_=false(),
+    return _require_hops(
+        rel,
+        case(
+            (_exists_where(rel, body), true()),
+            (_exists_where(rel, body.is_(None)), null()),
+            else_=false(),
+        ),
     )
 
 
@@ -355,10 +399,13 @@ def _all_fn(coll: Any, body: Any):
     # CEL all: false on any false witness (absorbing errors), error if any
     # element errors without one, true otherwise (incl. empty).
     rel = _require_relation("all", coll)
-    return case(
-        (_exists_where(rel, not_(body)), false()),
-        (_exists_where(rel, body.is_(None)), null()),
-        else_=true(),
+    return _require_hops(
+        rel,
+        case(
+            (_exists_where(rel, not_(body)), false()),
+            (_exists_where(rel, body.is_(None)), null()),
+            else_=true(),
+        ),
     )
 
 
@@ -366,9 +413,12 @@ def _exists_one_fn(coll: Any, body: Any):
     # CEL exists_one never absorbs an erroring element, even next to a true
     # witness; otherwise it's an exact count-of-matches == 1.
     rel = _require_relation("exists_one", coll)
-    return case(
-        (_exists_where(rel, body.is_(None)), null()),
-        else_=(_count_subquery(rel, body) == 1),
+    return _require_hops(
+        rel,
+        case(
+            (_exists_where(rel, body.is_(None)), null()),
+            else_=(_count_subquery(rel, body) == 1),
+        ),
     )
 
 
@@ -385,15 +435,19 @@ def _map_fn(coll: Any, projected: Any):
 def _size_fn(target: Any, _: Any):
     if isinstance(target, _Relation):
         # size() counts elements without evaluating them, so NULL element
-        # columns still count — no error guard needed.
-        return _count_subquery(target)
+        # columns still count — no error guard needed. An absent to-one parent
+        # still has to count as UNKNOWN rather than 0 (#309).
+        return _require_hops(target, _count_subquery(target))
     if isinstance(target, tuple) and target[0] == "filter":
         # CEL filter never absorbs an erroring element: any UNKNOWN body row
         # poisons the whole count.
         _, rel, body = target
-        return case(
-            (_exists_where(rel, body.is_(None)), null()),
-            else_=_count_subquery(rel, body),
+        return _require_hops(
+            rel,
+            case(
+                (_exists_where(rel, body.is_(None)), null()),
+                else_=_count_subquery(rel, body),
+            ),
         )
     return func.length(target)
 
@@ -803,13 +857,17 @@ class TestAdversarialConformance:
                 pass  # expected: the shape must be rejected under this representation
         assert not_rejected == []
 
+    # nan-ord-inf is absent: its 1.0/0.0 and -1.0/0.0 branches carry a CONSTANT zero
+    # denominator, and over the HTTP transport that arrives as the integer 0 with the
+    # sign bit already gone, so the adapter now rejects the shape rather than guess
+    # which infinity CEL produced. It is declared in adapterUnsupported[sqlalchemy]
+    # and asserted as a throw by test_fails_loudly (cerbos/query-plan-adapters#312).
     @pytest.mark.parametrize(
         "action",
         (
             "nan-ord-ternary",
             "nan-ord-ternary-vf",
             "nan-ord-le",
-            "nan-ord-inf",
         ),
     )
     def test_nonfinite_ordering_is_folded_before_postgresql_compilation(
@@ -863,6 +921,17 @@ class TestAdversarialConformance:
             "pv-all",
             "null-eq",
             "null-ne",
+            # #309/#312/#311. w1-size-zero-chain and the two string casts are absent
+            # on purpose: their oracles are empty by CONSTRUCTION, so they cannot
+            # satisfy this guard; cast-int-double stands in for the cast group.
+            "w1-all-chain",
+            "w1-not-exists-chain",
+            "w1-size-nonneg-chain",
+            "cr-div-neg-zero",
+            "cr-div-other-column",
+            "cr-div-then-add",
+            "cr-div-then-add-ne",
+            "cast-int-double",
         ):
             ids = _oracle_allowed_ids(adv_cerbos_client, action)
             assert 0 < len(ids) < len(SEEDS)

@@ -180,6 +180,16 @@ func floatDiv(l, r value) (value, error) {
 		R:  Call{Name: FuncNullIf, Args: []Expr{denominator, zero}},
 	}
 
+	// IEEE-754 keeps the sign of a zero, so `n / -0.0` is the OPPOSITE infinity from `n / 0.0`.
+	// A CONSTANT denominator carries its sign on the wire (the planner ships `-0` verbatim and
+	// protobuf doubles preserve the sign bit), so it must be applied. A COLUMN denominator does
+	// not: SQL cannot tell -0.0 from 0.0 and no portable function reads the sign bit, so the
+	// positive-zero reading is assumed — see the README's IEEE section.
+	denominatorSign := 1.0
+	if rIsNum && math.Signbit(rn) {
+		denominatorSign = -1.0
+	}
+
 	return condValue{
 		cond: Cmp{Op: OpEq, L: denominator, R: zero},
 		then: condValue{
@@ -187,12 +197,106 @@ func floatDiv(l, r value) (value, error) {
 			then: ieeeConst{v: math.NaN()},
 			els: condValue{
 				cond: Cmp{Op: OpGt, L: numerator, R: zero},
-				then: ieeeConst{v: math.Inf(1)},
-				els:  ieeeConst{v: math.Inf(-1)},
+				then: ieeeConst{v: math.Inf(int(denominatorSign))},
+				els:  ieeeConst{v: math.Inf(-int(denominatorSign))},
 			},
 		},
 		els: finite,
 	}, nil
+}
+
+// arithOverConditional distributes a binary arithmetic operator across a retained ternary, so a
+// non-finite arm keeps propagating symbolically instead of being lowered to SQL.
+//
+// `R.attr.aNumber / R.attr.aNumber + 1.0` composes addition on top of a division that is NaN for
+// a zero row. Lowering that arm to SQL turns it into `NULL + 1`, and `NULL != 2.0` is UNKNOWN
+// where CEL's `NaN != 2.0` is TRUE — the row the PDP allows would be dropped. Returns (nil, false)
+// when neither operand is conditional.
+func arithOverConditional(op ArithOp, l, r value) (value, bool, error) {
+	combine := func(left, right value) (value, error) {
+		if lf, ok := asFloat(left); ok {
+			if rf, ok := asFloat(right); ok {
+				folded, err := foldArithmetic(op, lf, rf)
+				if err != nil {
+					return nil, err
+				}
+				if folded != nil {
+					return *folded, nil
+				}
+			}
+		}
+		if inner, ok, err := arithOverConditional(op, left, right); err != nil || ok {
+			return inner, err
+		}
+		// A non-finite operand absorbs every finite one under +, -, * and /, so fold it here
+		// rather than asking asExpr for a SQL representation that does not exist.
+		if lc, ok := left.(ieeeConst); ok {
+			if rf, ok := asFloat(right); ok {
+				return ieeeConst{v: applyIEEE(op, lc.v, rf)}, nil
+			}
+			return nil, fmt.Errorf(
+				"arithmetic combines a non-finite value with a column, which SQL cannot carry",
+			)
+		}
+		if rc, ok := right.(ieeeConst); ok {
+			if lf, ok := asFloat(left); ok {
+				return ieeeConst{v: applyIEEE(op, lf, rc.v)}, nil
+			}
+			return nil, fmt.Errorf(
+				"arithmetic combines a non-finite value with a column, which SQL cannot carry",
+			)
+		}
+		lExpr, err := asExpr(left)
+		if err != nil {
+			return nil, err
+		}
+		rExpr, err := asExpr(right)
+		if err != nil {
+			return nil, err
+		}
+		return Arith{Op: op, L: lExpr, R: rExpr}, nil
+	}
+
+	if cv, ok := l.(condValue); ok {
+		then, err := combine(cv.then, r)
+		if err != nil {
+			return nil, true, err
+		}
+		els, err := combine(cv.els, r)
+		if err != nil {
+			return nil, true, err
+		}
+		return condValue{cond: cv.cond, then: then, els: els}, true, nil
+	}
+	if cv, ok := r.(condValue); ok {
+		then, err := combine(l, cv.then)
+		if err != nil {
+			return nil, true, err
+		}
+		els, err := combine(l, cv.els)
+		if err != nil {
+			return nil, true, err
+		}
+		return condValue{cond: cv.cond, then: then, els: els}, true, nil
+	}
+	return nil, false, nil
+}
+
+// applyIEEE evaluates an arithmetic operator in Go's IEEE double space, which is CEL's own.
+func applyIEEE(op ArithOp, l, r float64) float64 {
+	switch op {
+	case OpAdd:
+		return l + r
+	case OpSub:
+		return l - r
+	case OpMult:
+		return l * r
+	case OpDiv:
+		return l / r
+	case OpMod:
+		return math.Mod(l, r)
+	}
+	return math.NaN()
 }
 
 // compare builds a comparison, distributing over any retained ternary so that a non-finite arm

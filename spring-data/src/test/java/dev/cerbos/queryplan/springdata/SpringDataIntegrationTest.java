@@ -679,9 +679,14 @@ class SpringDataIntegrationTest {
             assertEquals(List.of("1", "3"), runNested("exists-one"));
         }
 
+        // #313: filter() returns a list, not a boolean. This adapter used to translate it as
+        // exists(), which is a meaning the policy never stated — `filter(...)` is not
+        // `size(filter(...)) > 0`. check() cannot evaluate a non-boolean condition either, so
+        // the corpus oracle for the equivalent `filter-as-condition` action is empty for every
+        // seed. Fail closed instead.
         @Test
         void filter() {
-            assertEquals(List.of("1", "3"), runNested("filter"));
+            assertThrows(IllegalArgumentException.class, () -> runNested("filter"));
         }
 
         @Test
@@ -938,7 +943,10 @@ class SpringDataIntegrationTest {
                     .withAttribute("tags",
                             AttributeValue.listValue(AttributeValue.stringValue("public")));
 
-            assertEquals(List.of("1"), runWithPrincipalAndMapping(
+            // #313: conjunct 1 is `R.attr.tags.filter(tag, tag.name == "public")` — a list in a
+            // boolean position. The adapter used to read it as exists() and return ["1"];
+            // it now fails closed, and so does the whole kitchensink condition.
+            assertThrows(IllegalArgumentException.class, () -> runWithPrincipalAndMapping(
                     principal, "kitchensink", COMBINED_MAP));
         }
     }

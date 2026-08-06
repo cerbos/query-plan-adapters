@@ -70,8 +70,8 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` d
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 91 reference conformance actions plus regex, ordered indexing/`get-field`, and timestamp probes (94 actions) |
-| Fail-closed | 31 reference actions |
+| Oracle-tested | 94 reference conformance actions plus regex, ordered indexing/`get-field`, and timestamp probes (97 actions) |
+| Fail-closed | 36 reference actions plus the 5 reference-unsupported shapes (41 actions total) |
 | Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`. Under the default it already returns the empty set the PDP demands, because `nullable: true` on a mapper entry declares per-attribute that a stored null is a missing Cerbos attribute; the global option is the backstop for mappings that do not declare it |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute documents. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 

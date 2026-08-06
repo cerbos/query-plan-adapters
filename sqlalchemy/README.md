@@ -43,8 +43,8 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `check()` decisio
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 120 reference conformance actions |
-| Fail-closed corpus shapes | Nanosecond `now()` thresholds plus regex `matches()`, ordered list indexing/`get-field`, and `timestamp()` over an ambiguous string column (5 actions) |
+| Oracle-tested | 126 reference conformance actions |
+| Fail-closed corpus shapes | Nanosecond `now()` thresholds, regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an ambiguous string column, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero) and `filter()`/`map()` used as a condition (both return a list, not a boolean), and a constant zero divisor whose sign the HTTP transport discards (12 actions) |
 | Representation-dependent | `null-eq-missing` — raises under `null_attribute_representation="omitted"`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 

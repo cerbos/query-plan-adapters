@@ -157,17 +157,45 @@ class AdversarialConformanceTest {
     private record NullRepresentationOmitted(String action, String reason) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
+    private record AdapterUnsupported(String action, String reason) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
     private record ActionsFile(
             List<String> conformance,
+            Map<String, List<AdapterUnsupported>> adapterUnsupported,
             List<UnsupportedShape> expectedUnsupported,
             List<NullRepresentationOmitted> nullRepresentationOmitted) {}
+
+    /** The corpus key for this adapter — its directory name, as every other harness uses. */
+    private static final String ADAPTER = "spring-data";
 
     private static SeedsFile seedsFile;
     private static ActionsFile actionsFile;
     private static List<Seed> SEEDS;
 
+    /**
+     * Conformance actions this adapter cannot express and must reject loudly instead.
+     *
+     * <p>Spring Data is the reference implementation, so this list is normally empty — a shape it
+     * translates is what puts an action in {@code conformance} in the first place. An entry here
+     * means the reference itself proved unable to express the shape faithfully and now fails
+     * closed, which is still the required outcome: a wrong filter is an authorization bug, a
+     * throw is a bug report.
+     */
+    private static List<AdapterUnsupported> adapterUnsupported() {
+        return actionsFile.adapterUnsupported() == null
+                ? List.of()
+                : actionsFile.adapterUnsupported().getOrDefault(ADAPTER, List.of());
+    }
+
     static Stream<String> conformanceActions() {
-        return actionsFile.conformance().stream();
+        Set<String> unsupported = adapterUnsupported().stream()
+                .map(AdapterUnsupported::action).collect(java.util.stream.Collectors.toSet());
+        return actionsFile.conformance().stream().filter(a -> !unsupported.contains(a));
+    }
+
+    static Stream<Arguments> adapterUnsupportedActions() {
+        return adapterUnsupported().stream().map(u -> Arguments.of(u.action(), u.reason()));
     }
 
     static Stream<Arguments> unsupportedShapes() {
@@ -630,6 +658,17 @@ class AdversarialConformanceTest {
     }
 
     /**
+     * Conformance actions the reference itself cannot express (see {@link #adapterUnsupported()}).
+     * They are excluded from the oracle comparison and must fail loudly instead — the invariant is
+     * absolute either way: an inexpressible shape throws before its filter can be used.
+     */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("adapterUnsupportedActions")
+    void adapterUnsupportedActionsThrow(String action, String reason) {
+        assertThrows(IllegalArgumentException.class, () -> adapterFilteredIds(action), reason);
+    }
+
+    /**
      * #302. {@code null-eq-missing} probes {@code aOptionalString == null}, and
      * {@code aOptionalString} follows the corpus default: a NULL column sends NO attribute. Both
      * halves are asserted because the rejection alone would pass vacuously if the adapter threw
@@ -832,6 +871,18 @@ class AdversarialConformanceTest {
         samples.put("all-on-empty", oracleAllowedIds("all-on-empty"));
         samples.put("null-eq", oracleAllowedIds("null-eq"));
         samples.put("null-ne", oracleAllowedIds("null-ne"));
+        // #309/#312/#311. w1-size-zero-chain and the two string-cast actions are deliberately
+        // absent: their oracles are empty by CONSTRUCTION (no seed holds a to-one parent with
+        // zero children; every seed's aString raises in int()/double()), so they cannot satisfy
+        // this guard. cast-int-double is the cast group's non-degenerate stand-in.
+        samples.put("w1-all-chain", oracleAllowedIds("w1-all-chain"));
+        samples.put("w1-not-exists-chain", oracleAllowedIds("w1-not-exists-chain"));
+        samples.put("w1-size-nonneg-chain", oracleAllowedIds("w1-size-nonneg-chain"));
+        samples.put("cr-div-neg-zero", oracleAllowedIds("cr-div-neg-zero"));
+        samples.put("cr-div-other-column", oracleAllowedIds("cr-div-other-column"));
+        samples.put("cr-div-then-add", oracleAllowedIds("cr-div-then-add"));
+        samples.put("cr-div-then-add-ne", oracleAllowedIds("cr-div-then-add-ne"));
+        samples.put("cast-int-double", oracleAllowedIds("cast-int-double"));
         samples.forEach((action, ids) -> assertTrue(
                 !ids.isEmpty() && ids.size() < SEEDS.size(),
                 "oracle for '" + action + "' is degenerate: " + ids));

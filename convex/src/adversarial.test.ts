@@ -438,11 +438,11 @@ describe("adversarial conformance corpus", () => {
         ].filter(Boolean).length !== 1,
     );
 
-    expect(allActions.size).toBe(127);
-    expect(CONVEX_UNSUPPORTED).toHaveLength(0);
+    expect(allActions.size).toBe(140);
+    expect(CONVEX_UNSUPPORTED).toHaveLength(2);
     expect(CONVEX_SUPPORTED_EXPECTED).toHaveLength(3);
-    expect(ORACLE_ACTIONS).toHaveLength(125);
-    expect(THROWING_ACTIONS).toHaveLength(0);
+    expect(ORACLE_ACTIONS).toHaveLength(131);
+    expect(THROWING_ACTIONS).toHaveLength(7);
     expect(misclassified).toEqual([]);
   });
 
@@ -536,7 +536,15 @@ describe("adversarial conformance corpus", () => {
   });
 
   test("oracle is not degenerate", async () => {
-    for (const action of ["vf-le", "like-percent", "all-on-empty", "pv-exists", "pv-all", "null-eq", "null-ne"]) {
+    // The #309/#312/#311 additions. w1-size-zero-chain and the two string-cast actions are
+    // deliberately absent: their oracles are empty by CONSTRUCTION (no seed holds a to-one
+    // parent with zero children; every seed's aString raises in int()/double()), so they
+    // cannot satisfy this guard. cast-int-double is the cast group's non-degenerate
+    // stand-in, and the w1/cr actions below carry it for their groups.
+    for (const action of ["vf-le", "like-percent", "all-on-empty", "pv-exists", "pv-all", "null-eq", "null-ne",
+      "w1-all-chain", "w1-not-exists-chain", "w1-size-nonneg-chain",
+      "cr-div-neg-zero", "cr-div-other-column", "cr-div-then-add", "cr-div-then-add-ne",
+      "cast-int-double"]) {
       const ids = await oracleAllowedIds(action);
       expect(ids.length).toBeGreaterThan(0);
       expect(ids.length).toBeLessThan(seedsFile.seeds.length);

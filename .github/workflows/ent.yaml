@@ -52,7 +52,9 @@ jobs:
 
       # The harness starts its own Cerbos PDP with testcontainers, reading the pinned version from
       # conformance/CERBOS_VERSION — there is no separate sidecar to set up, and the version is
-      # never hardcoded here. The corpus is replayed against both an in-memory SQLite database and
-      # a PostgreSQL testcontainer, so both dialects this adapter claims are actually exercised.
+      # never hardcoded here. The corpus is replayed against an in-memory SQLite database and
+      # PostgreSQL and MySQL testcontainers, so every dialect this adapter claims through
+      # WithDialect is actually exercised. Three dialect legs share one PDP and one plan pass;
+      # the timeout allows for the extra container start.
       - name: Adversarial conformance suite
-        run: go test -race -timeout 20m ./...
+        run: go test -race -timeout 30m ./...

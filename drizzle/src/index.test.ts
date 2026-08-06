@@ -689,7 +689,6 @@ const conditionalActions = [
   "exists-one",
   "exists-single",
   "explicit-deny",
-  "filter",
   "filter-deeply-nested",
   "gt",
   "gte",
@@ -735,11 +734,9 @@ const conditionalActions = [
   "arith-sub",
   "arith-mult",
   "arith-div",
-  "arith-mod",
-  // CEL type conversions: string(), double(), int() — compiled to CAST.
+  // CEL type conversions. Only string() survives as a CAST: int()/double() are rejected —
+  // see the throwing assertions below and cerbos/query-plan-adapters#311.
   "convert-string",
-  "convert-double",
-  "convert-int",
   // Ternary expression — compiled to CASE WHEN.
   "ternary",
   // size() on scalar (LENGTH) and on relation (correlated COUNT subquery).
@@ -1153,6 +1150,41 @@ describe("queryPlanToDrizzle", () => {
   // and the dispatch in buildFilterFromExpression requires one value operand.
   // If/when the adapter learns to compare two columns, replace this with a
   // data-driven assertion against the conditionalActions loop.
+  // #311: int()/double() cannot be lowered to SQL CAST. CEL reads a WHOLE string or raises
+  // (and an error denies), while CAST reads a numeric prefix — SQLite turns "100%_done"
+  // into 100 — so the old lowering returned rows the PDP denies. The numeric direction is
+  // no safer: CEL truncates toward zero where PostgreSQL and MySQL round. `arith-mod` is
+  // here because its policy wraps the column in int() before the modulus.
+  test.each([
+    ["convert-int", /int\(\)/],
+    ["convert-double", /double\(\)/],
+    ["arith-mod", /int\(\)/],
+  ])("throws for %s (SQL CAST is not a CEL conversion)", async (action, message) => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action,
+    });
+
+    expect(() => queryPlanToDrizzle({ queryPlan, mapper })).toThrow(message);
+  });
+
+  // #313: filter() returns a list, not a boolean. Used as a whole condition there is no
+  // meaning to pick — it is not `size(filter(...)) > 0` — so the adapter fails closed
+  // rather than guessing at "non-empty". The size(filter(...)) form still translates; see
+  // the `filter-count-gt` case in the conditional actions above.
+  test("throws for filter used as a condition", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "filter",
+    });
+
+    expect(() => queryPlanToDrizzle({ queryPlan, mapper })).toThrow(
+      /returns a list, not a boolean/
+    );
+  });
+
   test("throws for index-list (array indexing on a relation)", async () => {
     // ownedBy is modelled as a join table — there is no scalar index column,
     // so R.attr.ownedBy[0] cannot be translated into a deterministic SQL fragment.

@@ -457,8 +457,15 @@ public final class SpringDataQueryPlanAdapter {
                     }
                     yield tri.not(traverse(operands.get(0), scope));
                 }
-                case "exists", "exists_one", "all", "filter" ->
+                case "exists", "exists_one", "all" ->
                         handleCollectionOperator(op, operands, scope);
+                // filter() yields a list, not a boolean. Reaching it here means the plan used it
+                // as a predicate, and there is no meaning to pick — `filter(...)` is not
+                // `size(filter(...)) > 0` (cerbos/query-plan-adapters#313). The legitimate
+                // size(filter(...)) form is intercepted by the size handler before this.
+                case "filter" -> throw new IllegalArgumentException(
+                        "filter() returns a list, not a boolean, so it cannot be a condition on "
+                                + "its own; only size(filter(...)) has a boolean meaning");
                 // Cerbos except() is a two-list function — PDP-verified wire shape:
                 // size(R.attr.tags.except(["archived"])) > 0 arrives as
                 // gt(size(except(variable, value-list)), 0). No lambda form exists on the wire
@@ -1614,14 +1621,36 @@ public final class SpringDataQueryPlanAdapter {
                             || division.getOperandsCount() != 2) {
                         continue;
                     }
-                    // A constant divisor is already decided statically, and a fully constant
-                    // subtree folds to an exact IEEE value — neither needs the rewrite.
+                    // A NON-ZERO constant divisor is already decided statically, and a fully
+                    // constant subtree folds to an exact IEEE value — neither needs the rewrite.
+                    // A constant ZERO does: NULLIF(0, 0) is NULL, which makes every comparison
+                    // UNKNOWN, while CEL produces a signed infinity for a non-zero numerator.
                     NumericOperand divisor = resolveNumericOperand(division.getOperands(1), scope);
-                    if (divisor instanceof NumericOperand.Constant) {
+                    if (divisor instanceof NumericOperand.Constant dc && dc.value() != 0.0) {
                         continue;
                     }
                     NumericOperand dividend =
                             resolveNumericOperand(division.getOperands(0), scope);
+                    // A fully constant subtree folds to an exact IEEE value elsewhere; only a
+                    // COLUMN dividend needs the per-row rewrite.
+                    if (divisor instanceof NumericOperand.Constant
+                            && dividend instanceof NumericOperand.Constant) {
+                        continue;
+                    }
+                    // IEEE-754 keeps the sign of a zero, so `n / -0.0` is the OPPOSITE infinity
+                    // from `n / 0.0`. A constant divisor carries its sign all the way here — the
+                    // planner ships `-0` and protobuf doubles preserve the sign bit — so it must
+                    // be applied. A COLUMN divisor cannot: SQL has no portable way to read the
+                    // sign bit of a stored zero, so the positive reading is assumed and
+                    // documented (cerbos/query-plan-adapters#312).
+                    boolean negativeZeroDivisor = divisor instanceof NumericOperand.Constant zc
+                            && Double.doubleToRawLongBits(zc.value()) != 0L;
+                    double positiveDividendResult = negativeZeroDivisor
+                            ? Double.NEGATIVE_INFINITY
+                            : Double.POSITIVE_INFINITY;
+                    double negativeDividendResult = negativeZeroDivisor
+                            ? Double.POSITIVE_INFINITY
+                            : Double.NEGATIVE_INFINITY;
 
                     // The comparison as written, with the division on the side it appeared.
                     boolean divisionIsLeft = side == 0;
@@ -1644,7 +1673,9 @@ public final class SpringDataQueryPlanAdapter {
                         return tri.baseUnlessUnknown(folded, () -> cb.isNull(sqlOf(o)));
                     };
 
-                    Supplier<Predicate> zeroDivisor = () -> cb.equal(sqlOf(divisor), 0.0);
+                    Supplier<Predicate> zeroDivisor = divisor instanceof NumericOperand.Constant
+                            ? () -> cb.and()
+                            : () -> cb.equal(sqlOf(divisor), 0.0);
                     Supplier<Predicate> zeroDividend = () -> cb.equal(sqlOf(dividend), 0.0);
                     Supplier<Predicate> positiveDividend = () -> cb.gt(sqlOf(dividend), 0.0);
 
@@ -1655,8 +1686,8 @@ public final class SpringDataQueryPlanAdapter {
                                     () -> arm.apply(Double.NaN),
                                     () -> tri.ternary(
                                             positiveDividend,
-                                            () -> arm.apply(Double.POSITIVE_INFINITY),
-                                            () -> arm.apply(Double.NEGATIVE_INFINITY))),
+                                            () -> arm.apply(positiveDividendResult),
+                                            () -> arm.apply(negativeDividendResult))),
                             () -> numericComparisonWithoutZeroGuard(op, operands, scope));
                 }
                 return null;
@@ -1753,6 +1784,28 @@ public final class SpringDataQueryPlanAdapter {
              * {@link #tryDivisionByZeroComparison}. The guard below survives only as the finite
              * arm of that rewrite, and for value positions no comparison folds.
              */
+            /** Whether an arithmetic subtree holds a division that can divide by zero. */
+            private boolean containsZeroCapableDivision(
+                    PlanResourcesFilter.Expression expr, Scope scope) {
+                String op = expr.getOperator();
+                if (!ARITHMETIC_OPS.contains(op)) {
+                    return false;
+                }
+                if ("div".equals(op) && expr.getOperandsCount() == 2) {
+                    NumericOperand divisor = resolveNumericOperand(expr.getOperands(1), scope);
+                    if (!(divisor instanceof NumericOperand.Constant dc) || dc.value() == 0.0) {
+                        return true;
+                    }
+                }
+                for (Operand child : expr.getOperandsList()) {
+                    if (child.getNodeCase() == Operand.NodeCase.EXPRESSION
+                            && containsZeroCapableDivision(child.getExpression(), scope)) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
             private NumericOperand resolveNumericOperand(Operand operand, Scope scope) {
                 switch (operand.getNodeCase()) {
                     case VARIABLE -> {
@@ -1763,6 +1816,14 @@ public final class SpringDataQueryPlanAdapter {
                         return new NumericOperand.Sql(toIeeeDouble(path));
                     }
                     case VALUE -> {
+                        // Read the raw double rather than going through protoValueToJava, which
+                        // narrows an integral value to Long and would discard the sign bit of
+                        // -0.0 — the one thing that decides which infinity `n / -0.0` is
+                        // (cerbos/query-plan-adapters#312).
+                        if (operand.getValue().getKindCase()
+                                == com.google.protobuf.Value.KindCase.NUMBER_VALUE) {
+                            return new NumericOperand.Constant(operand.getValue().getNumberValue());
+                        }
                         Object v = PlanValues.protoValueToJava(operand.getValue());
                         if (!(v instanceof Number n)) {
                             throw new IllegalArgumentException(
@@ -1779,6 +1840,21 @@ public final class SpringDataQueryPlanAdapter {
                                     "mod is not supported in comparisons: CEL % is integer-only and "
                                             + "attribute values are always doubles at check time, so "
                                             + "the condition can never be satisfied by the PDP");
+                        }
+                        if (ARITHMETIC_OPS.contains(op) && !"div".equals(op)
+                                && containsZeroCapableDivision(expr, scope)) {
+                            // CEL propagates a NaN or signed infinity through the surrounding
+                            // arithmetic; SQL has neither, and the NULLIF guard turns the whole
+                            // sum into NULL. `NaN + 1.0 != 2.0` is TRUE for the zero row while
+                            // `NULL + 1 <> 2` is UNKNOWN, so the row the PDP allows would be
+                            // dropped. The rewrite in tryDivisionByZeroComparison only reaches a
+                            // division that IS the comparison operand, so fail closed rather than
+                            // emit the under-granting filter (cerbos/query-plan-adapters#312).
+                            throw new IllegalArgumentException(
+                                    "arithmetic composed on a division whose denominator may be "
+                                            + "zero is not supported: CEL carries the resulting NaN "
+                                            + "or infinity through the surrounding arithmetic and "
+                                            + "SQL has no value that does");
                         }
                         if (!ARITHMETIC_OPS.contains(op)) {
                             throw new IllegalArgumentException(
@@ -2033,16 +2109,23 @@ public final class SpringDataQueryPlanAdapter {
                             || ("le".equals(cmpOp) && numValue == 0L)
                             || ("lt".equals(cmpOp) && numValue == 1L);
                     if (nonEmpty) {
+                        // A non-empty count already implies the hop, so no guard is needed.
                         return existsSubquery(scope, ref, (sub, tailJoin, rebased) -> cb.conjunction());
                     }
                     if (empty) {
-                        return tri.not(existsSubquery(scope, ref,
+                        // `size(chain) == 0` is TRUE over an empty count, which is exactly what an
+                        // absent to-one parent produces — require the hop separately (#309).
+                        Predicate emptyTail = tri.not(existsSubquery(scope, ref,
                                 (sub, tailJoin, rebased) -> cb.conjunction()));
+                        Predicate hops = leadingHopsExist(scope, ref);
+                        return hops == null ? emptyTail : cb.and(hops, emptyTail);
                     }
                     // Arbitrary N → correlated (SELECT COUNT(...)) <op> N. For a multi-hop chain
                     // the COUNT joins through every hop, so it counts the FLATTENED tail
                     // elements — the same element set the EXISTS shortcuts range over.
-                    return compareCount(countSubquery(scope, ref).sub(), cmpOp, numValue);
+                    return compareCount(
+                            requireLeadingHops(scope, ref, countSubquery(scope, ref).sub(), Long.class),
+                            cmpOp, numValue);
                 }
                 // size(coll.filter(x, pred)): CEL filter has NO error absorption — any element
                 // whose predicate errors (NULL-derived UNKNOWN body) errors the whole expression
@@ -2483,18 +2566,21 @@ public final class SpringDataQueryPlanAdapter {
                 // exists (and filter): OR with error absorption — TRUE iff any element is
                 // determined-true (max score 2); UNKNOWN iff none is true but at least one is
                 // undetermined (max score 1 → NULLIF yields SQL NULL); FALSE otherwise.
-                case "exists", "filter" ->
-                        cb.equal(macroScoreSubquery(scope, ref, bodyBuilder, 2, 0), 2);
+                case "exists" ->
+                        cb.equal(requireLeadingHops(scope, ref,
+                                macroScoreSubquery(scope, ref, bodyBuilder, 2, 0), Integer.class), 2);
                 // all: AND with error absorption — FALSE iff any element is determined-false
                 // (max score 2 absorbs undetermined siblings); UNKNOWN iff none is false but at
                 // least one is undetermined; TRUE otherwise (including the empty collection).
                 case "all" ->
-                        cb.equal(macroScoreSubquery(scope, ref, bodyBuilder, 0, 2), 0);
+                        cb.equal(requireLeadingHops(scope, ref,
+                                macroScoreSubquery(scope, ref, bodyBuilder, 0, 2), Integer.class), 0);
                 // exists_one: strict — any UNKNOWN element denies, else COUNT(body) = 1. The
                 // strict counter goes SQL NULL when any element is undetermined, so the equality
                 // is UNKNOWN and the row stays excluded under both polarities.
                 case "exists_one" ->
-                        cb.equal(strictMatchCountSubquery(scope, ref, bodyBuilder), 1L);
+                        cb.equal(requireLeadingHops(scope, ref,
+                                strictMatchCountSubquery(scope, ref, bodyBuilder), Long.class), 1L);
                 default -> throw new IllegalArgumentException("Unsupported collection operator: " + op);
             });
         }
@@ -2801,6 +2887,40 @@ public final class SpringDataQueryPlanAdapter {
             ChainSubquery<Long> cs = chainSubquery(Long.class, scope, ref);
             cs.sub().select(cb.count(cs.tailJoin()));
             return cs;
+        }
+
+        /**
+         * "Every intermediate hop of a dotted path exists", or {@code null} for a direct relation.
+         *
+         * <p>CEL cannot dot through a list, so each intermediate segment of {@code a.b.c} is a
+         * to-ONE parent: absent, the caller sends no attribute at all and CEL raises a
+         * missing-path error, which denies. A subquery rooted at the entity cannot see that — an
+         * absent parent and a childless parent both return nothing — so {@code all} reads TRUE,
+         * {@code !exists} reads TRUE and the count reads 0, each admitting rows the PDP denies
+         * (cerbos/query-plan-adapters#309).
+         */
+        private Predicate leadingHopsExist(Scope scope, Scope.ResolvedRelation ref) {
+            if (ref.chain().size() < 2) {
+                return null;
+            }
+            Scope.ResolvedRelation hops = new Scope.ResolvedRelation(
+                    ref.owner(), ref.chain().subList(0, ref.chain().size() - 1));
+            return existsSubquery(scope, hops, (sub, tailJoin, rebased) -> cb.conjunction());
+        }
+
+        /**
+         * Make {@code value} SQL NULL unless every intermediate to-one hop exists, so an absent
+         * parent leaves the enclosing comparison UNKNOWN and the row excluded under BOTH
+         * polarities. A CASE with no ELSE yields NULL for the missing case.
+         */
+        private <N> jakarta.persistence.criteria.Expression<N> requireLeadingHops(
+                Scope scope, Scope.ResolvedRelation ref,
+                jakarta.persistence.criteria.Expression<N> value, Class<N> type) {
+            Predicate guard = leadingHopsExist(scope, ref);
+            if (guard == null) {
+                return value;
+            }
+            return cb.<N>selectCase().when(guard, value).otherwise(cb.nullLiteral(type));
         }
 
         private Predicate existsSubquery(Scope scope, Scope.ResolvedRelation ref,

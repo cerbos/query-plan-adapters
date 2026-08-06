@@ -1106,6 +1106,37 @@ function getPrismaRelationOperator(relation: {
 /**
  * Builds a nested relation filter for Prisma queries.
  */
+/**
+ * "Every intermediate hop of a dotted path exists", as a Prisma filter.
+ *
+ * CEL cannot dot through a list, so each intermediate segment of `a.b.c` is a to-ONE
+ * parent: absent, the caller sends no attribute and CEL raises a missing-path error, which
+ * denies. `NOT { categories: { some: { subCategories: { some: P } } } }` is TRUE for a row
+ * with no category at all, so the negation returns rows the PDP denies — the parent must be
+ * required separately (cerbos/query-plan-adapters#309).
+ *
+ * Returns undefined when the reference has no intermediate hop, so a direct relation keeps
+ * its empty-collection semantics (`!tags.exists(...)` over zero tags is still TRUE).
+ */
+function buildLeadingHopsExistFilter(
+  head: RelationConfig,
+  restRelations: RelationConfig[]
+): PrismaFilter | undefined {
+  if (restRelations.length === 0) {
+    return undefined;
+  }
+  // The last entry is the collection being iterated; everything before it is a hop.
+  let inner: PrismaFilter = {};
+  for (let i = restRelations.length - 2; i >= 0; i--) {
+    const relation = assertDefined(
+      restRelations[i],
+      "Relation mapping is missing"
+    );
+    inner = { [relation.name]: { [getPrismaRelationOperator(relation)]: inner } };
+  }
+  return { [head.name]: { [getPrismaRelationOperator(head)]: inner } };
+}
+
 function buildNestedRelationFilter(
   relations: RelationConfig[],
   fieldFilter: any
@@ -2739,10 +2770,22 @@ function buildNegatedCollectionFilter(
 
   const parts = buildCollectionLambdaParts(operator, operands, mapper);
   const { head, filterValue, nullableFields } = parts;
+  // An absent to-one parent must stay denied under negation rather than satisfying it
+  // vacuously (#309).
+  const leadingHopsExist = buildLeadingHopsExistFilter(
+    head,
+    parts.restRelations
+  );
+  const requireLeadingHops = (filter: PrismaFilter): PrismaFilter =>
+    leadingHopsExist === undefined
+      ? filter
+      : { AND: [leadingHopsExist, filter] };
 
   switch (operator) {
     case "exists": {
-      const base = { NOT: { [head.name]: { some: filterValue } } };
+      const base = requireLeadingHops({
+        NOT: { [head.name]: { some: filterValue } },
+      });
       const unknownElement = buildUnknownElementFilter(parts);
       if (unknownElement === undefined) {
         return base;
@@ -2767,7 +2810,9 @@ function buildNegatedCollectionFilter(
       return { [head.name]: { some: { NOT: filterValue } } };
     case "except": {
       // !except(c,P) = every element definitively matches P.
-      const base = { [head.name]: { none: { NOT: filterValue } } };
+      const base = requireLeadingHops({
+        [head.name]: { none: { NOT: filterValue } },
+      });
       if (nullableFields.size === 0) {
         return base;
       }

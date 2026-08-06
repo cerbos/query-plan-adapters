@@ -433,6 +433,48 @@ const resolveTableName = (table: Table, reference: string): string => {
   }
 };
 
+/**
+ * The hops a dotted path traverses BEFORE its final collection, minus any the enclosing
+ * lambda scope already established.
+ *
+ * CEL cannot dot through a list, so every intermediate segment of `a.b.c` is a to-ONE
+ * parent: when it is absent the caller sends no attribute at all and CEL raises a
+ * missing-path error, which denies. A join chain rooted at the resource row cannot see
+ * that — an absent parent and a childless parent both produce zero correlated rows — so
+ * `all` goes vacuously TRUE, `!exists` goes TRUE and the count goes 0, each returning rows
+ * the PDP denies (cerbos/query-plan-adapters#309).
+ *
+ * Hops listed in `skipRelations` are already correlated by an enclosing subquery and exist
+ * there by construction, so they must not be re-required off the root.
+ */
+const unskippedLeadingRelations = (
+  leadingRelations: RelationMapping[],
+  options?: BuildFilterOptions
+): RelationMapping[] =>
+  leadingRelations.filter(
+    (relation) => !options?.skipRelations?.has(relation)
+  );
+
+/**
+ * Make `inner` UNKNOWN (SQL NULL) unless every intermediate to-one hop exists, so an
+ * absent parent stays excluded under BOTH polarities instead of collapsing onto the
+ * empty-collection case. The CASE has no ELSE on purpose: a missing hop yields NULL, and
+ * `NOT NULL` is still NULL.
+ */
+const requireLeadingHops = (
+  leadingRelations: RelationMapping[],
+  inner: SQL,
+  reference: string,
+  options?: BuildFilterOptions
+): SQL => {
+  const required = unskippedLeadingRelations(leadingRelations, options);
+  if (required.length === 0) {
+    return inner;
+  }
+  const hopsExist = wrapWithRelations(required, TRUE_CONDITION, reference);
+  return sql`(case when ${hopsExist} then ${inner} end)`;
+};
+
 const wrapWithRelations = (
   relations: RelationMapping[],
   filter: SQL,
@@ -776,10 +818,25 @@ const buildHierarchyFilter = (
 
 const CONVERSION_TARGETS: Record<string, string> = {
   string: "TEXT",
-  // FLOAT(53) is float8 on PostgreSQL, DOUBLE on MySQL, and receives REAL
-  // affinity on SQLite.
-  double: "FLOAT(53)",
-  int: "INTEGER",
+};
+
+/**
+ * `int()` / `double()` over a plan operand, which SQL `CAST` cannot reproduce.
+ *
+ * CEL reads a WHOLE string or raises an error, and an error denies the row. SQL reads
+ * whatever prefix parses: `CAST('100%_done' AS INTEGER)` is `100` on SQLite, `0` on MySQL
+ * and a hard error on PostgreSQL, so a direct lowering returns rows the PDP denies.
+ *
+ * The numeric direction is no safer: CEL's `int()` truncates toward zero, SQLite's CAST
+ * truncates, but PostgreSQL and MySQL round to nearest — `int(-0.6)` is `0` to CEL and
+ * `-1` to those engines.
+ *
+ * Nothing in the plan says what type the column holds, so the adapter cannot pick a
+ * faithful lowering per row. Fail closed instead (cerbos/query-plan-adapters#311).
+ */
+const UNSUPPORTED_CONVERSIONS: Record<string, string> = {
+  int: "int()",
+  double: "double()",
 };
 
 const buildValueExpressionFromValue = (value: Value): SQL => sql`${value}`;
@@ -922,7 +979,12 @@ const buildSizeExpression = (
           options
         )
       : joinCondition;
-    return sql`(select case when coalesce(sum(case when (${rowCondition}) is null then 1 else 0 end), 0) > 0 then null else coalesce(sum(case when ${rowCondition} then 1 else 0 end), 0) end from ${sql.identifier(tableName)} where ${chainWhere})`;
+    return requireLeadingHops(
+      scope.leadingRelations,
+      sql`(select case when coalesce(sum(case when (${rowCondition}) is null then 1 else 0 end), 0) > 0 then null else coalesce(sum(case when ${rowCondition} then 1 else 0 end), 0) end from ${sql.identifier(tableName)} where ${chainWhere})`,
+      scope.collectionName,
+      options
+    );
   }
 
   if (!isNameOperand(operand)) {
@@ -943,7 +1005,15 @@ const buildSizeExpression = (
     const chainWhere = leading.length
       ? wrapWithRelations(leading, joinCondition, operand.name, options)
       : joinCondition;
-    return sql`(select count(*) from ${sql.identifier(tableName)} where ${chainWhere})`;
+    // An absent to-one parent must count as UNKNOWN, not 0: `size(chain) == 0` and
+    // `size(chain) >= 0` are both TRUE over an empty count and would return every
+    // parentless row (#309).
+    return requireLeadingHops(
+      leading,
+      sql`(select count(*) from ${sql.identifier(tableName)} where ${chainWhere})`,
+      operand.name,
+      options
+    );
   }
   // Scalar column: LENGTH(col).
   const colExpr = buildColumnExpression(resolved.mapping, operand.name);
@@ -1011,6 +1081,15 @@ const buildValueExpression = (
     }
     const op = ARITHMETIC_OPERATORS[operator]!;
     return sql`(${left} ${sql.raw(op)} ${right})`;
+  }
+
+  if (operator in UNSUPPORTED_CONVERSIONS) {
+    throw new Error(
+      `Cannot translate ${UNSUPPORTED_CONVERSIONS[operator]}: SQL CAST does not reproduce ` +
+        `CEL conversion semantics — it reads a numeric prefix where CEL requires the whole ` +
+        `string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates ` +
+        `toward zero. The adapter rejects the shape instead of returning rows the PDP denies`
+    );
   }
 
   if (operator in CONVERSION_TARGETS) {
@@ -1849,28 +1928,41 @@ const buildCollectionOperatorFilter = (
     wrapLeading(
       wrapWithRelations([primaryRelation], inner, collectionName)
     );
+  // An absent to-one parent must stay UNKNOWN rather than reaching the empty-collection
+  // answer, which `all` reads as TRUE and `!exists` inverts into an allow (#309).
+  const guardHops = (inner: SQL): SQL =>
+    requireLeadingHops(leadingRelations, inner, collectionName, options);
 
   switch (operator) {
-    case "filter": {
-      const filter = FALSE_CONDITION;
-      return negated ? not(filter) : filter;
-    }
+    // filter() yields a list, not a boolean. Reaching it here means the plan used it as a
+    // predicate, and there is no meaning to pick: `filter(...)` is not
+    // `size(filter(...)) > 0`. Fail closed (cerbos/query-plan-adapters#313); the legitimate
+    // use — `size(filter(coll, lambda))` — is handled by buildSizeExpression before this.
+    case "filter":
+      throw new Error(
+        "Cannot translate 'filter' as a condition: filter() returns a list, not a boolean. " +
+          "Only size(filter(...)) has a boolean meaning"
+      );
     case "exists":
       {
         const trueWitness = wrapAll(sql`(${rowCondition}) is true`);
         const unknownWitness = wrapAll(sql`(${rowCondition}) is null`);
-        const triState = sql`(case when ${trueWitness} then true when ${unknownWitness} then null else false end)`;
+        const triState = guardHops(
+          sql`(case when ${trueWitness} then true when ${unknownWitness} then null else false end)`
+        );
         return negated ? not(triState) : triState;
       }
     case "except": {
-      const exceptFilter = wrapAll(not(rowCondition));
+      const exceptFilter = guardHops(wrapAll(not(rowCondition)));
       return negated ? not(exceptFilter) : exceptFilter;
     }
     case "all":
       {
         const falseWitness = wrapAll(sql`(${rowCondition}) is false`);
         const unknownWitness = wrapAll(sql`(${rowCondition}) is null`);
-        const triState = sql`(case when ${falseWitness} then false when ${unknownWitness} then null else true end)`;
+        const triState = guardHops(
+          sql`(case when ${falseWitness} then false when ${unknownWitness} then null else true end)`
+        );
         return negated ? not(triState) : triState;
       }
     case "exists_one": {
@@ -1891,7 +1983,7 @@ const buildCollectionOperatorFilter = (
         collectionName
       );
       const triState = sql`(case when ${unknownWitness} then null when ${countExpr} = 1 then true else false end)`;
-      const wrapped = wrapLeading(triState);
+      const wrapped = guardHops(wrapLeading(triState));
       return negated ? not(wrapped) : wrapped;
     }
     default:
@@ -1954,6 +2046,105 @@ const resolveConstantNumber = (
       return { kind: "constant", value: left.value * right.value };
     case "div":
       return { kind: "constant", value: left.value / right.value };
+  }
+};
+
+type DivisionNode = PlanExpressionOperand & {
+  operator: string;
+  operands: PlanExpressionOperand[];
+};
+
+/**
+ * A division whose denominator is not a known non-zero constant, so the row-level result
+ * may be a CEL NaN or signed infinity that SQL cannot represent.
+ */
+const isZeroCapableDivision = (
+  operand: PlanExpressionOperand
+): operand is DivisionNode => {
+  if (!isExpressionOperand(operand) || operand.operator !== "div") {
+    return false;
+  }
+  // A division of two constants already folds to an exact IEEE value, and the
+  // constant/NaN paths render it more tightly than a CASE can.
+  if (resolveConstantNumber(operand).kind === "constant") {
+    return false;
+  }
+  const denominatorOperand = operand.operands[1];
+  if (!denominatorOperand) {
+    return false;
+  }
+  const denominator = resolveConstantNumber(denominatorOperand);
+  return denominator.kind !== "constant" || denominator.value === 0;
+};
+
+/**
+ * The first zero-capable division anywhere in an arithmetic tree. The comparison need not
+ * sit directly on the division: `div(a, a) + 1.0 != 2.0` composes addition on top of a
+ * result that can be NaN, and lowering that to `NULL + 1` excludes the one row CEL allows.
+ */
+const findZeroCapableDivision = (
+  operand: PlanExpressionOperand
+): DivisionNode | undefined => {
+  if (isZeroCapableDivision(operand)) {
+    return operand;
+  }
+  if (
+    !isExpressionOperand(operand) ||
+    !(operand.operator in ARITHMETIC_OPERATORS)
+  ) {
+    return undefined;
+  }
+  for (const child of operand.operands) {
+    const found = findZeroCapableDivision(child);
+    if (found) {
+      return found;
+    }
+  }
+  return undefined;
+};
+
+/**
+ * Evaluate an arithmetic tree in JavaScript's IEEE double space with `target` replaced by
+ * `substitute`, so a NaN or infinity produced by a division propagates through the
+ * surrounding arithmetic exactly as CEL propagates it. Returns undefined when any other
+ * leaf is not a constant — SQL cannot carry a non-finite value alongside a column, and
+ * guessing would return rows the PDP denies.
+ */
+const foldWithSubstitution = (
+  operand: PlanExpressionOperand,
+  target: PlanExpressionOperand,
+  substitute: number
+): number | undefined => {
+  if (operand === target) {
+    return substitute;
+  }
+  if (isValueOperand(operand)) {
+    return typeof operand.value === "number" ? operand.value : undefined;
+  }
+  if (!isExpressionOperand(operand) || operand.operands.length !== 2) {
+    return undefined;
+  }
+  if (!(operand.operator in ARITHMETIC_OPERATORS)) {
+    return undefined;
+  }
+  const left = foldWithSubstitution(operand.operands[0]!, target, substitute);
+  const right = foldWithSubstitution(operand.operands[1]!, target, substitute);
+  if (left === undefined || right === undefined) {
+    return undefined;
+  }
+  switch (operand.operator) {
+    case "add":
+      return left + right;
+    case "sub":
+      return left - right;
+    case "mult":
+      return left * right;
+    case "div":
+      return left / right;
+    case "mod":
+      return left % right;
+    default:
+      return undefined;
   }
 };
 
@@ -2098,6 +2289,7 @@ const buildComparisonFilter = (
    * row stays excluded under BOTH polarities — CEL's missing-attribute deny.
    */
   const buildDivision = (
+    enclosing: PlanExpressionOperand,
     division: PlanExpressionOperand & {
       operator: string;
       operands: PlanExpressionOperand[];
@@ -2117,23 +2309,47 @@ const buildComparisonFilter = (
     );
     const otherExpr = buildValueExpression(other, mapper, options);
 
+    // IEEE-754 keeps the sign of a zero, so `n / -0.0` is the OPPOSITE infinity from
+    // `n / 0.0`. The planner ships the denominator verbatim (the wire operand is `-0`),
+    // so a CONSTANT denominator's sign is knowable and must be applied. A COLUMN
+    // denominator is not: SQL cannot tell -0.0 from 0.0 and no portable function reads
+    // the sign bit, so the positive-zero reading is assumed and documented.
+    const denominatorConstant = resolveConstantNumber(denominatorOperand);
+    const denominatorIsNegativeZero =
+      denominatorConstant.kind === "constant" &&
+      Object.is(denominatorConstant.value, -0);
+    const signed = (infinity: number): number =>
+      denominatorIsNegativeZero ? -infinity : infinity;
+
+    // The comparison may sit above the division rather than on it — `div(a, b) + 1 != 2`.
+    // Substitute each IEEE outcome for the division and fold the rest of the enclosing
+    // expression in JavaScript's own IEEE space, so `NaN + 1.0` stays NaN instead of
+    // becoming SQL NULL (which would exclude a row `NaN != 2.0` allows).
     const arm = (nonFinite: number): SQL => {
+      const folded = foldWithSubstitution(enclosing, division, nonFinite);
+      if (folded === undefined) {
+        throw new Error(
+          "Cannot translate arithmetic over a division whose denominator may be zero: " +
+            "the surrounding expression mixes the non-finite result with a column, and " +
+            "SQL has no NaN or Infinity to carry it through"
+        );
+      }
       const result = divisionIsLeft
-        ? evaluateConstantNumberComparison(operator, nonFinite, 0)
-        : evaluateConstantNumberComparison(operator, 0, nonFinite);
+        ? evaluateConstantNumberComparison(operator, folded, 0)
+        : evaluateConstantNumberComparison(operator, 0, folded);
       return result !== negated ? sql`true` : sql`false`;
     };
 
-    const quotient = sql`(cast(${numerator} as float(53)) / ${denominator})`;
+    const enclosingExpr = buildValueExpression(enclosing, mapper, options);
     const finite = divisionIsLeft
-      ? applyComparisonWithExpression(operator, quotient, otherExpr)
-      : applyComparisonWithExpression(operator, otherExpr, quotient);
+      ? applyComparisonWithExpression(operator, enclosingExpr, otherExpr)
+      : applyComparisonWithExpression(operator, otherExpr, enclosingExpr);
 
     return sql`(case
       when ${numerator} is null or ${denominator} is null or ${otherExpr} is null then null
       when ${denominator} = 0 and ${numerator} = 0 then ${arm(Number.NaN)}
-      when ${denominator} = 0 and ${numerator} > 0 then ${arm(Number.POSITIVE_INFINITY)}
-      when ${denominator} = 0 then ${arm(Number.NEGATIVE_INFINITY)}
+      when ${denominator} = 0 and ${numerator} > 0 then ${arm(signed(Number.POSITIVE_INFINITY))}
+      when ${denominator} = 0 then ${arm(signed(Number.NEGATIVE_INFINITY))}
       else ${negated ? not(finite) : finite}
     end)`;
   };
@@ -2145,35 +2361,16 @@ const buildComparisonFilter = (
     return buildTernary(right, left, false);
   }
 
-  // A zero denominator is only reachable when it is not a known non-zero
-  // constant; otherwise fall through to the plain arithmetic path.
-  const canDivideByZero = (
-    operand: PlanExpressionOperand
-  ): operand is PlanExpressionOperand & {
-    operator: string;
-    operands: PlanExpressionOperand[];
-  } => {
-    if (!isExpressionOperand(operand) || operand.operator !== "div") {
-      return false;
-    }
-    // A division of two constants already folds to an exact IEEE value, and
-    // the constant/NaN paths below render it more tightly than a CASE can.
-    if (resolveConstantNumber(operand).kind === "constant") {
-      return false;
-    }
-    const denominatorOperand = operand.operands[1];
-    if (!denominatorOperand) {
-      return false;
-    }
-    const denominator = resolveConstantNumber(denominatorOperand);
-    return denominator.kind !== "constant" || denominator.value === 0;
-  };
-
-  if (canDivideByZero(left)) {
-    return buildDivision(left, right, true);
+  // A zero denominator is only reachable when it is not a known non-zero constant;
+  // otherwise fall through to the plain arithmetic path. The division may be nested inside
+  // further arithmetic, so search the whole tree rather than only the comparison operand.
+  const leftDivision = findZeroCapableDivision(left);
+  if (leftDivision) {
+    return buildDivision(left, leftDivision, right, true);
   }
-  if (canDivideByZero(right)) {
-    return buildDivision(right, left, false);
+  const rightDivision = findZeroCapableDivision(right);
+  if (rightDivision) {
+    return buildDivision(right, rightDivision, left, false);
   }
 
   const leftConstant = resolveConstantNumber(left);

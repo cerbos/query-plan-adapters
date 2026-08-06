@@ -26,7 +26,9 @@
     "n-not-exists-one-null", "n-all-mixed-null", "n-not-all-null", "n-not-all-absorb",
     "cr-contains", "cr-startswith", "cr-endswith", "cr-startswith-concat",
     "cr-div-zero", "cr-div-zero-ne", "cr-div-zero-eq-neg", "cr-size-frac-ge",
+    "cr-div-neg-zero", "cr-div-other-column", "cr-div-then-add", "cr-div-then-add-ne",
     "w1-exists-chain", "w1-size-chain", "w1-in-chain", "w2-outer-relation",
+    "w1-all-chain", "w1-not-exists-chain", "w1-size-zero-chain", "w1-size-nonneg-chain",
     "like-bracket", "cs-eq",
     "arith-add-eq-frac", "arith-add-ne-frac", "arith-add-eq-frac-exact",
     "size-huge-gt", "size-huge-lt",
@@ -45,6 +47,10 @@
     "null-eq", "null-ne", "vf-null-ne", "null-not-eq"
   ],
   "adapterUnsupported": {
+    "spring-data": [
+      { "action": "cr-div-then-add", "reason": "CEL carries a NaN or signed infinity through the arithmetic composed on top of a division, and SQL has no value that does — the NULLIF divide-by-zero guard turns the whole sum into NULL. The reference's non-finite rewrite only reaches a division that IS the comparison operand, so a division nested inside further arithmetic fails closed rather than emitting the under-granting filter" },
+      { "action": "cr-div-then-add-ne", "reason": "Same nested-division limitation as cr-div-then-add. This is the arm that proves it matters: `NaN != 2.0` is TRUE and the PDP allows the zero row, while `NULL + 1 <> 2` is UNKNOWN and drops it" }
+    ],
     "prisma": [
       { "action": "like-percent", "reason": "Prisma emits LIKE without an ESCAPE clause and does not escape wildcards, so a needle containing % or _ cannot be matched literally; the adapter throws instead of filtering wrong" },
       { "action": "like-underscore", "reason": "Same LIKE-wildcard limitation as like-percent" },
@@ -59,6 +65,12 @@
       { "action": "cr-div-zero", "reason": "Division by a column cannot be solved to a plain column filter" },
       { "action": "cr-div-zero-ne", "reason": "Same column-division limitation as cr-div-zero, reached through an inequality" },
       { "action": "cr-div-zero-eq-neg", "reason": "Same column-division limitation as cr-div-zero, reached through a negated equality" },
+      { "action": "cr-div-neg-zero", "reason": "Prisma filters have no column arithmetic, so the division must be solved algebraically into a plain column predicate — and a zero denominator has no reciprocal to solve with; the adapter throws rather than guessing the sign of the resulting infinity" },
+      { "action": "cr-div-other-column", "reason": "A denominator that is a second column leaves the comparison with two field references and no constant to solve against, which a Prisma where-filter cannot express" },
+      { "action": "cr-div-then-add", "reason": "Arithmetic composed on a column division is doubly inexpressible: Prisma has no column arithmetic, and the algebraic solve has no reciprocal for a denominator that may be zero" },
+      { "action": "cr-div-then-add-ne", "reason": "Same composed column-division limitation as cr-div-then-add, reached through an inequality" },
+      { "action": "w1-all-chain", "reason": "every() applies to a single relation; a multi-hop chain would need the universal to be evaluated against the flattened tail while still requiring the intermediate hop, which nested every/some cannot express — the adapter throws" },
+      { "action": "w1-size-nonneg-chain", "reason": "Prisma where-filters express only empty/non-empty via none/some, so a >= 0 relation-count threshold — which is TRUE exactly when the to-one parent exists — has no equivalent; same limitation as size-threshold" },
       { "action": "size-threshold", "reason": "Prisma where-filters cannot express relation-count thresholds (only empty/non-empty via none/some)" },
       { "action": "size-filter-count", "reason": "Same relation-count limitation as size-threshold" },
       { "action": "string-size", "reason": "Prisma has no string-length filter" },
@@ -86,7 +98,9 @@
     ],
     "sqlalchemy": [
       { "action": "ts-window", "reason": "The planner emits a nanosecond-precision now() literal that Python/SQLAlchemy DateTime cannot represent without changing the CEL instant" },
-      { "action": "ts-vf", "reason": "Same nanosecond-precision now() limitation in value-first form" }
+      { "action": "ts-vf", "reason": "Same nanosecond-precision now() limitation in value-first form" },
+      { "action": "cr-div-neg-zero", "reason": "IEEE keeps the sign of a zero, but Cerbos's HTTP transport renders the double -0.0 as `-0` and Python's json.loads returns the INTEGER 0 for it, discarding the sign bit — so the adapter cannot tell +Infinity from -Infinity and rejects a constant zero denominator instead of guessing. The gRPC client preserves the sign (json.loads('-0.0') is -0.0), so this is a transport limitation rather than a SQL one" },
+      { "action": "nan-ord-inf", "reason": "Same indeterminate-signed-zero rejection as cr-div-neg-zero: the 1.0/0.0 and -1.0/0.0 branches also arrive with an integer-zero denominator over HTTP, and the adapter cannot distinguish that from -0.0" }
     ],
     "mongoose": [
       { "action": "exists-one-multi", "reason": "exactly-one collection cardinality is not expressible by the current match-filter translator" },
@@ -108,6 +122,11 @@
       { "action": "cr-div-zero", "reason": "a row-dependent zero denominator aborts a Mongo query instead of denying that row" },
       { "action": "cr-div-zero-ne", "reason": "Same zero-denominator abort as cr-div-zero, reached through an inequality" },
       { "action": "cr-div-zero-eq-neg", "reason": "Same zero-denominator abort as cr-div-zero, reached through a negated equality" },
+      { "action": "cr-div-neg-zero", "reason": "$divide aborts the whole query on a zero denominator instead of producing CEL's signed infinity for that document, so the adapter requires a non-zero constant denominator and rejects a literal zero" },
+      { "action": "cr-div-other-column", "reason": "A denominator that is a second field can be zero for some documents, and $divide aborts the query rather than denying just those; the adapter requires a non-zero constant denominator" },
+      { "action": "cr-div-then-add", "reason": "Same zero-denominator abort as cr-div-zero, reached through arithmetic composed on the division" },
+      { "action": "cr-div-then-add-ne", "reason": "Same zero-denominator abort as cr-div-then-add, reached through an inequality" },
+      { "action": "w1-not-exists-chain", "reason": "Negating a collection macro over nullable element members would turn CEL errors into matches, the same three-valued limitation as not-exists — and the chain adds an absent to-one parent, which a Mongo filter has no UNKNOWN to represent" },
       { "action": "nan-ord-ternary", "reason": "MongoDB division by zero aborts rather than producing CEL non-finite values" },
       { "action": "nan-ord-ternary-vf", "reason": "same non-finite arithmetic limitation in value-first form" },
       { "action": "nan-ord-le", "reason": "MongoDB cannot safely reproduce this CEL NaN ordering expression" },
@@ -181,6 +200,14 @@
       { "action": "cr-div-zero", "reason": "Chroma metadata filters compare a stored field against a literal only \u2014 there is no computed-value or column-arithmetic operand \u2014 so the plan's arithmetic expression cannot be translated" },
       { "action": "cr-div-zero-ne", "reason": "Same flat-scalar-metadata limitation as cr-div-zero: the arithmetic operand cannot be translated at all, whatever the enclosing comparison" },
       { "action": "cr-div-zero-eq-neg", "reason": "Same flat-scalar-metadata limitation as cr-div-zero under a negated equality" },
+      { "action": "cr-div-neg-zero", "reason": "Same flat-scalar-metadata limitation as cr-div-zero: Chroma compares a stored field against a literal only, so a division operand cannot be translated whatever its denominator" },
+      { "action": "cr-div-other-column", "reason": "Same flat-scalar-metadata limitation as cr-div-zero, with a second metadata key as the denominator — Chroma has neither arithmetic nor a field-to-field operand" },
+      { "action": "cr-div-then-add", "reason": "Same flat-scalar-metadata limitation as cr-div-zero, with addition composed on the division" },
+      { "action": "cr-div-then-add-ne", "reason": "Same flat-scalar-metadata limitation as cr-div-then-add, reached through an inequality" },
+      { "action": "w1-all-chain", "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, so the chained collection lambda cannot be translated" },
+      { "action": "w1-not-exists-chain", "reason": "Chroma has no negation of a collection predicate, and no relation model to reach the chained collection with in the first place" },
+      { "action": "w1-size-zero-chain", "reason": "Chroma metadata is a flat scalar map with no relation model and no count function, so a size(...) collection-count operand cannot be translated" },
+      { "action": "w1-size-nonneg-chain", "reason": "Same missing relation model and count function as w1-size-zero-chain" },
       { "action": "cr-size-frac-ge", "reason": "Chroma metadata is a flat scalar map with no relation model and no count function, so a size(...) collection-count operand cannot be translated" },
       { "action": "w1-exists-chain", "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated" },
       { "action": "w1-size-chain", "reason": "Chroma metadata is a flat scalar map with no relation model and no count function, so a size(...) collection-count operand cannot be translated" },
@@ -229,6 +256,10 @@
       { "action": "null-ne", "reason": "Chroma $ne matches records whose metadata key is absent, unlike Cerbos missing-attribute error semantics, and this field is not declared required" },
       { "action": "vf-null-ne", "reason": "Value-first form of null-ne; the same $ne absent-key mismatch applies after the planner mirrors the operands" },
       { "action": "null-not-eq", "reason": "Negating the null equality routes through the same $ne absent-key mismatch as null-ne" }
+    ],
+    "convex": [
+      { "action": "cr-div-neg-zero", "reason": "IEEE keeps the sign of a zero, and the planner does ship it (the wire operand for -0.0 is `-0`), but a query plan is JSON-encoded on its way into a Convex function and JSON.stringify(-0) is \"0\" — the sign bit is gone before the adapter sees it, so it rejects a constant zero denominator rather than guess which infinity CEL produced" },
+      { "action": "nan-ord-inf", "reason": "Same indeterminate-signed-zero rejection as cr-div-neg-zero: the 1.0/0.0 and -1.0/0.0 branches also carry a constant zero denominator, which survives the JSON hop as an unsigned 0" }
     ],
     "elasticsearch-java": [
       { "action": "all-on-empty", "reason": "Elasticsearch does not index empty nested arrays, so a positive all predicate cannot distinguish an empty collection (true) from a missing collection (CEL error)" },
@@ -311,7 +342,15 @@
       { "action": "in-null-elem-hasint", "reason": "Elasticsearch nested fields do not retain explicit null array elements, so intersection with null cannot be represented faithfully" },
       { "action": "in-var-var", "reason": "Elasticsearch Query DSL cannot test membership of one document field in another without scripts" },
       { "action": "in-var-var-neg", "reason": "Elasticsearch Query DSL cannot test negated membership of one document field in another without scripts" },
-      { "action": "null-eq", "reason": "Elasticsearch does not index explicit null scalar values, so positive equality against null cannot distinguish an explicit null attribute (check() allows) from a missing field (CEL error, denies) without an indexed null_value sentinel. The negated forms (null-ne, vf-null-ne, null-not-eq) are expressible as exists and stay in the oracle set" }
+      { "action": "null-eq", "reason": "Elasticsearch does not index explicit null scalar values, so positive equality against null cannot distinguish an explicit null attribute (check() allows) from a missing field (CEL error, denies) without an indexed null_value sentinel. The negated forms (null-ne, vf-null-ne, null-not-eq) are expressible as exists and stay in the oracle set" },
+      { "action": "cr-div-neg-zero", "reason": "Elasticsearch Query DSL cannot evaluate document-field division without scripts, whatever the denominator" },
+      { "action": "cr-div-other-column", "reason": "Elasticsearch Query DSL cannot evaluate division by a second document field without scripts" },
+      { "action": "cr-div-then-add", "reason": "Elasticsearch Query DSL cannot evaluate document-field arithmetic composed on a division without scripts" },
+      { "action": "cr-div-then-add-ne", "reason": "Same scriptless-arithmetic limitation as cr-div-then-add, reached through an inequality" },
+      { "action": "w1-all-chain", "reason": "Elasticsearch does not index empty nested arrays, so a positive all over a chained collection cannot distinguish an absent to-one parent (CEL error, denies) from an empty collection (vacuously true)" },
+      { "action": "w1-not-exists-chain", "reason": "Elasticsearch does not index empty nested arrays, so a negated exists over a chained collection cannot distinguish an absent to-one parent from an empty collection" },
+      { "action": "w1-size-zero-chain", "reason": "Same missing-versus-empty ambiguity as w1-not-exists-chain, reached through a zero-count emptiness check" },
+      { "action": "w1-size-nonneg-chain", "reason": "Elasticsearch Query DSL expresses only emptiness checks over nested collections, not arbitrary count thresholds, so a >= 0 threshold — which is TRUE exactly when the to-one parent exists — has no equivalent" }
     ]
   },
   "adapterSupportedExpected": {
@@ -333,7 +372,12 @@
   "expectedUnsupported": [
     { "action": "p-timestamp", "shape": "timestamp() comparison over an ISO-date string column", "springDataMessage": "Unexpected timestamp() expression in leaf operand of lt" },
     { "action": "p-matches",   "shape": "matches() regex", "springDataMessage": "Unsupported operator: matches" },
-    { "action": "p-index",     "shape": "list indexing (tags[0].name)", "springDataMessage": "Unexpected get-field() expression in leaf operand of eq" }
+    { "action": "p-index",     "shape": "list indexing (tags[0].name)", "springDataMessage": "Unexpected get-field() expression in leaf operand of eq" },
+    { "action": "cast-int-string",   "shape": "int() cast over a string column — CEL reads a whole string or raises, SQL reads the leading digits", "springDataMessage": "Unexpected int() expression in leaf operand of gt" },
+    { "action": "cast-double-string", "shape": "double() cast over a string column — same whole-string-versus-leading-digits divergence as cast-int-string", "springDataMessage": "Unexpected double() expression in leaf operand of gt" },
+    { "action": "cast-int-double",   "shape": "int() cast over a numeric column — CEL truncates toward zero, PostgreSQL and MySQL CAST round to nearest", "springDataMessage": "Unexpected int() expression in leaf operand of eq" },
+    { "action": "filter-as-condition", "shape": "filter() used as the whole condition — it returns a list, not a boolean", "springDataMessage": "filter() returns a list, not a boolean, so it cannot be a condition on its own; only size(filter(...)) has a boolean meaning" },
+    { "action": "map-as-condition",    "shape": "map() used as the whole condition — it returns a list, not a boolean", "springDataMessage": "Unexpected lambda() expression in leaf operand of map" }
   ],
   "nullRepresentationOmitted": [
     {

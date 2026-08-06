@@ -881,10 +881,26 @@ const evaluateExpression = (
     case "mult":
     case "div":
     case "mod": {
-      const left = resolve(getOperandAt(operands, 0, `${operator} left`));
-      const right = resolve(getOperandAt(operands, 1, `${operator} right`));
+      const leftOperand = getOperandAt(operands, 0, `${operator} left`);
+      const rightOperand = getOperandAt(operands, 1, `${operator} right`);
+      const left = resolve(leftOperand);
+      const right = resolve(rightOperand);
       if (typeof left !== "number" || typeof right !== "number") {
         return EVALUATION_ERROR;
+      }
+      if (operator === "div" && right === 0 && left !== 0) {
+        // IEEE-754 keeps the sign of a zero, so `n / -0.0` is the OPPOSITE infinity from
+        // `n / 0.0`. The planner does ship the sign — the wire operand for -0.0 is `-0` —
+        // but a plan reaching a Convex function is JSON-encoded on the way in, and
+        // `JSON.stringify(-0)` is `"0"`, so the sign bit is already gone by the time the
+        // adapter sees it. Guessing returns rows the PDP denies, so fail closed instead
+        // (cerbos/query-plan-adapters#312). A zero numerator is unaffected: 0/0 is NaN
+        // under either sign.
+        throw new Error(
+          "division by a constant zero whose sign is indeterminate: a query plan is " +
+            "JSON-encoded on its way into a Convex function and JSON has no -0, so the " +
+            "adapter cannot tell +Infinity from -Infinity"
+        );
       }
       switch (operator) {
         case "add":
