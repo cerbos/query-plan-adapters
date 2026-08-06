@@ -44,7 +44,9 @@ const document = {
   mainCategory: v.optional(mainCategory),
 };
 
-const MAPPER: Mapper = {
+// Exported so the adversarial throw suite can invoke translation with the exact mapper the
+// backend uses — a duplicated copy would be a projection that can drift.
+export const MAPPER: Mapper = {
   "request.resource.attr.aBool": { field: "aBool" },
   "request.resource.attr.aString": { field: "aString" },
   "request.resource.attr.aNumber": { field: "aNumber" },

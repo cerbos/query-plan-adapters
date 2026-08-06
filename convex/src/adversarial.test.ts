@@ -7,7 +7,8 @@ import { GRPC as Cerbos } from "@cerbos/grpc";
 import { ConvexHttpClient } from "convex/browser";
 
 import { api } from "../convex/_generated/api.js";
-import { PlanKind } from ".";
+import { MAPPER } from "../convex/adversarial";
+import { PlanKind, queryPlanToConvex } from ".";
 
 const CONVEX_URL = process.env["CONVEX_URL"] ?? "http://127.0.0.1:3210";
 const convex = new ConvexHttpClient(CONVEX_URL);
@@ -152,6 +153,10 @@ const isActionsFile = (value: unknown): value is ActionsFile =>
   isAdapterMap(value["adapterSupportedExpected"]) &&
   Array.isArray(value["expectedUnsupported"]) &&
   value["expectedUnsupported"].every(isExpectedUnsupported) &&
+  // Every group the interface declares must be validated: a group this predicate does not
+  // name is the projection trap the corpus README warns about.
+  Array.isArray(value["nullRepresentationOmitted"]) &&
+  value["nullRepresentationOmitted"].every(isAdapterOutcome) &&
   Array.isArray(value["knownDivergences"]) &&
   value["knownDivergences"].every(isKnownDivergence);
 
@@ -201,7 +206,11 @@ const MANIFEST_ACTIONS = new Set([
   ...actionsFile.conformance,
   ...actionsFile.expectedUnsupported.map((entry) => entry.action),
   ...NULL_REPRESENTATION_OMITTED.map((entry) => entry.action),
-  ...KNOWN_DIVERGENCES,
+  // ALL divergences, not just Convex's: a divergence registered solely for another adapter
+  // must still enter this manifest, so the size tripwire and the classified-exactly-once
+  // check flag it for triage here instead of letting the action silently vanish from this
+  // harness. Classification/skipping still uses the Convex-filtered KNOWN_DIVERGENCES.
+  ...actionsFile.knownDivergences.map((entry) => entry.action),
 ]);
 
 function doubleFor(seed: Seed): number | null {
@@ -440,11 +449,51 @@ describe("adversarial conformance corpus", () => {
 
     expect(allActions.size).toBe(140);
     expect(CONVEX_UNSUPPORTED).toHaveLength(2);
-    expect(CONVEX_SUPPORTED_EXPECTED).toHaveLength(3);
-    expect(ORACLE_ACTIONS).toHaveLength(131);
-    expect(THROWING_ACTIONS).toHaveLength(7);
+    expect(CONVEX_SUPPORTED_EXPECTED).toHaveLength(6);
+    expect(ORACLE_ACTIONS).toHaveLength(134);
+    expect(THROWING_ACTIONS).toHaveLength(4);
     expect(misclassified).toEqual([]);
   });
+
+  // The message each throwing action must fail with. Pinning the message is what proves the
+  // rejection happens for the DECLARED mechanism — a bare "it threw" is satisfied just as
+  // happily by a mapper typo or a transport error, and the corpus README calls that a silent
+  // pass. A new throwing action must add its message here or the coverage assertion fails.
+  const THROWING_MESSAGES: Record<string, RegExp> = {
+    "cr-div-neg-zero": /sign is indeterminate/,
+    "nan-ord-inf": /sign is indeterminate/,
+    "filter-as-condition": /returns a list, not a boolean/,
+    "map-as-condition": /returns a list, not a boolean/,
+  };
+
+  test("every throwing action pins the message that names its mechanism", () => {
+    expect(Object.keys(THROWING_MESSAGES).sort()).toEqual(
+      [...THROWING_ACTIONS].sort(),
+    );
+  });
+
+  // The invariant is that an inexpressible shape must throw BEFORE its filter can be used, so
+  // the assertion wraps translation only: the plan is fetched outside it (a PDP failure fails
+  // the test instead of passing it), and no query executes (a store rejecting a wrongly
+  // emitted filter cannot masquerade as the adapter refusing to translate).
+  test.each(THROWING_ACTIONS)(
+    "%s fails during translation, before any filter exists",
+    async (action) => {
+      const queryPlan = await cerbos.planResources({
+        principal: seedsFile.principal,
+        resource: { kind: seedsFile.resourceKind },
+        action,
+      });
+      expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+      expect(() =>
+        queryPlanToConvex({
+          queryPlan,
+          mapper: MAPPER,
+          allowPostFilter: true,
+        }),
+      ).toThrow(THROWING_MESSAGES[action]);
+    },
+  );
 
   test.each(ORACLE_ACTIONS)("%s matches the check() oracle", async (action) => {
     const [oracle, filtered] = await Promise.all([
@@ -512,8 +561,13 @@ describe("adversarial conformance corpus", () => {
       try {
         await adapterFilteredIds(action, "omitted");
         notRejected.push(action);
-      } catch {
-        // expected: the shape must be rejected under this representation
+      } catch (error) {
+        // The rejection must be the null-operand check talking, not an incidental failure —
+        // a transport error or mapper typo counting as the required rejection is the silent
+        // pass the corpus README warns about.
+        if (!/missing-attribute error/.test(String(error))) {
+          notRejected.push(`${action} (rejected for the wrong reason: ${String(error)})`);
+        }
       }
     }
     expect(notRejected).toEqual([]);
