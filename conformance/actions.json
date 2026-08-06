@@ -345,7 +345,7 @@
   "knownDivergences": [
     {
       "action": "p-has",
-      "adapters": ["spring-data", "prisma", "drizzle", "sqlalchemy", "mongoose", "langchain-chromadb", "elasticsearch-java", "convex"],
+      "adapters": ["spring-data", "prisma", "drizzle", "sqlalchemy", "mongoose", "langchain-chromadb", "elasticsearch-java", "convex", "ent", "pgx"],
       "reason": "The planner folds has(unknown attr) to KIND_ALWAYS_ALLOWED (a Cerbos planner bug, not an adapter bug), so the adapter returns all rows while check() denies rows where the attribute is missing. Excluded from the oracle run rather than asserted against.",
       "relatedIssue": null
     }

@@ -12,6 +12,8 @@ Multi-language ORM adapters that translate Cerbos query plan responses into data
 | convex | TypeScript | `@cerbos/orm-convex` | Convex |
 | langchain-chromadb | TypeScript | `@cerbos/langchain-chromadb` | ChromaDB |
 | sqlalchemy | Python | `cerbos-sqlalchemy` | SQLAlchemy |
+| ent | Go | `github.com/cerbos/query-plan-adapters/ent` | Ent |
+| pgx | Go | `github.com/cerbos/query-plan-adapters/pgx` | pgx / PostgreSQL |
 | elasticsearch-java | Java | `cerbos-elasticsearch` | Elasticsearch |
 | spring-data | Java | `cerbos-spring-data` | Spring Data JPA |
 
@@ -36,6 +38,18 @@ pdm install
 pdm run test     # pytest
 pdm run format   # isort + black
 ```
+
+### Go (Ent, pgx)
+```bash
+go test ./...             # includes the adversarial suite; starts its own containers
+golangci-lint run ./...   # config mirrors github.com/cerbos/cerbos
+golangci-lint fmt ./...
+```
+
+Both Go modules are standalone: each vendors its own translator under `internal/queryplan` and
+depends on nothing else in this repository, so a consumer only ever pulls in the one module. The
+harnesses need Docker (testcontainers) and read the pinned PDP version from
+`conformance/CERBOS_VERSION`.
 
 ### Java (Elasticsearch, Spring Data)
 ```bash
@@ -108,23 +122,24 @@ For pull requests: give a concise summary, note the affected adapters, link rela
 
 ## CI
 
-Each adapter has its own GitHub Actions workflow triggered by changes in its directory, `/policies/`, or `/conformance/`. Matrix tests across Node versions (22, 24, 25) and relevant service versions. All eight adapter workflows validate the corpus and run their adversarial suite — as a separate `adversarial` job for prisma, drizzle, mongoose and ChromaDB; inside the existing test job for convex, sqlalchemy, spring-data and elasticsearch-java. `conformance.yaml` additionally replans the golden wire fixtures against the pinned PDP and fails on drift.
+Each adapter has its own GitHub Actions workflow triggered by changes in its directory, `/policies/`, or `/conformance/`. Matrix tests across Node versions (22, 24, 25) and relevant service versions. All ten adapter workflows validate the corpus and run their adversarial suite — as a separate `adversarial` job for prisma, drizzle, mongoose, ChromaDB, ent and pgx; inside the existing test job for convex, sqlalchemy, spring-data and elasticsearch-java. `conformance.yaml` additionally replans the golden wire fixtures against the pinned PDP and fails on drift.
 
-Tag-based publishing: `prisma/v*` -> npm, `sqla/v*` -> PyPI, `elasticsearch-java/v*` and `spring-data/v*` -> Maven Central.
+Tag-based publishing: `prisma/v*` -> npm, `sqla/v*` -> PyPI, `elasticsearch-java/v*` and `spring-data/v*` -> Maven Central; `ent/v*` and `pgx/v*` are Go
+module tags resolved directly from the repository.
 
 ## Changing how a condition is translated
 
 **Any change to how an operator, condition, or expression shape is translated starts in the
 shared corpus, not in one adapter.** The same semantic bug has repeatedly shipped identically to
 several adapters because each re-derives the planner's wire contract by hand. A fix proven only
-against the adapter you happened to be looking at leaves the identical bug live in the other seven.
+against the adapter you happened to be looking at leaves the identical bug live in the other nine.
 
 So when you add, fix, or change the handling of any shape:
 
 1. **Add the shape to `conformance/policies/adversarial.yaml`** as a new action, with seed data
    that discriminates it (see `conformance/README.md`, "Adding a new hostile shape"). If it needs a
    principal attribute or column that does not exist yet, add it to `conformance/seeds.json`.
-2. **Classify it in `conformance/actions.json` for all eight adapters** — but only *after* running
+2. **Classify it in `conformance/actions.json` for all ten adapters** — but only *after* running
    the harnesses. The classification is an output of the run, not an input: declaring an action
    unsupported before watching it fail is how a translatable shape gets permanently skipped.
 3. **Regenerate the wire fixtures** (`conformance/scripts/regenerate-wire-fixtures.sh`) and confirm
@@ -155,7 +170,7 @@ two agree and the action passes vacuously. Pass corpus data through verbatim.
 
 - Edit only `src/` — never commit `lib/` until tests pass
 - Shared policies in `/policies/` affect all adapters; edit carefully
-- `conformance/` affects all adapters too: a change there re-runs every adapter's CI, and adding an action requires classifying it for all eight
+- `conformance/` affects all adapters too: a change there re-runs every adapter's CI, and adding an action requires classifying it for all ten
 - Regenerate build artifacts in the same commit as source changes
 - Changing what an adapter can translate means updating its `conformance/actions.json` entry and its README contract table in the same commit
 - When an adapter cannot express a shape, make it throw with a message naming the real mechanism — never emit a best-effort filter
