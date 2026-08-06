@@ -144,7 +144,11 @@ const MANIFEST_ACTIONS = new Set([
   ...actionsFile.conformance,
   ...EXPECTED_UNSUPPORTED_ACTIONS,
   ...NULL_REPRESENTATION_OMITTED.map(([action]) => action),
-  ...PRISMA_KNOWN_DIVERGENCES,
+  // ALL divergences, not just Prisma's: a divergence registered solely for another adapter
+  // must still enter this manifest, so the size tripwire and the classified-exactly-once
+  // check flag it for triage here instead of letting the action silently vanish from this
+  // harness. Classification/skipping still uses the Prisma-filtered set.
+  ...actionsFile.knownDivergences.map((entry) => entry.action),
 ]);
 
 function doubleFor(seed: Seed): number | null {
@@ -577,11 +581,27 @@ describe("adversarial conformance corpus", () => {
 
   // Shapes the adapter does not support (globally unsupported planner shapes plus Prisma's
   // declared adapterUnsupported list): translation must fail loudly, never produce a
-  // silently-wrong filter.
+  // silently-wrong filter. The plan is fetched OUTSIDE the assertion so a PDP failure fails
+  // the test instead of passing it, and no query executes — the invariant is that the shape
+  // throws BEFORE a filter exists, so SQLite rejecting a wrongly emitted filter afterwards
+  // must not be able to masquerade as the adapter refusing to translate.
   test.each(THROWING_ACTIONS)(
-    "%s fails loudly instead of silently mistranslating (%s)",
+    "%s fails during translation, before any filter exists (%s)",
     async (action) => {
-      await expect(adapterFilteredIds(action)).rejects.toThrow();
+      const queryPlan = await cerbos.planResources({
+        principal: principal(),
+        resource: { kind: seedsFile.resourceKind },
+        action,
+      });
+      expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+      expect(() =>
+        queryPlanToPrisma({
+          queryPlan,
+          mapper: MAPPER,
+          model: "AdversarialResource",
+          nullAttributeRepresentation: "explicit",
+        })
+      ).toThrow();
     }
   );
 
