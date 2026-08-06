@@ -53,21 +53,33 @@ stay:
 | `p-index` | `tags[0]` selects an element of a list by its position. A relation has no order of its own. |
 | `p-timestamp` | `timestamp()` on a column that holds a timestamp in text. A comparison between that column and a `Time` compares two different text formats. Thus the order of the results comes from the text and not from the instants. Map the attribute to a `datetime` column. |
 
-The adapter also raises an error for these shapes, which no corpus action covers:
+The adapter also raises an error for the shapes below. The shared corpus does not cover them
+yet, and each has an issue to add it — a refusal that only one adapter enforces leaves the same
+defect live in the others:
 
 - A `filter()` or a `map()` that a policy uses as a condition. Those operations give a list
   and not a boolean.
+  ([#313](https://github.com/cerbos/query-plan-adapters/issues/313))
 - A division whose denominator is a column, unless the numerator is the same column. IEEE-754
   keeps the sign of a zero, and `2.0 / -0.0` is -Infinity while `2.0 / 0.0` is +Infinity. SQL
   cannot tell `-0.0` from `0.0`, because both satisfy `= 0` and no portable function reads the
   sign bit. Thus the sign of the Infinity is unknown. A division of a value by itself stays
   safe: the denominator can only be zero when the numerator is zero too, and that gives NaN,
   which has no sign. Divide by a constant to keep the shape.
+  ([#312](https://github.com/cerbos/query-plan-adapters/issues/312))
 - More arithmetic on the result of a division that can give a value which is not finite. Only
   a comparison can resolve NaN or an Infinity without putting it into SQL.
+  ([#312](https://github.com/cerbos/query-plan-adapters/issues/312))
 - An `and` or an `or` that carries no operands, and any operator that carries the wrong number
-  of operands. The planner does not make those shapes, but this adapter accepts a plan from
-  any source, and a plan that lost or gained an operand must not become a wider filter.
+  of operands. The planner does not make those shapes, so the corpus cannot hold them: it is
+  built from real plans. But this adapter accepts a plan from any source, and a plan that lost
+  or gained an operand must not become a wider filter.
+- `int()` over a column that is not an integer, and `double()` over a column that is not
+  numeric. CEL reads a whole string or makes an error, and Cerbos then denies the row, but SQL
+  reads the digits at the front: `CAST('1junk' AS INTEGER)` is `1` on SQLite. A cast from a
+  double is also not portable, because SQLite removes the fraction while PostgreSQL rounds.
+  Compare the column directly, or give an operator override.
+  ([#311](https://github.com/cerbos/query-plan-adapters/issues/311))
 
 ### The NULL convention of the caller
 
@@ -97,6 +109,32 @@ itself, but this adapter puts a negation around a predicate and does not push it
 Thus a leaf cannot know that a `not` above it will make `IS NOT NULL` into a predicate that
 selects NULL again. To refuse each null constant is correct for all the shapes. Refer to
 [cerbos/query-plan-adapters#302](https://github.com/cerbos/query-plan-adapters/issues/302).
+
+#### A known limit of the `explicit` convention
+
+Under `:explicit`, CEL holds a null *value*, and thus `null != "x"` is true and `null == "x"` is
+false. SQL does not agree: `NULL != 'x'` is UNKNOWN, and an UNKNOWN keeps the row out. Thus the
+adapter gives fewer rows than the PDP permits when a policy compares a column that holds NULL
+with a constant that is not null:
+
+```cel
+R.attr.owner != "x"        # Cerbos permits a row whose owner is null; the filter does not
+!(R.attr.owner == "x")     # the same
+!P.attr.teams.exists(t, R.attr.owner == t)
+R.attr.owner == R.attr.otherOwner   # two nulls are equal in CEL; `a = b` is UNKNOWN in SQL
+```
+
+The direction is safe — the filter is narrower than the decision, and never wider — but the two
+do not agree. A row with a NULL column is absent from the result although the policy permits it.
+
+The adapter does not correct this today, because the correction would need the convention for
+each attribute and not one setting for the whole call. The shared corpus uses both conventions
+in one policy suite: `owner` sends an explicit null while `aOptionalString` sends no attribute.
+One setting cannot be right for both. Refer to
+[cerbos/query-plan-adapters#308](https://github.com/cerbos/query-plan-adapters/issues/308).
+
+Until then: keep a column that a policy compares with a constant `NOT NULL`, or use `:omitted`
+and send no attribute for a NULL column, which the adapter already translates correctly.
 
 ### The collation is part of the contract
 
@@ -252,8 +290,17 @@ select a row that the decision did not.
 | An association with a scope, including the outer association of a `through` chain | The adapter cannot put the conditions of that scope onto the alias that it makes |
 | A target model with a `default_scope` | The rows that the scope removes are absent from the attributes that Cerbos evaluates |
 | A `has_one` used as a collection | ActiveRecord does not make the database enforce that a `has_one` has only one row, so the association gives one row while a subquery examines every row. Map a to-one association as a field path with dots. |
+| An association that points at a subclass in a single-table hierarchy | Such an association also filters on the inheritance column. The adapter does not add that condition, because the set of subclasses depends on which of them Ruby has loaded. An association that points at the base class needs no condition and is permitted. |
+| An association that joins on more than one column | The adapter builds one equality for the correlated subquery and cannot express a composite key |
 
 Map the attribute to a concrete association without a scope, or give an operator override.
+
+The corpus cannot hold these either. It proves the *plan* side — that a filter returns the rows
+`check()` allows — and a mapping is not a policy condition. But the invariant is the same one:
+the rows that the subquery of the adapter sees must equal the rows that the application put
+into the attributes it sent to Cerbos.
+[#314](https://github.com/cerbos/query-plan-adapters/issues/314) proposes a shared way to cover
+them.
 
 #### `operator_overrides` for translations that are specific to your schema
 

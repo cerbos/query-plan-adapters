@@ -399,8 +399,8 @@ module Cerbos
         when "hasIntersection" then has_intersection(values.fetch(0), values.fetch(1))
         when "timestamp" then timestamp(values.fetch(0))
         when "string" then cast(values.fetch(0), "TEXT", "VARCHAR")
-        when "double" then cast(values.fetch(0), dialect.double_type, dialect.double_type)
-        when "int" then cast(values.fetch(0), "INTEGER", "SIGNED")
+        when "double" then cast_to_double(values.fetch(0))
+        when "int" then cast_to_int(values.fetch(0))
         when "list" then values
         when "hierarchy" then hierarchy(values)
         when "ancestorOf" then ancestor_of(values.fetch(0), values.fetch(1))
@@ -728,6 +728,39 @@ module Cerbos
           "CAST",
           [Arel::Nodes::As.new(ArelSupport.quote(value), Arel.sql(dialect.mysql? ? mysql_type : type))]
         )
+      end
+
+      INTEGER_COLUMN_TYPES = %i[integer bigint].freeze
+      NUMERIC_COLUMN_TYPES = %i[integer bigint float decimal].freeze
+
+      # CEL reads a whole string or it makes an error: `int("1junk")` is an error and Cerbos
+      # denies the row. `CAST('1junk' AS INTEGER)` gives 1 on SQLite, so the filter would give
+      # a row that the PDP denies. No portable SQL reads a number the way CEL does.
+      #
+      # A cast from a double is also not portable. CEL removes the fraction toward zero, SQLite
+      # does the same, but PostgreSQL rounds. Thus only an integer column is safe, and there the
+      # cast has nothing to do.
+      def cast_to_int(value)
+        return value.to_i if value.is_a?(Numeric)
+        return value if INTEGER_COLUMN_TYPES.include?(column_type(value))
+
+        raise UnsupportedOperatorError,
+          "int() needs an integer column. CEL makes an error for a string that is not a whole " \
+          "number, and Cerbos denies the row, but SQL reads the digits at the front and gives " \
+          "a number. A cast from a double is also not portable, because dialects disagree on " \
+          "removing the fraction. Compare the column directly, or give an operator override."
+      end
+
+      # The same reason as `int()`: `double("abc")` is an error in CEL and Cerbos denies the
+      # row, but SQL gives 0.0 and the filter would keep the row.
+      def cast_to_double(value)
+        return value.to_f if value.is_a?(Numeric)
+        return cast(value, dialect.double_type, dialect.double_type) if NUMERIC_COLUMN_TYPES.include?(column_type(value))
+
+        raise UnsupportedOperatorError,
+          "double() needs a numeric column. CEL makes an error for a string that is not a " \
+          "number, and Cerbos denies the row, but SQL gives 0.0 and the filter would keep it. " \
+          "Compare the column directly, or give an operator override."
       end
 
       # --- strings --------------------------------------------------------------------

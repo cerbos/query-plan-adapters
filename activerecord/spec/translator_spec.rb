@@ -223,6 +223,39 @@ RSpec.describe Cerbos::ActiveRecord do
     end
   end
 
+  describe "casts that SQL cannot make the way CEL does" do
+    it "raises for int() over a string column" do
+      # CEL reads a whole string or makes an error, and Cerbos then denies the row. SQLite
+      # reads the digits at the front, so CAST('1junk' AS INTEGER) is 1 and the filter would
+      # keep a row that the PDP denies.
+      expect {
+        described_class.query_plan_to_relation(
+          plan: conditional(expression("gt",
+            expression("int", variable("s")), value(0))),
+          model: EdgeDocument, attributes: {"s" => field("title")}
+        )
+      }.to raise_error(Cerbos::ActiveRecord::UnsupportedOperatorError, /int\(\) needs an integer column/)
+    end
+
+    it "raises for double() over a string column" do
+      expect {
+        described_class.query_plan_to_relation(
+          plan: conditional(expression("gt",
+            expression("double", variable("s")), value(0.5))),
+          model: EdgeDocument, attributes: {"s" => field("title")}
+        )
+      }.to raise_error(Cerbos::ActiveRecord::UnsupportedOperatorError, /double\(\) needs a numeric column/)
+    end
+
+    it "accepts int() over an integer column, where the cast has nothing to do" do
+      relation = described_class.query_plan_to_relation(
+        plan: conditional(expression("gt", expression("int", variable("n")), value(0))),
+        model: EdgeDocument, attributes: {"n" => field("n")}
+      )
+      expect(relation.order(:id).pluck(:title)).to eq(%w[two])
+    end
+  end
+
   describe "membership between two columns under each NULL convention" do
     let(:plan) do
       conditional(expression("in", variable("a"), expression("list", variable("b"))))
@@ -366,6 +399,30 @@ RSpec.describe Cerbos::ActiveRecord do
           attributes: {"c" => relation(:profile, member_field: "name")}
         )
       }.to raise_error(Cerbos::ActiveRecord::UnsupportedAssociationError, /not a collection/)
+    end
+
+    it "raises for an association that points at a subclass in a single-table hierarchy" do
+      # Such an association also filters on the inheritance column. Without that condition the
+      # subquery would find the rows of the base class, which the association never gives.
+      expect {
+        described_class.query_plan_to_relation(
+          plan: conditional(expression("exists", variable("c"),
+            expression("lambda", value(true), variable("x")))),
+          model: EdgeDocument,
+          attributes: {"c" => relation(:special_kinds, member_field: "name")}
+        )
+      }.to raise_error(Cerbos::ActiveRecord::UnsupportedAssociationError, /single-table hierarchy/)
+    end
+
+    it "accepts an association that points at the base class of a hierarchy" do
+      # ActiveRecord adds no type condition there, so the subquery already agrees.
+      expect {
+        described_class.query_plan_to_relation(
+          plan: conditional(expression("in", value("x"), variable("c"))),
+          model: EdgeDocument,
+          attributes: {"c" => relation(:kinds, member_field: "name")}
+        ).to_sql
+      }.not_to raise_error
     end
 
     it "raises for an association that does not exist" do

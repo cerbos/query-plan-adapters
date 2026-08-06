@@ -196,6 +196,21 @@ module Cerbos
           "generates; map the attribute onto an unscoped association instead"
       end
 
+      # ActiveRecord gives an array for a key that has more than one column. Such an array
+      # would reach +table[...]+ and become one quoted name, and the query would then fail with
+      # "no such column". The adapter refuses the association here instead, with a message that
+      # says why.
+      #
+      # @api private
+      def assert_single_key(reflection, owner_model, *keys)
+        return if keys.none?(Array)
+
+        raise UnsupportedAssociationError,
+          "Association #{reflection.name.inspect} on #{owner_model.name} joins on more than " \
+          "one column. This adapter builds one equality for a correlated subquery and cannot " \
+          "express a composite key. Give an operator override for this attribute."
+      end
+
       # @api private
       def direct_hop(reflection, owner_table, owner_model, aliaser)
         if reflection.respond_to?(:polymorphic?) && reflection.polymorphic?
@@ -206,6 +221,23 @@ module Cerbos
         end
 
         target = reflection.klass
+
+        # An association that points at a subclass in a single-table hierarchy also filters on
+        # the inheritance column. Without that condition the subquery would find the rows of a
+        # sibling class or of the base class, which are absent from the association and thus
+        # from the attributes that Cerbos evaluates.
+        #
+        # The adapter does not add the condition itself. The set of subclasses depends on which
+        # of them Ruby has loaded, so the condition could be short and the filter would then
+        # disagree in the other direction.
+        if target.respond_to?(:finder_needs_type_condition?) && target.finder_needs_type_condition?
+          raise UnsupportedAssociationError,
+            "#{target.name} is a subclass in a single-table hierarchy. Its association also " \
+            "filters on the inheritance column, and this adapter does not add that condition, " \
+            "because the set of subclasses depends on which of them are loaded. Map the " \
+            "attribute onto an association that points at the base class, or give an operator " \
+            "override."
+        end
 
         # A default scope on the model removes rows from the association, and thus from the
         # attributes that Cerbos sees. The subquery below reads the table and does not apply
@@ -223,6 +255,8 @@ module Cerbos
 
         case reflection.macro
         when :has_many, :has_one
+          assert_single_key(reflection, owner_model,
+            reflection.foreign_key, reflection.active_record_primary_key)
           predicates << table[reflection.foreign_key].eq(
             owner_table[reflection.active_record_primary_key]
           )
@@ -232,6 +266,8 @@ module Cerbos
             predicates << table[reflection.type].eq(owner_model.polymorphic_name)
           end
         when :belongs_to
+          assert_single_key(reflection, owner_model,
+            reflection.association_primary_key, reflection.foreign_key)
           predicates << table[reflection.association_primary_key].eq(
             owner_table[reflection.foreign_key]
           )

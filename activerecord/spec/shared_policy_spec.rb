@@ -74,7 +74,11 @@ RSpec.describe "shared policy suite" do
     "index-list" => "list indexing has no positional equivalent over an unordered relation",
     "map-compared" => "comparing a projected collection to an ordered list needs list equality",
     "filter" => "filter() evaluates to a list, not to a condition",
-    "kitchensink" => "embeds a bare filter() as a conjunct"
+    "kitchensink" => "embeds a bare filter() as a conjunct",
+    # CEL reads a whole string or makes an error, and Cerbos then denies the row. SQL reads the
+    # digits at the front: CAST('1junk' AS INTEGER) is 1 on SQLite, so a filter would keep a row
+    # that the PDP denies.
+    "convert-int" => "int() over a string column cannot copy the strict reading of CEL"
   }.freeze
 
   # check() cannot evaluate the expressions of these actions with one shape of attributes.

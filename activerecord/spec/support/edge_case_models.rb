@@ -46,6 +46,12 @@ module EdgeCaseModels
         t.string :name
         t.integer :document_id
       end
+
+      create_table :edge_kinds, force: true do |t|
+        t.string :name
+        t.string :type
+        t.integer :document_id
+      end
     end
 
     EdgeDocument.create!(id: 1, title: "zero", n: 0)
@@ -78,6 +84,14 @@ class EdgeProfile < ActiveRecord::Base
   self.table_name = "edge_profiles"
 end
 
+# A single-table hierarchy. An association that points at the subclass also filters on the
+# inheritance column, and the adapter does not add that condition.
+class EdgeKind < ActiveRecord::Base
+  self.table_name = "edge_kinds"
+end
+
+class EdgeSpecialKind < EdgeKind; end
+
 class EdgeDocument < ActiveRecord::Base
   self.table_name = "edge_documents"
   belongs_to :author, class_name: "EdgeAuthor", foreign_key: :author_id
@@ -91,4 +105,6 @@ class EdgeDocument < ActiveRecord::Base
     class_name: "EdgeTag", foreign_key: :document_id
   has_many :softs, class_name: "EdgeSoft", foreign_key: :document_id
   has_one :profile, class_name: "EdgeProfile", foreign_key: :document_id
+  has_many :kinds, class_name: "EdgeKind", foreign_key: :document_id
+  has_many :special_kinds, class_name: "EdgeSpecialKind", foreign_key: :document_id
 end
