@@ -1,6 +1,12 @@
 {
   "version": 1,
   "skills": {
+    "cerbos-policy": {
+      "source": "cerbos/skills",
+      "sourceType": "github",
+      "skillPath": "plugins/cerbos-skills/skills/cerbos-policy/SKILL.md",
+      "computedHash": "1a73a5d54496d1e4a2c7bb8ce2628534c78b241f6e5adde73db61faa029f29e0"
+    },
     "code-review": {
       "source": "mattpocock/skills",
       "sourceType": "github",
