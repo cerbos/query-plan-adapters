@@ -30,7 +30,7 @@ jobs:
         run: echo "version=$(tr -d '[:space:]' < ../conformance/CERBOS_VERSION)" >> "$GITHUB_OUTPUT"
 
       - name: Setup Cerbos
-        uses: cerbos/cerbos-setup-action@f772482c8504a05c49018a0bf2d84012a607733c # v1
+        uses: cerbos/cerbos-setup-action@30ad92b0242d792bd156985682426577fcfcc589 # v1
         with:
           version: v${{ steps.cerbos.outputs.version }}
 
@@ -62,7 +62,7 @@ jobs:
         run: echo "version=$(tr -d '[:space:]' < ../conformance/CERBOS_VERSION)" >> "$GITHUB_OUTPUT"
 
       - name: Setup Cerbos
-        uses: cerbos/cerbos-setup-action@f772482c8504a05c49018a0bf2d84012a607733c # v1
+        uses: cerbos/cerbos-setup-action@30ad92b0242d792bd156985682426577fcfcc589 # v1
         with:
           version: v${{ steps.cerbos.outputs.version }}
 
