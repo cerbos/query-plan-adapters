@@ -600,6 +600,15 @@ omissions were deliberate. The absent to-one parent's row records that it is *pr
 (`w1-all-chain` and its siblings) rather than merely documented — it is what a closed hazard looks
 like, and it is the row that makes the difference visible.
 
+An adapter may append **additional** rows below those six for a hazard only its store has, and must
+say in the prose above the table that it has done so — the six shared rows stay first and in order,
+so the diff against this list still reads cleanly. A hazard is adapter-specific only when no other
+store can reach it; anything two adapters could hit belongs here, in the shared list, so all ten
+have to record a position on it. The one such row today is elasticsearch-java's **analyzed (`text`)
+field mapping**: Elasticsearch rewrites a stored string into tokens before comparing it, so a field
+mapped `text` widens every string comparison the adapter emits. No other store in this repository
+transforms a value between write and comparison, so there is nothing for the other nine to answer.
+
 The three classes the ten adapters fall into determine most of the answers:
 
 | Class | Adapters | What the store applies to the subquery |
