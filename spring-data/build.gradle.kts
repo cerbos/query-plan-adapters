@@ -34,7 +34,7 @@ dependencies {
     // `compileOnly` for the same reason as Spring Data JPA above: the consuming
     // application provides its own Hibernate, and the adapter degrades gracefully (plain
     // cb.toDouble casts) when Hibernate is absent at runtime.
-    compileOnly("org.hibernate.orm:hibernate-core:6.6.54.Final")
+    compileOnly("org.hibernate.orm:hibernate-core:6.6.55.Final")
 
     testImplementation("org.springframework.data:spring-data-jpa:3.5.13")
     testImplementation("jakarta.persistence:jakarta.persistence-api:3.2.0")
@@ -48,7 +48,7 @@ dependencies {
     testImplementation("org.testcontainers:mysql:1.21.4")
     testRuntimeOnly("org.postgresql:postgresql:42.7.13")
     testRuntimeOnly("com.mysql:mysql-connector-j:9.7.0")
-    testImplementation("org.hibernate.orm:hibernate-core:6.6.54.Final")
+    testImplementation("org.hibernate.orm:hibernate-core:6.6.55.Final")
     testImplementation("com.h2database:h2:2.4.240")
     // Parses seeds.json/actions.json from the shared ../conformance/ corpus (see
     // AdversarialConformanceTest and conformance/README.md).
