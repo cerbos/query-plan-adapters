@@ -275,7 +275,7 @@ pathological probes — not policy-writing guidance.
 
 `DELETE /photos/bulk-unsafe` is an intentionally-failing demonstration endpoint: a 409 with
 the guard's message is its correct, asserted behavior. The safe deletion pattern is
-`findAll(spec)` followed by `deleteAllById(ids)` — see the `Result` Javadoc in the adapter.
+`findAll(spec)` followed by `deleteAllById(ids)` — see the `SpringDataQueryPlanAdapter` Javadoc.
 
 ### Dialect-sensitive findings
 

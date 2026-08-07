@@ -1,7 +1,6 @@
 package dev.cerbos.example.photos;
 
 import dev.cerbos.queryplan.springdata.AttributeMapping;
-import dev.cerbos.queryplan.springdata.Result;
 import dev.cerbos.queryplan.springdata.SpringDataQueryPlanAdapter;
 import dev.cerbos.sdk.CerbosBlockingClient;
 import dev.cerbos.sdk.PlanResourcesResult;
@@ -92,10 +91,10 @@ public class PhotoService {
                 Resource.newInstance("photo"),
                 action);
 
-        Result<Photo> result = SpringDataQueryPlanAdapter.toSpecification(plan, PHOTO_ATTRS);
+        Specification<Photo> allowed = SpringDataQueryPlanAdapter.toSpecification(plan, PHOTO_ATTRS);
         Specification<Photo> tenantBoundary = (root, query, cb) ->
                 cb.equal(root.get("tenantId"), context.tenantId());
-        Specification<Photo> specification = tenantBoundary.and(result.toSpecification());
+        Specification<Photo> specification = tenantBoundary.and(allowed);
         if (minRating != null) {
             specification = specification.and((root, query, cb) ->
                     cb.greaterThanOrEqualTo(root.get("rating"), minRating));
