@@ -5,6 +5,8 @@ import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand;
 import dev.cerbos.api.v1.response.Response.PlanResourcesResponse;
 import dev.cerbos.sdk.PlanResourcesResult;
 
+import org.springframework.data.jpa.domain.Specification;
+
 import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.CriteriaQuery;
 import jakarta.persistence.criteria.From;
@@ -28,8 +30,36 @@ import java.util.function.Supplier;
 
 /**
  * Translates a Cerbos {@code PlanResources} response into a Spring Data JPA
- * {@link org.springframework.data.jpa.domain.Specification} that can be executed by any
- * {@code JpaSpecificationExecutor}.
+ * {@link Specification} that can be executed by any {@code JpaSpecificationExecutor}.
+ *
+ * <p>Every {@code toSpecification} overload returns a Specification covering all three plan
+ * kinds, so the caller never switches on the kind: {@code KIND_ALWAYS_ALLOWED} yields
+ * {@link Specification#unrestricted()} (Spring Data omits the {@code WHERE} clause),
+ * {@code KIND_ALWAYS_DENIED} yields an always-false predicate ({@code 1=0}), and a
+ * conditional plan yields the translated predicate tree. All three compose with the caller's
+ * own Specifications via {@code .and(...)} / {@code .or(...)}. To skip the database entirely
+ * on a denied plan, test {@code planResult.isAlwaysDenied()} on the SDK response (or
+ * {@code response.getFilter().getKind()} on the raw protobuf) before translating.
+ *
+ * <p>Hand the Specification to a repository method and let Spring Data invoke it. Calling
+ * {@link Specification#toPredicate} yourself is not a supported path.
+ *
+ * <p><strong>The returned Specification is SELECT-only.</strong> Never pass it to
+ * {@code JpaSpecificationExecutor.delete(Specification)} or any other criteria bulk
+ * operation. When the attribute mapping contains {@link AttributeMapping.Relation} entries,
+ * the translation builds correlated subqueries over collection/join tables, and Hibernate's
+ * multi-table bulk delete first clears those {@code @ElementCollection}/join tables using
+ * the same predicate — self-invalidating the correlated subquery so that 0 entity rows are
+ * deleted while their collection rows are silently destroyed (which can in turn flip the
+ * outcome of ownership/blocklist policies for the surviving rows). The adapter detects the
+ * bulk-delete invocation context and throws {@link UnsupportedOperationException} before
+ * anything is deleted. To delete policy-permitted rows, select first and delete by id:
+ *
+ * <pre>{@code
+ * Specification<MyEntity> spec = SpringDataQueryPlanAdapter.toSpecification(plan, MAPPING);
+ * List<Long> ids = repository.findAll(spec).stream().map(MyEntity::getId).toList();
+ * repository.deleteAllById(ids);
+ * }</pre>
  */
 public final class SpringDataQueryPlanAdapter {
 
@@ -56,11 +86,15 @@ public final class SpringDataQueryPlanAdapter {
 
     /**
      * Translates a Cerbos query plan (as returned by the Java SDK's
-     * {@code CerbosBlockingClient.plan(...)}) into a {@link Result} wrapping a Spring Data
-     * JPA Specification, using the default operator translations.
+     * {@code CerbosBlockingClient.plan(...)}) into a Spring Data JPA
+     * {@link Specification}, using the default operator translations.
      *
      * <p>Equivalent to {@link #toSpecification(PlanResourcesResult, Map, Map)} with no
      * operator overrides.
+     *
+     * <p><strong>The returned Specification is SELECT-only</strong> — see
+     * {@link SpringDataQueryPlanAdapter the class documentation} for the corruption
+     * mechanism this prevents and the select-ids-then-{@code deleteAllById} alternative.
      *
      * @param <T> the entity type the Specification will be executed against
      * @param planResult the SDK plan result ({@code KIND_ALWAYS_ALLOWED},
@@ -68,23 +102,25 @@ public final class SpringDataQueryPlanAdapter {
      * @param mapper maps each plan variable ({@code request.resource.attr.<name>},
      *        {@code request.resource.id}) to a JPA path or relation — see
      *        {@link AttributeMapping}
-     * @return {@link Result.AlwaysAllowed}, {@link Result.AlwaysDenied}, or a
-     *         {@link Result.Conditional} wrapping the translated Specification
+     * @return a Specification selecting exactly the rows the plan permits — every row for
+     *         {@code KIND_ALWAYS_ALLOWED} ({@link Specification#unrestricted()}), no row for
+     *         {@code KIND_ALWAYS_DENIED} ({@code 1=0}), the translated predicate tree
+     *         otherwise
      * @throws IllegalArgumentException if the conditional plan carries no condition.
      *         Translation of the condition itself is deferred: unsupported operators,
      *         unmapped attributes, and unresolvable paths throw
      *         {@code IllegalArgumentException} (fail closed) when the Specification is first
      *         evaluated by the repository, not from this call.
      */
-    public static <T> Result<T> toSpecification(
+    public static <T> Specification<T> toSpecification(
             PlanResourcesResult planResult, Map<String, AttributeMapping> mapper) {
         return toSpecification(planResult, mapper, Map.of());
     }
 
     /**
      * Translates a Cerbos query plan (as returned by the Java SDK's
-     * {@code CerbosBlockingClient.plan(...)}) into a {@link Result} wrapping a Spring Data
-     * JPA Specification, consulting {@code overrides} for scalar leaf translations.
+     * {@code CerbosBlockingClient.plan(...)}) into a Spring Data JPA {@link Specification},
+     * consulting {@code overrides} for scalar leaf translations.
      *
      * <p>Prefer this {@link PlanResourcesResult} entry point when using the Cerbos Java SDK
      * client. The {@link #toSpecification(PlanResourcesResponse, Map, Map)} overloads accept
@@ -100,13 +136,13 @@ public final class SpringDataQueryPlanAdapter {
      *        consulted only for resolved scalar (field, value) leaves — see
      *        {@link OperatorFunction} for exactly which translation sites are (and are not)
      *        overridable
-     * @return {@link Result.AlwaysAllowed}, {@link Result.AlwaysDenied}, or a
-     *         {@link Result.Conditional} wrapping the translated Specification
+     * @return a SELECT-only Specification selecting exactly the rows the plan permits — see
+     *         {@link #toSpecification(PlanResourcesResult, Map)}
      * @throws IllegalArgumentException if the conditional plan carries no condition; see
      *         {@link #toSpecification(PlanResourcesResult, Map)} for the deferred
      *         fail-closed contract covering the translation itself
      */
-    public static <T> Result<T> toSpecification(
+    public static <T> Specification<T> toSpecification(
             PlanResourcesResult planResult,
             Map<String, AttributeMapping> mapper,
             Map<String, OperatorFunction> overrides) {
@@ -115,8 +151,8 @@ public final class SpringDataQueryPlanAdapter {
     }
 
     /**
-     * Translates a Cerbos query plan into a {@link Result}, declaring how the caller represents
-     * a NULL column in the attributes it sends to {@code check()}.
+     * Translates a Cerbos query plan into a Spring Data JPA {@link Specification}, declaring
+     * how the caller represents a NULL column in the attributes it sends to {@code check()}.
      *
      * <p>The planner emits the same {@code eq(attr, null)} node under both conventions, so the
      * plan cannot reveal which one is in use. Under
@@ -130,43 +166,36 @@ public final class SpringDataQueryPlanAdapter {
      * @param mapper maps each plan variable to a JPA path or relation
      * @param overrides per-operator replacement translations, keyed by Cerbos operator name
      * @param nullAttributeRepresentation the caller's NULL-column convention
-     * @return {@link Result.AlwaysAllowed}, {@link Result.AlwaysDenied}, or a
-     *         {@link Result.Conditional} wrapping the translated Specification
+     * @return a SELECT-only Specification selecting exactly the rows the plan permits — see
+     *         {@link #toSpecification(PlanResourcesResult, Map)}
      * @throws IllegalArgumentException if the conditional plan carries no condition, or if the
      *         plan carries a null comparison operand under
      *         {@link NullAttributeRepresentation#OMITTED}
      */
-    public static <T> Result<T> toSpecification(
+    public static <T> Specification<T> toSpecification(
             PlanResourcesResult planResult,
             Map<String, AttributeMapping> mapper,
             Map<String, OperatorFunction> overrides,
             NullAttributeRepresentation nullAttributeRepresentation) {
         if (planResult.isAlwaysAllowed()) {
-            return new Result.AlwaysAllowed<>();
+            return alwaysAllowed();
         }
         if (planResult.isAlwaysDenied()) {
-            return new Result.AlwaysDenied<>();
+            return alwaysDenied();
         }
         Operand condition = planResult.getCondition()
                 .orElseThrow(() -> new IllegalArgumentException("Conditional plan has no condition"));
         if (nullAttributeRepresentation == NullAttributeRepresentation.OMITTED) {
             assertNoNullComparisonOperands(condition);
         }
-        // Defensive copies: the returned Specification is re-invoked fresh per query execution
-        // (see Result), so capturing the caller's maps by reference would let post-construction
-        // mutation silently change which columns the authorization filter resolves.
-        Map<String, AttributeMapping> mapperCopy = Map.copyOf(mapper);
-        Map<String, OperatorFunction> overridesCopy = Map.copyOf(overrides);
-        return new Result.Conditional<>((root, query, cb) ->
-                new Translator(cb, overridesCopy, isSelectInvocation(root, query))
-                        .traverse(condition, Scope.root(root, query, mapperCopy)));
+        return conditional(condition, mapper, overrides);
     }
 
     // -- PlanResourcesResponse overloads --
 
     /**
-     * Translates a raw {@link PlanResourcesResponse} protobuf into a {@link Result} wrapping
-     * a Spring Data JPA Specification, using the default operator translations.
+     * Translates a raw {@link PlanResourcesResponse} protobuf into a Spring Data JPA
+     * {@link Specification}, using the default operator translations.
      *
      * <p>Equivalent to {@link #toSpecification(PlanResourcesResponse, Map, Map)} with no
      * operator overrides. Accepts the wire-level protobuf directly, so it works with
@@ -178,21 +207,20 @@ public final class SpringDataQueryPlanAdapter {
      * @param response the raw {@code PlanResources} RPC response
      * @param mapper maps each plan variable to a JPA path or relation — see
      *        {@link AttributeMapping}
-     * @return {@link Result.AlwaysAllowed}, {@link Result.AlwaysDenied}, or a
-     *         {@link Result.Conditional} wrapping the translated Specification
+     * @return a SELECT-only Specification selecting exactly the rows the plan permits — see
+     *         {@link #toSpecification(PlanResourcesResult, Map)}
      * @throws IllegalArgumentException if the filter kind is unknown or a conditional filter
      *         carries no condition; see {@link #toSpecification(PlanResourcesResult, Map)}
      *         for the deferred fail-closed contract covering the translation itself
      */
-    public static <T> Result<T> toSpecification(
+    public static <T> Specification<T> toSpecification(
             PlanResourcesResponse response, Map<String, AttributeMapping> mapper) {
         return toSpecification(response, mapper, Map.of());
     }
 
     /**
-     * Translates a raw {@link PlanResourcesResponse} protobuf into a {@link Result} wrapping
-     * a Spring Data JPA Specification, consulting {@code overrides} for scalar leaf
-     * translations.
+     * Translates a raw {@link PlanResourcesResponse} protobuf into a Spring Data JPA
+     * {@link Specification}, consulting {@code overrides} for scalar leaf translations.
      *
      * @param <T> the entity type the Specification will be executed against
      * @param response the raw {@code PlanResources} RPC response
@@ -202,13 +230,13 @@ public final class SpringDataQueryPlanAdapter {
      *        consulted only for resolved scalar (field, value) leaves — see
      *        {@link OperatorFunction} for exactly which translation sites are (and are not)
      *        overridable
-     * @return {@link Result.AlwaysAllowed}, {@link Result.AlwaysDenied}, or a
-     *         {@link Result.Conditional} wrapping the translated Specification
+     * @return a SELECT-only Specification selecting exactly the rows the plan permits — see
+     *         {@link #toSpecification(PlanResourcesResult, Map)}
      * @throws IllegalArgumentException if the filter kind is unknown or a conditional filter
      *         carries no condition; see {@link #toSpecification(PlanResourcesResult, Map)}
      *         for the deferred fail-closed contract covering the translation itself
      */
-    public static <T> Result<T> toSpecification(
+    public static <T> Specification<T> toSpecification(
             PlanResourcesResponse response,
             Map<String, AttributeMapping> mapper,
             Map<String, OperatorFunction> overrides) {
@@ -217,8 +245,9 @@ public final class SpringDataQueryPlanAdapter {
     }
 
     /**
-     * Translates a raw {@link PlanResourcesResponse} protobuf into a {@link Result}, declaring
-     * how the caller represents a NULL column in the attributes it sends to {@code check()}.
+     * Translates a raw {@link PlanResourcesResponse} protobuf into a Spring Data JPA
+     * {@link Specification}, declaring how the caller represents a NULL column in the
+     * attributes it sends to {@code check()}.
      *
      * <p>See {@link #toSpecification(PlanResourcesResult, Map, Map,
      * NullAttributeRepresentation)} for what the representation changes.
@@ -228,21 +257,21 @@ public final class SpringDataQueryPlanAdapter {
      * @param mapper maps each plan variable to a JPA path or relation
      * @param overrides per-operator replacement translations, keyed by Cerbos operator name
      * @param nullAttributeRepresentation the caller's NULL-column convention
-     * @return {@link Result.AlwaysAllowed}, {@link Result.AlwaysDenied}, or a
-     *         {@link Result.Conditional} wrapping the translated Specification
+     * @return a SELECT-only Specification selecting exactly the rows the plan permits — see
+     *         {@link #toSpecification(PlanResourcesResult, Map)}
      * @throws IllegalArgumentException if the filter kind is unknown, a conditional filter
      *         carries no condition, or the plan carries a null comparison operand under
      *         {@link NullAttributeRepresentation#OMITTED}
      */
-    public static <T> Result<T> toSpecification(
+    public static <T> Specification<T> toSpecification(
             PlanResourcesResponse response,
             Map<String, AttributeMapping> mapper,
             Map<String, OperatorFunction> overrides,
             NullAttributeRepresentation nullAttributeRepresentation) {
         PlanResourcesFilter filter = response.getFilter();
         return switch (filter.getKind()) {
-            case KIND_ALWAYS_ALLOWED -> new Result.AlwaysAllowed<>();
-            case KIND_ALWAYS_DENIED -> new Result.AlwaysDenied<>();
+            case KIND_ALWAYS_ALLOWED -> alwaysAllowed();
+            case KIND_ALWAYS_DENIED -> alwaysDenied();
             case KIND_CONDITIONAL -> {
                 Operand cond = filter.getCondition();
                 if (cond.getNodeCase() == Operand.NodeCase.NODE_NOT_SET) {
@@ -251,15 +280,51 @@ public final class SpringDataQueryPlanAdapter {
                 if (nullAttributeRepresentation == NullAttributeRepresentation.OMITTED) {
                     assertNoNullComparisonOperands(cond);
                 }
-                // Defensive copies — same rationale as the PlanResourcesResult overload.
-                Map<String, AttributeMapping> mapperCopy = Map.copyOf(mapper);
-                Map<String, OperatorFunction> overridesCopy = Map.copyOf(overrides);
-                yield new Result.Conditional<T>((root, query, cb) ->
-                        new Translator(cb, overridesCopy, isSelectInvocation(root, query))
-                                .traverse(cond, Scope.root(root, query, mapperCopy)));
+                yield conditional(cond, mapper, overrides);
             }
             default -> throw new IllegalArgumentException("Unknown filter kind: " + filter.getKind());
         };
+    }
+
+    // -- The three plan kinds --
+
+    /**
+     * {@code KIND_ALWAYS_ALLOWED} — Spring Data's own "no restriction" Specification, whose
+     * implementation is {@code (root, query, cb) -> null}. {@code SimpleJpaRepository} guards
+     * with {@code if (predicate != null) query.where(predicate)}, so no {@code WHERE 1=1} is
+     * emitted, and it is a true identity for {@code .and(...)} / {@code .or(...)}. Requires
+     * spring-data-jpa 3.5.2 or later.
+     */
+    private static <T> Specification<T> alwaysAllowed() {
+        return Specification.unrestricted();
+    }
+
+    /** {@code KIND_ALWAYS_DENIED} — an always-false predicate ({@code 1=0}). */
+    private static <T> Specification<T> alwaysDenied() {
+        return (root, query, cb) -> cb.disjunction();
+    }
+
+    /**
+     * {@code KIND_CONDITIONAL} — a Specification whose lambda rebuilds the entire predicate
+     * tree from the {@code Root}/{@code CriteriaQuery} it is handed, on every invocation. That
+     * is required, not incidental: {@code JpaSpecificationExecutor.findAll(spec, Pageable)}
+     * fires a separate {@code COUNT} query with its own {@code CriteriaQuery} and {@code Root},
+     * and Hibernate 6 rejects a {@code Predicate} built against a different {@code Root}
+     * ({@code SqlTreeCreationException: Could not locate TableGroup}).
+     *
+     * <p>The caller's maps are defensively copied because of that re-invocation: capturing them
+     * by reference would let post-translation mutation silently change which columns the
+     * authorization filter resolves.
+     */
+    private static <T> Specification<T> conditional(
+            Operand condition,
+            Map<String, AttributeMapping> mapper,
+            Map<String, OperatorFunction> overrides) {
+        Map<String, AttributeMapping> mapperCopy = Map.copyOf(mapper);
+        Map<String, OperatorFunction> overridesCopy = Map.copyOf(overrides);
+        return (root, query, cb) ->
+                new Translator(cb, overridesCopy, isSelectInvocation(root, query))
+                        .traverse(condition, Scope.root(root, query, mapperCopy));
     }
 
     // -- NULL representation guard --

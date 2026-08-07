@@ -33,6 +33,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -176,10 +177,8 @@ class SpringDataQueryPlanAdapterTest {
                                 Map<String, OperatorFunction> overrides) {
         PlanResourcesResponse resp =
                 buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
-        Result<ResourceEntity> result =
+        Specification<ResourceEntity> spec =
                 SpringDataQueryPlanAdapter.toSpecification(resp, mapper, overrides);
-        assertInstanceOf(Result.Conditional.class, result);
-        Specification<ResourceEntity> spec = ((Result.Conditional<ResourceEntity>) result).specification();
 
         EntityManager em = emf.createEntityManager();
         try {
@@ -229,19 +228,13 @@ class SpringDataQueryPlanAdapterTest {
     };
 
     @Test
-    void alwaysAllowedResult() {
-        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_ALWAYS_ALLOWED, null);
-        Result<ResourceEntity> result =
-                SpringDataQueryPlanAdapter.toSpecification(resp, MAPPER);
-        assertInstanceOf(Result.AlwaysAllowed.class, result);
-    }
-
-    @Test
     void alwaysAllowedSpecificationReturnsNullPredicate() {
-        // Contract: AlwaysAllowed.toSpecification() must produce a Specification whose
-        // toPredicate returns null — Spring Data's SimpleJpaRepository skips the WHERE
-        // clause entirely in that case. Pins B2 against regression to cb.conjunction().
-        Specification<ResourceEntity> spec = new Result.AlwaysAllowed<ResourceEntity>().toSpecification();
+        // Contract: an always-allowed plan must produce a Specification whose toPredicate
+        // returns null — Spring Data's SimpleJpaRepository skips the WHERE clause entirely
+        // in that case. Pins B2 against regression to cb.conjunction().
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_ALWAYS_ALLOWED, null);
+        Specification<ResourceEntity> spec =
+                SpringDataQueryPlanAdapter.toSpecification(resp, MAPPER);
         EntityManager em = emf.createEntityManager();
         try {
             CriteriaBuilder cb = em.getCriteriaBuilder();
@@ -254,24 +247,18 @@ class SpringDataQueryPlanAdapterTest {
     }
 
     @Test
-    void alwaysDeniedResult() {
-        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_ALWAYS_DENIED, null);
-        Result<ResourceEntity> result =
-                SpringDataQueryPlanAdapter.toSpecification(resp, MAPPER);
-        assertInstanceOf(Result.AlwaysDenied.class, result);
-    }
-
-    @Test
     void alwaysDeniedSpecificationReturnsDisjunction() {
-        // Symmetric pin: AlwaysDenied.toSpecification() must produce a non-null predicate.
-        Specification<ResourceEntity> spec = new Result.AlwaysDenied<ResourceEntity>().toSpecification();
+        // Symmetric pin: an always-denied plan must produce a non-null predicate.
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_ALWAYS_DENIED, null);
+        Specification<ResourceEntity> spec =
+                SpringDataQueryPlanAdapter.toSpecification(resp, MAPPER);
         EntityManager em = emf.createEntityManager();
         try {
             CriteriaBuilder cb = em.getCriteriaBuilder();
             CriteriaQuery<ResourceEntity> cq = cb.createQuery(ResourceEntity.class);
             Root<ResourceEntity> root = cq.from(ResourceEntity.class);
             assertNotNull(spec.toPredicate(root, cq, cb),
-                    "AlwaysDenied must emit an explicit predicate, not null");
+                    "An always-denied plan must emit an explicit predicate, not null");
         } finally {
             em.close();
         }
@@ -1257,7 +1244,7 @@ class SpringDataQueryPlanAdapterTest {
     @Nested
     class NullAttributeRepresentationTest {
 
-        private Result<ResourceEntity> translate(
+        private Specification<ResourceEntity> translate(
                 Operand condition, NullAttributeRepresentation representation) {
             PlanResourcesResponse resp =
                     buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
@@ -1274,9 +1261,7 @@ class SpringDataQueryPlanAdapterTest {
             // The three-arg overload and an EXPLICIT fourth argument agree, and both still
             // translate rather than throw.
             assertEquals(0, runCount(nullEq()));
-            assertInstanceOf(
-                    Result.Conditional.class,
-                    translate(nullEq(), NullAttributeRepresentation.EXPLICIT));
+            assertDoesNotThrow(() -> translate(nullEq(), NullAttributeRepresentation.EXPLICIT));
         }
 
         @Test
@@ -1326,9 +1311,7 @@ class SpringDataQueryPlanAdapterTest {
         void omittedLeavesNullFreeComparisonsUntouched() {
             Operand condition =
                     exprOp("eq", var("request.resource.attr.aString"), sval("x"));
-            assertInstanceOf(
-                    Result.Conditional.class,
-                    translate(condition, NullAttributeRepresentation.OMITTED));
+            assertDoesNotThrow(() -> translate(condition, NullAttributeRepresentation.OMITTED));
         }
     }
 
@@ -1964,11 +1947,8 @@ class SpringDataQueryPlanAdapterTest {
         private Set<String> runIds(Operand condition) {
             PlanResourcesResponse resp =
                     buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
-            Result<ResourceEntity> result =
-                    SpringDataQueryPlanAdapter.toSpecification(resp, MAPPER, Map.of());
-            assertInstanceOf(Result.Conditional.class, result);
             Specification<ResourceEntity> spec =
-                    ((Result.Conditional<ResourceEntity>) result).specification();
+                    SpringDataQueryPlanAdapter.toSpecification(resp, MAPPER, Map.of());
             EntityManager em = emf.createEntityManager();
             try {
                 CriteriaBuilder cb = em.getCriteriaBuilder();
@@ -2165,11 +2145,8 @@ class SpringDataQueryPlanAdapterTest {
         private Set<String> runIds(Operand condition) {
             PlanResourcesResponse resp =
                     buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
-            Result<ResourceEntity> result =
-                    SpringDataQueryPlanAdapter.toSpecification(resp, MAPPER, Map.of());
-            assertInstanceOf(Result.Conditional.class, result);
             Specification<ResourceEntity> spec =
-                    ((Result.Conditional<ResourceEntity>) result).specification();
+                    SpringDataQueryPlanAdapter.toSpecification(resp, MAPPER, Map.of());
             EntityManager em = emf.createEntityManager();
             try {
                 CriteriaBuilder cb = em.getCriteriaBuilder();
@@ -3634,10 +3611,8 @@ class SpringDataQueryPlanAdapterTest {
                 Operand cond = exprOp("eq", var("request.resource.attr.aString"), sval("match"));
                 PlanResourcesResponse resp =
                         buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, cond);
-                Result<ResourceEntity> result =
-                        SpringDataQueryPlanAdapter.toSpecification(resp, mapper);
                 Specification<ResourceEntity> spec =
-                        ((Result.Conditional<ResourceEntity>) result).specification();
+                        SpringDataQueryPlanAdapter.toSpecification(resp, mapper);
 
                 assertEquals(1, countWithSpec(spec));
                 // Redirect the attribute at a different column AFTER construction: the
@@ -4094,9 +4069,7 @@ class SpringDataQueryPlanAdapterTest {
         private Specification<ResourceEntity> spec(Operand condition) {
             PlanResourcesResponse resp =
                     buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
-            Result<ResourceEntity> result =
-                    SpringDataQueryPlanAdapter.toSpecification(resp, MAPPER, Map.of());
-            return ((Result.Conditional<ResourceEntity>) result).specification();
+            return SpringDataQueryPlanAdapter.toSpecification(resp, MAPPER, Map.of());
         }
 
         @Test

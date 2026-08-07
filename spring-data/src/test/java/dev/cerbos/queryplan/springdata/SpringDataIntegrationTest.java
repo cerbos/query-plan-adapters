@@ -341,12 +341,10 @@ class SpringDataIntegrationTest {
     private static List<String> runWithPrincipalAndMapping(
             Principal principal, String action, Map<String, AttributeMapping> mapping) {
         PlanResourcesResult planResult = plan(principal, action);
-        Result<ResourceEntity> result =
+        // Every plan kind is executed against the store — an always-denied plan's `1=0` has to
+        // return no rows on its own, not because the harness short-circuited on the kind.
+        Specification<ResourceEntity> spec =
                 SpringDataQueryPlanAdapter.toSpecification(planResult, mapping);
-
-        if (result instanceof Result.AlwaysDenied<ResourceEntity>) {
-            return List.of();
-        }
 
         EntityManager em = emf.createEntityManager();
         try {
@@ -355,12 +353,9 @@ class SpringDataIntegrationTest {
             Root<ResourceEntity> root = cq.from(ResourceEntity.class);
             cq.select(root.get("id")).distinct(true);
 
-            if (result instanceof Result.Conditional<ResourceEntity> conditional) {
-                Specification<ResourceEntity> spec = conditional.specification();
-                Predicate p = spec.toPredicate(root, cq, cb);
-                if (p != null) {
-                    cq.where(p);
-                }
+            Predicate p = spec.toPredicate(root, cq, cb);
+            if (p != null) {
+                cq.where(p);
             }
             cq.orderBy(cb.asc(root.get("id")));
             return em.createQuery(cq).getResultList();
@@ -1254,8 +1249,8 @@ class SpringDataIntegrationTest {
     // Every other suite hand-rolls a CriteriaQuery with `cq.select(root.get("id")).distinct(true)`
     // and calls spec.toPredicate exactly once. That harness can never observe the documented
     // integration contract: `findAll(spec, Pageable)` invokes toPredicate TWICE on ONE
-    // Specification instance (content query + count query — the re-invocation contract
-    // Result.java documents and the README promises), and the manual distinct(true) id-projection
+    // Specification instance (content query + count query — the re-invocation the translated
+    // Specification is built to survive), and the manual distinct(true) id-projection
     // would silently dedupe any duplicate-root-row regression that a real repository caller would
     // see as duplicated entities and broken page math. These tests run live-PDP plans through the
     // real Spring Data glue and assert entity IDENTITIES and page totals — never bare counts and
@@ -1277,9 +1272,7 @@ class SpringDataIntegrationTest {
         private Specification<ResourceEntity> specFor(String action,
                                                       Map<String, AttributeMapping> mapping) {
             PlanResourcesResult planResult = plan(action);
-            return SpringDataQueryPlanAdapter
-                    .<ResourceEntity>toSpecification(planResult, mapping)
-                    .toSpecification();
+            return SpringDataQueryPlanAdapter.toSpecification(planResult, mapping);
         }
 
         /**
@@ -1382,9 +1375,9 @@ class SpringDataIntegrationTest {
 
         @Test
         void pageableFindAllInvokesToPredicateTwiceOnOneSpecification() {
-            // Result.java documents that findAll(spec, Pageable) fires a separate COUNT query
-            // and re-invokes the SAME Specification instance for it — the reason the adapter
-            // rebuilds the whole predicate tree from the Root/CriteriaQuery on every call
+            // findAll(spec, Pageable) fires a separate COUNT query and re-invokes the SAME
+            // Specification instance for it — the reason the adapter rebuilds the whole
+            // predicate tree from the Root/CriteriaQuery on every call
             // (Hibernate 6 rejects a Predicate cached across queries with
             // SqlTreeCreationException). No previous test ever executed that path.
             CountingSpecification spec =

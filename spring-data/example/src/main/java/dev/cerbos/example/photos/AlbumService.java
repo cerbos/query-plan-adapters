@@ -1,7 +1,6 @@
 package dev.cerbos.example.photos;
 
 import dev.cerbos.queryplan.springdata.AttributeMapping;
-import dev.cerbos.queryplan.springdata.Result;
 import dev.cerbos.queryplan.springdata.SpringDataQueryPlanAdapter;
 import dev.cerbos.sdk.CerbosBlockingClient;
 import dev.cerbos.sdk.PlanResourcesResult;
@@ -33,9 +32,9 @@ public class AlbumService {
     public List<Album> listAllowed(AccessContext context, String action) {
         PlanResourcesResult plan = cerbos.plan(
                 context.toPrincipal(), Resource.newInstance("album"), action);
-        Result<Album> result = SpringDataQueryPlanAdapter.toSpecification(plan, ALBUM_ATTRS);
+        Specification<Album> allowed = SpringDataQueryPlanAdapter.toSpecification(plan, ALBUM_ATTRS);
         Specification<Album> tenantBoundary = (root, query, cb) ->
                 cb.equal(root.get("tenantId"), context.tenantId());
-        return repository.findAll(tenantBoundary.and(result.toSpecification()));
+        return repository.findAll(tenantBoundary.and(allowed));
     }
 }

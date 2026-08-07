@@ -1,7 +1,6 @@
 package dev.cerbos.example.photos;
 
 import dev.cerbos.queryplan.springdata.AttributeMapping;
-import dev.cerbos.queryplan.springdata.Result;
 import dev.cerbos.queryplan.springdata.SpringDataQueryPlanAdapter;
 import dev.cerbos.sdk.CerbosBlockingClient;
 import dev.cerbos.sdk.PlanResourcesResult;
@@ -33,10 +32,10 @@ public class WorkspaceService {
     public List<Workspace> listAllowed(AccessContext context, String action) {
         PlanResourcesResult plan = cerbos.plan(
                 context.toPrincipal(), Resource.newInstance("workspace"), action);
-        Result<Workspace> result =
+        Specification<Workspace> allowed =
                 SpringDataQueryPlanAdapter.toSpecification(plan, WORKSPACE_ATTRS);
         Specification<Workspace> tenantBoundary = (root, query, cb) ->
                 cb.equal(root.get("tenantId"), context.tenantId());
-        return repository.findAll(tenantBoundary.and(result.toSpecification()));
+        return repository.findAll(tenantBoundary.and(allowed));
     }
 }

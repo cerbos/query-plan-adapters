@@ -764,8 +764,8 @@ class AdversarialConformanceTest {
         PlanResourcesResult plan = client.plan(
                 principal(), Resource.newInstance(seedsFile.resourceKind()), action);
         Specification<ResourceEntity> spec =
-                SpringDataQueryPlanAdapter.<ResourceEntity>toSpecification(
-                        plan, MAPPING, Map.of(), representation).toSpecification();
+                SpringDataQueryPlanAdapter.toSpecification(
+                        plan, MAPPING, Map.of(), representation);
 
         EntityManager em = emf.createEntityManager();
         try {
@@ -1069,10 +1069,8 @@ class AdversarialConformanceTest {
                         .setKind(PlanResourcesFilter.Kind.KIND_CONDITIONAL)
                         .setCondition(condition))
                 .build();
-        Result<ResourceEntity> result =
-                SpringDataQueryPlanAdapter.toSpecification(response, MAPPING, Map.of());
         Specification<ResourceEntity> spec =
-                ((Result.Conditional<ResourceEntity>) result).specification();
+                SpringDataQueryPlanAdapter.toSpecification(response, MAPPING, Map.of());
 
         EntityManager em = emf.createEntityManager();
         try {

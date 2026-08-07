@@ -1,7 +1,26 @@
 # cerbos-spring-data
 
-> **Alpha release — `0.1.0-alpha.1`.** API and operator coverage are stable, but field/relation
+> **Alpha release — `0.1.0-alpha.1`.** Operator coverage is stable; the API and the field/relation
 > mapping shapes may still change before `1.0`. We'd love feedback while it's still alpha.
+
+> [!IMPORTANT]
+> **Breaking change since the last alpha:** `toSpecification(...)` now returns
+> `Specification<T>` directly. The `Result<T>` wrapper is gone — drop the second
+> `.toSpecification()` call, and check `planResult.isAlwaysDenied()` on the SDK response if you
+> were pattern-matching the result kind to skip the database.
+>
+> ```java
+> // before
+> Result<Contact> result = SpringDataQueryPlanAdapter.toSpecification(planResult, MAPPING);
+> repository.findAll(tenantBoundary.and(result.toSpecification()));
+>
+> // after
+> Specification<Contact> allowed = SpringDataQueryPlanAdapter.toSpecification(planResult, MAPPING);
+> repository.findAll(tenantBoundary.and(allowed));
+> ```
+>
+> This also raises the Spring Data JPA floor to 3.5.2 (see [Install](#install)). Rationale:
+> [ADR-0003](../docs/adr/0003-spring-data-returns-specification-directly.md).
 
 [Cerbos](https://cerbos.dev) query plan adapter for [Spring Data JPA](https://spring.io/projects/spring-data-jpa). Converts a Cerbos `PlanResources` response into a `org.springframework.data.jpa.domain.Specification<T>` you can pass straight to a `JpaSpecificationExecutor`.
 
@@ -25,13 +44,15 @@ Maven:
 </dependency>
 ```
 
-You'll also need the Cerbos Java SDK (`dev.cerbos:cerbos-sdk-java`) to call the PDP and Spring Data JPA (`org.springframework.data:spring-data-jpa`).
+You'll also need the Cerbos Java SDK (`dev.cerbos:cerbos-sdk-java`) to call the PDP and Spring
+Data JPA (`org.springframework.data:spring-data-jpa`) **3.5.2 or later** — an always-allowed plan
+is translated to `Specification.unrestricted()`, which arrived in 3.5.2. If you take Spring Data
+JPA from the Spring Boot BOM, that means **Boot 3.5.4 or later** (3.5.0–3.5.3 manage 3.5.0/3.5.1).
 
 ## Quick start
 
 ```java
 import dev.cerbos.queryplan.springdata.AttributeMapping;
-import dev.cerbos.queryplan.springdata.Result;
 import dev.cerbos.queryplan.springdata.SpringDataQueryPlanAdapter;
 import dev.cerbos.sdk.CerbosBlockingClient;
 import dev.cerbos.sdk.builders.Principal;
@@ -62,20 +83,24 @@ var planResult = cerbosClient.plan(
     "view");
 
 // 2) Translate to a Specification
-Result<Contact> result =
+Specification<Contact> allowed =
     SpringDataQueryPlanAdapter.toSpecification(planResult, MAPPING);
 
 // 3) Execute via your repository
-List<Contact> contacts = contactRepository.findAll(result.toSpecification());
+List<Contact> contacts = contactRepository.findAll(allowed);
 ```
 
-`Result.toSpecification()` returns a Specification that captures all three plan kinds, so you don't need to switch on the result kind unless you want to short-circuit the DB hit:
+The returned Specification covers all three plan kinds, so there is nothing to switch on:
 
-| Kind                   | Specification                                                |
-|------------------------|--------------------------------------------------------------|
-| `Result.AlwaysAllowed` | `null` predicate — Spring Data omits the `WHERE` clause      |
-| `Result.AlwaysDenied`  | always-false predicate (`1=0`)                               |
-| `Result.Conditional`   | the translated predicate tree                                |
+| Plan kind              | Specification                                                          |
+|------------------------|------------------------------------------------------------------------|
+| `KIND_ALWAYS_ALLOWED`  | `Specification.unrestricted()` — Spring Data omits the `WHERE` clause  |
+| `KIND_ALWAYS_DENIED`   | always-false predicate (`1=0`)                                         |
+| `KIND_CONDITIONAL`     | the translated predicate tree                                          |
+
+To skip the database entirely on a denied plan, ask the plan rather than the Specification —
+`planResult.isAlwaysDenied()` on the SDK response, or `response.getFilter().getKind()` on the raw
+protobuf.
 
 Compose it with your own filters:
 
@@ -83,9 +108,12 @@ Compose it with your own filters:
 Specification<Contact> own =
     (root, query, cb) -> cb.like(root.get("name"), "Smith%");
 
-Page<Contact> results = contactRepository.findAll(
-    own.and(result.toSpecification()), pageable);
+Page<Contact> results = contactRepository.findAll(own.and(allowed), pageable);
 ```
+
+**Hand the Specification to a repository method — composing with `.and(...)` / `.or(...)` first if
+you need to — and let Spring Data invoke it.** Calling `Specification.toPredicate` yourself is not
+a supported path.
 
 > [!WARNING]
 > **The Specification is SELECT-only.** Never pass it to
@@ -101,7 +129,7 @@ Page<Contact> results = contactRepository.findAll(
 > To delete policy-permitted rows, select ids first, then delete by id:
 >
 > ```java
-> List<Long> ids = contactRepository.findAll(result.toSpecification())
+> List<Long> ids = contactRepository.findAll(allowed)
 >         .stream().map(Contact::getId).toList();
 > contactRepository.deleteAllById(ids);
 > ```
@@ -220,7 +248,7 @@ Map<String, OperatorFunction> overrides = Map.of(
         cb.equal(cb.lower(field.as(String.class)), value.toString().toLowerCase())
 );
 
-Result<Contact> result =
+Specification<Contact> allowed =
     SpringDataQueryPlanAdapter.toSpecification(planResult, MAPPING, overrides);
 ```
 
@@ -272,7 +300,7 @@ denies. Unlike the rest of the translation, this check runs eagerly from `toSpec
 than when the Specification is first evaluated.
 
 ```java
-Result<ResourceEntity> result = SpringDataQueryPlanAdapter.toSpecification(
+Specification<ResourceEntity> allowed = SpringDataQueryPlanAdapter.toSpecification(
         planResult, mapper, Map.of(), NullAttributeRepresentation.OMITTED);
 ```
 
@@ -568,15 +596,6 @@ The adapter itself has no opinion here — this is the same `open-in-view=false`
 JPA app hits — but it's worth flagging because Cerbos plans frequently *do* reference
 collection attributes (`tags`, `members`, `categories`), and those are the ones developers
 typically forget to fetch.
-
-### Don't cache the produced `Predicate`
-
-`Result.Conditional.toSpecification()` returns a Specification whose lambda **rebuilds the
-predicate tree against each invocation's `Root`/`CriteriaQuery`**. Spring Data's
-`findAll(spec, Pageable)` fires a separate `COUNT` query with its own root, and Hibernate 6
-rejects a `Predicate` produced against a stale root with
-`SqlTreeCreationException: Could not locate TableGroup`. Pass the Specification to
-repository methods; don't cache the `Predicate` it returns.
 
 ### MySQL / MariaDB `LIKE` backslash escaping
 
