@@ -124,8 +124,13 @@ What that second assertion looks like depends on where the adapter's NULL lives:
   harness asserts the aligned empty result *and* that `owner` (same column, no `nullable`) still
   returns its five explicit-null documents, so the empty set is the flag talking.
 - **convex** — a document store, so the seeded shape mirrors the convention directly: the harness
-  omits the field entirely and `q.eq(field, null)` does not match an absent field. Same paired
-  assertion as mongoose. Alignment here comes from the storage layout, not from the plan.
+  omits the field entirely, and because `aOptionalString` is `nullable: true` in the mapper the
+  adapter refuses the push-down and evaluates the predicate in its own JavaScript post-filter,
+  where the absent path raises the same CEL missing-attribute error that made `check()` deny. Same
+  paired assertion as mongoose — `owner` is the same seed field stored as an explicit null and
+  returns its five documents through that same evaluator. Alignment here comes from the storage
+  layout, not from the plan, and *not* from a Convex `q.eq(field, null)`: that code path never runs
+  for either action (cerbos/query-plan-adapters#327).
 - **langchain-chromadb, elasticsearch-java** — need no option at all: neither store can represent
   an explicit null distinguishably from a missing key, so every null-selecting direction already
   fails closed under both conventions. Their harnesses assert the rejection happens regardless,
@@ -389,7 +394,11 @@ guard; run it before trusting it.
    `expect(MANIFEST_ACTIONS.size).toBe(146)` and `expect(THROWING_ACTIONS).toHaveLength(50)` in
    `prisma/src/adversarial.test.ts`; the oracle counts too in the convex, langchain-chromadb and
    elasticsearch-java harnesses). Bump them deliberately — those assertions exist so a new action
-   cannot slip past an adapter unnoticed.
+   cannot slip past an adapter unnoticed. The convex harness additionally pins WHICH actions its
+   filter engine decides on its own, under each of its two mappers, because its README quotes those
+   counts as the coverage the differential actually buys
+   ([#327](https://github.com/cerbos/query-plan-adapters/issues/327)) — a new action lands in one
+   of those buckets and has to be named.
 7. Add the action to each harness's degeneracy-guard list so it cannot pass vacuously — to that
    harness's *compared* list where the adapter translates the shape, and to its liveness-only list
    where it does not, per "The degeneracy guard" above. Adding it to the compared list of an
@@ -682,7 +691,13 @@ the policy suite and classify it like anything else.
     MySQL and literal on SQLite, so one needle meant two things. Not expressible without an
     `ESCAPE` clause Prisma does not emit, so it is now `adapterUnsupported` and throws.
 
-  Each adapter's README names the stores its contract is actually proved on.
+  The same caution applies to a *hosted* store the harness substitutes a local build for: `convex`
+  runs against a pinned self-hosted `convex-backend` container, never Convex Cloud, and most of its
+  corpus is decided by the adapter's own JavaScript post-filter rather than by any filter engine at
+  all ([#327](https://github.com/cerbos/query-plan-adapters/issues/327)).
+
+  Each adapter's README names the stores its contract is actually proved on, and how much of the
+  corpus each one actually executes.
 
 ## Regenerating wire fixtures after a Cerbos version bump
 
