@@ -588,6 +588,10 @@ const DEGENERACY_LIVENESS_PROBES = [
   "pv-exists",
   "null-eq",
   "w1-all-chain",
+  // The chain reached through a ternary condition (#334) and through a fractional count
+  // threshold (#333): different rejection sites, both still fail-closed here.
+  "w1-ternary-chain-cond",
+  "w1-size-frac-le-chain",
   "cr-div-neg-zero",
   "cast-int-double",
 ] as const;
@@ -817,7 +821,7 @@ describe("adversarial conformance corpus", () => {
       /pins no throw message/,
     );
   });
-  test("manifest assigns all 143 policy actions exactly one Chroma outcome", () => {
+  test("manifest assigns all 146 policy actions exactly one Chroma outcome", () => {
     const oracle = new Set(CHROMA_SUPPORTED_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map(({ action }) => action));
     const nullOmitted = new Set(
@@ -833,12 +837,12 @@ describe("adversarial conformance corpus", () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(143);
+    expect(MANIFEST_ACTIONS.size).toBe(146);
     expect(CHROMA_SUPPORTED_ACTIONS).toHaveLength(15);
     expect(oracle.size).toBe(CHROMA_SUPPORTED_ACTIONS.length);
-    expect(CHROMA_UNSUPPORTED).toHaveLength(118);
+    expect(CHROMA_UNSUPPORTED).toHaveLength(121);
     expect(CHROMA_SUPPORTED_EXPECTED).toHaveLength(0);
-    expect(THROWING_ACTIONS).toHaveLength(126);
+    expect(THROWING_ACTIONS).toHaveLength(129);
     expect(misclassified).toEqual([]);
   });
 

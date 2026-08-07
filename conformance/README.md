@@ -150,30 +150,66 @@ resource row, where an absent parent and a childless parent produce the same emp
 | `!("finance" in mainCategory.subNames)` | deny | no rows → `!false` → **over-grants** |
 | `!hasIntersection(mainCategory.subNames, […])` | deny | no rows → `!false` → **over-grants** |
 | `!(size(mainCategory.subCategories) > 0)` | deny | count 0 → `!false` → **over-grants** |
+| `("finance" in mainCategory.subNames) ? … : …` | deny | no rows → `!false` → else-branch → **over-grants** |
+| `size(mainCategory.subCategories) <= 1.5` | deny | count 0 ≤ 1 → **over-grants** |
 
-Only a universal, a negation, or a zero/lower-bound count discriminates them, which is why
-`w1-exists-chain`, `w1-size-chain` and `w1-in-chain` passed everywhere while the bug was live
-(cerbos/query-plan-adapters#309). `w1-all-chain`, `w1-not-exists-chain`, `w1-size-zero-chain`,
-`w1-size-nonneg-chain`, `w1-not-in-chain`, `w1-not-hasint-chain` and `w1-not-size-chain` are the
-seven that discriminate.
+Only a universal, a negation, a zero/lower-bound count or a ternary's false-branch discriminates
+them, which is why `w1-exists-chain`, `w1-size-chain` and `w1-in-chain` passed everywhere while the
+bug was live (cerbos/query-plan-adapters#309). `w1-all-chain`, `w1-not-exists-chain`,
+`w1-size-zero-chain`, `w1-size-nonneg-chain`, `w1-not-in-chain`, `w1-not-hasint-chain`,
+`w1-not-size-chain`, `w1-ternary-chain-cond` and `w1-size-frac-le-chain` are the nine that
+discriminate.
+
+`w1-size-frac-chain` is the one `w1-*` action that does **not** probe this hazard, and it is worth
+being clear about why it is still here: `>= 1.5` rounds up to `>= 2`, which a count of zero fails
+whether or not the hop is required, so guarded and unguarded agree. It pins the other property of
+a fractional threshold — that the adapter ROUNDS rather than truncates — over a chain, which
+`cr-size-frac-ge` only pins over a direct relation. An adapter that truncates to `>= 1` returns
+`a1/a6/a8/c1` against an empty oracle.
 
 The fix is in the translation, not in the classification: **a chained collection must require its
 intermediate hop to exist**, so an absent parent stays excluded under both polarities instead of
-collapsing onto the empty-collection case. `w1-size-zero-chain` and `w1-not-size-chain` have empty
-oracles by construction (no seed holds a parent with zero children) and therefore stay out of the
-degeneracy guard; `w1-all-chain`, `w1-not-exists-chain`, `w1-size-nonneg-chain`,
-`w1-not-in-chain` and `w1-not-hasint-chain` all have non-degenerate oracles and carry the
+collapsing onto the empty-collection case. `w1-size-zero-chain`, `w1-not-size-chain` and
+`w1-size-frac-chain` have empty oracles by construction (no seed holds a parent with zero children,
+nor one with two or more) and therefore stay out of the degeneracy guard; `w1-all-chain`,
+`w1-not-exists-chain`, `w1-size-nonneg-chain`, `w1-not-in-chain`, `w1-not-hasint-chain`,
+`w1-ternary-chain-cond` and `w1-size-frac-le-chain` all have non-degenerate oracles and carry the
 anti-vacuity assertion for the group.
 
 **Put the guard in the shared relation-scope construction, not in each operator.** The #309 round
 guarded the collection macros, which left every sibling operator reached through the same chain
 unguarded — membership and `hasIntersection` (#315), and the negated count spelling `!(size > 0)`,
 which takes a different branch from `size == 0` because the planner emits the negation verbatim
-rather than normalising it (#316). ent and pgx needed no change in either round: their membership
+rather than normalising it (#316). ent and pgx needed no change in any round: their membership
 routes through the same guarded tri-state existence construction as everything else. Adapters with
 no UNKNOWN to represent (Prisma filters, Mongo query documents) get the same result by requiring
 the hops **outside** the negation rather than inside it, so the negation cannot flip the
 requirement along with the predicate.
+
+**A private copy of "negate this" is how the ternary escaped both rounds.** A ternary rewrites into
+guarded branches, and its false-branch is "the condition is definitively FALSE" — the same
+three-valued negation the `not` handler already computes. Prisma spelled that a second time as a
+bare `NOT`, so the hop requirement #315/#316 added never reached it and the else-branch was selected
+for every parentless row (#334). The repair is delegation, not another patch: one negation with the
+guard inside it, reused wherever a condition has to be falsified.
+
+Mongoose is the other adapter with no UNKNOWN to represent, and it does **not** share that defect:
+its ternary is a single `$cond` inside an aggregation expression, so there is no second negation to
+diverge. It has a *different* latent hazard in the same place — `$cond`'s `if` treats a missing
+field path as falsy, which selects the else-branch for an absent parent — but no corpus action
+reaches it, because every chained operand the corpus carries is a collection and membership has no
+aggregation-expression form there. Probing it needs a chained **scalar** attribute, which is a new
+seed field.
+
+**The fractional-threshold collapse is the one branch the corpus cannot reach.** CEL rejects
+`==`/`!=` between an `int` and a `double` ("found no matching overload for `_==_` applied to
+`(int, double)`"), so no policy can make the planner emit a fractional equality against `size()`,
+and the ordering spellings the corpus does pin (`>= 1.5`, `<= 1.5`) round to an integer threshold
+and travel the ordinary count path. An adapter that folds the fractional equality to a constant
+must still guard it — `hops AND constant` is two-valued and readmits parentless rows under a
+negation — but only that adapter's unit tests can prove it (#333). This is the documented exception
+to "a per-adapter unit test is not a substitute for a corpus action": there is no corpus action to
+substitute for.
 
 ### The degeneracy guard
 
@@ -200,10 +236,10 @@ harness therefore keeps two lists and asserts they are complements of its own or
 
 Both lists still assert the non-empty, non-total oracle. The exclusion for an action whose oracle
 is empty *by construction* is unchanged: it belongs in neither list (see
-`nullRepresentationOmitted` above, and `w1-size-zero-chain`/`w1-not-size-chain`/`in-empty`/the
-string casts).
+`nullRepresentationOmitted` above, and
+`w1-size-zero-chain`/`w1-not-size-chain`/`w1-size-frac-chain`/`in-empty`/the string casts).
 
-Adapters differ widely in what they can express — `langchain-chromadb` compares 15 of the 133
+Adapters differ widely in what they can express — `langchain-chromadb` compares 15 of the 136
 conformance actions where `ent` and `pgx` compare all of them — so the lists are expected to look
 different per harness. That is the point.
 
@@ -346,7 +382,7 @@ guard; run it before trusting it.
    what it actually says; the harness refuses to run with a message missing, so there is no way to
    forget one.
 6. Each harness pins the corpus size AND its throwing-action count as tripwires (e.g.
-   `expect(MANIFEST_ACTIONS.size).toBe(143)` and `expect(THROWING_ACTIONS).toHaveLength(47)` in
+   `expect(MANIFEST_ACTIONS.size).toBe(146)` and `expect(THROWING_ACTIONS).toHaveLength(50)` in
    `prisma/src/adversarial.test.ts`; the oracle counts too in the convex, langchain-chromadb and
    elasticsearch-java harnesses). Bump them deliberately — those assertions exist so a new action
    cannot slip past an adapter unnoticed.

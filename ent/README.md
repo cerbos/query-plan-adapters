@@ -115,7 +115,7 @@ assumed. The Spring Data adapter defines the reference semantics for this compat
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 133 reference conformance actions — every conformance shape in the corpus, on SQLite, PostgreSQL and MySQL |
+| Oracle-tested | 136 reference conformance actions — every conformance shape in the corpus, on SQLite, PostgreSQL and MySQL |
 | Fail-closed corpus shapes | Regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an untyped string field, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero) and `filter()`/`map()` used as a condition (both return a list, not a boolean) (8 actions) |
 | Representation-dependent | `null-eq-missing` — rejected under `NullOmitted`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |

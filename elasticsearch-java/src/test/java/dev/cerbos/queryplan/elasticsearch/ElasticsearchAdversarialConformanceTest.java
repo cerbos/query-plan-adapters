@@ -284,7 +284,7 @@ class ElasticsearchAdversarialConformanceTest {
                 "adapterUnsupported.elasticsearch-java contains non-conformance actions");
         assertTrue(expected.containsAll(supportedExpected),
                 "adapterSupportedExpected.elasticsearch-java contains non-expected actions");
-        assertEquals(92, unsupported.size(),
+        assertEquals(95, unsupported.size(),
                 "Elasticsearch unsupported coverage changed without updating the ledger assertion");
         assertEquals(2, supportedExpected.size(),
                 "Elasticsearch supported-expected coverage changed without updating the ledger assertion");
@@ -329,9 +329,9 @@ class ElasticsearchAdversarialConformanceTest {
         manifest.addAll(nullRepresentationOmittedActions);
         manifest.addAll(divergences);
         assertEquals(43, oracleActions.size());
-        assertEquals(98, throwingActions.size());
+        assertEquals(101, throwingActions.size());
         assertEquals(1, nullRepresentationOmittedActions.size());
-        assertEquals(143, classified.size());
+        assertEquals(146, classified.size());
         assertEquals(manifest, classified, "every manifest action must be classified locally");
     }
 
@@ -657,6 +657,11 @@ class ElasticsearchAdversarialConformanceTest {
             // Elasticsearch does not index an empty nested array, so a positive all() cannot tell
             // an empty collection (true) from a missing one (CEL error).
             "all-on-empty",
+            // The chain reached through a ternary condition (#334) and through a fractional count
+            // threshold (#333): different rejection sites, both still fail-closed here — the
+            // Query DSL has no conditional-value expression and no arbitrary count threshold.
+            "w1-ternary-chain-cond",
+            "w1-size-frac-le-chain",
             // Nor an explicit null scalar, so positive equality against null cannot tell an
             // explicit null (allow) from a missing field (deny). The negated forms stay compared.
             "null-eq");

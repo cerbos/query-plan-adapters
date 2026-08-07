@@ -3085,6 +3085,57 @@ class SpringDataQueryPlanAdapterTest {
             });
         }
 
+        /**
+         * The FRACTIONAL threshold over a chain. CEL rejects {@code ==}/{@code !=} between an
+         * int and a double ("found no matching overload for '_==_' applied to '(int, double)'"),
+         * so no policy can make the planner emit these and no corpus action reaches them — the
+         * collapse branch is defensive code a consumer can still drive with a hand-built plan,
+         * and this is its only proving ground (cerbos/query-plan-adapters#333).
+         *
+         * <p>A COUNT is never fractional, so the comparison is statically decided — but not
+         * UNCONDITIONALLY. An absent to-one parent is a CEL missing-path error, which denies
+         * under both polarities, so the collapse has to be tri-state like every other chained
+         * comparison. Spelling it {@code hops AND constant} is two-valued: the negations below
+         * were TRUE for the parentless row and returned it.
+         */
+        @Test
+        void fractionalCollapseOverTwoHopChainStaysUnknownForAnAbsentParent() {
+            var fin = new SubCategoryEntity("chain-sub-f1", "finance");
+            var biz = new CategoryEntity("chain-cat-f1", "business");
+            biz.setSubCategories(List.of(fin));
+            ResourceEntity parented = new ResourceEntity("chain-r-f1");
+            parented.setCategories(List.of(biz));
+            // No categories at all: the chain's leading hop is absent, so CEL denies this row
+            // whatever the collapse decides.
+            ResourceEntity orphan = new ResourceEntity("chain-r-f2");
+
+            Operand size = exprOp("size", var(CHAIN));
+            Operand matching = exprOp("size",
+                    exprOp("filter", var(CHAIN),
+                            lambda("s", exprOp("eq", var("s.name"), sval("finance")))));
+
+            withCategoryGraph(parented, List.of(biz), List.of(fin), () ->
+                    withResource(orphan, () -> {
+                        // ne f collapses to always-TRUE: the parented row only, never the orphan.
+                        assertEquals(1, runChainCount(exprOp("ne", size, nval(1.5))));
+                        assertEquals(1, runChainCount(exprOp("ne", matching, nval(1.5))));
+                        // eq f collapses to always-FALSE: neither row.
+                        assertEquals(0, runChainCount(exprOp("eq", size, nval(1.5))));
+                        assertEquals(0, runChainCount(exprOp("eq", matching, nval(1.5))));
+
+                        // The discriminating arms. A two-valued `hops AND constant` makes both
+                        // negations TRUE for the orphan; the tri-state form leaves them UNKNOWN.
+                        assertEquals(0, runChainCount(
+                                exprOp("not", exprOp("ne", size, nval(1.5)))));
+                        assertEquals(0, runChainCount(
+                                exprOp("not", exprOp("ne", matching, nval(1.5)))));
+                        assertEquals(1, runChainCount(
+                                exprOp("not", exprOp("eq", size, nval(1.5)))));
+                        assertEquals(1, runChainCount(
+                                exprOp("not", exprOp("eq", matching, nval(1.5)))));
+                    }));
+        }
+
         @Test
         void rootRelationSubqueryInsideLambdaAnchorsToOwningEntity() {
             // W2: R.attr.categories.exists(c, c.name == "business" && R.attr.tags.exists(u, ...))

@@ -2127,10 +2127,18 @@ public final class SpringDataQueryPlanAdapter {
                         // It is not unconditional though: an absent to-one parent is a CEL
                         // missing-path error (deny), and folding to TRUE would return every
                         // parentless row (#309).
-                        Predicate hops = leadingHopsExist(scope, ref);
-                        Predicate collapsed =
-                                fractionalCollapse ? cb.conjunction() : cb.disjunction();
-                        return hops == null ? collapsed : cb.and(hops, collapsed);
+                        //
+                        // The guard has to be TRI-STATE, like every other chained comparison:
+                        // `hops AND constant` is two-valued, so `NOT(hops AND constant)` is TRUE
+                        // for a parentless row under BOTH collapses and readmits all of them
+                        // (cerbos/query-plan-adapters#333). A CASE with no ELSE yields SQL NULL
+                        // instead, leaving the comparison UNKNOWN under both polarities.
+                        if (leadingHopsExist(scope, ref) == null) {
+                            return fractionalCollapse ? cb.conjunction() : cb.disjunction();
+                        }
+                        return cb.equal(
+                                requireLeadingHops(scope, ref, cb.literal(1L), Long.class),
+                                fractionalCollapse ? 1L : 0L);
                     }
                     boolean nonEmpty = ("gt".equals(cmpOp) && numValue == 0L)
                             || ("ge".equals(cmpOp) && numValue == 1L);
@@ -2179,13 +2187,16 @@ public final class SpringDataQueryPlanAdapter {
                         // poison term is 0 when every element body is determined and SQL NULL
                         // otherwise, making the collapse UNKNOWN exactly when CEL errors.
                         // An absent to-one parent denies for a different reason and needs its
-                        // own guard (#309).
-                        Subquery<Long> poison = undeterminedPoisonSubquery(scope, ref, bodyBuilder);
-                        Predicate collapsed = finalCollapse
+                        // own guard (#309) — carried on the poison EXPRESSION rather than ANDed
+                        // beside it, so both polarities inherit it the way every other chained
+                        // comparison does (cerbos/query-plan-adapters#333).
+                        jakarta.persistence.criteria.Expression<Long> poison =
+                                requireLeadingHops(scope, ref,
+                                        undeterminedPoisonSubquery(scope, ref, bodyBuilder),
+                                        Long.class);
+                        return finalCollapse
                                 ? cb.equal(poison, 0L)
                                 : cb.notEqual(poison, 0L);
-                        Predicate hops = leadingHopsExist(scope, ref);
-                        return hops == null ? collapsed : cb.and(hops, collapsed);
                     }
                     return compareCount(strictMatchCountSubquery(scope, ref, bodyBuilder),
                             finalCmpOp, finalNumValue);

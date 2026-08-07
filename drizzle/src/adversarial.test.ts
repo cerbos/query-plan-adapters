@@ -336,9 +336,10 @@ const MANIFEST_ACTIONS = new Set([
 // asserted to be in `ORACLE_ACTIONS` (cerbos/query-plan-adapters#324), which turns moving one
 // into `adapterUnsupported` into a failure here rather than a silent no-op.
 //
-// w1-size-zero-chain and w1-not-size-chain are deliberately absent: their oracles are empty by
-// CONSTRUCTION (no seed holds a to-one parent with zero children), so they cannot satisfy a
-// non-empty assertion. Their siblings below carry it for that group.
+// w1-size-zero-chain, w1-not-size-chain and w1-size-frac-chain are deliberately absent: their
+// oracles are empty by CONSTRUCTION (no seed holds a to-one parent with zero children, nor one
+// with two or more), so they cannot satisfy a non-empty assertion. Their siblings below carry it
+// for that group.
 
 const DEGENERACY_GUARD_ACTIONS = [
   "vf-le",
@@ -348,13 +349,15 @@ const DEGENERACY_GUARD_ACTIONS = [
   "pv-all",
   "null-eq",
   "null-ne",
-  // The absent to-one parent (#309/#315/#316): the five discriminating chain shapes with a
-  // non-empty oracle.
+  // The absent to-one parent (#309/#315/#316/#333/#334): the seven discriminating chain shapes
+  // with a non-empty oracle.
   "w1-all-chain",
   "w1-not-exists-chain",
   "w1-size-nonneg-chain",
   "w1-not-in-chain",
   "w1-not-hasint-chain",
+  "w1-ternary-chain-cond",
+  "w1-size-frac-le-chain",
   // Column arithmetic under a division (#311).
   "cr-div-neg-zero",
   "cr-div-other-column",
@@ -1115,7 +1118,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(143);
+    expect(MANIFEST_ACTIONS.size).toBe(146);
     expect(NULL_REPRESENTATION_OMITTED).toHaveLength(1);
     // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
     // gained or lost has to be re-triaged here rather than joining the suite unnoticed.

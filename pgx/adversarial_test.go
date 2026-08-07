@@ -461,7 +461,7 @@ func TestAdversarialConformance(t *testing.T) {
 		}
 		// Corpus-size tripwire: bump deliberately when the corpus grows, so a new hostile shape
 		// cannot slip past this adapter unnoticed.
-		require.Len(t, seen, 143, "corpus size changed; triage the new action(s) before bumping")
+		require.Len(t, seen, 146, "corpus size changed; triage the new action(s) before bumping")
 		require.Len(t, h.corpus.Seeds.Seeds, 20, "seed count changed")
 		// Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
 		// lost has to be re-triaged here rather than joining the throw suite unnoticed.
@@ -575,16 +575,17 @@ func TestAdversarialConformance(t *testing.T) {
 		// guard nothing (cerbos/query-plan-adapters#324). The membership assertion turns moving an
 		// action into adapterUnsupported into a failure here rather than a silent no-op.
 		//
-		// w1-size-zero-chain, w1-not-size-chain, cast-int-string and cast-double-string are
-		// deliberately absent: their oracles are empty by CONSTRUCTION (no seed holds a to-one
-		// parent with zero children; every seed's aString raises in int()/double()), so they
-		// cannot satisfy this guard.
+		// w1-size-zero-chain, w1-not-size-chain, w1-size-frac-chain, cast-int-string and
+		// cast-double-string are deliberately absent: their oracles are empty by CONSTRUCTION (no
+		// seed holds a to-one parent with zero children, nor one with two or more; every seed's
+		// aString raises in int()/double()), so they cannot satisfy this guard.
 		compared := []string{
 			"vf-le", "in-single", "like-percent", "exists-on-empty", "not-exists",
 			"nary-and", "field-to-field", "ternary-cmp", "arith-add", "size-threshold",
 			"hier-ancestor-cf", "pv-exists", "in-null-elem-mixed", "null-eq", "cs-eq",
 			"w1-all-chain", "w1-not-exists-chain", "w1-size-nonneg-chain",
 			"w1-not-in-chain", "w1-not-hasint-chain",
+			"w1-ternary-chain-cond", "w1-size-frac-le-chain",
 			"cr-div-neg-zero", "cr-div-other-column", "cr-div-then-add", "cr-div-then-add-ne",
 		}
 		// int() over a numeric column is unsupported for every adapter but convex, so there is no

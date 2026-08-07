@@ -380,10 +380,10 @@ const MANIFEST_ACTIONS = new Set([
 // can express. The two lists are asserted to be complements of `ORACLE_ACTIONS`, so neither can
 // drift into the other unnoticed.
 //
-// w1-size-zero-chain, w1-not-size-chain and the two string-cast actions are deliberately absent
-// from both lists: their oracles are empty by CONSTRUCTION (no seed holds a to-one parent with
-// zero children; every seed's aString raises in int()/double()), so they cannot satisfy a
-// non-empty assertion.
+// w1-size-zero-chain, w1-not-size-chain, w1-size-frac-chain and the two string-cast actions are
+// deliberately absent from both lists: their oracles are empty by CONSTRUCTION (no seed holds a
+// to-one parent with zero children, nor one with two or more; every seed's aString raises in
+// int()/double()), so they cannot satisfy a non-empty assertion.
 
 const DEGENERACY_GUARD_ACTIONS = [
   "vf-le",
@@ -397,11 +397,12 @@ const DEGENERACY_GUARD_ACTIONS = [
   "pv-all",
   "null-eq",
   "null-ne",
-  // The absent to-one parent (#309/#315/#316): the three discriminating chain shapes Prisma
-  // translates. Its two unsupported siblings are liveness probes below.
+  // The absent to-one parent (#309/#315/#316/#334): the four discriminating chain shapes Prisma
+  // translates. Its unsupported siblings are liveness probes below.
   "w1-not-exists-chain",
   "w1-not-in-chain",
   "w1-not-hasint-chain",
+  "w1-ternary-chain-cond",
 ] as const;
 
 /**
@@ -415,10 +416,11 @@ const DEGENERACY_LIVENESS_PROBES = [
   // (cerbos/query-plan-adapters#320).
   "like-percent",
   "like-backslash",
-  // every() cannot require the intermediate hop of a chain, and a >= 0 relation count has no
-  // none/some spelling — the two chain shapes Prisma throws on.
+  // every() cannot require the intermediate hop of a chain, and no relation count with an
+  // arbitrary threshold — >= 0 or a rounded fractional one — has a none/some spelling.
   "w1-all-chain",
   "w1-size-nonneg-chain",
+  "w1-size-frac-le-chain",
   // Prisma filters have no column arithmetic, so the whole cr-div group (#311) throws.
   "cr-div-neg-zero",
   // int() over a numeric column: truncation-versus-rounding, unsupported for every adapter but
@@ -826,7 +828,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
     expect(classify).toThrow(/pins no throw message/);
   });
 
-  test("manifest assigns all 143 policy actions exactly one Prisma outcome", () => {
+  test("manifest assigns all 146 policy actions exactly one Prisma outcome", () => {
     const oracle = new Set(ORACLE_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map(([action]) => action));
     const nullOmitted = new Set(
@@ -842,10 +844,10 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(143);
+    expect(MANIFEST_ACTIONS.size).toBe(146);
     // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
     // gained or lost has to be re-triaged here rather than joining the suite unnoticed.
-    expect(THROWING_ACTIONS).toHaveLength(48);
+    expect(THROWING_ACTIONS).toHaveLength(50);
     expect(misclassified).toEqual([]);
     expect(
       [...PRISMA_SUPPORTED_EXPECTED].filter(
@@ -1037,6 +1039,96 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
     expect(withParent.length).toBeLessThan(SEEDS.length);
     expect(await filteredIdsFor(negate(compare("eq", 0)))).toEqual(withParent);
     expect(await filteredIdsFor(negate(compare("lt", 1)))).toEqual(withParent);
+  });
+
+  // The corpus pins ONE ternary whose condition reaches a chain — `w1-ternary-chain-cond`, whose
+  // else-branch is a bare `!aBool`. The guard has to be a property of the ternary's false-branch
+  // rather than of that one spelling, so these synthesise the other condition positions onto the
+  // same seeded store (cerbos/query-plan-adapters#334). Each expectation is a real check() oracle,
+  // never a hand-computed row list.
+  test("every ternary condition over the chain inherits the absent-parent guard", async () => {
+    const chainIn = new PlanExpression("in", [
+      new PlanExpressionValue("finance"),
+      new PlanExpressionVariable("request.resource.attr.mainCategory.subNames"),
+    ]);
+    const TRUE = new PlanExpressionValue(true);
+    const FALSE = new PlanExpressionValue(false);
+    const ternary = (
+      condition: PlanExpressionOperand,
+      thenBranch: PlanExpressionOperand,
+      elseBranch: PlanExpressionOperand
+    ) => new PlanExpression("if", [condition, thenBranch, elseBranch]);
+
+    const filteredIdsFor = async (
+      condition: PlanExpressionOperand
+    ): Promise<string[]> => {
+      const result = queryPlanToPrisma({
+        queryPlan: {
+          kind: PlanKind.CONDITIONAL,
+          condition,
+          cerbosCallId: "synthetic",
+          requestId: "synthetic",
+          validationErrors: [],
+          metadata: undefined,
+        },
+        mapper: MAPPER,
+        model: "AdversarialResource",
+      });
+      expect(result.kind).toBe(PlanKind.CONDITIONAL);
+      const where = result.kind === PlanKind.CONDITIONAL ? result.filters : {};
+      const rows = await prisma.adversarialResource.findMany({
+        where,
+        select: { id: true },
+      });
+      return rows.map((row) => row.id).sort();
+    };
+
+    // The rows the chain condition is definitively TRUE for, and the ones it is definitively
+    // FALSE for. Everything else — every row with no mainCategory at all — is a CEL
+    // missing-path error, which selects NEITHER branch.
+    const conditionTrue = await oracleAllowedIds("w1-in-chain");
+    const conditionFalse = await oracleAllowedIds("w1-not-in-chain");
+    expect(conditionTrue.length).toBeGreaterThan(0);
+    expect(conditionFalse.length).toBeGreaterThan(0);
+    expect(conditionTrue.length + conditionFalse.length).toBeLessThan(
+      SEEDS.length
+    );
+
+    // The else-branch is what a bare `NOT` over the chain filter over-grants: it is TRUE for
+    // every parentless row, so each of these returned the 16 missing-parent seeds on top.
+    expect(await filteredIdsFor(ternary(chainIn, FALSE, TRUE))).toEqual(
+      conditionFalse
+    );
+    expect(
+      await filteredIdsFor(
+        ternary(new PlanExpression("not", [chainIn]), TRUE, FALSE)
+      )
+    ).toEqual(conditionFalse);
+    // A `not` condition in false-branch position: the double negation collapses back to the
+    // positive membership, which excludes the parentless rows by itself.
+    expect(
+      await filteredIdsFor(
+        ternary(new PlanExpression("not", [chainIn]), FALSE, TRUE)
+      )
+    ).toEqual(conditionTrue);
+
+    // A conjunction condition needs De Morgan, not an outer NOT with the hops ANDed beside it:
+    // CEL's `&&` absorbs an erroring operand when the other is FALSE, so a parentless row with
+    // aBool=false makes the whole condition definitively FALSE and DOES select the else-branch.
+    const aBoolFalse = SEEDS.filter((seed) => !seed.aBool).map((seed) => seed.id);
+    expect(aBoolFalse.length).toBeGreaterThan(0);
+    expect(
+      await filteredIdsFor(
+        ternary(
+          new PlanExpression("and", [
+            chainIn,
+            new PlanExpressionVariable("request.resource.attr.aBool"),
+          ]),
+          FALSE,
+          TRUE
+        )
+      )
+    ).toEqual([...new Set([...conditionFalse, ...aBoolFalse])].sort());
   });
 
   test("oracle is not degenerate", async () => {

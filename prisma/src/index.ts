@@ -1737,6 +1737,18 @@ function buildBooleanBranchFilter(
   return { kind: "constant", value: branch.value };
 }
 
+/**
+ * "The ternary's condition is definitively FALSE", which is exactly buildNegatedFilter's
+ * contract — three-valued, so a condition that is UNKNOWN (a NULL column, an erroring lambda
+ * body, an absent to-one parent) selects NEITHER branch.
+ *
+ * It delegates rather than spelling a second negation. A private copy is how the ternary
+ * missed the hop requirement #315/#316 added: a bare `NOT` over a chain filter is TRUE when
+ * the to-one parent is absent, so the else-branch was selected for rows CEL denies outright —
+ * the missing path is an evaluation error, not a false condition
+ * (cerbos/query-plan-adapters#334). Delegating also gives the ternary the De Morgan push-down,
+ * which a chained `and`/`or` condition needs for CEL's error absorption to survive.
+ */
 function buildFalseConditionFilter(
   condition: PlanExpressionOperand,
   mapper: Mapper
@@ -1745,26 +1757,7 @@ function buildFalseConditionFilter(
     throw new Error("Constant ternary conditions must be folded before use");
   }
 
-  if (isNamedOperand(condition)) {
-    const fieldRef = resolveFieldReference(condition.name, mapper);
-    if (!fieldRef.relations || fieldRef.relations.length === 0) {
-      return buildFieldEqualsFilter(fieldRef, false);
-    }
-    return {
-      NOT: buildFieldEqualsFilter(fieldRef, true),
-    };
-  }
-
-  if (isOperatorOperand(condition) && condition.operator === "not") {
-    return buildPrismaFilterFromCerbosExpression(
-      assertDefined(condition.operands[0], "not operator requires an operand"),
-      mapper
-    );
-  }
-
-  return {
-    NOT: buildPrismaFilterFromCerbosExpression(condition, mapper),
-  };
+  return buildNegatedFilter(condition, mapper);
 }
 
 function buildGuardedTernaryFilter({

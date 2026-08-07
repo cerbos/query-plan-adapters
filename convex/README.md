@@ -110,7 +110,7 @@ The adapter is differentially tested with 20 hostile seed documents against Cerb
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 131 of the 133 reference conformance actions, plus `matches()`, list indexing/`get-field`, `timestamp()`, and `int()`/`double()` cast plans that the Spring Data reference adapter rejects — the post-filter reimplements CEL cast semantics exactly (whole-string parse, truncation toward zero), so the SQL divergences do not apply (137 actions total) |
+| Oracle-tested | 134 of the 136 reference conformance actions, plus `matches()`, list indexing/`get-field`, `timestamp()`, and `int()`/`double()` cast plans that the Spring Data reference adapter rejects — the post-filter reimplements CEL cast semantics exactly (whole-string parse, truncation toward zero), so the SQL divergences do not apply (140 actions total) |
 | Fail-closed | `filter()`/`map()` used as a condition (they return a list, not a boolean) and a constant zero divisor whose sign the JSON hop into a Convex function discards (4 actions). All four throw during translation, before any filter exists; unknown operators and invalid expression structures still throw |
 | Explicit opt-in | Any plan that cannot be represented entirely as a Convex database filter requires `allowPostFilter: true` |
 | Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`. Under the default it already returns the empty set the PDP demands *when the document omits the field for a NULL value*, which is what the conformance harness seeds; a deployment that stores explicit nulls while omitting the attribute would over-grant |
