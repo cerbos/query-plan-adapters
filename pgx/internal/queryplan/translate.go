@@ -56,10 +56,10 @@ func Build(cond *enginev1.PlanResourcesFilter_Expression_Operand, m Mapper, opts
 
 	m = guardedMapper{parent: m}
 
-	if opts.NullRepresentation == NullOmitted {
-		if err := assertNoNullOperands(root); err != nil {
-			return nil, err
-		}
+	// Always: the call-level option is only the fallback now, and an attribute can declare
+	// NullConventionOmitted while the call declares NullExplicit.
+	if err := assertNoNullOperands(root, m, opts.NullRepresentation); err != nil {
+		return nil, err
 	}
 
 	b := &builder{opts: opts}
@@ -1122,7 +1122,11 @@ func (b *builder) resolveVariable(reference string, m Mapper) (value, error) {
 			"attribute %q maps to a collection and cannot be used as a scalar value", reference,
 		)
 	}
-	return Column{Qualifier: entry.Qualifier, Name: entry.Column}, nil
+	return Column{
+		Qualifier:    entry.Qualifier,
+		Name:         entry.Column,
+		ExplicitNull: entry.NullConvention == NullConventionExplicit,
+	}, nil
 }
 
 // lambdaParts destructures the planner's `lambda(body, variable)` operand.
@@ -1208,24 +1212,60 @@ func substituteLambdaVariable(n *node, variable string, element any) (*node, err
 // aligned, but a leaf cannot tell whether an enclosing `not` will flip IS NOT NULL back into a
 // NULL-selecting predicate, so rejecting every null operand is what stays correct under any
 // nesting. Narrowing it would require negation-parity tracking.
-func assertNoNullOperands(n *node) error {
+func assertNoNullOperands(n *node, m Mapper, fallback NullRepresentation) error {
 	if n.isValue() {
-		if carriesNull(n.value) {
-			return fmt.Errorf(
-				"cannot translate a null operand under NullOmitted: a NULL column sends no " +
-					"attribute, so Cerbos evaluates the comparison as a missing-attribute error " +
-					"(deny) while a NULL-selecting filter would return those rows. Send NULL " +
-					"columns as explicit nulls and use NullExplicit, or keep this shape out of the policy",
-			)
+		if carriesNull(n.value) && fallback == NullOmitted {
+			return errNullOperandUnderOmitted()
 		}
 		return nil
 	}
+	// A comparison between a mapped attribute and a literal is decided by that attribute's own
+	// declaration, which is what lets one call carry both conventions. Confined to that shape: a
+	// null buried in a macro over a literal list reaches a comparison long after this scan, and
+	// nothing here can say which column it will land against, so those keep using the fallback.
+	if variable, literal, ok := comparedAttributeAndLiteral(n); ok {
+		if entry, found := m.Resolve(variable); found && entry.NullConvention != NullConventionUnset {
+			if carriesNull(literal.value) && entry.NullConvention == NullConventionOmitted {
+				return errNullOperandUnderOmitted()
+			}
+			return nil
+		}
+	}
 	for _, child := range n.operands {
-		if err := assertNoNullOperands(child); err != nil {
+		if err := assertNoNullOperands(child, m, fallback); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func errNullOperandUnderOmitted() error {
+	return fmt.Errorf(
+		"cannot translate a null operand under NullOmitted: a NULL column sends no " +
+			"attribute, so Cerbos evaluates the comparison as a missing-attribute error " +
+			"(deny) while a NULL-selecting filter would return those rows. Send NULL " +
+			"columns as explicit nulls and use NullExplicit, or keep this shape out of the policy",
+	)
+}
+
+// comparedAttributeAndLiteral destructures a binary comparison between a plan variable and a
+// literal, in either operand order.
+func comparedAttributeAndLiteral(n *node) (string, *node, bool) {
+	if !n.isExpr() || len(n.operands) != binaryOperands {
+		return "", nil, false
+	}
+	if _, ok := comparisonOps[n.operator]; !ok && n.operator != "in" {
+		return "", nil, false
+	}
+	left, right := n.operands[0], n.operands[1]
+	variable, literal := left, right
+	if right.isVariable() {
+		variable, literal = right, left
+	}
+	if !variable.isVariable() || !literal.isValue() {
+		return "", nil, false
+	}
+	return variable.variable, literal, true
 }
 
 // carriesNull reports whether a literal contains a null anywhere inside it.

@@ -25,6 +25,7 @@ export default defineSchema({
     createdAt: v.optional(v.string()),
     scope: v.optional(v.string()),
     owner: v.union(v.string(), v.null()),
+    coOwner: v.union(v.string(), v.null()),
     tagNames: v.array(v.union(v.string(), v.null())),
     obj: v.object({ inner: v.string() }),
     tags: v.array(

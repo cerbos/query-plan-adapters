@@ -22,6 +22,7 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -185,9 +186,9 @@ public final class SpringDataQueryPlanAdapter {
         }
         Operand condition = planResult.getCondition()
                 .orElseThrow(() -> new IllegalArgumentException("Conditional plan has no condition"));
-        if (nullAttributeRepresentation == NullAttributeRepresentation.OMITTED) {
-            assertNoNullComparisonOperands(condition);
-        }
+        // Always: the call-level option is only the fallback now, and an attribute can declare
+        // OMITTED while the call declares EXPLICIT.
+        assertNoNullComparisonOperands(condition, mapper, nullAttributeRepresentation);
         return conditional(condition, mapper, overrides);
     }
 
@@ -277,9 +278,7 @@ public final class SpringDataQueryPlanAdapter {
                 if (cond.getNodeCase() == Operand.NodeCase.NODE_NOT_SET) {
                     throw new IllegalArgumentException("Conditional plan has no condition");
                 }
-                if (nullAttributeRepresentation == NullAttributeRepresentation.OMITTED) {
-                    assertNoNullComparisonOperands(cond);
-                }
+                assertNoNullComparisonOperands(cond, mapper, nullAttributeRepresentation);
                 yield conditional(cond, mapper, overrides);
             }
             default -> throw new IllegalArgumentException("Unknown filter kind: " + filter.getKind());
@@ -352,22 +351,77 @@ public final class SpringDataQueryPlanAdapter {
      * every null operand is correct under any nesting; narrowing it requires negation-parity
      * tracking.
      */
-    private static void assertNoNullComparisonOperands(Operand operand) {
+    private static void assertNoNullComparisonOperands(
+            Operand operand, Map<String, AttributeMapping> mapper,
+            NullAttributeRepresentation fallback) {
         if (operand.getNodeCase() != Operand.NodeCase.EXPRESSION) {
             return;
         }
         var expression = operand.getExpression();
         List<Operand> operands = expression.getOperandsList();
-        if (operands.stream().anyMatch(SpringDataQueryPlanAdapter::carriesNull)) {
-            throw new IllegalArgumentException(
-                    "Cannot translate `" + expression.getOperator() + "` against a null operand"
-                            + " under NullAttributeRepresentation.OMITTED: a NULL column sends no"
-                            + " attribute, so Cerbos evaluates the comparison as a"
-                            + " missing-attribute error (deny) while a NULL-selecting filter"
-                            + " would return those rows. Send NULL columns as explicit nulls and"
-                            + " use EXPLICIT, or keep this shape out of the policy.");
+
+        // A comparison between a mapped attribute and a literal is decided by that attribute's
+        // own declaration, which is what lets one call carry both conventions (#308). Confined
+        // to that shape: a null buried in a macro over a literal list reaches a comparison long
+        // after this scan, and nothing here can say which column it will land against, so those
+        // keep using the call-level fallback.
+        NullAttributeRepresentation declared =
+                declaredForComparedAttribute(expression.getOperator(), operands, mapper);
+        if (declared != null) {
+            if (declared == NullAttributeRepresentation.OMITTED
+                    && operands.stream().anyMatch(SpringDataQueryPlanAdapter::carriesNull)) {
+                throw nullOperandUnderOmitted(expression.getOperator());
+            }
+            return;
         }
-        operands.forEach(SpringDataQueryPlanAdapter::assertNoNullComparisonOperands);
+
+        if (fallback == NullAttributeRepresentation.OMITTED
+                && operands.stream().anyMatch(SpringDataQueryPlanAdapter::carriesNull)) {
+            throw nullOperandUnderOmitted(expression.getOperator());
+        }
+        operands.forEach(child -> assertNoNullComparisonOperands(child, mapper, fallback));
+    }
+
+    private static final Set<String> EQUALITY_FAMILY = Set.of("eq", "ne", "in");
+
+    private static IllegalArgumentException nullOperandUnderOmitted(String operator) {
+        return new IllegalArgumentException(
+                "Cannot translate `" + operator + "` against a null operand"
+                        + " under NullAttributeRepresentation.OMITTED: a NULL column sends no"
+                        + " attribute, so Cerbos evaluates the comparison as a"
+                        + " missing-attribute error (deny) while a NULL-selecting filter"
+                        + " would return those rows. Send NULL columns as explicit nulls and"
+                        + " use EXPLICIT, or keep this shape out of the policy.");
+    }
+
+    /**
+     * The declared NULL convention of the attribute a binary comparison names, or {@code null}
+     * when the node is not a comparison between one mapped attribute and one literal.
+     */
+    private static NullAttributeRepresentation declaredForComparedAttribute(
+            String operator, List<Operand> operands, Map<String, AttributeMapping> mapper) {
+        // The operators CEL evaluates to a definite boolean over a null value, and so the only
+        // ones an attribute's declared convention can settle. Anything else — a collection macro,
+        // hasIntersection, a string match — keeps using the call-level fallback, because the
+        // declaration says nothing about what its null means there.
+        if (!EQUALITY_FAMILY.contains(operator) || operands.size() != 2) {
+            return null;
+        }
+        Operand left = operands.get(0);
+        Operand right = operands.get(1);
+        Operand variable = left;
+        Operand literal = right;
+        if (right.getNodeCase() == Operand.NodeCase.VARIABLE) {
+            variable = right;
+            literal = left;
+        }
+        if (variable.getNodeCase() != Operand.NodeCase.VARIABLE
+                || literal.getNodeCase() != Operand.NodeCase.VALUE) {
+            return null;
+        }
+        return mapper.get(variable.getVariable()) instanceof AttributeMapping.Field f
+                ? f.nullAttributeRepresentation()
+                : null;
     }
 
     private static boolean carriesNull(Operand operand) {
@@ -626,6 +680,55 @@ public final class SpringDataQueryPlanAdapter {
                 return override.apply(cb, field, value);
             }
             return dflt.get();
+        }
+
+        /**
+         * Whether {@code cerbosVar} maps to a scalar the caller sends as an explicit null.
+         *
+         * <p>Read from the mapping rather than from the path: the same column is legitimately
+         * mapped twice under two attribute names with two conventions, so the JPA path cannot
+         * discriminate them.
+         */
+        private boolean isExplicitNull(String cerbosVar, Scope scope) {
+            return scope.resolveMapping(cerbosVar) instanceof AttributeMapping.Field f
+                    && f.nullAttributeRepresentation() == NullAttributeRepresentation.EXPLICIT;
+        }
+
+        /**
+         * An equality that can never be SQL UNKNOWN, for operands the caller sends as explicit
+         * nulls.
+         *
+         * <p>A null VALUE is what CEL holds under that convention, so {@code null == "x"} is a
+         * definite FALSE, {@code null != "x"} a definite TRUE, and two nulls are EQUAL. SQL
+         * answers UNKNOWN to all three, which excludes the row under BOTH polarities — so the
+         * NOT an enclosing negation applies has nothing definite to flip.
+         *
+         * <p>Deliberately not a null-safe equality operator. Two reasons, and the second is the
+         * load-bearing one: Hibernate would need a dialect function — and a null-safe equality is
+         * SYMMETRIC while this rewrite must not be. When only ONE side declares the convention,
+         * the other side's NULL is a MISSING attribute on the check side, so CEL raises an error
+         * and denies; only the asymmetric expansion below keeps propagating UNKNOWN for it. A
+         * null-safe operator would match the two NULLs and over-grant.
+         */
+        private Predicate definiteEquality(String op,
+                                           jakarta.persistence.criteria.Expression<?> left,
+                                           jakarta.persistence.criteria.Expression<?> right,
+                                           boolean leftExplicit, boolean rightExplicit) {
+            List<Predicate> present = new ArrayList<>();
+            if (leftExplicit) {
+                present.add(cb.isNotNull(left));
+            }
+            if (rightExplicit) {
+                present.add(cb.isNotNull(right));
+            }
+            present.add(cb.equal(left, right));
+            Predicate equality = cb.and(present.toArray(new Predicate[0]));
+            if (leftExplicit && rightExplicit) {
+                equality = cb.or(cb.and(cb.isNull(left), cb.isNull(right)), equality);
+            }
+            // The junction barrier matters: cb.not(cb.not(p)) collapses in Hibernate, and this
+            // predicate is frequently built under an enclosing negation.
+            return "ne".equals(op) ? cb.not(cb.and(equality)) : equality;
         }
 
         @SuppressWarnings({"rawtypes", "unchecked"})
@@ -1205,6 +1308,16 @@ public final class SpringDataQueryPlanAdapter {
                     });
                 }
 
+                // An attribute the caller sends as an explicit null holds a null VALUE in CEL,
+                // so equality against a non-null operand is definite. An operator the caller
+                // overrode is left to the override: replacing it would make this declaration
+                // silently discard the caller's own translation (#308).
+                if (("eq".equals(op) || "ne".equals(op))
+                        && overrides.get(op) == null
+                        && isExplicitNull(field.variable(), scope)) {
+                    return definiteEquality(op, path, cb.literal(value), true, false);
+                }
+
                 return applyLeaf(op, path, value);
             }
 
@@ -1479,6 +1592,27 @@ public final class SpringDataQueryPlanAdapter {
                                                      Scope scope) {
                 jakarta.persistence.criteria.Expression<?> left = scope.resolvePath(leftVar);
                 jakarta.persistence.criteria.Expression<?> right = scope.resolvePath(rightVar);
+                boolean leftExplicit = isExplicitNull(leftVar, scope);
+                boolean rightExplicit = isExplicitNull(rightVar, scope);
+                // Mixing the two conventions across one comparison has no faithful rendering.
+                // The declared side needs a definite answer for its NULL (CEL holds a null
+                // VALUE); the undeclared side needs UNKNOWN for its NULL (a missing attribute,
+                // which CEL denies under both polarities). A definite predicate returns rows the
+                // PDP refuses; a plain one drops rows the PDP allows. Refuse it rather than pick
+                // a direction — declare both attributes, or neither.
+                if (("eq".equals(op) || "ne".equals(op)) && leftExplicit != rightExplicit) {
+                    throw new IllegalArgumentException(
+                            "Cannot translate `" + op + "` between two columns under mixed null"
+                                    + " conventions: cannot compare an attribute declared"
+                                    + " explicit-null with one on the omitted convention: the"
+                                    + " omitted side is UNKNOWN for a NULL column while the"
+                                    + " declared side is definite, and no single predicate is"
+                                    + " both. Declare the convention on both mappings, or on"
+                                    + " neither.");
+                }
+                if (("eq".equals(op) || "ne".equals(op)) && leftExplicit && rightExplicit) {
+                    return definiteEquality(op, left, right, leftExplicit, rightExplicit);
+                }
                 return switch (op) {
                     case "eq", "ne", "lt", "gt", "le", "ge" -> comparePredicate(op, left, right);
                     case "contains" -> fieldToFieldLike(left, right, true, true);
@@ -2335,7 +2469,17 @@ public final class SpringDataQueryPlanAdapter {
                     if (list.isEmpty()) {
                         return cb.disjunction();
                     }
-                    return scalarInWithNullElements(path, list);
+                    Predicate membership = scalarInWithNullElements(path, list);
+                    // Without a null element nothing has made the membership definite yet:
+                    // `NOT (col IN (…))` over a NULL column is UNKNOWN and drops the row, while
+                    // CEL compares a null VALUE against each element and gets a definite false.
+                    // With a null element `scalarInWithNullElements` already adds the IS NULL
+                    // disjunct, which settles it (#308).
+                    if (list.stream().noneMatch(Objects::isNull)
+                            && isExplicitNull(var, scope)) {
+                        return cb.and(cb.isNotNull(path), membership);
+                    }
+                    return membership;
                 }
                 // Scalar membership over a Field mapping is equality — and equality against
                 // the null constant is IS NULL, mirroring the eq-null leaf translation.

@@ -140,6 +140,60 @@ Because the oracle for these actions is empty by construction, they must **not**
 degeneracy guard below — that guard asserts a non-empty, non-total oracle, which is exactly what
 this shape cannot have.
 
+#### The other side of the same option: an explicit null against a non-null constant
+
+`null-eq` and friends compare the explicit-null attribute only **against null**, where SQL's
+`IS NULL` and CEL's null-valued comparison agree. Against a non-null constant they do not. CEL holds
+a null *value* under that convention, so `null != "x"` is TRUE and `null == "x"` is FALSE — both
+definite — while SQL answers UNKNOWN, which excludes the row under **both** polarities. Every
+SQL-backed adapter therefore returned fewer rows than the PDP allows
+(cerbos/query-plan-adapters#308). `optional-ne` does not reach it: it is the only other comparison
+against a non-null constant and it uses `aOptionalString`, the omitted-convention attribute, where
+UNKNOWN and a missing-attribute error agree.
+
+The direction is safe — narrower than the decision, never wider — but the id sets do not match,
+which is what this corpus exists to enforce. Five actions pin it: `null-value-ne-const`,
+`null-value-not-eq-const`, `null-value-not-in-const`, `null-value-f2f` and
+`null-value-pv-not-exists`.
+
+**A call-level option cannot fix it, which is why the convention is now declared per attribute**
+(see [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md)). This suite
+deliberately maps the same column twice — `owner` sends an explicit null, `aOptionalString` sends
+nothing — because real applications do. Told `explicit`, an adapter has to make `optional-ne` return
+the NULL rows and breaks it; told `omitted`, it already refuses the null-comparison shapes. Each
+adapter's mapper therefore carries a per-attribute declaration, and the call-level
+`nullAttributeRepresentation` is its default. Declaring nothing means "treat this column as NOT
+NULL", which is the historical rendering, so the fix is opt-in per column rather than a silent
+rewrite of every nullable comparison.
+
+The declaration changes only the **equality family** — `eq`, `ne`, `in`. Those are the operators CEL
+evaluates to a definite boolean over a null value, so they are the only ones whose SQL has to be
+definite too. `lt`/`le`/`gt`/`ge` and the string operators raise a no-overload error on a null
+receiver, which denies under both polarities exactly as UNKNOWN does; making them definite would
+break them.
+
+`coOwner` is the second explicit-null attribute the corpus carries, added for `null-value-f2f`. It
+aliases the **`scope`** column rather than `aOptionalString`, because comparing a column with itself
+is TRUE for all 20 seeds and the degeneracy guard forbids a total oracle. Against `scope` the only
+row where both sides are NULL is `e1`, so the oracle is exactly one row — thin, but non-degenerate,
+and it is precisely the row the naive translation loses.
+
+What each adapter does with the declaration differs, and the split is the point:
+
+- **prisma, drizzle, sqlalchemy, spring-data, ent, pgx** translate it. All five actions are
+  oracle-compared.
+- **mongoose, convex** need no declaration: they store the value the caller sent, so a stored null
+  already compares as a null value exactly as CEL does. All five were aligned before the change.
+  (Mongoose refuses `null-value-pv-not-exists` for an unrelated, pre-existing reason — the
+  value-list fold puts a collection macro under a negation.)
+- **langchain-chromadb** refuses all five: its metadata model has no null, so `$ne`/`$nin` match
+  documents missing the key.
+- **elasticsearch-java** takes the declaration in order to **refuse**. It already carried the right
+  message — "cannot distinguish an explicit null value from a missing field without an indexed
+  null-value sentinel" — but the guard keyed off a null *literal* in the plan, so it never fired for
+  these shapes. Every Query DSL spelling of `!= "x"` either requires the field to exist (dropping
+  the row) or matches every document missing it, and neither is the decision.
+
 #### The absent to-one parent
 
 The other representation mismatch the corpus pins is a *path* that is absent rather than a value

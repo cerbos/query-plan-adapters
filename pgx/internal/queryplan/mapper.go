@@ -121,6 +121,39 @@ const (
 	ValueTimestamp
 )
 
+// NullConvention declares, for one attribute, that its column can be SQL NULL and how the caller
+// represents that NULL in the attributes it sends to check().
+//
+// It is per attribute rather than per call because one policy suite can legitimately mix the two
+// conventions — the same column can be mapped twice, sent as an explicit null under one attribute
+// name and omitted under another. Options.NullRepresentation cannot express that, which is what
+// made https://github.com/cerbos/query-plan-adapters/issues/308 unfixable with the call-level
+// option alone.
+//
+// The zero value declares nothing, which is why this is a separate type from NullRepresentation
+// rather than a reuse of it: NullExplicit is NullRepresentation's zero value, and an Entry that
+// declared a convention merely by existing would change the SQL emitted for every mapped column.
+type NullConvention uint8
+
+const (
+	// NullConventionUnset declares nothing. The column is treated as NOT NULL when rendering a
+	// comparison — the historical translation — and Options.NullRepresentation still governs
+	// whether a null comparison operand is rejected.
+	NullConventionUnset NullConvention = iota
+	// NullConventionExplicit means a NULL column is sent as an explicit null attribute, so CEL
+	// holds a null VALUE: `null != "x"` is TRUE and `null == "x"` is FALSE, both definite. SQL's
+	// UNKNOWN excludes the row under BOTH polarities, so the equality family (eq, ne, in) is
+	// rendered so it can never be UNKNOWN. Ordering and string operators are left alone: they
+	// raise a no-overload error on a null receiver in CEL, which denies exactly as UNKNOWN does.
+	NullConventionExplicit
+	// NullConventionOmitted means a NULL column sends no attribute, so CEL raises a
+	// missing-attribute error and check() denies. UNKNOWN already excludes the row under both
+	// polarities, so the rendering is unchanged; what the declaration adds is the same
+	// null-operand rejection Options.NullRepresentation = NullOmitted performs, scoped to this
+	// attribute.
+	NullConventionOmitted
+)
+
 // Entry is what a plan variable resolves to.
 type Entry struct {
 	// Relation is set when the attribute reaches another table, and Column is empty.
@@ -133,6 +166,8 @@ type Entry struct {
 	Qualifier string
 	// ValueType marks a column whose stored representation needs special handling.
 	ValueType ValueType
+	// NullConvention declares this column's NULL representation. See NullConvention.
+	NullConvention NullConvention
 }
 
 // Mapper resolves a plan variable — the full reference as the planner emits it, e.g.

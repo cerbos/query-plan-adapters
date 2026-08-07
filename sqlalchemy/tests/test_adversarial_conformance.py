@@ -248,6 +248,15 @@ DEGENERACY_GUARD_ACTIONS = (
     "pv-all",
     "null-eq",
     "null-ne",
+    # The explicit-null convention against a non-null operand (#308). All five are
+    # compared rather than raised, because the attribute map declares the convention
+    # per attribute; every one of them under-granted by exactly the NULL-column rows
+    # before that declaration existed.
+    "null-value-ne-const",
+    "null-value-not-eq-const",
+    "null-value-not-in-const",
+    "null-value-f2f",
+    "null-value-pv-not-exists",
     # The absent to-one parent (#309/#315/#316/#333/#334).
     "w1-all-chain",
     "w1-not-exists-chain",
@@ -668,6 +677,16 @@ OPERATOR_OVERRIDES = {
     "in": _in_fn,
 }
 
+# `owner` and `coOwner` alias columns that `aOptionalString` and `scope` also map,
+# under the OTHER null convention: the oracle sends a real null attribute for them
+# rather than omitting it. Declaring that here is what makes the equality family
+# definite for these two attributes and leaves it untouched for every other
+# mapping (cerbos/query-plan-adapters#308).
+ATTRIBUTE_NULL_REPRESENTATION = {
+    "request.resource.attr.owner": "explicit",
+    "request.resource.attr.coOwner": "explicit",
+}
+
 ATTR_MAP = {
     "request.resource.attr.aBool": AdvResource.a_bool,
     "request.resource.attr.aString": AdvResource.a_string,
@@ -676,6 +695,7 @@ ATTR_MAP = {
     "request.resource.attr.aOptionalString": AdvResource.a_optional_string,
     "request.resource.attr.createdBy": AdvResource.created_by,
     "request.resource.attr.owner": AdvResource.a_optional_string,
+    "request.resource.attr.coOwner": AdvResource.scope,
     "request.resource.attr.scope": AdvResource.scope,
     "request.resource.attr.createdAt": AdvResource.created_at,
     # obj.inner is not a real nested column — mirrors aString, the same trick
@@ -830,6 +850,11 @@ def _check_resource(seed: Dict[str, Any]) -> Resource:
         # These two attributes deliberately use EXPLICIT nulls. Unlike the
         # optional field above, CEL membership distinguishes null from missing.
         "owner": seed["aOptionalString"],
+        # `coOwner` is the explicit-null alias of the `scope` column, the second
+        # half of `null-value-f2f`: `scope` itself is omitted when NULL (below),
+        # so the corpus carries the same column under both conventions and the
+        # field-to-field probe has two explicit nulls to compare.
+        "coOwner": _scope_for(seed),
         "tagNames": [tag["name"] for tag in seed["tags"]],
         "categories": [
             {
@@ -902,6 +927,7 @@ def _adapter_filtered_ids(
     conn,
     action: str,
     null_attribute_representation: str = "explicit",
+    attribute_null_representation=ATTRIBUTE_NULL_REPRESENTATION,
 ) -> Set[str]:
     plan = client.plan_resources(action, _principal(), ResourceDesc(RESOURCE_KIND))
     query = get_query(
@@ -910,6 +936,7 @@ def _adapter_filtered_ids(
         ATTR_MAP,
         operator_override_fns=OPERATOR_OVERRIDES,
         null_attribute_representation=null_attribute_representation,
+        attribute_null_representation=attribute_null_representation,
     )
     return {row.id for row in conn.execute(query).fetchall()}
 
@@ -945,11 +972,11 @@ class TestAdversarialConformance:
 
         # Deliberate tripwires: a corpus edit must bump these in the same
         # change, so a new hostile action cannot join (or vanish) silently.
-        assert len(MANIFEST_ACTIONS) == 146
+        assert len(MANIFEST_ACTIONS) == 152
         assert len(SEEDS) == 20
         # Each of these carries a pinned message, so a shape gained or lost has
         # to be re-triaged here rather than joining the throw suite unnoticed.
-        assert len(THROWING_ACTIONS) == 12
+        assert len(THROWING_ACTIONS) == 13
         assert misclassified == []
         assert SQLALCHEMY_SUPPORTED_EXPECTED <= {
             u["action"] for u in ACTIONS_FILE["expectedUnsupported"]
@@ -987,6 +1014,10 @@ class TestAdversarialConformance:
                 ATTR_MAP,
                 operator_override_fns=OPERATOR_OVERRIDES,
                 null_attribute_representation="explicit",
+                # The per-attribute declarations belong here too: a shape whose
+                # refusal depends on them (null-value-f2f-mixed) would otherwise
+                # translate cleanly and read as a missing throw.
+                attribute_null_representation=ATTRIBUTE_NULL_REPRESENTATION,
             )
 
     # #302. `null-eq-missing` probes `aOptionalString == null`, and
@@ -1018,6 +1049,33 @@ class TestAdversarialConformance:
     # its value list, and an allowlist of eq/ne/in silently misses it. Enumerating the
     # corpus rather than naming shapes means a newly added action carrying a null
     # constant is covered automatically.
+    # #308. The per-attribute declaration overrides the call-level option, which is
+    # the property that makes a suite mixing both conventions expressible at all.
+    # Asserted in both directions against the SAME action and the SAME call-level
+    # option, varying only whether the attribute map declares the convention -- so a
+    # declaration that did nothing would show up here as the two runs agreeing. It
+    # also proves the completeness guard below is not quietly running against the
+    # same declarations.
+    def test_attribute_declaration_overrides_the_call_level_representation(
+        self, adv_cerbos_client, adv_conn
+    ):
+        # `owner` declares "explicit", so the call-level "omitted" does not reach it.
+        assert _adapter_filtered_ids(
+            adv_cerbos_client,
+            adv_conn,
+            "null-eq",
+            null_attribute_representation="omitted",
+        ) == _oracle_allowed_ids(adv_cerbos_client, "null-eq")
+
+        with pytest.raises(ValueError, match="null operand"):
+            _adapter_filtered_ids(
+                adv_cerbos_client,
+                adv_conn,
+                "null-eq",
+                null_attribute_representation="omitted",
+                attribute_null_representation=None,
+            )
+
     def test_every_null_carrying_action_is_rejected_under_omitted(
         self, adv_cerbos_client, adv_conn
     ):
@@ -1046,6 +1104,7 @@ class TestAdversarialConformance:
                     adv_conn,
                     action,
                     null_attribute_representation="omitted",
+                    attribute_null_representation=None,
                 )
                 not_rejected.append(action)
             except Exception as exc:  # noqa: BLE001 - triaged below

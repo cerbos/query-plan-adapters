@@ -42,6 +42,9 @@ type (
 	MapperFunc = queryplan.MapperFunc
 	// NullRepresentation declares the caller's NULL-attribute convention.
 	NullRepresentation = queryplan.NullRepresentation
+	// NullConvention declares one attribute's NULL representation, overriding
+	// NullRepresentation for that attribute.
+	NullConvention = queryplan.NullConvention
 )
 
 // Value types.
@@ -72,6 +75,24 @@ const (
 	// NullOmitted — a NULL column sends no attribute, so CEL raises a missing-attribute error
 	// (a deny) and a NULL-selecting filter would over-grant. Null operands are rejected.
 	NullOmitted = queryplan.NullOmitted
+)
+
+// Per-attribute NULL conventions, set on Entry.NullConvention.
+//
+// One policy suite can legitimately mix the two — the same column mapped twice, sent as an
+// explicit null under one attribute name and omitted under another — which the call-level
+// NullRepresentation cannot express. See
+// https://github.com/cerbos/query-plan-adapters/issues/308.
+const (
+	// NullConventionUnset declares nothing: the column is treated as NOT NULL when rendering a
+	// comparison, and NullRepresentation still governs null-operand rejection.
+	NullConventionUnset = queryplan.NullConventionUnset
+	// NullConventionExplicit — this column's NULL is sent as an explicit null attribute, so the
+	// equality family renders definitely and a negation includes the NULL rows CEL allows.
+	NullConventionExplicit = queryplan.NullConventionExplicit
+	// NullConventionOmitted — this column's NULL sends no attribute, so null operands against it
+	// are rejected whatever NullRepresentation says.
+	NullConventionOmitted = queryplan.NullConventionOmitted
 )
 
 // PlanKind mirrors the plan's filter kind.

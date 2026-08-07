@@ -47,7 +47,9 @@
     "in-null-elem-only", "in-null-elem-only-neg",
     "in-null-elem-rel", "in-null-elem-rel-neg", "in-null-elem-hasint",
     "in-var-var", "in-var-var-neg",
-    "null-eq", "null-ne", "vf-null-ne", "null-not-eq"
+    "null-eq", "null-ne", "vf-null-ne", "null-not-eq",
+    "null-value-ne-const", "null-value-not-eq-const", "null-value-not-in-const",
+    "null-value-f2f", "null-value-pv-not-exists"
   ],
   "adapterUnsupported": {
     "spring-data": [
@@ -111,6 +113,7 @@
     "mongoose": [
       { "action": "exists-one-multi", "reason": "exactly-one collection cardinality is not expressible by the current match-filter translator", "message": "exists_one requires exact match cardinality and is unsupported" },
       { "action": "n-not-exists-one-null", "reason": "The negation over a collection macro whose elements are nullable is rejected first, for the same three-valued reason as not-exists: a $nor would turn a CEL element error into a match. The exists_one cardinality of exists-one-multi is inexpressible underneath it either way", "message": "not over nullable fields or collection macros cannot preserve Cerbos error semantics" },
+      { "action": "null-value-pv-not-exists", "reason": "The value-list fold produces a collection macro under a negation, which Mongoose refuses before it ever reaches the comparison leaves: $nor over an exists would turn a CEL element error into a match. The explicit-null convention this action probes is expressible in Mongoose (its four siblings are oracle-compared) — the negated macro above it is not", "message": "not over nullable fields or collection macros cannot preserve Cerbos error semantics" },
       { "action": "lambda-field-to-field", "reason": "MongoDB $expr cannot be safely scoped inside the adapter's $elemMatch predicates", "message": "eq aggregation expressions inside collection predicates are unsupported" },
       { "action": "outer-attr-depth2", "reason": "outer resource references inside nested element predicates require aggregation pipeline scoping", "message": "Outer reference request.resource.attr.aBool inside a collection predicate is unsupported" },
       { "action": "p-arith-in-lambda", "reason": "MongoDB rejects $expr below the top level of a query ('$expr can only be applied to the top-level document'), and field arithmetic exists only as an aggregation expression inside $expr; the per-element scope this needs comes from $elemMatch, so no find filter is both element-scoped and expression-valued. It would take an aggregation pipeline ($map/$filter plus $anyElementTrue), which a Mongoose Query filter is not", "message": "gt aggregation expressions inside collection predicates are unsupported" },
@@ -268,7 +271,12 @@
       { "action": "null-eq", "reason": "Chroma $eq accepts only a finite number, string or boolean literal, and Chroma metadata has no null value, so an equality against null cannot be represented", "message": "eq requires a finite number, string, or boolean literal" },
       { "action": "null-ne", "reason": "Chroma $ne matches records whose metadata key is absent, unlike Cerbos missing-attribute error semantics, and this field is not declared required", "message": "ne is unsafe for optional Chroma metadata because missing fields match the filter" },
       { "action": "vf-null-ne", "reason": "Value-first form of null-ne; the same $ne absent-key mismatch applies after the planner mirrors the operands", "message": "ne is unsafe for optional Chroma metadata because missing fields match the filter" },
-      { "action": "null-not-eq", "reason": "Negating the null equality routes through the same $ne absent-key mismatch as null-ne", "message": "ne is unsafe for optional Chroma metadata because missing fields match the filter" }
+      { "action": "null-not-eq", "reason": "Negating the null equality routes through the same $ne absent-key mismatch as null-ne", "message": "ne is unsafe for optional Chroma metadata because missing fields match the filter" },
+      { "action": "null-value-ne-const", "reason": "Chroma $ne matches records whose metadata key is absent, and `owner` is stored as absent for a NULL column because Chroma metadata has no null value. The explicit-null convention this action probes therefore cannot even be represented in the store, let alone compared", "message": "ne is unsafe for optional Chroma metadata because missing fields match the filter" },
+      { "action": "null-value-not-eq-const", "reason": "The negated-equality spelling lowers to the same $ne absent-key mismatch as null-value-ne-const", "message": "ne is unsafe for optional Chroma metadata because missing fields match the filter" },
+      { "action": "null-value-not-in-const", "reason": "The negated membership lowers to $nin, which matches records whose metadata key is absent for the same reason $ne does", "message": "nin is unsafe for optional Chroma metadata because missing fields match the filter" },
+      { "action": "null-value-f2f", "reason": "Chroma Where documents compare a metadata field against a literal only, so the field-to-field operand is rejected before the null convention on either side is reached — the same limitation as field-to-field", "message": "Variable-to-variable comparisons are not supported by ChromaDB filters" },
+      { "action": "null-value-pv-not-exists", "reason": "The value-list fold puts a collection macro under a negation, and Chroma has no negation for `exists` — the macro is refused before the comparison leaves it folds into are reached, the same limitation as pv-exists reaches from the positive side", "message": "Cannot negate operator exists" }
     ],
     "convex": [
       { "action": "cr-div-neg-zero", "reason": "IEEE keeps the sign of a zero, and the planner does ship it (the wire operand for -0.0 is `-0`), but a query plan is JSON-encoded on its way into a Convex function and JSON.stringify(-0) is \"0\" — the sign bit is gone before the adapter sees it, so it rejects a constant zero denominator rather than guess which infinity CEL produced", "message": "division by a constant zero whose sign is indeterminate: a query plan is JSON-encoded on its way into a Convex function and JSON has no -0, so the adapter cannot tell +Infinity from -Infinity" },
@@ -369,11 +377,17 @@
       { "action": "w1-not-size-chain", "reason": "Same missing-versus-empty ambiguity as w1-size-zero-chain, reached through the negated positive-count spelling rather than the direct zero-count one", "message": "size(request.resource.attr.mainCategory.subCategories) emptiness cannot distinguish a missing collection from an empty collection in Elasticsearch" },
       { "action": "w1-ternary-chain-cond", "reason": "Same missing conditional-value expression as ternary-bare: the Query DSL has no CEL-ternary equivalent without scripts, so the conditional is rejected at the top of the filter before its chained condition is examined", "message": "if requires exactly 2 operands, got 3" },
       { "action": "w1-size-frac-chain", "reason": "Same arbitrary-count-threshold limitation as w1-size-nonneg-chain, reached through a fractional threshold: >= 1.5 rounds up to >= 2, and the Query DSL expresses only emptiness over nested collections", "message": "Unsupported size comparison: size(request.resource.attr.mainCategory.subCategories) ge 1.5. Only emptiness checks (size > 0, size == 0) are supported." },
-      { "action": "w1-size-frac-le-chain", "reason": "Same arbitrary-count-threshold limitation as w1-size-frac-chain under the opposite ordering: <= 1.5 rounds down to <= 1, still not an emptiness check", "message": "Unsupported size comparison: size(request.resource.attr.mainCategory.subCategories) le 1.5. Only emptiness checks (size > 0, size == 0) are supported." }
+      { "action": "w1-size-frac-le-chain", "reason": "Same arbitrary-count-threshold limitation as w1-size-frac-chain under the opposite ordering: <= 1.5 rounds down to <= 1, still not an emptiness check", "message": "Unsupported size comparison: size(request.resource.attr.mainCategory.subCategories) le 1.5. Only emptiness checks (size > 0, size == 0) are supported." },
+      { "action": "null-value-ne-const", "reason": "Elasticsearch does not index a JSON null, so an explicitly-null value and a missing field are the same document to every query the DSL can express. Under the explicit convention CEL holds a null VALUE and allows the row, while every Elasticsearch spelling of `!= \"x\"` either requires the field to exist (dropping it) or matches every document missing the field. Neither is the decision, so the comparison is refused rather than answered narrowly", "message": "Elasticsearch cannot distinguish an explicit null value from a missing field without an indexed null-value sentinel" },
+      { "action": "null-value-not-eq-const", "reason": "The negated-equality spelling reaches the same unrepresentable convention as null-value-ne-const", "message": "Elasticsearch cannot distinguish an explicit null value from a missing field without an indexed null-value sentinel" },
+      { "action": "null-value-not-in-const", "reason": "The negated membership reaches the same unrepresentable convention as null-value-ne-const", "message": "Elasticsearch cannot distinguish an explicit null value from a missing field without an indexed null-value sentinel" },
+      { "action": "null-value-pv-not-exists", "reason": "The value-list fold turns the macro into a chain of equalities against the explicit-null attribute, each of which reaches the same unrepresentable convention as null-value-ne-const", "message": "Elasticsearch cannot distinguish an explicit null value from a missing field without an indexed null-value sentinel" },
+      { "action": "null-value-f2f", "reason": "Elasticsearch Query DSL compares a field against a literal only, so the field-to-field operand is rejected before either side's null convention is reached — the same limitation as field-to-field", "message": "Elasticsearch Query DSL cannot compare two document fields without scripts" }
     ]
   },
   "adapterSupportedExpected": {
     "mongoose": [
+      { "action": "null-value-f2f-mixed", "reason": "Mongoose stores the value the caller sent, so a stored null compares as a null VALUE and a stored-null field is distinguishable from an absent one. The mixed conventions the SQL adapters cannot render in one predicate are both directly representable here: `nullable: true` on the omitted-side mapping makes its null behave as a missing attribute while the declared side keeps comparing as a value" },
       { "action": "p-matches", "reason": "MongoDB query filters natively support regular expressions" },
       { "action": "p-index", "reason": "MongoDB aggregation expressions support $arrayElemAt and $getField" },
       { "action": "p-timestamp", "reason": "MongoDB aggregation expressions can safely convert valid RFC 3339 strings to dates" }
@@ -383,6 +397,7 @@
       { "action": "p-timestamp", "reason": "The whole-second timestamp probe is millisecond-exact and maps safely to an Elasticsearch date-field range query" }
     ],
     "convex": [
+      { "action": "null-value-f2f-mixed", "reason": "Convex stores the value the caller sent, so a stored null compares as a null VALUE and a stored-null field is distinguishable from an absent one. The mixed conventions the SQL adapters cannot render in one predicate are both directly representable here" },
       { "action": "p-index", "reason": "Convex queries can apply the adapter's explicit post-filter for list indexing" },
       { "action": "p-matches", "reason": "Convex queries can apply the adapter's explicit post-filter for regular-expression matching" },
       { "action": "p-timestamp", "reason": "Convex queries can apply the adapter's explicit post-filter for timestamp comparisons" },
@@ -392,6 +407,21 @@
     ]
   },
   "expectedUnsupported": [
+    {
+      "action": "null-value-f2f-mixed",
+      "shape": "field-to-field equality where one side declares the explicit-null convention and the other does not",
+      "reason": "The declared side needs a definite answer for its NULL — CEL holds a null VALUE there. The undeclared side needs UNKNOWN for its NULL — that is a missing attribute, which CEL denies under BOTH polarities. A definite predicate returns rows the PDP refuses (e1, both columns NULL); a plain one drops rows the PDP allows (a2/a4/a8/c2). No single predicate is both, so every adapter refuses the shape rather than picking a direction. Declaring the convention on both attributes, or on neither, is expressible; mixing them across one comparison is not (cerbos/query-plan-adapters#308)",
+      "messages": {
+        "prisma": "between two columns under mixed null conventions",
+        "drizzle": "between two columns under mixed null conventions",
+        "sqlalchemy": "between two columns under mixed null conventions",
+        "spring-data": "between two columns under mixed null conventions",
+        "ent": "under mixed null conventions",
+        "pgx": "under mixed null conventions",
+        "langchain-chromadb": "Variable-to-variable comparisons are not supported by ChromaDB filters",
+        "elasticsearch-java": "Elasticsearch Query DSL cannot compare two document fields without scripts"
+      }
+    },
     {
       "action": "p-timestamp",
       "shape": "timestamp() comparison over an ISO-date string column",

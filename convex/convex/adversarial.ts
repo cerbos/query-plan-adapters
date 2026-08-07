@@ -34,6 +34,7 @@ const document = {
   createdAt: v.optional(v.string()),
   scope: v.optional(v.string()),
   owner: v.union(v.string(), v.null()),
+  coOwner: v.union(v.string(), v.null()),
   tagNames: v.array(v.union(v.string(), v.null())),
   obj: v.object({ inner: v.string() }),
   tags: v.array(tag),
@@ -59,6 +60,10 @@ export const MAPPER: Record<string, MapperConfig> = {
   "request.resource.attr.createdAt": { field: "createdAt", nullable: true },
   "request.resource.attr.scope": { field: "scope", nullable: true },
   "request.resource.attr.owner": { field: "owner", nullable: true },
+  // `coOwner` is the explicit-null alias of the `scope` field, the second half of
+  // `null-value-f2f`: `scope` itself is omitted when NULL, so the corpus carries the same
+  // value under both conventions (cerbos/query-plan-adapters#308).
+  "request.resource.attr.coOwner": { field: "coOwner", nullable: true },
   "request.resource.attr.tagNames": { field: "tagNames" },
   "request.resource.attr.obj.inner": { field: "obj.inner" },
   "request.resource.attr.tags": { field: "tags" },

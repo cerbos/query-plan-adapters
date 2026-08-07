@@ -80,6 +80,10 @@ const (
 type Column struct {
 	Qualifier string
 	Name      string
+	// ExplicitNull marks a column whose NULL the caller sends to check() as an explicit null
+	// attribute, so CEL compares a null VALUE rather than raising a missing-attribute error. The
+	// equality family has to render definitely for such a column; see Entry.NullConvention.
+	ExplicitNull bool
 }
 
 // Lit is a value bound as a query parameter. A nil V renders as SQL NULL.

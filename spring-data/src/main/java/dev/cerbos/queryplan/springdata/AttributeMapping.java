@@ -57,7 +57,42 @@ public sealed interface AttributeMapping permits AttributeMapping.Field, Attribu
      * @return the scalar mapping
      */
     static Field field(String jpaPath) {
-        return new Field(jpaPath);
+        return new Field(jpaPath, null);
+    }
+
+    /**
+     * Maps an attribute to a scalar JPA path, declaring that its column can be SQL NULL and
+     * how the caller represents that NULL in the attributes it sends to {@code check()}.
+     *
+     * <p>Declaring it asserts both facts; the {@link #field(String) one-argument form} means
+     * "treat this column as NOT NULL", which is the historical rendering.
+     *
+     * <p>This is per attribute rather than per call because one policy suite can legitimately
+     * mix the two conventions — the same column can be mapped twice, sent as an explicit null
+     * under one attribute name and omitted under another. The call-level
+     * {@link NullAttributeRepresentation} cannot express that, which is what made
+     * <a href="https://github.com/cerbos/query-plan-adapters/issues/308">#308</a> unfixable
+     * with <a href="https://github.com/cerbos/query-plan-adapters/issues/302">#302</a>'s
+     * option alone.
+     *
+     * <p>Under {@link NullAttributeRepresentation#EXPLICIT} CEL holds a null VALUE, so
+     * {@code null != "x"} is TRUE and {@code null == "x"} is FALSE, both definite, while SQL
+     * answers UNKNOWN and excludes the row under BOTH polarities. The equality family
+     * ({@code eq}, {@code ne}, {@code in}) is therefore rendered so it can never be UNKNOWN.
+     * Ordering and string operators are left alone: a null receiver raises a no-overload error
+     * in CEL, which denies exactly as UNKNOWN does.
+     *
+     * <p>Under {@link NullAttributeRepresentation#OMITTED} the rendering is unchanged; what
+     * the declaration adds is the same null-operand rejection the call-level option performs,
+     * scoped to this attribute.
+     *
+     * @param jpaPath entity property name, or a dot-separated path through embeddables
+     * @param nullAttributeRepresentation how a NULL in this column reaches {@code check()}
+     * @return the scalar mapping
+     */
+    static Field field(String jpaPath, NullAttributeRepresentation nullAttributeRepresentation) {
+        return new Field(jpaPath, Objects.requireNonNull(
+                nullAttributeRepresentation, "nullAttributeRepresentation"));
     }
 
     /**
@@ -129,11 +164,19 @@ public sealed interface AttributeMapping permits AttributeMapping.Field, Attribu
     /**
      * Scalar mapping: {@code jpaPath} is an entity property name or a dot-separated
      * {@code @Embedded}/to-one path, resolved via {@code Path.get(...)} at translation time.
-     * Create via {@link #field(String)}.
+     * {@code nullAttributeRepresentation} is nullable and declares this column's NULL
+     * convention when set. Create via {@link #field(String)} or
+     * {@link #field(String, NullAttributeRepresentation)}.
      */
-    record Field(String jpaPath) implements AttributeMapping {
+    record Field(String jpaPath, NullAttributeRepresentation nullAttributeRepresentation)
+            implements AttributeMapping {
         public Field {
             Objects.requireNonNull(jpaPath, "jpaPath");
+        }
+
+        /** A mapping that declares no NULL convention — see {@link #field(String)}. */
+        public Field(String jpaPath) {
+            this(jpaPath, null);
         }
     }
 

@@ -104,7 +104,15 @@ class AdversarialConformanceTest {
             // EXPLICIT null attribute for NULL columns (aOptionalString is OMITTED instead)
             // — pinning the adapter's convention that a DB NULL is the explicitly-null
             // attribute (eq-null → IS NULL, and `x in [..., null]` → OR IS NULL).
-            Map.entry("request.resource.attr.owner", AttributeMapping.field("aOptionalString")),
+            // `owner` and `coOwner` alias columns that `aOptionalString` and `scope` also map,
+            // under the OTHER null convention: the oracle sends a real null attribute for them
+            // rather than omitting it. Declaring that here is what makes the equality family
+            // definite for these two attributes and leaves it untouched for every other
+            // mapping (cerbos/query-plan-adapters#308).
+            Map.entry("request.resource.attr.owner",
+                    AttributeMapping.field("aOptionalString", NullAttributeRepresentation.EXPLICIT)),
+            Map.entry("request.resource.attr.coOwner",
+                    AttributeMapping.field("scope", NullAttributeRepresentation.EXPLICIT)),
             // Scalar projection of tags (defaultMemberField=name) for `null in R.attr.tagNames`;
             // NULL name columns become explicit null list elements on the check side.
             Map.entry("request.resource.attr.tagNames", AttributeMapping.relation("tags", "name")),
@@ -137,6 +145,24 @@ class AdversarialConformanceTest {
                     "subNames", AttributeMapping.relation("subCategories", "name")
             )))
     );
+
+    /**
+     * The same mapping with every per-attribute null convention stripped, so the call-level
+     * option is the only thing governing null operands.
+     *
+     * <p>The #302 completeness guard is a statement about that option: every corpus action
+     * carrying a null literal must be rejected under OMITTED. Declaring {@code owner}/
+     * {@code coOwner} as explicit-null (#308) deliberately overrides the option for those two
+     * attributes — which would otherwise read as the guard going quiet, when in fact it is the
+     * per-attribute declaration doing exactly its job. Stripping the declarations keeps the
+     * guard testing what it was written to test.
+     */
+    private static final Map<String, AttributeMapping> MAPPING_WITHOUT_NULL_CONVENTIONS =
+            MAPPING.entrySet().stream().collect(java.util.stream.Collectors.toUnmodifiableMap(
+                    Map.Entry::getKey,
+                    e -> e.getValue() instanceof AttributeMapping.Field f
+                            ? AttributeMapping.field(f.jpaPath())
+                            : e.getValue()));
 
     // -- shared corpus (../conformance/): policy, seed data, and action list are read from disk
     // rather than duplicated here. See conformance/README.md for the recipe these implement.
@@ -671,6 +697,13 @@ class AdversarialConformanceTest {
         r = r.withAttribute("owner", s.aOptionalString() != null
                 ? AttributeValue.stringValue(s.aOptionalString())
                 : nullAttributeValue());
+        // `coOwner` is the explicit-null alias of the `scope` column, the second half of
+        // `null-value-f2f`: `scope` itself is omitted when NULL (below), so the corpus carries
+        // the same column under both conventions and the field-to-field probe has two explicit
+        // nulls to compare.
+        r = r.withAttribute("coOwner", scopeFor(s) != null
+                ? AttributeValue.stringValue(scopeFor(s))
+                : nullAttributeValue());
         // tagNames: the scalar name projection of tags, with NULL name columns as explicit
         // null elements — the representation under which `null in R.attr.tagNames` is TRUE
         // exactly when a related row's member column IS NULL.
@@ -761,11 +794,17 @@ class AdversarialConformanceTest {
 
     private static List<String> adapterFilteredIds(
             String action, NullAttributeRepresentation representation) {
+        return adapterFilteredIds(action, representation, MAPPING);
+    }
+
+    private static List<String> adapterFilteredIds(
+            String action, NullAttributeRepresentation representation,
+            Map<String, AttributeMapping> mapping) {
         PlanResourcesResult plan = client.plan(
                 principal(), Resource.newInstance(seedsFile.resourceKind()), action);
         Specification<ResourceEntity> spec =
                 SpringDataQueryPlanAdapter.toSpecification(
-                        plan, MAPPING, Map.of(), representation);
+                        plan, mapping, Map.of(), representation);
 
         EntityManager em = emf.createEntityManager();
         try {
@@ -848,6 +887,28 @@ class AdversarialConformanceTest {
     }
 
     /**
+     * #308. The per-attribute declaration overrides the call-level option, which is the
+     * property that makes a suite mixing both conventions expressible at all. Asserted in both
+     * directions against the SAME action and the SAME call-level option, varying only whether
+     * the mapping declares the convention — so a declaration that did nothing would show up here
+     * as the two runs agreeing. It also proves the completeness guard below is not quietly
+     * running against the same mapping.
+     */
+    @Test
+    void perAttributeDeclarationOverridesTheCallLevelRepresentation() {
+        // `owner` declares EXPLICIT, so the call-level OMITTED does not reach it.
+        assertEquals(oracleAllowedIds("null-eq"),
+                adapterFilteredIds("null-eq", NullAttributeRepresentation.OMITTED));
+
+        // Strip the declaration and the same action under the same option is rejected — so the
+        // stripped mapping the completeness guard uses is not quietly equivalent to MAPPING.
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> adapterFilteredIds("null-eq", NullAttributeRepresentation.OMITTED,
+                        MAPPING_WITHOUT_NULL_CONVENTIONS));
+        assertTrue(ex.getMessage().contains("null operand"), ex.getMessage());
+    }
+
+    /**
      * #302 completeness guard. The rejection must key off the null OPERAND, not off a list of
      * operators: {@code hasIntersection(tagNames, ["public", null])} carries one in its value
      * list, and an allowlist of eq/ne/in silently misses it. Enumerating the corpus rather than
@@ -875,7 +936,8 @@ class AdversarialConformanceTest {
         List<String> notRejected = new ArrayList<>();
         for (String action : nullCarrying) {
             try {
-                adapterFilteredIds(action, NullAttributeRepresentation.OMITTED);
+                adapterFilteredIds(action, NullAttributeRepresentation.OMITTED,
+                        MAPPING_WITHOUT_NULL_CONVENTIONS);
                 notRejected.add(action);
             } catch (IllegalArgumentException expected) {
                 // The rejection must be the null-operand check talking, not an incidental
@@ -1141,14 +1203,14 @@ class AdversarialConformanceTest {
                         .filter(Boolean::booleanValue).count() != 1)
                 .toList();
 
-        assertEquals(146, manifest.size(),
+        assertEquals(152, manifest.size(),
                 "corpus size changed; triage the new action(s) before bumping this pin");
         assertEquals(20, SEEDS.size(), "seed count changed");
         // Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
         // lost has to be re-triaged here rather than joining the throw suite unnoticed. The two
         // @MethodSource streams that feed the throw cases are what resolve those messages, and
         // both fail loudly on a missing one.
-        assertEquals(10, throwing.size(), "throwing action count changed");
+        assertEquals(11, throwing.size(), "throwing action count changed");
         assertEquals(throwing.size(),
                 adapterUnsupportedActions().count() + unsupportedShapes().count(),
                 "every throwing action must reach a parameterised throw case");
@@ -1175,6 +1237,12 @@ class AdversarialConformanceTest {
      */
     private static final List<String> DEGENERACY_GUARD_ACTIONS = List.of(
             "vf-le", "like-percent", "all-on-empty", "null-eq", "null-ne",
+            // The explicit-null convention against a non-null operand (#308). All five are
+            // compared rather than thrown, because the mapper declares the convention per
+            // attribute; every one of them under-granted by exactly the NULL-column rows
+            // before that declaration existed.
+            "null-value-ne-const", "null-value-not-eq-const", "null-value-not-in-const",
+            "null-value-f2f", "null-value-pv-not-exists",
             // The absent to-one parent (#309/#315/#316/#333/#334).
             "w1-all-chain", "w1-not-exists-chain", "w1-size-nonneg-chain",
             "w1-not-in-chain", "w1-not-hasint-chain",

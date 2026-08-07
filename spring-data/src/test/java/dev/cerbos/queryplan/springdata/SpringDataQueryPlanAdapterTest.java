@@ -1315,6 +1315,125 @@ class SpringDataQueryPlanAdapterTest {
         }
     }
 
+    // -- the per-attribute NULL convention (issue #308) --
+
+    /**
+     * A call-level {@link NullAttributeRepresentation} cannot describe a policy suite that mixes
+     * both conventions — the same column mapped twice, sent as an explicit null under one
+     * attribute name and omitted under another — so the declaration lives on the mapping and the
+     * call-level option is only its default.
+     *
+     * <p>Every case here runs the query, so an assertion is about the rows the filter actually
+     * returns rather than about the Criteria tree that produced them.
+     */
+    @Nested
+    class PerAttributeNullRepresentationTest {
+
+        private final Map<String, AttributeMapping> mapper = Map.of(
+                "request.resource.attr.owner",
+                AttributeMapping.field("aOptionalString", NullAttributeRepresentation.EXPLICIT),
+                "request.resource.attr.coOwner",
+                AttributeMapping.field("aString", NullAttributeRepresentation.EXPLICIT),
+                "request.resource.attr.plain",
+                AttributeMapping.field("aOptionalString"));
+
+        private int count(Operand condition) {
+            return runCount(condition, mapper, Map.of());
+        }
+
+        private ResourceEntity nullOwner() {
+            ResourceEntity e = new ResourceEntity();
+            e.setId("null-owner");
+            e.setaOptionalString(null);
+            e.setaString(null);
+            return e;
+        }
+
+        /**
+         * A null VALUE is not equal to "x", so CEL returns a definite FALSE and its negation a
+         * definite TRUE. {@code aOptionalString <> 'x'} is UNKNOWN instead, which excludes the
+         * row under BOTH polarities — the row the PDP allows never comes back.
+         */
+        @Test
+        void neAgainstAConstantIncludesANullRow() {
+            withResource(nullOwner(), () -> assertEquals(1, count(
+                    exprOp("ne", var("request.resource.attr.owner"), sval("x")))));
+        }
+
+        @Test
+        void eqAgainstAConstantExcludesANullRow() {
+            withResource(nullOwner(), () -> assertEquals(0, count(
+                    exprOp("eq", var("request.resource.attr.owner"), sval("x")))));
+        }
+
+        /** The negated equality spelling takes the other branch and must agree with {@code ne}. */
+        @Test
+        void negatedEqAgainstAConstantIncludesANullRow() {
+            withResource(nullOwner(), () -> assertEquals(1, count(exprOp("not",
+                    exprOp("eq", var("request.resource.attr.owner"), sval("x"))))));
+        }
+
+        /**
+         * The equality family only. An ordering comparison against a null receiver is a
+         * no-overload error in CEL, which denies under both polarities — exactly what UNKNOWN
+         * already does — so it keeps propagating it.
+         */
+        @Test
+        void orderingComparisonsStayUnknown() {
+            withResource(nullOwner(), () -> assertEquals(0, count(
+                    exprOp("gt", var("request.resource.attr.owner"), sval("x")))));
+        }
+
+        @Test
+        void negatedMembershipWithoutANullElementIncludesANullRow() {
+            withResource(nullOwner(), () -> assertEquals(1, count(exprOp("not",
+                    exprOp("in", var("request.resource.attr.owner"), listOp("x", "y"))))));
+        }
+
+        /** Two explicit nulls are EQUAL in CEL, so the row must come back. */
+        @Test
+        void twoExplicitNullsMatchFieldToField() {
+            withResource(nullOwner(), () -> assertEquals(1, count(exprOp("eq",
+                    var("request.resource.attr.owner"), var("request.resource.attr.coOwner")))));
+        }
+
+        /**
+         * An attribute the mapping does not declare keeps the historical rendering, so declaring
+         * the convention for one cannot change the filter emitted for any other mapping.
+         */
+        @Test
+        void anUndeclaredAttributeIsUntouched() {
+            withResource(nullOwner(), () -> assertEquals(0, count(
+                    exprOp("ne", var("request.resource.attr.plain"), sval("x")))));
+        }
+
+        /**
+         * The declaration overrides the call-level default in both directions, which is the
+         * whole point: one call, two conventions.
+         */
+        @Test
+        void declaringOmittedRejectsANullOperandUnderTheExplicitDefault() {
+            PlanResourcesResponse resp = buildResponse(
+                    PlanResourcesFilter.Kind.KIND_CONDITIONAL,
+                    exprOp("eq", var("request.resource.attr.omitted"), nullVal()));
+            IllegalArgumentException thrown = assertThrows(IllegalArgumentException.class,
+                    () -> SpringDataQueryPlanAdapter.toSpecification(resp,
+                            Map.of("request.resource.attr.omitted", AttributeMapping.field(
+                                    "aOptionalString", NullAttributeRepresentation.OMITTED)),
+                            Map.of(), NullAttributeRepresentation.EXPLICIT));
+            assertTrue(thrown.getMessage().contains("missing-attribute error"));
+        }
+
+        @Test
+        void declaringExplicitTranslatesANullOperandUnderTheOmittedDefault() {
+            PlanResourcesResponse resp = buildResponse(
+                    PlanResourcesFilter.Kind.KIND_CONDITIONAL,
+                    exprOp("eq", var("request.resource.attr.owner"), nullVal()));
+            assertDoesNotThrow(() -> SpringDataQueryPlanAdapter.toSpecification(
+                    resp, mapper, Map.of(), NullAttributeRepresentation.OMITTED));
+        }
+    }
+
     // -- Minor operator/comparison shapes (PR #234) --
 
     @Nested

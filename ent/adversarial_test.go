@@ -342,9 +342,14 @@ func buildMapper() cerbosent.Mapper {
 		"request.resource.attr.aDouble":         {Column: "a_double"},
 		"request.resource.attr.aOptionalString": {Column: "a_optional_string"},
 		"request.resource.attr.createdBy":       {Column: "created_by"},
-		"request.resource.attr.owner":           {Column: "a_optional_string"},
-		"request.resource.attr.scope":           {Column: "scope"},
-		"request.resource.attr.createdAt":       {Column: "created_at", ValueType: cerbosent.ValueTimestamp},
+		// `owner` and `coOwner` alias columns that `aOptionalString` and `scope` also map, under
+		// the OTHER null convention: the oracle sends a real null attribute for them rather than
+		// omitting it. Declaring that here is what makes the equality family definite for these
+		// two attributes and leaves it untouched for every other mapping.
+		"request.resource.attr.owner":     {Column: "a_optional_string", NullConvention: cerbosent.NullConventionExplicit},
+		"request.resource.attr.coOwner":   {Column: "scope", NullConvention: cerbosent.NullConventionExplicit},
+		"request.resource.attr.scope":     {Column: "scope"},
+		"request.resource.attr.createdAt": {Column: "created_at", ValueType: cerbosent.ValueTimestamp},
 		// obj.inner is not a real nested column — it mirrors aString, the same trick the
 		// spring-data and prisma reference harnesses use for the p-struct probe.
 		"request.resource.attr.obj.inner": {Column: "a_string"},
@@ -568,6 +573,15 @@ func (h *harness) checkResource(seed Seed) *cerbos.Resource {
 		attr["owner"] = nil
 	}
 
+	// `coOwner` is the explicit-null alias of the `scope` column, the second half of
+	// `null-value-f2f`: `scope` itself is omitted when NULL (below), so the corpus carries the
+	// same column under both conventions and the field-to-field probe has two explicit nulls.
+	if s := h.corpus.scopeOf(seed); s != nil {
+		attr["coOwner"] = *s
+	} else {
+		attr["coOwner"] = nil
+	}
+
 	if d := h.corpus.aDouble(seed); d != nil {
 		attr["aDouble"] = *d
 	}
@@ -703,11 +717,11 @@ func runConformance(t *testing.T, h *harness) {
 		}
 		// Corpus-size tripwire: bump deliberately when the corpus grows, so a new hostile shape
 		// cannot slip past this adapter unnoticed.
-		require.Len(t, seen, 146, "corpus size changed; triage the new action(s) before bumping")
+		require.Len(t, seen, 152, "corpus size changed; triage the new action(s) before bumping")
 		require.Len(t, h.corpus.Seeds.Seeds, 20, "seed count changed")
 		// Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
 		// lost has to be re-triaged here rather than joining the throw suite unnoticed.
-		require.Len(t, h.corpus.ThrowingActions, 8, "throwing action count changed")
+		require.Len(t, h.corpus.ThrowingActions, 9, "throwing action count changed")
 	})
 
 	t.Run("oracle", func(t *testing.T) {
@@ -826,6 +840,12 @@ func runConformance(t *testing.T, h *harness) {
 			"vf-le", "in-single", "like-percent", "exists-on-empty", "not-exists",
 			"nary-and", "field-to-field", "ternary-cmp", "arith-add", "size-threshold",
 			"hier-ancestor-cf", "pv-exists", "in-null-elem-mixed", "null-eq", "cs-eq",
+			// The explicit-null convention against a non-null operand (#308). All five are
+			// compared rather than thrown, because the mapper declares the convention per
+			// attribute; every one of them under-granted by exactly the NULL-column rows
+			// before that declaration existed.
+			"null-value-ne-const", "null-value-not-eq-const", "null-value-not-in-const",
+			"null-value-f2f", "null-value-pv-not-exists",
 			"w1-all-chain", "w1-not-exists-chain", "w1-size-nonneg-chain",
 			"w1-not-in-chain", "w1-not-hasint-chain",
 			"w1-ternary-chain-cond", "w1-size-frac-le-chain",
