@@ -207,13 +207,24 @@ and use a case-sensitive (e.g. `C` or a `_cs_` ICU) collation on columns policie
 ## Development
 
 ```bash
-go test ./...          # adversarial conformance suite (needs Docker for testcontainers)
+go test -skip TestAdversarialConformance ./...   # unit suite, no Docker
+go test ./...                                    # adds the adversarial conformance suite (Docker)
 golangci-lint run ./...
 golangci-lint fmt ./...
 ```
 
-The suite starts its own PostgreSQL and Cerbos containers, reading the pinned PDP version from
-`conformance/CERBOS_VERSION`.
+The adversarial suite starts its own PostgreSQL and Cerbos containers, reading the pinned PDP
+version from `conformance/CERBOS_VERSION`.
+
+The unit suite is everything else, and needs nothing running. It covers what the corpus structurally
+cannot: malformed and hostile plans no planner emits. CI runs it as its own step before the
+container-backed one, so "these tests need no Docker" stays a checked claim.
+
+The translator under `internal/queryplan` is vendored byte-for-byte into the
+[ent module](../ent) as well, so that a consumer of either pulls in only the one.
+`conformance/scripts/validate-corpus.sh` diffs the two trees and fails on any difference: a semantic
+fix has to land in both copies. Anything genuinely per-engine belongs in `render.go`, which is
+outside the shared tree.
 
 ## License
 

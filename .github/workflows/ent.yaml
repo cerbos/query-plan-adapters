@@ -43,6 +43,15 @@ jobs:
           golangci-lint fmt ./...
           git diff --exit-code
 
+      # The unit suite covers the translator and the renderer over hand-built plans — the malformed
+      # and hostile shapes no planner emits, and the per-dialect spellings. It is run on its own
+      # first for two reasons: it fails in seconds where the container-backed suite takes minutes,
+      # and running it with the adversarial test skipped is what keeps "these tests need no Docker"
+      # a checked claim. Under `./...` a unit test that grew a container dependency would be
+      # invisible, because the suite that follows starts Docker anyway.
+      - name: Unit suite (no Docker)
+        run: go test -race -skip TestAdversarialConformance ./...
+
       # The harness starts its own Cerbos PDP with testcontainers, reading the pinned version from
       # conformance/CERBOS_VERSION — there is no separate sidecar to set up, and the version is
       # never hardcoded here. The corpus is replayed against an in-memory SQLite database and

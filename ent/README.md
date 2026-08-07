@@ -196,14 +196,30 @@ reads it: `RestrictIn` then hides every row, `RestrictNotIn` hides none.
 
 The three proved dialects are not the same test three times: SQLite stores instants as text and
 booleans as integers, PostgreSQL has real types for both, MySQL needs `CONCAT` rather than `||`
-(which it reads as logical OR outside `PIPES_AS_CONCAT`), `CHAR_LENGTH` rather than `LENGTH` (which
-counts bytes), and `TRUNCATE` before an integer cast — and each needs a different null-safe
-equality operator and different cast spellings. Running all three is what makes `WithDialect` a
-checked claim rather than an assertion.
+(which it reads as logical OR outside `PIPES_AS_CONCAT`) and `CHAR_LENGTH` rather than `LENGTH`
+(which counts bytes) — and each needs a different null-safe equality operator (`IS`, `IS NOT
+DISTINCT FROM`, `<=>`) and different cast spellings (`real`, `double precision`, `double`).
+Running all three is what makes `WithDialect` a checked claim rather than an assertion.
 
 The MySQL schema pins a **binary collation** on every string column. MySQL's default
 `utf8mb4_0900_ai_ci` is both case- and accent-insensitive, which over-grants on `cs-eq`,
 `unicode-eq` and every hierarchy prefix probe — see [Collation](#collation) below.
+
+### Identifier quoting
+
+This is about the names in your `Mapper`, not about the rows a subquery sees, so it is not one of the
+hazards above.
+
+Table, column and qualifier names are passed to Ent's `sql.Builder.Ident`, which quotes for the
+dialect in use. `Ident` treats a name that already contains the dialect's own quote character — a
+backtick on SQLite and MySQL, a double quote on PostgreSQL — as pre-quoted and writes it through
+unchanged, so a column named ``we`ird`` is emitted bare rather than escaped. **Name your columns with
+ordinary identifiers.**
+
+No plan data reaches an identifier: every value from the query plan is a bound parameter, which the
+unit suite asserts against deliberately hostile policy strings. A `Mapper` is your own code, so this
+is a naming constraint rather than an injection surface. It is written down because it is a real
+difference from the [pgx adapter](../pgx), which quotes defensively.
 
 ### Known gaps
 
@@ -241,14 +257,27 @@ the adapter cannot detect. Treat collation as part of your policy contract.
 ## Development
 
 ```bash
-go test ./...          # adversarial conformance suite (needs Docker for testcontainers)
+go test -skip TestAdversarialConformance ./...   # unit suite, no Docker
+go test ./...                                    # adds the adversarial conformance suite (Docker)
 golangci-lint run ./...
 golangci-lint fmt ./...
 ```
 
-The suite starts one Cerbos container, reading the pinned PDP version from
-`conformance/CERBOS_VERSION`, then replays the whole corpus against an in-memory SQLite database
-and a PostgreSQL testcontainer in turn.
+The adversarial suite starts one Cerbos container, reading the pinned PDP version from
+`conformance/CERBOS_VERSION`, then replays the whole corpus against an in-memory SQLite database and
+PostgreSQL and MySQL testcontainers in turn.
+
+The unit suite is everything else, and needs nothing running. It covers what the corpus structurally
+cannot: malformed and hostile plans no planner emits (a `mod` that used to panic, typed-nil oneof
+wrappers, policy data chosen to be SQL syntax), and the per-dialect spellings, where a wrong choice
+is often still valid SQL — `||` is legal MySQL, where it means logical OR. CI runs it as its own step
+before the container-backed one, so "these tests need no Docker" stays a checked claim.
+
+The translator under `internal/queryplan` is vendored byte-for-byte into the
+[pgx module](../pgx) as well, so that a consumer of either pulls in only the one.
+`conformance/scripts/validate-corpus.sh` diffs the two trees and fails on any difference: a
+semantic fix has to land in both copies. Anything genuinely per-engine belongs in `render.go`, which
+is outside the shared tree.
 
 ## License
 

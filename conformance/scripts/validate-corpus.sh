@@ -362,6 +362,38 @@ if [[ "${image_drift}" -ne 0 ]]; then
   exit 1
 fi
 
+# The two Go modules are standalone — each vendors the translator under its own
+# internal/queryplan so a consumer pulls in only the one — which means the same source exists
+# twice and a semantic fix can land in one copy alone. Nothing else notices: the corpus catches it
+# only if some action happens to exercise the fixed shape, and the hostile-plan invariants pinned
+# by the unit suites never come off a real planner wire at all
+# (cerbos/query-plan-adapters#319). So the trees are held byte-identical and diffed here, in the
+# script both adapter workflows already run — including on a change under the other adapter's
+# directory, since each workflow triggers on `conformance/**` as well as its own.
+#
+# Byte-identical rather than identical-modulo-an-allowlist on purpose: an allowlist is a place for
+# a real divergence to hide as a comment tweak. Anything genuinely per-module belongs in that
+# module's render.go, which is outside this tree.
+VENDORED_TRANSLATOR="internal/queryplan"
+
+# A tree that is not there would make the diff below pass by comparing nothing, so assert both
+# exist first — the same vacuity guard the image scan applies to a repository nothing references.
+for module in ent pgx; do
+  if [[ ! -d "${REPO_ROOT}/${module}/${VENDORED_TRANSLATOR}" ]]; then
+    echo "${module}/${VENDORED_TRANSLATOR} is missing: the sync check below would guard nothing."
+    exit 1
+  fi
+done
+
+if ! diff -ru \
+  --label "ent/${VENDORED_TRANSLATOR}" --label "pgx/${VENDORED_TRANSLATOR}" \
+  "${REPO_ROOT}/ent/${VENDORED_TRANSLATOR}" "${REPO_ROOT}/pgx/${VENDORED_TRANSLATOR}"; then
+  echo "The vendored translator trees have drifted. Both modules must carry the identical"
+  echo "${VENDORED_TRANSLATOR}: apply the change to both copies, or move whatever is genuinely"
+  echo "per-module into that module's render.go."
+  exit 1
+fi
+
 # The Go modules pin the Cerbos wire gencode (cerbos/api/genpb) separately from the PDP
 # image; a CERBOS_VERSION bump that leaves a stale genpb would silently test new planner
 # output against old generated types.

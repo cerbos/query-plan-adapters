@@ -525,6 +525,26 @@ hand, deliberately, alongside whatever re-verification the bump needs. That is t
 trade — reproducibility now, staleness to be watched for — and re-enabling Docker updates is a
 maintainer decision, not a drive-by one.
 
+#### Vendored code stays byte-identical
+
+The ent and pgx modules are standalone: each vendors the translator under its own
+`internal/queryplan` so a consumer pulls in only the one. That means the same source exists twice,
+and a semantic fix can land in one copy alone. Nothing downstream notices — the corpus catches it
+only if some action happens to exercise the fixed shape, and the hostile-plan invariants the two unit
+suites pin never come off a real planner wire at all
+([#319](https://github.com/cerbos/query-plan-adapters/issues/319)).
+
+So `validate-corpus.sh` diffs `ent/internal/queryplan` against `pgx/internal/queryplan` and fails on
+any difference. Both adapter workflows already run the script, and each triggers on `conformance/**`
+as well as its own directory, so a one-sided edit fails whichever side it lands on. **Byte-identical,
+not identical-modulo-an-allowlist**: an allowlist is a place for a real divergence to hide as a
+comment tweak, so anything genuinely per-engine goes in that module's `render.go`, which is outside
+the shared tree.
+
+Two copies of the same code also need two copies of the same proof, which is why
+`ent/translate_test.go` and `pgx/translate_test.go` share their test names, section order and shapes.
+Keep them in step when you add an invariant to either.
+
 8. **Document the contract** in the adapter's README with a `Conformance contract` table
    (oracle-tested / fail-closed / known divergence counts). Each adapter is published
    independently, so its README must stand alone — a consumer should not need this monorepo to

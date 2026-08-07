@@ -152,6 +152,18 @@ func TestPlanKinds(t *testing.T) {
 	}
 }
 
+// TestUnrecognisedFilterKindIsRejected covers the remaining wire value: an unset kind is neither of
+// the constants above and must not be read as one of them.
+func TestUnrecognisedFilterKindIsRejected(t *testing.T) {
+	t.Parallel()
+
+	plan := &responsev1.PlanResourcesResponse{
+		Filter: &enginev1.PlanResourcesFilter{Kind: enginev1.PlanResourcesFilter_KIND_UNSPECIFIED},
+	}
+	_, err := cerbospgx.Translate(plan, "resource", testMapper())
+	require.ErrorContains(t, err, "unrecognised filter kind")
+}
+
 // -- emitted SQL ---------------------------------------------------------------------------------
 
 // TestNoPlanDataReachesSQLText is the injection guard. Every value in the plan below is chosen to
@@ -204,6 +216,44 @@ func TestSymmetricComparisonsNormaliseToColumnFirst(t *testing.T) {
 	result, err := translate(t, expr("eq", val(t, "x"), variable("request.resource.attr.name")))
 	require.NoError(t, err)
 	require.Equal(t, `("resource"."name" = $1::text)`, result.Where)
+}
+
+// TestOperatorSymbols pins the two lookup tables the renderer spells operators through.
+//
+// They are the kind of thing nothing else catches: a `+` written where `-` belongs, or `<` where
+// `<=` belongs, is valid SQL that quietly returns a different row set, and the corpus only notices
+// if some action happens to straddle the boundary the wrong symbol moves. Every arm is asserted so
+// there is no operator whose spelling is taken on trust.
+func TestOperatorSymbols(t *testing.T) {
+	t.Parallel()
+
+	t.Run("comparisons", func(t *testing.T) {
+		t.Parallel()
+
+		for operator, symbol := range map[string]string{
+			"eq": "=", "ne": "<>", "lt": "<", "le": "<=", "gt": ">", "ge": ">=",
+		} {
+			result, err := translate(t, expr(operator, variable("request.resource.attr.count"), val(t, 2)))
+			require.NoError(t, err, operator)
+			require.Equal(t, `("resource"."count" `+symbol+` $1::double precision)`, result.Where, operator)
+		}
+	})
+
+	t.Run("arithmetic", func(t *testing.T) {
+		t.Parallel()
+
+		// A column dividend keeps `div` and `mod` from folding to a constant, and the division
+		// shapes wrap the arithmetic in the guards that keep a zero divisor UNKNOWN — so these
+		// assert the operator appears rather than pinning the whole surrounding CASE.
+		for operator, symbol := range map[string]string{
+			"add": "+", "sub": "-", "mult": "*", "div": "/", "mod": "%",
+		} {
+			result, err := translate(t, expr("gt",
+				expr(operator, variable("request.resource.attr.count"), val(t, 2)), val(t, 1)))
+			require.NoError(t, err, operator)
+			require.Contains(t, result.Where, " "+symbol+" ", operator+": "+result.Where)
+		}
+	})
 }
 
 // TestReceiverSensitiveOperatorsKeepWireOrder is the reason eq/ne/in are normalised by name rather

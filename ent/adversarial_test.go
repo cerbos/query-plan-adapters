@@ -647,7 +647,15 @@ func (h *harness) adapterFilteredIDs(t *testing.T, action string, opts ...cerbos
 		selector.Where(result.Predicate)
 	}
 
+	// Query() runs the predicate's closure — the second write pass. Translate already surfaced a
+	// render error from its own probe pass, so a failure here is one only this pass can reach, and
+	// the builder reports it by collecting it on the selector rather than by returning it. Ignoring
+	// it would execute whatever partial SQL the failed pass left behind: a truncated WHERE clause
+	// still parses, so the run would compare the wrong row set against the oracle instead of
+	// failing (cerbos/query-plan-adapters#319).
 	query, args := selector.Query()
+	require.NoError(t, selector.Err(), "building the translated query for %s\nSQL: %s", action, query)
+
 	rows, err := h.db.QueryContext(t.Context(), query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("executing translated predicate for %s: %w\nSQL: %s", action, err, query)
