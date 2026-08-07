@@ -35,8 +35,8 @@ adapter gives the reference behaviour.
 
 | Classification | Coverage |
 | --- | --- |
-| Tested against the oracle | 120 reference actions |
-| Fail-closed | 2 reference actions, and the 3 shapes that the reference adapter does not support (5 actions in total) |
+| Tested against the oracle | 128 reference actions |
+| Fail-closed | 13 actions: 5 that this adapter cannot show, and the 8 that the reference adapter does not support either. Each one must raise an error whose message the corpus pins, so a typo or a transport error cannot pass as the refusal |
 | Refused under the `omitted` NULL convention | 1 action — see [The NULL convention of the caller](#the-null-convention-of-the-caller) |
 | Known difference in the planner | The Cerbos planner changes `has()` on a missing attribute into `ALWAYS_ALLOWED`, but `checkResource` denies the rows in which the attribute is missing. Until the planner has a correction, use `R.attr.x != null` and not `has(R.attr.x)` for the attributes in your database |
 
@@ -49,37 +49,46 @@ stay:
 | Action | Why the adapter raises an error |
 | --- | --- |
 | `ts-window`, `ts-vf` | The planner makes a `now()` literal with nanoseconds. ActiveRecord puts a `Time` into SQL with microseconds. Thus the query would compare with a different instant from the instant in the policy. |
+| `cr-div-other-column` | A division whose denominator is a second column. IEEE-754 keeps the sign of a zero, and `2.0 / -0.0` is -Infinity while `2.0 / 0.0` is +Infinity. SQL cannot tell `-0.0` from `0.0`, because both satisfy `= 0` and no portable function reads the sign bit, so the sign of the Infinity is unknown. A division of a value by ITSELF stays safe — the denominator can only be zero when the numerator is zero too, and that gives NaN, which has no sign — and so does a constant denominator, whose sign the plan carries. Divide by a constant to keep the shape. |
+| `cr-div-then-add`, `cr-div-then-add-ne` | More arithmetic on the result of a division that can give a value which is not finite. The adapter keeps such a division as branches until a comparison resolves them, because SQL has no NaN and no signed Infinity to bind. An addition on those branches has no SQL form: a NULL would go through the sum where CEL takes NaN through it. |
 | `p-matches` | `matches()` uses RE2. No SQL dialect gives the behaviour of RE2, and `LIKE` cannot show a regular expression. |
 | `p-index` | `tags[0]` selects an element of a list by its position. A relation has no order of its own. |
 | `p-timestamp` | `timestamp()` on a column that holds a timestamp in text. A comparison between that column and a `Time` compares two different text formats. Thus the order of the results comes from the text and not from the instants. Map the attribute to a `datetime` column. |
+| `cast-int-string`, `cast-double-string` | `int()` and `double()` over a text column. CEL reads the WHOLE string or makes an error, and Cerbos then denies the row, but SQL reads the digits at the front: `CAST('1junk' AS INTEGER)` is `1` on SQLite. Compare the column directly, or give an operator override. |
+| `cast-int-double` | `int()` over a double column. CEL removes the fraction toward zero. PostgreSQL and MySQL round a `CAST` to the nearest whole number, so the two disagree for every value with a fraction of one half or more. |
+| `filter-as-condition`, `map-as-condition` | A `filter()` or a `map()` that a policy uses as the whole condition. Those operations give a list and not a boolean, and only `size(filter(...))` or `hasIntersection(map(...), [...])` has a boolean meaning. |
 
-The adapter also raises an error for the shapes below. The shared corpus does not cover them
-yet, and each has an issue to add it — a refusal that only one adapter enforces leaves the same
-defect live in the others:
+The adapter also raises an error for a plan whose `and` or `or` carries no operands, and for any
+operator that carries the wrong number of operands. The planner does not make those shapes, so
+the corpus cannot hold them: it is built from real plans. But this adapter accepts a plan from
+any source, and a plan that lost or gained an operand must not become a wider filter.
 
-- A `filter()` or a `map()` that a policy uses as a condition. Those operations give a list
-  and not a boolean.
-  ([#313](https://github.com/cerbos/query-plan-adapters/issues/313))
-- A division whose denominator is a column, unless the numerator is the same column. IEEE-754
-  keeps the sign of a zero, and `2.0 / -0.0` is -Infinity while `2.0 / 0.0` is +Infinity. SQL
-  cannot tell `-0.0` from `0.0`, because both satisfy `= 0` and no portable function reads the
-  sign bit. Thus the sign of the Infinity is unknown. A division of a value by itself stays
-  safe: the denominator can only be zero when the numerator is zero too, and that gives NaN,
-  which has no sign. Divide by a constant to keep the shape.
-  ([#312](https://github.com/cerbos/query-plan-adapters/issues/312))
-- More arithmetic on the result of a division that can give a value which is not finite. Only
-  a comparison can resolve NaN or an Infinity without putting it into SQL.
-  ([#312](https://github.com/cerbos/query-plan-adapters/issues/312))
-- An `and` or an `or` that carries no operands, and any operator that carries the wrong number
-  of operands. The planner does not make those shapes, so the corpus cannot hold them: it is
-  built from real plans. But this adapter accepts a plan from any source, and a plan that lost
-  or gained an operand must not become a wider filter.
-- `int()` over a column that is not an integer, and `double()` over a column that is not
-  numeric. CEL reads a whole string or makes an error, and Cerbos then denies the row, but SQL
-  reads the digits at the front: `CAST('1junk' AS INTEGER)` is `1` on SQLite. A cast from a
-  double is also not portable, because SQLite removes the fraction while PostgreSQL rounds.
-  Compare the column directly, or give an operator override.
-  ([#311](https://github.com/cerbos/query-plan-adapters/issues/311))
+### Mapping hazards
+
+The table above is about the **plan**: given a shape of policy, does the filter give the rows
+that `checkResource` allows. The other half of the contract is the **mapping**:
+
+> The rows that a subquery of the adapter sees must be the same rows that your application put
+> into the resource attributes.
+
+When the two differ, the filter gives rows that the PDP denies and no action in the corpus can
+see it, because the oracle reads the attributes while the adapter reads the tables. Each hazard
+below was a real over-grant, found while building this adapter
+([#314](https://github.com/cerbos/query-plan-adapters/issues/314)). This is the position of this
+adapter on each one:
+
+| Hazard | Position | Mechanism to check |
+| --- | --- | --- |
+| A filtered association | **Rejected** | `has_many …, -> { where(…) }`. The adapter cannot put the conditions of the scope onto the alias that it makes for the correlated subquery, so it refuses the mapping. A `through:` chain is opened into its parts first, so a scope on the outer association is also found. |
+| A default scope on the target model | **Rejected** | `default_scope` on the model that the association points at. Every read of the application applies it and the subquery would not. |
+| Subtype discrimination | **Rejected** | Single-table inheritance. An association that points at a subclass also filters on the inheritance column. The adapter does not add that condition itself, because the set of subclasses depends on which of them Ruby has loaded, and a short condition would give the wrong answer in the other direction. Map the attribute onto the base class, or give an operator override. |
+| A to-one relation used as a collection | **Rejected** | `has_one`. Nothing makes the database keep one row, so the application reads one and the subquery would examine all of them. Map a to-one association as a field path with dots. |
+| A composite association key | **Rejected** | ActiveRecord gives an ARRAY for the keys of such an association. The adapter builds one equality for the correlated subquery and refuses the mapping instead of joining on the first column only. |
+| An absent to-one parent | **Proved by the corpus** | Write a path such as `R.attr.parent.children` as a NESTED `relation` mapping and not as one flat `has_many :through`. The nesting is what tells the adapter which hops are the parent, and the adapter then requires them to exist. See [A chain through a parent](#a-chain-through-a-parent). The `w1-*-chain` actions hold it under every polarity. |
+
+Five of the six are rejected rather than reproduced, because this adapter builds the subquery
+from the association itself and can therefore see the hazard in the reflection. "The caller owns
+it" is only honest for a hazard that the adapter cannot detect, and none of these is one.
 
 ### The NULL convention of the caller
 
@@ -256,6 +265,38 @@ Cerbos::ActiveRecord.relation(
   })
 })
 ```
+
+#### A chain through a parent
+
+The same nesting also carries a path that the policy writes with dots, such as
+`R.attr.mainCategory.subCategories`. Map the START of the path, and put each step after it in
+`fields`:
+
+```ruby
+"request.resource.attr.mainCategory" => Cerbos::ActiveRecord.relation(:categories, fields: {
+  "subCategories" => Cerbos::ActiveRecord.relation(:sub_categories, fields: {
+    "name" => Cerbos::ActiveRecord.field("name")
+  }),
+  "subNames" => Cerbos::ActiveRecord.relation(:sub_categories, member_field: "name")
+})
+```
+
+**Write the path this way and do not map the full name onto one flat `has_many :through`.**
+Both give the same joins, but only the nested form says which hops are the parent, and the
+adapter needs that to keep an authorization guarantee.
+
+CEL cannot read a field from a list, so every step before the last one is a to-ONE parent. When
+that parent is absent your application sends no attribute at all, CEL makes a missing-path
+error, and Cerbos denies the row. A subquery from the resource row cannot see the difference,
+because an absent parent and a parent with no children both give no rows. Then
+`all(...)` reads TRUE, `!exists(...)` reads TRUE, `size(...) == 0` reads TRUE, and each one of
+those gives back the rows that the PDP denies.
+
+With the nested form the adapter requires the parent hops to exist, so a row without a parent
+stays out of the result under **both** polarities. A relation that you map directly keeps the
+usual meaning of an empty collection: `!R.attr.tags.exists(...)` over zero tags is still TRUE.
+That is why the adapter cannot decide this for you — a `has_many :through` is also how a plain
+join table is written, and Cerbos never sees such a table.
 
 #### A macro over a principal attribute
 

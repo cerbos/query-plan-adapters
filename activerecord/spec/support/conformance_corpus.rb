@@ -1,30 +1,87 @@
 # frozen_string_literal: true
 
-# Reads the shared corpus of the repository (cerbos/query-plan-adapters#263) and calculates
-# the derived fields. conformance/README.md gives the rules for those fields, and the rules
-# always give the same result.
+# Reads the shared corpus of the repository (cerbos/query-plan-adapters#263).
 #
-# These rules are part of the shared contract. They are not data only for this adapter. The
-# same rows and the same attributes go to both sides of the differential comparison. Thus an
-# error in one rule makes the oracle agree with the adapter for an incorrect reason.
+# Nothing here is data only for this adapter. The same rows and the same attributes go to both
+# sides of the differential comparison. Thus a value that this file invents, or a corpus field
+# that it drops, makes the oracle agree with the adapter for an incorrect reason and no test
+# downstream can see it. Two guards hold that shut:
+#
+# * the derived fields come from conformance/derived-fields.json. They are not calculated here.
+# * the seed keys, the tag keys and the derived-field names are asserted against the JSON. A
+#   key that this harness does not read is an error, and so is a key that it reads and the
+#   corpus no longer carries.
 module ConformanceCorpus
   DIR = File.expand_path("../../../conformance", __dir__)
 
   SEEDS_FILE = JSON.parse(File.read(File.join(DIR, "seeds.json"))).freeze
   ACTIONS_FILE = JSON.parse(File.read(File.join(DIR, "actions.json"))).freeze
+  DERIVED_FILE = JSON.parse(File.read(File.join(DIR, "derived-fields.json"))).freeze
   CERBOS_VERSION = File.read(File.join(DIR, "CERBOS_VERSION")).strip.freeze
 
   SEEDS = SEEDS_FILE.fetch("seeds").freeze
   RESOURCE_KIND = SEEDS_FILE.fetch("resourceKind").freeze
+  # Verbatim. A projection here — an allowlist of principal attributes, for example — would
+  # drop the attribute that a new action discriminates on from the plan AND from the oracle,
+  # and the action would then pass without testing anything.
   PRINCIPAL = SEEDS_FILE.fetch("principal").freeze
 
   # The key of this adapter in the manifest is the name of its directory.
   ADAPTER = "activerecord"
 
+  # --- corpus coverage guards ---------------------------------------------------------------
+
+  SEED_KEYS = %w[id aBool aString aNumber aOptionalString tags subCategoryNames].freeze
+  # Corpus prose that no harness reads: the one documented exclusion from SEED_KEYS.
+  SEED_NOTE_KEY = "note"
+  # The one array of nested objects that a seed carries. A key added inside an element
+  # disappears from both sides of the differential as quietly as a key at the top level.
+  TAG_KEYS = %w[id name].freeze
+  DERIVED_KEYS = %w[createdBy aDouble createdAt scope labels].freeze
+
+  module_function
+
+  def assert_keys!(label, got, want, optional = [])
+    unexpected = got - want - optional
+    unless unexpected.empty?
+      raise "#{label} carries #{unexpected.inspect}, which this harness does not read. An " \
+            "unread corpus field disappears from the stored row and from the check() oracle " \
+            "at the same time, so the differential still agrees and the field tests nothing."
+    end
+
+    missing = want - got
+    raise "#{label} is missing #{missing.inspect}, which this harness reads." unless missing.empty?
+  end
+
+  # SEEDS holds the parsed JSON rows without a change, so `keys` reports the key set of the
+  # corpus. Keep it that way. A reader that rebuilt each row field by field could only report
+  # the keys that this file already names, and the assertion would then prove nothing.
+  SEEDS.each_with_index do |seed, index|
+    assert_keys!("seeds.json seeds[#{index}]", seed.keys, SEED_KEYS, [SEED_NOTE_KEY])
+    seed.fetch("tags").each_with_index do |tag, tag_index|
+      assert_keys!("seeds.json seeds[#{index}].tags[#{tag_index}]", tag.keys, TAG_KEYS)
+    end
+  end
+
+  assert_keys!("derived-fields.json fields", DERIVED_FILE.fetch("fields"), DERIVED_KEYS)
+
+  DERIVED = DERIVED_FILE.fetch("derived").freeze
+  if DERIVED.keys.sort != SEEDS.map { |seed| seed.fetch("id") }.sort
+    raise "derived-fields.json must carry exactly one entry for each seed id"
+  end
+  DERIVED.each do |id, entry|
+    assert_keys!("derived-fields.json derived[#{id.inspect}]", entry.keys, DERIVED_KEYS)
+  end
+
+  # --- classification, read from the manifest at run time ------------------------------------
+  #
+  # Each group is read by name. A group that this file did not name would disappear from every
+  # count and from every test at the same time, and the run would then pass without a word.
+  # That is the projection trap in conformance/README.md.
+
   UNSUPPORTED = ACTIONS_FILE
     .fetch("adapterUnsupported", {})
     .fetch(ADAPTER, [])
-    .to_h { |entry| [entry.fetch("action"), entry.fetch("reason")] }
     .freeze
 
   SUPPORTED_EXPECTED = ACTIONS_FILE
@@ -53,78 +110,77 @@ module ConformanceCorpus
     .map { |entry| entry.fetch("action") }
     .freeze
 
-  # The harness reads the classification from the manifest when it runs. It does not keep a
-  # copy. Thus a new action in the corpus comes to this adapter automatically.
   ORACLE_ACTIONS = (
-    (ACTIONS_FILE.fetch("conformance") - UNSUPPORTED.keys) + SUPPORTED_EXPECTED - SKIPPED
+    (ACTIONS_FILE.fetch("conformance") - UNSUPPORTED.map { |entry| entry.fetch("action") }) +
+      SUPPORTED_EXPECTED - SKIPPED
   ).freeze
 
-  THROWING_ACTIONS = (UNSUPPORTED.keys + EXPECTED_UNSUPPORTED - SUPPORTED_EXPECTED).uniq.sort.freeze
+  # Every action that the corpus classifies, whichever adapter it belongs to. A divergence that
+  # only another adapter registered must still arrive here, so the size tripwire and the
+  # "classified exactly once" test bring it up for triage instead of letting it disappear.
+  MANIFEST_ACTIONS = (
+    ACTIONS_FILE.fetch("conformance") +
+      EXPECTED_UNSUPPORTED +
+      NULL_REPRESENTATION_OMITTED +
+      SUPPORTED_EXPECTED +
+      ACTIONS_FILE.fetch("knownDivergences", []).map { |entry| entry.fetch("action") }
+  ).uniq.freeze
 
-  module_function
-
-  def created_by(seed)
-    (seed.fetch("aNumber") >= 2) ? "2024-06-01T00:00:00Z" : "2026-06-01T00:00:00Z"
-  end
-
-  def a_double(seed)
-    case seed.fetch("id")
-    when "a1" then -0.6
-    when "a2" then 0.25
-    when "a3" then nil
-    else seed.fetch("aNumber") + 0.3
+  # The message that the error of a throwing action must contain.
+  #
+  # Without it, "it threw" is satisfied as happily by a typo in the attribute map, by an
+  # unrelated validation or by a transport error as by the limitation that the classification
+  # names — and the classification then rests on a failure that never reached its own mechanism
+  # (cerbos/query-plan-adapters#326).
+  def require_message(label, message)
+    if message.nil? || message.empty?
+      raise "actions.json pins no throw message for #{label}: the throw suite would then " \
+            "accept a failure for any reason at all"
     end
+
+    message
   end
 
-  CREATED_AT = {
-    "a1" => "2020-03-15T10:30:00Z",
-    "a2" => "2037-01-01T00:00:00Z",
-    "a3" => nil,
-    "a4" => "2024-06-01T00:00:00Z",
-    "a5" => "2020-03-15T10:30:00.123456Z"
-  }.freeze
+  # [action, message] for every shape this adapter must refuse.
+  THROWING_ACTIONS = (
+    UNSUPPORTED.map { |entry|
+      action = entry.fetch("action")
+      [action, require_message("adapterUnsupported.#{ADAPTER}.#{action}", entry["message"])]
+    } +
+    ACTIONS_FILE.fetch("expectedUnsupported")
+      .reject { |entry| SUPPORTED_EXPECTED.include?(entry.fetch("action")) }
+      .map { |entry|
+        action = entry.fetch("action")
+        [action, require_message(
+          "expectedUnsupported.#{action}.messages.#{ADAPTER}", entry["messages"]&.[](ADAPTER)
+        )]
+      }
+  ).freeze
 
-  def created_at(seed)
-    id = seed.fetch("id")
-    return CREATED_AT.fetch(id) if CREATED_AT.key?(id)
+  # The same, for the group that every adapter must refuse under the `omitted` representation.
+  NULL_OMITTED_THROWS = ACTIONS_FILE
+    .fetch("nullRepresentationOmitted", [])
+    .map { |entry|
+      action = entry.fetch("action")
+      [action, require_message(
+        "nullRepresentationOmitted.#{action}.messages.#{ADAPTER}", entry["messages"]&.[](ADAPTER)
+      )]
+    }
+    .freeze
 
-    (seed.fetch("aNumber") >= 2) ? "2036-06-06T06:06:06Z" : "2021-05-05T05:05:05Z"
+  # --- derived fields, read and never calculated ---------------------------------------------
+
+  def derived(seed)
+    DERIVED.fetch(seed.fetch("id"))
   end
 
-  SCOPES = {
-    "a1" => "dept",
-    "a2" => "dept.eng",
-    "a3" => "dept.eng.platform",
-    "a4" => "dept.eng.platform.obs",
-    "a5" => "dept.engineering",
-    "a6" => "dept.sales",
-    "a7" => nil,
-    "a8" => "",
-    "a9" => "50%",
-    "b1" => "50%:a_b:x",
-    "b2" => "50x:a_b:y",
-    "b3" => "50%:aXb:y",
-    "b4" => "50%:a_b",
-    "b5" => "dept.eng.platform2",
-    "b6" => "50%.a_b",
-    "c1" => "Dept.Eng",
-    "c2" => "dept.eng.",
-    "d1" => "[env]:prod:eu",
-    "d2" => "e:prod:eu"
-  }.freeze
+  def created_by(seed) = derived(seed).fetch("createdBy")
 
-  def scope(seed)
-    SCOPES[seed.fetch("id")]
-  end
+  def a_double(seed) = derived(seed).fetch("aDouble")
 
-  LABELS = {
-    "a1" => ["gold", "silver"],
-    "a6" => [nil, "silver"],
-    "a8" => ["silver"],
-    "c1" => ["Gold"]
-  }.freeze
+  def created_at(seed) = derived(seed).fetch("createdAt")
 
-  def labels(seed)
-    LABELS.fetch(seed.fetch("id"), [])
-  end
+  def scope(seed) = derived(seed).fetch("scope")
+
+  def labels(seed) = derived(seed).fetch("labels")
 end

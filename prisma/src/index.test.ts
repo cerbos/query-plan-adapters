@@ -1,4 +1,5 @@
 import { queryPlanToPrisma, PlanKind, QueryPlanToPrismaResult } from ".";
+import type { Mapper } from ".";
 import {
   beforeAll,
   beforeEach,
@@ -8984,5 +8985,147 @@ describe("Promoted adversarial planner shapes", () => {
     }
     expect(JSON.stringify(result.filters)).toContain('"name":null');
     expect(JSON.stringify(result.filters)).toContain('"NOT":{"categories"');
+  });
+});
+
+// The class 1 mapping-hazard contract (README, "Mapping hazards"). Prisma names a relation, so
+// the mapping LOOKS as if the ORM will apply the application's own narrowing to the nested
+// filter. It does not: Prisma has no schema-level filtered relation, and a `where` injected by a
+// client extension or middleware rewrites the top-level query only. `subqueryFilter` is how the
+// caller closes that gap (cerbos/query-plan-adapters#323).
+describe("relation subqueryFilter", () => {
+  // The application's own reads of `tags` hide the "hidden" tag; the resource attributes it
+  // sends to check() therefore never mention it.
+  const VISIBLE_ONLY = { name: { not: "hidden" } };
+
+  const mapperFor = (subqueryFilter?: Record<string, unknown>): Mapper => ({
+    "request.resource.attr.tags": {
+      relation: {
+        name: "tags",
+        type: "many",
+        fields: { name: { field: "name" } },
+        ...(subqueryFilter ? { subqueryFilter } : {}),
+      },
+    },
+  });
+
+  const lambda = (operator: string, value: string): PlanExpressionOperand =>
+    ({
+      operator: "lambda",
+      operands: [
+        { operator, operands: [{ name: "t.name" }, { value }] },
+        { name: "t" },
+      ],
+    }) as PlanExpressionOperand;
+
+  const macro = (
+    name: string,
+    body: PlanExpressionOperand
+  ): PlanResourcesResponse =>
+    createConditionalPlan({
+      operator: name,
+      operands: [{ name: "request.resource.attr.tags" }, body],
+    } as PlanExpressionOperand);
+
+  const idsFor = async (
+    queryPlan: PlanResourcesResponse,
+    subqueryFilter?: Record<string, unknown>
+  ): Promise<string[]> => {
+    const result = queryPlanToPrisma({
+      queryPlan,
+      mapper: mapperFor(subqueryFilter),
+    });
+    if (result.kind !== PlanKind.CONDITIONAL) {
+      throw new Error(`Expected CONDITIONAL result, got ${result.kind}`);
+    }
+    const rows = await prisma.resource.findMany({
+      where: result.filters,
+      select: { id: true },
+    });
+    return rows.map((row) => row.id).sort();
+  };
+
+  beforeEach(async () => {
+    await prisma.tag.create({ data: { id: "tagHidden", name: "hidden" } });
+    // resource1's visible tags are ["public"]; resource4 has nothing visible at all.
+    await prisma.resource.update({
+      where: { id: "resource1" },
+      data: { tags: { connect: [{ id: "tagHidden" }] } },
+    });
+    await prisma.resource.create({
+      data: {
+        id: "resource4",
+        aBool: true,
+        aNumber: 4,
+        aString: "string4",
+        createdBy: { connect: { id: "user1" } },
+        nested: { connect: { id: "nested1" } },
+        tags: { connect: [{ id: "tagHidden" }] },
+      },
+    });
+  });
+
+  test("declared: exists() sees only the records the application serialised", async () => {
+    const plan = macro("exists", lambda("eq", "hidden"));
+
+    // Undeclared, the nested `some` matches records the application's own reads hide — the
+    // over-grant cerbos/query-plan-adapters#314 catalogues.
+    expect(await idsFor(plan)).toEqual(["resource1", "resource4"]);
+    expect(await idsFor(plan, VISIBLE_ONLY)).toEqual([]);
+  });
+
+  test("declared: all() narrows the records examined, not the records required", async () => {
+    const plan = macro("all", lambda("eq", "public"));
+
+    // `every: AND(visible, P)` would REQUIRE every record to be visible, excluding resource1
+    // for holding a hidden tag. The rewrite to `none: AND(visible, NOT P)` is what makes the
+    // declaration mean "ignore what the application hides".
+    //
+    // resource4 is the empty-collection case and belongs in the allowed set: once the hidden
+    // tag is excluded it has no tags at all, and CEL's all() over an empty collection is
+    // vacuously TRUE — which is exactly what check() answers, because the application sends it
+    // an empty `tags` list for the same reason.
+    expect(await idsFor(plan)).toEqual([]);
+    expect(await idsFor(plan, VISIBLE_ONLY)).toEqual(["resource1", "resource4"]);
+  });
+
+  test("declared: an emptiness check counts only the visible records", async () => {
+    const plan = createConditionalPlan({
+      operator: "gt",
+      operands: [
+        {
+          operator: "size",
+          operands: [{ name: "request.resource.attr.tags" }],
+        },
+        { value: 0 },
+      ],
+    } as PlanExpressionOperand);
+
+    expect(await idsFor(plan)).toContain("resource4");
+    expect(await idsFor(plan, VISIBLE_ONLY)).not.toContain("resource4");
+  });
+
+  test("undeclared: the emitted filter is identical to before the field existed", async () => {
+    // The non-breaking guarantee. Silence must not add a clause, and must not warn.
+    const plan = macro("exists", lambda("eq", "public"));
+    const withoutField = queryPlanToPrisma({
+      queryPlan: plan,
+      mapper: {
+        "request.resource.attr.tags": {
+          relation: {
+            name: "tags",
+            type: "many",
+            fields: { name: { field: "name" } },
+          },
+        },
+      },
+    });
+    const withUndefined = queryPlanToPrisma({
+      queryPlan: plan,
+      mapper: mapperFor(undefined),
+    });
+
+    expect(withUndefined).toStrictEqual(withoutField);
+    expect(JSON.stringify(withoutField)).not.toContain("hidden");
   });
 });

@@ -20,15 +20,16 @@ error — UNKNOWN in SQL — and must stay excluded under BOTH polarities).
 import json
 import math
 import os
+import re
 from datetime import datetime
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List, Set, Union
 
 import pytest
 from cerbos.sdk.client import CerbosClient
 from cerbos.sdk.container import CerbosContainer
 from cerbos.sdk.model import PlanResourcesFilterKind, Principal, Resource, ResourceDesc
 
-from cerbos_sqlalchemy import get_query
+from cerbos_sqlalchemy import get_query, require_hops
 from sqlalchemy import (
     Boolean,
     Column,
@@ -63,11 +64,74 @@ with open(os.path.join(CONFORMANCE_DIR, "seeds.json"), encoding="utf-8") as f:
     SEEDS_FILE = json.load(f)
 with open(os.path.join(CONFORMANCE_DIR, "actions.json"), encoding="utf-8") as f:
     ACTIONS_FILE = json.load(f)
+with open(os.path.join(CONFORMANCE_DIR, "derived-fields.json"), encoding="utf-8") as f:
+    DERIVED_FILE = json.load(f)
 with open(os.path.join(CONFORMANCE_DIR, "CERBOS_VERSION"), encoding="utf-8") as f:
     CERBOS_VERSION = f.read().strip()
 
 SEEDS: List[Dict[str, Any]] = SEEDS_FILE["seeds"]
 RESOURCE_KIND: str = SEEDS_FILE["resourceKind"]
+
+# -- corpus coverage guards -------------------------------------------------
+#
+# The same parsed seed feeds the stored row AND the check() oracle, so a corpus
+# field this harness does not consume is dropped from both sides at once and the
+# differential agrees for the wrong reason — the projection trap
+# conformance/README.md describes for actions.json, applied to the seeds.
+# Asserting set equality catches both directions: a corpus key nothing here
+# reads, and a key this harness reads that the corpus no longer carries.
+SEED_KEYS = {
+    "id",
+    "aBool",
+    "aString",
+    "aNumber",
+    "aOptionalString",
+    "tags",
+    "subCategoryNames",
+}
+# Corpus prose, never read by a harness: the one documented exclusion.
+SEED_NOTE_KEY = "note"
+# The one nested object array a seed carries. A key added inside an element is
+# dropped from both sides of the differential just as silently as a top-level
+# one, so it is guarded the same way.
+TAG_KEYS = {"id", "name"}
+DERIVED_KEYS = {"createdBy", "aDouble", "createdAt", "scope", "labels"}
+
+
+def _assert_keys(
+    label: str,
+    got: Set[str],
+    want: Set[str],
+    optional: Set[str] = frozenset(),
+) -> None:
+    unconsumed = got - want - optional
+    if unconsumed:
+        raise AssertionError(
+            f"{label} carries {sorted(unconsumed)}, which this harness does not "
+            "consume: an unconsumed corpus field is dropped from the stored row "
+            "and the check() oracle at once"
+        )
+    missing = want - got
+    if missing:
+        raise AssertionError(
+            f"{label} is missing {sorted(missing)}, which this harness consumes"
+        )
+
+
+for _index, _seed in enumerate(SEEDS):
+    _label = f"seeds.json seeds[{_index}]"
+    _assert_keys(_label, set(_seed), SEED_KEYS, {SEED_NOTE_KEY})
+    for _tag_index, _tag in enumerate(_seed["tags"]):
+        _assert_keys(f"{_label}.tags[{_tag_index}]", set(_tag), TAG_KEYS)
+
+DERIVED: Dict[str, Dict[str, Any]] = DERIVED_FILE["derived"]
+_assert_keys("derived-fields.json fields", set(DERIVED_FILE["fields"]), DERIVED_KEYS)
+if set(DERIVED) != {seed["id"] for seed in SEEDS}:
+    raise AssertionError(
+        "derived-fields.json must carry exactly one entry per seeds.json id"
+    )
+for _id, _entry in DERIVED.items():
+    _assert_keys(f'derived-fields.json derived["{_id}"]', set(_entry), DERIVED_KEYS)
 
 # Capability classifications come from the shared manifest. Unsupported
 # conformance actions must throw; globally-unsupported actions promoted for
@@ -87,88 +151,171 @@ SQLALCHEMY_SUPPORTED_EXPECTED = {
 ORACLE_ACTIONS = [
     a for a in ACTIONS_FILE["conformance"] if a not in SQLALCHEMY_UNSUPPORTED
 ] + sorted(SQLALCHEMY_SUPPORTED_EXPECTED)
+
+
+def _require_message(label: str, message: Any) -> str:
+    """The substring this adapter's error must contain, or a loud failure.
+
+    The message is what turns "it raised" into "it raised for the declared
+    reason": without it a mapper typo or an unrelated validation satisfies the
+    throw suite just as well as the documented limitation
+    (cerbos/query-plan-adapters#326).
+    """
+    if not isinstance(message, str) or not message:
+        raise AssertionError(
+            f"actions.json pins no throw message for {label}: the throw suite "
+            "would accept a failure for any reason"
+        )
+    return message
+
+
 # Globally-unsupported planner shapes plus this adapter's own unsupported list:
 # translation (or execution) must fail loudly, never produce a silently-wrong
-# filter.
+# filter. Each carries the substring the raised error must contain.
 THROWING_ACTIONS = sorted(
-    (
-        {u["action"] for u in ACTIONS_FILE["expectedUnsupported"]}
-        | set(SQLALCHEMY_UNSUPPORTED)
-    )
-    - SQLALCHEMY_SUPPORTED_EXPECTED
+    [
+        (
+            item["action"],
+            _require_message(
+                f'adapterUnsupported.sqlalchemy.{item["action"]}',
+                item.get("message"),
+            ),
+        )
+        for item in ACTIONS_FILE["adapterUnsupported"].get("sqlalchemy", [])
+    ]
+    + [
+        (
+            item["action"],
+            _require_message(
+                f'expectedUnsupported.{item["action"]}.messages.sqlalchemy',
+                item.get("messages", {}).get("sqlalchemy"),
+            ),
+        )
+        for item in ACTIONS_FILE["expectedUnsupported"]
+        if item["action"] not in SQLALCHEMY_SUPPORTED_EXPECTED
+    ]
 )
+THROWING_ACTION_NAMES = {action for action, _ in THROWING_ACTIONS}
 
 # Actions whose `== null` probe targets an attribute the oracle OMITS for NULL
 # columns. They carry no oracle comparison: under the omitted representation
 # check() denies every row, so the adapter must reject the shape rather than
 # emit a filter (#302).
+# Every adapter must reject these, so the message map names the whole roster and
+# this harness resolves its own entry exactly as it does for a throwing action.
 NULL_REPRESENTATION_OMITTED = [
-    (item["action"], item["reason"])
+    (
+        item["action"],
+        item["reason"],
+        _require_message(
+            f'nullRepresentationOmitted.{item["action"]}.messages.sqlalchemy',
+            item.get("messages", {}).get("sqlalchemy"),
+        ),
+    )
     for item in ACTIONS_FILE["nullRepresentationOmitted"]
 ]
+# The one message every null-carrying action must be rejected with under
+# ``omitted``.
+NULL_OMITTED_MESSAGE = NULL_REPRESENTATION_OMITTED[0][2]
+
+# Every classified action across all four manifest groups. Read each group
+# explicitly: a group this expression does not name is dropped silently, and a
+# dropped group makes its actions vanish from every count at once (the
+# projection trap conformance/README.md warns about).
+MANIFEST_ACTIONS = (
+    set(ACTIONS_FILE["conformance"])
+    | {u["action"] for u in ACTIONS_FILE["expectedUnsupported"]}
+    | {n["action"] for n in ACTIONS_FILE["nullRepresentationOmitted"]}
+    | {d["action"] for d in ACTIONS_FILE["knownDivergences"]}
+)
+SQLALCHEMY_SKIPPED_DIVERGENCES = {
+    d["action"]
+    for d in ACTIONS_FILE["knownDivergences"]
+    if "sqlalchemy" in d["adapters"]
+}
+
+# -- the degeneracy guard (conformance/README.md, "The degeneracy guard") ----
+#
+# A representative sample of the actions this adapter ORACLE-COMPARES, one per
+# hostile group it can express. The two lists are asserted to be complements of
+# ORACLE_ACTIONS, so neither can drift into the other unnoticed.
+#
+# w1-size-zero-chain, w1-not-size-chain and the two string-cast actions are
+# deliberately absent: their oracles are empty by CONSTRUCTION (no seed holds a
+# to-one parent with zero children; every seed's aString raises in
+# int()/double()), so they cannot satisfy this guard.
+DEGENERACY_GUARD_ACTIONS = (
+    "vf-le",
+    "like-percent",
+    "all-on-empty",
+    "pv-exists",
+    "pv-all",
+    "null-eq",
+    "null-ne",
+    # The absent to-one parent (#309/#315/#316).
+    "w1-all-chain",
+    "w1-not-exists-chain",
+    "w1-size-nonneg-chain",
+    "w1-not-in-chain",
+    "w1-not-hasint-chain",
+    # Column arithmetic under a division (#311); the zero-denominator arm is a
+    # liveness probe below.
+    "cr-div-other-column",
+    "cr-div-then-add",
+    "cr-div-then-add-ne",
+)
+
+# Shapes this adapter refuses to translate: they have no oracle comparison to
+# guard, and stay here as PDP/policy liveness probes for a group the list above
+# cannot cover. See cerbos/query-plan-adapters#324.
+DEGENERACY_LIVENESS_PROBES = (
+    # json.loads renders the wire's -0 as the integer 0, so the sign of a zero
+    # denominator is gone before the adapter sees it.
+    "cr-div-neg-zero",
+    # int() over a numeric column: truncation-versus-rounding, unsupported for
+    # every adapter but convex, which promotes it in adapterSupportedExpected.
+    "cast-int-double",
+)
+
+
+# -- deterministic derived fields (conformance/README.md) --------------------
+#
+# Read from conformance/derived-fields.json rather than restated here. The same
+# value feeds the stored row and the check() oracle, so a transcription error
+# would be self-consistent and invisible to the differential; one
+# machine-readable definition is what makes that impossible.
+
+
+def _derived_for(seed: Dict[str, Any]) -> Dict[str, Any]:
+    entry = DERIVED.get(seed["id"])
+    if entry is None:
+        raise AssertionError(
+            f'derived-fields.json has no entry for seed "{seed["id"]}"'
+        )
+    return entry
 
 
 def _iso_for(seed: Dict[str, Any]) -> str:
     """Deterministic ISO instant per seed for the timestamp probe (see
     conformance/README.md): split around the probe's 2025-01-01 threshold."""
-    return "2024-06-01T00:00:00Z" if seed["aNumber"] >= 2 else "2026-06-01T00:00:00Z"
+    return _derived_for(seed)["createdBy"]
 
 
 def _double_for(seed: Dict[str, Any]):
-    if seed["id"] == "a1":
-        return -0.6
-    if seed["id"] == "a2":
-        return 0.25
-    if seed["id"] == "a3":
-        return None
-    return seed["aNumber"] + 0.3
+    return _derived_for(seed)["aDouble"]
 
 
 def _timestamp_for(seed: Dict[str, Any]):
-    timestamps = {
-        "a1": "2020-03-15T10:30:00Z",
-        "a2": "2037-01-01T00:00:00Z",
-        "a3": None,
-        "a4": "2024-06-01T00:00:00Z",
-        "a5": "2020-03-15T10:30:00.123456Z",
-    }
-    value = timestamps.get(
-        seed["id"],
-        "2036-06-06T06:06:06Z" if seed["aNumber"] >= 2 else "2021-05-05T05:05:05Z",
-    )
+    value = _derived_for(seed)["createdAt"]
     return datetime.fromisoformat(value.replace("Z", "+00:00")) if value else None
 
 
 def _scope_for(seed: Dict[str, Any]):
-    return {
-        "a1": "dept",
-        "a2": "dept.eng",
-        "a3": "dept.eng.platform",
-        "a4": "dept.eng.platform.obs",
-        "a5": "dept.engineering",
-        "a6": "dept.sales",
-        "a8": "",
-        "a9": "50%",
-        "b1": "50%:a_b:x",
-        "b2": "50x:a_b:y",
-        "b3": "50%:aXb:y",
-        "b4": "50%:a_b",
-        "b5": "dept.eng.platform2",
-        "b6": "50%.a_b",
-        "c1": "Dept.Eng",
-        "c2": "dept.eng.",
-        "d1": "[env]:prod:eu",
-        "d2": "e:prod:eu",
-    }.get(seed["id"])
+    return _derived_for(seed)["scope"]
 
 
 def _labels_for(seed: Dict[str, Any]):
-    return {
-        "a1": ["gold", "silver"],
-        "a6": [None, "silver"],
-        "a8": ["silver"],
-        "c1": ["Gold"],
-    }.get(seed["id"], [])
+    return _derived_for(seed)["labels"]
 
 
 # ---------------------------------------------------------------------------
@@ -247,6 +394,7 @@ class _Relation:
         correlation: List[Any],
         correlate_targets: List[Any],
         member_field=None,
+        hop_correlation: Union[List[Any], None] = None,
     ):
         self.description = description
         self.correlation = correlation
@@ -258,6 +406,23 @@ class _Relation:
         self.correlate_targets = correlate_targets
         # For plain `in` membership over a chained string list (w1-in-chain).
         self.member_field = member_field
+        # Correlation for the INTERMEDIATE hops alone, when the collection is
+        # reached through an optional to-one parent. CEL cannot dot through a
+        # list, so `mainCategory.subCategories` reaches its tail through a to-one
+        # parent: absent, the application sends no `mainCategory` attribute and
+        # CEL raises a missing-path error, which denies. A subquery rooted at the
+        # resource row cannot see that — an absent parent and a childless parent
+        # both return nothing — so `all` reads TRUE, `!exists` reads TRUE and the
+        # count reads 0, each admitting rows the PDP denies
+        # (cerbos/query-plan-adapters#309). Requiring the hop separately restores
+        # the distinction. The requirement itself is `cerbos_sqlalchemy.
+        # require_hops`; what stays in the MAPPING is only which predicates the
+        # hops are, because the SQLAlchemy adapter has no relation model of its
+        # own: collection semantics are entirely caller-supplied through operator
+        # overrides, so the caller owns the invariant that its subquery sees
+        # exactly the rows the application serialised into the resource
+        # attributes.
+        self.hop_correlation = hop_correlation or []
 
     def __repr__(self) -> str:  # pragma: no cover - diagnostics only
         return f"_Relation({self.description})"
@@ -304,6 +469,7 @@ MAIN_SUB = _Relation(
         AdvCategory.resource_id == AdvResource.id,
     ],
     correlate_targets=[AdvResource],
+    hop_correlation=[AdvCategory.resource_id == AdvResource.id],
 )
 MAIN_SUBNAMES = _Relation(
     "mainCategory.subNames",
@@ -313,6 +479,7 @@ MAIN_SUBNAMES = _Relation(
     ],
     correlate_targets=[AdvResource],
     member_field=AdvSubCategory.name,
+    hop_correlation=[AdvCategory.resource_id == AdvResource.id],
 )
 
 
@@ -334,6 +501,20 @@ def _count_subquery(rel: _Relation, *conds: Any):
     return q.correlate(*rel.correlate_targets).scalar_subquery()
 
 
+def _require_hops(rel: _Relation, expr: Any):
+    """Make ``expr`` UNKNOWN unless every intermediate to-one hop exists.
+
+    The invariant lives in the library as ``cerbos_sqlalchemy.require_hops``; this
+    is only the unpacking of the harness's ``_Relation`` marker into its arguments.
+    The harness using the shipped helper rather than a private copy is what proves
+    the helper: every chained corpus action — ``w1-all-chain``,
+    ``w1-not-exists-chain``, ``w1-size-zero-chain``, ``w1-not-in-chain``,
+    ``w1-not-hasint-chain`` and the rest — is an oracle comparison against a real
+    PDP that runs through this call.
+    """
+    return require_hops(expr, rel.hop_correlation, rel.correlate_targets)
+
+
 def _require_relation(op: str, coll: Any) -> _Relation:
     if not isinstance(coll, _Relation):
         raise ValueError(f"{op} over unsupported collection operand: {coll!r}")
@@ -344,10 +525,13 @@ def _exists_fn(coll: Any, body: Any):
     # CEL exists: true on any true witness (absorbing errors), error if any
     # element errors without one, false otherwise (incl. empty).
     rel = _require_relation("exists", coll)
-    return case(
-        (_exists_where(rel, body), true()),
-        (_exists_where(rel, body.is_(None)), null()),
-        else_=false(),
+    return _require_hops(
+        rel,
+        case(
+            (_exists_where(rel, body), true()),
+            (_exists_where(rel, body.is_(None)), null()),
+            else_=false(),
+        ),
     )
 
 
@@ -355,10 +539,13 @@ def _all_fn(coll: Any, body: Any):
     # CEL all: false on any false witness (absorbing errors), error if any
     # element errors without one, true otherwise (incl. empty).
     rel = _require_relation("all", coll)
-    return case(
-        (_exists_where(rel, not_(body)), false()),
-        (_exists_where(rel, body.is_(None)), null()),
-        else_=true(),
+    return _require_hops(
+        rel,
+        case(
+            (_exists_where(rel, not_(body)), false()),
+            (_exists_where(rel, body.is_(None)), null()),
+            else_=true(),
+        ),
     )
 
 
@@ -366,9 +553,12 @@ def _exists_one_fn(coll: Any, body: Any):
     # CEL exists_one never absorbs an erroring element, even next to a true
     # witness; otherwise it's an exact count-of-matches == 1.
     rel = _require_relation("exists_one", coll)
-    return case(
-        (_exists_where(rel, body.is_(None)), null()),
-        else_=(_count_subquery(rel, body) == 1),
+    return _require_hops(
+        rel,
+        case(
+            (_exists_where(rel, body.is_(None)), null()),
+            else_=(_count_subquery(rel, body) == 1),
+        ),
     )
 
 
@@ -385,15 +575,19 @@ def _map_fn(coll: Any, projected: Any):
 def _size_fn(target: Any, _: Any):
     if isinstance(target, _Relation):
         # size() counts elements without evaluating them, so NULL element
-        # columns still count — no error guard needed.
-        return _count_subquery(target)
+        # columns still count — no error guard needed. An absent to-one parent
+        # still has to count as UNKNOWN rather than 0 (#309).
+        return _require_hops(target, _count_subquery(target))
     if isinstance(target, tuple) and target[0] == "filter":
         # CEL filter never absorbs an erroring element: any UNKNOWN body row
         # poisons the whole count.
         _, rel, body = target
-        return case(
-            (_exists_where(rel, body.is_(None)), null()),
-            else_=_count_subquery(rel, body),
+        return _require_hops(
+            rel,
+            case(
+                (_exists_where(rel, body.is_(None)), null()),
+                else_=_count_subquery(rel, body),
+            ),
         )
     return func.length(target)
 
@@ -404,17 +598,23 @@ def _has_intersection_fn(mapped: Any, values: Any):
             raise ValueError(
                 f"hasIntersection over relation without member field: {mapped!r}"
             )
-        return _exists_where(mapped, _scalar_membership(mapped.member_field, values))
+        return _require_hops(
+            mapped,
+            _exists_where(mapped, _scalar_membership(mapped.member_field, values)),
+        )
 
     # hasIntersection(map(coll, x), list): map errors on any erroring element
     # (no absorption), so the error guard comes FIRST.
     if not (isinstance(mapped, tuple) and mapped[0] == "map"):
         raise ValueError(f"hasIntersection over unsupported operand: {mapped!r}")
     _, rel, projected = mapped
-    return case(
-        (_exists_where(rel, projected.is_(None)), null()),
-        (_exists_where(rel, _scalar_membership(projected, values)), true()),
-        else_=false(),
+    return _require_hops(
+        rel,
+        case(
+            (_exists_where(rel, projected.is_(None)), null()),
+            (_exists_where(rel, _scalar_membership(projected, values)), true()),
+            else_=false(),
+        ),
     )
 
 
@@ -442,7 +642,7 @@ def _relation_membership(relation: _Relation, value: Any):
         )
     else:
         predicate = member == value
-    return _exists_where(relation, predicate)
+    return _require_hops(relation, _exists_where(relation, predicate))
 
 
 def _in_fn(column: Any, value: Any):
@@ -721,27 +921,84 @@ def _adapter_filtered_ids(
 # one) — a silent-wrongness bug class, so escalate it to an error.
 @pytest.mark.filterwarnings("error::sqlalchemy.exc.SAWarning")
 class TestAdversarialConformance:
+    def test_throwing_action_with_no_pinned_message_fails_classification(self):
+        # Adding a throwing action without pinning its message must fail this
+        # harness rather than silently degrade the throw suite to a bare "it
+        # raised" (cerbos/query-plan-adapters#326).
+        for absent in (None, "", 42):
+            with pytest.raises(AssertionError, match="pins no throw message"):
+                _require_message("synthetic-entry", absent)
+
+    def test_manifest_assigns_every_action_exactly_one_outcome(self):
+        oracle = set(ORACLE_ACTIONS)
+        throwing = THROWING_ACTION_NAMES
+        null_omitted = {action for action, _, _ in NULL_REPRESENTATION_OMITTED}
+        misclassified = [
+            action
+            for action in sorted(MANIFEST_ACTIONS)
+            if [
+                action in oracle,
+                action in throwing,
+                action in null_omitted,
+                action in SQLALCHEMY_SKIPPED_DIVERGENCES,
+            ].count(True)
+            != 1
+        ]
+
+        # Deliberate tripwires: a corpus edit must bump these in the same
+        # change, so a new hostile action cannot join (or vanish) silently.
+        assert len(MANIFEST_ACTIONS) == 143
+        assert len(SEEDS) == 20
+        # Each of these carries a pinned message, so a shape gained or lost has
+        # to be re-triaged here rather than joining the throw suite unnoticed.
+        assert len(THROWING_ACTIONS) == 12
+        assert misclassified == []
+        assert SQLALCHEMY_SUPPORTED_EXPECTED <= {
+            u["action"] for u in ACTIONS_FILE["expectedUnsupported"]
+        }
+
     @pytest.mark.parametrize("action", ORACLE_ACTIONS)
     def test_matches_check_oracle(self, action, adv_cerbos_client, adv_conn):
         oracle = _oracle_allowed_ids(adv_cerbos_client, action)
         filtered = _adapter_filtered_ids(adv_cerbos_client, adv_conn, action)
         assert sorted(filtered) == sorted(oracle)
 
-    @pytest.mark.parametrize("action", THROWING_ACTIONS)
-    def test_fails_loudly(self, action, adv_cerbos_client, adv_conn):
-        # A loud failure — at translation or at query execution — is required;
-        # a silently-wrong filter is the only unacceptable outcome.
-        with pytest.raises(Exception):
-            _adapter_filtered_ids(adv_cerbos_client, adv_conn, action)
+    @pytest.mark.parametrize("action,message", THROWING_ACTIONS)
+    def test_fails_loudly(self, action, message, adv_cerbos_client):
+        # The plan is fetched OUTSIDE the assertion so a PDP failure fails the
+        # test instead of passing it, and nothing executes — the invariant is
+        # that the shape throws during translation, BEFORE a filter exists, so
+        # the database rejecting a wrongly emitted query afterwards cannot
+        # masquerade as the adapter refusing to translate.
+        plan = adv_cerbos_client.plan_resources(
+            action, _principal(), ResourceDesc(RESOURCE_KIND)
+        )
+        # The adapter's translation-time refusals: ValueError (unsupported
+        # operator/cast/timestamp shapes), KeyError (attribute missing from the
+        # map), TypeError (attribute needs an operator override to be
+        # expressible). Anything else — connection errors, SQLAlchemy runtime
+        # errors — must fail the test, not satisfy it.
+        #
+        # The exception type alone is not enough: it scopes the failure to the
+        # adapter but says nothing about WHICH refusal fired, so the corpus
+        # message pins the mechanism too (cerbos/query-plan-adapters#326).
+        with pytest.raises((ValueError, KeyError, TypeError), match=re.escape(message)):
+            get_query(
+                plan,
+                AdvResource,
+                ATTR_MAP,
+                operator_override_fns=OPERATOR_OVERRIDES,
+                null_attribute_representation="explicit",
+            )
 
     # #302. `null-eq-missing` probes `aOptionalString == null`, and
     # `aOptionalString` follows the corpus default: a NULL column sends NO
     # attribute. Both halves are asserted because the rejection alone would pass
     # vacuously if the adapter raised for an unrelated reason — the over-grant
     # under the default representation is what makes the rejection necessary.
-    @pytest.mark.parametrize("action,reason", NULL_REPRESENTATION_OMITTED)
+    @pytest.mark.parametrize("action,reason,message", NULL_REPRESENTATION_OMITTED)
     def test_null_representation_omitted_is_rejected(
-        self, action, reason, adv_cerbos_client, adv_conn
+        self, action, reason, message, adv_cerbos_client, adv_conn
     ):
         assert _oracle_allowed_ids(adv_cerbos_client, action) == set()
 
@@ -750,7 +1007,7 @@ class TestAdversarialConformance:
         over_granted = _adapter_filtered_ids(adv_cerbos_client, adv_conn, action)
         assert len(over_granted) > 0, reason
 
-        with pytest.raises(ValueError, match="missing-attribute"):
+        with pytest.raises(ValueError, match=re.escape(message)):
             _adapter_filtered_ids(
                 adv_cerbos_client,
                 adv_conn,
@@ -766,14 +1023,8 @@ class TestAdversarialConformance:
     def test_every_null_carrying_action_is_rejected_under_omitted(
         self, adv_cerbos_client, adv_conn
     ):
-        manifest = (
-            set(ACTIONS_FILE["conformance"])
-            | {u["action"] for u in ACTIONS_FILE["expectedUnsupported"]}
-            | {n["action"] for n in ACTIONS_FILE["nullRepresentationOmitted"]}
-            | {d["action"] for d in ACTIONS_FILE["knownDivergences"]}
-        )
         null_carrying = []
-        for action in sorted(manifest):
+        for action in sorted(MANIFEST_ACTIONS):
             plan = adv_cerbos_client.plan_resources(
                 action, _principal(), ResourceDesc(RESOURCE_KIND)
             )
@@ -799,17 +1050,28 @@ class TestAdversarialConformance:
                     null_attribute_representation="omitted",
                 )
                 not_rejected.append(action)
-            except Exception:
-                pass  # expected: the shape must be rejected under this representation
+            except Exception as exc:  # noqa: BLE001 - triaged below
+                # The rejection must be the null-operand check talking, not an
+                # incidental failure: a transport error or attr-map typo counting
+                # as the required rejection is the silent pass the corpus README
+                # warns about.
+                if NULL_OMITTED_MESSAGE not in str(exc):
+                    not_rejected.append(
+                        f"{action} (rejected for the wrong reason: {exc})"
+                    )
         assert not_rejected == []
 
+    # nan-ord-inf is absent: its 1.0/0.0 and -1.0/0.0 branches carry a CONSTANT zero
+    # denominator, and over the HTTP transport that arrives as the integer 0 with the
+    # sign bit already gone, so the adapter now rejects the shape rather than guess
+    # which infinity CEL produced. It is declared in adapterUnsupported[sqlalchemy]
+    # and asserted as a throw by test_fails_loudly (cerbos/query-plan-adapters#312).
     @pytest.mark.parametrize(
         "action",
         (
             "nan-ord-ternary",
             "nan-ord-ternary-vf",
             "nan-ord-le",
-            "nan-ord-inf",
         ),
     )
     def test_nonfinite_ordering_is_folded_before_postgresql_compilation(
@@ -855,14 +1117,22 @@ class TestAdversarialConformance:
         # Guard the guard: these actions must produce a non-empty, non-total
         # oracle set, otherwise the differential comparison could pass
         # vacuously (e.g. a PDP that denies everything).
-        for action in (
-            "vf-le",
-            "like-percent",
-            "all-on-empty",
-            "pv-exists",
-            "pv-all",
-            "null-eq",
-            "null-ne",
-        ):
+        #
+        # Every entry is asserted to be an action this adapter actually
+        # oracle-compares. A list copied from another harness drifts into naming
+        # shapes it never compares, which guard nothing
+        # (cerbos/query-plan-adapters#324); the membership assertion turns moving
+        # an action into adapterUnsupported into a failure here rather than a
+        # silent no-op.
+        def assert_non_degenerate(action: str) -> None:
             ids = _oracle_allowed_ids(adv_cerbos_client, action)
-            assert 0 < len(ids) < len(SEEDS)
+            assert 0 < len(ids) < len(SEEDS), f"{action} has a degenerate oracle"
+
+        for action in DEGENERACY_GUARD_ACTIONS:
+            assert action in ORACLE_ACTIONS, f"{action} is not oracle-compared"
+            assert_non_degenerate(action)
+        # Asserting the complement keeps the split honest — an action this
+        # adapter gains support for must move up into the guard proper.
+        for action in DEGENERACY_LIVENESS_PROBES:
+            assert action not in ORACLE_ACTIONS, f"{action} is now oracle-compared"
+            assert_non_degenerate(action)

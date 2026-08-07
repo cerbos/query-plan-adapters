@@ -18,6 +18,9 @@ module EdgeCaseModels
         # gives NaN for 0/0, +Infinity for a positive numerator and -Infinity for a negative
         # one, and each of the three needs a row.
         t.integer :n
+        # A double column, so a test can reach the int() cast that CEL and SQL disagree about:
+        # CEL removes the fraction toward zero, PostgreSQL and MySQL round to the nearest.
+        t.float :score
       end
 
       create_table :edge_comments, force: true do |t|
@@ -63,12 +66,28 @@ module EdgeCaseModels
         t.string :parent_code
         t.string :name
       end
+
+      # The second hop of a chain, for the absent-parent guard.
+      create_table :edge_tag_labels, force: true do |t|
+        t.string :name
+        t.integer :tag_id
+      end
     end
 
-    EdgeDocument.create!(id: 1, title: "zero", n: 0)
-    EdgeDocument.create!(id: 2, title: "two", n: 2)
-    EdgeDocument.create!(id: 3, title: "negative", n: -3)
+    EdgeDocument.create!(id: 1, title: "zero", n: 0, score: 0.0)
+    EdgeDocument.create!(id: 2, title: "two", n: 2, score: 2.5)
+    EdgeDocument.create!(id: 3, title: "negative", n: -3, score: -0.6)
+
+    # The three rows a chain must tell apart: a parent with a matching child, a parent with no
+    # matching child, and NO parent at all. Only the last one is a missing path for CEL.
+    chained = EdgeTag.create!(id: 91, name: "chained", document_id: 1)
+    EdgeTag.create!(id: 92, name: "childless", document_id: 2)
+    EdgeTagLabel.create!(name: "urgent", tag_id: chained.id)
   end
+end
+
+class EdgeTagLabel < ActiveRecord::Base
+  self.table_name = "edge_tag_labels"
 end
 
 class EdgeAuthor < ActiveRecord::Base
@@ -89,6 +108,7 @@ end
 
 class EdgeTag < ActiveRecord::Base
   self.table_name = "edge_tags"
+  has_many :labels, class_name: "EdgeTagLabel", foreign_key: :tag_id
 end
 
 class EdgeProfile < ActiveRecord::Base

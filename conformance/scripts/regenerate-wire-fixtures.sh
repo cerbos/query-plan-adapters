@@ -6,9 +6,14 @@
 # that silently changes wire output for a hostile shape is caught by diffing this directory
 # instead of by an adapter test failing for the wrong reason.
 #
-# Requires: docker, curl, jq. Run deliberately (not in CI) after confirming a PDP version bump
-# is intentional -- commit the resulting diff in its own commit so reviewers can see exactly
-# what the planner's wire contract changed.
+# Requires: docker, curl, jq.
+#
+# Two callers, one behaviour. Locally, run it deliberately after confirming a PDP version bump is
+# intentional, and commit the resulting diff in its own commit so reviewers can see exactly what
+# the planner's wire contract changed. In CI, .github/workflows/conformance.yaml runs this same
+# script and then fails on any resulting `git diff` -- that is the drift check, so the script must
+# stay deterministic for a fixed CERBOS_VERSION: never write a timestamp, container id or other
+# run-varying value into a fixture.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

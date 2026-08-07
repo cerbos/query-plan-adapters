@@ -134,12 +134,52 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` d
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 89 reference actions |
-| Fail-closed | 33 reference actions plus the 3 reference-unsupported shapes (36 actions total) |
+| Oracle-tested | 94 reference actions |
+| Fail-closed | 39 reference actions plus the 8 reference-unsupported shapes (47 actions total) |
 | Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 
-The fail-closed set consists of literal `LIKE` cases Prisma cannot escape safely, cross-model field references, arbitrary relation counts and string lengths, `exists_one`, unsolved column arithmetic, sub-millisecond `now()` thresholds, and the reference probes for regex, ordered indexing, and `timestamp()` over a string field. Supported timestamp plans require a mapper entry with `valueType: "dateTime"` and a strict, millisecond-exact RFC 3339 literal in CEL's supported instant range. These shapes throw instead of producing a broader authorization filter.
+The fail-closed set consists of literal `LIKE` cases Prisma cannot escape safely, cross-model field references, arbitrary relation counts and string lengths, `exists_one`, unsolved column arithmetic, sub-millisecond `now()` thresholds, and the reference probes for regex, ordered indexing, and `timestamp()` over a string field. Supported timestamp plans require a mapper entry with `valueType: "dateTime"` and a strict, millisecond-exact RFC 3339 literal in CEL's supported instant range. These shapes throw instead of producing a broader authorization filter. Every fail-closed shape's error message is pinned in the shared corpus (`conformance/actions.json`) and asserted by this adapter's conformance run, so a classification proves the throw names its declared mechanism rather than merely that something threw.
+
+### Mapping hazards
+
+The conformance contract above proves the *plan* side — given a policy shape, does the filter select the rows `check()` allows. The other half is the *mapping*: **the records the nested filter reads must be the records the application put into the resource attributes.** Six ways that can break are catalogued in the shared corpus, and every adapter has to record a position on each of them.
+
+This adapter names a Prisma relation, so the mapping *looks* as though the ORM will apply the application's own narrowing to the nested `some`/`every`/`none`. **It will not.** Prisma has no schema-level filtered relation and no `@Where` equivalent; a `where` injected by a client extension or by `$extends`/middleware rewrites the top-level query and leaves nested relation filters untouched. In corpus terms this adapter is class 1 — a **bare-table subquery** — despite naming a relation.
+
+Where the application narrows its own reads of a related model, declare the same predicate as [`subqueryFilter`](#declaring-the-applications-own-predicate) on the relation and the adapter reproduces it. Declaring nothing emits exactly the filter this adapter emitted before the field existed — it cannot detect the omission, so silence is not a warning.
+
+| Hazard | Position | Mechanism to check |
+|---|---|---|
+| Filtered association | **Caller-owned**, reproducible with `subqueryFilter` | A `$extends`/`$use` client extension or middleware that injects a `where` for the related model, or a repository helper that always appends one. None of them rewrite the nested filter this adapter returns |
+| Default scope on the target model | **Caller-owned**, reproducible with `subqueryFilter` | A soft-delete column (`deletedAt: null`), a tenant column, a `published` flag — anything every application read of the related model filters on. Prisma has no default-scope construct, so the convention lives in your own query code and only you can see it |
+| Subtype discrimination | **Caller-owned**, reproducible with `subqueryFilter` | A `type`/`kind` discriminator column where one model holds several row kinds. Declare `{ type: "…" }` |
+| To-one relation used as a collection | **Rejected by Prisma** | A `type: "one"` mapping compiles to `is`, an argument Prisma only accepts on a relation its own schema declares to-one, and `@relation(references: …)` must already point at a unique field. Mapping a to-many relation as `type: "one"` is therefore a query-validation error from Prisma, not a silently wider subquery |
+| Composite association key | **Reproduced by Prisma** | Prisma resolves multi-column foreign keys itself from `@relation(fields: […], references: […])`. The mapping names the relation, never its columns, so there is no key for the adapter to get wrong |
+| Absent to-one parent | **Reproduced**, and proved by the corpus (`w1-all-chain` and siblings) | None — every operator reached through a relation chain requires its intermediate hops separately, so a missing parent stays denied under both polarities ([#309](https://github.com/cerbos/query-plan-adapters/issues/309), [#315](https://github.com/cerbos/query-plan-adapters/issues/315)) |
+
+#### Declaring the application's own predicate
+
+```ts
+const result = queryPlanToPrisma({
+  queryPlan,
+  mapper: {
+    "request.resource.attr.tags": {
+      relation: {
+        name: "tags",
+        type: "many",
+        field: "name",
+        // Exactly the predicate your own reads of `Tag` apply.
+        subqueryFilter: { deletedAt: null, kind: "label" },
+      },
+    },
+  },
+});
+```
+
+`subqueryFilter` is a Prisma where-input over the *related* model. It is ANDed into the nested filter, so it narrows the records the subquery *examines* rather than the records it requires, and it applies to every operator reached through the relation — `exists`, `all`, `except`, membership, `hasIntersection`, emptiness checks — and to the hop-existence guard, so an intermediate hop must exist *and* be visible.
+
+`all()` is the one operator that cannot simply absorb the predicate: `every: AND(declared, P)` would *require* every record to satisfy the declaration, which is the opposite of ignoring what the application hides. It is rewritten to `none: AND(declared, NOT P)` — no visible record violates `P`. Note the consequence, which is correct rather than surprising: if the declaration hides every record of a relation, `all()` over it is vacuously true, exactly as it is for the application, which sends `check()` an empty list for the same reason.
 
 ## Requirements
 
@@ -320,7 +360,9 @@ const result = queryPlanToPrisma({
 
 ### Relations Mapping
 
-Relations are mapped with their types and optional field configurations. Fields can be automatically inferred from the path if not explicitly mapped:
+Relations are mapped with their types and optional field configurations. Fields can be automatically inferred from the path if not explicitly mapped.
+
+The nested filters this produces read the related model unfiltered — Prisma has no schema-level filtered relation, and an injected `where` does not reach them. If your own reads of that model apply a predicate, declare it as `subqueryFilter` on the relation. See [Mapping hazards](#mapping-hazards).
 
 ```ts
 const result = queryPlanToPrisma({

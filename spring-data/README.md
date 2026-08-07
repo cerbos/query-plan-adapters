@@ -175,6 +175,8 @@ Map each `request.resource.attr.<name>` to a JPA path or a relation:
 
 `Field("nested.aBool")` traverses embeddables via JPA `Path.get(...)`. Use it for both simple columns and `@Embedded` paths.
 
+`relation(...)` names a JPA association, so the correlated subquery is a criteria association join and Hibernate applies the association's own `@SQLRestriction` and discriminator to it. That is why there is no option here to declare a store-side predicate — see [Mapping hazards](#mapping-hazards).
+
 ## Supported operators
 
 | Cerbos operator                  | JPA Criteria translation                                            |
@@ -286,12 +288,33 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `check()` decisio
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | All 122 reference conformance actions |
-| Fail-closed corpus shapes | Regex `matches()`, ordered list indexing/`get-field`, and `timestamp()` over an ambiguous string column (3 actions) |
+| Oracle-tested | 131 of the 133 reference conformance actions |
+| Fail-closed corpus shapes | Regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an ambiguous string column, `int()`/`double()` casts, `filter()`/`map()` used as a condition, and arithmetic composed on a division whose denominator may be zero (10 actions) |
 | Representation-dependent | `null-eq-missing` — rejected under `NullAttributeRepresentation.OMITTED`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute rows; this is pinned separately as an upstream divergence |
 
-The oracle coverage includes value-first and field-to-field comparisons, literal-safe string matching, nested and correlated collection macros, three-valued null/error propagation, arithmetic and ternaries, hierarchy operations, timestamp comparisons on supported absolute-instant columns, and multi-hop relations. Unsupported shapes throw before a predicate can be used.
+The oracle coverage includes value-first and field-to-field comparisons, literal-safe string matching, nested and correlated collection macros, three-valued null/error propagation, arithmetic and ternaries, hierarchy operations, timestamp comparisons on supported absolute-instant columns, and multi-hop relations. Unsupported shapes throw before a predicate can be used — including the two conformance shapes this reference cannot express itself (`cr-div-then-add`, `cr-div-then-add-ne`): CEL carries a NaN through the surrounding arithmetic and SQL has no value that does. Every fail-closed shape's error message is pinned in the shared corpus (`conformance/actions.json`) and asserted by this adapter's conformance run, so a classification proves the throw names its declared mechanism rather than merely that something threw.
+
+## Mapping hazards
+
+The conformance contract above proves the *plan* side — given a policy shape, does the predicate select the rows `check()` allows. The other half is the *mapping*: **the rows the subquery reads must be the rows the application put into the resource attributes.** Six ways that can break are catalogued in the shared corpus, and every adapter has to record a position on each of them.
+
+This adapter builds an **ORM-association subquery.** `AttributeMapping.relation("tags")` names a JPA association, and the correlated subquery reaches it with `correlate(root).join("tags")` — a criteria association join, not a query over a bare table. Everything Hibernate applies to that association it applies here too, which closes most of the grid without any work by the caller.
+
+**There is deliberately no option to declare a store-side predicate on the mapping**, unlike the bare-table adapters (drizzle, ent, pgx, prisma). If there were, a caller could declare a filter Hibernate already applies; it would then be applied twice, silently removing rows the PDP permits — an under-grant nothing in the differential suite would catch, because the caller's own reads would still show the rows. **Your association filters are already applied; do not re-declare them.**
+
+| Hazard | Position | Mechanism to check |
+|---|---|---|
+| Filtered association | **Reproduced by Hibernate** | `@SQLRestriction` (`@Where` before 6.3) on the collection attribute is applied however the collection is reached, including an explicit join, so the subquery sees exactly the association's rows. The exception is `@Filter`, which only applies while it is *enabled on the session*: enable it on the same session that runs the `Specification`, and note that Hibernate does not apply filters to `EntityManager.find()`, so an application that builds attributes through `find()` and filters through queries has two views and the adapter follows the query one |
+| Default scope on the target model | **Reproduced by Hibernate** | `@SQLRestriction` on the target *entity* is applied to every query that loads it, this subquery included. A soft-delete implemented as a repository convention rather than an annotation is not — move it to `@SQLRestriction` so both sides see it |
+| Subtype discrimination | **Reproduced by Hibernate** | The single-table discriminator restriction is added whenever the join's target type is a subclass, so an association typed to a `@DiscriminatorValue` subclass is restricted to it. Declaring the association to the *base* type sees the siblings — which is also what the application sees, so the two still agree |
+| To-one relation used as a collection | **Caller-owned** | A `@OneToOne(mappedBy = …)` whose foreign key carries no unique constraint. JPA believes the cardinality the mapping declares; the database is what has to enforce it. Add the unique constraint |
+| Composite association key | **Reproduced by JPA** | The mapping names the association, never its columns, so Hibernate resolves `@JoinColumns` itself. There is no key for the adapter to get wrong |
+| Absent to-one parent | **Reproduced**, and proved by the corpus (`w1-all-chain` and siblings) | None — a chained relation requires its intermediate hops separately, so a missing parent is UNKNOWN under both polarities ([#309](https://github.com/cerbos/query-plan-adapters/issues/309)) |
+
+The three "Reproduced by Hibernate" rows are claims about Hibernate, not about this adapter, so they are worth being able to check: entity- and collection-level `@SQLRestriction` are documented in the [Hibernate user guide](https://docs.jboss.org/hibernate/orm/current/userguide/html_single/Hibernate_User_Guide.html#pc-where), and Hibernate's own `OneToManySQLRestrictionTests` pins the collection restriction being applied however the collection is reached, an explicit join included. Verify against the Hibernate version you actually run before relying on a row here — a wrong claim in this table is worse than no claim.
+
+One consequence of being an association subquery rather than a bare-table one is worth stating: this adapter is only as correct as the mapping is honest. A `@SQLRestriction` you add for the query side but not for the read path that builds the resource attributes makes the two disagree in the *other* direction. Keep one definition of what the association contains.
 
 ## Gotchas
 

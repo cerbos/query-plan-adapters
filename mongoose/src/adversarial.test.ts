@@ -2,7 +2,17 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { afterAll, beforeAll, describe, expect, test } from "@jest/globals";
-import type { Principal, Resource, Value } from "@cerbos/core";
+import {
+  PlanExpression,
+  PlanExpressionValue,
+  PlanExpressionVariable,
+} from "@cerbos/core";
+import type {
+  PlanExpressionOperand,
+  Principal,
+  Resource,
+  Value,
+} from "@cerbos/core";
 import { GRPC as Cerbos } from "@cerbos/grpc";
 import mongoose, { model, Schema } from "mongoose";
 
@@ -33,14 +43,43 @@ interface SeedsFile {
   seeds: Seed[];
 }
 
+/** One seed's derived fields, exactly as conformance/derived-fields.json carries them. */
+interface DerivedEntry {
+  createdBy: string;
+  aDouble: number | null;
+  createdAt: string | null;
+  scope: string | null;
+  labels: (string | null)[];
+}
+
+interface DerivedFile {
+  fields: string[];
+  derived: Record<string, DerivedEntry>;
+}
+
 interface AdapterEntry {
   action: string;
   reason: string;
+  /** Absent on `adapterSupportedExpected` / `nullRepresentationOmitted`, required on a throw. */
+  message?: string;
 }
 
 interface ExpectedUnsupportedEntry {
   action: string;
   shape: string;
+  /** One entry per adapter that must reject the shape; the corpus asserts the key set. */
+  messages: Record<string, string>;
+}
+
+/**
+ * A `nullRepresentationOmitted` entry. Every adapter must reject these — the two NULL conventions
+ * are indistinguishable on the wire — so `messages` names the whole roster with no promotions to
+ * subtract.
+ */
+interface NullRepresentationOmittedEntry {
+  action: string;
+  reason: string;
+  messages: Record<string, string>;
 }
 
 interface KnownDivergence {
@@ -53,7 +92,7 @@ interface ActionsFile {
   adapterUnsupported: Record<string, AdapterEntry[]>;
   adapterSupportedExpected: Record<string, AdapterEntry[]>;
   expectedUnsupported: ExpectedUnsupportedEntry[];
-  nullRepresentationOmitted: AdapterEntry[];
+  nullRepresentationOmitted: NullRepresentationOmittedEntry[];
   knownDivergences: KnownDivergence[];
 }
 
@@ -143,6 +182,138 @@ function parseTag(value: unknown, label: string): Tag {
   };
 }
 
+// -- corpus coverage guards ---------------------------------------------------------------------
+//
+// The same parsed seed feeds the stored document AND the check() oracle, so a corpus field this
+// harness does not consume is dropped from both sides at once and the differential agrees for the
+// wrong reason — the projection trap conformance/README.md describes for actions.json, applied to
+// the seeds. Asserting set equality catches both directions: a corpus key nothing here reads, and a
+// key this harness reads that the corpus no longer carries.
+
+const SEED_KEYS = [
+  "id",
+  "aBool",
+  "aString",
+  "aNumber",
+  "aOptionalString",
+  "tags",
+  "subCategoryNames",
+] as const;
+
+/** Corpus prose, never read by a harness: the one documented exclusion from SEED_KEYS. */
+const SEED_NOTE_KEY = "note";
+
+/** The one nested object array a seed carries. A key added inside an element is dropped from both
+ * sides of the differential just as silently as a top-level one, so it is guarded the same way. */
+const TAG_KEYS = ["id", "name"] as const;
+
+const DERIVED_KEYS = [
+  "createdBy",
+  "aDouble",
+  "createdAt",
+  "scope",
+  "labels",
+] as const;
+
+function assertKeys(
+  label: string,
+  got: string[],
+  want: readonly string[],
+  optional: readonly string[] = []
+): void {
+  const allowed = new Set<string>([...want, ...optional]);
+  for (const key of got) {
+    if (!allowed.has(key)) {
+      throw new Error(
+        `${label} carries "${key}", which this harness does not consume: an unconsumed corpus field is dropped from the stored document and the check() oracle at once`
+      );
+    }
+  }
+  const present = new Set(got);
+  for (const key of want) {
+    if (!present.has(key)) {
+      throw new Error(
+        `${label} is missing "${key}", which this harness consumes`
+      );
+    }
+  }
+}
+
+/**
+ * Asserted against the RAW json rather than the parsed seeds: parseSeed rebuilds each row field by
+ * field, so a parsed seed can only ever carry the keys this harness already names and the
+ * assertion would pass vacuously.
+ */
+function assertSeedKeyCoverage(value: unknown): void {
+  const seeds = expectRecord(value, "seeds.json")["seeds"];
+  if (!Array.isArray(seeds)) {
+    throw new Error("seeds.json.seeds must be an array");
+  }
+  seeds.forEach((seed, index) => {
+    const label = `seeds.json seeds[${index}]`;
+    const record = expectRecord(seed, label);
+    assertKeys(label, Object.keys(record), SEED_KEYS, [SEED_NOTE_KEY]);
+    const tags = record["tags"];
+    if (!Array.isArray(tags)) {
+      throw new Error(`${label}.tags must be an array`);
+    }
+    tags.forEach((tag, tagIndex) => {
+      const tagLabel = `${label}.tags[${tagIndex}]`;
+      assertKeys(tagLabel, Object.keys(expectRecord(tag, tagLabel)), TAG_KEYS);
+    });
+  });
+}
+
+function parseDerivedEntry(value: unknown, label: string): DerivedEntry {
+  const record = expectRecord(value, label);
+  assertKeys(label, Object.keys(record), DERIVED_KEYS);
+  const aDouble = record["aDouble"];
+  if (aDouble !== null && typeof aDouble !== "number") {
+    throw new Error(`${label}.aDouble must be a number or null`);
+  }
+  const createdAt = record["createdAt"];
+  if (createdAt !== null && typeof createdAt !== "string") {
+    throw new Error(`${label}.createdAt must be a string or null`);
+  }
+  const scope = record["scope"];
+  if (scope !== null && typeof scope !== "string") {
+    throw new Error(`${label}.scope must be a string or null`);
+  }
+  const labels = record["labels"];
+  if (
+    !Array.isArray(labels) ||
+    !labels.every((entry) => entry === null || typeof entry === "string")
+  ) {
+    throw new Error(`${label}.labels must be an array of strings or nulls`);
+  }
+  return {
+    createdBy: expectString(record["createdBy"], `${label}.createdBy`),
+    aDouble,
+    createdAt,
+    scope,
+    labels,
+  };
+}
+
+function parseDerivedFile(value: unknown): DerivedFile {
+  const record = expectRecord(value, "derived-fields.json");
+  const fields = expectStringArray(
+    record["fields"],
+    "derived-fields.json fields"
+  );
+  assertKeys("derived-fields.json fields", fields, DERIVED_KEYS);
+  const derived: Record<string, DerivedEntry> = {};
+  for (const [id, entry] of Object.entries(
+    expectRecord(record["derived"], "derived-fields.json derived")
+  )) {
+    derived[id] = parseDerivedEntry(
+      entry,
+      `derived-fields.json derived["${id}"]`
+    );
+  }
+  return { fields, derived };
+}
+
 function parseSeed(value: unknown, index: number): Seed {
   const label = `seeds[${index}]`;
   const record = expectRecord(value, label);
@@ -189,10 +360,29 @@ function parseSeedsFile(value: unknown): SeedsFile {
 
 function parseAdapterEntry(value: unknown, label: string): AdapterEntry {
   const record = expectRecord(value, label);
+  const message = record["message"];
   return {
     action: expectString(record["action"], `${label}.action`),
     reason: expectString(record["reason"], `${label}.reason`),
+    // `adapterUnsupported` carries this and the classification below requires it;
+    // `adapterSupportedExpected` and `nullRepresentationOmitted` do not throw, so they do not.
+    ...(message === undefined
+      ? {}
+      : { message: expectString(message, `${label}.message`) }),
   };
+}
+
+/** The `messages` map of one `expectedUnsupported` entry: adapter key -> required substring. */
+function parseMessages(
+  value: unknown,
+  label: string
+): Record<string, string> {
+  const record = expectRecord(value, label);
+  const result: Record<string, string> = {};
+  for (const [adapter, message] of Object.entries(record)) {
+    result[adapter] = expectString(message, `${label}.${adapter}`);
+  }
+  return result;
 }
 
 function parseAdapterMap(
@@ -248,6 +438,10 @@ function parseActionsFile(value: unknown): ActionsFile {
           parsed["shape"],
           `expectedUnsupported[${index}].shape`
         ),
+        messages: parseMessages(
+          parsed["messages"],
+          `expectedUnsupported[${index}].messages`
+        ),
       };
     }),
     // This parser rebuilds the manifest field by field, so a corpus group it does not name is
@@ -263,6 +457,10 @@ function parseActionsFile(value: unknown): ActionsFile {
         reason: expectString(
           parsed["reason"],
           `nullRepresentationOmitted[${index}].reason`
+        ),
+        messages: parseMessages(
+          parsed["messages"],
+          `nullRepresentationOmitted[${index}].messages`
         ),
       };
     }),
@@ -282,9 +480,24 @@ function parseActionsFile(value: unknown): ActionsFile {
   };
 }
 
-const seedsFile = parseSeedsFile(readJson("seeds.json"));
+const rawSeedsJson = readJson("seeds.json");
+assertSeedKeyCoverage(rawSeedsJson);
+const seedsFile = parseSeedsFile(rawSeedsJson);
 const actionsFile = parseActionsFile(readJson("actions.json"));
+const derivedFile = parseDerivedFile(readJson("derived-fields.json"));
 const SEEDS = seedsFile.seeds;
+
+if (Object.keys(derivedFile.derived).length !== SEEDS.length) {
+  throw new Error(
+    `derived-fields.json has ${
+      Object.keys(derivedFile.derived).length
+    } entries for ${SEEDS.length} seeds`
+  );
+}
+for (const seed of SEEDS) {
+  // Throws when the entry is missing.
+  derivedFor(seed);
+}
 
 const unsupportedEntries = actionsFile.adapterUnsupported["mongoose"] ?? [];
 const unsupportedActions = new Set(
@@ -309,22 +522,115 @@ const ORACLE_ACTIONS = [
   ),
   ...supportedExpectedActions,
 ].sort();
-const THROWING_ACTIONS = [
-  ...unsupportedEntries,
+/**
+ * A shape this adapter must refuse, with the substring its error has to contain.
+ *
+ * The message is what turns "it threw" into "it threw for the declared reason": without it a
+ * mapper typo or an unrelated validation satisfies the assertion just as well as the limitation
+ * the corpus documents (cerbos/query-plan-adapters#326).
+ */
+interface ThrowingAction {
+  action: string;
+  reason: string;
+  message: string;
+}
+
+/** The pinned message, or a failure — a throwing action without one asserts nothing. */
+function requireMessage(label: string, message: string | undefined): string {
+  if (message === undefined || message === "") {
+    throw new Error(
+      `actions.json pins no throw message for ${label}: the throw suite would accept a failure for any reason`
+    );
+  }
+  return message;
+}
+
+const THROWING_ACTIONS: ThrowingAction[] = [
+  ...unsupportedEntries.map((entry) => ({
+    action: entry.action,
+    reason: entry.reason,
+    message: requireMessage(
+      `adapterUnsupported.mongoose.${entry.action}`,
+      entry.message
+    ),
+  })),
   ...actionsFile.expectedUnsupported
     .filter((entry) => !supportedExpectedActions.has(entry.action))
-    .map((entry) => ({ action: entry.action, reason: entry.shape })),
+    .map((entry) => ({
+      action: entry.action,
+      reason: entry.shape,
+      message: requireMessage(
+        `expectedUnsupported.${entry.action}.messages.mongoose`,
+        entry.messages["mongoose"]
+      ),
+    })),
 ].sort((left, right) => left.action.localeCompare(right.action));
 // Actions whose `== null` probe targets an attribute the oracle OMITS for NULL columns. They
 // carry no oracle comparison: under the omitted representation check() denies every document, so
 // the adapter must reject the shape rather than emit a filter (#302).
-const NULL_REPRESENTATION_OMITTED = actionsFile.nullRepresentationOmitted;
+const NULL_REPRESENTATION_OMITTED = actionsFile.nullRepresentationOmitted.map(
+  (entry): ThrowingAction => ({
+    action: entry.action,
+    reason: entry.reason,
+    message: requireMessage(
+      `nullRepresentationOmitted.${entry.action}.messages.mongoose`,
+      entry.messages["mongoose"]
+    ),
+  })
+);
+/** The one message every null-carrying action must be rejected with under `omitted`. */
+const NULL_OMITTED_MESSAGE = NULL_REPRESENTATION_OMITTED[0]?.message ?? "";
 const MANIFEST_ACTIONS = new Set([
   ...actionsFile.conformance,
   ...actionsFile.expectedUnsupported.map((entry) => entry.action),
   ...NULL_REPRESENTATION_OMITTED.map((entry) => entry.action),
   ...actionsFile.knownDivergences.map((entry) => entry.action),
 ]);
+
+// -- the degeneracy guard (conformance/README.md, "The degeneracy guard") -----------------------
+//
+// A representative sample of the actions this adapter ORACLE-COMPARES, one per hostile group it
+// can express. The two lists are asserted to be complements of `ORACLE_ACTIONS`, so neither can
+// drift into the other unnoticed.
+//
+// w1-size-zero-chain, w1-not-size-chain and the two string-cast actions are deliberately absent
+// from both lists: their oracles are empty by CONSTRUCTION (no seed holds a to-one parent with
+// zero children; every seed's aString raises in int()/double()), so they cannot satisfy a
+// non-empty assertion.
+
+const DEGENERACY_GUARD_ACTIONS = [
+  "vf-le",
+  "like-percent",
+  "all-on-empty",
+  "pv-exists",
+  "pv-all",
+  "null-eq",
+  "null-ne",
+  // The absent to-one parent (#309/#315/#316): the four discriminating chain shapes Mongoose
+  // translates. Its negated-exists sibling is a liveness probe below.
+  "w1-all-chain",
+  "w1-size-nonneg-chain",
+  "w1-not-in-chain",
+  "w1-not-hasint-chain",
+  // Mongoose throws on the whole cr-div group (#311), so the computed-relation group is guarded
+  // by the fractional-size shape it does translate.
+  "cr-size-frac-ge",
+] as const;
+
+/**
+ * Shapes Mongoose refuses to translate: they have no oracle comparison to guard, and stay here as
+ * PDP/policy liveness probes for a group Mongoose's own list cannot cover. See
+ * cerbos/query-plan-adapters#324.
+ */
+const DEGENERACY_LIVENESS_PROBES = [
+  // A negated macro over a chain has no UNKNOWN to represent in a Mongo filter.
+  "w1-not-exists-chain",
+  // $divide aborts the query on a zero denominator, so the cr-div group throws.
+  "cr-div-neg-zero",
+  // int() over a numeric column: truncation-versus-rounding, unsupported for every adapter but
+  // convex, which promotes it in adapterSupportedExpected.
+  "cast-int-double",
+] as const;
 
 interface AdversarialLabel {
   name: string | null;
@@ -477,10 +783,17 @@ const MAPPER: Mapper = {
       },
     },
   },
+  // mainCategory is a to-ONE parent on the check side: a seed with no subCategoryNames
+  // sends NO mainCategory attribute, so CEL raises a missing-path error and check()
+  // denies. The flattened `categories.subCategories` path cannot see that on its own —
+  // an absent parent and a childless parent both give an empty array — so the mapping
+  // declares the parent and the adapter makes the count UNKNOWN when it is missing
+  // (cerbos/query-plan-adapters#309).
   "request.resource.attr.mainCategory.subCategories": {
     relation: {
       name: "categories.subCategories",
       type: "many",
+      requiresParent: "categories",
       fields: { name: { field: "name" } },
     },
   },
@@ -489,105 +802,45 @@ const MAPPER: Mapper = {
       name: "categories.subCategories",
       type: "many",
       field: "name",
+      requiresParent: "categories",
       fields: { name: { field: "name" } },
     },
   },
 };
 
-function doubleFor(seed: Seed): number | null {
-  switch (seed.id) {
-    case "a1":
-      return -0.6;
-    case "a2":
-      return 0.25;
-    case "a3":
-      return null;
-    default:
-      return seed.aNumber + 0.3;
+// -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") --------
+//
+// Read from conformance/derived-fields.json rather than restated here. The same value feeds the
+// stored row and the check() oracle, so a transcription error would be self-consistent and
+// invisible to the differential; one machine-readable definition is what makes that impossible.
+
+function derivedFor(seed: Seed): DerivedEntry {
+  const entry = derivedFile.derived[seed.id];
+  if (entry === undefined) {
+    throw new Error(`derived-fields.json has no entry for seed "${seed.id}"`);
   }
+  return entry;
 }
 
+function doubleFor(seed: Seed): number | null {
+  return derivedFor(seed).aDouble;
+}
+
+/** Third-level label names. A null element is a NULL label name — a missing element attribute. */
 function labelsFor(seed: Seed): (string | null)[] {
-  switch (seed.id) {
-    case "a1":
-      return ["gold", "silver"];
-    case "a6":
-      return [null, "silver"];
-    case "a8":
-      return ["silver"];
-    case "c1":
-      return ["Gold"];
-    default:
-      return [];
-  }
+  return derivedFor(seed).labels;
 }
 
 function createdByFor(seed: Seed): string {
-  return seed.aNumber >= 2
-    ? "2024-06-01T00:00:00Z"
-    : "2026-06-01T00:00:00Z";
+  return derivedFor(seed).createdBy;
 }
 
 function timestampFor(seed: Seed): string | null {
-  switch (seed.id) {
-    case "a1":
-      return "2020-03-15T10:30:00Z";
-    case "a2":
-      return "2037-01-01T00:00:00Z";
-    case "a3":
-      return null;
-    case "a4":
-      return "2024-06-01T00:00:00Z";
-    case "a5":
-      return "2020-03-15T10:30:00.123456Z";
-    default:
-      return seed.aNumber >= 2
-        ? "2036-06-06T06:06:06Z"
-        : "2021-05-05T05:05:05Z";
-  }
+  return derivedFor(seed).createdAt;
 }
 
 function scopeFor(seed: Seed): string | null {
-  switch (seed.id) {
-    case "a1":
-      return "dept";
-    case "a2":
-      return "dept.eng";
-    case "a3":
-      return "dept.eng.platform";
-    case "a4":
-      return "dept.eng.platform.obs";
-    case "a5":
-      return "dept.engineering";
-    case "a6":
-      return "dept.sales";
-    case "a8":
-      return "";
-    case "a9":
-      return "50%";
-    case "b1":
-      return "50%:a_b:x";
-    case "b2":
-      return "50x:a_b:y";
-    case "b3":
-      return "50%:aXb:y";
-    case "b4":
-      return "50%:a_b";
-    case "b5":
-      return "dept.eng.platform2";
-    case "b6":
-      return "50%.a_b";
-    case "c1":
-      return "Dept.Eng";
-    case "c2":
-      return "dept.eng.";
-    case "d1":
-      return "[env]:prod:eu";
-    case "d2":
-      return "e:prod:eu";
-    default:
-      return null;
-  }
+  return derivedFor(seed).scope;
 }
 
 function asTagAttribute(tag: Tag): Record<string, Value> {
@@ -700,6 +953,16 @@ async function oracleAllowedIds(action: string): Promise<string[]> {
     .sort();
 }
 
+/** The degeneracy guard's per-action assertion, labelled so a failure names the action. */
+async function expectNonDegenerateOracle(action: string): Promise<void> {
+  const ids = await oracleAllowedIds(action);
+  expect({
+    action,
+    nonEmpty: ids.length > 0,
+    nonTotal: ids.length < SEEDS.length,
+  }).toEqual({ action, nonEmpty: true, nonTotal: true });
+}
+
 async function adapterFilteredIds(
   action: string,
   nullAttributeRepresentation: "explicit" | "omitted" = "explicit"
@@ -739,7 +1002,18 @@ function planCarriesNullLiteral(operand: unknown): boolean {
 }
 
 describe("adversarial conformance corpus", () => {
-  test("manifest assigns all 127 actions exactly one Mongoose outcome", () => {
+
+  // Adding a throwing action without pinning its message must fail this harness rather than
+  // silently degrade the throw suite to a bare "it threw" (cerbos/query-plan-adapters#326).
+  test("a throwing action with no pinned message fails classification", () => {
+    expect(() => requireMessage("synthetic-entry", undefined)).toThrow(
+      /pins no throw message/
+    );
+    expect(() => requireMessage("synthetic-entry", "")).toThrow(
+      /pins no throw message/
+    );
+  });
+  test("manifest assigns all 143 actions exactly one Mongoose outcome", () => {
     const oracle = new Set(ORACLE_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map((entry) => entry.action));
     const nullOmitted = new Set(
@@ -755,11 +1029,11 @@ describe("adversarial conformance corpus", () => {
       return count !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(127);
-    expect(unsupportedEntries).toHaveLength(31);
+    expect(MANIFEST_ACTIONS.size).toBe(143);
+    expect(unsupportedEntries).toHaveLength(36);
     expect(supportedExpectedEntries).toHaveLength(3);
-    expect(ORACLE_ACTIONS).toHaveLength(94);
-    expect(THROWING_ACTIONS).toHaveLength(31);
+    expect(ORACLE_ACTIONS).toHaveLength(100);
+    expect(THROWING_ACTIONS).toHaveLength(41);
     expect(misclassified).toEqual([]);
     expect(
       [...supportedExpectedActions].filter(
@@ -776,10 +1050,30 @@ describe("adversarial conformance corpus", () => {
     expect(filtered).toEqual(oracle);
   });
 
+  // The plan is fetched OUTSIDE the assertion so a PDP failure fails the test instead of
+  // passing it, and no query executes — the invariant is that the shape throws BEFORE a
+  // filter exists, so MongoDB aborting a wrongly emitted pipeline at query time must not be
+  // able to masquerade as the adapter refusing to translate.
+  //
+  // The message is asserted, not just the throw: a bare `toThrow()` is satisfied by a mapper
+  // typo or an unrelated validation, which would leave the classification resting on a failure
+  // that has nothing to do with the limitation it declares (cerbos/query-plan-adapters#326).
   test.each(THROWING_ACTIONS)(
-    "$action fails loudly instead of silently mistranslating ($reason)",
-    async ({ action }) => {
-      await expect(adapterFilteredIds(action)).rejects.toThrow();
+    "$action fails during translation with the declared message, before any filter exists ($reason)",
+    async ({ action, message }) => {
+      const queryPlan = await cerbos.planResources({
+        principal: seedsFile.principal,
+        resource: { kind: seedsFile.resourceKind },
+        action,
+      });
+      expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
+      expect(() =>
+        queryPlanToMongoose({
+          queryPlan,
+          mapper: MAPPER,
+          nullAttributeRepresentation: "explicit",
+        })
+      ).toThrow(message);
     }
   );
 
@@ -794,7 +1088,7 @@ describe("adversarial conformance corpus", () => {
   // flag, not the corpus, is doing the discriminating.
   test.each(NULL_REPRESENTATION_OMITTED)(
     "$action already aligns via the nullable mapper flag and is rejected under omitted ($reason)",
-    async ({ action }) => {
+    async ({ action, message }) => {
       expect(await oracleAllowedIds(action)).toEqual([]);
       expect(await adapterFilteredIds(action, "explicit")).toEqual([]);
 
@@ -808,7 +1102,7 @@ describe("adversarial conformance corpus", () => {
       // The global switch is still the fail-closed backstop for callers who omit attributes
       // without declaring `nullable` on every affected mapper entry.
       await expect(adapterFilteredIds(action, "omitted")).rejects.toThrow(
-        /missing-attribute error/
+        message
       );
     }
   );
@@ -842,7 +1136,14 @@ describe("adversarial conformance corpus", () => {
       try {
         await adapterFilteredIds(action, "omitted");
         notRejected.push(action);
-      } catch { /* expected */ }
+      } catch (error) {
+        // The rejection must be the null-operand check talking, not an incidental failure — a
+        // transport error or mapper typo counting as the required rejection is the silent pass
+        // the corpus README warns about.
+        if (!String(error).includes(NULL_OMITTED_MESSAGE)) {
+          notRejected.push(`${action} (rejected for the wrong reason: ${String(error)})`);
+        }
+      }
     }
     expect(notRejected).toEqual([]);
   });
@@ -864,11 +1165,131 @@ describe("adversarial conformance corpus", () => {
     expect(await adapterFilteredIds(action)).toEqual(allIds);
   });
 
+  // The corpus pins two count spellings over the chain — `size(...) == 0` and
+  // `!(size(...) > 0)` — but the guard has to be a property of the chain rather than of the
+  // two spellings that happen to be pinned. These synthesise the remaining
+  // threshold/polarity combinations onto the same seeded collection and assert the parentless
+  // documents stay out of every one, including an arbitrary-N threshold neither corpus action
+  // reaches (cerbos/query-plan-adapters#316).
+  test("every count threshold over the chain inherits the absent-parent guard", async () => {
+    const chain = new PlanExpressionVariable(
+      "request.resource.attr.mainCategory.subCategories"
+    );
+    const size = new PlanExpression("size", [chain]);
+    const compare = (operator: string, threshold: number) =>
+      new PlanExpression(operator, [size, new PlanExpressionValue(threshold)]);
+    const negate = (condition: PlanExpressionOperand) =>
+      new PlanExpression("not", [condition]);
+
+    const filteredIdsFor = async (
+      condition: PlanExpressionOperand
+    ): Promise<string[]> => {
+      const result = queryPlanToMongoose({
+        queryPlan: {
+          kind: PlanKind.CONDITIONAL,
+          condition,
+          cerbosCallId: "synthetic",
+          requestId: "synthetic",
+          validationErrors: [],
+          metadata: undefined,
+        },
+        mapper: MAPPER,
+      });
+      expect(result.kind).toBe(PlanKind.CONDITIONAL);
+      const rows = await AdversarialResource.find(
+        result.kind === PlanKind.CONDITIONAL ? result.filters : {}
+      )
+        .select({ resourceId: 1, _id: 0 })
+        .lean()
+        .exec();
+      return rows.map((row) => row.resourceId).sort();
+    };
+
+    // Every seed that HAS a mainCategory holds at least one subCategory, and the 16 without
+    // it are CEL missing-path errors — so each of these is empty unless the guard leaks.
+    const emptyByConstruction: [string, PlanExpressionOperand][] = [
+      ["size(chain) == 0", compare("eq", 0)],
+      ["size(chain) <= 0", compare("le", 0)],
+      ["size(chain) >= 2", compare("ge", 2)],
+      ["!(size(chain) > 0)", negate(compare("gt", 0))],
+      ["!(size(chain) >= 1)", negate(compare("ge", 1))],
+      ["!(size(chain) < 2)", negate(compare("lt", 2))],
+    ];
+
+    for (const [shape, condition] of emptyByConstruction) {
+      expect([shape, await filteredIdsFor(condition)]).toEqual([shape, []]);
+    }
+
+    // The mirror image, so the loop above cannot pass by denying everything: `>= 0` and `< 2`
+    // are TRUE for exactly the documents that HAVE the parent.
+    const withParent = await oracleAllowedIds("w1-size-nonneg-chain");
+    expect(withParent.length).toBeGreaterThan(0);
+    expect(withParent.length).toBeLessThan(SEEDS.length);
+    expect(await filteredIdsFor(compare("ge", 0))).toEqual(withParent);
+    expect(await filteredIdsFor(compare("lt", 2))).toEqual(withParent);
+  });
+
+  // The mapping-hazard contract in README.md ("Mapping hazards") rests on ONE structural fact:
+  // this adapter builds no subquery. A relation is a path inside the same document, so the filter
+  // and the application read the same document and the five subquery hazards
+  // (conformance/README.md, "Mapping hazards: the rows the subquery sees") cannot arise. The day
+  // the adapter reaches a second collection — a `$lookup` stage, a `populate()` call — every one
+  // of them arrives at once and the README's "not applicable" rows become over-grants, silently.
+  // This is the test that stops that landing unnoticed (cerbos/query-plan-adapters#323).
+  test("emits no $lookup and reaches no second collection", async () => {
+    const forbidden = /\$lookup|\$graphLookup|\bpopulate\s*\(|\baggregate\s*\(/;
+
+    // The claim is about the adapter, not about the corpus's mapper: a filter walk alone would
+    // pass for a `$lookup` the corpus mapper never triggers. Reading the source is what makes the
+    // guard total over mapper shapes.
+    const source = fs.readFileSync(path.join(__dirname, "index.ts"), "utf8");
+    // Prose about the guard is not a violation of it, so comments come off first — including
+    // trailing ones, or this very file's vocabulary would trip the scan the moment someone
+    // wrote `// never calls populate()` next to a line of code.
+    const stripComments = (line: string): string =>
+      /^(\/\/|\/\*|\*)/.test(line.trimStart())
+        ? ""
+        : line.replace(/\/\/.*$/, "").replace(/\/\*.*?\*\//g, "");
+    const offendingLines = source
+      .split("\n")
+      .map((line, index) => [index + 1, stripComments(line)] as const)
+      .filter(([, code]) => forbidden.test(code));
+    expect(offendingLines).toEqual([]);
+
+    // And the emitted filters, so a `$lookup` assembled from string fragments cannot slip past
+    // the source scan.
+    for (const action of ORACLE_ACTIONS) {
+      const queryPlan = await cerbos.planResources({
+        principal: seedsFile.principal,
+        resource: { kind: seedsFile.resourceKind },
+        action,
+      });
+      const result = queryPlanToMongoose({ queryPlan, mapper: MAPPER });
+      if (result.kind !== PlanKind.CONDITIONAL) continue;
+      expect([action, JSON.stringify(result.filters)]).toEqual([
+        action,
+        expect.not.stringMatching(forbidden),
+      ]);
+    }
+  });
+
   test("oracle is not degenerate", async () => {
-    for (const action of ["vf-le", "like-percent", "all-on-empty", "pv-exists", "pv-all", "null-eq", "null-ne"]) {
-      const ids = await oracleAllowedIds(action);
-      expect(ids.length).toBeGreaterThan(0);
-      expect(ids.length).toBeLessThan(SEEDS.length);
+    // Guard the guard: each of these actions must produce a non-empty, non-total oracle set,
+    // otherwise the differential comparison could pass vacuously (e.g. PDP denying all).
+    //
+    // Every entry is asserted to be an action Mongoose actually oracle-compares. A list copied
+    // from another harness drifts into naming shapes this adapter never compares, which guard
+    // nothing (cerbos/query-plan-adapters#324); the membership assertion turns moving an action
+    // into Mongoose's `adapterUnsupported` set into a failure here rather than a silent no-op.
+    for (const action of DEGENERACY_GUARD_ACTIONS) {
+      expect(ORACLE_ACTIONS).toContain(action);
+      await expectNonDegenerateOracle(action);
+    }
+    // Asserting the complement keeps the split honest — an action Mongoose gains support for
+    // must move up into the guard proper.
+    for (const action of DEGENERACY_LIVENESS_PROBES) {
+      expect(ORACLE_ACTIONS).not.toContain(action);
+      await expectNonDegenerateOracle(action);
     }
   });
 });

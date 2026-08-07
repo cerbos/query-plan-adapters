@@ -97,11 +97,26 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` d
 | Classification | Coverage |
 | --- | --- |
 | Oracle-tested | 15 reference actions: directional and inequality comparisons, single/empty membership, Unicode and empty strings, negative numbers, n-ary/double/triple negation, membership on an optional resource field, mapped nested-field equality, and case-sensitive equality |
-| Fail-closed | 107 reference conformance actions plus regex, ordered indexing/`get-field`, and timestamp probes (110 actions total) |
+| Fail-closed | 118 reference conformance actions plus regex, ordered indexing/`get-field`, timestamp, cast and non-boolean-macro probes (126 actions total) |
 | Representation-independent | `null-eq-missing` — rejected like every other null comparison operand, so no `nullAttributeRepresentation` option is required |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute documents. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 
-Chroma metadata filters are limited to flat scalar comparisons and membership. Nested collections, field-to-field and arithmetic expressions, string helpers, hierarchy/timestamp operations, ternaries, nullable inequality, and other shapes that cannot be represented faithfully throw before a filter is returned.
+Chroma metadata filters are limited to flat scalar comparisons and membership. Nested collections, field-to-field and arithmetic expressions, string helpers, hierarchy/timestamp operations, ternaries, nullable inequality, and other shapes that cannot be represented faithfully throw before a filter is returned. Every fail-closed shape's error message is pinned in the shared corpus (`conformance/actions.json`) and asserted by this adapter's conformance run, so a classification proves the throw names its declared mechanism rather than merely that something threw.
+
+## Mapping hazards
+
+The conformance contract above proves the *plan* side — given a policy shape, does the filter select the documents `check()` allows. The other half is the *mapping*: **the documents the filter reads must be the documents the application put into the resource attributes.** Six ways that can break are catalogued in the shared corpus, and every adapter has to record a position on each of them.
+
+This adapter **builds no subquery**, and has nothing to build one over: a Chroma `where` clause compares flat scalar metadata on the document being matched. Every shape that would need to reach a second record is already in the fail-closed set above.
+
+| Hazard | Position | Mechanism to check |
+|---|---|---|
+| Filtered association | Not applicable — no subquery | — |
+| Default scope on the target model | Not applicable — no second collection is read | — |
+| Subtype discrimination | **Caller-owned** | The Chroma collection you pass the `where` clause to. The adapter is handed a plan, never a collection, so it cannot check that the collection you query is the one whose metadata became the resource attributes. If one collection mixes document kinds, add the discriminating metadata key to the `where` yourself |
+| To-one relation used as a collection | Not applicable — a metadata key holds exactly what the application stored | — |
+| Composite association key | Not applicable — no join, so no key to compose | — |
+| Absent to-one parent | **Rejected** — `w1-all-chain`, `w1-not-exists-chain` and the eight other chained shapes are in `adapterUnsupported` and throw | None — Chroma metadata is flat, so a chain has nowhere to resolve to and the adapter refuses the plan rather than flattening it ([#309](https://github.com/cerbos/query-plan-adapters/issues/309)) |
 
 ## Requirements
 

@@ -110,13 +110,30 @@ The adapter is differentially tested with 20 hostile seed documents against Cerb
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | All 122 reference conformance actions, plus `matches()`, list indexing/`get-field`, and `timestamp()` plans that the Spring Data reference adapter rejects (125 actions total) |
-| Fail-closed | No corpus shape when `allowPostFilter: true`; unknown operators and invalid expression structures still throw |
+| Oracle-tested | 131 of the 133 reference conformance actions, plus `matches()`, list indexing/`get-field`, `timestamp()`, and `int()`/`double()` cast plans that the Spring Data reference adapter rejects — the post-filter reimplements CEL cast semantics exactly (whole-string parse, truncation toward zero), so the SQL divergences do not apply (137 actions total) |
+| Fail-closed | `filter()`/`map()` used as a condition (they return a list, not a boolean) and a constant zero divisor whose sign the JSON hop into a Convex function discards (4 actions). All four throw during translation, before any filter exists; unknown operators and invalid expression structures still throw |
 | Explicit opt-in | Any plan that cannot be represented entirely as a Convex database filter requires `allowPostFilter: true` |
 | Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`. Under the default it already returns the empty set the PDP demands *when the document omits the field for a NULL value*, which is what the conformance harness seeds; a deployment that stores explicit nulls while omitting the attribute would over-grant |
 | Known planner divergence | `has()` on a missing attribute is currently folded by the Cerbos planner to `ALWAYS_ALLOWED`; `checkResource` still denies documents where the attribute is missing. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 
 This support statement includes value-first comparisons, field-to-field expressions, null and missing-attribute behavior, nested lambdas, collection macros, string and arithmetic expressions, timestamps, hierarchy operations, and chained nested fields. Fields that may be absent must be marked `nullable: true` in the mapper so the adapter evaluates their predicates with CEL-compatible missing-value semantics instead of pushing them to a Convex filter.
+
+Every fail-closed shape's error message is pinned in the shared corpus (`conformance/actions.json`) and asserted by this adapter's conformance run, so a classification proves the throw names its declared mechanism rather than merely that something threw.
+
+## Mapping hazards
+
+The conformance contract above proves the *plan* side — given a policy shape, does the filter select the documents `check()` allows. The other half is the *mapping*: **the documents the filter reads must be the documents the application put into the resource attributes.** Six ways that can break are catalogued in the shared corpus, and every adapter has to record a position on each of them.
+
+This adapter **builds no subquery.** Convex has no joins, so the mapper resolves every Cerbos path — including chained ones such as `mainCategory.subCategories` — to a path inside the same document, and the returned `filter`/`postFilter` pair reads exactly the document the application serialised.
+
+| Hazard | Position | Mechanism to check |
+|---|---|---|
+| Filtered association | Not applicable — no subquery | — |
+| Default scope on the target model | Not applicable — no second table is read | — |
+| Subtype discrimination | **Caller-owned** | The table you pass to `ctx.db.query()`. The adapter is handed a plan, never a table, so it cannot check that the table you filter is the one the resource attributes were read from. If one Convex table holds several document shapes distinguished by a field, that field is not in the returned filter and you have to add it yourself |
+| To-one relation used as a collection | Not applicable — a document path holds exactly what the application stored | — |
+| Composite association key | Not applicable — no join, so no key to compose | — |
+| Absent to-one parent | **Reproduced**, and proved by the corpus (`w1-all-chain` and siblings) | None — the post-filter evaluates a missing path as a CEL error, which denies, so an absent `mainCategory` is excluded under both polarities rather than reading as an empty collection ([#309](https://github.com/cerbos/query-plan-adapters/issues/309)) |
 
 ## Requirements
 

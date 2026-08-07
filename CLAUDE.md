@@ -13,6 +13,8 @@ Multi-language ORM adapters that translate Cerbos query plan responses into data
 | convex | TypeScript | `@cerbos/orm-convex` | Convex |
 | langchain-chromadb | TypeScript | `@cerbos/langchain-chromadb` | ChromaDB |
 | sqlalchemy | Python | `cerbos-sqlalchemy` | SQLAlchemy |
+| ent | Go | `github.com/cerbos/query-plan-adapters/ent` | Ent |
+| pgx | Go | `github.com/cerbos/query-plan-adapters/pgx` | pgx / PostgreSQL |
 | elasticsearch-java | Java | `cerbos-elasticsearch` | Elasticsearch |
 | spring-data | Java | `cerbos-spring-data` | Spring Data JPA |
 
@@ -49,6 +51,18 @@ pdm run test     # pytest
 pdm run format   # isort + black
 ```
 
+### Go (Ent, pgx)
+```bash
+go test ./...             # includes the adversarial suite; starts its own containers
+golangci-lint run ./...   # config mirrors github.com/cerbos/cerbos
+golangci-lint fmt ./...
+```
+
+Both Go modules are standalone: each vendors its own translator under `internal/queryplan` and
+depends on nothing else in this repository, so a consumer only ever pulls in the one module. The
+harnesses need Docker (testcontainers) and read the pinned PDP version from
+`conformance/CERBOS_VERSION`.
+
 ### Java (Elasticsearch, Spring Data)
 ```bash
 # Run from the REPOSITORY ROOT, not the adapter directory: the Java harnesses read the
@@ -77,7 +91,8 @@ Some adapters need additional services:
 ## Conformance
 
 `conformance/` is the shared adversarial corpus every adapter is proved against: one hostile policy
-suite, one set of hostile seed rows, one classification ledger, and golden planner wire fixtures.
+suite, one set of hostile seed rows, one derived-field table, one classification ledger, and golden
+planner wire fixtures.
 It exists because the same semantic bug — value-first operand inversion, LIKE metacharacter leaks,
 three-valued logic under negation — has historically shipped identically to more than one adapter.
 
@@ -120,23 +135,24 @@ For pull requests: give a concise summary, note the affected adapters, link rela
 
 ## CI
 
-Each adapter has its own GitHub Actions workflow triggered by changes in its directory, `/policies/`, or `/conformance/`. Matrix tests across Node versions (22, 24, 25) and relevant service versions. All eight adapter workflows validate the corpus and run their adversarial suite — as a separate `adversarial` job for prisma, drizzle, mongoose and ChromaDB; inside the existing test job for convex, sqlalchemy, spring-data and elasticsearch-java. `conformance.yaml` additionally replans the golden wire fixtures against the pinned PDP and fails on drift.
+Each adapter has its own GitHub Actions workflow triggered by changes in its directory, `/policies/`, or `/conformance/`. Matrix tests across Node versions (22, 24, 25) and relevant service versions. All eleven adapter workflows validate the corpus and run their adversarial suite **inside the same job as the regular tests** — there is no separate `adversarial` job. On the TypeScript adapters the adversarial step is gated to the baseline Node leg (`if: matrix.node-version == '22'`), because the corpus discriminates the translator and the datastore, not the Node runtime; the other matrix dimensions (Prisma major, MongoDB server version) still get their own adversarial run. Adding a new adversarial job — or dropping that gate so the corpus replays on every Node leg — multiplies runner minutes for no extra coverage. `conformance.yaml` additionally replans the golden wire fixtures against the pinned PDP and fails on drift.
 
-Tag-based publishing: `prisma/v*` -> npm, `sqla/v*` -> PyPI, `elasticsearch-java/v*` and `spring-data/v*` -> Maven Central.
+Tag-based publishing: `prisma/v*` -> npm, `sqla/v*` -> PyPI, `elasticsearch-java/v*` and `spring-data/v*` -> Maven Central; `ent/v*` and `pgx/v*` are Go
+module tags resolved directly from the repository.
 
 ## Changing how a condition is translated
 
 **Any change to how an operator, condition, or expression shape is translated starts in the
 shared corpus, not in one adapter.** The same semantic bug has repeatedly shipped identically to
 several adapters because each re-derives the planner's wire contract by hand. A fix proven only
-against the adapter you happened to be looking at leaves the identical bug live in the other seven.
+against the adapter you happened to be looking at leaves the identical bug live in the other ten.
 
 So when you add, fix, or change the handling of any shape:
 
 1. **Add the shape to `conformance/policies/adversarial.yaml`** as a new action, with seed data
    that discriminates it (see `conformance/README.md`, "Adding a new hostile shape"). If it needs a
    principal attribute or column that does not exist yet, add it to `conformance/seeds.json`.
-2. **Classify it in `conformance/actions.json` for all eight adapters** — but only *after* running
+2. **Classify it in `conformance/actions.json` for all eleven adapters** — but only *after* running
    the harnesses. The classification is an output of the run, not an input: declaring an action
    unsupported before watching it fail is how a translatable shape gets permanently skipped.
 3. **Regenerate the wire fixtures** (`conformance/scripts/regenerate-wire-fixtures.sh`) and confirm
@@ -145,13 +161,21 @@ So when you add, fix, or change the handling of any shape:
 4. **Run every adapter's adversarial suite and triage each divergence** into exactly one of: a
    translation bug (fix it), a shape that adapter's query language genuinely cannot express (add
    to `adapterUnsupported` with a reason naming the real mechanism, and make it throw), or an
-   upstream planner bug (`knownDivergences`).
+   upstream planner bug (`knownDivergences`). A fail-closed classification also needs the message
+   that adapter actually raises pinned next to it — `message` on an `adapterUnsupported` entry,
+   `messages.<adapter>` on an `expectedUnsupported` one. Every harness refuses to run with one
+   missing, and `validate-corpus.sh` checks the key sets. Pin what the adapter says, then check it
+   names the mechanism the `reason` declares; when the two disagree, the reason is usually naming a
+   limitation the walk never reaches.
 5. **Bump the per-harness tripwires deliberately** — corpus size, oracle/throwing counts, and the
-   degeneracy-guard action list. Add the new action to that guard so it cannot pass vacuously.
+   degeneracy-guard action lists. Add the new action to each guard so it cannot pass vacuously,
+   choosing the right list per adapter: the *compared* list where that adapter translates the
+   shape, the *liveness-only* list where it throws. Every entry asserts its own side of that split,
+   so a guard list copied from another harness fails instead of quietly guarding nothing.
    The exception is an action whose oracle is empty *by construction* (a `nullRepresentationOmitted`
-   probe): the guard asserts a non-empty, non-total oracle, so such an action must stay out of it
-   and carry a different anti-vacuity assertion — one pinning *why* its rejection is required, not
-   merely that a rejection happens. See `conformance/README.md`.
+   probe): the guard asserts a non-empty, non-total oracle, so such an action must stay out of both
+   lists and carry a different anti-vacuity assertion — one pinning *why* its rejection is required,
+   not merely that a rejection happens. See `conformance/README.md`.
 6. **Update the affected READMEs' `Conformance contract` tables** in the same commit.
 
 A per-adapter unit test is not a substitute for a corpus action. Unit tests pin the filter an
@@ -163,11 +187,34 @@ attribute allowlist, a fixed column list). A projection silently drops anything 
 depends on, and because the same projected input feeds both the plan and the check() oracle, the
 two agree and the action passes vacuously. Pass corpus data through verbatim.
 
+Every harness declares the exact `seeds.json` keys and `derived-fields.json` fields it consumes and
+asserts set equality against the corpus, so adding a seed field fails all eleven loudly instead of
+being dropped from both sides at once. Adding a field means updating those declarations
+deliberately — that is the point of the guard, not an obstacle to route around. The derived fields
+(`createdBy`, `aDouble`, `createdAt`, `scope`, `labels`) live in `conformance/derived-fields.json`;
+never recompute them in a harness.
+
 ## Working with Adapters
 
 - Edit only `src/` — never commit `lib/` until tests pass
 - Shared policies in `/policies/` affect all adapters; edit carefully
-- `conformance/` affects all adapters too: a change there re-runs every adapter's CI, and adding an action requires classifying it for all eight
+- `conformance/` affects all adapters too: a change there re-runs every adapter's CI, and adding an action requires classifying it for all eleven
+- Adding a seed row means adding its `conformance/derived-fields.json` entry in the same commit; adding a seed *field* also means widening every harness's declared key set — both are enforced, not optional
 - Regenerate build artifacts in the same commit as source changes
 - Changing what an adapter can translate means updating its `conformance/actions.json` entry and its README contract table in the same commit
-- When an adapter cannot express a shape, make it throw with a message naming the real mechanism — never emit a best-effort filter
+- When an adapter cannot express a shape, make it throw with a message naming the real mechanism — never emit a best-effort filter. That message is pinned in `conformance/actions.json` and asserted, so changing it is a deliberate corpus edit
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues on `cerbos/query-plan-adapters`, via the `gh` CLI. Tag every affected adapter with its
+per-adapter label, or `conformance` for corpus-wide work. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical roles, each label string equal to its name. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.

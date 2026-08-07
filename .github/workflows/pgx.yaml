@@ -1,0 +1,50 @@
+name: pgx Test
+
+on:
+  pull_request:
+    paths:
+      - "pgx/**"
+      - "conformance/**"
+      - "policies/**"
+      - ".github/workflows/pgx.yaml"
+  push:
+    tags:
+      - pgx/v*
+
+defaults:
+  run:
+    working-directory: pgx
+
+jobs:
+  # Lint and the adversarial suite share one job: they need the identical checkout and Go
+  # toolchain, and the lint steps run first so a formatting break still fails in about a minute
+  # rather than after the container-backed suite.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate conformance corpus
+        run: ../conformance/scripts/validate-corpus.sh
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: pgx/go.mod
+
+      - name: Lint
+        uses: golangci/golangci-lint-action@d583c34f0599d37dbac4a198b9c83201be380893 # v9.3.0
+        with:
+          working-directory: pgx
+          args: --config=.golangci.yaml
+
+      - name: Check formatting
+        run: |
+          golangci-lint fmt ./...
+          git diff --exit-code
+
+      # The harness starts its own Cerbos PDP with testcontainers, reading the pinned version from
+      # conformance/CERBOS_VERSION — there is no separate sidecar to set up, and the version is
+      # never hardcoded here. It also seeds a PostgreSQL testcontainer.
+      - name: Adversarial conformance suite
+        run: go test -race -timeout 20m ./...

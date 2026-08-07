@@ -10,8 +10,11 @@ module AdversarialOracle
     @client ||= Cerbos::Client.new(ENV.fetch("CERBOS_HOST", "cerbos:3593"), tls: false)
   end
 
+  # The principal goes through without a change. An allowlist of keys here would drop the
+  # attribute that a new action discriminates on from the plan and from the oracle at the same
+  # time, and the action would then agree with itself and prove nothing.
   def principal
-    ConformanceCorpus::PRINCIPAL.slice("id", "roles", "attr").transform_keys(&:to_sym)
+    ConformanceCorpus::PRINCIPAL.transform_keys(&:to_sym)
   end
 
   def allowed_ids(action)

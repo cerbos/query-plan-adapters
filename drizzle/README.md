@@ -45,12 +45,52 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` d
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 120 reference conformance actions |
-| Fail-closed corpus shapes | Sub-millisecond `now()` thresholds plus regex `matches()`, ordered list indexing/`get-field`, and `timestamp()` over an untyped string field (5 actions) |
+| Oracle-tested | 131 reference conformance actions |
+| Fail-closed corpus shapes | Sub-millisecond `now()` thresholds, regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an untyped string field, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero) and `filter()`/`map()` used as a condition (both return a list, not a boolean) (10 actions) |
 | Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 
-The oracle coverage includes value-first and field-to-field comparisons, escaped string predicates, relation counts and nested collection macros, null/error propagation, arithmetic and ternaries, hierarchy operations, typed timestamps, and multi-hop relations. The five fail-closed shapes throw rather than return a broader SQL filter. `matches()` is rejected because SQL regex dialects do not guarantee CEL/RE2 semantics.
+The oracle coverage includes value-first and field-to-field comparisons, escaped string predicates, relation counts and nested collection macros, null/error propagation, arithmetic and ternaries, hierarchy operations, typed timestamps, and multi-hop relations. The fail-closed shapes throw rather than return a broader SQL filter. `matches()` is rejected because SQL regex dialects do not guarantee CEL/RE2 semantics. Every fail-closed shape's error message is pinned in the shared corpus (`conformance/actions.json`) and asserted by this adapter's conformance run, so a classification proves the throw names its declared mechanism rather than merely that something threw.
+
+## Mapping hazards
+
+The conformance contract above proves the *plan* side — given a policy shape, does the filter select the rows `check()` allows. The other half is the *mapping*: **the rows the subquery reads must be the rows the application put into the resource attributes.** Six ways that can break are catalogued in the shared corpus, and every adapter has to record a position on each of them.
+
+This adapter builds a **bare-table subquery.** A relation mapping is a table plus a source and a target column; Drizzle has no association metadata for the adapter to consult, so nothing the application applies to its own reads reaches the generated `EXISTS`. Where the application narrows those reads, declare the same predicate as [`subqueryFilter`](#declaring-the-applications-own-predicate) on the relation and the adapter reproduces it. Declaring nothing emits exactly the SQL this adapter emitted before the field existed — it cannot detect the omission, so silence is not a warning.
+
+| Hazard | Position | Mechanism to check |
+|---|---|---|
+| Filtered association | **Caller-owned**, reproducible with `subqueryFilter` | The `where` you pass to Drizzle's relational query builder (`db.query.<table>.findMany({ with: { rel: { where } } })`), and any repository helper that appends one. Drizzle applies those to the query you call them on; the adapter is given `table`, `sourceColumn` and `targetColumn` and reads the table bare |
+| Default scope on the target model | **Caller-owned**, reproducible with `subqueryFilter` | A soft-delete column (`deletedAt IS NULL`), a tenant column, a `published` flag — anything every application read of that table filters on. Drizzle has no `default_scope` construct, so the convention lives in your own query code and only you can see it |
+| Subtype discrimination | **Caller-owned**, reproducible with `subqueryFilter` | A `type`/`kind` discriminator column where one table holds several row kinds. Declare `eq(table.type, "…")` |
+| To-one relation used as a collection | **Caller-owned** | A `type: "one"` relation whose target column has no unique index. `type` is declarative — the adapter emits the same correlated `EXISTS` for either value — so nothing makes the database enforce the single row the application saw. Add the unique constraint, or accept that the subquery examines every matching row |
+| Composite association key | **Rejected by the type system** | `sourceColumn`/`targetColumn` are each a single `AnyColumn`, so a two-column key cannot be expressed. This is a compile error, not a wrong join |
+| Absent to-one parent | **Reproduced**, and proved by the corpus (`w1-all-chain` and siblings) | None — every operator reached through a relation chain requires its intermediate hops separately, so a missing parent is UNKNOWN under both polarities ([#309](https://github.com/cerbos/query-plan-adapters/issues/309), [#315](https://github.com/cerbos/query-plan-adapters/issues/315)) |
+
+### Declaring the application's own predicate
+
+```ts
+import { and, eq, isNull } from "drizzle-orm";
+
+const result = queryPlanToDrizzle({
+  queryPlan,
+  mapper: {
+    "request.resource.attr.tags": {
+      relation: {
+        type: "many",
+        table: tags,
+        sourceColumn: resources.id,
+        targetColumn: tags.resourceId,
+        field: tags.name,
+        // Exactly the predicate your own reads of `tags` apply.
+        subqueryFilter: and(isNull(tags.deletedAt), eq(tags.kind, "label")),
+      },
+    },
+  },
+});
+```
+
+`subqueryFilter` is ANDed into the correlated subquery alongside the join, so it narrows the rows the subquery *examines* rather than the rows it returns. That is what makes it right under negation as well: `all()` compiles to a `NOT EXISTS` over a false witness, and restricting the scan turns it into "every visible row satisfies the predicate" instead of "every row in the table does". It applies to every operator reached through the relation — `exists`, `all`, `except`, membership, `hasIntersection`, `size` — and to the hop-existence guard, so an intermediate hop must exist *and* be visible.
 
 ## How it works
 
@@ -225,6 +265,8 @@ const result = queryPlanToDrizzle({
 
 With the above mapper, query plan references such as `request.resource.attr.owner.email` and `request.resource.attr.tags.name`
 are translated into `EXISTS` expressions that join the `owners` and `tags` tables respectively.
+
+Those `EXISTS` expressions read the mapped table bare. If your own reads of that table apply a predicate — a soft-delete flag, a tenant column, a subtype discriminator — declare it as `subqueryFilter` on the relation so the subquery sees the same rows the application serialised. See [Mapping hazards](#mapping-hazards).
 
 ### Working with collections
 

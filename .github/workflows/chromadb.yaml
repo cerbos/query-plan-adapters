@@ -19,12 +19,19 @@ defaults:
 jobs:
   test:
     strategy:
+      # The adversarial suite now shares this matrix, so the default fail-fast would let an
+      # unrelated Node leg cancel the baseline leg mid-corpus and report it as "cancelled" —
+      # neither a pass nor a failure for the repo's load-bearing signal.
+      fail-fast: false
       matrix:
         node-version: ["22", "24", "25"]
         chroma-image: ["chromadb/chroma@sha256:1e0b73a187a28757c572acba508c46f48c9e8b0acaf5c20e6d95cdedce1acdf6"]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate conformance corpus
+        run: ../conformance/scripts/validate-corpus.sh
 
       - name: Read pinned Cerbos version
         id: cerbos
@@ -58,43 +65,14 @@ jobs:
         env:
           CHROMA_URL: http://127.0.0.1:8000
 
-  adversarial:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Validate conformance corpus
-        run: ../conformance/scripts/validate-corpus.sh
-
-      - name: Read pinned Cerbos version
-        id: cerbos
-        run: echo "version=$(tr -d '[:space:]' < ../conformance/CERBOS_VERSION)" >> "$GITHUB_OUTPUT"
-
-      - name: Setup Cerbos
-        uses: cerbos/cerbos-setup-action@f772482c8504a05c49018a0bf2d84012a607733c # v1
-        with:
-          version: v${{ steps.cerbos.outputs.version }}
-
-      - name: Start ChromaDB
-        run: |
-          docker run -d --name chromadb -p 8000:8000 chromadb/chroma@sha256:1e0b73a187a28757c572acba508c46f48c9e8b0acaf5c20e6d95cdedce1acdf6
-          for _ in {1..30}; do
-            if curl -sf http://127.0.0.1:8000/api/v2/heartbeat > /dev/null; then
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "ChromaDB failed to start" >&2
-          exit 1
-
-      - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: "22"
-
-      - run: npm install
-
+      # The adversarial corpus is a property of the translator, not of the Node runtime, so it
+      # runs on the baseline leg only — the same single execution the standalone `adversarial`
+      # job used to perform, minus the duplicated checkout, Cerbos install, ChromaDB start and
+      # `npm install`. The two suites own separate collections (`adapter-tests` vs
+      # `adapter-adversarial-tests`), each recreated in its own `beforeAll`, so sharing one
+      # ChromaDB instance does not cross-contaminate them.
       - name: Run adversarial differential suite
+        if: matrix.node-version == '22'
         run: npm run test:adversarial:cerbos
         env:
           CHROMA_URL: http://127.0.0.1:8000

@@ -125,9 +125,4 @@ class AdvResource < ActiveRecord::Base
   self.record_timestamps = false
   has_many :tags, class_name: "AdvTag", foreign_key: :resource_id, primary_key: :id
   has_many :categories, class_name: "AdvCategory", foreign_key: :resource_id, primary_key: :id
-  # The `mainCategory.*` attributes use this chain of two hops from the root. It becomes one
-  # correlated subquery with a join through the category between the two ends. It does not
-  # become an EXISTS inside an EXISTS, because that shape would count the last rows for each
-  # category and not for each resource.
-  has_many :sub_categories, through: :categories, source: :sub_categories
 end

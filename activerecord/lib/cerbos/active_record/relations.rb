@@ -33,13 +33,14 @@ module Cerbos
       # A collection after the adapter resolves it. The adapter can change it into an EXISTS
       # subquery or a COUNT subquery.
       class Scope
-        def initialize(hops:, model:, mapping: nil)
+        def initialize(hops:, model:, mapping: nil, guard_hops: [])
           @hops = hops
           @mapping = mapping
           @model = model
+          @guard_hops = guard_hops
         end
 
-        attr_reader :hops, :mapping, :model
+        attr_reader :hops, :mapping, :model, :guard_hops
 
         # The table with its alias for the last hop. The member columns are on this table.
         def table
@@ -68,28 +69,57 @@ module Cerbos
           # The adapter gives the AST to the EXISTS node and not the manager. A SelectManager
           # makes its own parentheses, and +EXISTS ((SELECT ...))+ is an expression in
           # parentheses and not a subquery.
-          Arel::Nodes::Exists.new(select_manager(Arel.sql("1"), conditions).ast)
+          Arel::Nodes::Exists.new(select_manager(hops, Arel.sql("1"), conditions).ast)
         end
 
         # Makes +(SELECT COUNT(*) FROM ... WHERE <correlation> [AND <conditions>])+ as a
         # scalar value.
         def count(*conditions)
-          Arel::Nodes::Grouping.new(select_manager(Arel.star.count, conditions).ast)
+          Arel::Nodes::Grouping.new(select_manager(hops, Arel.star.count, conditions).ast)
         end
 
         # Makes +(SELECT <column> FROM ... WHERE <correlation>)+ as a scalar value. A field
         # path with dots through to-one associations uses this. A scalar subquery cannot
         # increase the number of rows in the result. A JOIN can do that.
         def scalar(column_name)
-          Arel::Nodes::Grouping.new(select_manager(table[column_name], []).ast)
+          Arel::Nodes::Grouping.new(select_manager(hops, table[column_name], []).ast)
+        end
+
+        # Makes +CASE WHEN EXISTS (<the hops before the collection>) THEN <expression> END+.
+        #
+        # CEL cannot read a field from a list, so each part before the last part of a path is
+        # a to-ONE parent. When that parent is absent, the application sends no attribute, CEL
+        # makes a missing-path error, and the decision is a deny. A subquery from the resource
+        # row cannot see the difference: an absent parent and a parent with no children both
+        # give no rows. Then +all+ reads TRUE, +!exists+ reads TRUE and the count reads 0, and
+        # each one of those gives back rows that the PDP denies
+        # (cerbos/query-plan-adapters#309).
+        #
+        # The CASE has no ELSE clause. Thus an absent parent gives NULL, and +NOT NULL+ is also
+        # NULL, so the row stays out of the result under both polarities. Every operator that
+        # reads a chain must come through here and not only the collection macros: a plain
+        # EXISTS has two values, so it is FALSE for an absent parent and its negation is TRUE.
+        # That is how membership and +hasIntersection+ (#315) and the negated count
+        # +!(size(chain) > 0)+ (#316) still gave back every row without a parent after the
+        # macros alone were corrected.
+        #
+        # +guard_hops+ is empty for a relation that the caller mapped directly. Such a relation
+        # keeps the meaning of an empty collection: +!tags.exists(...)+ over zero tags is TRUE.
+        def guarded(expression)
+          return expression if guard_hops.empty?
+
+          ArelSupport.case_node([[
+            Arel::Nodes::Exists.new(select_manager(guard_hops, Arel.sql("1"), []).ast),
+            expression
+          ]])
         end
 
         private
 
-        def select_manager(projection, conditions)
+        def select_manager(hop_list, projection, conditions)
           manager = Arel::SelectManager.new
-          manager.from(hops.first.table)
-          hops.drop(1).each do |hop|
+          manager.from(hop_list.first.table)
+          hop_list.drop(1).each do |hop|
             manager.join(hop.table).on(ArelSupport.and_node(hop.predicates))
           end
           manager.project(projection)
@@ -127,6 +157,36 @@ module Cerbos
 
         hops = hops_for(reflection, owner_table, owner_model, aliaser)
         Scope.new(hops: hops, mapping: mapping, model: hops.last.model)
+      end
+
+      # Resolves a relation that the plan reaches THROUGH another relation, for the attribute
+      # path +R.attr.mainCategory.subCategories+. The caller writes the chain as a nested
+      # +fields:+ mapping, and each step becomes one more set of hops in the same correlated
+      # subquery.
+      #
+      # The nesting is what makes the hop requirement visible to the adapter, and this is the
+      # reason to prefer it over one +has_many :through+ under the full name with dots. Both
+      # give the same joins, but only the nested form says which hops are the parent and which
+      # hop is the collection. A +through:+ association can also be a plain join table that
+      # Cerbos never sees, where an empty collection is a real empty collection. See
+      # {Scope#guarded}.
+      #
+      # @param outer_scope [Scope] the relation that holds the nested mapping
+      # @return [Scope] the full chain, which requires the hops of +outer_scope+ to exist
+      def chain(outer_scope:, mapping:, aliaser:)
+        inner = build(
+          owner_model: outer_scope.model,
+          owner_table: outer_scope.table,
+          mapping: mapping,
+          aliaser: aliaser
+        )
+
+        Scope.new(
+          hops: outer_scope.hops + inner.hops,
+          mapping: mapping,
+          model: inner.model,
+          guard_hops: outer_scope.hops
+        )
       end
 
       # Resolves a chain of to-one associations for an {AttributeMapping::Field} path with

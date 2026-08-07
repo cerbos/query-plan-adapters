@@ -386,12 +386,12 @@ class TestGetQuery:
     def test_arith_mod(
         self, cerbos_client, principal, resource_desc, resource_table, conn
     ):
+        # The policy wraps the column in int() before the modulus, so this
+        # inherits the cast rejection below (#311).
         plan = cerbos_client.plan_resources("arith-mod", principal, resource_desc)
         attr = {"request.resource.attr.aNumber": resource_table.aNumber}
-        query = get_query(plan, resource_table, attr)
-        res = conn.execute(query).fetchall()
-        assert len(res) == 1
-        assert res[0].name == "resource2"
+        with pytest.raises(ValueError, match="cannot be lowered to SQL CAST"):
+            get_query(plan, resource_table, attr)
 
     def test_matches_regex(
         self, cerbos_client, principal, resource_desc, resource_table, conn
@@ -447,26 +447,33 @@ class TestGetQuery:
         assert len(res) == 1
         assert res[0].name == "resource1"
 
+    # #311: SQL CAST is not a CEL conversion, in either direction.
+    #
+    # CEL reads a WHOLE string or raises, and an error DENIES the row, while CAST
+    # reads whatever numeric prefix parses — this suite's fixtures happen to hold no
+    # string that casts to a non-zero number, which is exactly why the old
+    # `int(aString) > 0` assertion below passed while the shape was unsafe. The
+    # conformance corpus seeds "100%_done" and "50%_off", which SQLite casts to 100
+    # and 50, and the filter then returns rows the PDP denies. The numeric direction
+    # is no safer: CEL truncates toward zero where PostgreSQL and MySQL round.
+    #
+    # Nothing in the plan says what type the operand's column holds, so the adapter
+    # cannot pick a faithful lowering and fails closed instead.
     def test_convert_double(
         self, cerbos_client, principal, resource_desc, resource_table, conn
     ):
         plan = cerbos_client.plan_resources("convert-double", principal, resource_desc)
         attr = {"request.resource.attr.aNumber": resource_table.aNumber}
-        query = get_query(plan, resource_table, attr)
-        res = conn.execute(query).fetchall()
-        assert len(res) == 2
-        assert all(map(lambda x: x.name in {"resource2", "resource3"}, res))
+        with pytest.raises(ValueError, match="'double\\(\\)' cannot be lowered"):
+            get_query(plan, resource_table, attr)
 
     def test_convert_int(
         self, cerbos_client, principal, resource_desc, resource_table, conn
     ):
-        # All `aString` values are non-numeric, so SQLite casts them to 0 and
-        # the predicate `int(aString) > 0` matches no rows.
         plan = cerbos_client.plan_resources("convert-int", principal, resource_desc)
         attr = {"request.resource.attr.aString": resource_table.aString}
-        query = get_query(plan, resource_table, attr)
-        res = conn.execute(query).fetchall()
-        assert len(res) == 0
+        with pytest.raises(ValueError, match="'int\\(\\)' cannot be lowered"):
+            get_query(plan, resource_table, attr)
 
     def test_ternary(
         self, cerbos_client, principal, resource_desc, resource_table, conn
@@ -950,12 +957,21 @@ class TestSemanticEdgeTranslations:
             }
         )
 
-        for plan in (nan_plan, infinity_plan):
-            query = get_query(plan, resource_table, attr)
-            assert {row.name for row in conn.execute(query)} == {
-                "resource1",
-                "resource3",
-            }
+        query = get_query(nan_plan, resource_table, attr)
+        assert {row.name for row in conn.execute(query)} == {
+            "resource1",
+            "resource3",
+        }
+
+        # #312: the infinity plan divides a NON-zero numerator by a constant zero, and
+        # the sign of that zero decides which infinity CEL produced. Over the HTTP
+        # transport the operand arrives as the INTEGER 0 — Cerbos renders the double
+        # -0.0 as `-0` and json.loads("-0") is 0 — so the sign bit is already gone and
+        # the adapter cannot tell +Infinity from -Infinity. It fails closed rather than
+        # assume the positive zero. The NaN plan above is unaffected: 0/0 is NaN under
+        # either sign.
+        with pytest.raises(ValueError, match="sign is indeterminate"):
+            get_query(infinity_plan, resource_table, attr)
 
         # PostgreSQL gives NaN a total ordering above finite numbers. Letting a
         # raw NaN bind reach that dialect turns the false CEL comparison into

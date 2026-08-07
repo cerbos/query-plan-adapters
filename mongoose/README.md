@@ -70,12 +70,27 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` d
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 91 reference conformance actions plus regex, ordered indexing/`get-field`, and timestamp probes (94 actions) |
-| Fail-closed | 31 reference actions |
+| Oracle-tested | 97 reference conformance actions plus regex, ordered indexing/`get-field`, and timestamp probes (100 actions) |
+| Fail-closed | 36 reference actions plus the 5 reference-unsupported shapes (41 actions total) |
 | Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`. Under the default it already returns the empty set the PDP demands, because `nullable: true` on a mapper entry declares per-attribute that a stored null is a missing Cerbos attribute; the global option is the backstop for mappings that do not declare it |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute documents. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 
-The fail-closed set covers exact-one cardinality, aggregation expressions or outer-document references inside `$elemMatch`, nested collection counts, correlated variable-in-variable membership, unsafe division/non-finite arithmetic, and negated nullable collection predicates that cannot preserve CEL's three-valued error semantics. These plans throw instead of silently degrading to a weaker MongoDB filter.
+The fail-closed set covers exact-one cardinality, aggregation expressions or outer-document references inside `$elemMatch`, nested collection counts, correlated variable-in-variable membership, unsafe division/non-finite arithmetic, and negated nullable collection predicates that cannot preserve CEL's three-valued error semantics. These plans throw instead of silently degrading to a weaker MongoDB filter. Every fail-closed shape's error message is pinned in the shared corpus (`conformance/actions.json`) and asserted by this adapter's conformance run, so a classification proves the throw names its declared mechanism rather than merely that something threw.
+
+## Mapping hazards
+
+The conformance contract above proves the *plan* side — given a policy shape, does the filter select the documents `check()` allows. The other half is the *mapping*: **the documents the filter reads must be the documents the application put into the resource attributes.** Six ways that can break are catalogued in the shared corpus, and every adapter has to record a position on each of them.
+
+This adapter **builds no subquery.** A relation is a path inside the same document, so `find()` reads exactly the document the application serialised. The adapter emits no `$lookup` and no `$graphLookup`, and never calls `populate()` or `aggregate()` — `src/adversarial.test.ts` ("emits no `$lookup` and reaches no second collection") asserts that against both the source and every emitted filter, because five of the six rows below are only "not applicable" for as long as it stays true.
+
+| Hazard | Position | Mechanism to check |
+|---|---|---|
+| Filtered association | Not applicable — no subquery | — |
+| Default scope on the target model | Not applicable — no second collection is read | — |
+| Subtype discrimination | **Caller-owned** | `Model.discriminator(...)`. Run the filter on the same model the application read the attributes from. Discriminated models share one collection, so a filter executed against the *base* model matches the other subtypes' documents — the `__t` criterion Mongoose adds for the discriminator model is not in the filter the adapter returns, and cannot be: the plan does not say which model the caller will use |
+| To-one relation used as a collection | Not applicable — a document path holds exactly what the application stored | — |
+| Composite association key | Not applicable — no join, so no key to compose | — |
+| Absent to-one parent | **Reproduced**, and proved by the corpus (`w1-all-chain` and siblings) | `relation.requiresParent` — declare the optional to-one parent a flattened path is reached through, so `size(chain)` comparisons yield null rather than 0 for a document that has no parent ([#309](https://github.com/cerbos/query-plan-adapters/issues/309)) |
 
 ## Requirements
 

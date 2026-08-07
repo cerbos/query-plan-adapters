@@ -12,6 +12,7 @@ from typing import (
     Dict,
     List,
     Literal,
+    NoReturn,
     Protocol,
     Tuple,
     Type,
@@ -29,7 +30,6 @@ from sqlalchemy import (
     Column,
     DateTime,
     Float,
-    Integer,
     String,
     Table,
     and_,
@@ -46,7 +46,12 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeMeta, InstrumentedAttribute
 from sqlalchemy.sql import Select
-from sqlalchemy.sql.expression import BinaryExpression, ColumnOperators, FromClause
+from sqlalchemy.sql.expression import (
+    BinaryExpression,
+    ColumnElement,
+    ColumnOperators,
+    FromClause,
+)
 
 try:  # SQLAlchemy >= 2.0
     from sqlalchemy.orm import DeclarativeBase
@@ -166,6 +171,32 @@ def _string_match(receiver: Any, needle: Any, *, prefix: bool, suffix: bool) -> 
     return receiver.like(pattern, escape=_LIKE_ESCAPE_CHAR)
 
 
+def _require_signed_zero(denominator: Any) -> None:
+    """Reject a zero denominator whose sign the adapter cannot observe.
+
+    IEEE-754 keeps the sign of a zero, so ``n / -0.0`` is the OPPOSITE infinity from
+    ``n / 0.0``. The planner does ship the sign — the wire operand for ``-0.0`` is
+    ``-0`` — but Cerbos's HTTP transport renders a whole double without a decimal
+    point and Python's ``json.loads("-0")`` returns the **int** ``0``, discarding the
+    sign bit. A float operand keeps it (``json.loads("-0.0")`` is ``-0.0``), which is
+    what the gRPC client delivers.
+
+    So when the denominator arrives as an integer zero the adapter cannot tell which
+    infinity CEL produced, and guessing returns rows the PDP denies. Fail closed
+    instead (cerbos/query-plan-adapters#312).
+    """
+    if isinstance(denominator, bool) or not isinstance(denominator, int):
+        return
+    if denominator != 0:
+        return
+    raise ValueError(
+        "division by a constant zero whose sign is indeterminate: the HTTP transport "
+        "renders -0.0 as `-0`, which JSON decodes to the integer 0, so the adapter "
+        "cannot tell +Infinity from -Infinity. Use the gRPC client, which preserves "
+        "the sign bit, or avoid a literal zero denominator"
+    )
+
+
 def _float_div(c: Any, v: Any) -> Any:
     """CEL numeric attribute arithmetic is double-typed (Cerbos transports all
     numbers as doubles), so force float division: dialects with integer `/`
@@ -180,7 +211,9 @@ def _float_div(c: Any, v: Any) -> Any:
         denominator = float(v)
         if denominator == 0.0:
             if numerator == 0.0 or math.isnan(numerator):
+                # NaN has no sign, so an indeterminate zero cannot change the answer.
                 return _IEEEConstant(math.nan)
+            _require_signed_zero(v)
             sign = math.copysign(1.0, numerator) * math.copysign(1.0, denominator)
             return _IEEEConstant(math.copysign(math.inf, sign))
         return numerator / denominator
@@ -211,6 +244,18 @@ def _float_div(c: Any, v: Any) -> Any:
     # The finite arm keeps a NULLIF guard: it can never be selected when the
     # denominator is zero, but dialects that evaluate CASE arms eagerly would
     # otherwise abort the whole query on a division by zero.
+    #
+    # IEEE-754 keeps the sign of a zero, so `n / -0.0` is the OPPOSITE infinity from
+    # `n / 0.0`. A CONSTANT denominator carries its sign on the wire (the planner ships
+    # `-0` verbatim and protobuf doubles preserve the sign bit), so it must be applied.
+    # A COLUMN denominator does not: SQL cannot tell -0.0 from 0.0 and no portable
+    # function reads the sign bit, so the positive-zero reading is assumed and
+    # documented (cerbos/query-plan-adapters#312).
+    denominator_sign = 1.0
+    if not isinstance(v, bool) and isinstance(v, (int, float)):
+        _require_signed_zero(v)
+        denominator_sign = math.copysign(1.0, float(v))
+
     return _ConditionalValue(
         condition=denominator == 0.0,
         then_value=_ConditionalValue(
@@ -218,11 +263,71 @@ def _float_div(c: Any, v: Any) -> Any:
             then_value=_IEEEConstant(math.nan),
             else_value=_ConditionalValue(
                 condition=numerator > 0.0,
-                then_value=_IEEEConstant(math.inf),
-                else_value=_IEEEConstant(-math.inf),
+                then_value=_IEEEConstant(math.copysign(math.inf, denominator_sign)),
+                else_value=_IEEEConstant(math.copysign(math.inf, -denominator_sign)),
             ),
         ),
         else_value=numerator / func.nullif(denominator, 0.0),
+    )
+
+
+def _arith_over_conditional(op_fn: Any, left: Any, right: Any) -> Any:
+    """Distribute a binary arithmetic operator across a retained ternary.
+
+    ``R.attr.aNumber / R.attr.aNumber + 1.0`` composes addition on top of a division
+    that is NaN for a zero row. Lowering that arm to SQL makes it ``NULL + 1``, and
+    ``NULL != 2.0`` is UNKNOWN where CEL's ``NaN != 2.0`` is TRUE — the row the PDP
+    allows would be dropped (cerbos/query-plan-adapters#312). Keeping the arms
+    symbolic lets the enclosing comparison fold each one exactly.
+    """
+    if isinstance(left, _ConditionalValue):
+        return _ConditionalValue(
+            condition=left.condition,
+            then_value=_arith_over_conditional(op_fn, left.then_value, right),
+            else_value=_arith_over_conditional(op_fn, left.else_value, right),
+        )
+    if isinstance(right, _ConditionalValue):
+        return _ConditionalValue(
+            condition=right.condition,
+            then_value=_arith_over_conditional(op_fn, left, right.then_value),
+            else_value=_arith_over_conditional(op_fn, left, right.else_value),
+        )
+    if isinstance(left, _IEEEConstant) or isinstance(right, _IEEEConstant):
+        left_value = left.value if isinstance(left, _IEEEConstant) else left
+        right_value = right.value if isinstance(right, _IEEEConstant) else right
+        numeric = [
+            value
+            for value in (left_value, right_value)
+            if not isinstance(value, bool) and isinstance(value, (int, float))
+        ]
+        if len(numeric) != 2:
+            raise ValueError(
+                "arithmetic combines a non-finite value with a column, which SQL "
+                "cannot carry"
+            )
+        # A non-finite operand absorbs every finite one under +, -, * and /, so the
+        # result is always non-finite and stays symbolic.
+        result = op_fn(float(left_value), float(right_value))
+        if isinstance(result, _IEEEConstant):
+            return result
+        return _IEEEConstant(float(result))
+    return op_fn(left, right)
+
+
+def _reject_numeric_cast(operator: str) -> NoReturn:
+    """Fail closed on CEL's int()/double().
+
+    CEL reads a WHOLE string or raises, and an error denies the row; SQL reads
+    whatever numeric prefix parses, so ``CAST('100%_done' AS INTEGER)`` is 100 on
+    SQLite and the filter returns rows the PDP denies. The numeric direction is no
+    safer: CEL truncates toward zero where PostgreSQL and MySQL round, so
+    ``int(-0.6)`` is 0 to CEL and -1 to them. Nothing in the plan says what type the
+    operand's column holds, so no lowering is faithful for every row.
+    """
+    raise ValueError(
+        f"'{operator}()' cannot be lowered to SQL CAST: CAST reads a numeric prefix "
+        "where CEL requires the whole string and raises otherwise, and PostgreSQL and "
+        "MySQL round where CEL truncates toward zero"
     )
 
 
@@ -437,10 +542,13 @@ __operator_fns: OperatorFnMap = {
     "contains": lambda c, v: _string_match(c, v, prefix=True, suffix=True),
     "startsWith": lambda c, v: _string_match(c, v, prefix=False, suffix=True),
     "endsWith": lambda c, v: _string_match(c, v, prefix=True, suffix=False),
-    # Type conversions — value-returning expressions.
+    # Type conversions — value-returning expressions. Only string() survives: SQL CAST
+    # does not reproduce CEL's int()/double(), which read a WHOLE string or raise where
+    # CAST reads a numeric prefix, and truncate toward zero where PostgreSQL and MySQL
+    # round (cerbos/query-plan-adapters#311).
     "string": lambda c, _: cast(c, String),
-    "double": lambda c, _: cast(c, Float),
-    "int": lambda c, _: cast(c, Integer),
+    "double": lambda *_: _reject_numeric_cast("double"),
+    "int": lambda *_: _reject_numeric_cast("int"),
     # size() over a string column — collection-typed columns require an override.
     "size": lambda c, _: func.length(c),
     "timestamp": _timestamp,
@@ -942,6 +1050,24 @@ def get_query(
         # non-commutative operators (sub/div) and receiver-style string ops.
         left = resolve_operand(child_operands[0])
         right = resolve_operand(child_operands[1])
+        if isinstance(left, (_ConditionalValue, _IEEEConstant)) or isinstance(
+            right, (_ConditionalValue, _IEEEConstant)
+        ):
+            if operator == "mod":
+                # CEL's % is integer-only while Cerbos attribute values are always
+                # doubles, so a modulus over this arithmetic is a no-overload error
+                # that denies every row at check time. Folding it with Python's %
+                # would answer a question CEL refused.
+                raise ValueError(
+                    "modulus over a division whose denominator may be zero is not "
+                    "supported: CEL's % is integer-only and attribute values are "
+                    "always doubles, so the condition can never be satisfied by the PDP"
+                )
+            # A retained ternary (a division that may be non-finite) must keep
+            # propagating symbolically through the surrounding arithmetic.
+            return _arith_over_conditional(
+                lambda a, b: get_operator_fn(operator, a, b), left, right
+            )
         return get_operator_fn(operator, left, right)
 
     def traverse_and_map_operands(operand: dict):
@@ -1046,7 +1172,21 @@ def get_query(
         # the operator handlers here are the leaf nodes of the recursion
         return get_operator_fn(operator, column, value)
 
-    q = select(table).where(traverse_and_map_operands(cond))
+    condition = traverse_and_map_operands(cond)
+    # The root of the plan must translate to a boolean SQL expression. A non-boolean root —
+    # filter()/map() as the whole condition, or an operator override's intermediate value that
+    # no enclosing override consumed — must be refused HERE, by the adapter, rather than left
+    # for SQLAlchemy's where() coercion to trip over: a value that happened to coerce would
+    # become a silently-wrong filter.
+    if not isinstance(condition, (ColumnElement, bool)):
+        raise ValueError(
+            f"the plan's condition translated to {type(condition).__name__!r}, which is not "
+            "a boolean SQL expression. filter() and map() return a list, so they cannot be a "
+            "condition on their own (only size(filter(...)) has a boolean meaning), and an "
+            "operator override returning an intermediate value must be consumed by an "
+            "enclosing override before the root"
+        )
+    q = select(table).where(condition)
 
     if table_mapping:
         q = q.select_from(table)

@@ -244,6 +244,17 @@ const canPushToDb = (
   }
 };
 
+// IEEE-754 keeps the sign of a zero, so `n / -0.0` is the OPPOSITE infinity from `n / 0.0`.
+// The planner does ship the sign — the wire operand for -0.0 is `-0` — but a plan reaching a
+// Convex function is JSON-encoded on the way in, and `JSON.stringify(-0)` is `"0"`, so the sign
+// bit is already gone by the time the adapter sees it. Guessing returns rows the PDP denies, so
+// fail closed instead (cerbos/query-plan-adapters#312). A zero numerator is unaffected: 0/0 is
+// NaN under either sign.
+const INDETERMINATE_ZERO_DIVISOR_MESSAGE =
+  "division by a constant zero whose sign is indeterminate: a query plan is " +
+  "JSON-encoded on its way into a Convex function and JSON has no -0, so the " +
+  "adapter cannot tell +Infinity from -Infinity";
+
 const validateStructure = (expression: PlanExpressionOperand): void => {
   if (isValue(expression) || isVariable(expression)) return;
   if (!isExpression(expression)) {
@@ -251,6 +262,22 @@ const validateStructure = (expression: PlanExpressionOperand): void => {
   }
   if (!ALL_KNOWN_OPERATORS.has(expression.operator)) {
     throw new Error(`Unsupported operator: ${expression.operator}`);
+  }
+  if (expression.operator === "div") {
+    // Reject at translation, not at post-filter evaluation: by the time the evaluator sees the
+    // zero the filter already exists, and the invariant is that an inexpressible shape must
+    // throw before its filter can be used. The evaluator keeps the same check as a backstop for
+    // zeros that are only computed at evaluation time.
+    const numerator = expression.operands[0];
+    const denominator = expression.operands[1];
+    if (
+      denominator !== undefined &&
+      isValue(denominator) &&
+      denominator.value === 0 &&
+      !(numerator !== undefined && isValue(numerator) && numerator.value === 0)
+    ) {
+      throw new Error(INDETERMINATE_ZERO_DIVISOR_MESSAGE);
+    }
   }
   if (expression.operator === "matches") {
     const pattern = expression.operands[1];
@@ -886,6 +913,11 @@ const evaluateExpression = (
       if (typeof left !== "number" || typeof right !== "number") {
         return EVALUATION_ERROR;
       }
+      if (operator === "div" && right === 0 && left !== 0) {
+        // Backstop for zeros only computed at evaluation time; constant zero divisors are
+        // already rejected during translation by validateStructure.
+        throw new Error(INDETERMINATE_ZERO_DIVISOR_MESSAGE);
+      }
       switch (operator) {
         case "add":
           return left + right;
@@ -1115,6 +1147,21 @@ export function queryPlanToConvex<Q = unknown, R = unknown>({
     case PlanKind.ALWAYS_DENIED:
       return { kind: PlanKind.ALWAYS_DENIED };
     case PlanKind.CONDITIONAL: {
+      // A `filter()` or `map()` at the ROOT of the condition returns a list, not a boolean.
+      // CEL raises for a non-boolean condition (deny), and the post-filter's `=== true`
+      // coercion would happen to agree — but silently, by coercing a list to false. That is
+      // an emitted filter for a shape with no boolean meaning, which the conformance
+      // contract forbids: throw instead. Nested inside size() they remain translatable.
+      const root = queryPlan.condition;
+      if (
+        isExpression(root) &&
+        (root.operator === "filter" || root.operator === "map")
+      ) {
+        throw new Error(
+          `${root.operator}() returns a list, not a boolean, so it cannot be a condition ` +
+            "on its own; only size() over its result has a boolean meaning",
+        );
+      }
       if (nullAttributeRepresentation === "omitted") {
         assertNoNullComparisonOperands(queryPlan.condition);
       }

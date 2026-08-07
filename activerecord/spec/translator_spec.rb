@@ -234,7 +234,22 @@ RSpec.describe Cerbos::ActiveRecord do
             expression("int", variable("s")), value(0))),
           model: EdgeDocument, attributes: {"s" => field("title")}
         )
-      }.to raise_error(Cerbos::ActiveRecord::UnsupportedOperatorError, /int\(\) needs an integer column/)
+      }.to raise_error(Cerbos::ActiveRecord::UnsupportedOperatorError,
+        /int\(\) applied to a :string column/)
+    end
+
+    # The two operands fail for two different reasons, so each message names only its own. A
+    # message that named both would not show which mechanism stopped the translation, which is
+    # what the corpus pins these messages for (cerbos/query-plan-adapters#326).
+    it "raises for int() over a double column, naming the rounding difference" do
+      expect {
+        described_class.query_plan_to_relation(
+          plan: conditional(expression("eq",
+            expression("int", variable("d")), value(0))),
+          model: EdgeDocument, attributes: {"d" => field("score")}
+        )
+      }.to raise_error(Cerbos::ActiveRecord::UnsupportedOperatorError,
+        /int\(\) applied to a double column is not portable/)
     end
 
     it "raises for double() over a string column" do
@@ -327,6 +342,110 @@ RSpec.describe Cerbos::ActiveRecord do
           variable("request.resource.attr.aString"),
           expression("lambda", value(true), variable("t")))))
       }.to raise_error(Cerbos::ActiveRecord::UnmappedAttributeError, /exists needs a collection/)
+    end
+  end
+
+  # A path such as `R.attr.parent.children` reaches a collection THROUGH a to-one parent. CEL
+  # cannot read a field from a list, so an absent parent is a missing path and Cerbos denies the
+  # row. A subquery from the resource row sees the same empty result for an absent parent and
+  # for a parent with no children, and thus `all`, `!exists` and every count over the chain
+  # would give back the rows that the PDP denies (cerbos/query-plan-adapters#309/#315/#316).
+  #
+  # The caller writes the chain as a nested `fields:` mapping, and that nesting is what tells
+  # the adapter which hops are the parent. The corpus proves the behaviour end to end with the
+  # w1-*-chain actions; these tests hold each polarity on a small model.
+  describe "a collection reached through a parent hop" do
+    CHAIN_ATTRIBUTES = {
+      "request.resource.attr.tag" => Cerbos::ActiveRecord.relation(:tags, fields: {
+        "labels" => Cerbos::ActiveRecord.relation(
+          :labels, fields: {"name" => Cerbos::ActiveRecord.field("name")}
+        ),
+        "labelNames" => Cerbos::ActiveRecord.relation(:labels, member_field: "name"),
+        "name" => Cerbos::ActiveRecord.field("name")
+      })
+    }.freeze
+
+    def chain_titles(condition)
+      Cerbos::ActiveRecord.query_plan_to_relation(
+        plan: conditional(condition), model: EdgeDocument, attributes: CHAIN_ATTRIBUTES
+      ).order(:id).pluck(:title)
+    end
+
+    def label_lambda(operator)
+      expression(operator,
+        variable("request.resource.attr.tag.labels"),
+        expression("lambda",
+          expression("eq", variable("l.name"), value("urgent")), variable("l")))
+    end
+
+    it "keeps the row without a parent out of a positive existential" do
+      expect(chain_titles(label_lambda("exists"))).to eq(%w[zero])
+    end
+
+    it "keeps the row without a parent out of a negated existential" do
+      # "two" has the parent and no matching label, so it belongs in the result. "negative" has
+      # no tag at all, and it must stay out under this polarity as well.
+      expect(chain_titles(expression("not", label_lambda("exists"))))
+        .to eq(%w[two])
+    end
+
+    # The guard removes only the row with NO parent. "two" has the parent and an empty label
+    # list, which is a real empty collection, and `all` over it is vacuously TRUE in CEL too.
+    it "keeps the row without a parent out of a universal, and keeps the childless one in" do
+      expect(chain_titles(label_lambda("all"))).to eq(%w[zero two])
+    end
+
+    it "keeps the row without a parent out of every count threshold" do
+      size = expression("size", variable("request.resource.attr.tag.labels"))
+      expect(chain_titles(expression("ge", size, value(0)))).to eq(%w[zero two])
+      expect(chain_titles(expression("eq", size, value(0)))).to eq(%w[two])
+      expect(chain_titles(expression("not", expression("gt", size, value(0)))))
+        .to eq(%w[two])
+    end
+
+    it "keeps the row without a parent out of a negated membership" do
+      membership = expression("in",
+        value("urgent"), variable("request.resource.attr.tag.labelNames"))
+      expect(chain_titles(membership)).to eq(%w[zero])
+      expect(chain_titles(expression("not", membership))).to eq(%w[two])
+    end
+
+    it "keeps the row without a parent out of a negated hasIntersection" do
+      intersection = expression("hasIntersection",
+        variable("request.resource.attr.tag.labelNames"),
+        expression("list", value("urgent")))
+      expect(chain_titles(intersection)).to eq(%w[zero])
+      expect(chain_titles(expression("not", intersection))).to eq(%w[two])
+    end
+
+    # A relation that the caller mapped directly keeps the meaning of an empty collection. Only
+    # a chain has a parent hop to require.
+    it "leaves a direct relation with the vacuous truth of an empty collection" do
+      titles = Cerbos::ActiveRecord.query_plan_to_relation(
+        plan: conditional(expression("all",
+          variable("request.resource.attr.tags"),
+          expression("lambda",
+            expression("eq", variable("t.name"), value("chained")), variable("t")))),
+        model: EdgeDocument,
+        attributes: {
+          "request.resource.attr.tags" => relation(:tags, fields: {"name" => field("name")})
+        }
+      ).order(:id).pluck(:title)
+
+      # "negative" has no tags, so `all` over the empty collection is TRUE, as it is in CEL.
+      expect(titles).to eq(%w[zero negative])
+    end
+
+    it "raises when a step of the path names a scalar field" do
+      expect {
+        chain_titles(expression("eq", variable("request.resource.attr.tag.name.x"), value("y")))
+      }.to raise_error(Cerbos::ActiveRecord::UnmappedAttributeError, /scalar field/)
+    end
+
+    it "raises when a step of the path names nothing" do
+      expect {
+        chain_titles(expression("eq", variable("request.resource.attr.tag.missing"), value("y")))
+      }.to raise_error(Cerbos::ActiveRecord::UnmappedAttributeError, /maps it to nothing/)
     end
   end
 

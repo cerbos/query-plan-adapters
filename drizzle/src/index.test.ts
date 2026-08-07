@@ -689,7 +689,6 @@ const conditionalActions = [
   "exists-one",
   "exists-single",
   "explicit-deny",
-  "filter",
   "filter-deeply-nested",
   "gt",
   "gte",
@@ -735,11 +734,9 @@ const conditionalActions = [
   "arith-sub",
   "arith-mult",
   "arith-div",
-  "arith-mod",
-  // CEL type conversions: string(), double(), int() — compiled to CAST.
+  // CEL type conversions. Only string() survives as a CAST: int()/double() are rejected —
+  // see the throwing assertions below and cerbos/query-plan-adapters#311.
   "convert-string",
-  "convert-double",
-  "convert-int",
   // Ternary expression — compiled to CASE WHEN.
   "ternary",
   // size() on scalar (LENGTH) and on relation (correlated COUNT subquery).
@@ -1153,6 +1150,41 @@ describe("queryPlanToDrizzle", () => {
   // and the dispatch in buildFilterFromExpression requires one value operand.
   // If/when the adapter learns to compare two columns, replace this with a
   // data-driven assertion against the conditionalActions loop.
+  // #311: int()/double() cannot be lowered to SQL CAST. CEL reads a WHOLE string or raises
+  // (and an error denies), while CAST reads a numeric prefix — SQLite turns "100%_done"
+  // into 100 — so the old lowering returned rows the PDP denies. The numeric direction is
+  // no safer: CEL truncates toward zero where PostgreSQL and MySQL round. `arith-mod` is
+  // here because its policy wraps the column in int() before the modulus.
+  test.each([
+    ["convert-int", /int\(\)/],
+    ["convert-double", /double\(\)/],
+    ["arith-mod", /int\(\)/],
+  ])("throws for %s (SQL CAST is not a CEL conversion)", async (action, message) => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action,
+    });
+
+    expect(() => queryPlanToDrizzle({ queryPlan, mapper })).toThrow(message);
+  });
+
+  // #313: filter() returns a list, not a boolean. Used as a whole condition there is no
+  // meaning to pick — it is not `size(filter(...)) > 0` — so the adapter fails closed
+  // rather than guessing at "non-empty". The size(filter(...)) form still translates; see
+  // the `filter-count-gt` case in the conditional actions above.
+  test("throws for filter used as a condition", async () => {
+    const queryPlan = await cerbos.planResources({
+      principal: { id: "user1", roles: ["USER"] },
+      resource: { kind: "resource" },
+      action: "filter",
+    });
+
+    expect(() => queryPlanToDrizzle({ queryPlan, mapper })).toThrow(
+      /returns a list, not a boolean/
+    );
+  });
+
   test("throws for index-list (array indexing on a relation)", async () => {
     // ownedBy is modelled as a join table — there is no scalar index column,
     // so R.attr.ownedBy[0] cannot be translated into a deterministic SQL fragment.
@@ -1645,5 +1677,168 @@ describe("nullAttributeRepresentation", () => {
     expect(db.select().from(resources).where(filter).toSQL().sql).toContain(
       "="
     );
+  });
+});
+
+// The class 1 mapping-hazard contract (README, "Mapping hazards"): the adapter reads the relation
+// table directly, so a soft-delete flag, tenant column or subtype discriminator the application
+// applies to its own reads does NOT reach the generated EXISTS unless the caller declares it.
+// `subqueryFilter` is that declaration (cerbos/query-plan-adapters#323).
+describe("relation subqueryFilter", () => {
+  const hazardResources = sqliteTable("hazard_resources", {
+    id: text("id").primaryKey(),
+  });
+  const hazardTags = sqliteTable("hazard_tags", {
+    id: text("id").primaryKey(),
+    resourceId: text("resource_id").notNull(),
+    name: text("name").notNull(),
+    deleted: integer("deleted", { mode: "boolean" }).notNull(),
+  });
+
+  const relation = (subqueryFilter?: ReturnType<typeof eq>) => ({
+    relation: {
+      type: "many" as const,
+      table: hazardTags,
+      sourceColumn: hazardResources.id,
+      targetColumn: hazardTags.resourceId,
+      field: hazardTags.name,
+      fields: { name: hazardTags.name },
+      ...(subqueryFilter ? { subqueryFilter } : {}),
+    },
+  });
+
+  const mapperFor = (
+    subqueryFilter?: ReturnType<typeof eq>
+  ): Record<string, MapperEntry> => ({
+    "request.resource.attr.tags": relation(subqueryFilter),
+  });
+
+  const VISIBLE_ONLY = eq(hazardTags.deleted, false);
+
+  const existsPlan = buildPlan({
+    operator: "exists",
+    operands: [
+      { name: "request.resource.attr.tags" },
+      {
+        operator: "lambda",
+        operands: [
+          {
+            operator: "eq",
+            operands: [{ name: "t.name" }, { value: "secret" }],
+          },
+          { name: "t" },
+        ],
+      },
+    ],
+  } as PlanExpressionOperand);
+
+  const allPlan = buildPlan({
+    operator: "all",
+    operands: [
+      { name: "request.resource.attr.tags" },
+      {
+        operator: "lambda",
+        operands: [
+          {
+            operator: "eq",
+            operands: [{ name: "t.name" }, { value: "public" }],
+          },
+          { name: "t" },
+        ],
+      },
+    ],
+  } as PlanExpressionOperand);
+
+  const sizePlan = buildPlan({
+    operator: "eq",
+    operands: [
+      {
+        operator: "size",
+        operands: [{ name: "request.resource.attr.tags" }],
+      },
+      { value: 1 },
+    ],
+  } as PlanExpressionOperand);
+
+  const idsFor = (
+    plan: PlanResourcesResponse,
+    subqueryFilter?: ReturnType<typeof eq>
+  ): string[] =>
+    db
+      .select({ id: hazardResources.id })
+      .from(hazardResources)
+      .where(ensureFilter(queryPlanToDrizzle({ queryPlan: plan, mapper: mapperFor(subqueryFilter) })))
+      .all()
+      .map((row) => row.id)
+      .sort();
+
+  beforeAll(() => {
+    sqlite.exec(`
+      CREATE TABLE hazard_resources (id TEXT PRIMARY KEY);
+      CREATE TABLE hazard_tags (
+        id TEXT PRIMARY KEY,
+        resource_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        deleted INTEGER NOT NULL
+      );
+      INSERT INTO hazard_resources (id) VALUES ('r1'), ('r2');
+      -- r1's application view is ['public']; the 'secret' row is soft-deleted, so the
+      -- application never serialised it into the resource attributes.
+      INSERT INTO hazard_tags (id, resource_id, name, deleted) VALUES
+        ('t1', 'r1', 'public', 0),
+        ('t2', 'r1', 'secret', 1),
+        ('t3', 'r2', 'secret', 0);
+    `);
+  });
+
+  test("declared: exists() sees only the rows the application serialised", () => {
+    // Undeclared, r1 matches on a row its own reads hide — the over-grant #314 catalogues.
+    expect(idsFor(existsPlan)).toEqual(["r1", "r2"]);
+    expect(idsFor(existsPlan, VISIBLE_ONLY)).toEqual(["r2"]);
+  });
+
+  test("declared: all() narrows the scan, not the result", () => {
+    // all() compiles to a NOT EXISTS over a false witness, so a declaration applied around the
+    // subquery instead of inside it would leave the hidden 'secret' row denying r1.
+    expect(idsFor(allPlan)).toEqual([]);
+    expect(idsFor(allPlan, VISIBLE_ONLY)).toEqual(["r1"]);
+  });
+
+  test("declared: size() counts only the rows the application serialised", () => {
+    expect(idsFor(sizePlan)).toEqual(["r2"]);
+    expect(idsFor(sizePlan, VISIBLE_ONLY)).toEqual(["r1", "r2"]);
+  });
+
+  test("undeclared: the emitted SQL is byte-identical to before the field existed", () => {
+    // The non-breaking guarantee. Silence must not add a clause, and must not warn.
+    const withoutField = queryPlanToDrizzle({
+      queryPlan: existsPlan,
+      mapper: {
+        "request.resource.attr.tags": {
+          relation: {
+            type: "many",
+            table: hazardTags,
+            sourceColumn: hazardResources.id,
+            targetColumn: hazardTags.resourceId,
+            field: hazardTags.name,
+            fields: { name: hazardTags.name },
+          },
+        },
+      },
+    });
+    const withUndefined = queryPlanToDrizzle({
+      queryPlan: existsPlan,
+      mapper: mapperFor(undefined),
+    });
+
+    const render = (result: QueryPlanToDrizzleResult) =>
+      db
+        .select()
+        .from(hazardResources)
+        .where(ensureFilter(result))
+        .toSQL();
+
+    expect(render(withUndefined)).toEqual(render(withoutField));
+    expect(render(withoutField).sql).not.toContain("deleted");
   });
 });

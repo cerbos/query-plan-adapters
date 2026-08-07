@@ -135,6 +135,29 @@ export type MapperConfig = {
     model?: string;
     field?: string;
     fields?: Record<string, MapperConfig>;
+    /**
+     * The predicate the application itself applies when it reads this relation — a soft-delete
+     * flag, a tenant column, a subtype discriminator, whatever narrows the rows that became the
+     * resource attributes.
+     *
+     * Prisma has no schema-level filtered relation. A `where` injected by a client extension or
+     * middleware rewrites the *top-level* query, never the nested `some`/`every`/`none` this
+     * adapter generates, so a narrowing the application applies to its own reads does not reach
+     * the subquery — and the subquery then matches records the application never serialised, a
+     * filter that returns rows the PDP denies. Declaring the predicate here restores the
+     * equality; the adapter cannot detect the omission, which is why the field is optional and
+     * silence is not a warning. See "Mapping hazards" in the README.
+     *
+     * It is a Prisma where-input over the RELATED model, ANDed into the nested filter, and it
+     * constrains every operator reached through this relation under both polarities. `every` is
+     * rewritten to the equivalent `none` so the restriction narrows the records examined rather
+     * than the records required to match.
+     *
+     * ```ts
+     * relation: { name: "tags", type: "many", subqueryFilter: { deletedAt: null } }
+     * ```
+     */
+    subqueryFilter?: PrismaFilter;
   };
 };
 
@@ -447,6 +470,7 @@ type RelationConfig = {
   model?: string;
   field?: string;
   nestedMapper?: Record<string, MapperConfig>;
+  subqueryFilter?: PrismaFilter;
 };
 
 type ResolvedFieldReference = {
@@ -611,6 +635,18 @@ export function queryPlanToPrisma({
         // are ignored.
         throw new Error(
           "A constant-false conditional predicate must be folded by the Cerbos planner"
+        );
+      }
+      // A `map()` at the ROOT of the condition returns a list, not a boolean. Translating it
+      // produces a projection filter that is not a valid Prisma `where` clause — the shape
+      // must be refused HERE rather than left for findMany to reject at query time, because
+      // a projection that happened to coerce would be a silently-wrong filter. (`filter()`
+      // as a condition is already rejected inside handleCollectionOperator with its own
+      // message; nested inside a comparison or size() both remain translatable.)
+      if (isOperatorOperand(condition) && condition.operator === "map") {
+        throw new Error(
+          "map() returns a list, not a boolean, so it cannot be a condition on its own; " +
+            "only comparisons or size() over its result have a boolean meaning"
         );
       }
       return {
@@ -1038,6 +1074,7 @@ function resolveFieldReference(
         model: activeConfig.relation.model,
         field: activeConfig.relation.field,
         nestedMapper: fields,
+        subqueryFilter: activeConfig.relation.subqueryFilter,
       },
     ];
 
@@ -1064,6 +1101,7 @@ function resolveFieldReference(
             model: nextConfig.relation.model,
             field: nextConfig.relation.field,
             nestedMapper: nextConfig.relation.fields,
+            subqueryFilter: nextConfig.relation.subqueryFilter,
           });
           currentMapper = nextConfig.relation.fields || {};
           currentParts = currentParts.slice(1);
@@ -1104,8 +1142,145 @@ function getPrismaRelationOperator(relation: {
 }
 
 /**
+ * One relation-scoped filter (`{ tags: { some: … } }`), narrowed by the store-side predicate the
+ * caller declared on the mapping.
+ *
+ * Every nested relation filter the adapter emits goes through here, so a declared
+ * `subqueryFilter` reaches the collection macros, the membership shapes, the emptiness checks and
+ * the hop-existence guard alike. Adding a new relation shape means routing it through here, or
+ * the declaration silently stops applying to it.
+ *
+ * `every` is the one operator that cannot simply absorb the predicate. `{ every: AND(W, P) }`
+ * would REQUIRE every record to satisfy W, which is the opposite of "ignore the records W hides",
+ * so it is rewritten to `{ none: AND(W, NOT P) }` — no visible record violates P. Both agree with
+ * `every` when nothing is declared, and both stay vacuously true over an empty relation.
+ */
+function relationFilter(
+  relation: RelationConfig,
+  operator: string,
+  inner: PrismaFilter
+): PrismaFilter {
+  const declared = relation.subqueryFilter;
+  if (declared === undefined) {
+    return { [relation.name]: { [operator]: inner } };
+  }
+  const narrow = (filter: PrismaFilter): PrismaFilter =>
+    Object.keys(filter).length === 0 ? declared : { AND: [declared, filter] };
+  if (operator === "every") {
+    return Object.keys(inner).length === 0
+      ? { [relation.name]: { every: inner } }
+      : { [relation.name]: { none: { AND: [declared, { NOT: inner }] } } };
+  }
+  return { [relation.name]: { [operator]: narrow(inner) } };
+}
+
+/**
  * Builds a nested relation filter for Prisma queries.
  */
+/**
+ * "Every intermediate hop of a dotted path exists", as a Prisma filter.
+ *
+ * CEL cannot dot through a list, so each intermediate segment of `a.b.c` is a to-ONE
+ * parent: absent, the caller sends no attribute and CEL raises a missing-path error, which
+ * denies. `NOT { categories: { some: { subCategories: { some: P } } } }` is TRUE for a row
+ * with no category at all, so the negation returns rows the PDP denies — the parent must be
+ * required separately (cerbos/query-plan-adapters#309).
+ *
+ * Returns undefined when the reference has no intermediate hop, so a direct relation keeps
+ * its empty-collection semantics (`!tags.exists(...)` over zero tags is still TRUE).
+ */
+function buildLeadingHopsExistFilter(
+  head: RelationConfig,
+  restRelations: RelationConfig[]
+): PrismaFilter | undefined {
+  if (restRelations.length === 0) {
+    return undefined;
+  }
+  // The last entry is the collection being iterated; everything before it is a hop.
+  let inner: PrismaFilter = {};
+  for (let i = restRelations.length - 2; i >= 0; i--) {
+    const relation = assertDefined(
+      restRelations[i],
+      "Relation mapping is missing"
+    );
+    inner = relationFilter(relation, getPrismaRelationOperator(relation), inner);
+  }
+  return relationFilter(head, getPrismaRelationOperator(head), inner);
+}
+
+/**
+ * "Every intermediate to-one hop this expression dots through exists", as a Prisma filter,
+ * or undefined when it dots through none.
+ *
+ * Prisma has no UNKNOWN: a chained relation filter is exact under the POSITIVE polarity —
+ * `categories: { some: { subCategories: { some: P } } }` cannot hold without the category —
+ * but `NOT` inverts the hop requirement along with the predicate, so every operator built on
+ * a chain readmits the parentless rows once negated. #309 fixed that inside the collection
+ * macros, which left the sibling operators reached through the same chain unguarded:
+ * membership and `hasIntersection` (cerbos/query-plan-adapters#315), and the negated count
+ * spelling `!(size(chain) > 0)` (#316), all of which the macros' guard never saw.
+ *
+ * Requiring the hops OUTSIDE the negation is what fixes all of them at once, and it is
+ * unconditionally faithful to CEL rather than a per-operator patch: a missing hop is a
+ * missing-path error, which denies under BOTH polarities, so the requirement never depends
+ * on which operator sits above the chain.
+ *
+ * Lambda bodies are deliberately not walked — their references resolve against a scoped
+ * mapper, and a negated macro carries its own guard through buildNegatedCollectionFilter.
+ */
+function buildExpressionHopsExistFilter(
+  operand: PlanExpressionOperand,
+  mapper: Mapper
+): PrismaFilter | undefined {
+  const hops: PrismaFilter[] = [];
+  const seen = new Set<string>();
+
+  const visit = (expr: PlanExpressionOperand): void => {
+    if (isNamedOperand(expr)) {
+      if (seen.has(expr.name)) {
+        return;
+      }
+      seen.add(expr.name);
+      const { relations } = resolveFieldReference(expr.name, mapper);
+      if (!relations || relations.length < 2) {
+        return;
+      }
+      const head = assertDefined(relations[0], "Relation mapping is missing");
+      const hopFilter = buildLeadingHopsExistFilter(head, relations.slice(1));
+      if (hopFilter !== undefined) {
+        hops.push(hopFilter);
+      }
+      return;
+    }
+    if (!isOperatorOperand(expr) || expr.operator === "lambda") {
+      return;
+    }
+    expr.operands.forEach(visit);
+  };
+
+  visit(operand);
+
+  if (hops.length === 0) {
+    return undefined;
+  }
+  return hops.length === 1
+    ? assertDefined(hops[0], "Leading-hops filter is missing")
+    : { AND: hops };
+}
+
+/**
+ * `{ NOT: filter }`, with every to-one hop `operand` dots through required OUTSIDE the
+ * negation so an absent parent stays denied (see buildExpressionHopsExistFilter).
+ */
+function negateRequiringHops(
+  operand: PlanExpressionOperand,
+  filter: PrismaFilter,
+  mapper: Mapper
+): PrismaFilter {
+  const hops = buildExpressionHopsExistFilter(operand, mapper);
+  return hops === undefined ? { NOT: filter } : { AND: [hops, { NOT: filter }] };
+}
+
 function buildNestedRelationFilter(
   relations: RelationConfig[],
   fieldFilter: any
@@ -1132,7 +1307,7 @@ function buildNestedRelationFilter(
       }
     }
 
-    currentFilter = { [relation.name]: { [relationOperator]: currentFilter } };
+    currentFilter = relationFilter(relation, relationOperator, currentFilter);
   }
 
   return currentFilter;
@@ -1405,6 +1580,26 @@ function containsCollectionOperator(expr: PlanExpressionOperand): boolean {
 }
 
 /**
+ * Whether `expr` dots through at least one intermediate to-one hop, so negating it needs the
+ * hop requirement of buildExpressionHopsExistFilter.
+ */
+function referencesChainedRelation(
+  expr: PlanExpressionOperand,
+  mapper: Mapper
+): boolean {
+  if (isNamedOperand(expr)) {
+    const { relations } = resolveFieldReference(expr.name, mapper);
+    return relations !== undefined && relations.length > 1;
+  }
+  if (!isOperatorOperand(expr) || expr.operator === "lambda") {
+    return false;
+  }
+  return expr.operands.some((operand) =>
+    referencesChainedRelation(operand, mapper)
+  );
+}
+
+/**
  * Builds the filter for `!expr`. Plain field predicates negate correctly with Prisma's NOT
  * (SQL three-valued logic keeps NULL rows excluded under both polarities), but relation
  * subqueries collapse UNKNOWN to false at the EXISTS boundary, so `NOT(some(P))` would
@@ -1431,12 +1626,23 @@ function buildNegatedFilter(
     if (!relations || relations.length === 0) {
       return buildFieldEqualsFilter(fieldRef, false);
     }
-    return {
-      NOT: buildPrismaFilterFromCerbosExpression(operand, mapper),
-    };
+    return negateRequiringHops(
+      operand,
+      buildPrismaFilterFromCerbosExpression(operand, mapper),
+      mapper
+    );
   }
 
-  if (isOperatorOperand(operand) && containsCollectionOperator(operand)) {
+  // `and`/`or` must be pushed through with De Morgan whenever a branch can be UNKNOWN, so
+  // CEL's error absorption survives: `!(A && B)` with A erroring and B false is TRUE in CEL,
+  // and `OR[!A, !B]` reproduces that where a single outer NOT over the conjunction — with the
+  // hop requirement ANDed outside it — would deny. A chained relation is the second source of
+  // UNKNOWN besides the collection macros, so it opens the same push-down.
+  if (
+    isOperatorOperand(operand) &&
+    (containsCollectionOperator(operand) ||
+      referencesChainedRelation(operand, mapper))
+  ) {
     switch (operand.operator) {
       case "and":
         return {
@@ -1467,9 +1673,11 @@ function buildNegatedFilter(
     }
   }
 
-  return {
-    NOT: buildPrismaFilterFromCerbosExpression(operand, mapper),
-  };
+  return negateRequiringHops(
+    operand,
+    buildPrismaFilterFromCerbosExpression(operand, mapper),
+    mapper
+  );
 }
 
 function getTernaryOperands(operands: PlanExpressionOperand[]): {
@@ -1900,7 +2108,7 @@ function handleSizeComparison(
   }
 
   const prismaOp = isNonEmpty ? "some" : "none";
-  const leafFilter = { [deepest.name]: { [prismaOp]: {} } };
+  const leafFilter = relationFilter(deepest, prismaOp, {});
 
   if (relations.length === 1) {
     return leafFilter;
@@ -2629,7 +2837,7 @@ function wrapCollectionElementFilter(
     parts.restRelations.length > 0
       ? buildNestedRelationFilter(parts.restRelations, elementFilter)
       : elementFilter;
-  return { [parts.head.name]: { some: inner } };
+  return relationFilter(parts.head, "some", inner);
 }
 
 function throwUnsupportedCollectionOperator(operator: string): never {
@@ -2674,7 +2882,7 @@ function handleCollectionOperator(
     case "exists": {
       // A NULL element keeps the per-element predicate UNKNOWN, so it can never create a
       // false positive here; a CEL error (deny) coincides with "no match" — no guard needed.
-      const filter = { [head.name]: { some: filterValue } };
+      const filter = relationFilter(head, "some", filterValue);
       const unknownElement = buildUnknownElementFilter(parts);
       if (unknownElement !== undefined) {
         recordNestedCollectionUnknownFilter({
@@ -2687,14 +2895,14 @@ function handleCollectionOperator(
       return filter;
     }
     case "except":
-      return { [head.name]: { some: { NOT: filterValue } } };
+      return relationFilter(head, "some", { NOT: filterValue });
     case "all": {
       if (parts.restRelations.length > 0) {
         throw new Error(
           "all() over a multi-hop relation chain is not supported"
         );
       }
-      const base = { [head.name]: { every: filterValue } };
+      const base = relationFilter(head, "every", filterValue);
       if (nullableFields.size === 0) {
         return base;
       }
@@ -2705,7 +2913,7 @@ function handleCollectionOperator(
       return {
         AND: [
           base,
-          { [head.name]: { none: buildNullWitnessFilter(nullableFields) } },
+          relationFilter(head, "none", buildNullWitnessFilter(nullableFields)),
         ],
       };
     }
@@ -2739,10 +2947,22 @@ function buildNegatedCollectionFilter(
 
   const parts = buildCollectionLambdaParts(operator, operands, mapper);
   const { head, filterValue, nullableFields } = parts;
+  // An absent to-one parent must stay denied under negation rather than satisfying it
+  // vacuously (#309).
+  const leadingHopsExist = buildLeadingHopsExistFilter(
+    head,
+    parts.restRelations
+  );
+  const requireLeadingHops = (filter: PrismaFilter): PrismaFilter =>
+    leadingHopsExist === undefined
+      ? filter
+      : { AND: [leadingHopsExist, filter] };
 
   switch (operator) {
     case "exists": {
-      const base = { NOT: { [head.name]: { some: filterValue } } };
+      const base = requireLeadingHops({
+        NOT: relationFilter(head, "some", filterValue),
+      });
       const unknownElement = buildUnknownElementFilter(parts);
       if (unknownElement === undefined) {
         return base;
@@ -2764,17 +2984,19 @@ function buildNegatedCollectionFilter(
     case "all":
       // !all is TRUE only with a definitive false witness, which also absorbs error
       // elements — exactly `some(NOT P)` in SQL (NULL columns keep NOT P UNKNOWN).
-      return { [head.name]: { some: { NOT: filterValue } } };
+      return relationFilter(head, "some", { NOT: filterValue });
     case "except": {
       // !except(c,P) = every element definitively matches P.
-      const base = { [head.name]: { none: { NOT: filterValue } } };
+      const base = requireLeadingHops(
+        relationFilter(head, "none", { NOT: filterValue })
+      );
       if (nullableFields.size === 0) {
         return base;
       }
       return {
         AND: [
           base,
-          { [head.name]: { none: buildNullWitnessFilter(nullableFields) } },
+          relationFilter(head, "none", buildNullWitnessFilter(nullableFields)),
         ],
       };
     }

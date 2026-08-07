@@ -2021,64 +2021,21 @@ describe("Arithmetic Operations", () => {
     );
   });
 
-  test("arith-mod: (aNumber % 2) == 0", async () => {
+  // #311: the arith-mod policy is `int(aNumber) % 2 == 0`, so it inherits the int()
+  // rejection — $convert parses a numeric prefix where CEL demands the whole string, and
+  // rounds where CEL truncates toward zero.
+  test("arith-mod: int() in the policy makes the shape fail closed", async () => {
     const queryPlan = await cerbos.planResources({
       principal: { id: "user1", roles: ["USER"] },
       resource: { kind: "resource" },
       action: "arith-mod",
     });
 
-    expect(queryPlan).toMatchObject({
-      kind: PlanKind.CONDITIONAL,
-      condition: {
-        operator: "eq",
-        operands: [
-          {
-            operator: "mod",
-            operands: [
-              {
-                operator: "int",
-                operands: [{ name: "request.resource.attr.aNumber" }],
-              },
-              { value: 2 },
-            ],
-          },
-          { value: 0 },
-        ],
-      },
-    });
-
-    const result = queryPlanToMongoose({
-      queryPlan,
-      mapper: arithMapper,
-    });
-    const conversion = checkedConversion(
-      "$aNumber",
-      ["string", "int", "long", "double", "decimal"],
-      "long"
-    );
-
-    expect(result).toStrictEqual({
-      kind: PlanKind.CONDITIONAL,
-      filters: {
-        $and: [
-          { $expr: { $ne: [conversion, null] } },
-          { $expr: { $eq: [{ $mod: [conversion, 2] }, 0] } },
-        ],
-      },
-    });
-
-    const query = await Resource.find(result.filters || {});
-    expect(query.map((r) => r.key).sort()).toEqual(
-      fixtureResources
-        .filter((r) => (r.aNumber as number) % 2 === 0)
-        .map((r) => r.key)
-        .sort()
-    );
+    expect(() =>
+      queryPlanToMongoose({ queryPlan, mapper: defaultMapper })
+    ).toThrow(/'int\(\)' cannot be translated/);
   });
-});
 
-describe("Regex Match", () => {
   test("matches-regex: aString.matches('str.*')", async () => {
     const queryPlan = await cerbos.planResources({
       principal: { id: "user1", roles: ["USER"] },
@@ -2345,102 +2302,29 @@ describe("Type Conversion", () => {
     );
   });
 
-  test("convert-double: double(aNumber) > 1.5", async () => {
+  // #311: CEL's int()/double() are not $convert. CEL reads a WHOLE string or raises, and
+  // an error DENIES the row, while $convert parses a leading numeric prefix — the corpus
+  // seeds "100%_done" and "50%_off", which became 100 and 50 and returned records the PDP
+  // denies. The numeric direction is no safer: $convert to "long" ROUNDS where CEL
+  // truncates toward zero, so int(-0.6) is 0 to CEL and -1 here. Nothing in the plan says
+  // what type the field holds, so the adapter fails closed for the whole family.
+  test.each([
+    ["convert-double", /'double\(\)' cannot be translated/],
+    ["convert-int", /'int\(\)' cannot be translated/],
+  ] as const)("%s fails closed", async (action, message) => {
     const queryPlan = await cerbos.planResources({
       principal: { id: "user1", roles: ["USER"] },
       resource: { kind: "resource" },
-      action: "convert-double",
+      action,
     });
 
-    expect(queryPlan).toMatchObject({
-      kind: PlanKind.CONDITIONAL,
-      condition: {
-        operator: "gt",
-        operands: [
-          {
-            operator: "double",
-            operands: [{ name: "request.resource.attr.aNumber" }],
-          },
-          { value: 1.5 },
-        ],
-      },
-    });
-
-    const result = queryPlanToMongoose({
-      queryPlan,
-      mapper: defaultMapper,
-    });
-    const conversion = checkedConversion(
-      "$aNumber",
-      ["string", "int", "long", "double", "decimal"],
-      "double"
-    );
-
-    expect(result).toStrictEqual({
-      kind: PlanKind.CONDITIONAL,
-      filters: {
-        $and: [
-          { $expr: { $ne: [conversion, null] } },
-          { $expr: { $gt: [conversion, 1.5] } },
-        ],
-      },
-    });
-
-    const query = await Resource.find(result.filters || {});
-    expect(query.map((r) => r.key).sort()).toEqual(
-      fixtureResources
-        .filter((r) => Number(r.aNumber) > 1.5)
-        .map((r) => r.key)
-        .sort()
-    );
-  });
-
-  test("convert-int: invalid source values fail closed without aborting the query", async () => {
-    const queryPlan = await cerbos.planResources({
-      principal: { id: "user1", roles: ["USER"] },
-      resource: { kind: "resource" },
-      action: "convert-int",
-    });
-
-    expect(queryPlan).toMatchObject({
-      kind: PlanKind.CONDITIONAL,
-      condition: {
-        operator: "gt",
-        operands: [
-          {
-            operator: "int",
-            operands: [{ name: "request.resource.attr.aString" }],
-          },
-          { value: 0 },
-        ],
-      },
-    });
-
-    const result = queryPlanToMongoose({
-      queryPlan,
-      mapper: defaultMapper,
-    });
-    const conversion = checkedConversion(
-      "$aString",
-      ["string", "int", "long", "double", "decimal"],
-      "long"
-    );
-
-    expect(result).toStrictEqual({
-      kind: PlanKind.CONDITIONAL,
-      filters: {
-        $and: [
-          { $expr: { $ne: [conversion, null] } },
-          { $expr: { $gt: [conversion, 0] } },
-        ],
-      },
-    });
-
-    expect(await Resource.find(result.filters || {})).toHaveLength(0);
+    expect(() =>
+      queryPlanToMongoose({ queryPlan, mapper: defaultMapper })
+    ).toThrow(message);
   });
 
   test.each(["double", "int"] as const)(
-    "%s rejects boolean inputs under both positive and negative polarity",
+    "%s is rejected under both positive and negative polarity",
     async (operator) => {
       const conversion = new PlanExpression(operator, [
         new PlanExpressionVariable("request.resource.attr.aBool"),
@@ -2453,11 +2337,12 @@ describe("Type Conversion", () => {
         comparison,
         new PlanExpression("not", [comparison]),
       ]) {
-        const result = queryPlanToMongoose({
-          queryPlan: conditionalPlan(condition),
-          mapper: defaultMapper,
-        });
-        expect(await Resource.find(result.filters || {})).toHaveLength(0);
+        expect(() =>
+          queryPlanToMongoose({
+            queryPlan: conditionalPlan(condition),
+            mapper: defaultMapper,
+          })
+        ).toThrow(/cannot be translated/);
       }
     }
   );
@@ -2492,34 +2377,20 @@ describe("Type Conversion", () => {
     }
   });
 
-  test("int conversion rejects BSON dates instead of using milliseconds", async () => {
+  test("int conversion is rejected rather than reading a BSON date's milliseconds", async () => {
     const condition = new PlanExpression("eq", [
       new PlanExpression("int", [
         new PlanExpressionVariable("request.resource.attr.aString"),
       ]),
       new PlanExpressionValue(1704067200000),
     ]);
-    const result = queryPlanToMongoose({
-      queryPlan: conditionalPlan(condition),
-      mapper: defaultMapper,
-    });
-    const original = fixtureResources.find(({ key }) => key === "a");
-    if (!original) {
-      throw new Error("Missing fixture resource a");
-    }
 
-    await Resource.collection.updateOne(
-      { key: original.key },
-      { $set: { aString: new Date("2024-01-01T00:00:00Z") } }
-    );
-    try {
-      expect(await Resource.find(result.filters || {})).toHaveLength(0);
-    } finally {
-      await Resource.collection.updateOne(
-        { key: original.key },
-        { $set: { aString: original.aString } }
-      );
-    }
+    expect(() =>
+      queryPlanToMongoose({
+        queryPlan: conditionalPlan(condition),
+        mapper: defaultMapper,
+      })
+    ).toThrow(/'int\(\)' cannot be translated/);
   });
 
   test("timestamp comparisons reject malformed and non-RFC 3339 fields", async () => {

@@ -43,12 +43,67 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `check()` decisio
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 120 reference conformance actions |
-| Fail-closed corpus shapes | Nanosecond `now()` thresholds plus regex `matches()`, ordered list indexing/`get-field`, and `timestamp()` over an ambiguous string column (5 actions) |
+| Oracle-tested | 129 reference conformance actions |
+| Fail-closed corpus shapes | Nanosecond `now()` thresholds, regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an ambiguous string column, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero) and `filter()`/`map()` used as a condition (both return a list, not a boolean), and a constant zero divisor whose sign the HTTP transport discards (12 actions) |
 | Representation-dependent | `null-eq-missing` — raises under `null_attribute_representation="omitted"`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 
-The conformance harness supplies the same public `operator_override_fns` mechanism available to applications for schema-specific collection translations. Regex `matches()` fails closed by default because SQL dialect regex engines do not guarantee CEL/RE2 semantics; applications may provide an override only when their database translation is known to be equivalent. Timestamp literals must use strict RFC 3339 grammar, resolve inside CEL's supported year 0001–9999 instant range, and be exactly representable at Python/SQLAlchemy microsecond precision: discarded fractional digits must be zero, and the mapped column/database must preserve microseconds. Unsupported shapes raise instead of producing a broader query.
+The conformance harness supplies the same public `operator_override_fns` mechanism available to applications for schema-specific collection translations. Regex `matches()` fails closed by default because SQL dialect regex engines do not guarantee CEL/RE2 semantics; applications may provide an override only when their database translation is known to be equivalent. Timestamp literals must use strict RFC 3339 grammar, resolve inside CEL's supported year 0001–9999 instant range, and be exactly representable at Python/SQLAlchemy microsecond precision: discarded fractional digits must be zero, and the mapped column/database must preserve microseconds. Unsupported shapes raise instead of producing a broader query. Every fail-closed shape's error message is pinned in the shared corpus (`conformance/actions.json`) and asserted by this adapter's conformance run, so a classification proves the throw names its declared mechanism rather than merely that something threw.
+
+## Mapping hazards
+
+The conformance contract above proves the *plan* side — given a policy shape, does the query select the rows `check()` allows. The other half is the *mapping*: **the rows a subquery reads must be the rows the application put into the resource attributes.** Six ways that can break are catalogued in the shared corpus, and every adapter has to record a position on each of them.
+
+**`get_query` has no relation model.** `attr_map` maps attribute references to columns; a collection-valued attribute reaches its rows entirely through [`operator_override_fns`](#overriding-default-predicates), which means *you* write the correlated subquery. Every hazard below is therefore caller-owned here, and which of them apply depends on how you write it:
+
+- Through a mapped **`relationship()`** — `Model.rel.any(...)`, `Model.rel.has(...)`, `select(...).join(Model.rel)` — SQLAlchemy applies the relationship's `primaryjoin` and, for a single-table-inheritance target, the discriminator criteria. Those hazards are closed by the ORM.
+- Through a **hand-written correlated `select()`** over columns, which is what the adversarial harness does, none of that applies. You are reading the table bare and the invariant is yours end to end.
+
+The single-table-inheritance half of that is [documented here](https://docs.sqlalchemy.org/en/20/orm/queryguide/inheritance.html#single-inheritance-mappings) — a `select(Subclass)` adds the discriminator to the `WHERE`. Check both against the SQLAlchemy version you actually run before relying on a row below.
+
+| Hazard | Position | Mechanism to check |
+|---|---|---|
+| Filtered association | **Caller-owned** | `relationship(primaryjoin=…)` and `relationship(secondaryjoin=…)`. Going through `.any()`/`.has()` applies them; a hand-written `select()` over the target's columns does not, and must repeat the predicate in its own `where()` |
+| Default scope on the target model | **Caller-owned** | A soft-delete column (`deleted_at IS NULL`), a tenant column, a `published` flag, or a `with_loader_criteria` you register on the session. SQLAlchemy applies none of those to a subquery you build yourself |
+| Subtype discrimination | **Caller-owned** | `polymorphic_identity` on a single-table-inheritance subclass. `select(Subclass)` carries the discriminator; `select(literal(1)).where(subclass_table.c.x == …)` over the shared table does not, and sees the sibling subtypes |
+| To-one relation used as a collection | **Caller-owned** | A `relationship(uselist=False)` whose foreign key has no unique constraint. Nothing in the override mechanism makes the database enforce the single row the application saw — add the constraint |
+| Composite association key | **Caller-owned** | A multi-column foreign key. Unlike the adapters that take one source and one target column, an override is arbitrary SQLAlchemy, so a composite key *is* expressible — which also means nothing stops you writing half of it. Conjoin every column pair |
+| Absent to-one parent | **Reproduced by `require_hops`**, and proved by the corpus (`w1-all-chain` and siblings) | `cerbos_sqlalchemy.require_hops` — see below. Call it from every override that reaches a collection through an intermediate to-one hop |
+
+### `require_hops`: the one hazard with a library helper
+
+CEL cannot dot through a list, so every intermediate segment of `a.b.c` is a to-ONE parent. When it is absent the application sends no attribute at all and CEL raises a missing-path error, which denies — but a subquery rooted at the resource row cannot tell an absent parent from a childless one, so `all` reads TRUE, `!exists` reads TRUE and the count reads 0, each admitting rows the PDP denies ([#309](https://github.com/cerbos/query-plan-adapters/issues/309)).
+
+That requirement is mechanical, identical for every caller, and easy to get subtly wrong, so it ships in the library rather than being left as advice:
+
+```python
+from cerbos_sqlalchemy import get_query, require_hops
+from sqlalchemy import exists, literal, select
+
+# `mainCategory.subCategories`: the collection is reached THROUGH the category hop.
+HOP = [Category.resource_id == Resource.id]
+CORRELATE = [Resource]
+
+def sub_categories_exists(collection, body):
+    subquery = (
+        select(literal(1))
+        .where(SubCategory.category_id == Category.id)
+        .where(Category.resource_id == Resource.id)
+        .where(body)
+        .correlate(*CORRELATE)
+    )
+    return require_hops(exists(subquery), HOP, CORRELATE)
+
+query = get_query(
+    plan, Resource, attr_map, operator_override_fns={"exists": sub_categories_exists}
+)
+```
+
+`require_hops` wraps the answer in a `CASE` with **no `ELSE`**: a missing hop yields NULL, and `NOT NULL` is still NULL, so the row stays excluded under both polarities. A direct relation — an empty `hop_correlation` — is returned unchanged, so `!tags.exists(...)` over zero tags is still TRUE.
+
+Every operator whose answer comes off a chain has to go through it, not just the collection macros. A bare `EXISTS` is two-valued, so it is FALSE for an absent parent and its negation is TRUE — which is how plain membership and `hasIntersection` kept readmitting every parentless row after the macros alone were fixed ([#315](https://github.com/cerbos/query-plan-adapters/issues/315)), and how `!(size(chain) > 0)` did the same ([#316](https://github.com/cerbos/query-plan-adapters/issues/316)).
+
+It is **optional**, and calling it is not enforced: a caller wiring a join chain today gets exactly the query it got before the helper existed. Making it mandatory would mean raising for every such caller, a consumer-visible break to guard a hazard many of them do not have.
 
 ## Requirements
 - Cerbos > v0.16

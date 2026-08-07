@@ -1,9 +1,14 @@
 package dev.cerbos.queryplan.springdata;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter;
+import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression;
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand;
+import dev.cerbos.api.v1.response.Response.PlanResourcesResponse;
 import dev.cerbos.queryplan.springdata.testmodel.CategoryEntity;
 import dev.cerbos.queryplan.springdata.testmodel.LabelEntity;
 import dev.cerbos.queryplan.springdata.testmodel.ResourceEntity;
@@ -47,15 +52,19 @@ import java.nio.file.Path;
 import com.google.protobuf.Value;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -136,44 +145,175 @@ class AdversarialConformanceTest {
         return Path.of(System.getProperty("user.dir"), "..", "conformance").normalize();
     }
 
-    @JsonIgnoreProperties(ignoreUnknown = true)
     private record Tag(String id, String name) {}
 
-    /** One seeded row; the single source of truth for BOTH the DB entity and the oracle attributes. */
-    @JsonIgnoreProperties(ignoreUnknown = true)
+    /**
+     * One seeded row; the single source of truth for BOTH the DB entity and the oracle attributes.
+     * {@code note} is corpus documentation this harness never reads; it is named so that strict
+     * decoding accepts it, and it is the one seed key {@link #SEED_KEYS} omits.
+     */
     private record Seed(String id, boolean aBool, String aString, int aNumber,
-                        String aOptionalString, List<Tag> tags, List<String> subCategoryNames) {}
+                        String aOptionalString, List<Tag> tags, List<String> subCategoryNames,
+                        String note) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record PrincipalSpec(String id, List<String> roles, Map<String, List<String>> attr) {}
 
+    /**
+     * conformance/seeds.json. Every key the file carries is named, including the prose ones,
+     * because unknown properties are rejected rather than ignored: a seed field this harness does
+     * not consume would be dropped from the entity AND the check() oracle at once, and the
+     * differential would agree for the wrong reason.
+     */
+    private record SeedsFile(@JsonProperty("$schema") String schema, String description,
+                             PrincipalSpec principal, String resourceKind, String principalNote,
+                             List<Seed> seeds) {}
+
+    /** One seed's derived fields, exactly as conformance/derived-fields.json carries them. */
+    private record DerivedEntry(String createdBy, Double aDouble, String createdAt, String scope,
+                                List<String> labels) {}
+
+    private record DerivedFile(@JsonProperty("$schema") String schema, String description,
+                               List<String> fields, Map<String, DerivedEntry> derived) {}
+
+    /**
+     * An {@code expectedUnsupported} entry. {@code messages} carries one entry per adapter that
+     * must reject the shape, keyed by adapter name; {@code validate-corpus.sh} asserts that key
+     * set is exactly the roster minus the adapters that promoted the shape.
+     */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    private record SeedsFile(PrincipalSpec principal, String resourceKind, List<Seed> seeds) {}
+    private record UnsupportedShape(String action, String shape, Map<String, String> messages) {}
+
+    /**
+     * A {@code nullRepresentationOmitted} entry. Every adapter must reject these — the two NULL
+     * conventions are indistinguishable on the wire — so {@code messages} names the whole roster
+     * with no promotions to subtract.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record NullRepresentationOmitted(String action, String reason,
+                                             Map<String, String> messages) {}
+
+    /**
+     * An {@code adapterUnsupported} / {@code adapterSupportedExpected} entry. {@code message} is
+     * the substring this adapter's error must contain — present on the first, absent on the
+     * second, which does not throw.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record AdapterUnsupported(String action, String reason, String message) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    private record UnsupportedShape(String action, String shape, String springDataMessage) {}
+    private record KnownDivergence(String action, String reason, List<String> adapters) {}
 
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    private record NullRepresentationOmitted(String action, String reason) {}
-
+    /**
+     * Every group in actions.json must be named here: Jackson silently drops a field this
+     * record does not declare, and a dropped group makes its actions vanish from every count
+     * and every parameterised case at once — the projection trap conformance/README.md warns
+     * about. The manifest tripwire test below is what makes an undropped group load-bearing.
+     */
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record ActionsFile(
             List<String> conformance,
+            Map<String, List<AdapterUnsupported>> adapterUnsupported,
+            Map<String, List<AdapterUnsupported>> adapterSupportedExpected,
             List<UnsupportedShape> expectedUnsupported,
-            List<NullRepresentationOmitted> nullRepresentationOmitted) {}
+            List<NullRepresentationOmitted> nullRepresentationOmitted,
+            List<KnownDivergence> knownDivergences) {}
+
+    /** The corpus key for this adapter — its directory name, as every other harness uses. */
+    private static final String ADAPTER = "spring-data";
+
+    // -- corpus coverage guards -----------------------------------------------------------------
+    //
+    // The same parsed seed feeds the persisted entity AND the check() oracle, so a corpus field
+    // this harness does not consume is dropped from both sides at once and the differential agrees
+    // for the wrong reason — the projection trap conformance/README.md describes for actions.json,
+    // applied to the seeds. Asserting set equality catches both directions: a corpus key nothing
+    // here reads, and a key this harness reads that the corpus no longer carries.
+
+    private static final List<String> SEED_KEYS = List.of(
+            "id", "aBool", "aString", "aNumber", "aOptionalString", "tags", "subCategoryNames");
+
+    /** Corpus prose, never read by a harness: the one documented exclusion from SEED_KEYS. */
+    private static final String SEED_NOTE_KEY = "note";
+
+    /**
+     * The one nested object array a seed carries. A key added inside an element is dropped from
+     * both sides of the differential just as silently as a top-level one, so it is guarded the
+     * same way.
+     */
+    private static final List<String> TAG_KEYS = List.of("id", "name");
+
+    private static final List<String> DERIVED_KEYS =
+            List.of("createdBy", "aDouble", "createdAt", "scope", "labels");
 
     private static SeedsFile seedsFile;
     private static ActionsFile actionsFile;
+    private static DerivedFile derivedFile;
     private static List<Seed> SEEDS;
 
+    /**
+     * Conformance actions this adapter cannot express and must reject loudly instead.
+     *
+     * <p>Spring Data is the reference implementation, so this list is normally empty — a shape it
+     * translates is what puts an action in {@code conformance} in the first place. An entry here
+     * means the reference itself proved unable to express the shape faithfully and now fails
+     * closed, which is still the required outcome: a wrong filter is an authorization bug, a
+     * throw is a bug report.
+     */
+    private static List<AdapterUnsupported> adapterUnsupported() {
+        return actionsFile.adapterUnsupported() == null
+                ? List.of()
+                : actionsFile.adapterUnsupported().getOrDefault(ADAPTER, List.of());
+    }
+
+    /** Reference-unsupported shapes this adapter deliberately translates anyway (normally empty). */
+    private static List<AdapterUnsupported> adapterSupportedExpected() {
+        return actionsFile.adapterSupportedExpected() == null
+                ? List.of()
+                : actionsFile.adapterSupportedExpected().getOrDefault(ADAPTER, List.of());
+    }
+
+    private static Set<String> adapterSupportedExpectedActions() {
+        return adapterSupportedExpected().stream()
+                .map(AdapterUnsupported::action).collect(java.util.stream.Collectors.toSet());
+    }
+
     static Stream<String> conformanceActions() {
-        return actionsFile.conformance().stream();
+        Set<String> unsupported = adapterUnsupported().stream()
+                .map(AdapterUnsupported::action).collect(java.util.stream.Collectors.toSet());
+        return Stream.concat(
+                actionsFile.conformance().stream().filter(a -> !unsupported.contains(a)),
+                adapterSupportedExpectedActions().stream().sorted());
+    }
+
+    static Stream<Arguments> adapterUnsupportedActions() {
+        return adapterUnsupported().stream().map(u -> Arguments.of(
+                u.action(),
+                u.reason(),
+                requireMessage("adapterUnsupported." + ADAPTER + "." + u.action(), u.message())));
     }
 
     static Stream<Arguments> unsupportedShapes() {
+        Set<String> promoted = adapterSupportedExpectedActions();
         return actionsFile.expectedUnsupported().stream()
-                .filter(u -> !u.action().equals("p-timestamp"))
-                .map(u -> Arguments.of(u.action(), u.springDataMessage()));
+                .filter(u -> !promoted.contains(u.action()))
+                .map(u -> Arguments.of(u.action(), requireMessage(
+                        "expectedUnsupported." + u.action() + ".messages." + ADAPTER,
+                        u.messages() == null ? null : u.messages().get(ADAPTER))));
+    }
+
+    /**
+     * The substring this adapter's error must contain, or a loud failure. The message is what
+     * turns "it threw" into "it threw for the declared reason": without it a mapper typo or an
+     * unrelated validation satisfies the throw suite just as well as the documented limitation
+     * (cerbos/query-plan-adapters#326).
+     */
+    private static String requireMessage(String label, String message) {
+        if (message == null || message.isEmpty()) {
+            throw new IllegalStateException("actions.json pins no throw message for " + label
+                    + ": the throw suite would accept a failure for any reason");
+        }
+        return message;
     }
 
     /**
@@ -183,7 +323,14 @@ class AdversarialConformanceTest {
      */
     static Stream<Arguments> nullRepresentationOmitted() {
         return actionsFile.nullRepresentationOmitted().stream()
-                .map(n -> Arguments.of(n.action(), n.reason()));
+                .map(n -> Arguments.of(n.action(), n.reason(), nullOmittedMessage(n)));
+    }
+
+    /** The substring this adapter's rejection under the omitted representation must contain. */
+    private static String nullOmittedMessage(NullRepresentationOmitted entry) {
+        return requireMessage(
+                "nullRepresentationOmitted." + entry.action() + ".messages." + ADAPTER,
+                entry.messages() == null ? null : entry.messages().get(ADAPTER));
     }
     /**
      * Deterministic label names per seed for the {@code macro-depth3-*} actions — the third
@@ -197,18 +344,26 @@ class AdversarialConformanceTest {
      * category/subCategory chain.
      */
     private static List<String> labelsFor(Seed s) {
-        return switch (s.id()) {
-            case "a1" -> java.util.Arrays.asList("gold", "silver");
-            case "a6" -> java.util.Arrays.asList(null, "silver");
-            case "a8" -> List.of("silver");
-            case "c1" -> List.of("Gold");
-            default -> List.of();
-        };
+        return derivedFor(s).labels();
     }
 
     /** Deterministic ISO instant per seed for the timestamp probe: split around 2025-01-01. */
     private static String isoFor(Seed s) {
-        return s.aNumber() >= 2 ? "2024-06-01T00:00:00Z" : "2026-06-01T00:00:00Z";
+        return derivedFor(s).createdBy();
+    }
+
+    /**
+     * The deterministic derived fields for one seed, read from conformance/derived-fields.json
+     * rather than restated here. The same value feeds the persisted entity and the check() oracle,
+     * so a transcription error would be self-consistent and invisible to the differential; one
+     * machine-readable definition is what makes that impossible. The JavaDoc on the accessors below
+     * explains what each value witnesses; conformance/README.md states the rules the file
+     * materialises, and validate-corpus.sh re-derives them.
+     */
+    private static DerivedEntry derivedFor(Seed s) {
+        DerivedEntry entry = derivedFile.derived().get(s.id());
+        assertNotNull(entry, () -> "derived-fields.json has no entry for seed \"" + s.id() + "\"");
+        return entry;
     }
 
     /**
@@ -224,16 +379,8 @@ class AdversarialConformanceTest {
      * and MySQL {@code timestamp(6)} columns.
      */
     private static java.time.Instant tsFor(Seed s) {
-        return switch (s.id()) {
-            case "a1" -> java.time.Instant.parse("2020-03-15T10:30:00Z");
-            case "a2" -> java.time.Instant.parse("2037-01-01T00:00:00Z");
-            case "a3" -> null;
-            case "a4" -> java.time.Instant.parse("2024-06-01T00:00:00Z");
-            case "a5" -> java.time.Instant.parse("2020-03-15T10:30:00.123456Z");
-            default -> s.aNumber() >= 2
-                    ? java.time.Instant.parse("2036-06-06T06:06:06Z")
-                    : java.time.Instant.parse("2021-05-05T05:05:05Z");
-        };
+        String value = derivedFor(s).createdAt();
+        return value == null ? null : java.time.Instant.parse(value);
     }
 
     /**
@@ -248,12 +395,7 @@ class AdversarialConformanceTest {
      * sides agree to exclude.
      */
     private static Double doubleFor(Seed s) {
-        return switch (s.id()) {
-            case "a1" -> -0.6;
-            case "a2" -> 0.25;
-            case "a3" -> null;
-            default -> s.aNumber() + 0.3;
-        };
+        return derivedFor(s).aDouble();
     }
 
     /**
@@ -269,27 +411,58 @@ class AdversarialConformanceTest {
      * attribute → CEL error → deny on the check side vs SQL NULL → excluded on the SQL side).
      */
     private static String scopeFor(Seed s) {
-        return switch (s.id()) {
-            case "a1" -> "dept";
-            case "a2" -> "dept.eng";
-            case "a3" -> "dept.eng.platform";
-            case "a4" -> "dept.eng.platform.obs";
-            case "a5" -> "dept.engineering";
-            case "a6" -> "dept.sales";
-            case "a8" -> "";
-            case "a9" -> "50%";
-            case "b1" -> "50%:a_b:x";
-            case "b2" -> "50x:a_b:y";
-            case "b3" -> "50%:aXb:y";
-            case "b4" -> "50%:a_b";
-            case "b5" -> "dept.eng.platform2";
-            case "b6" -> "50%.a_b";
-            case "c1" -> "Dept.Eng";
-            case "c2" -> "dept.eng.";
-            case "d1" -> "[env]:prod:eu"; // literal-bracket descendant for hier-bracket
-            case "d2" -> "e:prod:eu"; // SQL Server char-class trap sibling for hier-bracket
-            default -> null; // a7: NULL scope — a missing attribute on the check side
-        };
+        return derivedFor(s).scope();
+    }
+
+    /**
+     * Proves this harness consumes every seed key and every derived field the corpus defines, and
+     * nothing it does not. Rejecting unknown properties on decode cannot do this alone: it catches
+     * an added key but says nothing about one that disappears, and a disappeared key decodes to its
+     * default on both sides of the differential.
+     */
+    private static void assertCorpusCoverage(ObjectMapper mapper, Path conformance)
+            throws IOException {
+        JsonNode rawSeeds = mapper.readTree(conformance.resolve("seeds.json").toFile()).get("seeds");
+        assertEquals(SEEDS.size(), rawSeeds.size(), "seeds.json rows lost in decoding");
+        for (int i = 0; i < rawSeeds.size(); i++) {
+            String label = "seeds.json seeds[" + i + "]";
+            assertKeys(label, keysOf(rawSeeds.get(i)), SEED_KEYS, List.of(SEED_NOTE_KEY));
+            JsonNode rawTags = rawSeeds.get(i).get("tags");
+            for (int j = 0; j < rawTags.size(); j++) {
+                assertKeys(label + ".tags[" + j + "]", keysOf(rawTags.get(j)), TAG_KEYS,
+                        List.of());
+            }
+        }
+
+        assertKeys("derived-fields.json fields", derivedFile.fields(), DERIVED_KEYS, List.of());
+        assertEquals(SEEDS.stream().map(Seed::id).collect(Collectors.toCollection(TreeSet::new)),
+                new TreeSet<>(derivedFile.derived().keySet()),
+                "derived-fields.json must carry exactly one entry per seeds.json id");
+        JsonNode rawDerived =
+                mapper.readTree(conformance.resolve("derived-fields.json").toFile()).get("derived");
+        for (Map.Entry<String, JsonNode> entry : rawDerived.properties()) {
+            assertKeys("derived-fields.json derived[\"" + entry.getKey() + "\"]",
+                    keysOf(entry.getValue()), DERIVED_KEYS, List.of());
+        }
+    }
+
+    private static void assertKeys(String label, Collection<String> got, Collection<String> want,
+                                   Collection<String> optional) {
+        Set<String> allowed = new LinkedHashSet<>(want);
+        allowed.addAll(optional);
+        for (String key : got) {
+            assertTrue(allowed.contains(key), () -> label + " carries \"" + key
+                    + "\", which this harness does not consume: an unconsumed corpus field is"
+                    + " dropped from the persisted entity and the check() oracle at once");
+        }
+        Set<String> missing = new LinkedHashSet<>(want);
+        missing.removeAll(got);
+        assertTrue(missing.isEmpty(),
+                () -> label + " is missing " + missing + ", which this harness consumes");
+    }
+
+    private static List<String> keysOf(JsonNode node) {
+        return node.properties().stream().map(Map.Entry::getKey).toList();
     }
 
     private static GenericContainer<?> cerbos;
@@ -304,7 +477,10 @@ class AdversarialConformanceTest {
         Path conformance = conformanceDir();
         seedsFile = mapper.readValue(conformance.resolve("seeds.json").toFile(), SeedsFile.class);
         actionsFile = mapper.readValue(conformance.resolve("actions.json").toFile(), ActionsFile.class);
+        derivedFile = mapper.readValue(
+                conformance.resolve("derived-fields.json").toFile(), DerivedFile.class);
         SEEDS = seedsFile.seeds();
+        assertCorpusCoverage(mapper, conformance);
 
         // Pinned PDP image — see CerbosTestImage for the pin rationale and bump policy.
         cerbos = new GenericContainer<>(CerbosTestImage.IMAGE)
@@ -620,13 +796,35 @@ class AdversarialConformanceTest {
     /**
      * Probe shapes the adapter does not support: the translation must fail loudly (never a
      * silently-wrong filter). Messages pinned so a regression to silent acceptance is caught.
+     *
+     * <p>{@code p-timestamp} runs here like every other shape. It used to be routed around this
+     * case because {@code actions.json} still carried the pre-support operand error; the corpus
+     * now pins the column-type error the adapter actually raises, which is the one that must keep
+     * firing.
      */
     @ParameterizedTest(name = "{0}")
     @MethodSource("unsupportedShapes")
     void unsupportedShapesThrow(String action, String expectedMessage) {
         IllegalArgumentException ex = assertThrows(
                 IllegalArgumentException.class, () -> adapterFilteredIds(action));
-        assertEquals(expectedMessage, ex.getMessage());
+        assertTrue(ex.getMessage().contains(expectedMessage),
+                "action '" + action + "' was rejected for a reason actions.json does not declare: "
+                        + ex.getMessage());
+    }
+
+    /**
+     * Conformance actions the reference itself cannot express (see {@link #adapterUnsupported()}).
+     * They are excluded from the oracle comparison and must fail loudly instead — the invariant is
+     * absolute either way: an inexpressible shape throws before its filter can be used.
+     */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("adapterUnsupportedActions")
+    void adapterUnsupportedActionsThrow(String action, String reason, String expectedMessage) {
+        IllegalArgumentException ex = assertThrows(
+                IllegalArgumentException.class, () -> adapterFilteredIds(action), reason);
+        assertTrue(ex.getMessage().contains(expectedMessage),
+                "action '" + action + "' was rejected for a reason actions.json does not declare: "
+                        + ex.getMessage());
     }
 
     /**
@@ -638,7 +836,7 @@ class AdversarialConformanceTest {
      */
     @ParameterizedTest(name = "{0}")
     @MethodSource("nullRepresentationOmitted")
-    void nullRepresentationOmittedIsRejected(String action, String reason) {
+    void nullRepresentationOmittedIsRejected(String action, String reason, String message) {
         assertEquals(List.of(), oracleAllowedIds(action), reason);
 
         // The default translation emits IS NULL and returns exactly the rows the PDP denies.
@@ -646,7 +844,7 @@ class AdversarialConformanceTest {
 
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
                 () -> adapterFilteredIds(action, NullAttributeRepresentation.OMITTED));
-        assertTrue(ex.getMessage().contains("missing-attribute error"), ex.getMessage());
+        assertTrue(ex.getMessage().contains(message), ex.getMessage());
     }
 
     /**
@@ -680,7 +878,14 @@ class AdversarialConformanceTest {
                 adapterFilteredIds(action, NullAttributeRepresentation.OMITTED);
                 notRejected.add(action);
             } catch (IllegalArgumentException expected) {
-                // the shape must be rejected under this representation
+                // The rejection must be the null-operand check talking, not an incidental
+                // failure: a mapper typo counting as the required rejection is the silent pass
+                // the corpus README warns about.
+                if (!expected.getMessage().contains(nullOmittedMessage(
+                        actionsFile.nullRepresentationOmitted().get(0)))) {
+                    notRejected.add(action + " (rejected for the wrong reason: "
+                            + expected.getMessage() + ")");
+                }
             }
         }
         assertEquals(List.of(), notRejected);
@@ -703,21 +908,6 @@ class AdversarialConformanceTest {
         };
     }
 
-    /**
-     * {@code p-timestamp} compares {@code timestamp(R.attr.createdBy)} where {@code createdBy}
-     * maps to a STRING column: timestamp() comparisons are supported only on columns that
-     * unambiguously denote an absolute instant (Instant / OffsetDateTime), so this must keep
-     * failing closed — with the column-type error, not the old pre-support operand error.
-     */
-    @Test
-    void timestampOnNonTemporalColumnThrowsNamedError() {
-        IllegalArgumentException ex = assertThrows(
-                IllegalArgumentException.class, () -> adapterFilteredIds("p-timestamp"));
-        assertTrue(ex.getMessage().contains("timestamp() comparison requires a column mapped to")
-                        && ex.getMessage().contains("String")
-                        && ex.getMessage().contains("request.resource.attr.createdBy"),
-                "unexpected message: " + ex.getMessage());
-    }
 
     /**
      * Pins the MySQL IEEE double-cast wiring. On the MySQL leg the ServiceLoader-discovered
@@ -822,16 +1012,207 @@ class AdversarialConformanceTest {
                         + "rows — if this fails the adapter started second-guessing plan kinds");
     }
 
+    /**
+     * The corpus pins two count spellings over the chain — {@code size(...) == 0} and
+     * {@code !(size(...) > 0)} — but the guard has to be a property of the COUNT rather than
+     * of the two spellings that happen to be pinned. These synthesise the remaining
+     * threshold/polarity combinations onto the same seeded store and assert the parentless
+     * rows stay out of every one, including an arbitrary-N threshold that neither corpus
+     * action reaches (cerbos/query-plan-adapters#316).
+     */
+    @Test
+    void everyCountThresholdOverTheChainInheritsTheAbsentParentGuard() {
+        Operand chain = Operand.newBuilder()
+                .setVariable("request.resource.attr.mainCategory.subCategories").build();
+        Operand size = expression("size", chain);
+
+        // Every seed that HAS a mainCategory holds exactly one subCategory, and the 16 without
+        // it are CEL missing-path errors — so each of these is empty unless the guard leaks.
+        Map<String, Operand> emptyByConstruction = new LinkedHashMap<>();
+        emptyByConstruction.put("size(chain) == 0", compare("eq", size, 0));
+        emptyByConstruction.put("size(chain) <= 0", compare("le", size, 0));
+        emptyByConstruction.put("size(chain) < 1", compare("lt", size, 1));
+        emptyByConstruction.put("size(chain) >= 2", compare("ge", size, 2));
+        emptyByConstruction.put("!(size(chain) > 0)", expression("not", compare("gt", size, 0)));
+        emptyByConstruction.put("!(size(chain) >= 1)", expression("not", compare("ge", size, 1)));
+        emptyByConstruction.put("!(size(chain) < 2)", expression("not", compare("lt", size, 2)));
+        emptyByConstruction.forEach((shape, condition) ->
+                assertEquals(List.of(), filteredIdsFor(condition),
+                        "absent-parent guard leaked for " + shape));
+
+        // The mirror image, so the loop above cannot pass by denying everything: `>= 0` and
+        // `< 2` are TRUE for exactly the rows that HAVE the parent.
+        List<String> withParent = oracleAllowedIds("w1-size-nonneg-chain");
+        assertFalse(withParent.isEmpty(), "sanity: some seed must carry a mainCategory");
+        assertTrue(withParent.size() < SEEDS.size(), "sanity: not every seed carries one");
+        assertEquals(withParent, filteredIdsFor(compare("ge", size, 0)));
+        assertEquals(withParent, filteredIdsFor(compare("lt", size, 2)));
+    }
+
+    private static Operand expression(String operator, Operand... operands) {
+        Expression.Builder e = Expression.newBuilder().setOperator(operator);
+        for (Operand operand : operands) {
+            e.addOperands(operand);
+        }
+        return Operand.newBuilder().setExpression(e).build();
+    }
+
+    private static Operand compare(String operator, Operand left, double threshold) {
+        return expression(operator, left,
+                Operand.newBuilder().setValue(Value.newBuilder().setNumberValue(threshold)).build());
+    }
+
+    /** Translate a synthesised CONDITIONAL plan and execute it against the seeded store. */
+    private static List<String> filteredIdsFor(Operand condition) {
+        PlanResourcesResponse response = PlanResourcesResponse.newBuilder()
+                .setFilter(PlanResourcesFilter.newBuilder()
+                        .setKind(PlanResourcesFilter.Kind.KIND_CONDITIONAL)
+                        .setCondition(condition))
+                .build();
+        Result<ResourceEntity> result =
+                SpringDataQueryPlanAdapter.toSpecification(response, MAPPING, Map.of());
+        Specification<ResourceEntity> spec =
+                ((Result.Conditional<ResourceEntity>) result).specification();
+
+        EntityManager em = emf.createEntityManager();
+        try {
+            CriteriaBuilder cb = em.getCriteriaBuilder();
+            CriteriaQuery<String> cq = cb.createQuery(String.class);
+            Root<ResourceEntity> root = cq.from(ResourceEntity.class);
+            cq.select(root.get("id")).distinct(true);
+            Predicate p = spec.toPredicate(root, cq, cb);
+            if (p != null) {
+                cq.where(p);
+            }
+            cq.orderBy(cb.asc(root.get("id")));
+            return em.createQuery(cq).getResultList();
+        } finally {
+            em.close();
+        }
+    }
+
+    /**
+     * Adding a throwing action without pinning its message must fail this harness rather than
+     * silently degrade the throw suite to a bare "it threw" (cerbos/query-plan-adapters#326).
+     */
+    @Test
+    void throwingActionWithNoPinnedMessageFailsClassification() {
+        for (String absent : new String[] {null, ""}) {
+            IllegalStateException ex = assertThrows(IllegalStateException.class,
+                    () -> requireMessage("synthetic-entry", absent));
+            assertTrue(ex.getMessage().contains("pins no throw message"), ex.getMessage());
+        }
+    }
+
+    /**
+     * Corpus-size tripwire and exactly-once partition. A corpus edit must bump the pinned
+     * counts in the same change — without this, a new hostile action silently joins the
+     * oracle run, and a group dropped by the {@code ActionsFile} parser above would make its
+     * actions vanish from every parameterised case with nothing failing.
+     */
+    @Test
+    void manifestAssignsEveryActionExactlyOneOutcome() {
+        Set<String> supportedExpected = adapterSupportedExpectedActions();
+        Set<String> oracle = conformanceActions().collect(java.util.stream.Collectors.toSet());
+        Set<String> throwing = adapterUnsupported().stream()
+                .map(AdapterUnsupported::action)
+                .collect(java.util.stream.Collectors.toCollection(java.util.HashSet::new));
+        actionsFile.expectedUnsupported().stream()
+                .map(UnsupportedShape::action)
+                .filter(a -> !supportedExpected.contains(a))
+                .forEach(throwing::add);
+        Set<String> nullOmitted = actionsFile.nullRepresentationOmitted().stream()
+                .map(NullRepresentationOmitted::action)
+                .collect(java.util.stream.Collectors.toSet());
+        Set<String> skipped = actionsFile.knownDivergences().stream()
+                .filter(d -> d.adapters().contains(ADAPTER))
+                .map(KnownDivergence::action)
+                .collect(java.util.stream.Collectors.toSet());
+
+        Set<String> manifest = new java.util.TreeSet<>(actionsFile.conformance());
+        actionsFile.expectedUnsupported().forEach(u -> manifest.add(u.action()));
+        actionsFile.nullRepresentationOmitted().forEach(n -> manifest.add(n.action()));
+        actionsFile.knownDivergences().forEach(d -> manifest.add(d.action()));
+
+        List<String> misclassified = manifest.stream()
+                .filter(action -> Stream.of(
+                                oracle.contains(action),
+                                throwing.contains(action),
+                                nullOmitted.contains(action),
+                                skipped.contains(action))
+                        .filter(Boolean::booleanValue).count() != 1)
+                .toList();
+
+        assertEquals(143, manifest.size(),
+                "corpus size changed; triage the new action(s) before bumping this pin");
+        assertEquals(20, SEEDS.size(), "seed count changed");
+        // Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
+        // lost has to be re-triaged here rather than joining the throw suite unnoticed. The two
+        // @MethodSource streams that feed the throw cases are what resolve those messages, and
+        // both fail loudly on a missing one.
+        assertEquals(10, throwing.size(), "throwing action count changed");
+        assertEquals(throwing.size(),
+                adapterUnsupportedActions().count() + unsupportedShapes().count(),
+                "every throwing action must reach a parameterised throw case");
+        assertEquals(List.of(), misclassified,
+                "every manifest action must have exactly one spring-data outcome");
+        assertTrue(actionsFile.expectedUnsupported().stream()
+                        .map(UnsupportedShape::action)
+                        .collect(java.util.stream.Collectors.toSet())
+                        .containsAll(supportedExpected),
+                "every promoted action must exist in expectedUnsupported");
+    }
+
+    /**
+     * A representative sample of the actions this adapter ORACLE-COMPARES, one per hostile group
+     * it can express. Asserted against {@link #conformanceActions()} so moving one into
+     * {@code adapterUnsupported} fails here rather than silently going inert
+     * (cerbos/query-plan-adapters#324).
+     *
+     * <p>{@code w1-size-zero-chain}, {@code w1-not-size-chain} and the two string-cast actions
+     * are deliberately absent: their oracles are empty by CONSTRUCTION (no seed holds a to-one
+     * parent with zero children; every seed's aString raises in {@code int()}/{@code double()}),
+     * so they cannot satisfy this guard.
+     */
+    private static final List<String> DEGENERACY_GUARD_ACTIONS = List.of(
+            "vf-le", "like-percent", "all-on-empty", "null-eq", "null-ne",
+            // The absent to-one parent (#309/#315/#316).
+            "w1-all-chain", "w1-not-exists-chain", "w1-size-nonneg-chain",
+            "w1-not-in-chain", "w1-not-hasint-chain",
+            // Column arithmetic under a division (#311). The two shapes that nest further
+            // arithmetic on top of the division are liveness probes below.
+            "cr-div-neg-zero", "cr-div-other-column");
+
+    /**
+     * Shapes this adapter refuses to translate: they have no oracle comparison to guard, and stay
+     * here as PDP/policy liveness probes for a group the list above cannot cover.
+     */
+    private static final List<String> DEGENERACY_LIVENESS_PROBES = List.of(
+            // A division nested inside further arithmetic fails closed: SQL has no value that
+            // carries CEL's NaN or signed infinity through the sum.
+            "cr-div-then-add", "cr-div-then-add-ne",
+            // int() over a numeric column: truncation-versus-rounding, unsupported for every
+            // adapter but convex, which promotes it in adapterSupportedExpected.
+            "cast-int-double");
+
     @Test
     void oracleIsNotDegenerate() {
-        // Guard the guard: at least one action must produce a non-empty, non-total oracle set,
+        // Guard the guard: each of these actions must produce a non-empty, non-total oracle set,
         // otherwise the differential comparison could pass vacuously (e.g. PDP denying all).
+        Set<String> compared = conformanceActions().collect(Collectors.toSet());
         Map<String, List<String>> samples = new LinkedHashMap<>();
-        samples.put("vf-le", oracleAllowedIds("vf-le"));
-        samples.put("like-percent", oracleAllowedIds("like-percent"));
-        samples.put("all-on-empty", oracleAllowedIds("all-on-empty"));
-        samples.put("null-eq", oracleAllowedIds("null-eq"));
-        samples.put("null-ne", oracleAllowedIds("null-ne"));
+        for (String action : DEGENERACY_GUARD_ACTIONS) {
+            assertTrue(compared.contains(action),
+                    "'" + action + "' guards nothing: this adapter does not oracle-compare it");
+            samples.put(action, oracleAllowedIds(action));
+        }
+        // Asserting the complement keeps the split honest — an action this adapter gains support
+        // for must move up into the guard proper.
+        for (String action : DEGENERACY_LIVENESS_PROBES) {
+            assertFalse(compared.contains(action),
+                    "'" + action + "' is now oracle-compared: move it into the guard proper");
+            samples.put(action, oracleAllowedIds(action));
+        }
         samples.forEach((action, ids) -> assertTrue(
                 !ids.isEmpty() && ids.size() < SEEDS.size(),
                 "oracle for '" + action + "' is degenerate: " + ids));

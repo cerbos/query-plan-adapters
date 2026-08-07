@@ -289,24 +289,29 @@ module Cerbos
       def quantifier(operator, scope, body)
         error_witness = scope.exists(ArelSupport.is_null(body))
 
-        case operator
-        when "exists"
-          ArelSupport.case_node(
-            [[scope.exists(body), true], [error_witness, nil]], else_value: false
-          )
-        when "all"
-          ArelSupport.case_node(
-            [[scope.exists(ArelSupport.not_node(body)), false], [error_witness, nil]],
-            else_value: true
-          )
-        when "exists_one"
-          ArelSupport.case_node(
-            [[error_witness, nil]],
-            else_value: ArelSupport.comparison("eq", scope.count(body), 1)
-          )
-        else
-          raise UnsupportedOperatorError, "Unsupported collection macro: #{operator}"
-        end
+        quantified =
+          case operator
+          when "exists"
+            ArelSupport.case_node(
+              [[scope.exists(body), true], [error_witness, nil]], else_value: false
+            )
+          when "all"
+            ArelSupport.case_node(
+              [[scope.exists(ArelSupport.not_node(body)), false], [error_witness, nil]],
+              else_value: true
+            )
+          when "exists_one"
+            ArelSupport.case_node(
+              [[error_witness, nil]],
+              else_value: ArelSupport.comparison("eq", scope.count(body), 1)
+            )
+          else
+            raise UnsupportedOperatorError, "Unsupported collection macro: #{operator}"
+          end
+
+        # A chain must require its parent hops. Without that, `all` over an absent parent is
+        # vacuously TRUE and gives back a row that the PDP denies. See {Relations::Scope#guarded}.
+        scope.guarded(quantified)
       end
 
       # A macro over a list of constants. The planner sends the list itself when the collection
@@ -530,7 +535,9 @@ module Cerbos
             ArelSupport.comparison("eq", member, value)
           end
 
-        scope.exists(condition)
+        # A bare EXISTS has two values, so `!("x" in chain)` over an absent parent is TRUE and
+        # gives back a row that the PDP denies (#315). The guard makes it NULL instead.
+        scope.guarded(scope.exists(condition))
       end
 
       def scalar_membership(needle, values)
@@ -737,18 +744,31 @@ module Cerbos
       # denies the row. `CAST('1junk' AS INTEGER)` gives 1 on SQLite, so the filter would give
       # a row that the PDP denies. No portable SQL reads a number the way CEL does.
       #
-      # A cast from a double is also not portable. CEL removes the fraction toward zero, SQLite
-      # does the same, but PostgreSQL rounds. Thus only an integer column is safe, and there the
-      # cast has nothing to do.
+      # A cast from a double is also not portable, and for a different reason. CEL removes the
+      # fraction toward zero, SQLite does the same, but PostgreSQL and MySQL round. Thus only an
+      # integer column is safe, and there the cast has nothing to do.
+      #
+      # Each of the two failures says its own reason. A message that named both would not show
+      # which mechanism stopped the translation, and the corpus pins these messages precisely so
+      # that a refusal proves the limitation it declares.
       def cast_to_int(value)
         return value.to_i if value.is_a?(Numeric)
         return value if INTEGER_COLUMN_TYPES.include?(column_type(value))
 
+        if NUMERIC_COLUMN_TYPES.include?(column_type(value))
+          raise UnsupportedOperatorError,
+            "int() applied to a double column is not portable: CEL removes the fraction " \
+            "toward zero, and PostgreSQL and MySQL round a CAST to the nearest whole number " \
+            "instead, so the two disagree for every value with a fraction of one half or " \
+            "more. Give an operator override that removes the fraction the way your database " \
+            "does it."
+        end
+
         raise UnsupportedOperatorError,
-          "int() needs an integer column. CEL makes an error for a string that is not a whole " \
-          "number, and Cerbos denies the row, but SQL reads the digits at the front and gives " \
-          "a number. A cast from a double is also not portable, because dialects disagree on " \
-          "removing the fraction. Compare the column directly, or give an operator override."
+          "int() applied to a #{column_type(value).inspect} column: CEL reads the WHOLE " \
+          "string or makes an error, and Cerbos then denies the row, but SQL reads the digits " \
+          "at the front and gives a number, so the filter would keep the row. Compare the " \
+          "column directly, or give an operator override."
       end
 
       # The same reason as `int()`: `double("abc")` is an error in CEL and Cerbos denies the
@@ -778,14 +798,18 @@ module Cerbos
         case target
         when Values::Collection
           # size() counts the elements and does not evaluate them. Thus it also counts a
-          # member column that is NULL. No error is possible, and no guard is necessary.
-          target.scope.count
+          # member column that is NULL, and no element can make an error. The hop guard is
+          # still necessary: over an absent parent the count is 0, and `== 0`, `>= 0` and
+          # `!(> 0)` each give back a row that the PDP denies (#309, #316).
+          target.scope.guarded(target.scope.count)
         when Values::FilteredCollection
           # filter() is different from exists(). It never ignores an element that made an
           # error. Thus one body with an UNKNOWN result makes the full count unknown.
-          ArelSupport.case_node(
-            [[target.scope.exists(ArelSupport.is_null(target.body)), nil]],
-            else_value: target.scope.count(target.body)
+          target.scope.guarded(
+            ArelSupport.case_node(
+              [[target.scope.exists(ArelSupport.is_null(target.body)), nil]],
+              else_value: target.scope.count(target.body)
+            )
           )
         when ::String
           target.length
@@ -802,17 +826,23 @@ module Cerbos
 
         case left
         when Values::Collection
-          left.scope.exists(scalar_membership(left.scope.member_column, values))
+          # As with membership: a bare EXISTS is FALSE for an absent parent, so
+          # `!hasIntersection(chain, [...])` would be TRUE for it (#315).
+          left.scope.guarded(
+            left.scope.exists(scalar_membership(left.scope.member_column, values))
+          )
         when Values::MappedCollection
           # map() makes an error for each element that makes an error, and it ignores no
           # errors. Thus the guard for the error must come before the test for a true
           # element.
-          ArelSupport.case_node(
-            [
-              [left.scope.exists(ArelSupport.is_null(left.projection)), nil],
-              [left.scope.exists(scalar_membership(left.projection, values)), true]
-            ],
-            else_value: false
+          left.scope.guarded(
+            ArelSupport.case_node(
+              [
+                [left.scope.exists(ArelSupport.is_null(left.projection)), nil],
+                [left.scope.exists(scalar_membership(left.projection, values)), true]
+              ],
+              else_value: false
+            )
           )
         else
           raise UnmappedAttributeError,
@@ -1025,6 +1055,9 @@ module Cerbos
 
           head, rest = name.split(".", 2)
           unless bindings.key?(head)
+            chained = resolve_chain(name)
+            return chained unless chained.nil?
+
             raise UnmappedAttributeError,
               "No mapping for attribute #{name.inspect}. Add it to the attributes hash " \
               "passed to Cerbos::ActiveRecord.query_plan_to_relation."
@@ -1055,6 +1088,54 @@ module Cerbos
         end
 
         private
+
+        # Resolves a plan variable that walks INTO a mapped relation, for example
+        # <tt>request.resource.attr.mainCategory.subCategories</tt>. The longest part of the
+        # name that the attribute map holds is the start of the chain, and each remaining part
+        # names a nested relation in the +fields:+ of the part before it.
+        #
+        # @return [Values::Collection, nil] nil when no part of the name is a mapped relation,
+        #   so the caller can raise the message for an attribute that has no mapping at all
+        def resolve_chain(name)
+          segments = name.split(".")
+
+          (segments.length - 1).downto(1) do |length|
+            mapping = translator.attributes[segments.take(length).join(".")]
+            next unless mapping.is_a?(AttributeMapping::Relation)
+
+            scope = Relations.build(
+              owner_model: translator.model,
+              owner_table: translator.root_table,
+              mapping: mapping,
+              aliaser: translator.aliaser
+            )
+            return walk_members(scope, segments.drop(length), name)
+          end
+
+          nil
+        end
+
+        # Each part after the mapped start must name a nested relation. A nested field would be
+        # a scalar read from a collection, and the adapter does not choose one row of a
+        # collection by itself.
+        def walk_members(scope, segments, name)
+          segments.each do |segment|
+            member = scope.mapping.fields[segment]
+            unless member.is_a?(AttributeMapping::Relation)
+              raise UnmappedAttributeError,
+                "#{name.inspect} reads #{segment.inspect} from relation " \
+                "#{scope.mapping.association.inspect}, which maps it to " \
+                "#{member.nil? ? "nothing" : "a scalar field"}. Every step of a path through " \
+                "a relation must name a nested relation mapping."
+            end
+
+            scope = Relations.chain(
+              outer_scope: scope, mapping: member, aliaser: translator.aliaser
+            )
+          end
+
+          Values::Collection.new(scope: scope)
+        end
 
         def element(scope)
           scope.mapping&.member_field ? scope.member_column : Values::Collection.new(scope: scope)

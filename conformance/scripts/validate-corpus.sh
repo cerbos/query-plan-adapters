@@ -50,6 +50,94 @@ if ! jq -e '
   exit 1
 fi
 
+# `adapters` is the canonical roster every other per-adapter key is checked against. Without it
+# each check would have to restate "the eleven adapters", and an adapter added to one list but not
+# another would look consistent.
+if ! jq -e '
+  (.adapters | type) == "array"
+  and (.adapters | length) > 0
+  and (.adapters | length) == (.adapters | unique | length)
+  and all(.adapters[]; type == "string" and length > 0)
+' actions.json >/dev/null; then
+  echo "actions.json must declare a non-empty, duplicate-free adapters roster"
+  exit 1
+fi
+
+if ! jq -e '
+  .adapters as $adapters
+  | ((.adapterUnsupported // {}) | keys) + ((.adapterSupportedExpected // {}) | keys)
+  | all(. as $adapter | $adapters | index($adapter) != null)
+' actions.json >/dev/null; then
+  echo "adapterUnsupported / adapterSupportedExpected name an adapter missing from the roster"
+  exit 1
+fi
+
+# Every throwing classification pins the substring that adapter's error must contain, so a
+# harness proves the throw is the DECLARED mechanism rather than a mapper typo or an unrelated
+# validation (cerbos/query-plan-adapters#326). A classification whose message is missing or empty
+# would degrade the harness assertion back to a bare "it threw".
+if ! jq -e '
+  all((.adapterUnsupported // {})[][];
+    (.message | type) == "string" and (.message | length) > 0
+    and (.reason | type) == "string" and (.reason | length) > 0)
+' actions.json >/dev/null; then
+  echo "Every adapterUnsupported entry must carry a non-empty reason and message"
+  exit 1
+fi
+
+# An expectedUnsupported shape is rejected by every adapter that has not promoted it, so its
+# `messages` key set is exactly that complement — not a subset. A missing key is an adapter whose
+# harness would have nothing to assert; a stray one is a message no harness reads.
+messages_drift="$(jq -r '
+  .adapters as $adapters
+  | (.adapterSupportedExpected // {}) as $promoted
+  | .expectedUnsupported[]
+  | . as $entry
+  | ($adapters | map(select(. as $a | ($promoted[$a] // []) | any(.action == $entry.action) | not))) as $expected
+  | (($entry.messages // {}) | keys) as $got
+  | (($expected - $got) | map("missing " + .)) + (($got - $expected) | map("unexpected " + .)) as $drift
+  | select(($drift | length) > 0)
+  | "  \($entry.action): \($drift | join(", "))"
+' actions.json)"
+if [[ -n "${messages_drift}" ]]; then
+  echo "expectedUnsupported messages must name exactly the adapters that reject the shape:"
+  echo "${messages_drift}"
+  exit 1
+fi
+
+if ! jq -e '
+  all(.expectedUnsupported[]; all(.messages[]; type == "string" and length > 0))
+' actions.json >/dev/null; then
+  echo "Every expectedUnsupported message must be a non-empty string"
+  exit 1
+fi
+
+# A `nullRepresentationOmitted` action is rejected by EVERY adapter — the two conventions are
+# indistinguishable on the wire, so no adapter can translate it — hence the full roster with no
+# promotions to subtract. It is as fail-closed as anything in the two groups above, so it pins its
+# message the same way rather than leaving each harness with a hardcoded literal.
+null_messages_drift="$(jq -r '
+  .adapters as $adapters
+  | .nullRepresentationOmitted[]
+  | . as $entry
+  | (($entry.messages // {}) | keys) as $got
+  | ((($adapters - $got) | map("missing " + .)) + (($got - $adapters) | map("unexpected " + .))) as $drift
+  | select(($drift | length) > 0)
+  | "  \($entry.action): \($drift | join(", "))"
+' actions.json)"
+if [[ -n "${null_messages_drift}" ]]; then
+  echo "nullRepresentationOmitted messages must name every adapter in the roster:"
+  echo "${null_messages_drift}"
+  exit 1
+fi
+
+if ! jq -e '
+  all(.nullRepresentationOmitted[]; all(.messages[]; type == "string" and length > 0))
+' actions.json >/dev/null; then
+  echo "Every nullRepresentationOmitted message must be a non-empty string"
+  exit 1
+fi
+
 jq -r '.conformance[]' actions.json | sort -u >"${VALIDATION_TMP}/conformance-actions"
 jq -r '.expectedUnsupported[].action' actions.json | sort -u >"${VALIDATION_TMP}/expected-unsupported-actions"
 jq -r '.adapterUnsupported | to_entries[] | .key as $adapter | .value[] | [$adapter, .action] | @tsv' \
@@ -133,29 +221,165 @@ for action in ts-window ts-vf; do
   fi
 done
 
-# CERBOS_VERSION is the single source of truth for the pinned PDP: every workflow reads it,
-# as does spring-data's CerbosTestImage. A Compose file cannot read another file, so the two
-# spring-data copies are asserted to agree instead of de-duplicated.
+# CERBOS_VERSION is the single source of truth for the pinned PDP: every workflow and test
+# harness reads it. Some files cannot read another file (Compose files, echo strings, go.mod
+# requirements), so every hardcoded restatement anywhere in the repository is asserted to
+# agree instead of de-duplicated. A repo-wide scan rather than a fixed path list: the fixed
+# list once missed spring-data/example/docker-compose.yml running `latest` in CI.
 pinned_version="$(tr -d '[:space:]' <CERBOS_VERSION)"
+REPO_ROOT="$(cd "${CONFORMANCE_DIR}/.." && pwd)"
 
-compose_version="$(sed -n 's|^[[:space:]]*image:[[:space:]]*ghcr\.io/cerbos/cerbos:\([^@[:space:]]*\).*|\1|p' \
-  ../spring-data/docker-compose.yml)"
-if [[ "${compose_version}" != "${pinned_version}" ]]; then
-  echo "spring-data/docker-compose.yml pins Cerbos ${compose_version:-<none>}, expected ${pinned_version} (conformance/CERBOS_VERSION)"
+version_drift=0
+while IFS=: read -r file _ match; do
+  # Extract the tag: everything after the last `cerbos:` up to a digest/quote/space/paren.
+  tag="$(printf '%s' "${match}" | sed -n 's|.*ghcr\.io/cerbos/cerbos:\([^@)"'\''[:space:]]*\).*|\1|p')"
+  [[ -z "${tag}" ]] && continue
+  # Workflow/script interpolations (`cerbos:${CERBOS_VERSION}` and language equivalents)
+  # read the pinned file at runtime and cannot drift.
+  case "${tag}" in
+    '$'*|'%'*|'{'*) continue ;;
+  esac
+  if [[ "${tag}" != "${pinned_version}" ]]; then
+    echo "${file#"${REPO_ROOT}"/} pins Cerbos '${tag}', expected ${pinned_version} (conformance/CERBOS_VERSION)"
+    version_drift=1
+  fi
+done < <(grep -rn 'ghcr\.io/cerbos/cerbos:' "${REPO_ROOT}" \
+  --include='*.yml' --include='*.yaml' --include='*.sh' \
+  --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=.claude --exclude-dir=lib \
+  --exclude-dir=build --exclude-dir=.venv --exclude-dir=.gradle --exclude-dir=bin || true)
+if [[ "${version_drift}" -ne 0 ]]; then
   exit 1
 fi
 
-e2e_version="$(sed -n 's|.*ghcr\.io/cerbos/cerbos:\([0-9][^@)"[:space:]]*\).*|\1|p' \
-  ../spring-data/scripts/run-e2e.sh | sort -u)"
-if [[ "${e2e_version}" != "${pinned_version}" ]]; then
-  echo "spring-data/scripts/run-e2e.sh names Cerbos ${e2e_version:-<none>}, expected ${pinned_version} (conformance/CERBOS_VERSION)"
-  exit 1
-fi
+# The Go modules pin the Cerbos wire gencode (cerbos/api/genpb) separately from the PDP
+# image; a CERBOS_VERSION bump that leaves a stale genpb would silently test new planner
+# output against old generated types.
+for gomod in "${REPO_ROOT}"/ent/go.mod "${REPO_ROOT}"/pgx/go.mod; do
+  genpb_version="$(sed -n 's|.*github\.com/cerbos/cerbos/api/genpb v\([^[:space:]]*\).*|\1|p' "${gomod}")"
+  if [[ -n "${genpb_version}" && "${genpb_version}" != "${pinned_version}" ]]; then
+    echo "${gomod#"${REPO_ROOT}"/} pins cerbos/api/genpb v${genpb_version}, expected ${pinned_version} (conformance/CERBOS_VERSION)"
+    exit 1
+  fi
+done
 
 seed_count="$(jq '.seeds | length' seeds.json)"
 unique_seed_count="$(jq -r '.seeds[].id' seeds.json | sort -u | wc -l | tr -d '[:space:]')"
 if [[ "${seed_count}" != "${unique_seed_count}" ]]; then
   echo "Seed ids must be unique"
+  exit 1
+fi
+
+# derived-fields.json materialises README.md's "Deterministic derived fields" rules once for every
+# harness. Nothing downstream can catch a wrong value there: each harness feeds the same entry to
+# both the stored row and the check() oracle, so a bad value makes both sides agree for the wrong
+# reason. These assertions are the only independent restatement of the rules.
+if ! jq -e '
+  (.fields | type) == "array"
+  and (.fields | length) > 0
+  and (.fields | length) == (.fields | unique | length)
+  and all(.fields[]; type == "string" and length > 0)
+' derived-fields.json >/dev/null; then
+  echo "derived-fields.json must declare a non-empty, duplicate-free fields list"
+  exit 1
+fi
+
+jq -r '.seeds[].id' seeds.json | sort >"${VALIDATION_TMP}/seed-ids"
+jq -r '.derived | keys[]' derived-fields.json | sort >"${VALIDATION_TMP}/derived-ids"
+if ! diff -u "${VALIDATION_TMP}/seed-ids" "${VALIDATION_TMP}/derived-ids"; then
+  echo "derived-fields.json must carry exactly one entry per seed id"
+  exit 1
+fi
+
+if ! jq -e '
+  (.fields | sort) as $fields
+  | all(.derived[]; keys == $fields)
+' derived-fields.json >/dev/null; then
+  echo "Every derived-fields.json entry must carry exactly the fields it declares"
+  exit 1
+fi
+
+if ! jq -e '
+  all(.derived[];
+    ((.createdBy | type) == "string")
+    and ((.aDouble | type) == "number" or .aDouble == null)
+    and ((.createdAt | type) == "string" or .createdAt == null)
+    and ((.scope | type) == "string" or .scope == null)
+    and ((.labels | type) == "array")
+    and all(.labels[]; type == "string" or . == null))
+' derived-fields.json >/dev/null; then
+  echo "derived-fields.json entries have the wrong value types"
+  exit 1
+fi
+
+derived_drift="$(jq -r -s '
+  .[1].derived as $derived
+  | .[0].seeds[]
+  | . as $seed
+  | $derived[$seed.id] as $entry
+  | [
+      (if $entry.createdBy != (
+         if $seed.aNumber >= 2 then "2024-06-01T00:00:00Z" else "2026-06-01T00:00:00Z" end
+       ) then "createdBy" else empty end),
+      (if $entry.aDouble != (
+         {"a1": -0.6, "a2": 0.25, "a3": null} as $fixed
+         | if ($fixed | has($seed.id)) then $fixed[$seed.id] else $seed.aNumber + 0.3 end
+       ) then "aDouble" else empty end),
+      (if $entry.createdAt != (
+         {
+           "a1": "2020-03-15T10:30:00Z",
+           "a2": "2037-01-01T00:00:00Z",
+           "a3": null,
+           "a4": "2024-06-01T00:00:00Z",
+           "a5": "2020-03-15T10:30:00.123456Z"
+         } as $fixed
+         | if ($fixed | has($seed.id)) then $fixed[$seed.id]
+           elif $seed.aNumber >= 2 then "2036-06-06T06:06:06Z"
+           else "2021-05-05T05:05:05Z" end
+       ) then "createdAt" else empty end)
+    ]
+  | select(length > 0)
+  | "  \($seed.id): \(join(", "))"
+' seeds.json derived-fields.json)"
+if [[ -n "${derived_drift}" ]]; then
+  echo "derived-fields.json disagrees with the derived-field rules in README.md:"
+  echo "${derived_drift}"
+  exit 1
+fi
+
+# `scope` and `labels` are per-seed tables with no rule to re-derive from, so they are restated
+# here instead. A restatement inside a checker is not a second source of truth: unlike the ten
+# harness copies it replaced, it never feeds a stored row or an oracle, so it cannot make both
+# sides of a differential agree for the wrong reason — it can only fail loudly. Without it these
+# forty values, which drive the hier-* and label oracles on every adapter at once, are checked by
+# nothing.
+cat >"${VALIDATION_TMP}/expected-tables" <<'JSON'
+{
+  "a1": { "scope": "dept",                  "labels": ["gold", "silver"] },
+  "a2": { "scope": "dept.eng",              "labels": [] },
+  "a3": { "scope": "dept.eng.platform",     "labels": [] },
+  "a4": { "scope": "dept.eng.platform.obs", "labels": [] },
+  "a5": { "scope": "dept.engineering",      "labels": [] },
+  "a6": { "scope": "dept.sales",            "labels": [null, "silver"] },
+  "a7": { "scope": null,                    "labels": [] },
+  "a8": { "scope": "",                      "labels": ["silver"] },
+  "a9": { "scope": "50%",                   "labels": [] },
+  "b1": { "scope": "50%:a_b:x",             "labels": [] },
+  "b2": { "scope": "50x:a_b:y",             "labels": [] },
+  "b3": { "scope": "50%:aXb:y",             "labels": [] },
+  "b4": { "scope": "50%:a_b",               "labels": [] },
+  "b5": { "scope": "dept.eng.platform2",    "labels": [] },
+  "b6": { "scope": "50%.a_b",               "labels": [] },
+  "c1": { "scope": "Dept.Eng",              "labels": ["Gold"] },
+  "c2": { "scope": "dept.eng.",             "labels": [] },
+  "d1": { "scope": "[env]:prod:eu",         "labels": [] },
+  "d2": { "scope": "e:prod:eu",             "labels": [] },
+  "e1": { "scope": null,                    "labels": [] }
+}
+JSON
+jq -S '.derived | map_values({scope, labels})' derived-fields.json \
+  >"${VALIDATION_TMP}/actual-tables"
+if ! diff -u <(jq -S . "${VALIDATION_TMP}/expected-tables") "${VALIDATION_TMP}/actual-tables"; then
+  echo "derived-fields.json scope/labels disagree with the tables in README.md"
   exit 1
 fi
 
