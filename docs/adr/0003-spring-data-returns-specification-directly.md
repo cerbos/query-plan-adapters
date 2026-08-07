@@ -1,10 +1,6 @@
-# 1. spring-data returns `Specification` directly
+# spring-data returns `Specification` directly, deleting `Result`
 
-Date: 2026-08-07
-
-## Status
-
-Accepted. Supersedes nothing. Implementation tracked in
+Accepted. Implementation tracked in
 [#266](https://github.com/cerbos/query-plan-adapters/issues/266).
 
 ## Context
