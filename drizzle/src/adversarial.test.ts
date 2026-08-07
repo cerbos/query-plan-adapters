@@ -63,12 +63,26 @@ interface SeedsFile {
 interface UnsupportedShape {
   action: string;
   shape: string;
-  springDataMessage: string;
+  /** One entry per adapter that must reject the shape; the corpus asserts the key set. */
+  messages: Record<string, string>;
 }
 
 interface AdapterUnsupportedEntry {
   action: string;
   reason: string;
+  /** Absent on `adapterSupportedExpected` / `nullRepresentationOmitted`, required on a throw. */
+  message?: string;
+}
+
+/**
+ * A `nullRepresentationOmitted` entry. Every adapter must reject these — the two NULL conventions
+ * are indistinguishable on the wire — so `messages` names the whole roster with no promotions to
+ * subtract.
+ */
+interface NullRepresentationOmittedEntry {
+  action: string;
+  reason: string;
+  messages: Record<string, string>;
 }
 
 interface KnownDivergence {
@@ -81,7 +95,7 @@ interface ActionsFile {
   adapterUnsupported?: Record<string, AdapterUnsupportedEntry[]>;
   adapterSupportedExpected?: Record<string, AdapterUnsupportedEntry[]>;
   expectedUnsupported: UnsupportedShape[];
-  nullRepresentationOmitted: AdapterUnsupportedEntry[];
+  nullRepresentationOmitted: NullRepresentationOmittedEntry[];
   knownDivergences?: KnownDivergence[];
 }
 
@@ -221,24 +235,65 @@ const ORACLE_ACTIONS = [
   ),
   ...[...DRIZZLE_SUPPORTED_EXPECTED].sort(),
 ];
-type ThrowingAction = readonly [action: string, reason: string];
+/**
+ * A shape this adapter must refuse, with the substring its error has to contain.
+ *
+ * The message is what turns "it threw" into "it threw for the declared reason": without it a
+ * mapper typo or an unrelated validation satisfies the assertion just as well as the limitation
+ * the corpus documents (cerbos/query-plan-adapters#326).
+ */
+type ThrowingAction = readonly [action: string, reason: string, message: string];
+
+/** The pinned message, or a failure — a throwing action without one asserts nothing. */
+function requireMessage(label: string, message: string | undefined): string {
+  if (message === undefined || message === "") {
+    throw new Error(
+      `actions.json pins no throw message for ${label}: the throw suite would accept a failure for any reason`
+    );
+  }
+  return message;
+}
+
 // Globally unsupported planner shapes plus any declared Drizzle limitations: these must
 // fail loudly during translation, never silently return a wrong id set.
 const THROWING_ACTIONS: ThrowingAction[] = [
   ...DRIZZLE_UNSUPPORTED.map(
-    (entry): ThrowingAction => [entry.action, entry.reason]
+    (entry): ThrowingAction => [
+      entry.action,
+      entry.reason,
+      requireMessage(
+        `adapterUnsupported.drizzle.${entry.action}`,
+        entry.message
+      ),
+    ]
   ),
   ...actionsFile.expectedUnsupported
     .filter((entry) => !DRIZZLE_SUPPORTED_EXPECTED.has(entry.action))
-    .map((entry): ThrowingAction => [entry.action, entry.shape]),
+    .map((entry): ThrowingAction => [
+      entry.action,
+      entry.shape,
+      requireMessage(
+        `expectedUnsupported.${entry.action}.messages.drizzle`,
+        entry.messages?.["drizzle"]
+      ),
+    ]),
 ];
 
 // Actions whose `== null` probe targets an attribute the oracle OMITS for NULL columns. They
 // carry no oracle comparison: under the omitted representation check() denies every row, so the
 // adapter must reject the shape rather than emit a filter (#302).
 const NULL_REPRESENTATION_OMITTED = actionsFile.nullRepresentationOmitted.map(
-  (entry): ThrowingAction => [entry.action, entry.reason]
+  (entry): ThrowingAction => [
+    entry.action,
+    entry.reason,
+    requireMessage(
+      `nullRepresentationOmitted.${entry.action}.messages.drizzle`,
+      entry.messages?.["drizzle"]
+    ),
+  ]
 );
+/** The one message every null-carrying action must be rejected with under `omitted`. */
+const NULL_OMITTED_MESSAGE = NULL_REPRESENTATION_OMITTED[0]?.[2] ?? "";
 
 const MANIFEST_ACTIONS = new Set([
   ...actionsFile.conformance,
@@ -682,6 +737,17 @@ function planCarriesNullLiteral(operand: unknown): boolean {
 }
 
 describe("adversarial conformance corpus", () => {
+
+  // Adding a throwing action without pinning its message must fail this harness rather than
+  // silently degrade the throw suite to a bare "it threw" (cerbos/query-plan-adapters#326).
+  test("a throwing action with no pinned message fails classification", () => {
+    expect(() => requireMessage("synthetic-entry", undefined)).toThrow(
+      /pins no throw message/
+    );
+    expect(() => requireMessage("synthetic-entry", "")).toThrow(
+      /pins no throw message/
+    );
+  });
   test("manifest assigns every action exactly one Drizzle outcome", () => {
     const oracle = new Set(ORACLE_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map(([action]) => action));
@@ -700,6 +766,9 @@ describe("adversarial conformance corpus", () => {
 
     expect(MANIFEST_ACTIONS.size).toBe(143);
     expect(NULL_REPRESENTATION_OMITTED).toHaveLength(1);
+    // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
+    // gained or lost has to be re-triaged here rather than joining the suite unnoticed.
+    expect(THROWING_ACTIONS).toHaveLength(10);
     expect(misclassified).toEqual([]);
     expect(
       [...DRIZZLE_SUPPORTED_EXPECTED].filter(
@@ -724,9 +793,13 @@ describe("adversarial conformance corpus", () => {
   // the test instead of passing it, and no query executes — SQLite rejecting a wrongly
   // emitted filter afterwards must not be able to masquerade as the adapter refusing to
   // translate.
+  //
+  // The message is asserted, not just the throw: a bare `toThrow()` is satisfied by a mapper
+  // typo or an unrelated validation, which would leave the classification resting on a failure
+  // that has nothing to do with the limitation it declares (cerbos/query-plan-adapters#326).
   test.each(THROWING_ACTIONS)(
-    "%s fails during translation, before any filter exists (%s)",
-    async (action) => {
+    "%s fails during translation with the declared message, before any filter exists (%s)",
+    async (action, _reason, message) => {
       const queryPlan = await cerbos.planResources({
         principal: principal(),
         resource: { kind: seedsFile.resourceKind },
@@ -739,7 +812,7 @@ describe("adversarial conformance corpus", () => {
           mapper: MAPPER,
           nullAttributeRepresentation: "explicit",
         })
-      ).toThrow();
+      ).toThrow(message);
     }
   );
 
@@ -749,7 +822,7 @@ describe("adversarial conformance corpus", () => {
   // over-grant under the default representation is what makes the rejection necessary.
   test.each(NULL_REPRESENTATION_OMITTED)(
     "%s over-grants under the explicit representation and is rejected under omitted (%s)",
-    async (action) => {
+    async (action, _reason, message) => {
       const oracle = await oracleAllowedIds(action);
       expect(oracle).toEqual([]);
 
@@ -758,7 +831,7 @@ describe("adversarial conformance corpus", () => {
       expect(overGranted.length).toBeGreaterThan(0);
 
       await expect(adapterFilteredIds(action, "omitted")).rejects.toThrow(
-        /missing-attribute error/
+        message
       );
     }
   );
@@ -792,8 +865,13 @@ describe("adversarial conformance corpus", () => {
       try {
         await adapterFilteredIds(action, "omitted");
         notRejected.push(action);
-      } catch {
-        // expected: the shape must be rejected under this representation
+      } catch (error) {
+        // The rejection must be the null-operand check talking, not an incidental failure — a
+        // transport error or mapper typo counting as the required rejection is the silent pass
+        // the corpus README warns about.
+        if (!String(error).includes(NULL_OMITTED_MESSAGE)) {
+          notRejected.push(`${action} (rejected for the wrong reason: ${String(error)})`);
+        }
       }
     }
     expect(notRejected).toEqual([]);

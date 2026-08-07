@@ -385,6 +385,8 @@ unexpressible categories above plus hierarchy expressions, positive explicit-nul
 null-sensitive variable membership, positive `all`, negated `exists`, and collection-emptiness
 predicates that require distinguishing an indexed empty array from a missing field.
 
+Every fail-closed shape's error message is pinned in the shared corpus (`conformance/actions.json`) and asserted by this adapter's conformance run, so a classification proves the throw names its declared mechanism rather than merely that something threw.
+
 Elasticsearch does not index empty arrays. An `exists` or nested query therefore cannot distinguish an attribute explicitly set to `[]` from an attribute omitted entirely. CEL treats the former as an empty collection and the latter as an evaluation error, so polarity matters: positive `exists`, positive non-empty checks, negated `all`, and negated empty checks remain safe; the opposite polarities throw rather than authorizing a document with a missing collection.
 
 ### Mapping hazards

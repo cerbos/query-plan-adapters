@@ -30,7 +30,8 @@ rows, and one oracle recipe that every adapter's harness implements against its 
   `createdAt`, `scope`, `labels`), materialised once per seed id. Every harness reads this file
   instead of restating the rules; `scripts/validate-corpus.sh` re-derives the rule-based fields
   from `seeds.json` and fails on drift. See "Deterministic derived fields" below.
-- `actions.json` — every action in `policies/adversarial.yaml`, grouped into `conformance`
+- `actions.json` — every action in `policies/adversarial.yaml`, grouped into `adapters` (the
+  canonical adapter roster, which every other per-adapter key is checked against), `conformance`
   (must match the check() oracle exactly), `adapterUnsupported` (per-adapter lists of conformance
   actions that adapter's query language genuinely cannot express — LIKE-wildcard escaping,
   relation-count thresholds, cross-model column comparisons; the adapter must THROW for these,
@@ -71,7 +72,8 @@ are necessarily language/ORM-specific):
 4. **Compare**: `adapterFilteredIds(action)` must equal `oracleAllowedIds(action)` for every
    `conformance` action. Translation must throw for every `expectedUnsupported` action unless the
    adapter is listed for that action in `adapterSupportedExpected`; declared exceptions must run
-   through the same oracle comparison as conformance actions.
+   through the same oracle comparison as conformance actions. A throw must carry the message the
+   corpus pins for that adapter — see "Pinned throw messages" below.
 
 ### NULL conventions
 
@@ -205,6 +207,59 @@ Adapters differ widely in what they can express — `langchain-chromadb` compare
 conformance actions where `ent` and `pgx` compare all of them — so the lists are expected to look
 different per harness. That is the point.
 
+### Pinned throw messages
+
+A fail-closed classification is only proven when the throw it rests on is the throw it claims. A
+bare "it threw" assertion is satisfied just as happily by a mapper typo, an unrelated validation, or
+a transport error — and every one of those makes the action pass while never reaching the mechanism
+its `reason` names. The elasticsearch-java harness found this the expensive way: an unmapped
+`categories` field had six of its actions throwing "Unknown attribute" — a harness gap — while
+never reaching the mechanism their `reason` claimed (cerbos/query-plan-adapters#326).
+
+So every throwing classification carries the substring that adapter's error must contain:
+
+- `adapterUnsupported[<adapter>][].message` — the entry is already per-adapter, so the message sits
+  on it directly.
+- `expectedUnsupported[].messages[<adapter>]` — one entry per adapter that must reject the shape.
+  This generalises the old `springDataMessage`, which pinned the reference and left the other nine
+  asserting nothing.
+- `nullRepresentationOmitted[].messages[<adapter>]` — the same, for the group every adapter rejects.
+
+`scripts/validate-corpus.sh` enforces all three: every `adapterUnsupported` entry has a non-empty
+`message`; every `expectedUnsupported` entry's `messages` key set is *exactly* the `adapters` roster
+minus the adapters that promoted the shape into `adapterSupportedExpected`; and every
+`nullRepresentationOmitted` entry's key set is the whole roster, since no adapter can translate one.
+A missing key is an adapter whose harness would have nothing to assert; a stray one is a message
+nothing reads.
+
+Each harness resolves its own message when it derives the classification and **fails the run if one
+is absent**, so adding a throwing action without pinning its message is a loud failure rather than a
+silent downgrade to a bare throw. Every harness also unit-tests that guard directly, so it cannot go
+inert against a corpus that already satisfies it.
+
+The assertion is `contains`, not equality. That is deliberate and it is a **weakening for
+spring-data**, which previously asserted `assertEquals` on its own `springDataMessage`: one field
+with one meaning across ten harnesses is worth more than byte-exactness in the reference alone, and
+several messages carry a runtime value (`Timestamp value exceeds millisecond precision:
+<now()-24h>`) that equality could never pin. Rewording the mechanism still fails every suite;
+appending to a message no longer fails spring-data's.
+
+Some messages are deliberately shared across many actions — Chroma answers 86 of its 126 throwing
+shapes with "Nested expressions are not supported by ChromaDB filters". Those 86 `reason` strings
+name different *upstream* limitations (no count function, no relation model, no temporal type), but
+they converge on one rejection: every Chroma comparison operand must be a bare field or literal, and
+a nested expression is not. Pin what the adapter says. The message discriminates the *mechanism*, not
+the action, and a rejection from anywhere else — an unmapped field, a transport error — still fails.
+Making those 86 messages individually specific would mean rewriting the adapter's error strings, not
+the corpus.
+
+The message and the entry's `reason` must name the same mechanism. Where they disagree, the fix is
+to work out which limitation actually fires first and correct the `reason` — not to loosen the pin.
+Several `reason` strings named the limitation a maintainer had in mind rather than the one the walk
+reaches (prisma's `p-deep-nest` reaches the LIKE-metacharacter needle before the cross-model
+comparison; elasticsearch-java's `p-ternary-under-all` rejects the positive `all` before it ever
+looks at the conditional inside it), and pinning the messages is what surfaced them.
+
 ### Known divergences still need a tripwire
 
 An action in `knownDivergences` is excluded from the oracle run, which leaves it exercised on
@@ -286,9 +341,14 @@ guard; run it before trusting it.
 4. Run `scripts/regenerate-wire-fixtures.sh` and commit the new fixture alongside the policy change.
 5. Every adapter harness picks up the new action automatically from `actions.json` on next run;
    triage any divergence into a per-adapter fix issue rather than special-casing it in the harness.
-6. Each harness pins the corpus size as a tripwire (e.g. `expect(MANIFEST_ACTIONS.size).toBe(143)`
-   in `prisma/src/adversarial.test.ts`, and the oracle/throwing counts in the convex and
-   langchain-chromadb harnesses). Bump them deliberately — that assertion exists so a new action
+   An action that ends up fail-closed for an adapter needs that adapter's throw message pinned
+   alongside the classification — see "Pinned throw messages" above. Run the adapter first and pin
+   what it actually says; the harness refuses to run with a message missing, so there is no way to
+   forget one.
+6. Each harness pins the corpus size AND its throwing-action count as tripwires (e.g.
+   `expect(MANIFEST_ACTIONS.size).toBe(143)` and `expect(THROWING_ACTIONS).toHaveLength(47)` in
+   `prisma/src/adversarial.test.ts`; the oracle counts too in the convex, langchain-chromadb and
+   elasticsearch-java harnesses). Bump them deliberately — those assertions exist so a new action
    cannot slip past an adapter unnoticed.
 7. Add the action to each harness's degeneracy-guard list so it cannot pass vacuously — to that
    harness's *compared* list where the adapter translates the shape, and to its liveness-only list
@@ -305,7 +365,8 @@ guard; run it before trusting it.
    construction*, which the degeneracy guard asserts against, so it must stay out of that list.
    It needs a different anti-vacuity assertion instead — assert why the rejection is required,
    not merely that one happens. See the `nullRepresentationOmitted` section above for the form
-   that takes in each adapter.
+   that takes in each adapter. It pins a message like any other rejection (see "Pinned throw
+   messages"), so a new one needs a `messages` entry per adapter.
 
 ## Adding a new adapter
 
@@ -327,6 +388,11 @@ unsupported before you have watched it fail is how a translatable shape gets per
    nullOmitted     = nullRepresentationOmitted            (translated with the option flipped)
    skipped         = knownDivergences where adapters contains me
    ```
+
+   Each throwing action also carries the message the throw must contain — `.message` on an
+   `adapterUnsupported` entry, `.messages[me]` on an `expectedUnsupported` one. Resolve it while
+   deriving the classification and fail the run when it is absent, so a shape cannot join the throw
+   suite with nothing but a bare throw behind it (see "Pinned throw messages" above).
 
    `drizzle/src/adversarial.test.ts` is the cleanest example of this wiring. Every adapter's key
    in `actions.json` is its **directory name** (`langchain-chromadb`, `elasticsearch-java`).
@@ -360,7 +426,8 @@ unsupported before you have watched it fail is how a translatable shape gets per
    - a shape the query language genuinely cannot express — add it to
      `adapterUnsupported[<adapter>]` with a **specific** reason naming the real mechanism, and
      make the adapter throw. "Cannot express this shape faithfully" is not a reason; "emits LIKE
-     without an ESCAPE clause, so `%` cannot be matched literally" is;
+     without an ESCAPE clause, so `%` cannot be matched literally" is. Pin the message the adapter
+     actually raises on the same entry, and check it names the mechanism the reason declares;
    - an upstream planner bug — add to `knownDivergences` with the affected adapters and a reason.
 
    The invariant is absolute: **an inexpressible shape must throw before its filter can be used.**
@@ -368,9 +435,13 @@ unsupported before you have watched it fail is how a translatable shape gets per
    report. Never degrade one operator into a weaker one (`exists_one` into `exists`) to make a
    test pass.
 
-6. **Register in `actions.json`** and run `scripts/validate-corpus.sh` — it enforces that every
-   `adapterUnsupported` entry names a real `conformance` action and every
-   `adapterSupportedExpected` entry names a real `expectedUnsupported` one.
+6. **Register in `actions.json`** — add the adapter to the `adapters` roster, and give every
+   `expectedUnsupported` entry it does not promote a `messages` key. Run
+   `scripts/validate-corpus.sh`: it enforces that every `adapterUnsupported` entry names a real
+   `conformance` action and carries a message, that every `adapterSupportedExpected` entry names a
+   real `expectedUnsupported` one, and that each `messages` key set is exactly the roster minus the
+   promotions — so onboarding an adapter without pinning its messages fails there rather than in
+   the new harness alone.
 
 7. **Wire CI.** Copy an existing adapter workflow. It must: read the PDP version from
    `CERBOS_VERSION` (never hardcode it), run `scripts/validate-corpus.sh` in every job that

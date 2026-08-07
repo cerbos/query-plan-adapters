@@ -20,6 +20,7 @@ error — UNKNOWN in SQL — and must stay excluded under BOTH polarities).
 import json
 import math
 import os
+import re
 from datetime import datetime
 from typing import Any, Dict, List, Set, Union
 
@@ -150,25 +151,72 @@ SQLALCHEMY_SUPPORTED_EXPECTED = {
 ORACLE_ACTIONS = [
     a for a in ACTIONS_FILE["conformance"] if a not in SQLALCHEMY_UNSUPPORTED
 ] + sorted(SQLALCHEMY_SUPPORTED_EXPECTED)
+
+
+def _require_message(label: str, message: Any) -> str:
+    """The substring this adapter's error must contain, or a loud failure.
+
+    The message is what turns "it raised" into "it raised for the declared
+    reason": without it a mapper typo or an unrelated validation satisfies the
+    throw suite just as well as the documented limitation
+    (cerbos/query-plan-adapters#326).
+    """
+    if not isinstance(message, str) or not message:
+        raise AssertionError(
+            f"actions.json pins no throw message for {label}: the throw suite "
+            "would accept a failure for any reason"
+        )
+    return message
+
+
 # Globally-unsupported planner shapes plus this adapter's own unsupported list:
 # translation (or execution) must fail loudly, never produce a silently-wrong
-# filter.
+# filter. Each carries the substring the raised error must contain.
 THROWING_ACTIONS = sorted(
-    (
-        {u["action"] for u in ACTIONS_FILE["expectedUnsupported"]}
-        | set(SQLALCHEMY_UNSUPPORTED)
-    )
-    - SQLALCHEMY_SUPPORTED_EXPECTED
+    [
+        (
+            item["action"],
+            _require_message(
+                f'adapterUnsupported.sqlalchemy.{item["action"]}',
+                item.get("message"),
+            ),
+        )
+        for item in ACTIONS_FILE["adapterUnsupported"].get("sqlalchemy", [])
+    ]
+    + [
+        (
+            item["action"],
+            _require_message(
+                f'expectedUnsupported.{item["action"]}.messages.sqlalchemy',
+                item.get("messages", {}).get("sqlalchemy"),
+            ),
+        )
+        for item in ACTIONS_FILE["expectedUnsupported"]
+        if item["action"] not in SQLALCHEMY_SUPPORTED_EXPECTED
+    ]
 )
+THROWING_ACTION_NAMES = {action for action, _ in THROWING_ACTIONS}
 
 # Actions whose `== null` probe targets an attribute the oracle OMITS for NULL
 # columns. They carry no oracle comparison: under the omitted representation
 # check() denies every row, so the adapter must reject the shape rather than
 # emit a filter (#302).
+# Every adapter must reject these, so the message map names the whole roster and
+# this harness resolves its own entry exactly as it does for a throwing action.
 NULL_REPRESENTATION_OMITTED = [
-    (item["action"], item["reason"])
+    (
+        item["action"],
+        item["reason"],
+        _require_message(
+            f'nullRepresentationOmitted.{item["action"]}.messages.sqlalchemy',
+            item.get("messages", {}).get("sqlalchemy"),
+        ),
+    )
     for item in ACTIONS_FILE["nullRepresentationOmitted"]
 ]
+# The one message every null-carrying action must be rejected with under
+# ``omitted``.
+NULL_OMITTED_MESSAGE = NULL_REPRESENTATION_OMITTED[0][2]
 
 # Every classified action across all four manifest groups. Read each group
 # explicitly: a group this expression does not name is dropped silently, and a
@@ -873,10 +921,18 @@ def _adapter_filtered_ids(
 # one) — a silent-wrongness bug class, so escalate it to an error.
 @pytest.mark.filterwarnings("error::sqlalchemy.exc.SAWarning")
 class TestAdversarialConformance:
+    def test_throwing_action_with_no_pinned_message_fails_classification(self):
+        # Adding a throwing action without pinning its message must fail this
+        # harness rather than silently degrade the throw suite to a bare "it
+        # raised" (cerbos/query-plan-adapters#326).
+        for absent in (None, "", 42):
+            with pytest.raises(AssertionError, match="pins no throw message"):
+                _require_message("synthetic-entry", absent)
+
     def test_manifest_assigns_every_action_exactly_one_outcome(self):
         oracle = set(ORACLE_ACTIONS)
-        throwing = set(THROWING_ACTIONS)
-        null_omitted = {action for action, _ in NULL_REPRESENTATION_OMITTED}
+        throwing = THROWING_ACTION_NAMES
+        null_omitted = {action for action, _, _ in NULL_REPRESENTATION_OMITTED}
         misclassified = [
             action
             for action in sorted(MANIFEST_ACTIONS)
@@ -893,6 +949,9 @@ class TestAdversarialConformance:
         # change, so a new hostile action cannot join (or vanish) silently.
         assert len(MANIFEST_ACTIONS) == 143
         assert len(SEEDS) == 20
+        # Each of these carries a pinned message, so a shape gained or lost has
+        # to be re-triaged here rather than joining the throw suite unnoticed.
+        assert len(THROWING_ACTIONS) == 12
         assert misclassified == []
         assert SQLALCHEMY_SUPPORTED_EXPECTED <= {
             u["action"] for u in ACTIONS_FILE["expectedUnsupported"]
@@ -904,8 +963,8 @@ class TestAdversarialConformance:
         filtered = _adapter_filtered_ids(adv_cerbos_client, adv_conn, action)
         assert sorted(filtered) == sorted(oracle)
 
-    @pytest.mark.parametrize("action", THROWING_ACTIONS)
-    def test_fails_loudly(self, action, adv_cerbos_client):
+    @pytest.mark.parametrize("action,message", THROWING_ACTIONS)
+    def test_fails_loudly(self, action, message, adv_cerbos_client):
         # The plan is fetched OUTSIDE the assertion so a PDP failure fails the
         # test instead of passing it, and nothing executes — the invariant is
         # that the shape throws during translation, BEFORE a filter exists, so
@@ -919,7 +978,11 @@ class TestAdversarialConformance:
         # map), TypeError (attribute needs an operator override to be
         # expressible). Anything else — connection errors, SQLAlchemy runtime
         # errors — must fail the test, not satisfy it.
-        with pytest.raises((ValueError, KeyError, TypeError)):
+        #
+        # The exception type alone is not enough: it scopes the failure to the
+        # adapter but says nothing about WHICH refusal fired, so the corpus
+        # message pins the mechanism too (cerbos/query-plan-adapters#326).
+        with pytest.raises((ValueError, KeyError, TypeError), match=re.escape(message)):
             get_query(
                 plan,
                 AdvResource,
@@ -933,9 +996,9 @@ class TestAdversarialConformance:
     # attribute. Both halves are asserted because the rejection alone would pass
     # vacuously if the adapter raised for an unrelated reason — the over-grant
     # under the default representation is what makes the rejection necessary.
-    @pytest.mark.parametrize("action,reason", NULL_REPRESENTATION_OMITTED)
+    @pytest.mark.parametrize("action,reason,message", NULL_REPRESENTATION_OMITTED)
     def test_null_representation_omitted_is_rejected(
-        self, action, reason, adv_cerbos_client, adv_conn
+        self, action, reason, message, adv_cerbos_client, adv_conn
     ):
         assert _oracle_allowed_ids(adv_cerbos_client, action) == set()
 
@@ -944,7 +1007,7 @@ class TestAdversarialConformance:
         over_granted = _adapter_filtered_ids(adv_cerbos_client, adv_conn, action)
         assert len(over_granted) > 0, reason
 
-        with pytest.raises(ValueError, match="missing-attribute"):
+        with pytest.raises(ValueError, match=re.escape(message)):
             _adapter_filtered_ids(
                 adv_cerbos_client,
                 adv_conn,
@@ -992,7 +1055,7 @@ class TestAdversarialConformance:
                 # incidental failure: a transport error or attr-map typo counting
                 # as the required rejection is the silent pass the corpus README
                 # warns about.
-                if "missing-attribute" not in str(exc):
+                if NULL_OMITTED_MESSAGE not in str(exc):
                     not_rejected.append(
                         f"{action} (rejected for the wrong reason: {exc})"
                     )
