@@ -247,28 +247,28 @@ func (r *renderer) writeBinary(symbol string, l, right queryplan.Expr) error {
 
 // writeCast lowers a CEL type conversion.
 //
-// CEL's int() truncates toward zero, while PostgreSQL's float-to-integer cast rounds to nearest —
-// `int(1.9)` is 1 in CEL and 2 in SQL, which is an over-grant on a `== 2` threshold. Truncating
-// first makes the cast mean what the policy means.
+// Only the two casts the translator emits have a spelling; see the CastType constants for why there
+// is no integer target. A target this does not know is an error rather than a nearest guess: an
+// unspelled cast that fell through to a float would compare against a value the policy never named,
+// which is the class of quiet over-grant this adapter refuses on principle.
 func (r *renderer) writeCast(c queryplan.Cast) error {
-	if c.To == queryplan.CastInt {
-		r.sb.WriteString("CAST(trunc(")
-		if err := r.write(c.X); err != nil {
-			return err
-		}
-		r.sb.WriteString(") AS bigint)")
-		return nil
+	var target string
+	switch c.To {
+	case queryplan.CastText:
+		target = "text"
+	case queryplan.CastFloat:
+		target = "double precision"
+	default:
+		return fmt.Errorf("cannot render cast to %q", c.To)
 	}
 
 	r.sb.WriteString("CAST(")
 	if err := r.write(c.X); err != nil {
 		return err
 	}
-	if c.To == queryplan.CastText {
-		r.sb.WriteString(" AS text)")
-	} else {
-		r.sb.WriteString(" AS double precision)")
-	}
+	r.sb.WriteString(" AS ")
+	r.sb.WriteString(target)
+	r.sb.WriteString(")")
 	return nil
 }
 

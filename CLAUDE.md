@@ -52,9 +52,13 @@ golangci-lint fmt ./...
 ```
 
 Both Go modules are standalone: each vendors its own translator under `internal/queryplan` and
-depends on nothing else in this repository, so a consumer only ever pulls in the one module. The
-harnesses need Docker (testcontainers) and read the pinned PDP image from
-`conformance/CERBOS_VERSION` and `conformance/CERBOS_IMAGE_DIGEST`.
+depends on nothing else in this repository, so a consumer only ever pulls in the one module. The two
+vendored trees are held **byte-identical** and diffed by `validate-corpus.sh` — a semantic fix has to
+land in both copies, and anything genuinely per-engine goes in that module's `render.go`, outside the
+shared tree. Their unit suites (`translate_test.go`, `render_test.go`) mirror each other for the same
+reason and need no Docker: `go test -skip TestAdversarialConformance ./...`. The adversarial harnesses
+do need Docker (testcontainers) and read the pinned PDP image from `conformance/CERBOS_VERSION` and
+`conformance/CERBOS_IMAGE_DIGEST`.
 
 ### Java (Elasticsearch, Spring Data)
 ```bash
