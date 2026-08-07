@@ -15,7 +15,11 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-echo "==> Starting Cerbos PDP container (ghcr.io/cerbos/cerbos:0.54.0)"
+# Read the pinned reference rather than restating it: docker-compose.yml has to spell the image
+# out as a literal (Compose cannot read a file), so this echo would be a third copy to keep in
+# step. validate-corpus.sh asserts the compose literal matches these two corpus files.
+CERBOS_IMAGE="ghcr.io/cerbos/cerbos:$(tr -d '[:space:]' <../conformance/CERBOS_VERSION)@$(tr -d '[:space:]' <../conformance/CERBOS_IMAGE_DIGEST)"
+echo "==> Starting Cerbos PDP container (${CERBOS_IMAGE})"
 docker compose up -d --wait cerbos
 
 CERBOS_HOST="${CERBOS_HOST:-localhost}"
@@ -42,7 +46,11 @@ if command -v gradle >/dev/null 2>&1; then
   gradle "${GRADLE_ARGS[@]}"
   TEST_EXIT=$?
 else
-  echo "==> No local gradle found; falling back to gradle:8.12-jdk17 Docker image"
+  # Pinned by tag and digest like every other image in this repository; validate-corpus.sh
+  # asserts it. One variable rather than two literals: the echo below and the `docker run`
+  # naming different builds is exactly the drift the scan is there to catch.
+  GRADLE_IMAGE="gradle:8.12-jdk17@sha256:deb3ed64f189e9b326e4147de66335286eea9f8b6677e53514af62370cbf7a4a"
+  echo "==> No local gradle found; falling back to the ${GRADLE_IMAGE} Docker image"
   # The docker socket mount is required by AdversarialConformanceTest, which always spawns its
   # own PDP (with its own hostile policy set) via Testcontainers even in external-PDP mode.
   docker run --rm \
@@ -53,7 +61,7 @@ else
     -e CERBOS_HOST="${CERBOS_HOST}" \
     -e CERBOS_PORT="${CERBOS_PORT}" \
     -w /app/spring-data \
-    gradle:8.12-jdk17 \
+    "${GRADLE_IMAGE}" \
     gradle "${GRADLE_ARGS[@]}"
   TEST_EXIT=$?
 fi

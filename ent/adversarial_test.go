@@ -43,6 +43,16 @@ import (
 // ent's own builder, so PostgreSQL and MySQL differ only in the cast spellings covered by
 // WithDialect.
 
+// Database container images, pinned by tag AND digest. A tag is mutable, so a tag-only pin
+// records an intent rather than a build; the adversarial suite is a differential whose
+// divergences are dialect behaviour, so "which build was this proved against" has to be
+// answerable from the repository alone. conformance/scripts/validate-corpus.sh asserts every
+// service image reference in the repository carries both halves.
+const (
+	postgresImage = "postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193"
+	mysqlImage    = "mysql:8.4@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb"
+)
+
 const (
 	adapterName = "ent"
 
@@ -215,7 +225,7 @@ func openMySQL(t *testing.T) *sql.DB {
 	t.Helper()
 
 	container, err := mysql.Run(t.Context(),
-		"mysql:8.4",
+		mysqlImage,
 		mysql.WithDatabase("conformance"),
 		mysql.WithUsername("conformance"),
 		mysql.WithPassword("conformance"),
@@ -248,7 +258,7 @@ func openPostgres(t *testing.T) *sql.DB {
 	t.Helper()
 
 	container, err := postgres.Run(t.Context(),
-		"postgres:17-alpine",
+		postgresImage,
 		postgres.WithDatabase("conformance"),
 		postgres.WithUsername("conformance"),
 		postgres.WithPassword("conformance"),
@@ -372,7 +382,7 @@ func setupSuite(t *testing.T) *suite {
 
 	container, err := testcontainers.GenericContainer(t.Context(), testcontainers.GenericContainerRequest{
 		ContainerRequest: testcontainers.ContainerRequest{
-			Image:        "ghcr.io/cerbos/cerbos:" + corpus.CerbosVersion,
+			Image:        corpus.CerbosImage,
 			ExposedPorts: []string{"3593/tcp"},
 			Cmd:          []string{"server", "--set=storage.disk.directory=/policies"},
 			Files: []testcontainers.ContainerFile{{

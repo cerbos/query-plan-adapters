@@ -1,4 +1,4 @@
-FROM gradle:8.12-jdk17 AS build
+FROM gradle:8.12-jdk17@sha256:deb3ed64f189e9b326e4147de66335286eea9f8b6677e53514af62370cbf7a4a AS build
 WORKDIR /app
 COPY build.gradle.kts settings.gradle.kts ./
 COPY src ./src

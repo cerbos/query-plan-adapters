@@ -53,13 +53,14 @@ golangci-lint fmt ./...
 
 Both Go modules are standalone: each vendors its own translator under `internal/queryplan` and
 depends on nothing else in this repository, so a consumer only ever pulls in the one module. The
-harnesses need Docker (testcontainers) and read the pinned PDP version from
-`conformance/CERBOS_VERSION`.
+harnesses need Docker (testcontainers) and read the pinned PDP image from
+`conformance/CERBOS_VERSION` and `conformance/CERBOS_IMAGE_DIGEST`.
 
 ### Java (Elasticsearch, Spring Data)
 ```bash
 # Run from the REPOSITORY ROOT, not the adapter directory: the Java harnesses read the
-# shared corpus at ../conformance/ (seeds.json, actions.json, CERBOS_VERSION), so the whole
+# shared corpus at ../conformance/ (seeds.json, actions.json, CERBOS_VERSION,
+# CERBOS_IMAGE_DIGEST), so the whole
 # repo must be mounted or they fail with FileNotFoundException.
 # The docker socket mount is for the testcontainers-backed tests (cerbos PDP + DBs).
 docker run --rm -v "$(pwd)":/repo -v /var/run/docker.sock:/var/run/docker.sock \
@@ -108,8 +109,17 @@ conformance/scripts/validate-corpus.sh          # corpus integrity; runs in ever
 conformance/scripts/regenerate-wire-fixtures.sh # after bumping conformance/CERBOS_VERSION
 ```
 
-The PDP version is pinned in `conformance/CERBOS_VERSION` and read by every workflow — never
-hardcode it elsewhere; `validate-corpus.sh` asserts the spring-data copies agree.
+The PDP is pinned by `conformance/CERBOS_VERSION` (the tag) and `conformance/CERBOS_IMAGE_DIGEST`
+(the build) and read by every workflow and harness — never hardcode either elsewhere.
+`validate-corpus.sh` scans the whole repository and asserts every restatement agrees on **both**
+halves; a right tag carrying some other build's digest reads as pinned and is not.
+
+Every other service image (the databases, the search and vector stores) is pinned per harness, in
+one constant that adapter's suites share, in the same `repo:tag@sha256:...` form. That is
+deliberately not a corpus file: `conformance/**` re-runs all ten adapter workflows, so a shared
+file would make bumping one adapter's server cost nine irrelevant CI runs. `validate-corpus.sh`
+enforces the *rule* instead — see "Pinning service images" in `conformance/README.md`, including
+what to do when you add a new service.
 
 **Read [conformance/README.md](conformance/README.md) before changing corpus behaviour.** It covers
 the oracle recipe, the NULL conventions, the degeneracy guard, how to add a hostile shape, and how

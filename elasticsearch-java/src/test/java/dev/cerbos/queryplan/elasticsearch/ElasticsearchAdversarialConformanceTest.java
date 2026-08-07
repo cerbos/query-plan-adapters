@@ -241,8 +241,7 @@ class ElasticsearchAdversarialConformanceTest {
         client = new CerbosClientBuilder(cerbos.getHost() + ":" + cerbos.getMappedPort(3593))
                 .withPlaintext().buildBlockingClient();
 
-        elasticsearch = new ElasticsearchContainer(
-                "docker.elastic.co/elasticsearch/elasticsearch:8.15.3")
+        elasticsearch = new ElasticsearchContainer(ElasticsearchTestImage.IMAGE)
                 .withEnv("xpack.security.enabled", "false");
         elasticsearch.start();
         httpClient = HttpClient.newHttpClient();

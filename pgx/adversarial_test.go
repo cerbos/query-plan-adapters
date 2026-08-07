@@ -34,6 +34,13 @@ import (
 // own evaluation for any row, the mismatch surfaces mechanically. This file owns only the
 // PostgreSQL-specific half: the schema, the seeding, and the attribute mapping.
 
+// Database container images, pinned by tag AND digest. A tag is mutable, so a tag-only pin
+// records an intent rather than a build; the adversarial suite is a differential whose
+// divergences are dialect behaviour, so "which build was this proved against" has to be
+// answerable from the repository alone. conformance/scripts/validate-corpus.sh asserts every
+// service image reference in the repository carries both halves.
+const postgresImage = "postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193"
+
 const (
 	adapterName = "pgx"
 
@@ -183,7 +190,7 @@ func setup(t *testing.T) *harness {
 	ctx := t.Context()
 
 	pgContainer, err := postgres.Run(ctx,
-		"postgres:17-alpine",
+		postgresImage,
 		postgres.WithDatabase("conformance"),
 		postgres.WithUsername("conformance"),
 		postgres.WithPassword("conformance"),
@@ -208,7 +215,7 @@ func setup(t *testing.T) *harness {
 
 	cerbosContainer, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: testcontainers.ContainerRequest{
-			Image:        "ghcr.io/cerbos/cerbos:" + corpus.CerbosVersion,
+			Image:        corpus.CerbosImage,
 			ExposedPorts: []string{"3593/tcp"},
 			Cmd:          []string{"server", "--set=storage.disk.directory=/policies"},
 			Files: []testcontainers.ContainerFile{{

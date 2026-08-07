@@ -18,8 +18,13 @@ module.exports = async function globalSetup() {
     return;
   }
 
-  // Mirrors the ent harness's PostgreSQL target so both adapters prove the same server.
-  const image = "postgres:17-alpine";
+  // Mirrors the ent harness's PostgreSQL target so both adapters prove the same server. Pinned by
+  // tag AND digest: a tag is mutable, so a tag-only pin records an intent rather than a build, and
+  // this leg exists to prove typed-column behaviour a re-pushed image could change under it.
+  // `conformance/scripts/validate-corpus.sh` asserts every service image reference in the
+  // repository carries both halves.
+  const image =
+    "postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193";
   const { PostgreSqlContainer } = require("@testcontainers/postgresql");
   const container = await new PostgreSqlContainer(image).start();
 

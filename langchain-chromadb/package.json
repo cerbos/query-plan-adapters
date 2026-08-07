@@ -45,14 +45,14 @@
     "test:adversarial": "cross-env CHROMA_URL=http://127.0.0.1:8234 start-server-and-test chroma http://127.0.0.1:8234/api/v2/heartbeat test:adversarial:cerbos",
     "test:adversarial:cerbos": "cerbos run --log-level=error --set=server.grpcListenAddr=:3641 --set=server.httpListenAddr=:3640 --set=storage.disk.directory=../conformance/policies --set=telemetry.disabled=true -- jest --config jest.adversarial.config.js",
     "cerbos": "cerbos server --config=./cerbos-config.yaml",
-    "chroma": "docker run --rm -p 8234:8000 chromadb/chroma@sha256:1e0b73a187a28757c572acba508c46f48c9e8b0acaf5c20e6d95cdedce1acdf6"
+    "chroma": "docker run --rm -p 8234:8000 \"$(cat CHROMA_IMAGE)\""
   },
   "engines": {
     "node": ">=22.0.0"
   },
   "devDependencies": {
     "@jest/globals": "^30.2.0",
-    "@tsconfig/node24": "^24.0.0",
+    "@tsconfig/node22": "^22.0.5",
     "@tsconfig/strictest": "^2.0.8",
     "@types/jest": "^30.0.0",
     "@types/node": "^24.0.0",

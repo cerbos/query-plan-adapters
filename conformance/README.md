@@ -53,6 +53,10 @@ rows, and one oracle recipe that every adapter's harness implements against its 
 - `CERBOS_VERSION` — the exact Cerbos PDP version the wire fixtures were captured against.
   Deliberately pinned rather than `latest`: a fixture diff should come from a deliberate version
   bump, not silently from whatever `latest` resolved to on a given day.
+- `CERBOS_IMAGE_DIGEST` — the digest of the image that version's tag resolves to. The tag says
+  which release; the digest says which build, and a tag can be re-pushed. Every harness and
+  workflow composes `ghcr.io/cerbos/cerbos:$CERBOS_VERSION@$CERBOS_IMAGE_DIGEST` from the two
+  files, and `scripts/validate-corpus.sh` asserts both halves everywhere either is restated.
 - `scripts/regenerate-wire-fixtures.sh` — regenerates `wire-fixtures/` from a running (pinned)
   Cerbos container. Run it after bumping `CERBOS_VERSION`, review the diff, commit both together.
 
@@ -480,13 +484,46 @@ unsupported before you have watched it fail is how a translatable shape gets per
    the new harness alone.
 
 7. **Wire CI.** Copy an existing adapter workflow. It must: read the PDP version from
-   `CERBOS_VERSION` (never hardcode it), run `scripts/validate-corpus.sh` in every job that
-   replays the corpus **or** hardcodes the PDP image — a job that interpolates `CERBOS_VERSION`
-   at runtime cannot drift and does not need it, but a hardcoded pin can, and that assertion is
-   `validate-corpus.sh`'s job — trigger on `conformance/**` as well as the adapter's own
-   directory, and run the adversarial suite **inside the same job as the regular tests**, not as
-   a separate job: the corpus discriminates the translator and the datastore, so a separate job
-   costs runner minutes for no extra coverage. Pin any service image by digest.
+   `CERBOS_VERSION` and its digest from `CERBOS_IMAGE_DIGEST` (never hardcode either), run
+   `scripts/validate-corpus.sh` in every job that replays the corpus **or** hardcodes the PDP
+   image — a job that interpolates the two files at runtime cannot drift and does not need it,
+   but a hardcoded pin can, and that assertion is `validate-corpus.sh`'s job — trigger on
+   `conformance/**` as well as the adapter's own directory, and run the adversarial suite
+   **inside the same job as the regular tests**, not as a separate job: the corpus discriminates
+   the translator and the datastore, so a separate job costs runner minutes for no extra
+   coverage. Pin every service image the harness or the workflow starts, by tag **and** digest —
+   see below.
+
+#### Pinning service images
+
+Every container a test or a workflow starts is written as `repository:tag@sha256:<64 hex>`. The
+tag says which release a reader is looking at; the digest says which build a green run actually
+proved. A tag alone records an intent, not a build — `postgres:16` and
+`docker.elastic.co/elasticsearch/elasticsearch:8.15.3` are both re-pushed — so a suite pinned only
+by tag cannot answer "what did this pass against", and a suite pinned only by digest cannot answer
+"which version is this". `validate-corpus.sh` enforces both halves:
+
+- **The PDP** is corpus-wide, so its two halves live here: `CERBOS_VERSION` and
+  `CERBOS_IMAGE_DIGEST`. Every restatement anywhere in the repository is asserted to match both.
+  A reference that carries the right tag and a digest from some other build reads as pinned and is
+  not, which is why the two are checked together rather than the tag alone
+  ([#322](https://github.com/cerbos/query-plan-adapters/issues/322)).
+- **Everything else** — the databases, the search and vector stores — is pinned *per harness*, in
+  one constant that both that adapter's suites read. It deliberately does **not** live under
+  `conformance/`: a change here re-runs all ten adapter workflows, so a shared file would make
+  bumping mongoose's server cost nine irrelevant CI runs. What is shared is the rule.
+  `validate-corpus.sh` holds a list of image repositories, scans the repository for each, requires
+  every occurrence to carry a tag and a digest, and requires a given `repo:tag` to resolve to
+  exactly one digest repo-wide — so two harnesses cannot claim the same nominal version while
+  running different builds. **Adding a new service means adding its repository to that list**; a
+  repository nothing scans is a repository nothing keeps pinned.
+- Markdown is out of scope for both scans. A README telling a *consumer* how to start a PDP of
+  their own is prose about their environment, not something this repository runs.
+
+Renovate is configured with `docker:disable`, so nothing proposes these bumps: they are made by
+hand, deliberately, alongside whatever re-verification the bump needs. That is the accepted
+trade — reproducibility now, staleness to be watched for — and re-enabling Docker updates is a
+maintainer decision, not a drive-by one.
 
 8. **Document the contract** in the adapter's README with a `Conformance contract` table
    (oracle-tested / fail-closed / known divergence counts). Each adapter is published
@@ -563,6 +600,15 @@ omissions were deliberate. The absent to-one parent's row records that it is *pr
 (`w1-all-chain` and its siblings) rather than merely documented — it is what a closed hazard looks
 like, and it is the row that makes the difference visible.
 
+An adapter may append **additional** rows below those six for a hazard only its store has, and must
+say in the prose above the table that it has done so — the six shared rows stay first and in order,
+so the diff against this list still reads cleanly. A hazard is adapter-specific only when no other
+store can reach it; anything two adapters could hit belongs here, in the shared list, so all ten
+have to record a position on it. The one such row today is elasticsearch-java's **analyzed (`text`)
+field mapping**: Elasticsearch rewrites a stored string into tokens before comparing it, so a field
+mapped `text` widens every string comparison the adapter emits. No other store in this repository
+transforms a value between write and comparison, so there is nothing for the other nine to answer.
+
 The three classes the ten adapters fall into determine most of the answers:
 
 | Class | Adapters | What the store applies to the subquery |
@@ -621,9 +667,12 @@ the policy suite and classify it like anything else.
 ## Regenerating wire fixtures after a Cerbos version bump
 
 ```bash
-# edit CERBOS_VERSION first
+# edit CERBOS_VERSION first, then resolve the digest the new tag points at:
+#   docker buildx imagetools inspect ghcr.io/cerbos/cerbos:$(cat CERBOS_VERSION) \
+#     --format '{{.Manifest.Digest}}' > CERBOS_IMAGE_DIGEST
 ./scripts/regenerate-wire-fixtures.sh
 git diff conformance/wire-fixtures   # review exactly what the planner's wire output changed
+./scripts/validate-corpus.sh         # fails if any restatement still names the old tag or digest
 ```
 
 Requires `docker`, `curl`, and `jq`.

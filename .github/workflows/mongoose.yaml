@@ -24,7 +24,14 @@ jobs:
       # neither a pass nor a failure for the repo's load-bearing signal.
       fail-fast: false
       matrix:
-        mongodb-version: ["7.0", "8.0"]
+        # Pinned by tag AND digest. `supercharge/mongodb-github-action` took a bare version
+        # string and resolved `mongo:<version>` at run time, so the server a green run proved
+        # the adapter against was whatever the tag pointed at that morning — and the corpus
+        # discriminates server behaviour, which is the whole reason this dimension exists.
+        # Starting the container directly is what makes the digest expressible.
+        mongodb-image:
+          - "mongo:7.0@sha256:35a5926f71f8b6cb19206bee928c5a85f241a8be99f20c81abe35ae78a73415d"
+          - "mongo:8.0@sha256:98605bfa1bb2a15dd82109e1d78ad31527a9a744909fab4606076fa71a0ae515"
         node-version: ["22", "24", "25"]
     runs-on: ubuntu-latest
     steps:
@@ -38,14 +45,23 @@ jobs:
         run: echo "version=$(tr -d '[:space:]' < ../conformance/CERBOS_VERSION)" >> "$GITHUB_OUTPUT"
 
       - name: Setup Cerbos
-        uses: cerbos/cerbos-setup-action@30ad92b0242d792bd156985682426577fcfcc589 # v1
+        uses: cerbos/cerbos-setup-action@f772482c8504a05c49018a0bf2d84012a607733c # v1
         with:
           version: v${{ steps.cerbos.outputs.version }}
 
       - name: Start MongoDB
-        uses: supercharge/mongodb-github-action@315db7fe45ac2880b7758f1933e6e5d59afd5e94 # 1.12.1
-        with:
-          mongodb-version: ${{ matrix.mongodb-version }}
+        run: |
+          docker run -d --name mongodb -p 27017:27017 "${{ matrix.mongodb-image }}"
+          for _ in {1..30}; do
+            if docker exec mongodb mongosh --quiet --eval 'db.runCommand({ ping: 1 }).ok' \
+              > /dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "MongoDB failed to start" >&2
+          docker logs mongodb >&2 || true
+          exit 1
 
       - name: Test using Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -64,3 +80,7 @@ jobs:
       - name: Run adversarial differential suite
         if: matrix.node-version == '22'
         run: npm run test:adversarial
+
+      - name: Stop MongoDB
+        if: always()
+        run: docker rm -f mongodb
