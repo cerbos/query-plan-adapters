@@ -37,15 +37,54 @@ under any nesting. It also fires ahead of `operator_override_fns`, since an over
 recover a representation the plan never carried. See
 [#302](https://github.com/cerbos/query-plan-adapters/issues/302).
 
+### Declare the convention per attribute
+
+The option above is a whole-call default, and one policy suite can legitimately use both
+conventions: the same column mapped twice, sent as an explicit null under one attribute name and
+omitted under another. Declare it per attribute instead and the call-level option only covers what
+the mapping does not:
+
+```python
+get_query(
+    query_plan,
+    Resource,
+    attr_map,
+    attribute_null_representation={
+        # sent as an explicit null when the column is NULL
+        "request.resource.attr.owner": "explicit",
+        # `request.resource.attr.department` is omitted for a NULL column, so it is
+        # left undeclared and the call-level default applies
+    },
+)
+```
+
+Declaring the explicit convention asserts two things: the column can be NULL, **and** a NULL reaches
+`check()` as an explicit null. The equality family (`eq`, `ne`, `in`) over that attribute is then
+rendered so it can never be SQL UNKNOWN — CEL holds a null *value* under this convention, so
+`null != "x"` is TRUE and the row must come back, while UNKNOWN would drop it under *both*
+polarities. Ordering and string operators are left alone: a null receiver raises a no-overload error
+in CEL, which denies exactly as UNKNOWN does.
+
+Leaving an attribute undeclared keeps the historical rendering — so nothing changes for a mapping
+that says nothing, and `!=` against a constant keeps under-granting the NULL rows until you declare
+it.
+
+**Declare both sides of a field-to-field comparison, or neither.** Mixing the conventions across one
+comparison has no faithful rendering — the declared side needs a definite answer for its NULL, the
+undeclared side needs UNKNOWN — so the adapter throws rather than picking a direction. See
+[#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
+[ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
+
 ## Conformance contract
 
 The adapter is differentially tested against Cerbos PDP 0.54.0 `check()` decisions using 20 hostile seed rows and executable SQLAlchemy queries. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 132 reference conformance actions |
+| Oracle-tested | 137 reference conformance actions |
 | Fail-closed corpus shapes | Nanosecond `now()` thresholds, regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an ambiguous string column, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero) and `filter()`/`map()` used as a condition (both return a list, not a boolean), and a constant zero divisor whose sign the HTTP transport discards (12 actions) |
 | Representation-dependent | `null-eq-missing` — raises under `null_attribute_representation="omitted"`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
+| Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute the caller sends as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare it per attribute — `attribute_null_representation={reference: "explicit"}` — or the historical rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 
 The conformance harness supplies the same public `operator_override_fns` mechanism available to applications for schema-specific collection translations. Regex `matches()` fails closed by default because SQL dialect regex engines do not guarantee CEL/RE2 semantics; applications may provide an override only when their database translation is known to be equivalent. Timestamp literals must use strict RFC 3339 grammar, resolve inside CEL's supported year 0001–9999 instant range, and be exactly representable at Python/SQLAlchemy microsecond precision: discarded fractional digits must be zero, and the mapped column/database must preserve microseconds. Unsupported shapes raise instead of producing a broader query. Every fail-closed shape's error message is pinned in the shared corpus (`conformance/actions.json`) and asserted by this adapter's conformance run, so a classification proves the throw names its declared mechanism rather than merely that something threw.

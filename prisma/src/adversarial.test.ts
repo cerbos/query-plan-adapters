@@ -397,6 +397,14 @@ const DEGENERACY_GUARD_ACTIONS = [
   "pv-all",
   "null-eq",
   "null-ne",
+  // The explicit-null convention against a non-null operand (#308). All five are compared rather
+  // than thrown, because the mapper declares the convention per attribute; every one of them
+  // under-granted by exactly the NULL-column rows before that declaration existed.
+  "null-value-ne-const",
+  "null-value-not-eq-const",
+  "null-value-not-in-const",
+  "null-value-f2f",
+  "null-value-pv-not-exists",
   // The absent to-one parent (#309/#315/#316/#334): the four discriminating chain shapes Prisma
   // translates. Its unsupported siblings are liveness probes below.
   "w1-not-exists-chain",
@@ -464,6 +472,27 @@ function scopeFor(seed: Seed): string | null {
   return derivedFor(seed).scope;
 }
 
+/**
+ * The same mapper with every per-attribute null convention stripped, so the call-level option is
+ * the only thing governing null operands.
+ *
+ * The #302 completeness guard is a statement about that option: every corpus action carrying a
+ * null literal must be rejected under `"omitted"`. Declaring `owner`/`coOwner` as explicit-null
+ * (#308) deliberately overrides the option for those two attributes — which would otherwise read
+ * as the guard going quiet, when in fact it is the per-attribute declaration doing exactly its
+ * job. Stripping the declarations keeps the guard testing what it was written to test.
+ */
+function withoutNullConventions(
+  mapper: Record<string, MapperConfig>
+): Record<string, MapperConfig> {
+  return Object.fromEntries(
+    Object.entries(mapper).map(([reference, config]) => {
+      const { nullAttributeRepresentation: _stripped, ...rest } = config;
+      return [reference, rest];
+    })
+  );
+}
+
 const MAPPER: Record<string, MapperConfig> = {
   "request.resource.attr.aBool": { field: "aBool" },
   "request.resource.attr.aString": { field: "aString" },
@@ -476,9 +505,19 @@ const MAPPER: Record<string, MapperConfig> = {
     field: "createdAt",
     valueType: "dateTime",
   },
+  // `owner` and `coOwner` alias columns that `aOptionalString` and `scope` also map, under the
+  // OTHER null convention: the oracle sends a real null attribute for them rather than omitting
+  // it. Declaring that here is what makes the equality family definite for these two attributes
+  // and leaves it untouched for every other mapping (cerbos/query-plan-adapters#308).
   "request.resource.attr.owner": {
     field: "aOptionalString",
     nullable: true,
+    nullAttributeRepresentation: "explicit",
+  },
+  "request.resource.attr.coOwner": {
+    field: "scope",
+    nullable: true,
+    nullAttributeRepresentation: "explicit",
   },
   // obj.inner is not a real nested column — mirrors aString, same trick the spring-data
   // reference harness uses for the p-struct probe.
@@ -563,6 +602,8 @@ const MAPPER: Record<string, MapperConfig> = {
   },
 };
 
+const MAPPER_WITHOUT_NULL_CONVENTIONS = withoutNullConventions(MAPPER);
+
 beforeAll(async () => {
   await prisma.adversarialLabel.deleteMany();
   await prisma.adversarialSubCategory.deleteMany();
@@ -631,6 +672,10 @@ function asCheckResource(seed: Seed): Resource {
     aNumber: seed.aNumber,
     createdBy: isoFor(seed),
     owner: seed.aOptionalString,
+    // The explicit-null alias of the `scope` column, the second half of `null-value-f2f`:
+    // `scope` itself is omitted when NULL (below), so the corpus carries the same column under
+    // both conventions and the field-to-field probe has two explicit nulls to compare.
+    coOwner: scopeFor(seed),
     tagNames: seed.tags.map((tag) => tag.name),
     obj: { inner: seed.aString },
     tags: seed.tags.map(asTagAttribute),
@@ -708,7 +753,8 @@ async function expectNonDegenerateOracle(action: string): Promise<void> {
 
 async function adapterFilteredIds(
   action: string,
-  nullAttributeRepresentation: "explicit" | "omitted" = "explicit"
+  nullAttributeRepresentation: "explicit" | "omitted" = "explicit",
+  mapper: Record<string, MapperConfig> = MAPPER
 ): Promise<string[]> {
   const queryPlan = await cerbos.planResources({
     principal: principal(),
@@ -717,7 +763,7 @@ async function adapterFilteredIds(
   });
   const result = queryPlanToPrisma({
     queryPlan,
-    mapper: MAPPER,
+    mapper,
     model: "AdversarialResource",
     nullAttributeRepresentation,
   });
@@ -844,10 +890,10 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(146);
+    expect(MANIFEST_ACTIONS.size).toBe(152);
     // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
     // gained or lost has to be re-triaged here rather than joining the suite unnoticed.
-    expect(THROWING_ACTIONS).toHaveLength(50);
+    expect(THROWING_ACTIONS).toHaveLength(51);
     expect(misclassified).toEqual([]);
     expect(
       [...PRISMA_SUPPORTED_EXPECTED].filter(
@@ -917,6 +963,24 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
     }
   );
 
+  // #308. The per-attribute declaration overrides the call-level option, which is the property
+  // that makes a suite mixing both conventions expressible at all. Asserted in both directions
+  // against the SAME action and the SAME call-level option, varying only whether the mapper
+  // declares the convention — so a declaration that did nothing would show up here as the two
+  // runs agreeing.
+  test("a per-attribute declaration overrides the call-level representation", async () => {
+    // `owner` declares "explicit", so the call-level "omitted" does not reach it.
+    await expect(adapterFilteredIds("null-eq", "omitted")).resolves.toEqual(
+      await oracleAllowedIds("null-eq")
+    );
+
+    // Strip the declaration and the same action under the same option is rejected — so the
+    // stripped mapper the completeness guard below uses is not quietly equivalent to MAPPER.
+    await expect(
+      adapterFilteredIds("null-eq", "omitted", MAPPER_WITHOUT_NULL_CONVENTIONS)
+    ).rejects.toThrow(NULL_OMITTED_MESSAGE);
+  });
+
   // #302 completeness guard. The rejection must key off the null OPERAND, not off a list of
   // operators: `hasIntersection(tagNames, ["public", null])` carries one in its value list, and
   // an allowlist of eq/ne/in silently misses it. Enumerating the corpus rather than naming
@@ -944,7 +1008,11 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
     const notRejected: string[] = [];
     for (const action of nullCarrying) {
       try {
-        await adapterFilteredIds(action, "omitted");
+        await adapterFilteredIds(
+          action,
+          "omitted",
+          MAPPER_WITHOUT_NULL_CONVENTIONS
+        );
         notRejected.push(action);
       } catch (error) {
         // The rejection must be the null-operand check talking, not an incidental failure — a

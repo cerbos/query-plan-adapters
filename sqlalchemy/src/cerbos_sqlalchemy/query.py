@@ -608,7 +608,37 @@ def _carries_null_operand(operand: dict) -> bool:
     return isinstance(value, list) and any(member is None for member in value)
 
 
-def _assert_no_null_comparison_operands(node: dict) -> None:
+# The operators CEL evaluates to a definite boolean over a null value, and so the
+# only ones an attribute's declared convention can settle. Anything else -- a
+# collection macro, hasIntersection, a string match -- keeps using the call-level
+# fallback, because the declaration says nothing about what its null means there.
+_EQUALITY_FAMILY = frozenset({"eq", "ne", "in"})
+
+
+def _compared_attribute_and_literal(node: dict):
+    """Destructure a binary comparison between a plan variable and a literal.
+
+    Returns ``(variable_name, literal_operand)`` in either operand order, or
+    ``None`` when the node is not that shape.
+    """
+    expression = _unwrap_expression(node)
+    if expression.get("operator") not in _EQUALITY_FAMILY:
+        return None
+    operands = expression.get("operands", [])
+    if len(operands) != 2:
+        return None
+    left, right = operands
+    variable, literal = left, right
+    if "variable" in right:
+        variable, literal = right, left
+    if "variable" not in variable or "value" not in literal:
+        return None
+    return variable["variable"], literal
+
+
+def _assert_no_null_comparison_operands(
+    node: dict, declarations: Dict[str, "NullAttributeRepresentation"], fallback: str
+) -> None:
     """Reject every null literal operand under the ``omitted`` representation.
 
     A NULL column then carries no attribute at all, so CEL raises a
@@ -631,17 +661,40 @@ def _assert_no_null_comparison_operands(node: dict) -> None:
     expression = _unwrap_expression(node)
     operator = expression.get("operator")
     operands = expression.get("operands", [])
-    if any(_carries_null_operand(_unwrap_expression(operand)) for operand in operands):
-        raise ValueError(
-            f"Cannot translate `{operator}` against a null operand under "
-            'null_attribute_representation="omitted": a NULL column sends no '
-            "attribute, so Cerbos evaluates the comparison as a missing-attribute "
-            "error (deny) while a NULL-selecting filter would return those rows. "
-            'Send NULL columns as explicit nulls and use "explicit", or keep this '
-            "shape out of the policy."
-        )
+
+    # A comparison between a mapped attribute and a literal is decided by that
+    # attribute's own declaration, which is what lets one call carry both
+    # conventions (cerbos/query-plan-adapters#308). Confined to that shape: a
+    # null buried in a macro over a literal list reaches a comparison long
+    # after this scan, and nothing here can say which column it will land
+    # against, so those keep using the call-level fallback.
+    compared = _compared_attribute_and_literal(node)
+    if compared is not None:
+        variable, literal = compared
+        declared = declarations.get(variable)
+        if declared is not None:
+            if declared == "omitted" and _carries_null_operand(literal):
+                raise _null_operand_error(operator)
+            return
+
+    if (
+        any(_carries_null_operand(_unwrap_expression(operand)) for operand in operands)
+        and fallback == "omitted"
+    ):
+        raise _null_operand_error(operator)
     for operand in operands:
-        _assert_no_null_comparison_operands(operand)
+        _assert_no_null_comparison_operands(operand, declarations, fallback)
+
+
+def _null_operand_error(operator) -> ValueError:
+    return ValueError(
+        f"Cannot translate `{operator}` against a null operand under "
+        'null_attribute_representation="omitted": a NULL column sends no '
+        "attribute, so Cerbos evaluates the comparison as a missing-attribute "
+        "error (deny) while a NULL-selecting filter would return those rows. "
+        'Send NULL columns as explicit nulls and use "explicit", or keep this '
+        "shape out of the policy."
+    )
 
 
 def _substitute_lambda_variable(
@@ -777,6 +830,9 @@ def get_query(
     table_mapping: Union[List[Tuple[GenericTable, GenericExpression]], None] = ...,
     operator_override_fns: Union[OperatorFnMap, None] = ...,
     null_attribute_representation: NullAttributeRepresentation = ...,
+    attribute_null_representation: Union[
+        Dict[str, NullAttributeRepresentation], None
+    ] = ...,
 ) -> Select[Tuple[_ORMModel]]:
     ...
 
@@ -793,6 +849,9 @@ def get_query(
     table_mapping: Union[List[Tuple[GenericTable, GenericExpression]], None] = ...,
     operator_override_fns: Union[OperatorFnMap, None] = ...,
     null_attribute_representation: NullAttributeRepresentation = ...,
+    attribute_null_representation: Union[
+        Dict[str, NullAttributeRepresentation], None
+    ] = ...,
 ) -> Select[Any]:
     ...
 
@@ -804,6 +863,9 @@ def get_query(
     table_mapping: Union[List[Tuple[GenericTable, GenericExpression]], None] = None,
     operator_override_fns: Union[OperatorFnMap, None] = None,
     null_attribute_representation: NullAttributeRepresentation = "explicit",
+    attribute_null_representation: Union[
+        Dict[str, NullAttributeRepresentation], None
+    ] = None,
 ) -> Select[Any]:
     """Translate a Cerbos query plan into a SQLAlchemy ``Select``.
 
@@ -820,13 +882,45 @@ def get_query(
       *selects* NULL rows returns rows the PDP denies. Null comparison operands
       are rejected instead of translated.
 
-    See https://github.com/cerbos/query-plan-adapters/issues/302.
+    ``attribute_null_representation`` declares the same thing PER ATTRIBUTE,
+    keyed by the references ``attr_map`` uses. It overrides
+    ``null_attribute_representation`` for the attributes it names and asserts
+    that their columns can be NULL; an attribute it does not name is treated as
+    NOT NULL when rendering a comparison, which is the historical translation.
+
+    It exists because one policy suite can legitimately mix the two conventions
+    -- the same column can be mapped twice, sent as an explicit null under one
+    attribute name and omitted under another -- which a single call-level
+    option cannot express. Declaring an attribute ``"explicit"`` makes the
+    equality family (``eq``, ``ne``, ``in``) render so it can never be SQL
+    UNKNOWN: CEL holds a null VALUE under that convention, so ``null != "x"``
+    is TRUE and ``null == "x"`` is FALSE, both definite, while UNKNOWN excludes
+    the row under BOTH polarities. Ordering and string operators are left
+    alone, because a null receiver raises a no-overload error in CEL, which
+    denies exactly as UNKNOWN does.
+
+    See https://github.com/cerbos/query-plan-adapters/issues/302 and
+    https://github.com/cerbos/query-plan-adapters/issues/308.
     """
     if null_attribute_representation not in ("explicit", "omitted"):
         raise ValueError(
             "null_attribute_representation must be 'explicit' or 'omitted', got "
             f"{null_attribute_representation!r}"
         )
+    null_conventions: Dict[str, NullAttributeRepresentation] = (
+        attribute_null_representation or {}
+    )
+    for attribute, convention in null_conventions.items():
+        if convention not in ("explicit", "omitted"):
+            raise ValueError(
+                "attribute_null_representation values must be 'explicit' or "
+                f"'omitted', got {convention!r} for {attribute!r}"
+            )
+        if attribute not in attr_map:
+            raise ValueError(
+                f"attribute_null_representation names {attribute!r}, which is not "
+                "in the attribute column map"
+            )
 
     if query_plan.filter is None or query_plan.filter.kind in _deny_types:
         return select(table).where(False)
@@ -840,8 +934,11 @@ def get_query(
         else query_plan.filter.condition.to_dict()
     )
 
-    if null_attribute_representation == "omitted":
-        _assert_no_null_comparison_operands(cond)
+    # Always: the call-level option is only the fallback now, and an attribute
+    # can declare "omitted" while the call declares "explicit".
+    _assert_no_null_comparison_operands(
+        cond, null_conventions, null_attribute_representation
+    )
 
     # Inspect columns that the normal translator owns. Override-owned operands
     # may legitimately be relation markers or columns translated into
@@ -908,6 +1005,90 @@ def get_query(
             raise KeyError(
                 f"Attribute does not exist in the attribute column map: {variable}"
             )
+
+    def is_explicit_null(variable: str) -> bool:
+        return null_conventions.get(variable) == "explicit"
+
+    def definite_equality(
+        operator: str,
+        left_column: Any,
+        right: Any,
+        left_explicit: bool,
+        right_explicit: bool,
+    ) -> Any:
+        """Render an equality that can never be SQL UNKNOWN.
+
+        An attribute the caller sends as an explicit null holds a null VALUE in
+        CEL, so equality against a non-null operand is a definite FALSE,
+        inequality a definite TRUE, and two nulls are EQUAL. SQL answers
+        UNKNOWN to all three, which excludes the row under BOTH polarities --
+        so the NOT an enclosing negation applies has nothing definite to flip.
+
+        Deliberately not ``is_distinct_from``. Two reasons, and the second is
+        the load-bearing one: the same expression has to render on SQLite,
+        PostgreSQL and MySQL -- and a null-safe equality is SYMMETRIC while this
+        rewrite must not be. When only ONE side declares the convention, the
+        other side's NULL is a MISSING attribute on the check side, so CEL raises
+        an error and denies; only the asymmetric expansion below keeps
+        propagating UNKNOWN for it. A null-safe operator would match the two
+        NULLs and over-grant.
+        """
+        present = []
+        if left_explicit:
+            present.append(left_column.isnot(None))
+        if right_explicit:
+            present.append(right.isnot(None))
+        equality = and_(*present, left_column == right)
+        if left_explicit and right_explicit:
+            equality = or_(and_(left_column.is_(None), right.is_(None)), equality)
+        return not_(equality) if operator == "ne" else equality
+
+    def with_null_conventions(
+        operator: str,
+        left: Any,
+        right: Any,
+        left_explicit: bool,
+        right_explicit: bool,
+        plain: Any,
+    ) -> Any:
+        """The comparison with the declared NULL conventions applied, else ``plain``.
+
+        ``plain`` is the ordinary lowering the caller would otherwise return --
+        passed in rather than rebuilt here, so a registered operator override is
+        honoured on every path.
+
+        ``eq``/``ne`` RESTRUCTURE the comparison, so an operator the caller
+        overrode is left alone: replacing it would make this declaration silently
+        discard the caller's own translation, which is not what it declares.
+        ``in`` only gains a presence guard ANDed alongside whatever the
+        membership lowered to, which composes with an override rather than
+        replacing it.
+        """
+        if (left_explicit or right_explicit) and right is not None:
+            if operator in ("eq", "ne"):
+                overridden = (
+                    operator_override_fns is not None
+                    and operator_override_fns.get(operator) is not None
+                )
+                if not overridden:
+                    return definite_equality(
+                        operator, left, right, left_explicit, right_explicit
+                    )
+            elif (
+                operator == "in"
+                and left_explicit
+                and hasattr(left, "isnot")
+                # A stored COLLECTION, not a literal list: a null element can
+                # exist at run time and `null in coll` is TRUE when it does, so
+                # the presence guard would exclude exactly the rows CEL allows.
+                # The collection's own lowering already handles the null member.
+                and isinstance(right, list)
+                # A null member already forces the `IS NULL` disjunct, which is
+                # definite on its own.
+                and not any(member is None for member in right)
+            ):
+                return and_(left.isnot(None), plain)
+        return plain
 
     def fold_value_list_macro(operator: str, elements: Any, lambda_operand: dict):
         """Fold a collection macro whose collection operand is a literal value list.
@@ -1142,20 +1323,53 @@ def get_query(
         # Wire order is preserved; SQL three-valued logic keeps rows with a
         # NULL side excluded, matching CEL's missing-attribute deny.
         if "variable" in left_operand and "variable" in right_operand:
-            return get_operator_fn(
+            left_column = resolve_variable(left_operand["variable"])
+            right_column = resolve_variable(right_operand["variable"])
+            # Mixing the two conventions across one comparison has no faithful
+            # rendering. The declared side needs a definite answer for its NULL
+            # (CEL holds a null VALUE); the undeclared side needs UNKNOWN for its
+            # NULL (a missing attribute, which CEL denies under both polarities).
+            # A definite predicate returns rows the PDP refuses; a plain one drops
+            # rows the PDP allows. Refuse it rather than pick a direction --
+            # declare both attributes, or neither.
+            left_explicit = is_explicit_null(left_operand["variable"])
+            right_explicit = is_explicit_null(right_operand["variable"])
+            if left_explicit != right_explicit and operator in ("eq", "ne"):
+                raise ValueError(
+                    f"Cannot translate `{operator}` between two columns under mixed "
+                    "null conventions: cannot compare an attribute declared "
+                    "explicit-null with one on the omitted convention: the omitted "
+                    "side is UNKNOWN for a NULL column while the declared side is "
+                    "definite, and no single predicate is both. Declare "
+                    "attribute_null_representation for both attributes, or for "
+                    "neither."
+                )
+            both_explicit = left_explicit and right_explicit
+            return with_null_conventions(
                 operator,
-                resolve_variable(left_operand["variable"]),
-                resolve_variable(right_operand["variable"]),
+                left_column,
+                right_column,
+                both_explicit,
+                both_explicit,
+                get_operator_fn(operator, left_column, right_column),
             )
 
         if "value" in left_operand and "variable" in right_operand:
             value = left_operand["value"]
             column = resolve_variable(right_operand["variable"])
+            explicit = is_explicit_null(right_operand["variable"])
             if operator in _MIRRORED_OPERATORS:
                 # Directional: `1 < R.attr.x` means `x > 1`.
                 return get_operator_fn(_MIRRORED_OPERATORS[operator], column, value)
             if operator in _ORDER_INSENSITIVE_OPERATORS:
-                return get_operator_fn(operator, column, value)
+                return with_null_conventions(
+                    operator,
+                    column,
+                    value,
+                    explicit,
+                    False,
+                    get_operator_fn(operator, column, value),
+                )
             # Receiver-sensitive (contains/startsWith/endsWith/...): keep wire
             # order — the value is the receiver, the column the argument.
             return get_operator_fn(operator, value, column)
@@ -1170,7 +1384,14 @@ def get_query(
         value = right_operand["value"]
 
         # the operator handlers here are the leaf nodes of the recursion
-        return get_operator_fn(operator, column, value)
+        return with_null_conventions(
+            operator,
+            column,
+            value,
+            is_explicit_null(left_operand["variable"]),
+            False,
+            get_operator_fn(operator, column, value),
+        )
 
     condition = traverse_and_map_operands(cond)
     # The root of the plan must translate to a boolean SQL expression. A non-boolean root —

@@ -106,6 +106,7 @@ interface StoredDocument {
   createdAt?: string;
   scope?: string;
   owner: string | null;
+  coOwner: string | null;
   tagNames: (string | null)[];
   obj: { inner: string };
   tags: { id: string; name?: string }[];
@@ -435,6 +436,14 @@ const DEGENERACY_GUARD_ACTIONS = [
   "pv-all",
   "null-eq",
   "null-ne",
+  // The explicit-null convention against a non-null operand (#308). Convex stores the value the
+  // caller sends, so a document field holding an explicit null compares as a null VALUE exactly
+  // as CEL does: these five needed no change, and are compared rather than probed.
+  "null-value-ne-const",
+  "null-value-not-eq-const",
+  "null-value-not-in-const",
+  "null-value-f2f",
+  "null-value-pv-not-exists",
   // The absent to-one parent (#309/#315/#316/#333/#334): the seven discriminating chain shapes
   // with a non-empty oracle.
   "w1-all-chain",
@@ -511,6 +520,12 @@ const PUSHDOWN_ONLY_ACTIONS = [
   "null-eq",
   "null-ne",
   "null-not-eq",
+  // The explicit-null convention against a non-null CONSTANT (#308): a scalar comparison on a
+  // mapped field, so the pushdown mapper reaches the database with it. Its field-to-field and
+  // macro-fold siblings cannot push down and stay in the post-filter under both mappers.
+  "null-value-ne-const",
+  "null-value-not-eq-const",
+  "null-value-not-in-const",
   "vf-null-ne",
 ];
 
@@ -595,6 +610,10 @@ function storedDocument(seed: Seed): StoredDocument {
     aNumber: seed.aNumber,
     createdBy: createdByFor(seed),
     owner: seed.aOptionalString,
+    // The explicit-null alias of the `scope` field, the second half of `null-value-f2f`:
+    // `scope` itself is omitted when NULL, so the corpus carries the same field under both
+    // conventions and the field-to-field probe has two explicit nulls to compare.
+    coOwner: scopeFor(seed),
     tagNames: seed.tags.map((tag) => tag.name),
     obj: { inner: seed.aString },
     tags: seed.tags.map((tag) =>
@@ -638,6 +657,7 @@ function checkResource(seed: Seed): Resource {
     aNumber: seed.aNumber,
     createdBy: createdByFor(seed),
     owner: seed.aOptionalString,
+    coOwner: scopeFor(seed),
     tagNames: seed.tags.map((tag) => tag.name),
     obj: { inner: seed.aString },
     tags: seed.tags.map((tag): Record<string, Value> =>
@@ -783,10 +803,10 @@ describe("adversarial conformance corpus", () => {
         ].filter(Boolean).length !== 1,
     );
 
-    expect(allActions.size).toBe(146);
+    expect(allActions.size).toBe(152);
     expect(CONVEX_UNSUPPORTED).toHaveLength(2);
-    expect(CONVEX_SUPPORTED_EXPECTED).toHaveLength(6);
-    expect(ORACLE_ACTIONS).toHaveLength(140);
+    expect(CONVEX_SUPPORTED_EXPECTED).toHaveLength(7);
+    expect(ORACLE_ACTIONS).toHaveLength(146);
     expect(THROWING_ACTIONS).toHaveLength(4);
     expect(misclassified).toEqual([]);
   });
@@ -908,19 +928,19 @@ describe("adversarial conformance corpus", () => {
       pushdownSplit: pushdown.split,
       pushdownPostCount: pushdown.post.length,
       // The two mappers must differ ONLY where the pushdown leg re-executes, which is what makes
-      // skipping the other 132 actions there sound rather than a coverage hole.
+      // skipping the other 138 actions there sound rather than a coverage hole.
       moved: pushdown.db.filter((action) => !base.db.includes(action)),
     }).toEqual({
-      total: 140,
+      total: 146,
       defaultDb: DB_DECIDED_DEFAULT,
       // No corpus action currently splits: `buildFilters` only splits a root `and`, and every
       // hostile shape that mixes pushable and non-pushable children is rooted elsewhere.
       defaultSplit: [],
       defaultUnconditional: UNCONDITIONAL_ACTIONS,
-      defaultPostCount: 126,
+      defaultPostCount: 132,
       pushdownDb: DB_DECIDED_PUSHDOWN,
       pushdownSplit: [],
-      pushdownPostCount: 118,
+      pushdownPostCount: 121,
       moved: PUSHDOWN_ONLY_ACTIONS,
     });
   });

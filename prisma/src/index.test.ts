@@ -1617,6 +1617,198 @@ describe("Field Operations", () => {
         });
       });
     });
+
+    // cerbos/query-plan-adapters#308. The per-attribute half of the same option. A call-level
+    // flag cannot express a policy suite that mixes the two conventions — the same column mapped
+    // twice, sent explicitly under one attribute name and omitted under another — so the
+    // declaration lives on the mapper entry and the call-level option is only its default.
+    describe("per-attribute nullAttributeRepresentation", () => {
+      const explicitMapper = {
+        "request.resource.attr.owner": {
+          field: "aOptionalString",
+          nullAttributeRepresentation: "explicit" as const,
+        },
+        "request.resource.attr.coOwner": {
+          field: "scope",
+          nullAttributeRepresentation: "explicit" as const,
+        },
+        "request.resource.attr.aOptionalString": { field: "aOptionalString" },
+      };
+
+      const conditionalPlan = (
+        condition: Record<string, unknown>
+      ): PlanResourcesConditionalResponse =>
+        ({
+          kind: PlanKind.CONDITIONAL,
+          condition,
+        }) as unknown as PlanResourcesConditionalResponse;
+
+      const filtersFor = (condition: Record<string, unknown>) => {
+        const result = queryPlanToPrisma({
+          queryPlan: conditionalPlan(condition),
+          mapper: explicitMapper,
+          model: "Resource",
+        });
+        if (result.kind !== PlanKind.CONDITIONAL) {
+          throw new Error("expected a conditional filter");
+        }
+        return result.filters;
+      };
+
+      // A null VALUE is not equal to "x", so CEL returns a definite FALSE and its negation a
+      // definite TRUE. `{ not: "x" }` leans on SQL's UNKNOWN instead, which drops the row under
+      // BOTH polarities — the row the PDP allows never comes back.
+      test("makes ne against a constant include a NULL row", () => {
+        expect(
+          filtersFor({
+            operator: "ne",
+            operands: [
+              { name: "request.resource.attr.owner" },
+              { value: "x" },
+            ],
+          })
+        ).toStrictEqual({
+          NOT: {
+            AND: [
+              { aOptionalString: { not: null } },
+              { aOptionalString: { equals: "x" } },
+            ],
+          },
+        });
+      });
+
+      test("makes eq against a constant definite under a negation", () => {
+        expect(
+          filtersFor({
+            operator: "eq",
+            operands: [
+              { name: "request.resource.attr.owner" },
+              { value: "x" },
+            ],
+          })
+        ).toStrictEqual({
+          AND: [
+            { aOptionalString: { not: null } },
+            { aOptionalString: { equals: "x" } },
+          ],
+        });
+      });
+
+      // The equality family only. An ordering comparison against a null receiver is a
+      // no-overload error in CEL, which denies under both polarities — exactly what the dropped
+      // row already does — so `gt` must be left alone.
+      test("leaves ordering comparisons untouched", () => {
+        expect(
+          filtersFor({
+            operator: "gt",
+            operands: [
+              { name: "request.resource.attr.owner" },
+              { value: "x" },
+            ],
+          })
+        ).toStrictEqual({ aOptionalString: { gt: "x" } });
+      });
+
+      test("makes membership without a null element definite", () => {
+        expect(
+          filtersFor({
+            operator: "in",
+            operands: [
+              { name: "request.resource.attr.owner" },
+              { value: ["x", "y"] },
+            ],
+          })
+        ).toStrictEqual({
+          AND: [
+            { aOptionalString: { not: null } },
+            { aOptionalString: { in: ["x", "y"] } },
+          ],
+        });
+      });
+
+      test("matches two explicit nulls in a field-to-field equality", () => {
+        expect(
+          filtersFor({
+            operator: "eq",
+            operands: [
+              { name: "request.resource.attr.owner" },
+              { name: "request.resource.attr.coOwner" },
+            ],
+          })
+        ).toStrictEqual({
+          OR: [
+            { AND: [{ aOptionalString: null }, { scope: null }] },
+            {
+              AND: [
+                { aOptionalString: { not: null } },
+                { scope: { not: null } },
+                {
+                  aOptionalString: {
+                    equals: { _ref: "scope", _container: "Resource" },
+                  },
+                },
+              ],
+            },
+          ],
+        });
+      });
+
+      // An entry that declares nothing keeps the historical rendering, so declaring the
+      // convention on one attribute cannot change the filter emitted for any other mapping.
+      test("leaves an undeclared entry untouched", () => {
+        expect(
+          filtersFor({
+            operator: "ne",
+            operands: [
+              { name: "request.resource.attr.aOptionalString" },
+              { value: "x" },
+            ],
+          })
+        ).toStrictEqual({ aOptionalString: { not: "x" } });
+      });
+
+      // The entry-level declaration overrides the call-level default in both directions, which
+      // is the whole point: one call, two conventions.
+      test('an entry declaring "omitted" rejects a null operand under the "explicit" default', () => {
+        expect(() =>
+          queryPlanToPrisma({
+            queryPlan: conditionalPlan({
+              operator: "eq",
+              operands: [
+                { name: "request.resource.attr.omitted" },
+                { value: null },
+              ],
+            }),
+            mapper: {
+              "request.resource.attr.omitted": {
+                field: "aOptionalString",
+                nullAttributeRepresentation: "omitted" as const,
+              },
+            },
+            nullAttributeRepresentation: "explicit",
+          })
+        ).toThrow(/missing-attribute error/);
+      });
+
+      test('an entry declaring "explicit" still translates a null operand under the "omitted" default', () => {
+        const result = queryPlanToPrisma({
+          queryPlan: conditionalPlan({
+            operator: "eq",
+            operands: [
+              { name: "request.resource.attr.owner" },
+              { value: null },
+            ],
+          }),
+          mapper: explicitMapper,
+          nullAttributeRepresentation: "omitted",
+        });
+
+        expect(result).toStrictEqual({
+          kind: PlanKind.CONDITIONAL,
+          filters: { aOptionalString: { equals: null } },
+        });
+      });
+    });
   });
 });
 

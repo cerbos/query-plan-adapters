@@ -124,6 +124,36 @@ export type MapperConfig = {
    * deny-aligned. Declaring nullability here enables those guards.
    */
   nullable?: boolean;
+  /**
+   * Declares that this column can be SQL NULL **and** how the caller represents that NULL in the
+   * attributes it sends to `check()`. Declaring it asserts both facts; leaving it undeclared means
+   * "treat this column as NOT NULL", which is the historical rendering.
+   *
+   * This is per attribute rather than per call because one policy suite can legitimately mix the
+   * two conventions — the same column can be mapped twice, sent as an explicit null under one
+   * attribute name and omitted under another. The call-level option cannot express that, which is
+   * what made cerbos/query-plan-adapters#308 unfixable with #302's option alone.
+   *
+   * - `"explicit"` — a NULL column is sent as an explicit `null` attribute, so CEL holds a null
+   *   VALUE. `null != "x"` is then TRUE and `null == "x"` is FALSE, both definite, while Prisma's
+   *   `{ not: "x" }` drops the row under both polarities. The equality family (`equals`, `not`,
+   *   `in`) is therefore rendered so it can never depend on SQL's UNKNOWN.
+   * - `"omitted"` — a NULL column sends no attribute, so CEL raises a missing-attribute error and
+   *   `check()` denies. Dropping the row is already right, so the rendering is unchanged; what the
+   *   declaration adds is the same null-operand rejection the call-level `"omitted"` performs,
+   *   scoped to this attribute.
+   *
+   * Only the equality family is affected. `lt`/`lte`/`gt`/`gte` and the string operators raise a
+   * no-overload error on a null receiver in CEL, which denies under both polarities exactly as a
+   * dropped row does, so they are left alone.
+   *
+   * Distinct from `nullable` above, which declares that a *relation element* column can be NULL so
+   * collection macros gain their three-valued guards. The two are independent: `nullable` is about
+   * what a subquery does with an UNKNOWN element, this is about what the caller sent to the PDP.
+   *
+   * See https://github.com/cerbos/query-plan-adapters/issues/308.
+   */
+  nullAttributeRepresentation?: NullAttributeRepresentation;
   relation?: {
     name: string;
     type: "one" | "many";
@@ -477,7 +507,13 @@ type ResolvedFieldReference = {
   path: string[];
   relations?: RelationConfig[];
   valueType?: "dateTime";
+  nullAttributeRepresentation?: NullAttributeRepresentation;
 };
+
+/** Whether this reference is one the caller sends as an explicit `null` when the column is NULL. */
+function isExplicitNullReference(fieldRef: ResolvedFieldReference): boolean {
+  return fieldRef.nullAttributeRepresentation === "explicit";
+}
 
 type ResolvedValue = {
   value: any;
@@ -523,16 +559,43 @@ function buildFieldEqualsFilter(
   return wrapRelations(fieldRef.relations, { [fieldName]: { equals: value } });
 }
 
-function buildFieldDirectOrInFilter(
+function buildDirectOrInLeaf(
   fieldRef: ResolvedFieldReference,
   values: Value[]
 ): PrismaFilter {
   const fieldName = getLeafField(fieldRef.path);
-  const baseFilter =
-    values.length === 1
-      ? { [fieldName]: values[0] }
-      : { [fieldName]: { in: values } };
-  return wrapRelations(fieldRef.relations, baseFilter);
+  return values.length === 1
+    ? { [fieldName]: values[0] }
+    : { [fieldName]: { in: values } };
+}
+
+function buildFieldDirectOrInFilter(
+  fieldRef: ResolvedFieldReference,
+  values: Value[]
+): PrismaFilter {
+  return wrapRelations(fieldRef.relations, buildDirectOrInLeaf(fieldRef, values));
+}
+
+/**
+ * `field IS NOT NULL AND <leaf>`, so a NULL column makes the whole thing definitely FALSE rather
+ * than merely unmatched — which is what lets an enclosing `NOT` include the row.
+ *
+ * Prisma has no three-valued logic to expose: a record either matches a `where` or it does not.
+ * That is exactly why the guard has to be explicit — `{ NOT: { field: { equals: "x" } } }` leans on
+ * the generated SQL's UNKNOWN, which excludes the record under both polarities, and an
+ * explicit-null attribute needs the negation to include it.
+ *
+ * The guard is ANDed with the leaf BEFORE the relation wrapping, so both halves are evaluated
+ * against the same element rather than against two independently-matched ones.
+ */
+function guardedFieldFilter(
+  fieldRef: ResolvedFieldReference,
+  leaf: PrismaFilter
+): PrismaFilter {
+  const fieldName = getLeafField(fieldRef.path);
+  return wrapRelations(fieldRef.relations, {
+    AND: [{ [fieldName]: { not: null } }, leaf],
+  });
 }
 
 function buildMembershipFilter(
@@ -540,15 +603,30 @@ function buildMembershipFilter(
   values: Value[]
 ): PrismaFilter {
   const nonNullValues = values.filter((value) => value !== null);
-  if (nonNullValues.length !== values.length) {
-    assertNullOperandTranslatable("a null element in an `in` list");
+  const carriesNull = nonNullValues.length !== values.length;
+  if (carriesNull) {
+    assertNullOperandTranslatable(
+      "a null element in an `in` list",
+      fieldRef.nullAttributeRepresentation
+    );
   }
   const filters: PrismaFilter[] = [];
 
   if (nonNullValues.length > 0 || values.length === 0) {
-    filters.push(buildFieldDirectOrInFilter(fieldRef, nonNullValues));
+    // Without a null element nothing has made the membership definite yet: a NULL column is
+    // dropped by `{ in: [...] }` under BOTH polarities, while CEL compares a null VALUE against
+    // each element and gets a definite false, so its negation is TRUE. With a null element the
+    // `[null]` disjunct below already settles it.
+    filters.push(
+      carriesNull || !isExplicitNullReference(fieldRef)
+        ? buildFieldDirectOrInFilter(fieldRef, nonNullValues)
+        : guardedFieldFilter(
+            fieldRef,
+            buildDirectOrInLeaf(fieldRef, nonNullValues)
+          )
+    );
   }
-  if (nonNullValues.length !== values.length) {
+  if (carriesNull) {
     filters.push(buildFieldDirectOrInFilter(fieldRef, [null]));
   }
 
@@ -593,8 +671,11 @@ let nullRepresentation: NullAttributeRepresentation = "explicit";
  * `IS NOT NULL` back into a NULL-selecting predicate. Rejecting every null operand is correct
  * under any nesting; narrowing it requires negation-parity tracking.
  */
-function assertNullOperandTranslatable(context: string): void {
-  if (nullRepresentation === "omitted") {
+function assertNullOperandTranslatable(
+  context: string,
+  declared?: NullAttributeRepresentation
+): void {
+  if ((declared ?? nullRepresentation) === "omitted") {
     throw new Error(
       `Cannot translate ${context} under nullAttributeRepresentation "omitted": a NULL column ` +
         "sends no attribute, so Cerbos evaluates the comparison as a missing-attribute error " +
@@ -1120,6 +1201,7 @@ function resolveFieldReference(
       path: field ? [field] : remainingParts,
       relations,
       valueType: activeConfig.valueType,
+      nullAttributeRepresentation: activeConfig.nullAttributeRepresentation,
     };
   }
 
@@ -1127,6 +1209,7 @@ function resolveFieldReference(
   return {
     path: [activeConfig?.field || reference],
     valueType: activeConfig?.valueType,
+    nullAttributeRepresentation: activeConfig?.nullAttributeRepresentation,
   };
 }
 
@@ -2239,7 +2322,28 @@ function buildComparisonFilter(
   );
 
   if (value === null) {
-    assertNullOperandTranslatable(`\`${operator}\` against a null operand`);
+    assertNullOperandTranslatable(
+      `\`${operator}\` against a null operand`,
+      fieldRef.nullAttributeRepresentation
+    );
+  }
+
+  // An attribute the caller sends as an explicit null holds a null VALUE in CEL, so equality
+  // against a non-null operand is a definite FALSE and inequality a definite TRUE. Prisma leans
+  // on SQL's UNKNOWN for both, which drops the row under either polarity, so the presence of the
+  // column has to become part of the predicate. Confined to the equality family: an ordering
+  // comparison against a null receiver is a no-overload error in CEL, which denies exactly as the
+  // dropped row does.
+  if (value !== null && isExplicitNullReference(fieldRef)) {
+    const fieldName = getLeafField(fieldRef.path);
+    if (operator === "eq") {
+      return guardedFieldFilter(fieldRef, { [fieldName]: { equals: value } });
+    }
+    if (operator === "ne") {
+      return {
+        NOT: guardedFieldFilter(fieldRef, { [fieldName]: { equals: value } }),
+      };
+    }
   }
 
   if (typeof value === "number" && !Number.isInteger(value)) {
@@ -2354,11 +2458,44 @@ function buildFieldToFieldFilter(
 
   const leftField = getLeafField(left.path);
   const rightField = getLeafField(right.path);
-  return {
-    [leftField]: {
-      [prismaOperator]: { _ref: rightField, _container: container },
-    },
-  };
+  const fieldReference = { _ref: rightField, _container: container };
+
+  // Two explicit nulls are EQUAL in CEL, and a null against a value is definitely NOT equal.
+  // A bare field reference gives UNKNOWN for both, which drops the row under either polarity.
+  const leftExplicit = isExplicitNullReference(left);
+  const rightExplicit = isExplicitNullReference(right);
+  // Mixing the two conventions across one comparison has no faithful rendering. The declared side
+  // needs a definite answer for its NULL (CEL holds a null VALUE); the undeclared side needs
+  // UNKNOWN for its NULL (a missing attribute, which CEL denies under both polarities). A definite
+  // predicate returns rows the PDP refuses; a plain one drops rows the PDP allows. Refuse it
+  // rather than pick a direction — declare both attributes, or neither.
+  if (leftExplicit !== rightExplicit && (operator === "eq" || operator === "ne")) {
+    throw new Error(
+      `Cannot translate \`${operator}\` between two columns under mixed null conventions: ` +
+        "cannot compare an attribute declared explicit-null with one on the omitted convention: the omitted side is UNKNOWN for a NULL column while the declared side is definite, and no single predicate is both. Declare nullAttributeRepresentation on both mapper entries, or on neither."
+    );
+  }
+  if (leftExplicit && rightExplicit && (operator === "eq" || operator === "ne")) {
+    const present: PrismaFilter[] = [];
+    if (leftExplicit) {
+      present.push({ [leftField]: { not: null } });
+    }
+    if (rightExplicit) {
+      present.push({ [rightField]: { not: null } });
+    }
+    const equality: PrismaFilter =
+      leftExplicit && rightExplicit
+        ? {
+            OR: [
+              { AND: [{ [leftField]: null }, { [rightField]: null }] },
+              { AND: [...present, { [leftField]: { equals: fieldReference } }] },
+            ],
+          }
+        : { AND: [...present, { [leftField]: { equals: fieldReference } }] };
+    return operator === "eq" ? equality : { NOT: equality };
+  }
+
+  return { [leftField]: { [prismaOperator]: fieldReference } };
 }
 
 /**

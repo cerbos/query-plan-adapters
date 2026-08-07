@@ -1322,6 +1322,119 @@ resourcePolicy:
         match:
           expr: '!(R.attr.owner == null)'
 
+    # ==================== explicit null against a NON-null constant ====================
+    # `null-eq`/`null-ne` above compare the explicit-null attribute only AGAINST NULL, where
+    # SQL's IS NULL and CEL's null-valued comparison agree. Against a non-null constant they
+    # do not: CEL holds a null VALUE under this convention, so `null != "x"` is TRUE and the
+    # row is ALLOWED, while `NULL != 'x'` is UNKNOWN in SQL and excludes it. A SQL-backed
+    # adapter therefore returns FEWER rows than the PDP permits — safe in direction, but the
+    # id sets do not match, which is what this corpus exists to enforce
+    # (cerbos/query-plan-adapters#308).
+    #
+    # `optional-ne` is the only other comparison against a non-null constant and it uses
+    # `aOptionalString`, the OMITTED-convention attribute, where UNKNOWN and a
+    # missing-attribute error agree. So these two are the only actions that reach the
+    # explicit convention's behaviour against a constant.
+    #
+    # NULL owners a2/a4/a8/c2/e1 are the witnesses; a3's owner IS "x", so the oracle is
+    # neither empty nor total under either polarity.
+    - actions: ["null-value-ne-const"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.owner != "x"'
+
+    # The negated-equality spelling. It takes a different branch from `ne`: the planner emits
+    # `not(eq(...))` verbatim, so an adapter that fixes only the `ne` leaf still under-grants
+    # here. `!(null == "x")` is `!false` = TRUE in CEL; `NOT (NULL = 'x')` stays UNKNOWN.
+    - actions: ["null-value-not-eq-const"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(R.attr.owner == "x")'
+
+    # Membership without a null ELEMENT, negated. The `in-null-elem-*` probes above all carry a
+    # null in the list, which already forces the `IN (...) OR IS NULL` disjunction and makes the
+    # predicate definite; a list of plain constants does not, so `NOT (col IN (...))` is UNKNOWN
+    # for a NULL column and drops it. CEL compares a null VALUE against each element — false, not
+    # an error — so the negation is TRUE. a3 ("x") and b1 ("one_two") are the two matches, so the
+    # oracle is 18 of 20 and the naive translation returns 13.
+    #
+    # This is why the rule is stated over the EQUALITY FAMILY rather than over `ne`: `eq`, `ne`
+    # and `in` are the operators CEL evaluates to a definite boolean over a null operand, so they
+    # are exactly the ones whose SQL has to be definite. `lt`/`le`/`gt`/`ge` and the string
+    # operators raise a no-overload or no-such-member error on a null receiver, which denies under
+    # both polarities — the same thing UNKNOWN already does — so they must keep propagating it.
+    - actions: ["null-value-not-in-const"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(R.attr.owner in ["x", "one_two"])'
+
+    # Column-versus-column, both explicit-null. Two null VALUES are EQUAL in CEL, so the PDP
+    # allows the row; `a = b` is UNKNOWN in SQL and excludes it. This is a different render
+    # from the constant case: the both-NULL row has to MATCH, which no amount of `OR col IS NULL`
+    # on one side expresses. It is deliberately NOT spelled as a null-safe equality operator —
+    # see `null-value-f2f-mixed` below, where the rendering has to tell "both sides declared"
+    # from "one side declared", and a symmetric operator cannot.
+    #
+    # `coOwner` is the explicit-null alias of the `scope` column, added for this action.
+    # It is NOT a second alias of `aOptionalString`: comparing a column with itself is TRUE
+    # for all 20 seeds, and the degeneracy guard forbids a total oracle. Against `scope` the
+    # only row where both sides are NULL is e1, and no row holds the same non-null value in
+    # both columns, so the oracle is exactly {e1} — one row, but the only row the naive
+    # translation loses.
+    #
+    # `field-to-field` does not reach this: it compares `aString` with `aOptionalString`, and
+    # `aOptionalString` is on the OMITTED convention, where UNKNOWN and a missing-attribute
+    # error agree.
+    - actions: ["null-value-f2f"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.owner == R.attr.coOwner'
+
+    # The MIXED field-to-field: one side declared explicit-null, the other on the corpus default.
+    # This is the shape that punishes a definite rendering applied too eagerly. `scope` is omitted
+    # when NULL, so a NULL there is a missing attribute and CEL denies under BOTH polarities —
+    # only UNKNOWN reproduces that. An adapter that makes the comparison definite because ONE side
+    # is declared turns `owner != scope` into TRUE for e1 (both columns NULL) and returns a row the
+    # PDP refuses. That is an OVER-grant, the direction the rest of this group is safe from.
+    #
+    # Oracle: a7 and e1 are denied (scope missing), no row holds the same value in both columns, so
+    # the other 18 are allowed. The definite-everywhere rendering returns 19.
+    - actions: ["null-value-f2f-mixed"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.owner != R.attr.scope'
+
+    # The same divergence reached through the value-list macro fold (#295/#301), under a
+    # negation. `manyTeams` has eleven elements, so the planner ships the lambda with a
+    # literal value-list collection rather than an unrolled or-chain; the fold turns it into a
+    # chain of equalities, every one of which is UNKNOWN for a NULL column, so the enclosing
+    # NOT excludes the row. CEL compares a null VALUE against each element — false, not an
+    # error — so `!exists` is TRUE and the PDP allows it.
+    #
+    # This is the #315/#316 lesson restated for the null convention: the guard has to live in
+    # the shared comparison construction, not in the operators that happen to be looked at.
+    # `pv-exists`/`pv-all` do not reach it — they use `aOptionalString`, the omitted-convention
+    # attribute, where the NULL rows are missing-attribute errors that deny under both
+    # polarities. Allowed: every seed whose owner matches no element — a1/a6/a9/b2 match
+    # ("set"/""/"same"/"%_o") and are denied, so the oracle is 16 of 20 and the naive fold
+    # returns 11.
+    - actions: ["null-value-pv-not-exists"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!P.attr.manyTeams.exists(t, R.attr.owner == t)'
+
     # The SAME shape against `aOptionalString`, which follows the corpus DEFAULT convention:
     # a NULL column sends NO attribute at all. CEL then raises a missing-attribute error for
     # every NULL row, and `"set" == null` is false for every non-NULL row, so check() denies
