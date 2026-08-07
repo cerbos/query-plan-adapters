@@ -103,6 +103,21 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` d
 
 Chroma metadata filters are limited to flat scalar comparisons and membership. Nested collections, field-to-field and arithmetic expressions, string helpers, hierarchy/timestamp operations, ternaries, nullable inequality, and other shapes that cannot be represented faithfully throw before a filter is returned.
 
+## Mapping hazards
+
+The conformance contract above proves the *plan* side — given a policy shape, does the filter select the documents `check()` allows. The other half is the *mapping*: **the documents the filter reads must be the documents the application put into the resource attributes.** Six ways that can break are catalogued in the shared corpus, and every adapter has to record a position on each of them.
+
+This adapter **builds no subquery**, and has nothing to build one over: a Chroma `where` clause compares flat scalar metadata on the document being matched. Every shape that would need to reach a second record is already in the fail-closed set above.
+
+| Hazard | Position | Mechanism to check |
+|---|---|---|
+| Filtered association | Not applicable — no subquery | — |
+| Default scope on the target model | Not applicable — no second collection is read | — |
+| Subtype discrimination | **Caller-owned** | The Chroma collection you pass the `where` clause to. The adapter is handed a plan, never a collection, so it cannot check that the collection you query is the one whose metadata became the resource attributes. If one collection mixes document kinds, add the discriminating metadata key to the `where` yourself |
+| To-one relation used as a collection | Not applicable — a metadata key holds exactly what the application stored | — |
+| Composite association key | Not applicable — no join, so no key to compose | — |
+| Absent to-one parent | **Rejected** — `w1-all-chain`, `w1-not-exists-chain` and the eight other chained shapes are in `adapterUnsupported` and throw | None — Chroma metadata is flat, so a chain has nowhere to resolve to and the adapter refuses the plan rather than flattening it ([#309](https://github.com/cerbos/query-plan-adapters/issues/309)) |
+
 ## Requirements
 
 - Cerbos > v0.16
