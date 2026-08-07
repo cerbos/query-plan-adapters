@@ -53,6 +53,16 @@ jobs:
       # The adversarial corpus is a property of the translator, not of the Node runtime, so it
       # runs on the baseline leg only — the same single execution the standalone `adversarial`
       # job used to perform, minus the duplicated checkout, Cerbos install and `npm install`.
-      - name: Run adversarial differential suite
+      - name: Run adversarial differential suite (SQLite)
         if: matrix.node-version == '22'
         run: npm run test:adversarial
+
+      # The store IS a translator property, unlike the Node runtime: `float(53)` casts, boolean
+      # CASE arms, timestamp binding and division by zero all evaluate differently on PostgreSQL,
+      # and before this leg existed PostgreSQL support was pinned at the rendered-string level
+      # (cerbos/query-plan-adapters#320). It stays on the baseline Node leg for the same reason
+      # the SQLite one does; the container comes from testcontainers, which needs no service
+      # block on ubuntu-latest.
+      - name: Run adversarial differential suite (PostgreSQL)
+        if: matrix.node-version == '22'
+        run: npm run test:adversarial:postgres

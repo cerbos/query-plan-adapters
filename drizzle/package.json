@@ -41,20 +41,24 @@
     "prepare": "npm run build",
     "prepublishOnly": "npm test",
     "version": "git add -A src",
-    "test": "cerbos run --log-level=error --set=storage.disk.directory=../policies --set=telemetry.disabled=true -- jest src/index.test.ts src/postgresql.test.ts",
+    "test": "cerbos run --log-level=error --set=storage.disk.directory=../policies --set=telemetry.disabled=true -- jest src/index.test.ts src/dialect-rendering.test.ts",
     "test:adversarial": "cerbos run --log-level=error --set=server.grpcListenAddr=:3621 --set=server.httpListenAddr=:3620 --set=storage.disk.directory=../conformance/policies --set=telemetry.disabled=true -- jest --config jest.adversarial.config.js",
+    "test:adversarial:postgres": "ADAPTER_TEST_DB=postgres npm run test:adversarial",
     "cerbos": "cerbos server --config=./cerbos-config.yaml"
   },
   "engines": {
     "node": ">=22.0.0"
   },
   "devDependencies": {
+    "@testcontainers/postgresql": "^12.1.0",
     "@types/better-sqlite3": "^7.6.8",
     "@types/jest": "^30.0.0",
     "@types/node": "^24.0.0",
+    "@types/pg": "^8.20.4",
     "better-sqlite3": "^12.0.0",
     "drizzle-orm": "^0.45.0",
     "jest": "^30.0.0",
+    "pg": "^8.22.0",
     "rimraf": "^6.0.0",
     "ts-jest": "^29.4.6",
     "ts-node": "^10.9.2",

@@ -65,6 +65,16 @@ jobs:
       # checkout, Cerbos install and `npm install`. It runs after the main suite: both suites
       # push their own SQLite file (dev.db vs dev-adversarial.db) and generate into their own
       # client output directory, so the ordering is what keeps them from resetting each other.
-      - name: Run adversarial differential suite
+      - name: Run adversarial differential suite (SQLite)
         if: matrix.node-version == '22'
         run: npm run test:adversarial:v${{ matrix.prisma-version }}
+
+      # The provider IS a translator property, unlike the Node runtime — and unlike the Prisma
+      # major above it, which is an ENGINE matrix. A fractional threshold against an `Int` column,
+      # a LIKE metacharacter, a real `timestamp` rather than milliseconds since the epoch: all of
+      # them evaluate differently here and were unproven while the corpus ran on SQLite alone
+      # (cerbos/query-plan-adapters#320). The container comes from testcontainers, started by the
+      # suite's own jest globalSetup, so it needs no service block on ubuntu-latest.
+      - name: Run adversarial differential suite (PostgreSQL)
+        if: matrix.node-version == '22'
+        run: npm run test:adversarial:postgres:v${{ matrix.prisma-version }}

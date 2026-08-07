@@ -28,11 +28,70 @@ import { prisma } from "./test-setup.adversarial";
  * evaluation for any row, the mismatch surfaces mechanically. See `conformance/README.md` for the
  * oracle recipe (NULL-as-missing-attribute, the degeneracy guard) — this file only owns the
  * Prisma-specific translation (seeding, field mapping, executing the query).
+ *
+ * The whole corpus is replayed against every store this adapter is proved on, one store per run,
+ * selected with `ADAPTER_TEST_DB` (`sqlite` by default, `postgres` for the container-backed leg —
+ * see `jest.globalSetup.adversarial.js`). The Prisma major and the store are independent
+ * dimensions: v6/v7 is an ENGINE matrix, and an engine matrix says nothing about how a provider
+ * coerces a fractional threshold against an `Int` column, escapes a LIKE metacharacter, or
+ * compares a real `timestamp` rather than milliseconds since the epoch
+ * (cerbos/query-plan-adapters#320).
  */
 
 const cerbos = new Cerbos("127.0.0.1:3593", { tls: false });
 
 const CONFORMANCE_DIR = path.join(__dirname, "..", "..", "conformance");
+const SCHEMA_DIR = path.join(__dirname, "..", "prisma");
+
+const STORE_NAMES = ["sqlite", "postgres"] as const;
+type StoreName = (typeof STORE_NAMES)[number];
+
+function selectedStoreName(): StoreName {
+  const requested = process.env["ADAPTER_TEST_DB"] ?? "sqlite";
+  // jest.adversarial.config.js rejects an unknown value before jest resolves this module; the
+  // repeat here is what keeps the assertion below reading against a value this file trusts.
+  if (!STORE_NAMES.includes(requested as StoreName)) {
+    throw new Error(
+      `Unknown ADAPTER_TEST_DB "${requested}": expected one of ${STORE_NAMES.join(", ")}`
+    );
+  }
+  return requested as StoreName;
+}
+
+const STORE_NAME = selectedStoreName();
+
+/**
+ * The four adversarial schemas, which must hold one data model between them.
+ *
+ * A generated Prisma client bakes in its provider and its major, so proving the corpus on
+ * (Prisma 6, Prisma 7) x (SQLite, PostgreSQL) needs four schema files. They are only a matrix
+ * over the same models — a column that drifts in one of them would seed a different row shape on
+ * that leg while every assertion in this file stayed identical, which is the projection trap
+ * conformance/README.md describes applied to the schema instead of the seeds.
+ */
+const ADVERSARIAL_SCHEMAS = [
+  "schema.adversarial.prisma",
+  "schema.adversarial.v6.prisma",
+  "schema.adversarial.pg.prisma",
+  "schema.adversarial.pg.v6.prisma",
+] as const;
+
+/**
+ * A schema's `model` blocks, with comments, the generator/datasource blocks and all incidental
+ * whitespace removed — everything that legitimately differs between the four.
+ */
+function modelBlocks(schema: string): string {
+  const withoutComments = schema
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("//"))
+    .join("\n");
+  const models = withoutComments.match(/^model\s[\s\S]*$/m) ?? [];
+  return models
+    .join("\n")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n\s*\n/g, "\n")
+    .trim();
+}
 
 interface Tag {
   id: string;
@@ -328,9 +387,11 @@ const MANIFEST_ACTIONS = new Set([
 
 const DEGENERACY_GUARD_ACTIONS = [
   "vf-le",
-  // Prisma cannot express the % needle (see the liveness probe below), so the LIKE
-  // metacharacter group is guarded by the escape spelling it does translate.
-  "like-backslash",
+  // Prisma escapes no LIKE metacharacter at all, so every needle-carrying shape in that group is
+  // a liveness probe below. `[` is the one metacharacter it can leave alone — it is literal on
+  // every provider but SQL Server, which Prisma's own guard only rejects for hierarchy prefixes —
+  // so like-bracket is what carries the group's oracle comparison.
+  "like-bracket",
   "all-on-empty",
   "pv-exists",
   "pv-all",
@@ -349,8 +410,11 @@ const DEGENERACY_GUARD_ACTIONS = [
  * cerbos/query-plan-adapters#324.
  */
 const DEGENERACY_LIVENESS_PROBES = [
-  // Prisma emits LIKE with no ESCAPE clause, so a % needle throws.
+  // Prisma emits LIKE with no ESCAPE clause, so a % needle throws — and so does a backslash one,
+  // which is the default escape character on PostgreSQL and MySQL and literal on SQLite
+  // (cerbos/query-plan-adapters#320).
   "like-percent",
+  "like-backslash",
   // every() cannot require the intermediate hop of a chain, and a >= 0 relation count has no
   // none/some spelling — the two chain shapes Prisma throws on.
   "w1-all-chain",
@@ -678,7 +742,44 @@ function planCarriesNullLiteral(operand: unknown): boolean {
   return Array.isArray(operands) && operands.some(planCarriesNullLiteral);
 }
 
-describe("adversarial conformance corpus", () => {
+describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
+  // Anti-vacuity for the store split: every other assertion in this file is identical on both
+  // legs, so a PostgreSQL leg that silently fell back to SQLite would pass the entire suite while
+  // proving nothing about PostgreSQL — the exact gap #320 reports. Ask the connection the suite
+  // actually queries through which engine it is. Each spelling is rejected by the other engine, so
+  // this fails in both directions rather than only when the container is missing.
+  test("executes against the store ADAPTER_TEST_DB selects", async () => {
+    const rows = await prisma.$queryRawUnsafe<{ banner: string }[]>(
+      STORE_NAME === "postgres"
+        ? "select version() as banner"
+        : "select 'SQLite ' || sqlite_version() as banner"
+    );
+    expect(rows[0]?.banner?.split(" ")[0]).toBe(
+      STORE_NAME === "postgres" ? "PostgreSQL" : "SQLite"
+    );
+  });
+
+  test("every adversarial schema declares the same data model", () => {
+    const [reference, ...rest] = ADVERSARIAL_SCHEMAS.map((name) => ({
+      name,
+      models: modelBlocks(
+        fs.readFileSync(path.join(SCHEMA_DIR, name), "utf8")
+      ),
+    }));
+    if (!reference) {
+      throw new Error("ADVERSARIAL_SCHEMAS is empty");
+    }
+    // Guard the guard: a regex that stopped matching would make every schema compare equal on an
+    // empty string.
+    expect(reference.models).toContain("model AdversarialResource");
+    for (const schema of rest) {
+      expect({ name: schema.name, models: schema.models }).toEqual({
+        name: schema.name,
+        models: reference.models,
+      });
+    }
+  });
+
   test("adapter-supported expected shapes move from throwing to oracle", () => {
     const promotedAction = "promoted-shape";
     const classification = classifyActionsForAdapter(
@@ -744,7 +845,7 @@ describe("adversarial conformance corpus", () => {
     expect(MANIFEST_ACTIONS.size).toBe(143);
     // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
     // gained or lost has to be re-triaged here rather than joining the suite unnoticed.
-    expect(THROWING_ACTIONS).toHaveLength(47);
+    expect(THROWING_ACTIONS).toHaveLength(48);
     expect(misclassified).toEqual([]);
     expect(
       [...PRISMA_SUPPORTED_EXPECTED].filter(

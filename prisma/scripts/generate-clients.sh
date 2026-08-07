@@ -5,6 +5,9 @@ generate_v7_clients() {
   echo "Generating Prisma v7 clients..."
   node node_modules/prisma/build/index.js generate
   node node_modules/prisma/build/index.js generate --schema=prisma/schema.adversarial.prisma
+  # The provider is baked into a generated client, so the PostgreSQL adversarial leg
+  # (cerbos/query-plan-adapters#320) needs its own. Generation touches no database.
+  node node_modules/prisma/build/index.js generate --schema=prisma/schema.adversarial.pg.prisma
 }
 
 restore_v7_client_package() {
@@ -24,6 +27,7 @@ generate_v6_clients() {
 
   node node_modules/prisma-v6/build/index.js generate --schema=prisma/schema.v6.prisma
   node node_modules/prisma-v6/build/index.js generate --schema=prisma/schema.adversarial.v6.prisma
+  node node_modules/prisma-v6/build/index.js generate --schema=prisma/schema.adversarial.pg.v6.prisma
 
   restore_v7_client_package
   trap - EXIT

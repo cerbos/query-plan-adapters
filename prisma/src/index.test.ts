@@ -8037,17 +8037,21 @@ describe("Hierarchy descendentOf", () => {
 
 // Every hierarchy relationship that narrows a column with a prefix emits a Prisma
 // `startsWith`, which compiles to `LIKE` with no `ESCAPE` clause: `%` and `_` in the
-// constant hierarchy would match as wildcards and admit rows the PDP denies. `[` is unsafe
-// even where an `ESCAPE` clause exists, because SQL Server opens a character class on it.
-// Both prefix-emitting paths (ancestorOf/descendentOf and overlaps) must throw.
+// constant hierarchy would match as wildcards and admit rows the PDP denies. `\` is unsafe
+// because PostgreSQL and MySQL read it as the default escape character where SQLite has none,
+// so one prefix means two things (cerbos/query-plan-adapters#320). `[` is unsafe even where an
+// `ESCAPE` clause exists, because SQL Server opens a character class on it. Both
+// prefix-emitting paths (ancestorOf/descendentOf and overlaps) must throw.
 describe("Hierarchy prefix LIKE metacharacters", () => {
   const likeMetacharacterError =
-    "Cannot translate hierarchy prefix matching with LIKE metacharacters (%, _ or [): " +
-    "Prisma emits LIKE without an ESCAPE clause, and [ opens a character class on SQL Server even with one";
+    "Cannot translate hierarchy prefix matching with LIKE metacharacters (%, _, \\ or [): " +
+    "Prisma emits LIKE without an ESCAPE clause, \\ is the default escape character on " +
+    "PostgreSQL and MySQL, and [ opens a character class on SQL Server even with one";
 
   const metacharacterHierarchies: [string, string][] = [
     ["percent", "50%:a"],
     ["underscore", "50_:a"],
+    ["backslash", "50\\:a"],
     ["bracket", "[env]:prod"],
   ];
 
