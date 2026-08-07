@@ -493,7 +493,6 @@
         "pgx": "'filter' produces a collection rather than a boolean; it only translates inside size() or hasIntersection(), which give the collection a scalar meaning",
         "elasticsearch-java": "Unexpected lambda expression in leaf operand",
         "spring-data": "filter() returns a list, not a boolean, so it cannot be a condition on its own; only size(filter(...)) has a boolean meaning",
-        "activerecord": "a filtered relation cannot be used as a condition: CEL collection expressions such as filter() and map() evaluate to a list, not to a boolean",
         "activerecord": "a filtered relation cannot be used as a condition: CEL collection expressions such as filter() and map() evaluate to a list, not to a boolean"
       }
     },
@@ -511,7 +510,6 @@
         "pgx": "'map' produces a collection rather than a boolean; it only translates inside size() or hasIntersection(), which give the collection a scalar meaning",
         "elasticsearch-java": "Unexpected lambda expression in leaf operand",
         "spring-data": "Unexpected lambda() expression in leaf operand of map",
-        "activerecord": "a projected relation cannot be used as a condition: CEL collection expressions such as filter() and map() evaluate to a list, not to a boolean",
         "activerecord": "a projected relation cannot be used as a condition: CEL collection expressions such as filter() and map() evaluate to a list, not to a boolean"
       }
     }
@@ -531,7 +529,6 @@
         "pgx": "missing-attribute error",
         "elasticsearch-java": "explicit null value from a missing field",
         "spring-data": "missing-attribute error",
-        "activerecord": "Cannot translate a null constant with null_attribute_representation: :omitted",
         "activerecord": "Cannot translate a null constant with null_attribute_representation: :omitted"
       },
       "relatedIssue": "https://github.com/cerbos/query-plan-adapters/issues/302"

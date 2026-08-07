@@ -103,27 +103,58 @@ RSpec.describe "adversarial conformance" do
 
   # --- the degeneracy guard (conformance/README.md, "The degeneracy guard") ------------------
   #
-  # A sample of the actions that this adapter COMPARES with the oracle, one for each group of
-  # hostile shapes that it can express. Each one is asserted to be in the oracle set, so moving
-  # an action into adapterUnsupported fails this list instead of emptying it without a word.
+  # One action for each group of hostile shapes in policies/adversarial.yaml that this adapter
+  # COMPARES with the oracle. Each one is asserted to be in the oracle set, so moving an action
+  # into adapterUnsupported fails this list instead of emptying it without a word.
   #
-  # The list belongs to this adapter and is not a copy of another harness. An entry naming a
-  # shape that this adapter refuses would guard nothing at all
-  # (cerbos/query-plan-adapters#324).
+  # The list belongs to this adapter. Do not copy it from another harness: this adapter compares
+  # 128 of the 133 actions, and a list built for an adapter that compares fewer would leave most
+  # of the groups here with no guard at all (cerbos/query-plan-adapters#324).
+  #
+  # Each entry has an oracle that is not empty and not all 20 seeds. Eight actions cannot join
+  # the list, because their oracle is degenerate BY CONSTRUCTION and no adapter can change that:
+  # in-empty, p-double-frac, arith-add-eq-frac, nan-ord-le, size-huge-gt, w1-size-zero-chain and
+  # w1-not-size-chain each allow nothing, and size-huge-lt allows every seed. Their groups are
+  # guarded by a sibling below.
   DEGENERACY_GUARD_ACTIONS = %w[
     vf-le
+    in-single
     like-percent
+    cs-eq
+    unicode-eq
+    double-threshold
     all-on-empty
-    pv-exists
-    pv-all
+    outer-attr-depth2
+    triple-negation
+    optional-ne
+    field-to-field
+    size-threshold
+    ternary-nested
+    f2f-contains
+    arith-add
+    p-deep-nest
+    n-not-all-null
+    cr-contains
+    cr-div-zero-ne
+    cr-div-neg-zero
+    cr-size-frac-ge
+    nan-ord-ternary
+    hier-ancestor-ff
+    hier-meta-like
+    ts-eq
     null-eq
     null-ne
+    in-null-elem-mixed
+    in-var-var
+    macro-depth3-all
+    pv-exists
+    pv-all
+    w2-outer-relation
     w1-all-chain
     w1-not-exists-chain
     w1-size-nonneg-chain
     w1-not-in-chain
     w1-not-hasint-chain
-    cr-div-neg-zero
   ].freeze
 
   # Shapes that this adapter REFUSES, kept because their group has no compared member here and
@@ -131,9 +162,12 @@ RSpec.describe "adversarial conformance" do
   # asserted NOT to be in the oracle set, so a shape that the adapter later learns to translate
   # must move up into the list above rather than stay a weaker probe.
   #
-  # Column division against a second column is the whole group for this adapter: cr-div-neg-zero
-  # above is a CONSTANT denominator, so nothing in the guard proper reaches a row-dependent one.
-  LIVENESS_ONLY_PROBES = %w[cr-div-other-column].freeze
+  # Both come from the arithmetic edge probes. The guard proper reaches that group through
+  # cr-div-zero-ne and cr-div-neg-zero, but each of those divides by a column BY ITSELF or by a
+  # constant. Two sub-shapes are left with nothing compared: a denominator that is a DIFFERENT
+  # column, and arithmetic composed ON a division. cr-div-then-add-ne is the second sub-shape
+  # again, so one action speaks for it.
+  LIVENESS_ONLY_PROBES = %w[cr-div-other-column cr-div-then-add].freeze
 
   describe "corpus" do
     # This test is a control and not a formality. A new action in the corpus must not go past
@@ -147,6 +181,10 @@ RSpec.describe "adversarial conformance" do
       # Every one of these carries a pinned message, so a throwing action that appears or
       # disappears must be triaged here and cannot join the suite quietly.
       expect(ConformanceCorpus::THROWING_ACTIONS.size).to eq(13)
+      # The guard has one entry for each group of hostile shapes. A new group arrives with a
+      # new action, which the count above already stops. This number makes the second half of
+      # that decision explicit: name a representative for the new group here.
+      expect(DEGENERACY_GUARD_ACTIONS.size).to eq(38)
     end
 
     # Adding a throwing action without a pinned message must fail the run and must not turn the
