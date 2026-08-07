@@ -252,6 +252,39 @@ const MANIFEST_ACTIONS = new Set([
   ...(actionsFile.knownDivergences ?? []).map((entry) => entry.action),
 ]);
 
+// -- the degeneracy guard (conformance/README.md, "The degeneracy guard") -----------------------
+//
+// A representative sample of the actions this adapter ORACLE-COMPARES, one per hostile group.
+// Drizzle translates every shape in the sample, so it has no liveness-only probes: each entry is
+// asserted to be in `ORACLE_ACTIONS` (cerbos/query-plan-adapters#324), which turns moving one
+// into `adapterUnsupported` into a failure here rather than a silent no-op.
+//
+// w1-size-zero-chain and w1-not-size-chain are deliberately absent: their oracles are empty by
+// CONSTRUCTION (no seed holds a to-one parent with zero children), so they cannot satisfy a
+// non-empty assertion. Their siblings below carry it for that group.
+
+const DEGENERACY_GUARD_ACTIONS = [
+  "vf-le",
+  "like-percent",
+  "all-on-empty",
+  "pv-exists",
+  "pv-all",
+  "null-eq",
+  "null-ne",
+  // The absent to-one parent (#309/#315/#316): the five discriminating chain shapes with a
+  // non-empty oracle.
+  "w1-all-chain",
+  "w1-not-exists-chain",
+  "w1-size-nonneg-chain",
+  "w1-not-in-chain",
+  "w1-not-hasint-chain",
+  // Column arithmetic under a division (#311).
+  "cr-div-neg-zero",
+  "cr-div-other-column",
+  "cr-div-then-add",
+  "cr-div-then-add-ne",
+] as const;
+
 // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") --------
 //
 // Read from conformance/derived-fields.json rather than restated here. The same value feeds the
@@ -597,6 +630,16 @@ async function oracleAllowedIds(action: string): Promise<string[]> {
   return ids.sort();
 }
 
+/** The degeneracy guard's per-action assertion, labelled so a failure names the action. */
+async function expectNonDegenerateOracle(action: string): Promise<void> {
+  const ids = await oracleAllowedIds(action);
+  expect({
+    action,
+    nonEmpty: ids.length > 0,
+    nonTotal: ids.length < SEEDS.length,
+  }).toEqual({ action, nonEmpty: true, nonTotal: true });
+}
+
 // -- adapter execution through the public queryPlanToDrizzle path --
 
 async function adapterFilteredIds(
@@ -837,19 +880,11 @@ describe("adversarial conformance corpus", () => {
   });
 
   test("oracle is not degenerate", async () => {
-    // Guard the guard: at least one action must produce a non-empty, non-total oracle set,
+    // Guard the guard: each of these actions must produce a non-empty, non-total oracle set,
     // otherwise the differential comparison could pass vacuously (e.g. PDP denying all).
-    // w1-size-zero-chain and w1-not-size-chain are deliberately absent: their oracles are
-    // empty by construction (no seed holds a to-one parent with zero children), so they
-    // cannot satisfy this guard. Their siblings below carry the anti-vacuity assertion for
-    // that group.
-    for (const action of ["vf-le", "like-percent", "all-on-empty", "pv-exists", "pv-all", "null-eq", "null-ne",
-      "w1-all-chain", "w1-not-exists-chain", "w1-size-nonneg-chain",
-      "w1-not-in-chain", "w1-not-hasint-chain",
-      "cr-div-neg-zero", "cr-div-other-column", "cr-div-then-add", "cr-div-then-add-ne"]) {
-      const ids = await oracleAllowedIds(action);
-      expect(ids.length).toBeGreaterThan(0);
-      expect(ids.length).toBeLessThan(SEEDS.length);
+    for (const action of DEGENERACY_GUARD_ACTIONS) {
+      expect(ORACLE_ACTIONS).toContain(action);
+      await expectNonDegenerateOracle(action);
     }
   });
 });

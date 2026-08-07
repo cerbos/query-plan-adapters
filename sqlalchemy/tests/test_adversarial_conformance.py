@@ -186,6 +186,49 @@ SQLALCHEMY_SKIPPED_DIVERGENCES = {
     if "sqlalchemy" in d["adapters"]
 }
 
+# -- the degeneracy guard (conformance/README.md, "The degeneracy guard") ----
+#
+# A representative sample of the actions this adapter ORACLE-COMPARES, one per
+# hostile group it can express. The two lists are asserted to be complements of
+# ORACLE_ACTIONS, so neither can drift into the other unnoticed.
+#
+# w1-size-zero-chain, w1-not-size-chain and the two string-cast actions are
+# deliberately absent: their oracles are empty by CONSTRUCTION (no seed holds a
+# to-one parent with zero children; every seed's aString raises in
+# int()/double()), so they cannot satisfy this guard.
+DEGENERACY_GUARD_ACTIONS = (
+    "vf-le",
+    "like-percent",
+    "all-on-empty",
+    "pv-exists",
+    "pv-all",
+    "null-eq",
+    "null-ne",
+    # The absent to-one parent (#309/#315/#316).
+    "w1-all-chain",
+    "w1-not-exists-chain",
+    "w1-size-nonneg-chain",
+    "w1-not-in-chain",
+    "w1-not-hasint-chain",
+    # Column arithmetic under a division (#311); the zero-denominator arm is a
+    # liveness probe below.
+    "cr-div-other-column",
+    "cr-div-then-add",
+    "cr-div-then-add-ne",
+)
+
+# Shapes this adapter refuses to translate: they have no oracle comparison to
+# guard, and stay here as PDP/policy liveness probes for a group the list above
+# cannot cover. See cerbos/query-plan-adapters#324.
+DEGENERACY_LIVENESS_PROBES = (
+    # json.loads renders the wire's -0 as the integer 0, so the sign of a zero
+    # denominator is gone before the adapter sees it.
+    "cr-div-neg-zero",
+    # int() over a numeric column: truncation-versus-rounding, unsupported for
+    # every adapter but convex, which promotes it in adapterSupportedExpected.
+    "cast-int-double",
+)
+
 
 # -- deterministic derived fields (conformance/README.md) --------------------
 #
@@ -1024,28 +1067,22 @@ class TestAdversarialConformance:
         # Guard the guard: these actions must produce a non-empty, non-total
         # oracle set, otherwise the differential comparison could pass
         # vacuously (e.g. a PDP that denies everything).
-        for action in (
-            "vf-le",
-            "like-percent",
-            "all-on-empty",
-            "pv-exists",
-            "pv-all",
-            "null-eq",
-            "null-ne",
-            # #309/#312/#311/#315/#316. w1-size-zero-chain, w1-not-size-chain and
-            # the two string casts are absent on purpose: their oracles are empty by
-            # CONSTRUCTION, so they cannot satisfy this guard; cast-int-double stands
-            # in for the cast group.
-            "w1-all-chain",
-            "w1-not-exists-chain",
-            "w1-size-nonneg-chain",
-            "w1-not-in-chain",
-            "w1-not-hasint-chain",
-            "cr-div-neg-zero",
-            "cr-div-other-column",
-            "cr-div-then-add",
-            "cr-div-then-add-ne",
-            "cast-int-double",
-        ):
+        #
+        # Every entry is asserted to be an action this adapter actually
+        # oracle-compares. A list copied from another harness drifts into naming
+        # shapes it never compares, which guard nothing
+        # (cerbos/query-plan-adapters#324); the membership assertion turns moving
+        # an action into adapterUnsupported into a failure here rather than a
+        # silent no-op.
+        def assert_non_degenerate(action: str) -> None:
             ids = _oracle_allowed_ids(adv_cerbos_client, action)
-            assert 0 < len(ids) < len(SEEDS)
+            assert 0 < len(ids) < len(SEEDS), f"{action} has a degenerate oracle"
+
+        for action in DEGENERACY_GUARD_ACTIONS:
+            assert action in ORACLE_ACTIONS, f"{action} is not oracle-compared"
+            assert_non_degenerate(action)
+        # Asserting the complement keeps the split honest — an action this
+        # adapter gains support for must move up into the guard proper.
+        for action in DEGENERACY_LIVENESS_PROBES:
+            assert action not in ORACLE_ACTIONS, f"{action} is now oracle-compared"
+            assert_non_degenerate(action)

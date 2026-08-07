@@ -334,6 +334,52 @@ const MANIFEST_ACTIONS = new Set([
   ...actionsFile.knownDivergences.map((entry) => entry.action),
 ]);
 
+// -- the degeneracy guard (conformance/README.md, "The degeneracy guard") -----------------------
+//
+// A representative sample of the actions this adapter ORACLE-COMPARES, one per hostile group it
+// can express. The two lists are asserted to be complements of `ORACLE_ACTIONS`, so neither can
+// drift into the other unnoticed.
+//
+// w1-size-zero-chain, w1-not-size-chain and the two string-cast actions are deliberately absent
+// from both lists: their oracles are empty by CONSTRUCTION (no seed holds a to-one parent with
+// zero children; every seed's aString raises in int()/double()), so they cannot satisfy a
+// non-empty assertion.
+
+const DEGENERACY_GUARD_ACTIONS = [
+  "vf-le",
+  "like-percent",
+  "all-on-empty",
+  "pv-exists",
+  "pv-all",
+  "null-eq",
+  "null-ne",
+  // The absent to-one parent (#309/#315/#316): the five discriminating chain shapes with a
+  // non-empty oracle.
+  "w1-all-chain",
+  "w1-not-exists-chain",
+  "w1-size-nonneg-chain",
+  "w1-not-in-chain",
+  "w1-not-hasint-chain",
+  // Column arithmetic under a division (#311); the zero-denominator arm is a liveness probe.
+  "cr-div-other-column",
+  "cr-div-then-add",
+  "cr-div-then-add-ne",
+  // Convex is the one adapter that promotes the casts in adapterSupportedExpected, so this is
+  // a real comparison here rather than the liveness probe it is everywhere else.
+  "cast-int-double",
+] as const;
+
+/**
+ * Shapes Convex refuses to translate: they have no oracle comparison to guard, and stay here as
+ * PDP/policy liveness probes for a group Convex's own list cannot cover. See
+ * cerbos/query-plan-adapters#324.
+ */
+const DEGENERACY_LIVENESS_PROBES = [
+  // JSON.stringify(-0) is "0", so the sign of a zero denominator is gone before the adapter
+  // sees it and the shape is refused rather than guessed.
+  "cr-div-neg-zero",
+] as const;
+
 // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") --------
 //
 // Read from conformance/derived-fields.json rather than restated here. The same value feeds the
@@ -467,6 +513,16 @@ async function oracleAllowedIds(action: string): Promise<string[]> {
     if (result.isAllowed(action)) ids.push(seed.id);
   }
   return ids.sort();
+}
+
+/** The degeneracy guard's per-action assertion, labelled so a failure names the action. */
+async function expectNonDegenerateOracle(action: string): Promise<void> {
+  const ids = await oracleAllowedIds(action);
+  expect({
+    action,
+    nonEmpty: ids.length > 0,
+    nonTotal: ids.length < seedsFile.seeds.length,
+  }).toEqual({ action, nonEmpty: true, nonTotal: true });
 }
 
 async function adapterFilteredIds(
@@ -669,20 +725,22 @@ describe("adversarial conformance corpus", () => {
   });
 
   test("oracle is not degenerate", async () => {
-    // The #309/#312/#311/#315/#316 additions. w1-size-zero-chain, w1-not-size-chain and the
-    // two string-cast actions are deliberately absent: their oracles are empty by
-    // CONSTRUCTION (no seed holds a to-one parent with zero children; every seed's aString
-    // raises in int()/double()), so they cannot satisfy this guard. cast-int-double is the
-    // cast group's non-degenerate stand-in, and the w1/cr actions below carry it for their
-    // groups.
-    for (const action of ["vf-le", "like-percent", "all-on-empty", "pv-exists", "pv-all", "null-eq", "null-ne",
-      "w1-all-chain", "w1-not-exists-chain", "w1-size-nonneg-chain",
-      "w1-not-in-chain", "w1-not-hasint-chain",
-      "cr-div-neg-zero", "cr-div-other-column", "cr-div-then-add", "cr-div-then-add-ne",
-      "cast-int-double"]) {
-      const ids = await oracleAllowedIds(action);
-      expect(ids.length).toBeGreaterThan(0);
-      expect(ids.length).toBeLessThan(seedsFile.seeds.length);
+    // Guard the guard: each of these actions must produce a non-empty, non-total oracle set,
+    // otherwise the differential comparison could pass vacuously (e.g. PDP denying all).
+    //
+    // Every entry is asserted to be an action Convex actually oracle-compares. A list copied
+    // from another harness drifts into naming shapes this adapter never compares, which guard
+    // nothing (cerbos/query-plan-adapters#324); the membership assertion turns moving an action
+    // into Convex's `adapterUnsupported` set into a failure here rather than a silent no-op.
+    for (const action of DEGENERACY_GUARD_ACTIONS) {
+      expect(ORACLE_ACTIONS).toContain(action);
+      await expectNonDegenerateOracle(action);
+    }
+    // Asserting the complement keeps the split honest — an action Convex gains support for
+    // must move up into the guard proper.
+    for (const action of DEGENERACY_LIVENESS_PROBES) {
+      expect(ORACLE_ACTIONS).not.toContain(action);
+      await expectNonDegenerateOracle(action);
     }
   });
 });

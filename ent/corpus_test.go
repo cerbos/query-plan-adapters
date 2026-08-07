@@ -238,6 +238,22 @@ func (c *Corpus) AllClassifiedActions() []string {
 	return seen
 }
 
+// OracleComparedActions is the set of actions this adapter actually compares against the check()
+// oracle. It applies the same skip the oracle run applies, so the two cannot drift: today no
+// knownDivergences action is also a conformance action, and the subtraction is a no-op — but a
+// divergence registered on one later must drop out of both at once, not just the run. The
+// degeneracy guard asserts membership against this, so a guard entry that guards nothing fails
+// loudly instead of going inert (cerbos/query-plan-adapters#324).
+func (c *Corpus) OracleComparedActions() map[string]bool {
+	compared := make(map[string]bool, len(c.OracleActions))
+	for _, action := range c.OracleActions {
+		if !c.SkippedActions[action] {
+			compared[action] = true
+		}
+	}
+	return compared
+}
+
 // findConformanceDir walks up from the working directory so the harness works whether it is run
 // from the module root or from a nested package.
 func findConformanceDir(tb testing.TB) string {

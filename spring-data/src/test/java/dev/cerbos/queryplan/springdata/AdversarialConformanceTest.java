@@ -1098,31 +1098,56 @@ class AdversarialConformanceTest {
                 "every promoted action must exist in expectedUnsupported");
     }
 
+    /**
+     * A representative sample of the actions this adapter ORACLE-COMPARES, one per hostile group
+     * it can express. Asserted against {@link #conformanceActions()} so moving one into
+     * {@code adapterUnsupported} fails here rather than silently going inert
+     * (cerbos/query-plan-adapters#324).
+     *
+     * <p>{@code w1-size-zero-chain}, {@code w1-not-size-chain} and the two string-cast actions
+     * are deliberately absent: their oracles are empty by CONSTRUCTION (no seed holds a to-one
+     * parent with zero children; every seed's aString raises in {@code int()}/{@code double()}),
+     * so they cannot satisfy this guard.
+     */
+    private static final List<String> DEGENERACY_GUARD_ACTIONS = List.of(
+            "vf-le", "like-percent", "all-on-empty", "null-eq", "null-ne",
+            // The absent to-one parent (#309/#315/#316).
+            "w1-all-chain", "w1-not-exists-chain", "w1-size-nonneg-chain",
+            "w1-not-in-chain", "w1-not-hasint-chain",
+            // Column arithmetic under a division (#311). The two shapes that nest further
+            // arithmetic on top of the division are liveness probes below.
+            "cr-div-neg-zero", "cr-div-other-column");
+
+    /**
+     * Shapes this adapter refuses to translate: they have no oracle comparison to guard, and stay
+     * here as PDP/policy liveness probes for a group the list above cannot cover.
+     */
+    private static final List<String> DEGENERACY_LIVENESS_PROBES = List.of(
+            // A division nested inside further arithmetic fails closed: SQL has no value that
+            // carries CEL's NaN or signed infinity through the sum.
+            "cr-div-then-add", "cr-div-then-add-ne",
+            // int() over a numeric column: truncation-versus-rounding, unsupported for every
+            // adapter but convex, which promotes it in adapterSupportedExpected.
+            "cast-int-double");
+
     @Test
     void oracleIsNotDegenerate() {
-        // Guard the guard: at least one action must produce a non-empty, non-total oracle set,
+        // Guard the guard: each of these actions must produce a non-empty, non-total oracle set,
         // otherwise the differential comparison could pass vacuously (e.g. PDP denying all).
+        Set<String> compared = conformanceActions().collect(Collectors.toSet());
         Map<String, List<String>> samples = new LinkedHashMap<>();
-        samples.put("vf-le", oracleAllowedIds("vf-le"));
-        samples.put("like-percent", oracleAllowedIds("like-percent"));
-        samples.put("all-on-empty", oracleAllowedIds("all-on-empty"));
-        samples.put("null-eq", oracleAllowedIds("null-eq"));
-        samples.put("null-ne", oracleAllowedIds("null-ne"));
-        // #309/#312/#311/#315/#316. w1-size-zero-chain, w1-not-size-chain and the two
-        // string-cast actions are deliberately absent: their oracles are empty by CONSTRUCTION
-        // (no seed holds a to-one parent with zero children; every seed's aString raises in
-        // int()/double()), so they cannot satisfy this guard. cast-int-double is the cast
-        // group's non-degenerate stand-in.
-        samples.put("w1-all-chain", oracleAllowedIds("w1-all-chain"));
-        samples.put("w1-not-exists-chain", oracleAllowedIds("w1-not-exists-chain"));
-        samples.put("w1-size-nonneg-chain", oracleAllowedIds("w1-size-nonneg-chain"));
-        samples.put("w1-not-in-chain", oracleAllowedIds("w1-not-in-chain"));
-        samples.put("w1-not-hasint-chain", oracleAllowedIds("w1-not-hasint-chain"));
-        samples.put("cr-div-neg-zero", oracleAllowedIds("cr-div-neg-zero"));
-        samples.put("cr-div-other-column", oracleAllowedIds("cr-div-other-column"));
-        samples.put("cr-div-then-add", oracleAllowedIds("cr-div-then-add"));
-        samples.put("cr-div-then-add-ne", oracleAllowedIds("cr-div-then-add-ne"));
-        samples.put("cast-int-double", oracleAllowedIds("cast-int-double"));
+        for (String action : DEGENERACY_GUARD_ACTIONS) {
+            assertTrue(compared.contains(action),
+                    "'" + action + "' guards nothing: this adapter does not oracle-compare it");
+            samples.put(action, oracleAllowedIds(action));
+        }
+        // Asserting the complement keeps the split honest — an action this adapter gains support
+        // for must move up into the guard proper.
+        for (String action : DEGENERACY_LIVENESS_PROBES) {
+            assertFalse(compared.contains(action),
+                    "'" + action + "' is now oracle-compared: move it into the guard proper");
+            samples.put(action, oracleAllowedIds(action));
+        }
         samples.forEach((action, ids) -> assertTrue(
                 !ids.isEmpty() && ids.size() < SEEDS.size(),
                 "oracle for '" + action + "' is degenerate: " + ids));

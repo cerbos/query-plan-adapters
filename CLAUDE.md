@@ -151,11 +151,14 @@ So when you add, fix, or change the handling of any shape:
    to `adapterUnsupported` with a reason naming the real mechanism, and make it throw), or an
    upstream planner bug (`knownDivergences`).
 5. **Bump the per-harness tripwires deliberately** — corpus size, oracle/throwing counts, and the
-   degeneracy-guard action list. Add the new action to that guard so it cannot pass vacuously.
+   degeneracy-guard action lists. Add the new action to each guard so it cannot pass vacuously,
+   choosing the right list per adapter: the *compared* list where that adapter translates the
+   shape, the *liveness-only* list where it throws. Every entry asserts its own side of that split,
+   so a guard list copied from another harness fails instead of quietly guarding nothing.
    The exception is an action whose oracle is empty *by construction* (a `nullRepresentationOmitted`
-   probe): the guard asserts a non-empty, non-total oracle, so such an action must stay out of it
-   and carry a different anti-vacuity assertion — one pinning *why* its rejection is required, not
-   merely that a rejection happens. See `conformance/README.md`.
+   probe): the guard asserts a non-empty, non-total oracle, so such an action must stay out of both
+   lists and carry a different anti-vacuity assertion — one pinning *why* its rejection is required,
+   not merely that a rejection happens. See `conformance/README.md`.
 6. **Update the affected READMEs' `Conformance contract` tables** in the same commit.
 
 A per-adapter unit test is not a substitute for a corpus action. Unit tests pin the filter an
