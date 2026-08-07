@@ -395,6 +395,7 @@ func (b *builder) relationScope(rel *Relation, alias, parent string) ([]FromItem
 	from := make([]FromItem, 0, len(rel.Via)+1)
 	from = append(from, FromItem{Table: rel.Table, Alias: alias})
 	preds := make([]Expr, 0, len(rel.Via)+1)
+	preds = appendRestrictions(preds, alias, rel.SubqueryFilter)
 
 	inner := alias
 	for _, hop := range rel.Via {
@@ -405,6 +406,7 @@ func (b *builder) relationScope(rel *Relation, alias, parent string) ([]FromItem
 			L:  Column{Qualifier: inner, Name: hop.ChildColumn},
 			R:  Column{Qualifier: hopAlias, Name: hop.JoinColumn},
 		})
+		preds = appendRestrictions(preds, hopAlias, hop.SubqueryFilter)
 		inner = hopAlias
 	}
 
@@ -415,6 +417,46 @@ func (b *builder) relationScope(rel *Relation, alias, parent string) ([]FromItem
 	})
 
 	return from, and(preds...)
+}
+
+// appendRestrictions lowers the caller-declared store-side predicates for one table into the
+// conjunction that correlates its subquery.
+//
+// They go in beside the join rather than around the subquery so every shape built on the scope —
+// the truth witnesses, the UNKNOWN witness, the counts, the hop guard — inherits them without
+// each one having to remember to.
+func appendRestrictions(preds []Expr, alias string, restrictions []Restriction) []Expr {
+	for _, r := range restrictions {
+		col := Column{Qualifier: alias, Name: r.Column}
+		switch r.Op {
+		case RestrictEq:
+			preds = append(preds, Cmp{Op: OpEq, L: col, R: Lit{V: r.Value}})
+		case RestrictNe:
+			preds = append(preds, Cmp{Op: OpNe, L: col, R: Lit{V: r.Value}})
+		case RestrictIsNull:
+			preds = append(preds, IsNull{X: col})
+		case RestrictIsNotNull:
+			preds = append(preds, IsNull{X: col, Negate: true})
+		case RestrictIn, RestrictNotIn:
+			// CEL's own identities: membership in an empty list is false, so an empty IN hides
+			// every row and an empty NOT IN hides none. Spelling them as constants also keeps
+			// the renderer away from `IN ()`, which is a syntax error.
+			if len(r.Values) == 0 {
+				preds = append(preds, BoolConst{V: r.Op == RestrictNotIn})
+				continue
+			}
+			vs := make([]Expr, 0, len(r.Values))
+			for _, v := range r.Values {
+				vs = append(vs, Lit{V: v})
+			}
+			in := Expr(InList{X: col, Vs: vs})
+			if r.Op == RestrictNotIn {
+				in = Not{X: in}
+			}
+			preds = append(preds, in)
+		}
+	}
+	return preds
 }
 
 // hopsExist builds "every intermediate table of a flattened chain has a row", or nil when the
@@ -448,6 +490,9 @@ func (b *builder) hopsExist(rel *Relation, parent string) Expr {
 				R:  Column{Qualifier: hopAlias, Name: hop.JoinColumn},
 			})
 		}
+		// A hop the application's own reads hide is a hop that does not exist as far as the
+		// resource attributes are concerned, so the guard has to agree with relationScope here.
+		preds = appendRestrictions(preds, hopAlias, hop.SubqueryFilter)
 		inner = hopAlias
 	}
 

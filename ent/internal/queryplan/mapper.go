@@ -32,6 +32,23 @@ type Relation struct {
 	// for a direct relation and non-empty for a flattened chain such as
 	// `mainCategory.subCategories`, which reaches the resource through its category table.
 	Via []Hop
+	// SubqueryFilter is the predicate the application itself applies when it reads Table — a
+	// soft-delete flag, a tenant column, a subtype discriminator, whatever narrows the rows that
+	// became the resource attributes.
+	//
+	// The translator reads Table bare. It is given a table name and two column names and has no
+	// association metadata to consult, so nothing that narrows the application's own read reaches
+	// the generated subquery, and the subquery then examines rows the application never
+	// serialised — a filter that returns rows the PDP denies. Declaring the predicate here
+	// restores the equality. It is optional because the translator cannot detect the omission;
+	// leaving it empty emits exactly the SQL it emitted before the field existed. See "Mapping
+	// hazards" in the adapter's README.
+	//
+	// Entries are ANDed into the subquery's correlation predicate, so the restriction narrows the
+	// rows the subquery EXAMINES rather than the rows it returns. That is what keeps it right
+	// under negation: `all` lowers to a false-witness EXISTS, and restricting the scan turns it
+	// into "every visible row satisfies the body" instead of "every row in the table does".
+	SubqueryFilter []Restriction
 }
 
 // Hop is one intermediate table in a flattened relation chain.
@@ -43,6 +60,54 @@ type Hop struct {
 	ChildColumn string
 	// JoinColumn is the referenced column on this hop's table.
 	JoinColumn string
+	// SubqueryFilter restricts this hop's table the same way Relation.SubqueryFilter restricts
+	// the element table. A hop is read bare too, and it is the to-ONE parent whose absence must
+	// deny (#309) — a row the application's own reads hide is, for this purpose, absent.
+	SubqueryFilter []Restriction
+}
+
+// RestrictOp is the comparison a Restriction applies.
+type RestrictOp uint8
+
+const (
+	// RestrictEq is `column = value`. It is the zero value, so a Restriction that names only a
+	// column and a value is an equality.
+	RestrictEq RestrictOp = iota
+	// RestrictNe is `column <> value`. It does not match NULL columns; pair it with
+	// RestrictIsNull under an OR if the application's own predicate treats NULL as matching.
+	RestrictNe
+	// RestrictIsNull is `column IS NULL` — the usual soft-delete spelling.
+	RestrictIsNull
+	// RestrictIsNotNull is `column IS NOT NULL`.
+	RestrictIsNotNull
+	// RestrictIn is `column IN (values…)`. An empty Values list hides every row.
+	RestrictIn
+	// RestrictNotIn is `column NOT IN (values…)`. An empty Values list hides none.
+	RestrictNotIn
+)
+
+// Restriction is one caller-declared predicate on the rows a relation subquery may see.
+//
+// The vocabulary is deliberately narrow — equality, inequality, null tests and membership over a
+// single column — because that is what the hazards it exists for look like: a `deleted_at IS
+// NULL` soft delete, a `tenant_id = $1` scope, a `kind IN (…)` discriminator. A predicate that
+// does not fit is a signal that the mapping cannot faithfully reproduce the application's read,
+// and the honest response is to not map that relation rather than to declare an approximation.
+//
+// Value and Values are read according to Op, and the pairing is not enforced at compile time. It
+// does not need to be, because every way of getting it wrong FAILS CLOSED: Values alongside
+// RestrictEq leaves Value nil and renders `column = NULL`, which is UNKNOWN and admits nothing,
+// and Value alongside RestrictIn leaves Values empty, which folds to FALSE. A mismatched pairing
+// therefore hides rows rather than exposing them. TestRestrictionMismatchFailsClosed pins it.
+type Restriction struct {
+	// Value is compared with Column. Ignored by RestrictIsNull and RestrictIsNotNull.
+	Value any
+	// Column is a column on the table this restriction applies to, unqualified.
+	Column string
+	// Values is the membership list for RestrictIn and RestrictNotIn.
+	Values []any
+	// Op is the comparison. The zero value is RestrictEq.
+	Op RestrictOp
 }
 
 // ValueType marks an attribute whose stored representation needs special handling.

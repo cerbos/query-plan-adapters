@@ -28,7 +28,7 @@ from cerbos.sdk.client import CerbosClient
 from cerbos.sdk.container import CerbosContainer
 from cerbos.sdk.model import PlanResourcesFilterKind, Principal, Resource, ResourceDesc
 
-from cerbos_sqlalchemy import get_query
+from cerbos_sqlalchemy import get_query, require_hops
 from sqlalchemy import (
     Boolean,
     Column,
@@ -367,11 +367,13 @@ class _Relation:
         # both return nothing — so `all` reads TRUE, `!exists` reads TRUE and the
         # count reads 0, each admitting rows the PDP denies
         # (cerbos/query-plan-adapters#309). Requiring the hop separately restores
-        # the distinction. This lives in the MAPPING because the SQLAlchemy
-        # adapter has no relation model of its own: collection semantics are
-        # entirely caller-supplied through operator overrides, so the caller owns
-        # the invariant that its subquery sees exactly the rows the application
-        # serialised into the resource attributes.
+        # the distinction. The requirement itself is `cerbos_sqlalchemy.
+        # require_hops`; what stays in the MAPPING is only which predicates the
+        # hops are, because the SQLAlchemy adapter has no relation model of its
+        # own: collection semantics are entirely caller-supplied through operator
+        # overrides, so the caller owns the invariant that its subquery sees
+        # exactly the rows the application serialised into the resource
+        # attributes.
         self.hop_correlation = hop_correlation or []
 
     def __repr__(self) -> str:  # pragma: no cover - diagnostics only
@@ -451,33 +453,18 @@ def _count_subquery(rel: _Relation, *conds: Any):
     return q.correlate(*rel.correlate_targets).scalar_subquery()
 
 
-def _hop_exists(rel: _Relation):
-    """EXISTS over the intermediate hops alone, or None for a direct relation."""
-    if not rel.hop_correlation:
-        return None
-    q = select(literal(1))
-    for pred in rel.hop_correlation:
-        q = q.where(pred)
-    return exists(q.correlate(*rel.correlate_targets))
-
-
 def _require_hops(rel: _Relation, expr: Any):
     """Make ``expr`` UNKNOWN unless every intermediate to-one hop exists.
 
-    The CASE has no ELSE on purpose: a missing hop yields NULL, and NOT NULL is
-    still NULL, so the row stays excluded under BOTH polarities — matching CEL
-    treating the missing path as an error (a deny).
-
-    EVERY operator whose answer comes off a chain has to go through here, not
-    just the collection macros. A bare ``_exists_where`` is two-valued, so it is
-    FALSE for an absent to-one parent and its negation is TRUE — which is how
-    membership and ``hasIntersection`` kept readmitting every parentless row
-    after the macros were fixed (cerbos/query-plan-adapters#315).
+    The invariant lives in the library as ``cerbos_sqlalchemy.require_hops``; this
+    is only the unpacking of the harness's ``_Relation`` marker into its arguments.
+    The harness using the shipped helper rather than a private copy is what proves
+    the helper: every chained corpus action — ``w1-all-chain``,
+    ``w1-not-exists-chain``, ``w1-size-zero-chain``, ``w1-not-in-chain``,
+    ``w1-not-hasint-chain`` and the rest — is an oracle comparison against a real
+    PDP that runs through this call.
     """
-    guard = _hop_exists(rel)
-    if guard is None:
-        return expr
-    return case((guard, expr))
+    return require_hops(expr, rel.hop_correlation, rel.correlate_targets)
 
 
 def _require_relation(op: str, coll: Any) -> _Relation:

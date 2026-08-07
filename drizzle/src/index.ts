@@ -178,6 +178,32 @@ export interface RelationMapping {
   targetColumn: AnyColumn;
   field?: MapperEntry;
   fields?: { [key: string]: MapperEntry };
+  /**
+   * The predicate the application itself applies when it reads this relation — a soft-delete
+   * flag, a tenant column, a subtype discriminator, whatever narrows the rows that became the
+   * resource attributes.
+   *
+   * The adapter reads `table` directly. Drizzle has no association metadata to consult, so
+   * nothing that narrows the application's own read reaches the generated `EXISTS`, and any
+   * such narrowing makes the subquery see rows the application never serialised — a filter that
+   * returns rows the PDP denies. Declaring the predicate here restores the equality; the adapter
+   * cannot detect the omission, which is why the field is optional and silence is not a warning.
+   * See "Mapping hazards" in the README.
+   *
+   * It is ANDed into the correlated subquery over `table`, so it constrains every operator
+   * reached through this relation — `exists`, `all`, membership, counts — under both polarities.
+   *
+   * ```ts
+   * relation: {
+   *   type: "many",
+   *   table: tags,
+   *   sourceColumn: resources.id,
+   *   targetColumn: tags.resourceId,
+   *   subqueryFilter: isNull(tags.deletedAt),
+   * }
+   * ```
+   */
+  subqueryFilter?: SQL;
 }
 
 type ScopedMapperMetadata = {
@@ -491,6 +517,23 @@ const wrapRelationChain = (
     options
   );
 
+/**
+ * The correlation predicate of a subquery over `relation`: the join, narrowed by whatever
+ * store-side predicate the caller declared on the mapping.
+ *
+ * Every subquery the adapter builds over a relation goes through here or through
+ * `wrapWithRelations`, so a declared `subqueryFilter` reaches the EXISTS forms, the COUNT forms
+ * and the hop-existence guard alike. Adding a new subquery shape means routing it through one of
+ * the two, or the declaration silently stops applying to it.
+ */
+const relationCorrelation = (relation: RelationMapping): SQL => {
+  const joinCondition = eq(relation.targetColumn, relation.sourceColumn);
+  if (relation.subqueryFilter === undefined) {
+    return joinCondition;
+  }
+  return and(joinCondition, relation.subqueryFilter) ?? joinCondition;
+};
+
 const wrapWithRelations = (
   relations: RelationMapping[],
   filter: SQL,
@@ -504,8 +547,12 @@ const wrapWithRelations = (
       if (options?.skipRelations?.has(relation)) {
         return currentFilter;
       }
-      const joinCondition = eq(relation.targetColumn, relation.sourceColumn);
-      const condition = and(joinCondition, currentFilter);
+      // The caller-declared store-side predicate goes in alongside the join, not around the
+      // EXISTS, so it narrows the rows the subquery examines rather than the rows it returns.
+      // That is what makes it correct under negation too: `all` compiles to `NOT EXISTS (… AND
+      // NOT P)`, and restricting the scan is what turns that into "every VISIBLE row satisfies
+      // P" instead of "every row in the table does".
+      const condition = and(relationCorrelation(relation), currentFilter);
       const tableName = resolveTableName(relation.table, reference);
       return exists(
         sql`(select 1 from ${sql.identifier(tableName)} where ${condition})`
@@ -980,10 +1027,7 @@ const buildSizeExpression = (
       scope.primaryRelation.table,
       scope.collectionName
     );
-    const joinCondition = eq(
-      scope.primaryRelation.targetColumn,
-      scope.primaryRelation.sourceColumn
-    );
+    const joinCondition = relationCorrelation(scope.primaryRelation);
     const chainWhere = scope.leadingRelations.length
       ? wrapWithRelations(
           scope.leadingRelations,
@@ -1014,7 +1058,7 @@ const buildSizeExpression = (
     const primary = relations[relations.length - 1]!;
     const leading = relations.slice(0, -1);
     const tableName = resolveTableName(primary.table, operand.name);
-    const joinCondition = eq(primary.targetColumn, primary.sourceColumn);
+    const joinCondition = relationCorrelation(primary);
     const chainWhere = leading.length
       ? wrapWithRelations(leading, joinCondition, operand.name, options)
       : joinCondition;
@@ -1980,11 +2024,10 @@ const buildCollectionOperatorFilter = (
       }
     case "exists_one": {
       const tableName = resolveTableName(primaryRelation.table, collectionName);
-      const joinCondition = eq(
-        primaryRelation.targetColumn,
-        primaryRelation.sourceColumn
+      const matchCondition = and(
+        relationCorrelation(primaryRelation),
+        rowCondition
       );
-      const matchCondition = and(joinCondition, rowCondition);
       if (!matchCondition) {
         return FALSE_CONDITION;
       }

@@ -31,6 +31,11 @@ type (
 	Relation = queryplan.Relation
 	// Hop is one intermediate table in a flattened relation chain.
 	Hop = queryplan.Hop
+	// Restriction is one caller-declared predicate on the rows a relation subquery may see.
+	// See Relation.SubqueryFilter and "Mapping hazards" in the README.
+	Restriction = queryplan.Restriction
+	// RestrictOp is the comparison a Restriction applies.
+	RestrictOp = queryplan.RestrictOp
 	// Mapper resolves plan variables to storage.
 	Mapper = queryplan.Mapper
 	// MapperMap is a static reference-to-entry table.
@@ -45,6 +50,16 @@ type (
 const (
 	ValueDefault   = queryplan.ValueDefault
 	ValueTimestamp = queryplan.ValueTimestamp
+)
+
+// Restriction comparisons, for Relation.SubqueryFilter and Hop.SubqueryFilter.
+const (
+	RestrictEq        = queryplan.RestrictEq
+	RestrictNe        = queryplan.RestrictNe
+	RestrictIsNull    = queryplan.RestrictIsNull
+	RestrictIsNotNull = queryplan.RestrictIsNotNull
+	RestrictIn        = queryplan.RestrictIn
+	RestrictNotIn     = queryplan.RestrictNotIn
 )
 
 // NULL-attribute representations.

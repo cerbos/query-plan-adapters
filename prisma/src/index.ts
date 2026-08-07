@@ -135,6 +135,29 @@ export type MapperConfig = {
     model?: string;
     field?: string;
     fields?: Record<string, MapperConfig>;
+    /**
+     * The predicate the application itself applies when it reads this relation — a soft-delete
+     * flag, a tenant column, a subtype discriminator, whatever narrows the rows that became the
+     * resource attributes.
+     *
+     * Prisma has no schema-level filtered relation. A `where` injected by a client extension or
+     * middleware rewrites the *top-level* query, never the nested `some`/`every`/`none` this
+     * adapter generates, so a narrowing the application applies to its own reads does not reach
+     * the subquery — and the subquery then matches records the application never serialised, a
+     * filter that returns rows the PDP denies. Declaring the predicate here restores the
+     * equality; the adapter cannot detect the omission, which is why the field is optional and
+     * silence is not a warning. See "Mapping hazards" in the README.
+     *
+     * It is a Prisma where-input over the RELATED model, ANDed into the nested filter, and it
+     * constrains every operator reached through this relation under both polarities. `every` is
+     * rewritten to the equivalent `none` so the restriction narrows the records examined rather
+     * than the records required to match.
+     *
+     * ```ts
+     * relation: { name: "tags", type: "many", subqueryFilter: { deletedAt: null } }
+     * ```
+     */
+    subqueryFilter?: PrismaFilter;
   };
 };
 
@@ -447,6 +470,7 @@ type RelationConfig = {
   model?: string;
   field?: string;
   nestedMapper?: Record<string, MapperConfig>;
+  subqueryFilter?: PrismaFilter;
 };
 
 type ResolvedFieldReference = {
@@ -1050,6 +1074,7 @@ function resolveFieldReference(
         model: activeConfig.relation.model,
         field: activeConfig.relation.field,
         nestedMapper: fields,
+        subqueryFilter: activeConfig.relation.subqueryFilter,
       },
     ];
 
@@ -1076,6 +1101,7 @@ function resolveFieldReference(
             model: nextConfig.relation.model,
             field: nextConfig.relation.field,
             nestedMapper: nextConfig.relation.fields,
+            subqueryFilter: nextConfig.relation.subqueryFilter,
           });
           currentMapper = nextConfig.relation.fields || {};
           currentParts = currentParts.slice(1);
@@ -1116,6 +1142,39 @@ function getPrismaRelationOperator(relation: {
 }
 
 /**
+ * One relation-scoped filter (`{ tags: { some: … } }`), narrowed by the store-side predicate the
+ * caller declared on the mapping.
+ *
+ * Every nested relation filter the adapter emits goes through here, so a declared
+ * `subqueryFilter` reaches the collection macros, the membership shapes, the emptiness checks and
+ * the hop-existence guard alike. Adding a new relation shape means routing it through here, or
+ * the declaration silently stops applying to it.
+ *
+ * `every` is the one operator that cannot simply absorb the predicate. `{ every: AND(W, P) }`
+ * would REQUIRE every record to satisfy W, which is the opposite of "ignore the records W hides",
+ * so it is rewritten to `{ none: AND(W, NOT P) }` — no visible record violates P. Both agree with
+ * `every` when nothing is declared, and both stay vacuously true over an empty relation.
+ */
+function relationFilter(
+  relation: RelationConfig,
+  operator: string,
+  inner: PrismaFilter
+): PrismaFilter {
+  const declared = relation.subqueryFilter;
+  if (declared === undefined) {
+    return { [relation.name]: { [operator]: inner } };
+  }
+  const narrow = (filter: PrismaFilter): PrismaFilter =>
+    Object.keys(filter).length === 0 ? declared : { AND: [declared, filter] };
+  if (operator === "every") {
+    return Object.keys(inner).length === 0
+      ? { [relation.name]: { every: inner } }
+      : { [relation.name]: { none: { AND: [declared, { NOT: inner }] } } };
+  }
+  return { [relation.name]: { [operator]: narrow(inner) } };
+}
+
+/**
  * Builds a nested relation filter for Prisma queries.
  */
 /**
@@ -1144,9 +1203,9 @@ function buildLeadingHopsExistFilter(
       restRelations[i],
       "Relation mapping is missing"
     );
-    inner = { [relation.name]: { [getPrismaRelationOperator(relation)]: inner } };
+    inner = relationFilter(relation, getPrismaRelationOperator(relation), inner);
   }
-  return { [head.name]: { [getPrismaRelationOperator(head)]: inner } };
+  return relationFilter(head, getPrismaRelationOperator(head), inner);
 }
 
 /**
@@ -1248,7 +1307,7 @@ function buildNestedRelationFilter(
       }
     }
 
-    currentFilter = { [relation.name]: { [relationOperator]: currentFilter } };
+    currentFilter = relationFilter(relation, relationOperator, currentFilter);
   }
 
   return currentFilter;
@@ -2049,7 +2108,7 @@ function handleSizeComparison(
   }
 
   const prismaOp = isNonEmpty ? "some" : "none";
-  const leafFilter = { [deepest.name]: { [prismaOp]: {} } };
+  const leafFilter = relationFilter(deepest, prismaOp, {});
 
   if (relations.length === 1) {
     return leafFilter;
@@ -2778,7 +2837,7 @@ function wrapCollectionElementFilter(
     parts.restRelations.length > 0
       ? buildNestedRelationFilter(parts.restRelations, elementFilter)
       : elementFilter;
-  return { [parts.head.name]: { some: inner } };
+  return relationFilter(parts.head, "some", inner);
 }
 
 function throwUnsupportedCollectionOperator(operator: string): never {
@@ -2823,7 +2882,7 @@ function handleCollectionOperator(
     case "exists": {
       // A NULL element keeps the per-element predicate UNKNOWN, so it can never create a
       // false positive here; a CEL error (deny) coincides with "no match" — no guard needed.
-      const filter = { [head.name]: { some: filterValue } };
+      const filter = relationFilter(head, "some", filterValue);
       const unknownElement = buildUnknownElementFilter(parts);
       if (unknownElement !== undefined) {
         recordNestedCollectionUnknownFilter({
@@ -2836,14 +2895,14 @@ function handleCollectionOperator(
       return filter;
     }
     case "except":
-      return { [head.name]: { some: { NOT: filterValue } } };
+      return relationFilter(head, "some", { NOT: filterValue });
     case "all": {
       if (parts.restRelations.length > 0) {
         throw new Error(
           "all() over a multi-hop relation chain is not supported"
         );
       }
-      const base = { [head.name]: { every: filterValue } };
+      const base = relationFilter(head, "every", filterValue);
       if (nullableFields.size === 0) {
         return base;
       }
@@ -2854,7 +2913,7 @@ function handleCollectionOperator(
       return {
         AND: [
           base,
-          { [head.name]: { none: buildNullWitnessFilter(nullableFields) } },
+          relationFilter(head, "none", buildNullWitnessFilter(nullableFields)),
         ],
       };
     }
@@ -2902,7 +2961,7 @@ function buildNegatedCollectionFilter(
   switch (operator) {
     case "exists": {
       const base = requireLeadingHops({
-        NOT: { [head.name]: { some: filterValue } },
+        NOT: relationFilter(head, "some", filterValue),
       });
       const unknownElement = buildUnknownElementFilter(parts);
       if (unknownElement === undefined) {
@@ -2925,19 +2984,19 @@ function buildNegatedCollectionFilter(
     case "all":
       // !all is TRUE only with a definitive false witness, which also absorbs error
       // elements — exactly `some(NOT P)` in SQL (NULL columns keep NOT P UNKNOWN).
-      return { [head.name]: { some: { NOT: filterValue } } };
+      return relationFilter(head, "some", { NOT: filterValue });
     case "except": {
       // !except(c,P) = every element definitively matches P.
-      const base = requireLeadingHops({
-        [head.name]: { none: { NOT: filterValue } },
-      });
+      const base = requireLeadingHops(
+        relationFilter(head, "none", { NOT: filterValue })
+      );
       if (nullableFields.size === 0) {
         return base;
       }
       return {
         AND: [
           base,
-          { [head.name]: { none: buildNullWitnessFilter(nullableFields) } },
+          relationFilter(head, "none", buildNullWitnessFilter(nullableFields)),
         ],
       };
     }

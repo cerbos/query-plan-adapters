@@ -1117,6 +1117,50 @@ describe("adversarial conformance corpus", () => {
     expect(await filteredIdsFor(compare("lt", 2))).toEqual(withParent);
   });
 
+  // The mapping-hazard contract in README.md ("Mapping hazards") rests on ONE structural fact:
+  // this adapter builds no subquery. A relation is a path inside the same document, so the filter
+  // and the application read the same document and the five subquery hazards
+  // (conformance/README.md, "Mapping hazards: the rows the subquery sees") cannot arise. The day
+  // the adapter reaches a second collection — a `$lookup` stage, a `populate()` call — every one
+  // of them arrives at once and the README's "not applicable" rows become over-grants, silently.
+  // This is the test that stops that landing unnoticed (cerbos/query-plan-adapters#323).
+  test("emits no $lookup and reaches no second collection", async () => {
+    const forbidden = /\$lookup|\$graphLookup|\bpopulate\s*\(|\baggregate\s*\(/;
+
+    // The claim is about the adapter, not about the corpus's mapper: a filter walk alone would
+    // pass for a `$lookup` the corpus mapper never triggers. Reading the source is what makes the
+    // guard total over mapper shapes.
+    const source = fs.readFileSync(path.join(__dirname, "index.ts"), "utf8");
+    // Prose about the guard is not a violation of it, so comments come off first — including
+    // trailing ones, or this very file's vocabulary would trip the scan the moment someone
+    // wrote `// never calls populate()` next to a line of code.
+    const stripComments = (line: string): string =>
+      /^(\/\/|\/\*|\*)/.test(line.trimStart())
+        ? ""
+        : line.replace(/\/\/.*$/, "").replace(/\/\*.*?\*\//g, "");
+    const offendingLines = source
+      .split("\n")
+      .map((line, index) => [index + 1, stripComments(line)] as const)
+      .filter(([, code]) => forbidden.test(code));
+    expect(offendingLines).toEqual([]);
+
+    // And the emitted filters, so a `$lookup` assembled from string fragments cannot slip past
+    // the source scan.
+    for (const action of ORACLE_ACTIONS) {
+      const queryPlan = await cerbos.planResources({
+        principal: seedsFile.principal,
+        resource: { kind: seedsFile.resourceKind },
+        action,
+      });
+      const result = queryPlanToMongoose({ queryPlan, mapper: MAPPER });
+      if (result.kind !== PlanKind.CONDITIONAL) continue;
+      expect([action, JSON.stringify(result.filters)]).toEqual([
+        action,
+        expect.not.stringMatching(forbidden),
+      ]);
+    }
+  });
+
   test("oracle is not degenerate", async () => {
     // Guard the guard: each of these actions must produce a non-empty, non-total oracle set,
     // otherwise the differential comparison could pass vacuously (e.g. PDP denying all).

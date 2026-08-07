@@ -387,6 +387,21 @@ predicates that require distinguishing an indexed empty array from a missing fie
 
 Elasticsearch does not index empty arrays. An `exists` or nested query therefore cannot distinguish an attribute explicitly set to `[]` from an attribute omitted entirely. CEL treats the former as an empty collection and the latter as an evaluation error, so polarity matters: positive `exists`, positive non-empty checks, negated `all`, and negated empty checks remain safe; the opposite polarities throw rather than authorizing a document with a missing collection.
 
+### Mapping hazards
+
+The conformance contract above proves the *plan* side — given a policy shape, does the query select the documents `check()` allows. The other half is the *mapping*: **the documents the query reads must be the documents the application put into the resource attributes.** Six ways that can break are catalogued in the shared corpus, and every adapter has to record a position on each of them.
+
+This adapter **builds no subquery.** A collection is a `nested` field on the same document (see below), so the `nested` query matches inner objects of the document being scored — it never reaches a second index. The emitted DSL contains no `has_child` and no `has_parent`, and its `terms` queries always carry an inline value list rather than a terms *lookup*.
+
+| Hazard | Position | Mechanism to check |
+|---|---|---|
+| Filtered association | Not applicable — no subquery | — |
+| Default scope on the target model | Not applicable — no second index is read | — |
+| Subtype discrimination | **Caller-owned** | The index or alias you send the query to, and any filtered alias on it. The adapter is handed a plan, never an index, so it cannot check that the documents you search are the ones the resource attributes were built from. An alias whose filter differs from the application's own read path, or an index holding several document kinds, needs its discriminator added to your `bool.filter` yourself |
+| To-one relation used as a collection | Not applicable — a `nested` field holds exactly the inner objects the application indexed | — |
+| Composite association key | Not applicable — no join, so no key to compose | — |
+| Absent to-one parent | **Reproduced** for the safe polarities, **rejected** for the rest — `w1-exists-chain`, `w1-size-chain` and `w1-in-chain` are oracle-tested; `w1-all-chain`, `w1-not-exists-chain`, `w1-size-zero-chain`, `w1-size-nonneg-chain`, `w1-not-in-chain`, `w1-not-hasint-chain` and `w1-not-size-chain` are in `adapterUnsupported` and throw | None — it is the empty-array limitation above, not a mapping choice: Elasticsearch cannot tell a document with no parent from a document whose parent has no children, so the polarities that would read that as an allow are refused ([#309](https://github.com/cerbos/query-plan-adapters/issues/309)) |
+
 ### Nested object queries (collection operators)
 
 When your Cerbos policies use collection operators (`exists`, `all`, `except`) or `hasIntersection` with `map` on arrays of nested objects, pass a `Set<String>` of Elasticsearch field names that use `nested` mappings:

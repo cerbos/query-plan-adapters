@@ -402,20 +402,75 @@ violation of exactly that one sentence, and every one of them was a real over-gr
 
 | Hazard | What goes wrong | Where it shows up |
 |---|---|---|
-| A **filtered association** | the application's association applies a predicate the subquery does not, so the subquery matches rows the application never serialised | ActiveRecord `has_many …, -> { where(visible: true) }`; Prisma filtered relations; SQLAlchemy `relationship(primaryjoin=…)`; Hibernate `@Where`/`@Filter` |
+| A **filtered association** | the application's association applies a predicate the subquery does not, so the subquery matches rows the application never serialised | ActiveRecord `has_many …, -> { where(visible: true) }`; SQLAlchemy `relationship(primaryjoin=…)`; Hibernate `@Where`/`@Filter`; a Prisma client extension or middleware injecting `where` |
 | A **default scope on the target model** | the subquery reads the table directly and skips the scope every application read applies | ActiveRecord `default_scope`; Hibernate `@Where` on the entity; a soft-delete filter |
-| **Subtype discrimination** | the association also filters on a type/discriminator column; the bare table holds the other subtypes too | ActiveRecord STI; Mongoose discriminators; JPA `@DiscriminatorValue` |
+| **Subtype discrimination** | the association also filters on a type/discriminator column; the bare table holds the other subtypes too | ActiveRecord STI; JPA `@DiscriminatorValue`; a Mongoose discriminator, though only for the model the caller hands to `find()` |
 | A **to-one relation used as a collection** | nothing makes the database enforce one row, so the application sees one and the subquery examines all of them | ActiveRecord `has_one`; any unindexed FK-back-reference |
 | A **composite association key** | a multi-column key becomes one quoted identifier and the query fails, or worse joins on the wrong column | ActiveRecord 7.1+ composite keys; any two-column FK |
 | An **absent to-one parent** | see the section above — this one *is* expressible, and `w1-all-chain` and friends pin it | every relational adapter |
 
-Two things follow for an adapter author:
+Two things follow for an adapter author.
 
-1. **Decide about each hazard explicitly.** Either the mapping reproduces the store-side filtering
-   exactly, or the adapter rejects the mapping with an error naming the mechanism. A best-effort
-   subquery is the one outcome the invariant forbids.
-2. **Say so in the adapter's README**, next to the `Conformance contract` table. A consumer whose
-   ORM offers filtered associations needs to know before they wire one up, not after.
+**1. Decide about each hazard explicitly.** For a hazard that *can arise* in an adapter, there are
+exactly three sanctioned outcomes:
+
+- **Reproduced** — the mapping carries the store-side predicate, so the subquery reads the rows the
+  application reads. Class 1 adapters (below) take an optional relation predicate for this.
+- **Rejected** — the adapter refuses the mapping with an error naming the real mechanism, or the
+  mapper type makes the hazardous mapping unexpressible in the first place. A composite association
+  key is rejected this way by every adapter whose relation mapping takes a single source column: the
+  caller gets a compile error, not a wrong join.
+- **Declared caller-owned** — the adapter states that holding the invariant is the caller's job, and
+  the README names the ORM feature the caller has to go and check.
+
+A best-effort subquery is the one outcome the invariant forbids.
+
+A fourth answer is available, and it is not one of the three because it is not a decision: **not
+applicable** — the hazard cannot arise, so there is nothing to decide. It is only honest when the
+row can say *structurally* why, and the structural reason is load-bearing enough to be worth a test
+of its own. Class 3 adapters (below) write it for the five subquery hazards because they build no
+subquery, and mongoose's harness asserts exactly that — the day it grows a `$lookup`, five "not
+applicable" rows silently become over-grants. "Not applicable" with no mechanism behind it is a
+best-effort subquery wearing a label, and does not pass review.
+
+**Declared caller-owned is available only where the adapter cannot detect the hazard from the mapper
+it is given.** That restriction is what stops it being a loophole, because "reject" presupposes a
+detection that mostly does not exist: an adapter handed a table and two column references cannot see
+a client extension, a soft-delete convention or a discriminator. Where the adapter *can* see the
+hazard, caller-owned is not available and the position must be reproduced or rejected.
+
+The second guard is a positive obligation: **a caller-owned row must name the exact ORM feature the
+caller must check.** A row that only says "caller-owned" does not pass review, for the same reason
+"cannot express this shape faithfully" is not an acceptable `adapterUnsupported` reason.
+
+**2. Say so in the adapter's README**, next to the `Conformance contract` table, as a table with one
+row per hazard above — six rows, in the same order:
+
+```
+| Hazard | Position | Mechanism to check |
+```
+
+Six rows even when most of them are inapplicable, because a reader diffing the adapter's table
+against this one should find every hazard accounted for rather than having to work out which
+omissions were deliberate. The absent to-one parent's row records that it is *proved by the corpus*
+(`w1-all-chain` and its siblings) rather than merely documented — it is what a closed hazard looks
+like, and it is the row that makes the difference visible.
+
+The three classes the ten adapters fall into determine most of the answers:
+
+| Class | Adapters | What the store applies to the subquery |
+|---|---|---|
+| **1 — bare-table subquery** | drizzle, ent, pgx, prisma | nothing |
+| **2 — ORM-association subquery** | spring-data, sqlalchemy | Hibernate applies `@SQLRestriction`/`@Where` — on the entity and on the joined collection — and the single-table discriminator; SQLAlchemy applies `primaryjoin` and the single-table discriminator *only* when the caller's override goes through a mapped `relationship()` |
+| **3 — no subquery** | mongoose, convex, langchain-chromadb, elasticsearch-java | n/a — relations are paths inside the same document |
+
+Prisma names a relation, so it looks like class 2. It is class 1: Prisma has no `@Where` equivalent,
+so nothing store-side reaches the nested `some`/`every`/`none`.
+
+Class 1 adapters expose an **optional** relation predicate the caller attaches to the mapping;
+declaring nothing emits exactly the filter the adapter emitted before the field existed. Class 2
+adapters deliberately do **not** expose one — a caller who re-declared a filter the ORM already
+applies would have it applied twice, silently removing rows the PDP permits.
 
 The precedent for handling this without a policy action is `nullRepresentationOmitted`: a
 per-adapter contract asserted by each harness rather than a shape in `adversarial.yaml`. If a
