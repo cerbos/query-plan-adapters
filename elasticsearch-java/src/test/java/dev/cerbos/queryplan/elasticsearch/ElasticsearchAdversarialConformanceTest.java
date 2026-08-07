@@ -562,17 +562,60 @@ class ElasticsearchAdversarialConformanceTest {
                 principal(), Resource.newInstance(seedsFile.resourceKind()), "p-has");
         List<String> oracle = oracleAllowedIds("p-has");
         assertTrue(plan.isAlwaysAllowed(), "p-has should remain the documented planner divergence");
+        // Both halves: an empty oracle is a silently broken PDP or policy load, which the
+        // non-total assertion alone would pass.
+        assertFalse(oracle.isEmpty(), "p-has check() oracle must still allow the seeds holding the attr");
         assertTrue(oracle.size() < seeds.size(), "p-has check() oracle must still deny missing attrs");
+        assertTrue(oracle.contains("a1"), "p-has: a1 holds aOptionalString");
         assertEquals(allIds(), adapterFilteredIds("p-has"));
     }
 
+    /**
+     * A representative sample of the actions this adapter ORACLE-COMPARES, one per hostile group
+     * it can express. Asserted against {@code oracleActions} so moving one into
+     * {@code adapterUnsupported} fails here rather than silently going inert
+     * (cerbos/query-plan-adapters#324).
+     */
+    private static final List<String> DEGENERACY_GUARD_ACTIONS = List.of(
+            "vf-le", "like-percent", "pv-exists", "pv-all", "null-ne",
+            // The chained relation (#309): the shapes Elasticsearch's nested queries express.
+            "w1-exists-chain");
+
+    /**
+     * Shapes this adapter refuses to translate: they have no oracle comparison to guard, and stay
+     * here as PDP/policy liveness probes for a group the list above cannot cover.
+     */
+    private static final List<String> DEGENERACY_LIVENESS_PROBES = List.of(
+            // Elasticsearch does not index an empty nested array, so a positive all() cannot tell
+            // an empty collection (true) from a missing one (CEL error).
+            "all-on-empty",
+            // Nor an explicit null scalar, so positive equality against null cannot tell an
+            // explicit null (allow) from a missing field (deny). The negated forms stay compared.
+            "null-eq");
+
     @Test
     void oracleIsNotDegenerate() {
-        for (String action : List.of("vf-le", "like-percent", "all-on-empty", "pv-exists", "pv-all", "null-eq", "null-ne")) {
-            List<String> ids = oracleAllowedIds(action);
-            assertTrue(!ids.isEmpty() && ids.size() < seeds.size(),
-                    "oracle for '" + action + "' is degenerate: " + ids);
+        // Guard the guard: each of these actions must produce a non-empty, non-total oracle set,
+        // otherwise the differential comparison could pass vacuously (e.g. PDP denying all).
+        Set<String> compared = Set.copyOf(oracleActions);
+        for (String action : DEGENERACY_GUARD_ACTIONS) {
+            assertTrue(compared.contains(action),
+                    "'" + action + "' guards nothing: this adapter does not oracle-compare it");
+            assertNonDegenerateOracle(action);
         }
+        // Asserting the complement keeps the split honest — an action this adapter gains support
+        // for must move up into the guard proper.
+        for (String action : DEGENERACY_LIVENESS_PROBES) {
+            assertFalse(compared.contains(action),
+                    "'" + action + "' is now oracle-compared: move it into the guard proper");
+            assertNonDegenerateOracle(action);
+        }
+    }
+
+    private static void assertNonDegenerateOracle(String action) {
+        List<String> ids = oracleAllowedIds(action);
+        assertTrue(!ids.isEmpty() && ids.size() < seeds.size(),
+                "oracle for '" + action + "' is degenerate: " + ids);
     }
 
     /**

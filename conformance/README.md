@@ -181,6 +181,39 @@ for at least a handful of representative actions, that the oracle result is neit
 full seed set (`!ids.isEmpty() && ids.size() < seeds.size()`). This guards the guard: without it, a
 harness whose PDP connection or policy load silently failed would still pass every comparison.
 
+**Derive the list per adapter; never copy another harness's.** The guard protects an oracle
+*comparison*, so an entry naming a shape that adapter never compares — because it sits in that
+adapter's `adapterUnsupported` set, or in the global `expectedUnsupported` — protects nothing. A
+copied list drifts into exactly that as classifications diverge, and the drift is invisible:
+nothing fails, the list simply stops meaning what it says (cerbos/query-plan-adapters#324). Each
+harness therefore keeps two lists and asserts they are complements of its own oracle set:
+
+- **the guard proper** — a representative sample of the actions the adapter *does* oracle-compare,
+  one per hostile group it can express. Each entry is asserted to be in the adapter's oracle set,
+  so moving an action into `adapterUnsupported` fails the guard instead of quietly emptying it.
+- **liveness-only probes** — shapes the adapter refuses to translate, kept because the group has no
+  compared member for that adapter and the non-degenerate oracle still proves the PDP and policy
+  are live. Each entry is asserted *not* to be in the oracle set, so a shape the adapter later
+  gains support for has to be promoted into the guard proper rather than staying a weaker probe.
+
+Both lists still assert the non-empty, non-total oracle. The exclusion for an action whose oracle
+is empty *by construction* is unchanged: it belongs in neither list (see
+`nullRepresentationOmitted` above, and `w1-size-zero-chain`/`w1-not-size-chain`/`in-empty`/the
+string casts).
+
+Adapters differ widely in what they can express — `langchain-chromadb` compares 15 of the 133
+conformance actions where `ent` and `pgx` compare all of them — so the lists are expected to look
+different per harness. That is the point.
+
+### Known divergences still need a tripwire
+
+An action in `knownDivergences` is excluded from the oracle run, which leaves it exercised on
+neither side unless the harness says something about it explicitly. Every harness therefore pins
+the `p-has` planner over-grant directly: the plan folds to `KIND_ALWAYS_ALLOWED`, the check()
+oracle is non-empty and non-total (it denies the seeds whose attribute is missing), and the adapter
+consequently returns every row. When the upstream fold is fixed the assertion fails, which is the
+prompt to move the action back into the oracle run.
+
 ### Deterministic derived fields
 
 The corpus keeps raw relational rows compact; five resource attributes and stored columns are
@@ -257,8 +290,12 @@ guard; run it before trusting it.
    in `prisma/src/adversarial.test.ts`, and the oracle/throwing counts in the convex and
    langchain-chromadb harnesses). Bump them deliberately — that assertion exists so a new action
    cannot slip past an adapter unnoticed.
-7. Add the action to each harness's degeneracy-guard list so it cannot pass vacuously, and check
-   that no harness projects the corpus into a narrower local shape. `langchain-chromadb` used to
+7. Add the action to each harness's degeneracy-guard list so it cannot pass vacuously — to that
+   harness's *compared* list where the adapter translates the shape, and to its liveness-only list
+   where it does not, per "The degeneracy guard" above. Adding it to the compared list of an
+   adapter that throws on it fails immediately, which is the intended feedback rather than an
+   obstacle. Also check that no harness projects the corpus into a narrower local shape.
+   `langchain-chromadb` used to
    rebuild the principal from a hardcoded attribute allowlist; when `pv-exists` added
    `principal.attr.manyTeams`, the projection dropped it, the plan folded to `ALWAYS_DENIED`, and
    the oracle — built from the same projected principal — agreed. The action passed on both sides
@@ -312,7 +349,11 @@ unsupported before you have watched it fail is how a translatable shape gets per
    silently drops the next corpus field from both sides of its own differential.
 
 4. **Assert the degeneracy guard** (see above) and pin the corpus size, so a silently broken PDP
-   connection or a newly added action cannot pass vacuously.
+   connection or a newly added action cannot pass vacuously. Derive the guard's compared list from
+   the adapter's own oracle set and assert per-entry membership — a list lifted from the nearest
+   existing harness will name shapes this adapter does not translate, and those entries guard
+   nothing. Pin every `knownDivergences` action the same way (see above): excluded from the oracle
+   run means exercised nowhere unless the harness says so explicitly.
 
 5. **Run it and let it fail.** Triage every divergence into exactly one of:
    - a translation bug in the adapter — fix it;

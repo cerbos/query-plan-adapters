@@ -468,6 +468,45 @@ const MANIFEST_ACTIONS = new Set([
   ...CHROMA_DIVERGENCES,
 ]);
 
+// -- the degeneracy guard (conformance/README.md, "The degeneracy guard") -----------------------
+//
+// Chroma's flat scalar metadata leaves it the narrowest oracle set of any adapter, so the guard
+// is derived from that set rather than shared with the relational harnesses: every entry below is
+// asserted to be in `CHROMA_SUPPORTED_ACTIONS` (cerbos/query-plan-adapters#324). This is every
+// action Chroma oracle-compares except `in-empty`, whose oracle is empty by CONSTRUCTION
+// (`x in []` is false for every seed) and so cannot satisfy a non-empty assertion.
+
+const DEGENERACY_GUARD_ACTIONS = [
+  "vf-le",
+  "vf-ge",
+  "vf-ne",
+  "nary-and",
+  "double-negation",
+  "triple-negation",
+  "cs-eq",
+  "empty-string-eq",
+  "unicode-eq",
+  "in-single",
+  "neg-number",
+  "p-struct",
+  "p-in-null-single",
+  "p-in-null-multi",
+] as const;
+
+/**
+ * Shapes Chroma refuses to translate: they have no oracle comparison to guard, and stay here as
+ * PDP/policy liveness probes for the groups Chroma's own list cannot cover — the collection
+ * macros, the null-selecting directions, the chained relation (#309/#315/#316), the column
+ * arithmetic (#311) and the numeric cast. See cerbos/query-plan-adapters#324.
+ */
+const DEGENERACY_LIVENESS_PROBES = [
+  "pv-exists",
+  "null-eq",
+  "w1-all-chain",
+  "cr-div-neg-zero",
+  "cast-int-double",
+] as const;
+
 // Fields are optional unless declared otherwise, so `$ne`/`$nin` are rejected by default.
 // `required: true` is asserted only for the metadata keys that `metadataFor` writes for every
 // seed in conformance/seeds.json. `aOptionalString` is null for a2/a4/a8/c2/e1, so it stays
@@ -651,6 +690,16 @@ async function oracleAllowedIds(action: string): Promise<string[]> {
   return ids.sort();
 }
 
+/** The degeneracy guard's per-action assertion, labelled so a failure names the action. */
+async function expectNonDegenerateOracle(action: string): Promise<void> {
+  const ids = await oracleAllowedIds(action);
+  expect({
+    action,
+    nonEmpty: ids.length > 0,
+    nonTotal: ids.length < SEEDS.length,
+  }).toEqual({ action, nonEmpty: true, nonTotal: true });
+}
+
 async function adapterFilteredIds(action: string): Promise<string[]> {
   const translated = queryPlanToChromaDB({
     queryPlan: await planFor(action),
@@ -756,17 +805,20 @@ describe("adversarial conformance corpus", () => {
   });
 
   test("oracle is not degenerate", async () => {
-    // #309/#312/#311/#315/#316. w1-size-zero-chain, w1-not-size-chain and the two string-cast
-    // actions are deliberately absent: their oracles are empty by CONSTRUCTION, so they
-    // cannot satisfy this guard; cast-int-double is the cast group's non-degenerate stand-in.
-    for (const action of ["vf-le", "nary-and", "p-in-null-multi", "pv-exists", "pv-all", "null-eq", "null-ne",
-      "w1-all-chain", "w1-not-exists-chain", "w1-size-nonneg-chain",
-      "w1-not-in-chain", "w1-not-hasint-chain",
-      "cr-div-neg-zero", "cr-div-other-column", "cr-div-then-add", "cr-div-then-add-ne",
-      "cast-int-double"]) {
-      const ids = await oracleAllowedIds(action);
-      expect(ids.length).toBeGreaterThan(0);
-      expect(ids.length).toBeLessThan(SEEDS.length);
+    // Guard the guard: each of these actions must produce a non-empty, non-total oracle set,
+    // otherwise the differential comparison could pass vacuously (e.g. PDP denying all). The
+    // membership assertion is what keeps the list honest — Chroma compares 15 of the corpus's
+    // 133 conformance actions, so a guard list shared with a relational harness would name
+    // shapes it never compares (cerbos/query-plan-adapters#324).
+    for (const action of DEGENERACY_GUARD_ACTIONS) {
+      expect(CHROMA_SUPPORTED_ACTIONS).toContain(action);
+      await expectNonDegenerateOracle(action);
+    }
+    // Asserting the complement keeps the split honest — an action Chroma gains support for must
+    // move up into the guard proper.
+    for (const action of DEGENERACY_LIVENESS_PROBES) {
+      expect(CHROMA_SUPPORTED_ACTIONS).not.toContain(action);
+      await expectNonDegenerateOracle(action);
     }
   });
 });

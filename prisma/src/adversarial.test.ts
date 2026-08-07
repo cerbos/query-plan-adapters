@@ -261,6 +261,53 @@ const MANIFEST_ACTIONS = new Set([
   ...(actionsFile.knownDivergences ?? []).map((entry) => entry.action),
 ]);
 
+// -- the degeneracy guard (conformance/README.md, "The degeneracy guard") -----------------------
+//
+// A representative sample of the actions this adapter ORACLE-COMPARES, one per hostile group it
+// can express. The two lists are asserted to be complements of `ORACLE_ACTIONS`, so neither can
+// drift into the other unnoticed.
+//
+// w1-size-zero-chain, w1-not-size-chain and the two string-cast actions are deliberately absent
+// from both lists: their oracles are empty by CONSTRUCTION (no seed holds a to-one parent with
+// zero children; every seed's aString raises in int()/double()), so they cannot satisfy a
+// non-empty assertion.
+
+const DEGENERACY_GUARD_ACTIONS = [
+  "vf-le",
+  // Prisma cannot express the % needle (see the liveness probe below), so the LIKE
+  // metacharacter group is guarded by the escape spelling it does translate.
+  "like-backslash",
+  "all-on-empty",
+  "pv-exists",
+  "pv-all",
+  "null-eq",
+  "null-ne",
+  // The absent to-one parent (#309/#315/#316): the three discriminating chain shapes Prisma
+  // translates. Its two unsupported siblings are liveness probes below.
+  "w1-not-exists-chain",
+  "w1-not-in-chain",
+  "w1-not-hasint-chain",
+] as const;
+
+/**
+ * Shapes Prisma refuses to translate: they have no oracle comparison to guard, and stay here as
+ * PDP/policy liveness probes for a group Prisma's own list cannot cover. See
+ * cerbos/query-plan-adapters#324.
+ */
+const DEGENERACY_LIVENESS_PROBES = [
+  // Prisma emits LIKE with no ESCAPE clause, so a % needle throws.
+  "like-percent",
+  // every() cannot require the intermediate hop of a chain, and a >= 0 relation count has no
+  // none/some spelling — the two chain shapes Prisma throws on.
+  "w1-all-chain",
+  "w1-size-nonneg-chain",
+  // Prisma filters have no column arithmetic, so the whole cr-div group (#311) throws.
+  "cr-div-neg-zero",
+  // int() over a numeric column: truncation-versus-rounding, unsupported for every adapter but
+  // convex, which promotes it in adapterSupportedExpected.
+  "cast-int-double",
+] as const;
+
 // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") --------
 //
 // Read from conformance/derived-fields.json rather than restated here. The same value feeds the
@@ -525,6 +572,16 @@ async function oracleAllowedIds(action: string): Promise<string[]> {
     }
   }
   return ids.sort();
+}
+
+/** The degeneracy guard's per-action assertion, labelled so a failure names the action. */
+async function expectNonDegenerateOracle(action: string): Promise<void> {
+  const ids = await oracleAllowedIds(action);
+  expect({
+    action,
+    nonEmpty: ids.length > 0,
+    nonTotal: ids.length < SEEDS.length,
+  }).toEqual({ action, nonEmpty: true, nonTotal: true });
 }
 
 // -- adapter execution through the public queryPlanToPrisma path --
@@ -796,22 +853,23 @@ describe("adversarial conformance corpus", () => {
   });
 
   test("oracle is not degenerate", async () => {
-    // Guard the guard: at least one action must produce a non-empty, non-total oracle set,
+    // Guard the guard: each of these actions must produce a non-empty, non-total oracle set,
     // otherwise the differential comparison could pass vacuously (e.g. PDP denying all).
-    // The #309/#312/#311/#315/#316 additions. w1-size-zero-chain, w1-not-size-chain and the
-    // two string-cast actions are deliberately absent: their oracles are empty by
-    // CONSTRUCTION (no seed holds a to-one parent with zero children; every seed's aString
-    // raises in int()/double()), so they cannot satisfy this guard. cast-int-double is the
-    // cast group's non-degenerate stand-in, and the w1/cr actions below carry it for their
-    // groups.
-    for (const action of ["vf-le", "like-percent", "all-on-empty", "pv-exists", "pv-all", "null-eq", "null-ne",
-      "w1-all-chain", "w1-not-exists-chain", "w1-size-nonneg-chain",
-      "w1-not-in-chain", "w1-not-hasint-chain",
-      "cr-div-neg-zero", "cr-div-other-column", "cr-div-then-add", "cr-div-then-add-ne",
-      "cast-int-double"]) {
-      const ids = await oracleAllowedIds(action);
-      expect(ids.length).toBeGreaterThan(0);
-      expect(ids.length).toBeLessThan(SEEDS.length);
+    //
+    // Every entry is asserted to be an action Prisma actually oracle-compares. A list copied
+    // from another harness drifts into naming shapes this adapter never compares, which guard
+    // nothing (cerbos/query-plan-adapters#324); the membership assertion turns moving an action
+    // into Prisma's `adapterUnsupported` set into a failure here rather than a silent no-op.
+    for (const action of DEGENERACY_GUARD_ACTIONS) {
+      expect(ORACLE_ACTIONS).toContain(action);
+      await expectNonDegenerateOracle(action);
+    }
+    // Shapes Prisma refuses to translate, so there is no comparison behind them: these carry
+    // PDP/policy liveness for their group only. Asserting the complement keeps the split
+    // honest — an action Prisma gains support for must move up into the guard proper.
+    for (const action of DEGENERACY_LIVENESS_PROBES) {
+      expect(ORACLE_ACTIONS).not.toContain(action);
+      await expectNonDegenerateOracle(action);
     }
   });
 });

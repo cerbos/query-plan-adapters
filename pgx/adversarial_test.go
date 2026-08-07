@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	enginev1 "github.com/cerbos/cerbos/api/genpb/cerbos/engine/v1"
+
 	"github.com/cerbos/cerbos-sdk-go/cerbos"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
@@ -390,6 +392,16 @@ func (h *harness) oracleAllowedIDs(t *testing.T, action string) []string {
 	return allowed
 }
 
+// allSeedIDs is every seeded id, sorted — what an unfiltered query returns.
+func (h *harness) allSeedIDs() []string {
+	ids := make([]string, 0, len(h.corpus.Seeds.Seeds))
+	for _, seed := range h.corpus.Seeds.Seeds {
+		ids = append(ids, seed.ID)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
 // adapterFilteredIDs plans, translates and executes, returning the ids the filter selects.
 func (h *harness) adapterFilteredIDs(t *testing.T, action string, opts ...cerbospgx.Option) ([]string, error) {
 	t.Helper()
@@ -509,29 +521,84 @@ func TestAdversarialConformance(t *testing.T) {
 		}
 	})
 
+	// The has() planner fold is a known divergence, so it is excluded from the oracle run above
+	// and nothing else in this suite touches it — the action would be exercised on neither side.
+	// Pin the over-grant itself: the plan folds to ALWAYS_ALLOWED while check() denies the seeds
+	// whose attribute is missing, so this adapter returns every row. When the planner stops
+	// folding, this fails and prompts re-inclusion in the oracle run
+	// (cerbos/query-plan-adapters#324).
+	t.Run("pins the upstream has() planner over-grant", func(t *testing.T) {
+		const action = "p-has"
+		require.True(t, h.corpus.SkippedActions[action],
+			"%s must stay registered as a known divergence for this adapter", action)
+
+		plan, err := h.client.PlanResources(t.Context(), h.principal(),
+			cerbos.NewResource(h.corpus.Seeds.ResourceKind, ""), action)
+		require.NoError(t, err, "planning %s", action)
+		require.Equal(t, enginev1.PlanResourcesFilter_KIND_ALWAYS_ALLOWED,
+			plan.PlanResourcesResponse.GetFilter().GetKind(),
+			"%s must remain the documented planner over-grant", action)
+
+		oracle := h.oracleAllowedIDs(t, action)
+		require.NotEmpty(t, oracle, "%s: check() must still allow the seeds that hold the attribute", action)
+		require.Less(t, len(oracle), len(h.corpus.Seeds.Seeds),
+			"%s: check() must still deny the seeds whose attribute is missing", action)
+		require.Contains(t, oracle, "a1", "%s: a1 holds aOptionalString", action)
+
+		filtered, err := h.adapterFilteredIDs(t, action)
+		require.NoError(t, err, "translating %s", action)
+		require.Equal(t, h.allSeedIDs(), filtered,
+			"%s: the folded plan makes this adapter return every row", action)
+	})
+
 	t.Run("degeneracy guard", func(t *testing.T) {
 		// The comparison above can pass vacuously if the oracle itself is trivial. Assert that a
 		// representative spread of actions has an oracle that is neither empty nor the full seed
 		// set — without this, a silently broken PDP connection would still pass every case.
+		//
+		// Every entry is asserted to be an action this adapter actually oracle-compares: a list
+		// copied between harnesses drifts into naming shapes the adapter never compares, which
+		// guard nothing (cerbos/query-plan-adapters#324). The membership assertion turns moving an
+		// action into adapterUnsupported into a failure here rather than a silent no-op.
+		//
 		// w1-size-zero-chain, w1-not-size-chain, cast-int-string and cast-double-string are
 		// deliberately absent: their oracles are empty by CONSTRUCTION (no seed holds a to-one
 		// parent with zero children; every seed's aString raises in int()/double()), so they
-		// cannot satisfy this guard. cast-int-double stands in for the cast group.
-		representative := []string{
+		// cannot satisfy this guard.
+		compared := []string{
 			"vf-le", "in-single", "like-percent", "exists-on-empty", "not-exists",
 			"nary-and", "field-to-field", "ternary-cmp", "arith-add", "size-threshold",
 			"hier-ancestor-cf", "pv-exists", "in-null-elem-mixed", "null-eq", "cs-eq",
 			"w1-all-chain", "w1-not-exists-chain", "w1-size-nonneg-chain",
 			"w1-not-in-chain", "w1-not-hasint-chain",
 			"cr-div-neg-zero", "cr-div-other-column", "cr-div-then-add", "cr-div-then-add-ne",
-			"cast-int-double",
 		}
+		// int() over a numeric column is unsupported for every adapter but convex, so there is no
+		// comparison behind it here: it stays as a PDP/policy liveness probe for the cast group.
+		// Asserting the complement keeps the split honest — a shape this adapter gains support for
+		// must move up into the compared list.
+		livenessOnly := []string{"cast-int-double"}
+
+		oracleCompared := h.corpus.OracleComparedActions()
 		total := len(h.corpus.Seeds.Seeds)
-		for _, action := range representative {
+		assertNonDegenerate := func(t *testing.T, action string) {
+			t.Helper()
+			allowed := h.oracleAllowedIDs(t, action)
+			require.NotEmpty(t, allowed, "%s: oracle allows nothing", action)
+			require.Less(t, len(allowed), total, "%s: oracle allows every seed", action)
+		}
+		for _, action := range compared {
 			t.Run(action, func(t *testing.T) {
-				allowed := h.oracleAllowedIDs(t, action)
-				require.NotEmpty(t, allowed, "%s: oracle allows nothing", action)
-				require.Less(t, len(allowed), total, "%s: oracle allows every seed", action)
+				require.True(t, oracleCompared[action],
+					"%s guards nothing: this adapter does not oracle-compare it", action)
+				assertNonDegenerate(t, action)
+			})
+		}
+		for _, action := range livenessOnly {
+			t.Run(action, func(t *testing.T) {
+				require.False(t, oracleCompared[action],
+					"%s is now oracle-compared: move it into the compared list", action)
+				assertNonDegenerate(t, action)
 			})
 		}
 	})
