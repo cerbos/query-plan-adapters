@@ -415,10 +415,10 @@ const MANIFEST_ACTIONS = new Set([
 // can express. The two lists are asserted to be complements of `ORACLE_ACTIONS`, so neither can
 // drift into the other unnoticed.
 //
-// w1-size-zero-chain, w1-not-size-chain and the two string-cast actions are deliberately absent
-// from both lists: their oracles are empty by CONSTRUCTION (no seed holds a to-one parent with
-// zero children; every seed's aString raises in int()/double()), so they cannot satisfy a
-// non-empty assertion.
+// w1-size-zero-chain, w1-not-size-chain, w1-size-frac-chain and the two string-cast actions are
+// deliberately absent from both lists: their oracles are empty by CONSTRUCTION (no seed holds a
+// to-one parent with zero children, nor one with two or more; every seed's aString raises in
+// int()/double()), so they cannot satisfy a non-empty assertion.
 
 const DEGENERACY_GUARD_ACTIONS = [
   "vf-le",
@@ -428,13 +428,15 @@ const DEGENERACY_GUARD_ACTIONS = [
   "pv-all",
   "null-eq",
   "null-ne",
-  // The absent to-one parent (#309/#315/#316): the five discriminating chain shapes with a
-  // non-empty oracle.
+  // The absent to-one parent (#309/#315/#316/#333/#334): the seven discriminating chain shapes
+  // with a non-empty oracle.
   "w1-all-chain",
   "w1-not-exists-chain",
   "w1-size-nonneg-chain",
   "w1-not-in-chain",
   "w1-not-hasint-chain",
+  "w1-ternary-chain-cond",
+  "w1-size-frac-le-chain",
   // Column arithmetic under a division (#311); the zero-denominator arm is a liveness probe.
   "cr-div-other-column",
   "cr-div-then-add",
@@ -668,10 +670,10 @@ describe("adversarial conformance corpus", () => {
         ].filter(Boolean).length !== 1,
     );
 
-    expect(allActions.size).toBe(143);
+    expect(allActions.size).toBe(146);
     expect(CONVEX_UNSUPPORTED).toHaveLength(2);
     expect(CONVEX_SUPPORTED_EXPECTED).toHaveLength(6);
-    expect(ORACLE_ACTIONS).toHaveLength(137);
+    expect(ORACLE_ACTIONS).toHaveLength(140);
     expect(THROWING_ACTIONS).toHaveLength(4);
     expect(misclassified).toEqual([]);
   });

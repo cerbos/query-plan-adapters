@@ -1,0 +1,40 @@
+{
+  "action": "w1-ternary-chain-cond",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "if",
+        "operands": [
+          {
+            "expression": {
+              "operator": "in",
+              "operands": [
+                {
+                  "value": "finance"
+                },
+                {
+                  "variable": "request.resource.attr.mainCategory.subNames"
+                }
+              ]
+            }
+          },
+          {
+            "variable": "request.resource.attr.aBool"
+          },
+          {
+            "expression": {
+              "operator": "not",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aBool"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

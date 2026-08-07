@@ -240,10 +240,11 @@ SQLALCHEMY_SKIPPED_DIVERGENCES = {
 # hostile group it can express. The two lists are asserted to be complements of
 # ORACLE_ACTIONS, so neither can drift into the other unnoticed.
 #
-# w1-size-zero-chain, w1-not-size-chain and the two string-cast actions are
-# deliberately absent: their oracles are empty by CONSTRUCTION (no seed holds a
-# to-one parent with zero children; every seed's aString raises in
-# int()/double()), so they cannot satisfy this guard.
+# w1-size-zero-chain, w1-not-size-chain, w1-size-frac-chain and the two
+# string-cast actions are deliberately absent: their oracles are empty by
+# CONSTRUCTION (no seed holds a to-one parent with zero children, nor one with
+# two or more; every seed's aString raises in int()/double()), so they cannot
+# satisfy this guard.
 DEGENERACY_GUARD_ACTIONS = (
     "vf-le",
     "like-percent",
@@ -252,12 +253,14 @@ DEGENERACY_GUARD_ACTIONS = (
     "pv-all",
     "null-eq",
     "null-ne",
-    # The absent to-one parent (#309/#315/#316).
+    # The absent to-one parent (#309/#315/#316/#333/#334).
     "w1-all-chain",
     "w1-not-exists-chain",
     "w1-size-nonneg-chain",
     "w1-not-in-chain",
     "w1-not-hasint-chain",
+    "w1-ternary-chain-cond",
+    "w1-size-frac-le-chain",
     # Column arithmetic under a division (#311); the zero-denominator arm is a
     # liveness probe below.
     "cr-div-other-column",
@@ -947,7 +950,7 @@ class TestAdversarialConformance:
 
         # Deliberate tripwires: a corpus edit must bump these in the same
         # change, so a new hostile action cannot join (or vanish) silently.
-        assert len(MANIFEST_ACTIONS) == 143
+        assert len(MANIFEST_ACTIONS) == 146
         assert len(SEEDS) == 20
         # Each of these carries a pinned message, so a shape gained or lost has
         # to be re-triaged here rather than joining the throw suite unnoticed.

@@ -971,6 +971,25 @@ resourcePolicy:
         match:
           expr: '!(size(R.attr.mainCategory.subCategories) > 0)'
 
+    # -- the same hazard through a TERNARY CONDITION (#334) --
+    # A ternary reaches its false-branch through its own rewrite rather than through the
+    # negation helper, so an adapter that spells "the condition is false" as a bare NOT over
+    # the chain filter never picks up the hop requirement: `NOT(chain matches)` is TRUE for an
+    # absent to-one parent, which selects the ELSE branch for rows CEL denies outright (the
+    # missing path is an evaluation error, not a false condition).
+    #
+    # The branches are chosen to disagree on the four seeds that HAVE a parent, so branch
+    # selection is discriminated separately from the guard: a1/a6 take the then-branch
+    # (aBool -> true, ALLOW), a8/c1 take the else-branch (!aBool -> false, DENY). Oracle a1/a6.
+    # An unguarded false-branch adds the parentless rows whose aBool is false — a2, a5, b2, b4,
+    # b6, c2, d2 — on top. Non-degenerate, so this belongs in the degeneracy guard.
+    - actions: ["w1-ternary-chain-cond"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '("finance" in R.attr.mainCategory.subNames) ? R.attr.aBool : !R.attr.aBool'
+
     # ==================== root relation inside a lambda body (W2) ====================
     # The inner R.attr.tags.exists(...) is planned INSIDE the categories lambda; its subquery
     # must correlate the ROOT entity (owner of "tags"), not the category join the lambda scope
@@ -994,6 +1013,41 @@ resourcePolicy:
       condition:
         match:
           expr: 'size(R.attr.tags) >= 1.5'
+
+    # -- the fractional threshold over a CHAIN (#333) --
+    # `R.attr.tags` above is a DIRECT relation, so the ROUNDING these two pin has only ever
+    # been exercised where there is no hop to require. Over a chain the rounded threshold and
+    # the absent-parent guard interact, and each arm probes a different half of that.
+    #
+    # The `eq`/`ne` COLLAPSE is deliberately not probed here — it cannot be: CEL rejects
+    # `size(...) == 1.5` with "found no matching overload for '_==_' applied to '(int, double)'",
+    # so no policy can make the planner emit it. An adapter that folds the collapse to a
+    # constant must still guard it under a chain (`hops AND constant` is two-valued and
+    # readmits parentless rows under an outer NOT), but only that adapter's unit tests can
+    # reach it. See conformance/README.md, "The absent to-one parent".
+
+    # `>= 1.5` rounds UP to `>= 2`. No seed holds a parent with two or more subCategories, so
+    # the oracle is EMPTY by construction and this arm cannot discriminate the hop guard — what
+    # it discriminates is the ROUNDING: an adapter that TRUNCATES to `>= 1` returns a1/a6/a8/c1
+    # while check() allows nothing. Being oracle-empty it stays OUT of the degeneracy guard,
+    # which asserts a non-empty non-total oracle.
+    - actions: ["w1-size-frac-chain"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'size(R.attr.mainCategory.subCategories) >= 1.5'
+
+    # `<= 1.5` rounds DOWN to `<= 1`, which a count of ZERO also satisfies — so this arm
+    # discriminates the hop guard as well as the rounding. Oracle a1/a6/a8/c1, the rows that
+    # HAVE the parent (each holds one subCategory); an unguarded chain counts 0 for the 16
+    # parentless rows and returns all 20. Non-degenerate, so this one belongs in the guard.
+    - actions: ["w1-size-frac-le-chain"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'size(R.attr.mainCategory.subCategories) <= 1.5'
 
     # ==================== size(string) thresholds outside int range ====================
     # The planner delivers giant integer constants verbatim (PDP-verified — not folded).

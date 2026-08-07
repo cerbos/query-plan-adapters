@@ -1143,7 +1143,7 @@ class AdversarialConformanceTest {
                         .filter(Boolean::booleanValue).count() != 1)
                 .toList();
 
-        assertEquals(143, manifest.size(),
+        assertEquals(146, manifest.size(),
                 "corpus size changed; triage the new action(s) before bumping this pin");
         assertEquals(20, SEEDS.size(), "seed count changed");
         // Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
@@ -1169,16 +1169,18 @@ class AdversarialConformanceTest {
      * {@code adapterUnsupported} fails here rather than silently going inert
      * (cerbos/query-plan-adapters#324).
      *
-     * <p>{@code w1-size-zero-chain}, {@code w1-not-size-chain} and the two string-cast actions
-     * are deliberately absent: their oracles are empty by CONSTRUCTION (no seed holds a to-one
-     * parent with zero children; every seed's aString raises in {@code int()}/{@code double()}),
-     * so they cannot satisfy this guard.
+     * <p>{@code w1-size-zero-chain}, {@code w1-not-size-chain}, {@code w1-size-frac-chain} and
+     * the two string-cast actions are deliberately absent: their oracles are empty by
+     * CONSTRUCTION (no seed holds a to-one parent with zero children, nor one with two or more;
+     * every seed's aString raises in {@code int()}/{@code double()}), so they cannot satisfy
+     * this guard.
      */
     private static final List<String> DEGENERACY_GUARD_ACTIONS = List.of(
             "vf-le", "like-percent", "all-on-empty", "null-eq", "null-ne",
-            // The absent to-one parent (#309/#315/#316).
+            // The absent to-one parent (#309/#315/#316/#333/#334).
             "w1-all-chain", "w1-not-exists-chain", "w1-size-nonneg-chain",
             "w1-not-in-chain", "w1-not-hasint-chain",
+            "w1-ternary-chain-cond", "w1-size-frac-le-chain",
             // Column arithmetic under a division (#311). The two shapes that nest further
             // arithmetic on top of the division are liveness probes below.
             "cr-div-neg-zero", "cr-div-other-column");

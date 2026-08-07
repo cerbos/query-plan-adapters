@@ -180,7 +180,11 @@ So when you add, fix, or change the handling of any shape:
 
 A per-adapter unit test is not a substitute for a corpus action. Unit tests pin the filter an
 adapter emits; only the corpus proves that filter returns the rows the PDP actually allows, and
-only the corpus asks the same question of every other adapter.
+only the corpus asks the same question of every other adapter. The one exception is a branch **CEL
+itself cannot reach** — a fractional `size()` equality is a type error, so no policy can drive it
+and there is no corpus action to substitute for. Prove the branch cannot be planned (compile the
+shape and quote the type error), then pin it with a unit test and say so in
+`conformance/README.md`; do not infer unreachability from the adapter's own code.
 
 Watch for harnesses that hand-project corpus data into a narrower local shape (a principal
 attribute allowlist, a fixed column list). A projection silently drops anything a new action
