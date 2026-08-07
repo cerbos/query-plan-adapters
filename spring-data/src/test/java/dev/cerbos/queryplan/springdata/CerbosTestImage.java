@@ -23,8 +23,10 @@ import java.util.List;
  * in particular {@code AdversarialConformanceTest.upstreamHasFoldOverGrantTripwire},
  * whose "fires when upstream fixes the fold" property is dormant between bumps and only
  * re-checks upstream behavior when the pinned image moves. Override per-run with
- * {@code -Dcerbos.test.image=ghcr.io/cerbos/cerbos:<tag>} to trial a newer PDP without
- * editing source.
+ * {@code -Dcerbos.test.image=<image reference>} to trial a newer PDP without editing source.
+ * (Spelled with a placeholder rather than a real reference on purpose: validate-corpus.sh scans
+ * the whole repository for Cerbos image references and holds every one of them to the corpus
+ * pin, including ones that only appear in documentation.)
  */
 final class CerbosTestImage {
 
@@ -35,13 +37,18 @@ final class CerbosTestImage {
     private CerbosTestImage() {}
 
     private static String defaultImage() {
-        Path versionFile = Path.of(
-                System.getProperty("user.dir"), "..", "conformance", "CERBOS_VERSION");
+        Path conformance = Path.of(System.getProperty("user.dir"), "..", "conformance");
+        Path versionFile = conformance.resolve("CERBOS_VERSION");
+        Path digestFile = conformance.resolve("CERBOS_IMAGE_DIGEST");
         try {
-            return "ghcr.io/cerbos/cerbos:" + Files.readString(versionFile).strip();
+            // Tag AND digest: the tag records which release this is, the digest makes the pin
+            // immune to the tag being re-pointed. validate-corpus.sh asserts the two agree
+            // everywhere they are restated.
+            return "ghcr.io/cerbos/cerbos:" + Files.readString(versionFile).strip()
+                    + "@" + Files.readString(digestFile).strip();
         } catch (IOException e) {
             throw new ExceptionInInitializerError(
-                    "Unable to read pinned Cerbos version from " + versionFile + ": " + e);
+                    "Unable to read the pinned Cerbos image from " + conformance + ": " + e);
         }
     }
 

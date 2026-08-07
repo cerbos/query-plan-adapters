@@ -22,6 +22,8 @@ FIXTURE_TMP="$(mktemp -d)"
 cd "${CONFORMANCE_DIR}"
 
 CERBOS_VERSION="$(tr -d '[:space:]' <CERBOS_VERSION)"
+CERBOS_IMAGE_DIGEST="$(tr -d '[:space:]' <CERBOS_IMAGE_DIGEST)"
+CERBOS_IMAGE="ghcr.io/cerbos/cerbos:${CERBOS_VERSION}@${CERBOS_IMAGE_DIGEST}"
 CONTAINER_NAME="cerbos-conformance-fixtures"
 HTTP_PORT=3592
 
@@ -38,7 +40,7 @@ docker run -d --rm \
   -p "${HTTP_PORT}:3592" \
   -v "${CONFORMANCE_DIR}/policies:/policies:ro" \
   -e CERBOS_NO_TELEMETRY=1 \
-  "ghcr.io/cerbos/cerbos:${CERBOS_VERSION}" \
+  "${CERBOS_IMAGE}" \
   server --set=storage.disk.directory=/policies >/dev/null
 
 echo "==> Waiting for the PDP to become healthy"

@@ -55,9 +55,9 @@ class ElasticsearchIntegrationTest {
     static GenericContainer<?> cerbos = createCerbosContainer();
 
     @Container
-    static ElasticsearchContainer elasticsearch = new ElasticsearchContainer(
-            "docker.elastic.co/elasticsearch/elasticsearch:8.15.3")
-            .withEnv("xpack.security.enabled", "false");
+    static ElasticsearchContainer elasticsearch =
+            new ElasticsearchContainer(ElasticsearchTestImage.IMAGE)
+                    .withEnv("xpack.security.enabled", "false");
 
     private static CerbosBlockingClient cerbosClient;
     private static HttpClient httpClient;

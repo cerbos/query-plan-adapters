@@ -10,6 +10,7 @@ from cerbos.sdk.client import CerbosClient
 from cerbos.sdk.container import CerbosContainer
 from cerbos.sdk.grpc.client import CerbosClient as GrpcCerbosClient
 from cerbos.sdk.model import Principal, ResourceDesc
+from cerbos_image import CERBOS_IMAGE
 from google.protobuf.json_format import ParseDict
 from google.protobuf.struct_pb2 import Value
 
@@ -214,7 +215,7 @@ def cerbos_container_host(client_type: str) -> Generator[str, None, None]:
         os.path.join(os.path.dirname(__file__), "../..", "policies")
     )
 
-    container = CerbosContainer(image="ghcr.io/cerbos/cerbos:dev")
+    container = CerbosContainer(image=CERBOS_IMAGE)
     container.with_volume_mapping(policy_dir, "/policies")
     container.with_env("CERBOS_NO_TELEMETRY", "1")
     container.with_command("server --set=schema.enforcement=reject")

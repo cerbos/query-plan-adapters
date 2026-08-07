@@ -28,6 +28,7 @@ import pytest
 from cerbos.sdk.client import CerbosClient
 from cerbos.sdk.container import CerbosContainer
 from cerbos.sdk.model import PlanResourcesFilterKind, Principal, Resource, ResourceDesc
+from cerbos_image import CERBOS_IMAGE, CONFORMANCE_DIR
 
 from cerbos_sqlalchemy import get_query, require_hops
 from sqlalchemy import (
@@ -56,18 +57,12 @@ from sqlalchemy import (
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import declarative_base
 
-CONFORMANCE_DIR = os.path.realpath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "conformance")
-)
-
 with open(os.path.join(CONFORMANCE_DIR, "seeds.json"), encoding="utf-8") as f:
     SEEDS_FILE = json.load(f)
 with open(os.path.join(CONFORMANCE_DIR, "actions.json"), encoding="utf-8") as f:
     ACTIONS_FILE = json.load(f)
 with open(os.path.join(CONFORMANCE_DIR, "derived-fields.json"), encoding="utf-8") as f:
     DERIVED_FILE = json.load(f)
-with open(os.path.join(CONFORMANCE_DIR, "CERBOS_VERSION"), encoding="utf-8") as f:
-    CERBOS_VERSION = f.read().strip()
 
 SEEDS: List[Dict[str, Any]] = SEEDS_FILE["seeds"]
 RESOURCE_KIND: str = SEEDS_FILE["resourceKind"]
@@ -790,7 +785,7 @@ def adv_conn(adv_engine):
 
 @pytest.fixture(scope="module")
 def adv_cerbos_client():
-    container = CerbosContainer(image=f"ghcr.io/cerbos/cerbos:{CERBOS_VERSION}")
+    container = CerbosContainer(image=CERBOS_IMAGE)
     container.with_volume_mapping(
         os.path.join(CONFORMANCE_DIR, "policies"), "/policies"
     )

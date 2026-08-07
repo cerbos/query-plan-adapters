@@ -517,7 +517,7 @@ class AdversarialConformanceTest {
             case "h2":
                 return Persistence.createEntityManagerFactory("adversarial-pu");
             case "postgres": {
-                PostgreSQLContainer<?> pg = new PostgreSQLContainer<>("postgres:16");
+                PostgreSQLContainer<?> pg = new PostgreSQLContainer<>(DatabaseTestImages.POSTGRES);
                 pg.start();
                 database = pg;
                 return Persistence.createEntityManagerFactory(
@@ -530,7 +530,7 @@ class AdversarialConformanceTest {
                 // mixed-case seeds (c1/c2) then diverge from the check() oracle.
                 String collation = System.getProperty(
                         "adapter.test.mysql.collation", "utf8mb4_0900_as_cs");
-                MySQLContainer<?> my = new MySQLContainer<>("mysql:8.4")
+                MySQLContainer<?> my = new MySQLContainer<>(DatabaseTestImages.MYSQL)
                         .withCommand("--character-set-server=utf8mb4",
                                 "--collation-server=" + collation);
                 // The leg runs with Connector/J's DEFAULT client-side prepared statements,

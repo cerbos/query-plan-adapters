@@ -14,6 +14,9 @@
 
 services:
   cerbos:
+    # Pinned to conformance/CERBOS_VERSION and conformance/CERBOS_IMAGE_DIGEST — Compose cannot
+    # read a file, so the reference is spelled out and validate-corpus.sh asserts that BOTH halves
+    # agree. The tag alone would leave the digest free to name some other build entirely.
     image: ghcr.io/cerbos/cerbos:0.54.0@sha256:211c261f6031675522a35c6055b13fd719c4aff13747307e4bcb6907326537ef
     container_name: cerbos-spring-data-e2e
     command:

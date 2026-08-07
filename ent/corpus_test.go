@@ -129,9 +129,12 @@ type ActionsFile struct {
 
 // Corpus is the parsed corpus plus this adapter's derived classification.
 type Corpus struct {
-	SkippedActions     map[string]bool
-	Dir                string
-	CerbosVersion      string
+	SkippedActions map[string]bool
+	Dir            string
+	CerbosVersion  string
+	// CerbosImage is the fully pinned PDP reference — tag AND digest, so a re-pointed tag
+	// cannot change which build a run tested against.
+	CerbosImage        string
 	Actions            ActionsFile
 	Seeds              SeedsFile
 	Derived            DerivedFile
@@ -165,6 +168,11 @@ var tagKeys = []string{"id", "name"}
 // way and for the same reason as seedKeys.
 var derivedKeys = []string{"aDouble", "createdAt", "createdBy", "labels", "scope"}
 
+// cerbosImageRepository is the PDP image the corpus pins. The tag comes from CERBOS_VERSION and
+// the digest from CERBOS_IMAGE_DIGEST; conformance/scripts/validate-corpus.sh asserts the two
+// agree everywhere they are restated.
+const cerbosImageRepository = "ghcr.io/cerbos/cerbos"
+
 // loadCorpus reads the corpus and derives the classification for adapterName exactly as
 // conformance/README.md prescribes:
 //
@@ -188,6 +196,12 @@ func loadCorpus(tb testing.TB, adapterName string) *Corpus {
 		tb.Fatalf("reading CERBOS_VERSION: %v", err)
 	}
 	c.CerbosVersion = strings.TrimSpace(string(version))
+
+	digest, err := os.ReadFile(filepath.Join(dir, "CERBOS_IMAGE_DIGEST"))
+	if err != nil {
+		tb.Fatalf("reading CERBOS_IMAGE_DIGEST: %v", err)
+	}
+	c.CerbosImage = cerbosImageRepository + ":" + c.CerbosVersion + "@" + strings.TrimSpace(string(digest))
 
 	unsupported := c.Actions.AdapterUnsupported[adapterName]
 	unsupportedSet := make(map[string]bool, len(unsupported))

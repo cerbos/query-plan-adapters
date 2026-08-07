@@ -16,13 +16,18 @@ final class CerbosTestImage {
     private CerbosTestImage() {}
 
     private static String defaultImage() {
-        Path versionFile = Path.of(
-                System.getProperty("user.dir"), "..", "conformance", "CERBOS_VERSION");
+        Path conformance = Path.of(System.getProperty("user.dir"), "..", "conformance");
+        Path versionFile = conformance.resolve("CERBOS_VERSION");
+        Path digestFile = conformance.resolve("CERBOS_IMAGE_DIGEST");
         try {
-            return "ghcr.io/cerbos/cerbos:" + Files.readString(versionFile).strip();
+            // Tag AND digest: the tag records which release this is, the digest makes the pin
+            // immune to the tag being re-pointed. validate-corpus.sh asserts the two agree
+            // everywhere they are restated.
+            return "ghcr.io/cerbos/cerbos:" + Files.readString(versionFile).strip()
+                    + "@" + Files.readString(digestFile).strip();
         } catch (IOException e) {
             throw new ExceptionInInitializerError(
-                    "Unable to read pinned Cerbos version from " + versionFile + ": " + e);
+                    "Unable to read the pinned Cerbos image from " + conformance + ": " + e);
         }
     }
 
