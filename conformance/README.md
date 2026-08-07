@@ -559,9 +559,28 @@ the policy suite and classify it like anything else.
 - **The wire fixtures are not consumed by adapter harnesses.** They pin planner shape
   independently and are enforced by the `Conformance Corpus` workflow, which replans against the
   pinned PDP and fails on drift.
-- **A dialect the harness does not exercise is not covered.** Most TypeScript harnesses run on
-  SQLite only; collation and LIKE metacharacter behaviour differ on MySQL and SQL Server, and the
-  READMEs treat collation as part of the policy contract for exactly this reason.
+- **A dialect the harness does not exercise is not covered.** Collation, LIKE metacharacter
+  handling and parameter typing all differ per dialect, and the READMEs treat them as part of the
+  policy contract for exactly this reason. `ent` and `spring-data` run three dialects each;
+  `drizzle` and `prisma` run SQLite and PostgreSQL, chosen with `ADAPTER_TEST_DB`
+  ([#320](https://github.com/cerbos/query-plan-adapters/issues/320)); the remaining TypeScript
+  harnesses are still single-store. That leg is not a formality. Adding it turned up three live
+  mechanisms SQLite could not see, none of them visible in `actions.json` afterwards because two
+  were fixed in the translator:
+  - `drizzle`, `$1 IS NULL` over a bound constant — untypeable on PostgreSQL, so a hard error
+    rather than the redundancy it is on SQLite (`cr-contains`, `like-underscore`, and the five
+    `cr-div-*` shapes).
+  - `drizzle`, a numeric constant typed from the column instead of the value — `aNumber >= 1.5`
+    against an `integer`, `size(aString) > 4294967296` against `length()`'s `integer`
+    (`double-threshold`, `p-double-frac`, `cr-size-frac-ge`, `size-huge-gt`, `size-huge-lt`,
+    `cr-div-neg-zero`, `cr-div-other-column`). Read as SQL `numeric` rather than `float(53)`
+    this one is silent, not loud: `aNumber * 0.1 == 0.3` is exact decimal arithmetic and admits
+    a row CEL's binary floating point denies.
+  - `prisma`, `like-backslash` — `\` is the default `LIKE` escape character on PostgreSQL and
+    MySQL and literal on SQLite, so one needle meant two things. Not expressible without an
+    `ESCAPE` clause Prisma does not emit, so it is now `adapterUnsupported` and throws.
+
+  Each adapter's README names the stores its contract is actually proved on.
 
 ## Regenerating wire fixtures after a Cerbos version bump
 

@@ -2446,10 +2446,18 @@ function handleStringOperator(
     // Prisma emits LIKE without an ESCAPE clause and does not escape wildcard characters,
     // so a needle containing % or _ would match as a pattern instead of literally (e.g.
     // startsWith("100%") wrongly matches "100xdone"). Fail loudly rather than filter wrong.
-    if (/[%_]/.test(value)) {
+    //
+    // A backslash is the same hazard reached from the other direction, and only an executed
+    // PostgreSQL leg surfaces it (cerbos/query-plan-adapters#320): SQLite's LIKE has no escape
+    // character at all, so `\` is literal there, while PostgreSQL and MySQL treat it as the
+    // DEFAULT escape character even with no ESCAPE clause. `endsWith("\\")` is then a pattern
+    // ending in an escape character — a hard error on PostgreSQL — and a `\x` anywhere inside
+    // silently drops the backslash, so `contains("a\\b")` matches "ab", a row the PDP denies.
+    if (/[%_\\]/.test(value)) {
       throw new Error(
-        `Cannot translate ${operator} with a needle containing LIKE metacharacters (% or _): ` +
-          "Prisma does not escape wildcards in string filters"
+        `Cannot translate ${operator} with a needle containing LIKE metacharacters (%, _ or \\): ` +
+          "Prisma does not escape wildcards in string filters, and \\ is the default LIKE " +
+          "escape character on PostgreSQL and MySQL"
       );
     }
     const fieldName = getLeafField(receiver.path);
@@ -3483,15 +3491,18 @@ function handleOverlapsOperator(
  *
  * `startsWith` compiles to `LIKE` with no `ESCAPE` clause, so `%` and `_` in the prefix
  * match as wildcards instead of literally and widen the filter past what the PDP allows.
- * `[` is unsafe for a separate reason: SQL Server opens a character class on `[` even when
- * an `ESCAPE` clause is declared, so it cannot be made literal at all. Fail loudly rather
- * than emit a filter that admits denied rows.
+ * `\` is unsafe because PostgreSQL and MySQL treat it as the DEFAULT escape character with no
+ * `ESCAPE` clause present, where SQLite has none at all — so the same prefix means different
+ * things per provider. `[` is unsafe for a third reason: SQL Server opens a character class on
+ * `[` even when an `ESCAPE` clause is declared, so it cannot be made literal at all. Fail loudly
+ * rather than emit a filter that admits denied rows.
  */
 function assertLikeSafePrefix(prefix: string): void {
-  if (/[%_\[]/.test(prefix)) {
+  if (/[%_\[\\]/.test(prefix)) {
     throw new Error(
-      "Cannot translate hierarchy prefix matching with LIKE metacharacters (%, _ or [): " +
-        "Prisma emits LIKE without an ESCAPE clause, and [ opens a character class on SQL Server even with one"
+      "Cannot translate hierarchy prefix matching with LIKE metacharacters (%, _, \\ or [): " +
+        "Prisma emits LIKE without an ESCAPE clause, \\ is the default escape character on " +
+        "PostgreSQL and MySQL, and [ opens a character class on SQL Server even with one"
     );
   }
 }

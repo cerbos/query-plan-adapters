@@ -32,6 +32,11 @@ npm run test:adversarial  # differential suite against the shared conformance co
 
 Prisma has version-specific tests: `npm run test:v6`, `npm run test:v7`
 
+Drizzle and Prisma also replay the corpus against a real PostgreSQL server (testcontainers, so
+Docker is required): `npm run test:adversarial:postgres`, and `…:postgres:v6` / `…:postgres:v7` on
+Prisma. The store is chosen with `ADAPTER_TEST_DB` (`sqlite` by default); an unknown value fails
+rather than falling back.
+
 ### Python (SQLAlchemy)
 ```bash
 pdm install
@@ -75,6 +80,7 @@ Some adapters need additional services:
 - Mongoose: `npm run mongo` (Docker MongoDB)
 - Convex: `npm run convex:up` (Docker Convex backend)
 - LangChain/ChromaDB: Docker ChromaDB on port 8234
+- Drizzle and Prisma, PostgreSQL adversarial leg only: Docker (testcontainers starts it)
 
 ## Conformance
 
@@ -95,6 +101,7 @@ so there are no hand-written expectations.
 
 ```bash
 npm run test:adversarial              # TypeScript adapters
+npm run test:adversarial:postgres     # drizzle and prisma: the same corpus on real PostgreSQL
 pdm run test                          # SQLAlchemy (includes the adversarial suite)
 gradle test                           # Java adapters (mount the repo root, see above)
 conformance/scripts/validate-corpus.sh          # corpus integrity; runs in every adapter's CI
@@ -123,7 +130,12 @@ For pull requests: give a concise summary, note the affected adapters, link rela
 
 ## CI
 
-Each adapter has its own GitHub Actions workflow triggered by changes in its directory, `/policies/`, or `/conformance/`. Matrix tests across Node versions (22, 24, 25) and relevant service versions. All ten adapter workflows validate the corpus and run their adversarial suite **inside the same job as the regular tests** — there is no separate `adversarial` job. On the TypeScript adapters the adversarial step is gated to the baseline Node leg (`if: matrix.node-version == '22'`), because the corpus discriminates the translator and the datastore, not the Node runtime; the other matrix dimensions (Prisma major, MongoDB server version) still get their own adversarial run. Adding a new adversarial job — or dropping that gate so the corpus replays on every Node leg — multiplies runner minutes for no extra coverage. `conformance.yaml` additionally replans the golden wire fixtures against the pinned PDP and fails on drift.
+Each adapter has its own GitHub Actions workflow triggered by changes in its directory, `/policies/`, or `/conformance/`. Matrix tests across Node versions (22, 24, 25) and relevant service versions. All ten adapter workflows validate the corpus and run their adversarial suite **inside the same job as the regular tests** — there is no separate `adversarial` job. On the TypeScript adapters the adversarial step is gated to the baseline Node leg (`if: matrix.node-version == '22'`), because the corpus discriminates the translator and the datastore, not the Node runtime; the other matrix dimensions still get their own adversarial run, and those divide into two kinds:
+
+- **The datastore is one.** Drizzle and Prisma each run the corpus twice on the baseline Node leg, once per `ADAPTER_TEST_DB` store (SQLite, then PostgreSQL) — collation, LIKE escaping and parameter typing are translator behaviour, so a store the workflow does not execute is a store the adapter does not cover. MongoDB server version is the mongoose equivalent.
+- **The client engine is not, on its own.** Prisma's v6/v7 dimension is an engine matrix; it crosses with the store dimension, giving four adversarial runs per Prisma workflow (2 majors × 2 stores), all on Node 22.
+
+Adding a new adversarial job — or dropping the Node gate so the corpus replays on every Node leg — multiplies runner minutes for no extra coverage. Adding a *store* leg does buy coverage; adding a Node leg does not. `conformance.yaml` additionally replans the golden wire fixtures against the pinned PDP and fails on drift.
 
 Tag-based publishing: `prisma/v*` -> npm, `sqla/v*` -> PyPI, `elasticsearch-java/v*` and `spring-data/v*` -> Maven Central; `ent/v*` and `pgx/v*` are Go
 module tags resolved directly from the repository.

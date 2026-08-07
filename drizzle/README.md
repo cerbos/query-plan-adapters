@@ -41,7 +41,7 @@ is correct under any nesting. See
 
 ## Conformance contract
 
-The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 20 hostile seed rows and real Drizzle queries. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
+The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 20 hostile seed rows and real Drizzle queries, executed on both SQLite and PostgreSQL. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
 
 | Classification | Coverage |
 | --- | --- |
@@ -51,6 +51,17 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` d
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 
 The oracle coverage includes value-first and field-to-field comparisons, escaped string predicates, relation counts and nested collection macros, null/error propagation, arithmetic and ternaries, hierarchy operations, typed timestamps, and multi-hop relations. The fail-closed shapes throw rather than return a broader SQL filter. `matches()` is rejected because SQL regex dialects do not guarantee CEL/RE2 semantics. Every fail-closed shape's error message is pinned in the shared corpus (`conformance/actions.json`) and asserted by this adapter's conformance run, so a classification proves the throw names its declared mechanism rather than merely that something threw.
+
+### Dialects the contract is proved on
+
+The classification above holds where the corpus is **executed**, not where the emitted SQL merely looks plausible. Until [#320](https://github.com/cerbos/query-plan-adapters/issues/320) the corpus ran on SQLite only and PostgreSQL support was pinned at the rendered-string level; it now runs end to end on both:
+
+```bash
+npm run test:adversarial            # SQLite
+npm run test:adversarial:postgres   # PostgreSQL, via testcontainers
+```
+
+The PostgreSQL leg is what proves the typed paths SQLite cannot reach — a real `boolean` where SQLite stores an integer, a real `timestamptz` where SQLite compares text, a hard error on division by zero where SQLite returns NULL, and a parameter typed from the column it is compared with rather than from the value. **MySQL and PlanetScale are not executed anywhere.** `src/dialect-rendering.test.ts` renders every filter through `MySqlDialect` so the adapter is at least known to emit no dialect-exclusive function there, which is renderability, not evaluation.
 
 ## Mapping hazards
 
