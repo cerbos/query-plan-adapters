@@ -180,7 +180,7 @@ final class HierarchyTranslator {
                 return new Hierarchy.Constant(splitLiteral(raw, delimiter), delimiter);
             }
             if (strOp.getNodeCase() == Operand.NodeCase.VARIABLE) {
-                return new Hierarchy.FieldRef(scope.resolvePath(strOp.getVariable()), delimiter);
+                return new Hierarchy.FieldRef(scope.path(strOp.getVariable()), delimiter);
             }
             throw new IllegalArgumentException("hierarchy(string, delimiter) requires a value or field operand");
         }
@@ -189,7 +189,7 @@ final class HierarchyTranslator {
             return switch (inner.getNodeCase()) {
                 case VALUE -> new Hierarchy.Constant(
                         splitLiteral(String.valueOf(PlanValues.protoValueToJava(inner.getValue())), "."), ".");
-                case VARIABLE -> new Hierarchy.FieldRef(scope.resolvePath(inner.getVariable()), ".");
+                case VARIABLE -> new Hierarchy.FieldRef(scope.path(inner.getVariable()), ".");
                 case EXPRESSION -> {
                     if (!"list".equals(inner.getExpression().getOperator())) {
                         throw new IllegalArgumentException("hierarchy requires a value, field, or list operand");
@@ -199,7 +199,7 @@ final class HierarchyTranslator {
                         switch (seg.getNodeCase()) {
                             case VALUE -> segs.add(new Seg.Const(
                                     String.valueOf(PlanValues.protoValueToJava(seg.getValue()))));
-                            case VARIABLE -> segs.add(new Seg.FieldSeg(scope.resolvePath(seg.getVariable())));
+                            case VARIABLE -> segs.add(new Seg.FieldSeg(scope.path(seg.getVariable())));
                             default -> throw new IllegalArgumentException(
                                     "hierarchy list segment must be a value or field, got " + seg.getNodeCase());
                         }
