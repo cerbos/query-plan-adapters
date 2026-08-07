@@ -86,6 +86,11 @@ Collection attributes lower into correlated subqueries. A relation may reach thr
 tables with `Via`, so a flattened chain such as `R.attr.mainCategory.subCategories` joins its
 intermediate table inside the subquery while only the resource row correlates outwards.
 
+Those subqueries read the mapped table bare. If your own reads of it apply a predicate — a
+soft-delete flag, a tenant column, a subtype discriminator — declare it as `SubqueryFilter` on the
+relation so the subquery sees the same rows the application serialised. See
+[Mapping hazards](#mapping-hazards).
+
 ### NULL representation
 
 The planner emits the same `eq(attr, null)` node whether the caller sends a NULL column as an
@@ -123,6 +128,61 @@ Go's `time.Time` carries nanoseconds, so those instants survive translation exac
 
 The eight fail-closed shapes return an error wrapping `ErrUnsupported` rather than a broader
 predicate. `matches()` is rejected because SQL regex dialects do not guarantee CEL/RE2 semantics.
+
+### Mapping hazards
+
+The conformance contract above proves the *plan* side — given a policy shape, does the filter select
+the rows `check()` allows. The other half is the *mapping*: **the rows the subquery reads must be
+the rows the application put into the resource attributes.** Six ways that can break are catalogued
+in the shared corpus, and every adapter has to record a position on each of them.
+
+This adapter builds a **bare-table subquery.** A `Relation` is a table name plus a source and a
+target column; there is no association metadata for the translator to consult, so nothing the
+application applies to its own reads reaches the generated subquery. Where the application narrows
+those reads, declare the same predicate as `SubqueryFilter` on the relation (or on the `Hop`, for an
+intermediate table) and the translator reproduces it. Declaring nothing emits exactly the SQL this
+adapter emitted before the field existed — it cannot detect the omission, so silence is not a
+warning.
+
+| Hazard | Position | Mechanism to check |
+|---|---|---|
+| Filtered association | **Caller-owned**, reproducible with `SubqueryFilter` | Ent interceptors (`client.Intercept(intercept.TraverseFunc(…))` calling `q.WhereP`), privacy filter rules (`privacy.FilterFunc`), and the `.Where(...)` predicates a repository helper always applies. All of those rewrite the Ent query they are attached to; none of them reach inside the raw correlated subquery this adapter builds, which is given `Table`, `SourceColumn` and `TargetColumn` and reads the table bare |
+| Default scope on the target model | **Caller-owned**, reproducible with `SubqueryFilter` | A soft-delete column (`deleted_at IS NULL`), a tenant column, a `published` flag — anything every application read of that table filters on. Go has no default-scope construct here, so the convention lives in your own query code and only you can see it |
+| Subtype discrimination | **Caller-owned**, reproducible with `SubqueryFilter` | A `type`/`kind` discriminator column where one table holds several row kinds. Declare `{Column: "kind", Value: "…"}`, or `RestrictIn` over the kinds the association admits |
+| To-one relation used as a collection | **Caller-owned** | A relation whose `TargetColumn` has no unique index. The mapping carries no cardinality at all — every relation lowers to the same correlated subquery — so nothing makes the database enforce the single row the application saw. Add the unique constraint, or accept that the subquery examines every matching row |
+| Composite association key | **Rejected by the type system** | `SourceColumn` and `TargetColumn` are each one `string`, so a two-column key cannot be expressed. This is a compile error, not a wrong join |
+| Absent to-one parent | **Reproduced**, and proved by the corpus (`w1-all-chain` and siblings) | None — every operator reached through a `Via` chain requires its intermediate hops separately, so a missing parent is UNKNOWN under both polarities ([#309](https://github.com/cerbos/query-plan-adapters/issues/309), [#315](https://github.com/cerbos/query-plan-adapters/issues/315)). Declaring `SubqueryFilter` on a `Hop` extends that to a parent the application *hides*, which for this purpose is equally absent |
+
+#### Declaring the application's own predicate
+
+```go
+tags := &cerbosent.Relation{
+    Table:        "contact_tag",
+    SourceColumn: "id",
+    TargetColumn: "contact_id",
+    Field:        &cerbosent.Entry{Column: "name"},
+    // Exactly the predicate your own reads of contact_tag apply.
+    SubqueryFilter: []cerbosent.Restriction{
+        {Column: "deleted_at", Op: cerbosent.RestrictIsNull},
+        {Column: "kind", Value: "label"},
+    },
+}
+```
+
+The vocabulary is deliberately narrow — `RestrictEq`, `RestrictNe`, `RestrictIsNull`,
+`RestrictIsNotNull`, `RestrictIn`, `RestrictNotIn` over a single column — because that is what these
+hazards look like in practice. A predicate that does not fit is a signal that the mapping cannot
+faithfully reproduce the application's read, and the honest response is to not map that relation
+rather than to declare an approximation.
+
+Restrictions are ANDed into the subquery's correlation predicate, so they narrow the rows the
+subquery *examines* rather than the rows it returns. That is what keeps them right under negation:
+`all` lowers to a false-witness `EXISTS`, and restricting the scan turns it into "every visible row
+satisfies the body" instead of "every row in the table does". They apply to every shape built on the
+relation — the truth witnesses, the UNKNOWN witness, the counts, and the hop-existence guard.
+
+Values are bound as query parameters, never interpolated. An empty `Values` list is read as CEL
+reads it: `RestrictIn` then hides every row, `RestrictNotIn` hides none.
 
 ### Dialect coverage
 

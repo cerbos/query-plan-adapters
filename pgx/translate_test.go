@@ -453,3 +453,173 @@ func TestMapperQualifierCannotShadowGeneratedAliases(t *testing.T) {
 		"resource", mapper)
 	require.ErrorIs(t, err, cerbospgx.ErrUnsupported)
 }
+
+// -- mapping hazards: the caller-declared store-side predicate -------------------------------------
+
+// The class 1 mapping-hazard contract (README, "Mapping hazards"). This adapter is handed a table
+// name and two column names, so nothing the application applies to its own reads of that table
+// reaches the generated subquery. Relation.SubqueryFilter is how the caller closes that gap
+// (cerbos/query-plan-adapters#323).
+
+func hazardMapper(rel *cerbospgx.Relation) cerbospgx.Mapper {
+	return cerbospgx.MapperMap{
+		"request.resource.attr.name": {Column: "name"},
+		"request.resource.attr.tags": {Relation: rel},
+	}
+}
+
+func tagRelation(filter ...cerbospgx.Restriction) *cerbospgx.Relation {
+	return &cerbospgx.Relation{
+		Table:          "tag",
+		SourceColumn:   "id",
+		TargetColumn:   "resource_id",
+		Field:          &cerbospgx.Entry{Column: "name"},
+		Fields:         map[string]cerbospgx.Entry{"name": {Column: "name"}},
+		SubqueryFilter: filter,
+	}
+}
+
+func translateWith(t *testing.T, mapper cerbospgx.Mapper, cond *operand) cerbospgx.Result {
+	t.Helper()
+	result, err := cerbospgx.Translate(conditional(cond), "resource", mapper)
+	require.NoError(t, err)
+	return result
+}
+
+// tagsExists is `R.attr.tags.exists(t, t.name == "x")`.
+func tagsExists(t *testing.T) *operand {
+	t.Helper()
+	return expr("exists", variable("request.resource.attr.tags"),
+		expr("lambda", expr("eq", variable("t.name"), val(t, "x")), variable("t")))
+}
+
+// TestSubqueryFilterNarrowsEveryShapeBuiltOnTheRelation is the load-bearing assertion: the
+// declaration has to reach every subquery the translator builds over the relation, not just the
+// one the author of the feature happened to look at. A shape that misses it silently reverts to
+// reading the table bare.
+func TestSubqueryFilterNarrowsEveryShapeBuiltOnTheRelation(t *testing.T) {
+	t.Parallel()
+
+	visible := cerbospgx.Restriction{Column: "deleted_at", Op: cerbospgx.RestrictIsNull}
+
+	cases := []struct {
+		cond *operand
+		name string
+	}{
+		{name: "exists", cond: tagsExists(t)},
+		{name: "negated exists", cond: expr("not", tagsExists(t))},
+		{name: "all", cond: expr("all", variable("request.resource.attr.tags"),
+			expr("lambda", expr("eq", variable("t.name"), val(t, "x")), variable("t")))},
+		{name: "except", cond: expr("except", variable("request.resource.attr.tags"),
+			expr("lambda", expr("eq", variable("t.name"), val(t, "x")), variable("t")))},
+		{name: "exists_one", cond: expr("exists_one", variable("request.resource.attr.tags"),
+			expr("lambda", expr("eq", variable("t.name"), val(t, "x")), variable("t")))},
+		{name: "count", cond: expr("gt", expr("size", variable("request.resource.attr.tags")), val(t, 2))},
+		{name: "membership", cond: expr("in", val(t, "x"), variable("request.resource.attr.tags"))},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			bare := translateWith(t, hazardMapper(tagRelation()), tc.cond)
+			require.NotContains(t, bare.Where, "deleted_at",
+				"undeclared must emit exactly what it emitted before the field existed")
+
+			subqueries := strings.Count(bare.Where, `FROM "tag"`)
+			require.NotZero(t, subqueries, "sanity: this shape must build a subquery at all")
+
+			// A shape typically renders the relation more than once — a true witness and an
+			// UNKNOWN witness, or a count beside a guard. Counting the restriction against the
+			// number of subqueries is what catches one that picks it up only in some of them.
+			declared := translateWith(t, hazardMapper(tagRelation(visible)), tc.cond)
+			require.Equal(t, subqueries,
+				strings.Count(declared.Where, `"deleted_at" IS NULL`),
+				"every subquery over the relation must carry the declared restriction")
+		})
+	}
+}
+
+// TestSubqueryFilterRestrictsIntermediateHops covers the flattened chain. A hop is read bare too,
+// and it is the to-ONE parent whose absence must deny (#309) — a row the application hides is,
+// for that purpose, absent, so the hop guard has to agree with the element subquery.
+func TestSubqueryFilterRestrictsIntermediateHops(t *testing.T) {
+	t.Parallel()
+
+	rel := &cerbospgx.Relation{
+		Table:        "sub_category",
+		SourceColumn: "id",
+		TargetColumn: "category_id",
+		Fields:       map[string]cerbospgx.Entry{"name": {Column: "name"}},
+		Via: []cerbospgx.Hop{{
+			Table:          "category",
+			ChildColumn:    "category_id",
+			JoinColumn:     "id",
+			SubqueryFilter: []cerbospgx.Restriction{{Column: "kind", Value: "main"}},
+		}},
+	}
+	mapper := cerbospgx.MapperMap{
+		"request.resource.attr.chain": {Relation: rel},
+	}
+	cond := expr("not", expr("exists", variable("request.resource.attr.chain"),
+		expr("lambda", expr("eq", variable("s.name"), val(t, "x")), variable("s"))))
+
+	result, err := cerbospgx.Translate(conditional(cond), "resource", mapper)
+	require.NoError(t, err)
+
+	// The negated macro renders the element subquery twice (true and UNKNOWN witnesses) and the
+	// hop-existence guard once, and all three read `category`. The guard is the one that matters:
+	// without the restriction it answers "the parent exists" for a parent the application hides,
+	// which is what turns the #309 fix back into an over-grant.
+	require.Equal(t, 3, strings.Count(result.Where, `"category" AS `))
+	require.Equal(t, 3, strings.Count(result.Where, `"kind" = `),
+		"the hop guard must restrict the hop the same way the element subquery does")
+}
+
+// TestSubqueryFilterMembershipEdges pins the two list identities. `IN ()` is a syntax error, so
+// the empty cases have to fold to constants rather than reach the renderer.
+func TestSubqueryFilterMembershipEdges(t *testing.T) {
+	t.Parallel()
+
+	cond := tagsExists(t)
+
+	empty := translateWith(t, hazardMapper(tagRelation(
+		cerbospgx.Restriction{Column: "kind", Op: cerbospgx.RestrictIn})), cond)
+	require.NotContains(t, empty.Where, "IN ()")
+	require.Contains(t, empty.Where, "FALSE", "membership in an empty list hides every row")
+
+	emptyNot := translateWith(t, hazardMapper(tagRelation(
+		cerbospgx.Restriction{Column: "kind", Op: cerbospgx.RestrictNotIn})), cond)
+	require.NotContains(t, emptyNot.Where, "IN ()")
+	require.Contains(t, emptyNot.Where, "TRUE", "non-membership in an empty list hides none")
+
+	listed := translateWith(t, hazardMapper(tagRelation(
+		cerbospgx.Restriction{Column: "kind", Op: cerbospgx.RestrictIn, Values: []any{"a", "b"}})), cond)
+	require.Contains(t, listed.Where, `"kind" IN (`)
+	require.NotContains(t, listed.Where, "'a'", "the declared values are bound, never interpolated")
+	require.Contains(t, listed.Args, "a")
+	require.Contains(t, listed.Args, "b")
+}
+
+// TestRestrictionMismatchFailsClosed pins the safety property that makes Restriction's
+// Value/Values pairing safe to leave unenforced: getting it wrong hides rows, never exposes them.
+// A sum type with a constructor would be tidier, but this is the property that actually matters
+// for an authorization filter, so it is asserted rather than assumed.
+func TestRestrictionMismatchFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	cond := tagsExists(t)
+
+	// Values supplied where Op reads Value: the comparison renders against NULL, which is
+	// UNKNOWN, so the subquery matches nothing.
+	valuesOnEq := translateWith(t, hazardMapper(tagRelation(
+		cerbospgx.Restriction{Column: "kind", Op: cerbospgx.RestrictEq, Values: []any{"a"}})), cond)
+	require.Contains(t, valuesOnEq.Where, `"kind" = NULL`)
+	require.NotContains(t, valuesOnEq.Args, "a")
+
+	// Value supplied where Op reads Values: the empty list folds to FALSE.
+	valueOnIn := translateWith(t, hazardMapper(tagRelation(
+		cerbospgx.Restriction{Column: "kind", Op: cerbospgx.RestrictIn, Value: "a"})), cond)
+	require.Contains(t, valueOnIn.Where, "FALSE")
+	require.NotContains(t, valueOnIn.Args, "a")
+}
