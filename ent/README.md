@@ -129,6 +129,8 @@ Go's `time.Time` carries nanoseconds, so those instants survive translation exac
 The eight fail-closed shapes return an error wrapping `ErrUnsupported` rather than a broader
 predicate. `matches()` is rejected because SQL regex dialects do not guarantee CEL/RE2 semantics.
 
+Every fail-closed shape's error message is pinned in the shared corpus (`conformance/actions.json`) and asserted by this adapter's conformance run, so a classification proves the throw names its declared mechanism rather than merely that something threw.
+
 ### Mapping hazards
 
 The conformance contract above proves the *plan* side — given a policy shape, does the filter select

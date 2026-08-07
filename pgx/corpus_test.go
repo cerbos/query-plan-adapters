@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 // The shared adversarial corpus. Everything about what is tested — the hostile rows, the action
@@ -79,18 +81,29 @@ type DerivedFile struct {
 	Fields      []string                `json:"fields"`
 }
 
-// UnsupportedShape is an entry in expectedUnsupported.
+// UnsupportedShape is an entry in expectedUnsupported. Messages carries one entry per adapter that
+// must reject the shape, keyed by adapter name; the corpus asserts that key set.
 type UnsupportedShape struct {
-	Action            string `json:"action"`
-	Shape             string `json:"shape"`
-	SpringDataMessage string `json:"springDataMessage"`
+	Messages map[string]string `json:"messages"`
+	Action   string            `json:"action"`
+	Shape    string            `json:"shape"`
 }
 
 // AdapterEntry is an entry in adapterUnsupported / adapterSupportedExpected /
 // nullRepresentationOmitted.
+//
+// Messages is the per-adapter message map a nullRepresentationOmitted entry carries; the other two
+// groups leave it nil, and adapterUnsupported uses the flat Message below instead because it is
+// already per-adapter.
+//
+// Message is the substring this adapter's error must contain. adapterUnsupported carries it and
+// loadCorpus requires it; adapterSupportedExpected and nullRepresentationOmitted do not throw for
+// the reason recorded here, so they leave it empty.
 type AdapterEntry struct {
-	Action string `json:"action"`
-	Reason string `json:"reason"`
+	Messages map[string]string `json:"messages"`
+	Action   string            `json:"action"`
+	Reason   string            `json:"reason"`
+	Message  string            `json:"message"`
 }
 
 // KnownDivergence is an action excluded from the oracle run for named adapters.
@@ -211,19 +224,58 @@ func loadCorpus(tb testing.TB, adapterName string) *Corpus {
 		c.OracleActions = append(c.OracleActions, entry.Action)
 	}
 
-	c.ThrowingActions = append(c.ThrowingActions, unsupported...)
+	for _, entry := range unsupported {
+		requireMessage(tb, fmt.Sprintf("adapterUnsupported.%s.%s", adapterName, entry.Action), entry.Message)
+		c.ThrowingActions = append(c.ThrowingActions, entry)
+	}
 	for _, shape := range c.Actions.ExpectedUnsupported {
 		if !supportedExpectedSet[shape.Action] {
+			message := shape.Messages[adapterName]
+			requireMessage(tb,
+				fmt.Sprintf("expectedUnsupported.%s.messages.%s", shape.Action, adapterName), message)
 			c.ThrowingActions = append(c.ThrowingActions, AdapterEntry{
-				Action: shape.Action,
-				Reason: shape.Shape,
+				Action:  shape.Action,
+				Reason:  shape.Shape,
+				Message: message,
 			})
 		}
 	}
 
-	c.NullOmittedActions = c.Actions.NullRepresentationOmitted
+	// Every adapter must reject these, so the message map names the whole roster and this
+	// harness resolves its own entry exactly as it does for a throwing action.
+	for _, entry := range c.Actions.NullRepresentationOmitted {
+		message := entry.Messages[adapterName]
+		requireMessage(tb,
+			fmt.Sprintf("nullRepresentationOmitted.%s.messages.%s", entry.Action, adapterName), message)
+		entry.Message = message
+		c.NullOmittedActions = append(c.NullOmittedActions, entry)
+	}
 
 	return c
+}
+
+// validateMessage rejects a throwing classification that pins no error message. The message is what
+// turns "it threw" into "it threw for the declared reason": without it a mapper typo or an
+// unrelated validation satisfies the throw suite just as well as the documented limitation
+// (cerbos/query-plan-adapters#326).
+//
+// Split from requireMessage so the guard itself is unit-testable rather than only reachable through
+// a corpus that already satisfies it.
+func validateMessage(label, message string) error {
+	if message == "" {
+		return fmt.Errorf(
+			"actions.json pins no throw message for %s: the throw suite would accept a failure for any reason",
+			label)
+	}
+	return nil
+}
+
+// requireMessage fails the run when validateMessage rejects the pin.
+func requireMessage(tb testing.TB, label, message string) {
+	tb.Helper()
+	if err := validateMessage(label, message); err != nil {
+		tb.Fatal(err)
+	}
 }
 
 // AllClassifiedActions returns every action the corpus classifies, so the harness can assert that
@@ -439,3 +491,13 @@ func (c *Corpus) labelsOf(s Seed) []*string { return c.derived(s).Labels }
 // another row's data and still agree with the oracle.
 func categoryID(s Seed, i int) string    { return fmt.Sprintf("%s-cat%d", s.ID, i) }
 func subCategoryID(s Seed, i int) string { return fmt.Sprintf("%s-sub%d", s.ID, i) }
+
+// TestValidateMessageRejectsAnUnpinnedThrow proves the guard fires: adding a throwing action without
+// pinning its message must fail this harness rather than silently degrade its throw case to a bare
+// "it threw" (cerbos/query-plan-adapters#326).
+func TestValidateMessageRejectsAnUnpinnedThrow(t *testing.T) {
+	t.Parallel()
+
+	require.ErrorContains(t, validateMessage("synthetic-entry", ""), "pins no throw message")
+	require.NoError(t, validateMessage("synthetic-entry", "a pinned mechanism"))
+}

@@ -176,14 +176,30 @@ class AdversarialConformanceTest {
     private record DerivedFile(@JsonProperty("$schema") String schema, String description,
                                List<String> fields, Map<String, DerivedEntry> derived) {}
 
+    /**
+     * An {@code expectedUnsupported} entry. {@code messages} carries one entry per adapter that
+     * must reject the shape, keyed by adapter name; {@code validate-corpus.sh} asserts that key
+     * set is exactly the roster minus the adapters that promoted the shape.
+     */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    private record UnsupportedShape(String action, String shape, String springDataMessage) {}
+    private record UnsupportedShape(String action, String shape, Map<String, String> messages) {}
 
+    /**
+     * A {@code nullRepresentationOmitted} entry. Every adapter must reject these — the two NULL
+     * conventions are indistinguishable on the wire — so {@code messages} names the whole roster
+     * with no promotions to subtract.
+     */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    private record NullRepresentationOmitted(String action, String reason) {}
+    private record NullRepresentationOmitted(String action, String reason,
+                                             Map<String, String> messages) {}
 
+    /**
+     * An {@code adapterUnsupported} / {@code adapterSupportedExpected} entry. {@code message} is
+     * the substring this adapter's error must contain — present on the first, absent on the
+     * second, which does not throw.
+     */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    private record AdapterUnsupported(String action, String reason) {}
+    private record AdapterUnsupported(String action, String reason, String message) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record KnownDivergence(String action, String reason, List<String> adapters) {}
@@ -271,15 +287,33 @@ class AdversarialConformanceTest {
     }
 
     static Stream<Arguments> adapterUnsupportedActions() {
-        return adapterUnsupported().stream().map(u -> Arguments.of(u.action(), u.reason()));
+        return adapterUnsupported().stream().map(u -> Arguments.of(
+                u.action(),
+                u.reason(),
+                requireMessage("adapterUnsupported." + ADAPTER + "." + u.action(), u.message())));
     }
 
     static Stream<Arguments> unsupportedShapes() {
         Set<String> promoted = adapterSupportedExpectedActions();
         return actionsFile.expectedUnsupported().stream()
-                .filter(u -> !u.action().equals("p-timestamp"))
                 .filter(u -> !promoted.contains(u.action()))
-                .map(u -> Arguments.of(u.action(), u.springDataMessage()));
+                .map(u -> Arguments.of(u.action(), requireMessage(
+                        "expectedUnsupported." + u.action() + ".messages." + ADAPTER,
+                        u.messages() == null ? null : u.messages().get(ADAPTER))));
+    }
+
+    /**
+     * The substring this adapter's error must contain, or a loud failure. The message is what
+     * turns "it threw" into "it threw for the declared reason": without it a mapper typo or an
+     * unrelated validation satisfies the throw suite just as well as the documented limitation
+     * (cerbos/query-plan-adapters#326).
+     */
+    private static String requireMessage(String label, String message) {
+        if (message == null || message.isEmpty()) {
+            throw new IllegalStateException("actions.json pins no throw message for " + label
+                    + ": the throw suite would accept a failure for any reason");
+        }
+        return message;
     }
 
     /**
@@ -289,7 +323,14 @@ class AdversarialConformanceTest {
      */
     static Stream<Arguments> nullRepresentationOmitted() {
         return actionsFile.nullRepresentationOmitted().stream()
-                .map(n -> Arguments.of(n.action(), n.reason()));
+                .map(n -> Arguments.of(n.action(), n.reason(), nullOmittedMessage(n)));
+    }
+
+    /** The substring this adapter's rejection under the omitted representation must contain. */
+    private static String nullOmittedMessage(NullRepresentationOmitted entry) {
+        return requireMessage(
+                "nullRepresentationOmitted." + entry.action() + ".messages." + ADAPTER,
+                entry.messages() == null ? null : entry.messages().get(ADAPTER));
     }
     /**
      * Deterministic label names per seed for the {@code macro-depth3-*} actions — the third
@@ -755,13 +796,20 @@ class AdversarialConformanceTest {
     /**
      * Probe shapes the adapter does not support: the translation must fail loudly (never a
      * silently-wrong filter). Messages pinned so a regression to silent acceptance is caught.
+     *
+     * <p>{@code p-timestamp} runs here like every other shape. It used to be routed around this
+     * case because {@code actions.json} still carried the pre-support operand error; the corpus
+     * now pins the column-type error the adapter actually raises, which is the one that must keep
+     * firing.
      */
     @ParameterizedTest(name = "{0}")
     @MethodSource("unsupportedShapes")
     void unsupportedShapesThrow(String action, String expectedMessage) {
         IllegalArgumentException ex = assertThrows(
                 IllegalArgumentException.class, () -> adapterFilteredIds(action));
-        assertEquals(expectedMessage, ex.getMessage());
+        assertTrue(ex.getMessage().contains(expectedMessage),
+                "action '" + action + "' was rejected for a reason actions.json does not declare: "
+                        + ex.getMessage());
     }
 
     /**
@@ -771,8 +819,12 @@ class AdversarialConformanceTest {
      */
     @ParameterizedTest(name = "{0}")
     @MethodSource("adapterUnsupportedActions")
-    void adapterUnsupportedActionsThrow(String action, String reason) {
-        assertThrows(IllegalArgumentException.class, () -> adapterFilteredIds(action), reason);
+    void adapterUnsupportedActionsThrow(String action, String reason, String expectedMessage) {
+        IllegalArgumentException ex = assertThrows(
+                IllegalArgumentException.class, () -> adapterFilteredIds(action), reason);
+        assertTrue(ex.getMessage().contains(expectedMessage),
+                "action '" + action + "' was rejected for a reason actions.json does not declare: "
+                        + ex.getMessage());
     }
 
     /**
@@ -784,7 +836,7 @@ class AdversarialConformanceTest {
      */
     @ParameterizedTest(name = "{0}")
     @MethodSource("nullRepresentationOmitted")
-    void nullRepresentationOmittedIsRejected(String action, String reason) {
+    void nullRepresentationOmittedIsRejected(String action, String reason, String message) {
         assertEquals(List.of(), oracleAllowedIds(action), reason);
 
         // The default translation emits IS NULL and returns exactly the rows the PDP denies.
@@ -792,7 +844,7 @@ class AdversarialConformanceTest {
 
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
                 () -> adapterFilteredIds(action, NullAttributeRepresentation.OMITTED));
-        assertTrue(ex.getMessage().contains("missing-attribute error"), ex.getMessage());
+        assertTrue(ex.getMessage().contains(message), ex.getMessage());
     }
 
     /**
@@ -826,7 +878,14 @@ class AdversarialConformanceTest {
                 adapterFilteredIds(action, NullAttributeRepresentation.OMITTED);
                 notRejected.add(action);
             } catch (IllegalArgumentException expected) {
-                // the shape must be rejected under this representation
+                // The rejection must be the null-operand check talking, not an incidental
+                // failure: a mapper typo counting as the required rejection is the silent pass
+                // the corpus README warns about.
+                if (!expected.getMessage().contains(nullOmittedMessage(
+                        actionsFile.nullRepresentationOmitted().get(0)))) {
+                    notRejected.add(action + " (rejected for the wrong reason: "
+                            + expected.getMessage() + ")");
+                }
             }
         }
         assertEquals(List.of(), notRejected);
@@ -849,21 +908,6 @@ class AdversarialConformanceTest {
         };
     }
 
-    /**
-     * {@code p-timestamp} compares {@code timestamp(R.attr.createdBy)} where {@code createdBy}
-     * maps to a STRING column: timestamp() comparisons are supported only on columns that
-     * unambiguously denote an absolute instant (Instant / OffsetDateTime), so this must keep
-     * failing closed — with the column-type error, not the old pre-support operand error.
-     */
-    @Test
-    void timestampOnNonTemporalColumnThrowsNamedError() {
-        IllegalArgumentException ex = assertThrows(
-                IllegalArgumentException.class, () -> adapterFilteredIds("p-timestamp"));
-        assertTrue(ex.getMessage().contains("timestamp() comparison requires a column mapped to")
-                        && ex.getMessage().contains("String")
-                        && ex.getMessage().contains("request.resource.attr.createdBy"),
-                "unexpected message: " + ex.getMessage());
-    }
 
     /**
      * Pins the MySQL IEEE double-cast wiring. On the MySQL leg the ServiceLoader-discovered
@@ -1048,6 +1092,19 @@ class AdversarialConformanceTest {
     }
 
     /**
+     * Adding a throwing action without pinning its message must fail this harness rather than
+     * silently degrade the throw suite to a bare "it threw" (cerbos/query-plan-adapters#326).
+     */
+    @Test
+    void throwingActionWithNoPinnedMessageFailsClassification() {
+        for (String absent : new String[] {null, ""}) {
+            IllegalStateException ex = assertThrows(IllegalStateException.class,
+                    () -> requireMessage("synthetic-entry", absent));
+            assertTrue(ex.getMessage().contains("pins no throw message"), ex.getMessage());
+        }
+    }
+
+    /**
      * Corpus-size tripwire and exactly-once partition. A corpus edit must bump the pinned
      * counts in the same change — without this, a new hostile action silently joins the
      * oracle run, and a group dropped by the {@code ActionsFile} parser above would make its
@@ -1089,6 +1146,14 @@ class AdversarialConformanceTest {
         assertEquals(143, manifest.size(),
                 "corpus size changed; triage the new action(s) before bumping this pin");
         assertEquals(20, SEEDS.size(), "seed count changed");
+        // Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
+        // lost has to be re-triaged here rather than joining the throw suite unnoticed. The two
+        // @MethodSource streams that feed the throw cases are what resolve those messages, and
+        // both fail loudly on a missing one.
+        assertEquals(10, throwing.size(), "throwing action count changed");
+        assertEquals(throwing.size(),
+                adapterUnsupportedActions().count() + unsupportedShapes().count(),
+                "every throwing action must reach a parameterised throw case");
         assertEquals(List.of(), misclassified,
                 "every manifest action must have exactly one spring-data outcome");
         assertTrue(actionsFile.expectedUnsupported().stream()

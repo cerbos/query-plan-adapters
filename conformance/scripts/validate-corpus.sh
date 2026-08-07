@@ -50,6 +50,94 @@ if ! jq -e '
   exit 1
 fi
 
+# `adapters` is the canonical roster every other per-adapter key is checked against. Without it
+# each check would have to restate "the ten adapters", and an adapter added to one list but not
+# another would look consistent.
+if ! jq -e '
+  (.adapters | type) == "array"
+  and (.adapters | length) > 0
+  and (.adapters | length) == (.adapters | unique | length)
+  and all(.adapters[]; type == "string" and length > 0)
+' actions.json >/dev/null; then
+  echo "actions.json must declare a non-empty, duplicate-free adapters roster"
+  exit 1
+fi
+
+if ! jq -e '
+  .adapters as $adapters
+  | ((.adapterUnsupported // {}) | keys) + ((.adapterSupportedExpected // {}) | keys)
+  | all(. as $adapter | $adapters | index($adapter) != null)
+' actions.json >/dev/null; then
+  echo "adapterUnsupported / adapterSupportedExpected name an adapter missing from the roster"
+  exit 1
+fi
+
+# Every throwing classification pins the substring that adapter's error must contain, so a
+# harness proves the throw is the DECLARED mechanism rather than a mapper typo or an unrelated
+# validation (cerbos/query-plan-adapters#326). A classification whose message is missing or empty
+# would degrade the harness assertion back to a bare "it threw".
+if ! jq -e '
+  all((.adapterUnsupported // {})[][];
+    (.message | type) == "string" and (.message | length) > 0
+    and (.reason | type) == "string" and (.reason | length) > 0)
+' actions.json >/dev/null; then
+  echo "Every adapterUnsupported entry must carry a non-empty reason and message"
+  exit 1
+fi
+
+# An expectedUnsupported shape is rejected by every adapter that has not promoted it, so its
+# `messages` key set is exactly that complement — not a subset. A missing key is an adapter whose
+# harness would have nothing to assert; a stray one is a message no harness reads.
+messages_drift="$(jq -r '
+  .adapters as $adapters
+  | (.adapterSupportedExpected // {}) as $promoted
+  | .expectedUnsupported[]
+  | . as $entry
+  | ($adapters | map(select(. as $a | ($promoted[$a] // []) | any(.action == $entry.action) | not))) as $expected
+  | (($entry.messages // {}) | keys) as $got
+  | (($expected - $got) | map("missing " + .)) + (($got - $expected) | map("unexpected " + .)) as $drift
+  | select(($drift | length) > 0)
+  | "  \($entry.action): \($drift | join(", "))"
+' actions.json)"
+if [[ -n "${messages_drift}" ]]; then
+  echo "expectedUnsupported messages must name exactly the adapters that reject the shape:"
+  echo "${messages_drift}"
+  exit 1
+fi
+
+if ! jq -e '
+  all(.expectedUnsupported[]; all(.messages[]; type == "string" and length > 0))
+' actions.json >/dev/null; then
+  echo "Every expectedUnsupported message must be a non-empty string"
+  exit 1
+fi
+
+# A `nullRepresentationOmitted` action is rejected by EVERY adapter — the two conventions are
+# indistinguishable on the wire, so no adapter can translate it — hence the full roster with no
+# promotions to subtract. It is as fail-closed as anything in the two groups above, so it pins its
+# message the same way rather than leaving each harness with a hardcoded literal.
+null_messages_drift="$(jq -r '
+  .adapters as $adapters
+  | .nullRepresentationOmitted[]
+  | . as $entry
+  | (($entry.messages // {}) | keys) as $got
+  | ((($adapters - $got) | map("missing " + .)) + (($got - $adapters) | map("unexpected " + .))) as $drift
+  | select(($drift | length) > 0)
+  | "  \($entry.action): \($drift | join(", "))"
+' actions.json)"
+if [[ -n "${null_messages_drift}" ]]; then
+  echo "nullRepresentationOmitted messages must name every adapter in the roster:"
+  echo "${null_messages_drift}"
+  exit 1
+fi
+
+if ! jq -e '
+  all(.nullRepresentationOmitted[]; all(.messages[]; type == "string" and length > 0))
+' actions.json >/dev/null; then
+  echo "Every nullRepresentationOmitted message must be a non-empty string"
+  exit 1
+fi
+
 jq -r '.conformance[]' actions.json | sort -u >"${VALIDATION_TMP}/conformance-actions"
 jq -r '.expectedUnsupported[].action' actions.json | sort -u >"${VALIDATION_TMP}/expected-unsupported-actions"
 jq -r '.adapterUnsupported | to_entries[] | .key as $adapter | .value[] | [$adapter, .action] | @tsv' \

@@ -80,6 +80,8 @@ interface DerivedFile {
 interface UnsupportedShape {
   action: string;
   shape: string;
+  /** One entry per adapter that must reject the shape; the corpus asserts the key set. */
+  messages: Record<string, string>;
 }
 
 interface ActionsFile {
@@ -87,13 +89,26 @@ interface ActionsFile {
   adapterUnsupported: Record<string, UnsupportedAction[]>;
   adapterSupportedExpected: Record<string, UnsupportedAction[]>;
   expectedUnsupported: UnsupportedShape[];
-  nullRepresentationOmitted: UnsupportedAction[];
+  nullRepresentationOmitted: NullRepresentationOmitted[];
   knownDivergences: KnownDivergence[];
 }
 
 interface UnsupportedAction {
   action: string;
   reason: string;
+  /** Absent on `adapterSupportedExpected` / `nullRepresentationOmitted`, required on a throw. */
+  message?: string;
+}
+
+/**
+ * A `nullRepresentationOmitted` entry. Every adapter must reject these — the two NULL conventions
+ * are indistinguishable on the wire — so `messages` names the whole roster with no promotions to
+ * subtract.
+ */
+interface NullRepresentationOmitted {
+  action: string;
+  reason: string;
+  messages: Record<string, string>;
 }
 
 interface KnownDivergence {
@@ -328,11 +343,25 @@ function parseSeedsFile(value: unknown): SeedsFile {
   };
 }
 
+/** The `messages` map of one `expectedUnsupported` entry: adapter key -> required substring. */
+function parseMessages(value: unknown, label: string): Record<string, string> {
+  const messages = requireRecord(value, label);
+  const result: Record<string, string> = {};
+  for (const [adapter, message] of Object.entries(messages)) {
+    result[adapter] = requireString(message, `${label}.${adapter}`);
+  }
+  return result;
+}
+
 function parseUnsupportedShape(value: unknown, index: number): UnsupportedShape {
   const shape = requireRecord(value, `expectedUnsupported[${index}]`);
   return {
     action: requireString(shape["action"], `expectedUnsupported[${index}].action`),
     shape: requireString(shape["shape"], `expectedUnsupported[${index}].shape`),
+    messages: parseMessages(
+      shape["messages"],
+      `expectedUnsupported[${index}].messages`,
+    ),
   };
 }
 
@@ -341,9 +370,15 @@ function parseUnsupportedAction(
   label: string,
 ): UnsupportedAction {
   const entry = requireRecord(value, label);
+  const message = entry["message"];
   return {
     action: requireString(entry["action"], `${label}.action`),
     reason: requireString(entry["reason"], `${label}.reason`),
+    // `adapterUnsupported` carries this and the classification below requires it;
+    // `adapterSupportedExpected` and `nullRepresentationOmitted` do not throw, so they do not.
+    ...(message === undefined
+      ? {}
+      : { message: requireString(message, `${label}.message`) }),
   };
 }
 
@@ -396,9 +431,15 @@ function parseActionsFile(value: unknown): ActionsFile {
     nullRepresentationOmitted: requireArray(
       file["nullRepresentationOmitted"],
       "nullRepresentationOmitted",
-    ).map((entry, index) =>
-      parseUnsupportedAction(entry, `nullRepresentationOmitted[${index}]`),
-    ),
+    ).map((entry, index) => {
+      const label = `nullRepresentationOmitted[${index}]`;
+      const record = requireRecord(entry, label);
+      return {
+        action: requireString(record["action"], `${label}.action`),
+        reason: requireString(record["reason"], `${label}.reason`),
+        messages: parseMessages(record["messages"], `${label}.messages`),
+      };
+    }),
     knownDivergences: requireArray(
       file["knownDivergences"],
       "knownDivergences",
@@ -448,19 +489,63 @@ const CHROMA_DIVERGENCES = new Set(
     .filter(({ adapters }) => adapters.includes("langchain-chromadb"))
     .map(({ action }) => action),
 );
-const THROWING_ACTIONS: UnsupportedAction[] = [
-  ...CHROMA_UNSUPPORTED,
+/**
+ * A shape this adapter must refuse, with the substring its error has to contain.
+ *
+ * The message is what turns "it threw" into "it threw for the declared reason": without it a
+ * mapper typo or an unrelated validation satisfies the assertion just as well as the limitation
+ * the corpus documents. Chroma is the largest consumer of this — most of its corpus is
+ * fail-closed, so a bare throw assertion proved almost nothing (cerbos/query-plan-adapters#326).
+ */
+interface ThrowingAction {
+  action: string;
+  reason: string;
+  message: string;
+}
+
+/** The pinned message, or a failure — a throwing action without one asserts nothing. */
+function requireMessage(label: string, message: string | undefined): string {
+  if (message === undefined || message === "") {
+    throw Error(
+      `actions.json pins no throw message for ${label}: the throw suite would accept a failure for any reason`,
+    );
+  }
+  return message;
+}
+
+const THROWING_ACTIONS: ThrowingAction[] = [
+  ...CHROMA_UNSUPPORTED.map(({ action, reason, message }) => ({
+    action,
+    reason,
+    message: requireMessage(
+      `adapterUnsupported.langchain-chromadb.${action}`,
+      message,
+    ),
+  })),
   ...actionsFile.expectedUnsupported
     .filter(({ action }) => !CHROMA_SUPPORTED_EXPECTED_ACTIONS.has(action))
-    .map(({ action, shape }) => ({
+    .map(({ action, shape, messages }) => ({
       action,
       reason: shape,
+      message: requireMessage(
+        `expectedUnsupported.${action}.messages.langchain-chromadb`,
+        messages["langchain-chromadb"],
+      ),
     })),
 ];
 // Actions whose `== null` probe targets an attribute the oracle OMITS for NULL columns. Chroma
 // needs no representation option: it cannot index an explicit null distinguishably from a missing
 // key, so every null comparison operand is already rejected outright (#302).
-const NULL_REPRESENTATION_OMITTED = actionsFile.nullRepresentationOmitted;
+const NULL_REPRESENTATION_OMITTED = actionsFile.nullRepresentationOmitted.map(
+  ({ action, reason, messages }) => ({
+    action,
+    reason,
+    message: requireMessage(
+      `nullRepresentationOmitted.${action}.messages.langchain-chromadb`,
+      messages["langchain-chromadb"],
+    ),
+  }),
+);
 const MANIFEST_ACTIONS = new Set([
   ...actionsFile.conformance,
   ...actionsFile.expectedUnsupported.map(({ action }) => action),
@@ -721,6 +806,17 @@ async function adapterFilteredIds(action: string): Promise<string[]> {
 }
 
 describe("adversarial conformance corpus", () => {
+
+  // Adding a throwing action without pinning its message must fail this harness rather than
+  // silently degrade the throw suite to a bare "it threw" (cerbos/query-plan-adapters#326).
+  test("a throwing action with no pinned message fails classification", () => {
+    expect(() => requireMessage("synthetic-entry", undefined)).toThrow(
+      /pins no throw message/,
+    );
+    expect(() => requireMessage("synthetic-entry", "")).toThrow(
+      /pins no throw message/,
+    );
+  });
   test("manifest assigns all 143 policy actions exactly one Chroma outcome", () => {
     const oracle = new Set(CHROMA_SUPPORTED_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map(({ action }) => action));
@@ -757,16 +853,19 @@ describe("adversarial conformance corpus", () => {
     },
   );
 
+  // The message is asserted, not just the throw: a bare `toThrow()` is satisfied by a mapper
+  // typo or an unrelated validation, which would leave the classification resting on a failure
+  // that has nothing to do with the limitation it declares (cerbos/query-plan-adapters#326).
   test.each(THROWING_ACTIONS)(
-    "$action fails during translation ($reason)",
-    async ({ action }) => {
+    "$action fails during translation with the declared message ($reason)",
+    async ({ action, message }) => {
       const queryPlan = await planFor(action);
       expect(() =>
         queryPlanToChromaDB({
           queryPlan,
           fieldNameMapper: FIELD_NAME_MAPPER,
         }),
-      ).toThrow();
+      ).toThrow(message);
     },
   );
 
@@ -778,7 +877,7 @@ describe("adversarial conformance corpus", () => {
   // throwing here and the adapter acquires a representation dependency it must then declare.
   test.each(NULL_REPRESENTATION_OMITTED)(
     "$action is rejected regardless of representation ($reason)",
-    async ({ action }) => {
+    async ({ action, message }) => {
       expect(await oracleAllowedIds(action)).toEqual([]);
 
       const queryPlan = await planFor(action);
@@ -787,7 +886,7 @@ describe("adversarial conformance corpus", () => {
           queryPlan,
           fieldNameMapper: FIELD_NAME_MAPPER,
         }),
-      ).toThrow(/finite number, string, or boolean literal/);
+      ).toThrow(message);
     },
   );
 

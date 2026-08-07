@@ -687,6 +687,9 @@ func runConformance(t *testing.T, h *harness) {
 		// cannot slip past this adapter unnoticed.
 		require.Len(t, seen, 143, "corpus size changed; triage the new action(s) before bumping")
 		require.Len(t, h.corpus.Seeds.Seeds, 20, "seed count changed")
+		// Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
+		// lost has to be re-triaged here rather than joining the throw suite unnoticed.
+		require.Len(t, h.corpus.ThrowingActions, 8, "throwing action count changed")
 	})
 
 	t.Run("oracle", func(t *testing.T) {
@@ -721,6 +724,12 @@ func runConformance(t *testing.T, h *harness) {
 					"%s must fail translation rather than emit a predicate (%s)", entry.Action, entry.Reason)
 				require.ErrorIs(t, err, cerbosent.ErrUnsupported,
 					"%s must be refused as unsupported, not fail incidentally", entry.Action)
+				// ErrUnsupported pins the family; the corpus message pins the mechanism. Without
+				// it a mapper typo or an unrelated validation wrapped in the same sentinel would
+				// satisfy this case as well as the documented limitation
+				// (cerbos/query-plan-adapters#326).
+				require.ErrorContains(t, err, entry.Message,
+					"%s must be refused for the mechanism actions.json declares", entry.Action)
 			})
 		}
 	})
@@ -731,6 +740,11 @@ func runConformance(t *testing.T, h *harness) {
 				_, err := h.adapterFilteredIDs(t, entry.Action,
 					cerbosent.WithNullRepresentation(cerbosent.NullOmitted))
 				require.Error(t, err, "%s must be rejected under the omitted representation", entry.Action)
+				// The rejection must be the null-operand check talking, not an incidental failure:
+				// a mapper typo satisfying this assertion would leave the representation guard
+				// proving nothing (cerbos/query-plan-adapters#326).
+				require.ErrorContains(t, err, entry.Message,
+					"%s must be rejected by the null-operand check, not incidentally", entry.Action)
 
 				// Anti-vacuity: pin WHY the rejection is required. Under the default explicit
 				// representation this adapter emits IS NULL and returns rows the PDP denies, so

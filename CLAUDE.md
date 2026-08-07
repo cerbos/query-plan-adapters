@@ -149,7 +149,12 @@ So when you add, fix, or change the handling of any shape:
 4. **Run every adapter's adversarial suite and triage each divergence** into exactly one of: a
    translation bug (fix it), a shape that adapter's query language genuinely cannot express (add
    to `adapterUnsupported` with a reason naming the real mechanism, and make it throw), or an
-   upstream planner bug (`knownDivergences`).
+   upstream planner bug (`knownDivergences`). A fail-closed classification also needs the message
+   that adapter actually raises pinned next to it — `message` on an `adapterUnsupported` entry,
+   `messages.<adapter>` on an `expectedUnsupported` one. Every harness refuses to run with one
+   missing, and `validate-corpus.sh` checks the key sets. Pin what the adapter says, then check it
+   names the mechanism the `reason` declares; when the two disagree, the reason is usually naming a
+   limitation the walk never reaches.
 5. **Bump the per-harness tripwires deliberately** — corpus size, oracle/throwing counts, and the
    degeneracy-guard action lists. Add the new action to each guard so it cannot pass vacuously,
    choosing the right list per adapter: the *compared* list where that adapter translates the
@@ -185,7 +190,7 @@ never recompute them in a harness.
 - Adding a seed row means adding its `conformance/derived-fields.json` entry in the same commit; adding a seed *field* also means widening every harness's declared key set — both are enforced, not optional
 - Regenerate build artifacts in the same commit as source changes
 - Changing what an adapter can translate means updating its `conformance/actions.json` entry and its README contract table in the same commit
-- When an adapter cannot express a shape, make it throw with a message naming the real mechanism — never emit a best-effort filter
+- When an adapter cannot express a shape, make it throw with a message naming the real mechanism — never emit a best-effort filter. That message is pinned in `conformance/actions.json` and asserted, so changing it is a deliberate corpus edit
 
 ## Agent skills
 

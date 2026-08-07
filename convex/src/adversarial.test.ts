@@ -52,11 +52,26 @@ interface DerivedFile {
 
 interface ExpectedUnsupported {
   action: string;
+  /** One entry per adapter that must reject the shape; the corpus asserts the key set. */
+  messages: Record<string, string>;
 }
 
 interface AdapterOutcome {
   action: string;
   reason: string;
+  /** Absent on `adapterSupportedExpected` / `nullRepresentationOmitted`, required on a throw. */
+  message?: string;
+}
+
+/**
+ * A `nullRepresentationOmitted` entry. Every adapter must reject these — the two NULL conventions
+ * are indistinguishable on the wire — so `messages` names the whole roster with no promotions to
+ * subtract.
+ */
+interface NullRepresentationOmitted {
+  action: string;
+  reason: string;
+  messages: Record<string, string>;
 }
 
 interface KnownDivergence {
@@ -69,7 +84,7 @@ interface ActionsFile {
   adapterUnsupported: Record<string, AdapterOutcome[]>;
   adapterSupportedExpected: Record<string, AdapterOutcome[]>;
   expectedUnsupported: ExpectedUnsupported[];
-  nullRepresentationOmitted: AdapterOutcome[];
+  nullRepresentationOmitted: NullRepresentationOmitted[];
   knownDivergences: KnownDivergence[];
 }
 
@@ -137,15 +152,32 @@ const isSeedsFile = (value: unknown): value is SeedsFile =>
   Array.isArray(value["seeds"]) &&
   value["seeds"].every(isSeed);
 
+const isMessageMap = (value: unknown): value is Record<string, string> =>
+  isRecord(value) &&
+  Object.values(value).every((message) => typeof message === "string");
+
 const isExpectedUnsupported = (
   value: unknown,
 ): value is ExpectedUnsupported =>
-  isRecord(value) && typeof value["action"] === "string";
+  isRecord(value) &&
+  typeof value["action"] === "string" &&
+  isMessageMap(value["messages"]);
+
+const isNullRepresentationOmitted = (
+  value: unknown,
+): value is NullRepresentationOmitted =>
+  isRecord(value) &&
+  typeof value["action"] === "string" &&
+  typeof value["reason"] === "string" &&
+  isMessageMap(value["messages"]);
 
 const isAdapterOutcome = (value: unknown): value is AdapterOutcome =>
   isRecord(value) &&
   typeof value["action"] === "string" &&
-  typeof value["reason"] === "string";
+  typeof value["reason"] === "string" &&
+  // `adapterUnsupported` carries this and the classification below requires it;
+  // `adapterSupportedExpected` and `nullRepresentationOmitted` do not throw, so they do not.
+  (value["message"] === undefined || typeof value["message"] === "string");
 
 const isAdapterMap = (
   value: unknown,
@@ -170,7 +202,7 @@ const isActionsFile = (value: unknown): value is ActionsFile =>
   // Every group the interface declares must be validated: a group this predicate does not
   // name is the projection trap the corpus README warns about.
   Array.isArray(value["nullRepresentationOmitted"]) &&
-  value["nullRepresentationOmitted"].every(isAdapterOutcome) &&
+  value["nullRepresentationOmitted"].every(isNullRepresentationOmitted) &&
   Array.isArray(value["knownDivergences"]) &&
   value["knownDivergences"].every(isKnownDivergence);
 
@@ -308,12 +340,44 @@ const ORACLE_ACTIONS = [
   ),
   ...SUPPORTED_EXPECTED_ACTIONS,
 ].sort();
-const THROWING_ACTIONS = [
-  ...CONVEX_UNSUPPORTED.map(({ action }) => action),
+/**
+ * A shape this adapter must refuse, with the substring its error has to contain.
+ *
+ * The message is what turns "it threw" into "it threw for the declared reason": without it a
+ * mapper typo or an unrelated validation satisfies the assertion just as well as the limitation
+ * the corpus documents. This harness used to keep the map locally; it now reads the corpus, so
+ * the pin covers every adapter rather than this one (cerbos/query-plan-adapters#326).
+ */
+interface ThrowingAction {
+  action: string;
+  message: string;
+}
+
+/** The pinned message, or a failure — a throwing action without one asserts nothing. */
+const requireMessage = (label: string, message: string | undefined): string => {
+  if (message === undefined || message === "") {
+    throw new Error(
+      `actions.json pins no throw message for ${label}: the throw suite would accept a failure for any reason`,
+    );
+  }
+  return message;
+};
+
+const THROWING_ACTIONS: ThrowingAction[] = [
+  ...CONVEX_UNSUPPORTED.map(({ action, message }) => ({
+    action,
+    message: requireMessage(`adapterUnsupported.convex.${action}`, message),
+  })),
   ...actionsFile.expectedUnsupported
-    .map(({ action }) => action)
-    .filter((action) => !SUPPORTED_EXPECTED_ACTIONS.has(action)),
-].sort();
+    .filter(({ action }) => !SUPPORTED_EXPECTED_ACTIONS.has(action))
+    .map(({ action, messages }) => ({
+      action,
+      message: requireMessage(
+        `expectedUnsupported.${action}.messages.convex`,
+        messages["convex"],
+      ),
+    })),
+].sort((left, right) => left.action.localeCompare(right.action));
 const KNOWN_DIVERGENCES = new Set(
   actionsFile.knownDivergences
     .filter((entry) => entry.adapters.includes("convex"))
@@ -322,7 +386,18 @@ const KNOWN_DIVERGENCES = new Set(
 // Actions whose `== null` probe targets an attribute the oracle OMITS for NULL columns. They
 // carry no oracle comparison: under the omitted representation check() denies every document, so
 // the adapter must reject the shape rather than emit a filter (#302).
-const NULL_REPRESENTATION_OMITTED = actionsFile.nullRepresentationOmitted;
+const NULL_REPRESENTATION_OMITTED = actionsFile.nullRepresentationOmitted.map(
+  ({ action, reason, messages }) => ({
+    action,
+    reason,
+    message: requireMessage(
+      `nullRepresentationOmitted.${action}.messages.convex`,
+      messages["convex"],
+    ),
+  }),
+);
+/** The one message every null-carrying action must be rejected with under `omitted`. */
+const NULL_OMITTED_MESSAGE = NULL_REPRESENTATION_OMITTED[0]?.message ?? "";
 const MANIFEST_ACTIONS = new Set([
   ...actionsFile.conformance,
   ...actionsFile.expectedUnsupported.map((entry) => entry.action),
@@ -565,10 +640,21 @@ function planCarriesNullLiteral(operand: unknown): boolean {
 }
 
 describe("adversarial conformance corpus", () => {
+
+  // Adding a throwing action without pinning its message must fail this harness rather than
+  // silently degrade the throw suite to a bare "it threw" (cerbos/query-plan-adapters#326).
+  test("a throwing action with no pinned message fails classification", () => {
+    expect(() => requireMessage("synthetic-entry", undefined)).toThrow(
+      /pins no throw message/,
+    );
+    expect(() => requireMessage("synthetic-entry", "")).toThrow(
+      /pins no throw message/,
+    );
+  });
   test("assigns all policy actions exactly one Convex outcome", () => {
     const allActions = MANIFEST_ACTIONS;
     const oracle = new Set(ORACLE_ACTIONS);
-    const throwing = new Set(THROWING_ACTIONS);
+    const throwing = new Set(THROWING_ACTIONS.map(({ action }) => action));
     const nullOmitted = new Set(
       NULL_REPRESENTATION_OMITTED.map((entry) => entry.action),
     );
@@ -590,30 +676,18 @@ describe("adversarial conformance corpus", () => {
     expect(misclassified).toEqual([]);
   });
 
-  // The message each throwing action must fail with. Pinning the message is what proves the
-  // rejection happens for the DECLARED mechanism — a bare "it threw" is satisfied just as
-  // happily by a mapper typo or a transport error, and the corpus README calls that a silent
-  // pass. A new throwing action must add its message here or the coverage assertion fails.
-  const THROWING_MESSAGES: Record<string, RegExp> = {
-    "cr-div-neg-zero": /sign is indeterminate/,
-    "nan-ord-inf": /sign is indeterminate/,
-    "filter-as-condition": /returns a list, not a boolean/,
-    "map-as-condition": /returns a list, not a boolean/,
-  };
-
-  test("every throwing action pins the message that names its mechanism", () => {
-    expect(Object.keys(THROWING_MESSAGES).sort()).toEqual(
-      [...THROWING_ACTIONS].sort(),
-    );
-  });
-
   // The invariant is that an inexpressible shape must throw BEFORE its filter can be used, so
   // the assertion wraps translation only: the plan is fetched outside it (a PDP failure fails
   // the test instead of passing it), and no query executes (a store rejecting a wrongly
   // emitted filter cannot masquerade as the adapter refusing to translate).
+  //
+  // The message comes from the corpus and is asserted, not just the throw: a bare `toThrow()` is
+  // satisfied by a mapper typo or a transport error, which the corpus README calls a silent pass.
+  // An action added without a pinned message fails classification at load
+  // (cerbos/query-plan-adapters#326).
   test.each(THROWING_ACTIONS)(
-    "%s fails during translation, before any filter exists",
-    async (action) => {
+    "$action fails during translation with the declared message, before any filter exists",
+    async ({ action, message }) => {
       const queryPlan = await cerbos.planResources({
         principal: seedsFile.principal,
         resource: { kind: seedsFile.resourceKind },
@@ -626,7 +700,7 @@ describe("adversarial conformance corpus", () => {
           mapper: MAPPER,
           allowPostFilter: true,
         }),
-      ).toThrow(THROWING_MESSAGES[action]);
+      ).toThrow(message);
     },
   );
 
@@ -649,7 +723,7 @@ describe("adversarial conformance corpus", () => {
   // check time would over-grant exactly as a SQL adapter does, which is what the option guards.
   test.each(NULL_REPRESENTATION_OMITTED)(
     "$action aligns via the omitted document shape and is rejected under omitted ($reason)",
-    async ({ action }) => {
+    async ({ action, message }) => {
       expect(await oracleAllowedIds(action)).toEqual([]);
       expect(await adapterFilteredIds(action, "explicit")).toEqual([]);
 
@@ -662,7 +736,7 @@ describe("adversarial conformance corpus", () => {
       );
 
       await expect(adapterFilteredIds(action, "omitted")).rejects.toThrow(
-        /missing-attribute error/,
+        message,
       );
     },
   );
@@ -700,7 +774,7 @@ describe("adversarial conformance corpus", () => {
         // The rejection must be the null-operand check talking, not an incidental failure —
         // a transport error or mapper typo counting as the required rejection is the silent
         // pass the corpus README warns about.
-        if (!/missing-attribute error/.test(String(error))) {
+        if (!String(error).includes(NULL_OMITTED_MESSAGE)) {
           notRejected.push(`${action} (rejected for the wrong reason: ${String(error)})`);
         }
       }

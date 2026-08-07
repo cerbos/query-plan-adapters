@@ -116,11 +116,22 @@ class ElasticsearchAdversarialConformanceTest {
     private record DerivedFile(@JsonProperty("$schema") String schema, String description,
                                List<String> fields, Map<String, DerivedEntry> derived) {}
 
+    /**
+     * An {@code expectedUnsupported} entry. {@code messages} carries one entry per adapter that
+     * must reject the shape, keyed by adapter name; {@code validate-corpus.sh} asserts that key
+     * set is exactly the roster minus the adapters that promoted the shape.
+     */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    private record UnsupportedShape(String action) {}
+    private record UnsupportedShape(String action, Map<String, String> messages) {}
 
+    /**
+     * An {@code adapterUnsupported} / {@code adapterSupportedExpected} entry. {@code message} is
+     * the substring this adapter's error must contain — present on the first, absent on the
+     * second, which does not throw.
+     */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    private record AdapterOutcome(String action, String reason) {}
+    private record AdapterOutcome(String action, String reason, String message,
+                                 Map<String, String> messages) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record KnownDivergence(String action, List<String> adapters) {}
@@ -157,13 +168,32 @@ class ElasticsearchAdversarialConformanceTest {
     private static final List<String> DERIVED_KEYS =
             List.of("createdBy", "aDouble", "createdAt", "scope", "labels");
 
+    /** The corpus key for this adapter — its directory name, as every other harness uses. */
+    private static final String ADAPTER = "elasticsearch-java";
+
     private static SeedsFile seedsFile;
     private static ActionsFile actionsFile;
     private static DerivedFile derivedFile;
     private static List<Seed> seeds;
     private static List<String> oracleActions;
     private static List<String> throwingActions;
+    private static Map<String, String> throwingMessages;
     private static List<String> nullRepresentationOmittedActions;
+    private static Map<String, String> nullRepresentationOmittedMessages;
+
+    /**
+     * The substring this adapter's error must contain, or a loud failure. The message is what
+     * turns "it threw" into "it threw for the declared reason": without it a mapper typo or an
+     * unrelated validation satisfies the throw suite just as well as the documented limitation
+     * (cerbos/query-plan-adapters#326).
+     */
+    private static String requireMessage(String label, String message) {
+        if (message == null || message.isEmpty()) {
+            throw new IllegalStateException("actions.json pins no throw message for " + label
+                    + ": the throw suite would accept a failure for any reason");
+        }
+        return message;
+    }
 
     private static GenericContainer<?> cerbos;
     private static ElasticsearchContainer elasticsearch;
@@ -227,20 +257,28 @@ class ElasticsearchAdversarialConformanceTest {
         Set<String> expected = actionsFile.expectedUnsupported().stream()
                 .map(UnsupportedShape::action).collect(java.util.stream.Collectors.toSet());
         Set<String> unsupported = actionsFile.adapterUnsupported()
-                .getOrDefault("elasticsearch-java", List.of()).stream()
+                .getOrDefault(ADAPTER, List.of()).stream()
                 .map(AdapterOutcome::action).collect(java.util.stream.Collectors.toSet());
         Set<String> supportedExpected = actionsFile.adapterSupportedExpected()
-                .getOrDefault("elasticsearch-java", List.of()).stream()
+                .getOrDefault(ADAPTER, List.of()).stream()
                 .map(AdapterOutcome::action).collect(java.util.stream.Collectors.toSet());
         Set<String> divergences = actionsFile.knownDivergences().stream()
-                .filter(divergence -> divergence.adapters().contains("elasticsearch-java"))
+                .filter(divergence -> divergence.adapters().contains(ADAPTER))
                 .map(KnownDivergence::action).collect(java.util.stream.Collectors.toSet());
         // Actions whose `== null` probe targets an attribute the oracle OMITS for NULL columns.
         // Elasticsearch needs no representation option — it cannot index an explicit null
         // distinguishably from a missing field, so every null-SELECTING direction already fails
         // closed — but the action still has to be classified somewhere (#302).
+        // Every adapter must reject these, so the message map names the whole roster and this
+        // harness resolves its own entry exactly as it does for a throwing action.
         nullRepresentationOmittedActions = actionsFile.nullRepresentationOmitted().stream()
                 .map(AdapterOutcome::action).sorted().toList();
+        Map<String, String> nullMessages = new LinkedHashMap<>();
+        actionsFile.nullRepresentationOmitted().forEach(outcome ->
+                nullMessages.put(outcome.action(), requireMessage(
+                        "nullRepresentationOmitted." + outcome.action() + ".messages." + ADAPTER,
+                        outcome.messages() == null ? null : outcome.messages().get(ADAPTER))));
+        nullRepresentationOmittedMessages = Map.copyOf(nullMessages);
 
         assertTrue(conformance.containsAll(unsupported),
                 "adapterUnsupported.elasticsearch-java contains non-conformance actions");
@@ -258,10 +296,27 @@ class ElasticsearchAdversarialConformanceTest {
         oracle.addAll(supportedExpected);
         oracleActions = List.copyOf(oracle);
 
+        // The substring each throwing action's error must contain, resolved once here so a
+        // classification with no pinned message fails the whole suite rather than degrading its
+        // case to a bare "it threw" (cerbos/query-plan-adapters#326).
+        Map<String, String> messages = new LinkedHashMap<>();
+        actionsFile.adapterUnsupported().getOrDefault(ADAPTER, List.of()).forEach(outcome ->
+                messages.put(outcome.action(), requireMessage(
+                        "adapterUnsupported." + ADAPTER + "." + outcome.action(),
+                        outcome.message())));
+        actionsFile.expectedUnsupported().stream()
+                .filter(shape -> !supportedExpected.contains(shape.action()))
+                .forEach(shape -> messages.put(shape.action(), requireMessage(
+                        "expectedUnsupported." + shape.action() + ".messages." + ADAPTER,
+                        shape.messages() == null ? null : shape.messages().get(ADAPTER))));
+        throwingMessages = Map.copyOf(messages);
+
         TreeSet<String> throwing = new TreeSet<>(unsupported);
         throwing.addAll(expected);
         throwing.removeAll(supportedExpected);
         throwingActions = List.copyOf(throwing);
+        assertEquals(throwing, throwingMessages.keySet(),
+                "every throwing action must pin the message that names its mechanism");
 
         Set<String> classified = new LinkedHashSet<>();
         classified.addAll(oracleActions);
@@ -527,13 +582,13 @@ class ElasticsearchAdversarialConformanceTest {
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
                 () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(plan, FIELD_MAP, NESTED_PATHS),
                 "unsupported action must fail during translation: " + action);
-        // "Unknown attribute" is the one rejection that indicts the HARNESS (a FIELD_MAP gap)
-        // rather than the adapter: an unmapped `categories` once let six actions throw here
-        // while never reaching the mechanism their actions.json reasons claim. Every real
-        // limitation throws a different message, so pin the distinction.
-        assertFalse(ex.getMessage().startsWith("Unknown attribute:"),
-                "action '" + action + "' was rejected by an unmapped field, not the declared "
-                        + "mechanism: " + ex.getMessage());
+        // The corpus pins the exact mechanism, which subsumes the old "Unknown attribute" guard:
+        // an unmapped FIELD_MAP entry (which once let six actions throw here while never reaching
+        // the mechanism their actions.json reasons claim) now fails this assertion along with
+        // every other wrong-reason rejection (cerbos/query-plan-adapters#326).
+        assertTrue(ex.getMessage().contains(throwingMessages.get(action)),
+                "action '" + action + "' was rejected for a reason actions.json does not declare: "
+                        + ex.getMessage());
     }
 
     /**
@@ -552,8 +607,21 @@ class ElasticsearchAdversarialConformanceTest {
                 "the omitted representation must deny every seed for " + action);
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
                 () -> adapterFilteredIds(action));
-        assertTrue(ex.getMessage().contains("explicit null value from a missing field"),
+        assertTrue(ex.getMessage().contains(nullRepresentationOmittedMessages.get(action)),
                 ex.getMessage());
+    }
+
+    /**
+     * Adding a throwing action without pinning its message must fail this harness rather than
+     * silently degrade the throw suite to a bare "it threw" (cerbos/query-plan-adapters#326).
+     */
+    @Test
+    void throwingActionWithNoPinnedMessageFailsClassification() {
+        for (String absent : new String[] {null, ""}) {
+            IllegalStateException ex = assertThrows(IllegalStateException.class,
+                    () -> requireMessage("synthetic-entry", absent));
+            assertTrue(ex.getMessage().contains("pins no throw message"), ex.getMessage());
+        }
     }
 
     @Test

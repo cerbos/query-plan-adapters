@@ -50,7 +50,7 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` d
 | Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 
-The oracle coverage includes value-first and field-to-field comparisons, escaped string predicates, relation counts and nested collection macros, null/error propagation, arithmetic and ternaries, hierarchy operations, typed timestamps, and multi-hop relations. The fail-closed shapes throw rather than return a broader SQL filter. `matches()` is rejected because SQL regex dialects do not guarantee CEL/RE2 semantics.
+The oracle coverage includes value-first and field-to-field comparisons, escaped string predicates, relation counts and nested collection macros, null/error propagation, arithmetic and ternaries, hierarchy operations, typed timestamps, and multi-hop relations. The fail-closed shapes throw rather than return a broader SQL filter. `matches()` is rejected because SQL regex dialects do not guarantee CEL/RE2 semantics. Every fail-closed shape's error message is pinned in the shared corpus (`conformance/actions.json`) and asserted by this adapter's conformance run, so a classification proves the throw names its declared mechanism rather than merely that something threw.
 
 ## Mapping hazards
 
