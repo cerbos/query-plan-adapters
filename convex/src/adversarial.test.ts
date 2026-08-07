@@ -7,7 +7,14 @@ import { GRPC as Cerbos } from "@cerbos/grpc";
 import { ConvexHttpClient } from "convex/browser";
 
 import { api } from "../convex/_generated/api.js";
-import { MAPPER } from "../convex/adversarial";
+import {
+  MAPPER,
+  PUSHDOWN_DEMOTED_FIELDS,
+  PUSHDOWN_MAPPER,
+  type MapperVariant,
+} from "../convex/adversarial";
+import type { ExecutionPath } from "../convex/planExecution";
+import type { Mapper } from ".";
 import { PlanKind, queryPlanToConvex } from ".";
 
 const CONVEX_URL = process.env["CONVEX_URL"] ?? "http://127.0.0.1:3210";
@@ -457,6 +464,94 @@ const DEGENERACY_LIVENESS_PROBES = [
   "cr-div-neg-zero",
 ] as const;
 
+// -- pushdown coverage (cerbos/query-plan-adapters#327) ------------------------------------------
+//
+// Convex has no string, collection, arithmetic or cast operators in its filter API, so most of the
+// corpus is decided by the adapter's in-memory post-filter after an unfiltered `.collect()` — the
+// differential is then adapter-CEL against PDP-CEL, and Convex's own comparison and ordering
+// semantics only get a say on the shapes that reach the engine. That split is the adapter's
+// documented design, but the SIZE of it is a fact about coverage, so it is pinned here and quoted
+// in the README rather than left to be re-derived by whoever next wonders.
+//
+// The lists below name the actions Convex's filter engine decides ON ITS OWN — a filter with no
+// post-filter beside it. An action gaining or losing push-down fails this pin, which is the point:
+// the README's numbers are only trustworthy while a test enforces them.
+
+const DB_DECIDED_DEFAULT = [
+  "cs-eq",
+  "double-negation",
+  "double-threshold",
+  "empty-string-eq",
+  "in-single",
+  "nary-and",
+  "neg-number",
+  "p-struct",
+  "triple-negation",
+  "unicode-eq",
+  "vf-ge",
+  "vf-le",
+  "vf-ne",
+];
+
+/**
+ * The actions `PUSHDOWN_MAPPER` moves into Convex's filter engine — the null-comparison family,
+ * un-blocked by clearing `nullable` on `owner`, a field the seeded documents always carry.
+ *
+ * These are the ONLY actions the pushdown leg re-executes. `nullable` is read in exactly one place
+ * in the adapter — `canPushToDb` — so an action whose execution path the two mappers agree on is
+ * translated identically by both, and replaying it would be a second identical query. The
+ * classification pin below is what makes that argument checkable rather than assumed: it asserts
+ * the full split under both mappers, so an action silently changing path fails there.
+ */
+const PUSHDOWN_ONLY_ACTIONS = [
+  "in-null-elem-mixed",
+  "in-null-elem-neg",
+  "in-null-elem-only",
+  "in-null-elem-only-neg",
+  "null-eq",
+  "null-ne",
+  "null-not-eq",
+  "vf-null-ne",
+];
+
+const DB_DECIDED_PUSHDOWN = [
+  ...DB_DECIDED_DEFAULT,
+  ...PUSHDOWN_ONLY_ACTIONS,
+].sort();
+
+/** `in-empty` folds to ALWAYS_DENIED, so no mapper can put it in either category. */
+const UNCONDITIONAL_ACTIONS = ["in-empty"];
+
+async function executionFor(
+  action: string,
+  mapper: Mapper,
+): Promise<ExecutionPath> {
+  const queryPlan = await cerbos.planResources({
+    principal: seedsFile.principal,
+    resource: { kind: seedsFile.resourceKind },
+    action,
+  });
+  if (queryPlan.kind !== PlanKind.CONDITIONAL) return "unconditional";
+  const { filter, postFilter } = queryPlanToConvex({
+    queryPlan,
+    mapper,
+    allowPostFilter: true,
+  });
+  if (filter && postFilter) return "split";
+  return filter ? "db" : "post";
+}
+
+/** Whether `path` — a mapped document field, dotted for nested ones — is present on `document`. */
+function documentCarries(document: unknown, path: string): boolean {
+  let current: unknown = document;
+  for (const part of path.split(".")) {
+    if (!isRecord(current)) return false;
+    if (!Object.prototype.hasOwnProperty.call(current, part)) return false;
+    current = current[part];
+  }
+  return true;
+}
+
 // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") --------
 //
 // Read from conformance/derived-fields.json rather than restated here. The same value feeds the
@@ -602,20 +697,38 @@ async function expectNonDegenerateOracle(action: string): Promise<void> {
   }).toEqual({ action, nonEmpty: true, nonTotal: true });
 }
 
-async function adapterFilteredIds(
+/**
+ * Executes the action's plan in Convex and reports the ids it selected AND which half of the
+ * adapter's output selected them. The path comes back from the backend rather than being
+ * re-derived here: re-deriving would only re-run the translation this harness already trusts, so a
+ * backend that used the wrong mapper would go unnoticed — both halves return the same ids.
+ */
+async function adapterRun(
   action: string,
   nullAttributeRepresentation: "explicit" | "omitted" = "explicit",
-): Promise<string[]> {
+  mapper: MapperVariant = "default",
+): Promise<{ ids: string[]; execution: string }> {
   const queryPlan = await cerbos.planResources({
     principal: seedsFile.principal,
     resource: { kind: seedsFile.resourceKind },
     action,
   });
-  if (queryPlan.kind === PlanKind.ALWAYS_DENIED) return [];
+  if (queryPlan.kind === PlanKind.ALWAYS_DENIED) {
+    return { ids: [], execution: "unconditional" };
+  }
   return convex.query(api.adversarial.executePlan, {
     queryPlan: JSON.parse(JSON.stringify(queryPlan)),
     nullAttributeRepresentation,
+    mapper,
   });
+}
+
+async function adapterFilteredIds(
+  action: string,
+  nullAttributeRepresentation: "explicit" | "omitted" = "explicit",
+  mapper: MapperVariant = "default",
+): Promise<string[]> {
+  return (await adapterRun(action, nullAttributeRepresentation, mapper)).ids;
 }
 
 beforeAll(async () => {
@@ -707,39 +820,173 @@ describe("adversarial conformance corpus", () => {
   );
 
   test.each(ORACLE_ACTIONS)("%s matches the check() oracle", async (action) => {
-    const [oracle, filtered] = await Promise.all([
+    const [oracle, run] = await Promise.all([
       oracleAllowedIds(action),
-      adapterFilteredIds(action),
+      adapterRun(action),
     ]);
-    expect(filtered).toEqual(oracle);
+    // The path the backend reports is checked against the pinned split, so the README's coverage
+    // table is a claim about what executed rather than about what this harness re-translates.
+    const expected = DB_DECIDED_DEFAULT.includes(action)
+      ? "db"
+      : UNCONDITIONAL_ACTIONS.includes(action)
+        ? "unconditional"
+        : "post";
+    expect({ ids: run.ids, execution: run.execution }).toEqual({
+      ids: oracle,
+      execution: expected,
+    });
+  });
+
+  // The pushdown leg. These eight shapes are answered above by the adapter's own CEL evaluator;
+  // here the SAME oracle is put to Convex's filter engine instead, so `q.eq(field, null)` and its
+  // negations are proved against the PDP rather than assumed to agree with the evaluator
+  // (cerbos/query-plan-adapters#327).
+  //
+  // The reported path is asserted alongside the ids, and that assertion is the whole leg: both
+  // halves return the documents check() allows, so a backend that ignored the mapper argument and
+  // post-filtered these would satisfy the id comparison and prove nothing.
+  test.each(PUSHDOWN_ONLY_ACTIONS)(
+    "%s matches the check() oracle when Convex's filter engine decides it",
+    async (action) => {
+      const [oracle, pushed] = await Promise.all([
+        oracleAllowedIds(action),
+        adapterRun(action, "explicit", "pushdown"),
+      ]);
+      expect({ ids: pushed.ids, execution: pushed.execution }).toEqual({
+        ids: oracle,
+        execution: "db",
+      });
+    },
+  );
+
+  // The pushdown mapper is a claim about the DOCUMENT SHAPE — "this field is never absent" — and
+  // nothing in the plan can check it. If a seed ever stopped carrying the key, `canPushToDb` would
+  // hand Convex a comparison whose CEL meaning is a missing-attribute error, and the engine would
+  // answer it as an ordinary comparison against `undefined`.
+  test("the pushdown mapper only demotes fields every seeded document carries", () => {
+    const absent: string[] = [];
+    for (const seed of seedsFile.seeds) {
+      const document = storedDocument(seed);
+      for (const field of PUSHDOWN_DEMOTED_FIELDS) {
+        if (!documentCarries(document, field)) {
+          absent.push(`${seed.id}.${field}`);
+        }
+      }
+    }
+    expect({ demoted: [...PUSHDOWN_DEMOTED_FIELDS], absent }).toEqual({
+      demoted: ["owner"],
+      absent: [],
+    });
+  });
+
+  // The README quotes these counts; this is what keeps them true. A shape that gains or loses
+  // push-down fails here rather than silently making the documented coverage a lie.
+  test("pins how much of the corpus each mapper hands to Convex's filter engine", async () => {
+    const classify = async (mapper: Mapper) => {
+      const byExecution: Record<ExecutionPath, string[]> = {
+        db: [],
+        split: [],
+        post: [],
+        unconditional: [],
+      };
+      for (const action of ORACLE_ACTIONS) {
+        byExecution[await executionFor(action, mapper)].push(action);
+      }
+      return byExecution;
+    };
+
+    const base = await classify(MAPPER);
+    const pushdown = await classify(PUSHDOWN_MAPPER);
+
+    expect({
+      total: ORACLE_ACTIONS.length,
+      defaultDb: base.db,
+      defaultSplit: base.split,
+      defaultUnconditional: base.unconditional,
+      defaultPostCount: base.post.length,
+      pushdownDb: pushdown.db,
+      pushdownSplit: pushdown.split,
+      pushdownPostCount: pushdown.post.length,
+      // The two mappers must differ ONLY where the pushdown leg re-executes, which is what makes
+      // skipping the other 132 actions there sound rather than a coverage hole.
+      moved: pushdown.db.filter((action) => !base.db.includes(action)),
+    }).toEqual({
+      total: 140,
+      defaultDb: DB_DECIDED_DEFAULT,
+      // No corpus action currently splits: `buildFilters` only splits a root `and`, and every
+      // hostile shape that mixes pushable and non-pushable children is rooted elsewhere.
+      defaultSplit: [],
+      defaultUnconditional: UNCONDITIONAL_ACTIONS,
+      defaultPostCount: 126,
+      pushdownDb: DB_DECIDED_PUSHDOWN,
+      pushdownSplit: [],
+      pushdownPostCount: 118,
+      moved: PUSHDOWN_ONLY_ACTIONS,
+    });
   });
 
   // #302. `null-eq-missing` probes `aOptionalString == null`, and `aOptionalString` follows the
   // corpus default: a NULL column sends NO attribute, so check() denies every document.
   //
-  // Convex is a document store, so the SEEDED SHAPE can mirror that convention directly: this
-  // harness omits `aOptionalString` entirely for a NULL column, and `q.eq(field, null)` does not
-  // match an absent field. The default translation therefore already returns the empty set the
-  // oracle demands — alignment that comes from the storage layout, not from anything the adapter
-  // knows about the plan. A deployment that stored explicit nulls while omitting the attribute at
-  // check time would over-grant exactly as a SQL adapter does, which is what the option guards.
+  // Convex is a document store, so the SEEDED SHAPE mirrors that convention directly: this harness
+  // omits `aOptionalString` entirely for a NULL column. What decides the action is the ADAPTER'S
+  // POST-FILTER, not a Convex `q.eq(field, null)` — `aOptionalString` is `nullable: true` in the
+  // mapper, so `canPushToDb` refuses the push-down and the whole predicate is evaluated in
+  // JavaScript. There `getNestedValue` finds no such key and yields a CEL missing-attribute error,
+  // which denies, so the empty set the oracle demands comes out of the same three-valued logic
+  // check() applied (cerbos/query-plan-adapters#327 corrected this rationale — the `q.eq` path it
+  // used to name never executes).
+  //
+  // The `owner` control runs through that same evaluator: it maps to the same seed field but IS
+  // stored as an explicit null, so `getNestedValue` finds the key, `null == null` holds, and its
+  // five documents come back. That is what makes the empty result above the document shape talking
+  // rather than a filter that matches nothing everywhere.
+  //
+  // A deployment that stored explicit nulls while omitting the attribute at check time would
+  // over-grant exactly as a SQL adapter does, which is what the option guards.
   test.each(NULL_REPRESENTATION_OMITTED)(
     "$action aligns via the omitted document shape and is rejected under omitted ($reason)",
     async ({ action, message }) => {
       expect(await oracleAllowedIds(action)).toEqual([]);
       expect(await adapterFilteredIds(action, "explicit")).toEqual([]);
 
-      // `owner` maps to the same seed field but IS stored as an explicit null, so the empty
-      // result above is the document shape talking, not a filter that matches nothing everywhere.
+      // The rationale above names the post-filter, so pin that it IS the post-filter — as the
+      // backend reports it, not as this harness would re-derive it. A mapper change that started
+      // pushing either action down would make the comment false while every id comparison passed.
       const explicitNullOracle = await oracleAllowedIds("null-eq");
       expect(explicitNullOracle.length).toBeGreaterThan(0);
-      expect(await adapterFilteredIds("null-eq", "explicit")).toEqual(
-        explicitNullOracle,
-      );
+      const [missingRun, controlRun] = await Promise.all([
+        adapterRun(action, "explicit"),
+        adapterRun("null-eq", "explicit"),
+      ]);
+      expect({
+        missing: missingRun.execution,
+        control: controlRun.execution,
+        controlIds: controlRun.ids,
+      }).toEqual({
+        missing: "post",
+        control: "post",
+        controlIds: explicitNullOracle,
+      });
 
+      // Under the pushdown mapper the control IS answered by Convex's filter engine, so the same
+      // five documents coming back proves `q.eq(field, null)` agrees with the evaluator on a
+      // stored explicit null — the claim the corrected rationale no longer makes about the
+      // missing-field case.
+      const pushedControl = await adapterRun("null-eq", "explicit", "pushdown");
+      expect(pushedControl).toEqual({
+        execution: "db",
+        ids: explicitNullOracle,
+      });
+
+      // The rejection is the null-operand scan over the plan, which runs before translation picks
+      // a path, so it cannot depend on the mapper.
       await expect(adapterFilteredIds(action, "omitted")).rejects.toThrow(
         message,
       );
+      await expect(
+        adapterFilteredIds(action, "omitted", "pushdown"),
+      ).rejects.toThrow(message);
     },
   );
 

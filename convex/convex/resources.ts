@@ -1,5 +1,11 @@
-import { mutation, query } from "./_generated/server";
+import type { Expression, FilterBuilder } from "convex/server";
 import { v } from "convex/values";
+
+import { PlanKind, queryPlanToConvex } from "../src/index";
+import type { Mapper } from "../src/index";
+import { mutation, query } from "./_generated/server";
+import type { DataModel } from "./_generated/dataModel";
+import { executionPathOf, isPlanResourcesResponse } from "./planExecution";
 
 export const insert = mutation({
   args: {
@@ -29,164 +35,57 @@ export const deleteAll = mutation({
   },
 });
 
-const filterValue = v.union(v.string(), v.number(), v.boolean());
-const resourceField = v.union(
-  v.literal("key"),
-  v.literal("aBool"),
-  v.literal("aNumber"),
-  v.literal("aString"),
-  v.literal("aOptionalString"),
-  v.literal("nested.aBool"),
-  v.literal("nested.aNumber"),
-  v.literal("nested.aString"),
-);
-
-const requireArgument = <T>(value: T | undefined, name: string): T => {
-  if (value === undefined) {
-    throw new Error(`${name} is required`);
-  }
-  return value;
+// Exported so the integration suite translates with the exact mapper this backend executes —
+// a duplicated copy in the test would be a projection that can drift.
+export const MAPPER: Mapper = {
+  "request.resource.attr.aBool": { field: "aBool" },
+  "request.resource.attr.aNumber": { field: "aNumber" },
+  "request.resource.attr.aString": { field: "aString" },
+  "request.resource.attr.aOptionalString": {
+    field: "aOptionalString",
+    nullable: true,
+  },
+  "request.resource.attr.nested.aBool": { field: "nested.aBool" },
+  "request.resource.attr.nested.aNumber": { field: "nested.aNumber" },
+  "request.resource.attr.nested.aString": { field: "nested.aString" },
 };
 
-export const filteredQuery = query({
-  args: {
-    filterType: v.string(),
-    filterField: v.optional(resourceField),
-    filterValue: v.optional(filterValue),
-    filterValues: v.optional(v.array(filterValue)),
-    filterField2: v.optional(resourceField),
-    filterValue2: v.optional(filterValue),
-  },
+/**
+ * Runs a Cerbos query plan against the `resources` table THROUGH THE ADAPTER.
+ *
+ * This used to be a `filterType`/`filterField`/`filterValue` switch that rebuilt each filter by
+ * hand, which meant the integration suite proved Convex's filter API worked and never executed a
+ * single translated filter (cerbos/query-plan-adapters#327). The plan goes in, the adapter's
+ * `filter`/`postFilter` pair comes out, and the keys it selects are what the suite compares
+ * against `check()`.
+ */
+export const executePlan = query({
+  args: { queryPlan: v.any() },
   handler: async (ctx, args) => {
-    const { filterType, filterField, filterValue, filterValues, filterField2, filterValue2 } = args;
-
-    let q = ctx.db.query("resources");
-
-    switch (filterType) {
-      case "eq":
-        return await q
-          .filter((f) =>
-            f.eq(
-              f.field(requireArgument(filterField, "filterField")),
-              requireArgument(filterValue, "filterValue"),
-            ),
-          )
-          .collect();
-      case "neq":
-        return await q
-          .filter((f) =>
-            f.neq(
-              f.field(requireArgument(filterField, "filterField")),
-              requireArgument(filterValue, "filterValue"),
-            ),
-          )
-          .collect();
-      case "gt":
-        return await q
-          .filter((f) =>
-            f.gt(
-              f.field(requireArgument(filterField, "filterField")),
-              requireArgument(filterValue, "filterValue"),
-            ),
-          )
-          .collect();
-      case "gte":
-        return await q
-          .filter((f) =>
-            f.gte(
-              f.field(requireArgument(filterField, "filterField")),
-              requireArgument(filterValue, "filterValue"),
-            ),
-          )
-          .collect();
-      case "lt":
-        return await q
-          .filter((f) =>
-            f.lt(
-              f.field(requireArgument(filterField, "filterField")),
-              requireArgument(filterValue, "filterValue"),
-            ),
-          )
-          .collect();
-      case "lte":
-        return await q
-          .filter((f) =>
-            f.lte(
-              f.field(requireArgument(filterField, "filterField")),
-              requireArgument(filterValue, "filterValue"),
-            ),
-          )
-          .collect();
-      case "not":
-        return await q
-          .filter((f) =>
-            f.not(
-              f.eq(
-                f.field(requireArgument(filterField, "filterField")),
-                requireArgument(filterValue, "filterValue"),
-              ),
-            ),
-          )
-          .collect();
-      case "and":
-        return await q
-          .filter((f) =>
-            f.and(
-              f.eq(
-                f.field(requireArgument(filterField, "filterField")),
-                requireArgument(filterValue, "filterValue"),
-              ),
-              f.neq(
-                f.field(requireArgument(filterField2, "filterField2")),
-                requireArgument(filterValue2, "filterValue2"),
-              ),
-            ),
-          )
-          .collect();
-      case "or":
-        return await q
-          .filter((f) =>
-            f.or(
-              f.eq(
-                f.field(requireArgument(filterField, "filterField")),
-                requireArgument(filterValue, "filterValue"),
-              ),
-              f.neq(
-                f.field(requireArgument(filterField2, "filterField2")),
-                requireArgument(filterValue2, "filterValue2"),
-              ),
-            ),
-          )
-          .collect();
-      case "in":
-        if (!filterValues || filterValues.length === 0) {
-          return [];
-        }
-        return await q
-          .filter((f) =>
-            f.or(
-              ...filterValues.map((value) =>
-                f.eq(
-                  f.field(requireArgument(filterField, "filterField")),
-                  value,
-                ),
-              ),
-            ),
-          )
-          .collect();
-      // Named for the SQL-ish shape, not a Cerbos operator: the planner has no existence
-      // operator, it emits ne(field, null) (cerbos/query-plan-adapters#261).
-      case "notNull":
-        return await q
-          .filter((f) =>
-            f.neq(
-              f.field(requireArgument(filterField, "filterField")),
-              undefined,
-            ),
-          )
-          .collect();
-      default:
-        return await q.collect();
+    const queryPlan: unknown = args.queryPlan;
+    if (!isPlanResourcesResponse(queryPlan)) {
+      throw new Error("Invalid Cerbos query plan");
     }
+
+    const translated = queryPlanToConvex<
+      FilterBuilder<DataModel["resources"]>,
+      Expression<boolean>
+    >({ queryPlan, mapper: MAPPER, allowPostFilter: true });
+
+    const execution = executionPathOf(translated);
+    if (translated.kind === PlanKind.ALWAYS_DENIED) return { keys: [], execution };
+
+    let queryBuilder = ctx.db.query("resources");
+    if (translated.kind === PlanKind.CONDITIONAL && translated.filter) {
+      queryBuilder = queryBuilder.filter(translated.filter);
+    }
+    const docs = await queryBuilder.collect();
+    const keys = docs
+      .filter((doc) =>
+        translated.postFilter ? translated.postFilter({ ...doc }) : true,
+      )
+      .map((doc) => doc.key)
+      .sort();
+    return { keys, execution };
   },
 });
