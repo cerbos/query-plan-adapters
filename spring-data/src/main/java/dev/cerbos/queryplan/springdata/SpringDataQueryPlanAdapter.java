@@ -525,7 +525,7 @@ public final class SpringDataQueryPlanAdapter {
         }
 
         private Predicate handleBareVariable(String variable, Scope scope) {
-            Path<?> path = scope.resolvePath(variable);
+            Path<?> path = scope.path(variable);
             return applyLeaf("eq", path, true);
         }
 
@@ -690,7 +690,8 @@ public final class SpringDataQueryPlanAdapter {
          * discriminate them.
          */
         private boolean isExplicitNull(String cerbosVar, Scope scope) {
-            return scope.resolveMapping(cerbosVar) instanceof AttributeMapping.Field f
+            return scope.resolve(cerbosVar) instanceof Scope.ResolvedScalar scalar
+                    && scalar.mapping() instanceof AttributeMapping.Field f
                     && f.nullAttributeRepresentation() == NullAttributeRepresentation.EXPLICIT;
         }
 
@@ -1184,7 +1185,7 @@ public final class SpringDataQueryPlanAdapter {
                             throw new IllegalArgumentException(
                                     op + " requires a string receiver, got " + typeName(receiver));
                         }
-                        Path<?> needle = scope.resolvePath(needleField.variable());
+                        Path<?> needle = scope.path(needleField.variable());
                         // The needle is a column, so it is escaped dynamically; a NULL needle is
                         // a missing attribute → CEL error → deny (fieldToFieldLike guards it).
                         return switch (op) {
@@ -1224,7 +1225,7 @@ public final class SpringDataQueryPlanAdapter {
                     // plan constant (normalization guarantees the field arrives first). Strings
                     // concatenate here, matching CEL — this shape never enters double space.
                     if (left instanceof Resolved.Field f && right instanceof Resolved.ConstantAdd ca) {
-                        return applyLeaf(op, scope.resolvePath(f.variable()), ca.fold());
+                        return applyLeaf(op, scope.path(f.variable()), ca.fold());
                     }
                     // Solve: `add(field, const) eq/ne constant` — for the ALGEBRAICALLY EXACT
                     // shapes only (string concatenation, in-range long/long integers).
@@ -1296,7 +1297,7 @@ public final class SpringDataQueryPlanAdapter {
                                     + " in/hasIntersection, or compare elements individually.");
                 }
 
-                Path<?> path = scope.resolvePath(field.variable());
+                Path<?> path = scope.path(field.variable());
 
                 if (value == null) {
                     // A registered override owns the operator's full translation, including a null RHS.
@@ -1352,7 +1353,7 @@ public final class SpringDataQueryPlanAdapter {
             private Predicate timestampLeaf(String op, Resolved.TimestampField field,
                                             Resolved.TimestampConstant constant, Scope scope) {
                 Instant instant = constant.instant();
-                Path<?> path = scope.resolvePath(field.variable());
+                Path<?> path = scope.path(field.variable());
                 return withOverride(op, path, instant, () -> {
                     Class<?> javaType = path.getJavaType();
                     Object bound;
@@ -1431,9 +1432,9 @@ public final class SpringDataQueryPlanAdapter {
                     if ("eq".equals(op)) {
                         return cb.disjunction();
                     }
-                    return cb.isNotNull(scope.resolvePath(fpc.fieldVariable()));
+                    return cb.isNotNull(scope.path(fpc.fieldVariable()));
                 }
-                return applyLeaf(op, scope.resolvePath(fpc.fieldVariable()), solved);
+                return applyLeaf(op, scope.path(fpc.fieldVariable()), solved);
             }
 
             /**
@@ -1477,7 +1478,7 @@ public final class SpringDataQueryPlanAdapter {
                         throw new IllegalArgumentException(
                                 "add(const, const) compared to a non-field operand is not supported");
                     }
-                    return applyLeaf(op, scope.resolvePath(otherOperand.getVariable()), folded);
+                    return applyLeaf(op, scope.path(otherOperand.getVariable()), folded);
                 }
                 throw new IllegalArgumentException(
                         "add comparison with a field reference only supports eq/ne (got " + op + ")");
@@ -1590,8 +1591,8 @@ public final class SpringDataQueryPlanAdapter {
              */
             private Predicate fieldToFieldComparison(String op, String leftVar, String rightVar,
                                                      Scope scope) {
-                jakarta.persistence.criteria.Expression<?> left = scope.resolvePath(leftVar);
-                jakarta.persistence.criteria.Expression<?> right = scope.resolvePath(rightVar);
+                jakarta.persistence.criteria.Expression<?> left = scope.path(leftVar);
+                jakarta.persistence.criteria.Expression<?> right = scope.path(rightVar);
                 boolean leftExplicit = isExplicitNull(leftVar, scope);
                 boolean rightExplicit = isExplicitNull(rightVar, scope);
                 // Mixing the two conventions across one comparison has no faithful rendering.
@@ -2035,7 +2036,7 @@ public final class SpringDataQueryPlanAdapter {
                         @SuppressWarnings("unchecked")
                         jakarta.persistence.criteria.Expression<? extends Number> path =
                                 (jakarta.persistence.criteria.Expression<? extends Number>)
-                                        scope.resolvePath(operand.getVariable());
+                                        scope.path(operand.getVariable());
                         return new NumericOperand.Sql(toIeeeDouble(path));
                     }
                     case VALUE -> {
@@ -2267,10 +2268,13 @@ public final class SpringDataQueryPlanAdapter {
                             "Unsupported size() expression: size() argument must be a collection "
                                     + "attribute or filter(...), got " + describeOperand(sizeArg));
                 }
-                Scope.ResolvedRelation ref = scope.resolveRelation(var);
-                if (ref == null) {
-                    AttributeMapping mapping = scope.resolveMapping(var);
-                    if (!(mapping instanceof AttributeMapping.Field)) {
+                Scope.Resolution resolved = scope.resolve(var);
+                if (!(resolved instanceof Scope.ResolvedRelation ref)) {
+                    // Only a genuine scalar ATTRIBUTE has a string length to take. The bare
+                    // lambda element lands in the scalar arm too, but its mapping is the
+                    // Relation it came from — size() of a relation element is not a length.
+                    Scope.ResolvedScalar scalar = (Scope.ResolvedScalar) resolved;
+                    if (!(scalar.mapping() instanceof AttributeMapping.Field)) {
                         throw new IllegalArgumentException(
                                 "size() requires a collection (Relation) mapping for " + var);
                     }
@@ -2279,7 +2283,7 @@ public final class SpringDataQueryPlanAdapter {
                         throw new IllegalArgumentException(
                                 "size(filter(...)) requires a collection (Relation) mapping for " + var);
                     }
-                    Path<?> path = scope.resolvePath(var);
+                    Path<?> path = scope.path(var);
                     if (fractionalCollapse != null) {
                         // ne f is vacuously true only for a PRESENT string: a NULL column is a
                         // missing attribute → CEL error → deny, so it must stay excluded —
@@ -2458,12 +2462,11 @@ public final class SpringDataQueryPlanAdapter {
             String var = fieldOp.getVariable();
             Object val = PlanValues.protoValueToJava(valueOp.getValue());
 
-            Scope.ResolvedRelation relRef = scope.resolveRelation(var);
-            if (relRef != null) {
+            if (scope.resolve(var) instanceof Scope.ResolvedRelation relRef) {
                 return collectionContainsAny(scope, relRef, asList(val));
             }
 
-            Path<?> path = scope.resolvePath(var);
+            Path<?> path = scope.path(var);
             return withOverride("in", path, val, () -> {
                 if (val instanceof List<?> list) {
                     if (list.isEmpty()) {
@@ -2526,22 +2529,24 @@ public final class SpringDataQueryPlanAdapter {
          */
         private Predicate handleInVariableVariable(String memberVar, String collectionVar,
                                                    Scope scope) {
-            Scope.ResolvedRelation ref = scope.resolveRelation(collectionVar);
-            if (ref == null) {
-                scope.resolveMapping(collectionVar); // throws "Unknown attribute" when unmapped
+            // resolve() is total, so an unmapped collectionVar throws "Unknown attribute" here
+            // rather than needing a separate call made purely for its throw.
+            if (!(scope.resolve(collectionVar) instanceof Scope.ResolvedRelation ref)) {
                 throw new IllegalArgumentException(
                         "in(" + memberVar + ", " + collectionVar + ") requires the second "
                                 + "attribute to be mapped as a Relation (collection membership), "
                                 + "but " + collectionVar + " resolves to a scalar Field mapping");
             }
-            // Resolve the member OUTSIDE the subquery first so an unknown/Relation-valued
-            // member reports its own resolution error rather than a subquery-build failure.
-            scope.resolvePath(memberVar);
+            // Check the member eagerly: resolved only inside the subquery body, an unknown or
+            // Relation-valued member would be masked by chainSubquery's own failure (the
+            // bulk-delete guard). The path itself has to be rebuilt against the REBASED scope
+            // below to be a legal correlation reference, so this call is a check, not a value.
+            scope.path(memberVar);
             return chainContains(scope, ref, (sub, tailJoin, rebased) -> {
                 Path<?> element = Scope.memberPath(tailJoin, ref.tail(), null);
                 // The outer scalar resolves through the REBASED scope so the produced path is
                 // a legal correlation reference inside the subquery.
-                Path<?> outer = rebased.resolvePath(memberVar);
+                Path<?> outer = rebased.path(memberVar);
                 return cb.or(
                         cb.equal(element, outer),
                         cb.and(cb.isNull(element), cb.isNull(outer)));
@@ -2590,11 +2595,10 @@ public final class SpringDataQueryPlanAdapter {
                 Object val = PlanValues.protoValueToJava(second.getValue());
                 List<?> values = asList(val);
 
-                Scope.ResolvedRelation relRef = scope.resolveRelation(var);
-                if (relRef != null) {
+                if (scope.resolve(var) instanceof Scope.ResolvedRelation relRef) {
                     return collectionContainsAny(scope, relRef, values);
                 }
-                Path<?> path = scope.resolvePath(var);
+                Path<?> path = scope.path(var);
                 // hasIntersection(field, []) is always false; avoid a dialect-dependent empty `IN ()`.
                 if (values.isEmpty()) {
                     return cb.disjunction();
@@ -2679,9 +2683,7 @@ public final class SpringDataQueryPlanAdapter {
             // dotted chains ("request.resource.attr.categories.subCategories") share one path:
             // the subquery correlates the OWNING From and joins through every hop, so the
             // projection ranges over the flattened tail elements.
-            Scope.ResolvedRelation ref = scope.resolveRelation(collectionVar);
-            if (ref == null) {
-                scope.resolveMapping(collectionVar); // throws "Unknown attribute" when unmapped
+            if (!(scope.resolve(collectionVar) instanceof Scope.ResolvedRelation ref)) {
                 throw new IllegalArgumentException(
                         "map can only be applied to a collection mapped as Relation: " + collectionVar);
             }
@@ -2805,9 +2807,7 @@ public final class SpringDataQueryPlanAdapter {
             String collectionVar = listOperand.getVariable();
             // Owner-anchored chain resolution: multi-hop chains join through every hop, and a
             // relation referenced from inside a lambda anchors to the scope that owns it.
-            Scope.ResolvedRelation ref = scope.resolveRelation(collectionVar);
-            if (ref == null) {
-                scope.resolveMapping(collectionVar); // throws "Unknown attribute" when unmapped
+            if (!(scope.resolve(collectionVar) instanceof Scope.ResolvedRelation ref)) {
                 throw new IllegalArgumentException(
                         op + " requires a Relation mapping for " + collectionVar);
             }
