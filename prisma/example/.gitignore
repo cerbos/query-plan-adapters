@@ -1,0 +1,8 @@
+node_modules
+lib
+src/generated
+tsconfig.tsbuildinfo
+prisma/demo.db
+prisma/demo.db-journal
+# The adapter tarball `run.sh` builds and installs. Regenerated on every run; never committed.
+cerbos-orm-prisma-*.tgz
