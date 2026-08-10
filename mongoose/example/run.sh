@@ -17,14 +17,13 @@ set -euo pipefail
 EXAMPLE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ADAPTER_DIR="$(cd "${EXAMPLE_DIR}/.." && pwd)"
 
-# Pinned by tag AND digest — the same reference mongoose/package.json's `mongo` script and the
-# 7.0 leg of .github/workflows/mongoose.yaml carry. conformance/scripts/validate-corpus.sh holds
-# every `mongo:` reference in the repository to that form and to one digest per tag, so no two of
-# the three can name different builds of 7.0. It does NOT tie them to the same TAG: moving the
-# adapter's matrix off 7.0 would leave this line behind, still pinned and still green. The example
-# runs one server version deliberately (see the job comment in the workflow), so that is a bump to
-# make by hand rather than a drift the corpus can catch.
-MONGO_IMAGE="mongo:7.0@sha256:35a5926f71f8b6cb19206bee928c5a85f241a8be99f20c81abe35ae78a73415d"
+# The baseline server, read rather than restated. `npm run mongo` and the baseline leg of
+# .github/workflows/mongoose.yaml read the same file, so the server this example proves the
+# packaging against is the one the adapter is developed and tested against, and bumping it is one
+# edit. A literal here would be a third copy that conformance/scripts/validate-corpus.sh could
+# only hold to one digest per TAG — nothing holds two tags equal, so moving the adapter off 7.0
+# would leave the example behind, still pinned and still green.
+MONGO_IMAGE="$(cat "${ADAPTER_DIR}/MONGO_IMAGE")"
 MONGO_CONTAINER="cerbos-demo-mongoose"
 # 27117, not MongoDB's default 27017: that is the port `npm run mongo` and the adapter's own CI
 # bind, and a demo server holding it would leave one of the two silently reading the other's data.

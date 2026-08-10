@@ -30,9 +30,25 @@ jobs:
         # the adapter against was whatever the tag pointed at that morning — and the corpus
         # discriminates server behaviour, which is the whole reason this dimension exists.
         # Starting the container directly is what makes the digest expressible.
-        mongodb-image:
-          - "mongo:7.0@sha256:35a5926f71f8b6cb19206bee928c5a85f241a8be99f20c81abe35ae78a73415d"
-          - "mongo:8.0@sha256:98605bfa1bb2a15dd82109e1d78ad31527a9a744909fab4606076fa71a0ae515"
+        #
+        # The references themselves live in mongoose/MONGO_IMAGE and mongoose/MONGO_NEXT_IMAGE,
+        # so this dimension is a list of FILENAMES and no image is restated here. `npm run mongo`
+        # and mongoose/example/run.sh read MONGO_IMAGE too, and a matrix entry that drifted from
+        # it would prove the adapter against a different server than anyone reproducing a failure
+        # locally — the same argument as langchain-chromadb/CHROMA_IMAGE, which is the precedent
+        # this follows. A matrix value cannot be a `$(cat …)`, so the alternative was to restate
+        # the baseline here and leave the two copies free to name different TAGS:
+        # conformance/scripts/validate-corpus.sh holds every reference to one digest per tag, but
+        # nothing holds two tags equal.
+        #
+        # MONGO_IMAGE is the baseline: the server the adapter is developed against, and the only
+        # one the example runs. MONGO_NEXT_IMAGE is the forward-compatibility leg, deliberately a
+        # different major and read by nothing else. Both names end in `_IMAGE` because that suffix
+        # is what validate-corpus.sh's `--include='*_IMAGE'` scans; a `MONGO_IMAGE_NEXT` would be
+        # a pin nothing checks.
+        mongodb-image-file:
+          - MONGO_IMAGE
+          - MONGO_NEXT_IMAGE
         node-version: ["22", "24", "25"]
     runs-on: ubuntu-latest
     steps:
@@ -52,7 +68,7 @@ jobs:
 
       - name: Start MongoDB
         run: |
-          docker run -d --name mongodb -p 27017:27017 "${{ matrix.mongodb-image }}"
+          docker run -d --name mongodb -p 27017:27017 "$(cat "${{ matrix.mongodb-image-file }}")"
           for _ in {1..30}; do
             if docker exec mongodb mongosh --quiet --eval 'db.runCommand({ ping: 1 }).ok' \
               > /dev/null 2>&1; then
@@ -105,12 +121,9 @@ jobs:
   # client, not the runtime and not the server. The server dimension in `test` above exists
   # because the corpus discriminates server BEHAVIOUR — three-valued logic, BSON ordering, regex
   # handling — which is semantics, and already covered there. This proves plumbing. No `services:`
-  # block or MongoDB step here either: `mongoose/example/run.sh` starts its own server, pinned to
-  # the same reference as the 7.0 leg above, so the example is one command on a laptop as well as
-  # in CI. (The image cannot be named here in prose: conformance/scripts/validate-corpus.sh scans
-  # this file for `mongo:` references and holds every one of them to `repo:tag@sha256:<64 hex>`.)
-  # Moving that leg to a new major means bumping the example's pin by hand — the corpus checker
-  # holds the two to one digest per tag, not to the same tag.
+  # block or MongoDB step here either: `mongoose/example/run.sh` starts its own server, reading
+  # mongoose/MONGO_IMAGE — the same file the baseline leg of `test` reads — so the example is one
+  # command on a laptop as well as in CI, and bumping the baseline moves both at once.
   example:
     runs-on: ubuntu-latest
     steps:

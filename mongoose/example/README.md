@@ -69,21 +69,24 @@ projected between the two.
 nine of the ten stores belong to somebody else; putting them there would grow it into the language
 switch that [split](../../demo/README.md#running-an-example) exists to avoid.
 
-Two numbers in `run.sh` are deliberate:
+Two things in `run.sh` are deliberate:
 
-- **The image is pinned by tag *and* digest,** the same reference `../package.json`'s `mongo`
-  script and the `mongo:7.0` leg of [`.github/workflows/mongoose.yaml`](../../.github/workflows/mongoose.yaml)
-  carry. `conformance/scripts/validate-corpus.sh` holds every `mongo:` reference in the repository
-  to that form and to one digest per tag, so no two of the three can name different builds of 7.0.
-  It does not tie them to the same *tag*: moving the adapter's matrix off 7.0 leaves this one
-  behind, still pinned and still green, so that is a bump to make by hand.
+- **The image is not named here.** `run.sh` reads [`../MONGO_IMAGE`](../MONGO_IMAGE), the same
+  file `../package.json`'s `mongo` script and the baseline leg of
+  [`.github/workflows/mongoose.yaml`](../../.github/workflows/mongoose.yaml) read, so the server
+  this example proves the packaging against is the one the adapter is developed and tested
+  against. A literal here would be a third copy, and
+  `conformance/scripts/validate-corpus.sh` can only hold copies to one digest per *tag* — nothing
+  holds two tags equal, so moving the adapter off 7.0 would leave the example behind, still
+  pinned and still green.
 - **The host port is 27117, not 27017.** 27017 is what `npm run mongo` and the adapter's own CI
   bind, and a demo server holding it would leave one of the two silently reading the other's data
   — the same failure mode that puts the demo PDP on 13592/13593 instead of 3592/3593.
 
-The example runs one server version. The 7.0/8.0 dimension in the adapter's workflow exists
-because the corpus discriminates server *behaviour* — three-valued logic, BSON ordering, regex
-handling — which is semantics, already covered there.
+The example runs one server version: the baseline, whatever `MONGO_IMAGE` currently names. The
+adapter's workflow also runs [`../MONGO_NEXT_IMAGE`](../MONGO_NEXT_IMAGE) because the corpus
+discriminates server *behaviour* — three-valued logic, BSON ordering, regex handling — which is
+semantics, already covered there.
 
 ## Two things that look odd and are not
 
