@@ -5,6 +5,7 @@ on:
     paths:
       - "mongoose/**"
       - "conformance/**"
+      - "demo/**"
       - "policies/**"
       - ".github/workflows/mongoose.yaml"
       - ".github/workflows/mongoose-publish.yaml"
@@ -84,3 +85,52 @@ jobs:
       - name: Stop MongoDB
         if: always()
         run: docker rm -f mongodb
+
+  # The example application: the published package, installed from `npm pack`'s tarball and used
+  # the way a consumer uses it, against the shared demo domain. It covers the two things the
+  # suites above structurally cannot — the packaging surface (`exports`, `types`, the `files`
+  # allowlist), which every harness bypasses by importing from `"."`, and the
+  # usage shapes past a single flat query (pagination, and composing the adapter's filter with
+  # the application's own). See cerbos/query-plan-adapters#349 and
+  # docs/adr/0002-examples-install-the-packed-artifact.md.
+  #
+  # THIS JOB MUST STAY IN THIS WORKFLOW. `renovate.json` sets `automerge: true` for every
+  # non-major bump, and that is the path an ORM regression takes into `main` today. Because the
+  # example's lockfile is committed and Renovate manages it, a Mongoose bump arrives as ONE PR
+  # touching both mongoose/package.json and mongoose/example/package.json — and this job, being a
+  # check on that PR, is what blocks the automerge when the new ORM breaks real usage. Moving it
+  # to a nightly run or a workflow of its own silently restores that gap.
+  #
+  # One Node leg and one MongoDB server: the demo domain discriminates the package and the ORM
+  # client, not the runtime and not the server. The server dimension in `test` above exists
+  # because the corpus discriminates server BEHAVIOUR — three-valued logic, BSON ordering, regex
+  # handling — which is semantics, and already covered there. This proves plumbing. No `services:`
+  # block or MongoDB step here either: `mongoose/example/run.sh` starts its own server, pinned to
+  # the same reference as the 7.0 leg above, so the example is one command on a laptop as well as
+  # in CI. (The image cannot be named here in prose: conformance/scripts/validate-corpus.sh scans
+  # this file for `mongo:` references and holds every one of them to `repo:tag@sha256:<64 hex>`.)
+  # Moving that leg to a new major means bumping the example's pin by hand — the corpus checker
+  # holds the two to one digest per tag, not to the same tag.
+  example:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate conformance corpus
+        run: ../conformance/scripts/validate-corpus.sh
+
+      - name: Validate demo domain
+        run: ../demo/scripts/validate-demo.sh
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
+      - run: npm install
+
+      # The PDP is a container started by the runner from demo/docker-compose.yml, pinned to
+      # conformance/CERBOS_VERSION and conformance/CERBOS_IMAGE_DIGEST — no cerbos-setup-action
+      # here, because an example must reach the PDP the way a deployed application does.
+      - name: Run the example against the demo domain
+        run: ../demo/scripts/run-example.sh mongoose

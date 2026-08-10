@@ -1,0 +1,5 @@
+node_modules
+lib
+tsconfig.tsbuildinfo
+# The adapter tarball `run.sh` builds and installs. Regenerated on every run; never committed.
+cerbos-orm-mongoose-*.tgz
