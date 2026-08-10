@@ -1,14 +1,15 @@
 /**
- * Example application for `@cerbos/orm-prisma`, run against the shared demo domain.
+ * Example application for `@cerbos/orm-drizzle`, run against the shared demo domain.
  *
  * This is NOT a test of what the adapter translates — `../src/adversarial.test.ts` proves that
- * against a hostile corpus and a live PDP oracle. This proves the two things that harness
- * structurally cannot:
+ * against a hostile corpus and a live PDP oracle, on SQLite and on PostgreSQL. This proves the
+ * two things that harness structurally cannot:
  *
  *   1. Packaging. The import below resolves through the PUBLISHED package — `exports`, `types`,
- *      the `files` allowlist, the peer range — because run.sh installs `npm pack`'s tarball
- *      rather than linking the source directory. The harness imports from `"."` and touches
- *      none of it. See docs/adr/0002-examples-install-the-packed-artifact.md.
+ *      the `files` allowlist, the peer range against this example's own `drizzle-orm` — because
+ *      run.sh installs `npm pack`'s tarball rather than linking the source directory. The harness
+ *      imports from `"."` and touches none of it. See
+ *      docs/adr/0002-examples-install-the-packed-artifact.md.
  *   2. Usage shape. A harness runs one flat filtered query. Consumers also paginate, and compose
  *      the adapter's filter with predicates of their own. Shape 5 below is the one that earns
  *      the exercise.
@@ -16,22 +17,32 @@
  * Prints one JSON document to stdout; everything a human might want to read goes to stderr.
  * demo/scripts/run-example.sh diffs that document against demo/expected.json.
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { GRPC as Cerbos } from "@cerbos/grpc";
-import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import {
   PlanKind,
-  queryPlanToPrisma,
+  queryPlanToDrizzle,
   type Mapper,
-  type QueryPlanToPrismaResult,
-} from "@cerbos/orm-prisma";
+  type QueryPlanToDrizzleResult,
+} from "@cerbos/orm-drizzle";
+import Database from "better-sqlite3";
+import { and, asc, eq, type SQL } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/better-sqlite3";
 
-import { PrismaClient, type Prisma } from "./generated/prisma/client";
+import { CREATE_TABLE, documents } from "./schema";
 
 const DEMO_DIR = resolve(__dirname, "../../../demo");
 const RESOURCE_KIND = "document";
+
+/**
+ * A dedicated file rather than `:memory:`, so a failing run leaves the seeded rows behind to
+ * inspect. It is scratch state this example owns and .gitignore excludes, so each run starts from
+ * nothing by deleting it — one `rm`, rather than a reset against whatever database a config
+ * happens to name.
+ */
+const DB_PATH = resolve(__dirname, "../demo.db");
 
 interface Seeds {
   principals: { id: string; roles: string[] }[];
@@ -53,19 +64,19 @@ const seeds = JSON.parse(
 
 /**
  * Cerbos attribute names are not column names, so a consumer always writes one of these. Without
- * it the adapter emits `request.resource.attr.ownerId` as a literal Prisma field and the query
- * fails — which is itself worth seeing in an example.
+ * it the adapter has nothing to resolve `request.resource.attr.ownerId` to and throws — which is
+ * itself worth seeing in an example.
  */
 const MAPPER: Mapper = {
-  "request.resource.attr.ownerId": { field: "ownerId" },
-  "request.resource.attr.public": { field: "public" },
+  "request.resource.attr.ownerId": documents.ownerId,
+  "request.resource.attr.public": documents.public,
 };
 
 /** The application's OWN predicate. Never expressed in policy; declared in demo/seeds.json. */
-const APPLICATION_FILTER = {
-  archived: seeds.applicationFilter.archived,
-  region: seeds.applicationFilter.region,
-} satisfies Prisma.DocumentWhereInput;
+const APPLICATION_FILTER = and(
+  eq(documents.archived, seeds.applicationFilter.archived),
+  eq(documents.region, seeds.applicationFilter.region)
+);
 
 /**
  * The runner sets this, and there is deliberately no fallback. The obvious default — Cerbos's own
@@ -79,13 +90,13 @@ const APPLICATION_FILTER = {
 const cerbosHost = process.env["CERBOS_HOST"];
 if (!cerbosHost) {
   throw new Error(
-    "CERBOS_HOST is not set — run this example through demo/scripts/run-example.sh prisma"
+    "CERBOS_HOST is not set — run this example through demo/scripts/run-example.sh drizzle"
   );
 }
 
-const prisma = new PrismaClient({
-  adapter: new PrismaBetterSqlite3({ url: "file:./prisma/demo.db" }),
-});
+rmSync(DB_PATH, { force: true });
+const sqlite = new Database(DB_PATH);
+const db = drizzle(sqlite);
 
 const cerbos = new Cerbos(cerbosHost, { tls: false });
 
@@ -98,10 +109,7 @@ function principal(id: string): { id: string; roles: string[] } {
   return found;
 }
 
-async function plan(
-  principalId: string,
-  action: string
-): Promise<QueryPlan> {
+async function plan(principalId: string, action: string): Promise<QueryPlan> {
   return cerbos.planResources({
     principal: principal(principalId),
     resource: { kind: RESOURCE_KIND },
@@ -111,30 +119,32 @@ async function plan(
 
 /**
  * What a consumer actually writes at the call site. `ALWAYS_DENIED` short-circuits rather than
- * building an impossible `where`, and `ALWAYS_ALLOWED` contributes no predicate at all — which
- * is exactly why composing it with an application filter (shape 5) is the case that breaks
- * first.
+ * building an impossible predicate, and `ALWAYS_ALLOWED` becomes `undefined` — Drizzle's own word
+ * for "no predicate", which `.where()` and `and()` both already understand. That second case is
+ * exactly why composing with an application filter (shape 5) is the one that breaks first.
  */
-type Where = Prisma.DocumentWhereInput | "denied";
+type Where = SQL | undefined | "denied";
 
-function toWhere(result: QueryPlanToPrismaResult): Where {
+function toWhere(result: QueryPlanToDrizzleResult): Where {
   switch (result.kind) {
     case PlanKind.ALWAYS_DENIED:
       return "denied";
     case PlanKind.ALWAYS_ALLOWED:
-      return {};
+      return undefined;
     case PlanKind.CONDITIONAL:
-      return result.filters;
+      return result.filter;
   }
 }
 
-async function findIds(where: Where): Promise<string[]> {
+function findIds(where: Where): string[] {
   if (where === "denied") return [];
-  const rows = await prisma.document.findMany({
-    where,
-    select: { id: true },
-  });
-  return rows.map((r) => r.id).sort();
+  return db
+    .select({ id: documents.id })
+    .from(documents)
+    .where(where)
+    .all()
+    .map((row) => row.id)
+    .sort();
 }
 
 interface ShapeResult {
@@ -157,8 +167,8 @@ async function filtered(
   action: string
 ): Promise<ShapeResult> {
   const queryPlan = await plan(principalId, action);
-  const result = queryPlanToPrisma({ queryPlan, mapper: MAPPER });
-  return { kind: result.kind, ids: await findIds(toWhere(result)) };
+  const result = queryPlanToDrizzle({ queryPlan, mapper: MAPPER });
+  return { kind: result.kind, ids: findIds(toWhere(result)) };
 }
 
 /**
@@ -172,26 +182,27 @@ async function paginated(
   pageSize: number
 ): Promise<PaginatedShapeResult> {
   const queryPlan = await plan(principalId, action);
-  const result = queryPlanToPrisma({ queryPlan, mapper: MAPPER });
+  const result = queryPlanToDrizzle({ queryPlan, mapper: MAPPER });
   const where = toWhere(result);
 
   const pageSizes: number[] = [];
   const ids: string[] = [];
   if (where !== "denied") {
-    for (let skip = 0; ; skip += pageSize) {
-      const page = await prisma.document.findMany({
-        where,
-        select: { id: true },
+    for (let offset = 0; ; offset += pageSize) {
+      const page = db
+        .select({ id: documents.id })
+        .from(documents)
+        .where(where)
         // Required for the paging itself to be correct, not for the assertion: without a total
-        // order, `skip`/`take` may repeat or omit rows between pages. The assertion below stays
+        // order, limit/offset may repeat or omit rows between pages. The assertion below stays
         // order-independent regardless — those are separate concerns.
-        orderBy: { id: "asc" },
-        skip,
-        take: pageSize,
-      });
+        .orderBy(asc(documents.id))
+        .limit(pageSize)
+        .offset(offset)
+        .all();
       if (page.length === 0) break;
       pageSizes.push(page.length);
-      ids.push(...page.map((r) => r.id));
+      ids.push(...page.map((row) => row.id));
       if (page.length < pageSize) break;
     }
   }
@@ -203,30 +214,31 @@ async function paginated(
  * Shape 5: the adapter's filter ANDed with the application's own predicate. All three plan kinds
  * go through here on purpose — an `ALWAYS_ALLOWED` plan has no filter to AND with, and an
  * `ALWAYS_DENIED` one must not have its denial undone by the application's predicate.
+ *
+ * `and(undefined, x)` collapsing to `x` is what makes the ALWAYS_ALLOWED case a one-liner here,
+ * and it is also why the sentinel above is a string rather than a second `undefined`: a denial
+ * that reached `and()` would come back out as the application's predicate alone.
  */
 async function composed(
   principalId: string,
   action: string
 ): Promise<ShapeResult> {
   const queryPlan = await plan(principalId, action);
-  const result = queryPlanToPrisma({ queryPlan, mapper: MAPPER });
+  const result = queryPlanToDrizzle({ queryPlan, mapper: MAPPER });
   const where = toWhere(result);
   if (where === "denied") {
     return { kind: result.kind, ids: [] };
   }
-  return {
-    kind: result.kind,
-    ids: await findIds({ AND: [where, APPLICATION_FILTER] }),
-  };
+  return { kind: result.kind, ids: findIds(and(where, APPLICATION_FILTER)) };
 }
 
-async function seed(): Promise<void> {
-  await prisma.document.deleteMany({});
-  await prisma.document.createMany({ data: seeds.documents });
+function seed(): void {
+  sqlite.exec(CREATE_TABLE);
+  db.insert(documents).values(seeds.documents).run();
 }
 
 async function main(): Promise<void> {
-  await seed();
+  seed();
   console.error(`seeded ${seeds.documents.length} documents`);
 
   const shapes = {
@@ -253,7 +265,7 @@ async function main(): Promise<void> {
   };
 
   process.stdout.write(
-    `${JSON.stringify({ adapter: "prisma", shapes }, null, 2)}\n`
+    `${JSON.stringify({ adapter: "drizzle", shapes }, null, 2)}\n`
   );
 }
 
@@ -264,6 +276,6 @@ void (async () => {
     console.error(error);
     process.exitCode = 1;
   } finally {
-    await prisma.$disconnect();
+    sqlite.close();
   }
 })();
