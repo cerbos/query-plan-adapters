@@ -86,10 +86,16 @@ adapter. Its `run.sh` must:
 - pack the adapter into a real distributable and install **that** (ADR 0002; Go uses `replace` and
   proves usage shapes only)
 - print exactly one JSON document to stdout, with everything else on stderr
-- reach the PDP at `$CERBOS_HOST`, which the runner sets — never a hardcoded address. The demo PDP
-  is published on `13592`/`13593` rather than the default `3592`/`3593` on purpose: those are the
-  ports every adapter's `cerbos run` test sidecar binds, and a demo PDP still holding them makes
-  that sidecar fail to bind while the suite silently talks to the demo policies instead.
+- reach the PDP at `$CERBOS_HOST`, which the runner sets — never a hardcoded address, and
+  `validate-demo.sh` fails the build on one. The demo PDP is published on `13592`/`13593` rather
+  than the default `3592`/`3593` on purpose: those are the ports every adapter's `cerbos run` test
+  sidecar binds, and a demo PDP still holding them makes that sidecar fail to bind while the suite
+  silently talks to the demo policies instead.
+
+  This is a check rather than prose because prose did not hold it: the first two examples both
+  shipped `?? "localhost:3593"`, so an unset `CERBOS_HOST` did not fail — it planned against a
+  sidecar loaded with `policies/` and the mismatch against `expected.json` read as an adapter bug
+  (cerbos/query-plan-adapters#367).
 
 The document is:
 
@@ -135,8 +141,12 @@ The rot risk is real, and `validate-demo.sh` is what answers it:
    and the example could drop the application predicate; equal to the application predicate's own
    result and the example could drop **the adapter** — an authorization hole that reads as a green
    build.
-3. **Pin reuse.** The demo domain has no `CERBOS_VERSION` of its own. One PDP pin in the
-   repository, reused, and every example reaches it.
+3. **Pin reuse and reachability.** The demo domain has no `CERBOS_VERSION` of its own. One PDP pin
+   in the repository, reused, and every example reaches it — *at `$CERBOS_HOST`*. No example may
+   name a PDP client address of its own, because the obvious one to reach for is the port the test
+   sidecar binds, and that failure is silent rather than loud. The scan is for a client address
+   specifically: `docker-compose.yml`'s `"13592:3592"` names the PDP's own listen port on the
+   container side, which is correct.
 4. **Example coverage.** Every adapter has an `example/`. **Currently disabled** — it cannot pass
    until the last child of cerbos/query-plan-adapters#349 merges, and enabling it is
    cerbos/query-plan-adapters#360's job. Run with `DEMO_REQUIRE_ALL_EXAMPLES=1` to see where it
