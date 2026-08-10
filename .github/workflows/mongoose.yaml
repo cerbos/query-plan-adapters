@@ -5,6 +5,7 @@ on:
     paths:
       - "mongoose/**"
       - "conformance/**"
+      - "demo/**"
       - "policies/**"
       - ".github/workflows/mongoose.yaml"
       - ".github/workflows/mongoose-publish.yaml"
@@ -29,9 +30,25 @@ jobs:
         # the adapter against was whatever the tag pointed at that morning — and the corpus
         # discriminates server behaviour, which is the whole reason this dimension exists.
         # Starting the container directly is what makes the digest expressible.
-        mongodb-image:
-          - "mongo:7.0@sha256:35a5926f71f8b6cb19206bee928c5a85f241a8be99f20c81abe35ae78a73415d"
-          - "mongo:8.0@sha256:98605bfa1bb2a15dd82109e1d78ad31527a9a744909fab4606076fa71a0ae515"
+        #
+        # The references themselves live in mongoose/MONGO_IMAGE and mongoose/MONGO_NEXT_IMAGE,
+        # so this dimension is a list of FILENAMES and no image is restated here. `npm run mongo`
+        # and mongoose/example/run.sh read MONGO_IMAGE too, and a matrix entry that drifted from
+        # it would prove the adapter against a different server than anyone reproducing a failure
+        # locally — the same argument as langchain-chromadb/CHROMA_IMAGE, which is the precedent
+        # this follows. A matrix value cannot be a `$(cat …)`, so the alternative was to restate
+        # the baseline here and leave the two copies free to name different TAGS:
+        # conformance/scripts/validate-corpus.sh holds every reference to one digest per tag, but
+        # nothing holds two tags equal.
+        #
+        # MONGO_IMAGE is the baseline: the server the adapter is developed against, and the only
+        # one the example runs. MONGO_NEXT_IMAGE is the forward-compatibility leg, deliberately a
+        # different major and read by nothing else. Both names end in `_IMAGE` because that suffix
+        # is what validate-corpus.sh's `--include='*_IMAGE'` scans; a `MONGO_IMAGE_NEXT` would be
+        # a pin nothing checks.
+        mongodb-image-file:
+          - MONGO_IMAGE
+          - MONGO_NEXT_IMAGE
         node-version: ["22", "24", "25"]
     runs-on: ubuntu-latest
     steps:
@@ -51,7 +68,7 @@ jobs:
 
       - name: Start MongoDB
         run: |
-          docker run -d --name mongodb -p 27017:27017 "${{ matrix.mongodb-image }}"
+          docker run -d --name mongodb -p 27017:27017 "$(cat "${{ matrix.mongodb-image-file }}")"
           for _ in {1..30}; do
             if docker exec mongodb mongosh --quiet --eval 'db.runCommand({ ping: 1 }).ok' \
               > /dev/null 2>&1; then
@@ -84,3 +101,49 @@ jobs:
       - name: Stop MongoDB
         if: always()
         run: docker rm -f mongodb
+
+  # The example application: the published package, installed from `npm pack`'s tarball and used
+  # the way a consumer uses it, against the shared demo domain. It covers the two things the
+  # suites above structurally cannot — the packaging surface (`exports`, `types`, the `files`
+  # allowlist), which every harness bypasses by importing from `"."`, and the
+  # usage shapes past a single flat query (pagination, and composing the adapter's filter with
+  # the application's own). See cerbos/query-plan-adapters#349 and
+  # docs/adr/0002-examples-install-the-packed-artifact.md.
+  #
+  # THIS JOB MUST STAY IN THIS WORKFLOW. `renovate.json` sets `automerge: true` for every
+  # non-major bump, and that is the path an ORM regression takes into `main` today. Because the
+  # example's lockfile is committed and Renovate manages it, a Mongoose bump arrives as ONE PR
+  # touching both mongoose/package.json and mongoose/example/package.json — and this job, being a
+  # check on that PR, is what blocks the automerge when the new ORM breaks real usage. Moving it
+  # to a nightly run or a workflow of its own silently restores that gap.
+  #
+  # One Node leg and one MongoDB server: the demo domain discriminates the package and the ORM
+  # client, not the runtime and not the server. The server dimension in `test` above exists
+  # because the corpus discriminates server BEHAVIOUR — three-valued logic, BSON ordering, regex
+  # handling — which is semantics, and already covered there. This proves plumbing. No `services:`
+  # block or MongoDB step here either: `mongoose/example/run.sh` starts its own server, reading
+  # mongoose/MONGO_IMAGE — the same file the baseline leg of `test` reads — so the example is one
+  # command on a laptop as well as in CI, and bumping the baseline moves both at once.
+  example:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate conformance corpus
+        run: ../conformance/scripts/validate-corpus.sh
+
+      - name: Validate demo domain
+        run: ../demo/scripts/validate-demo.sh
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
+      - run: npm install
+
+      # The PDP is a container started by the runner from demo/docker-compose.yml, pinned to
+      # conformance/CERBOS_VERSION and conformance/CERBOS_IMAGE_DIGEST — no cerbos-setup-action
+      # here, because an example must reach the PDP the way a deployed application does.
+      - name: Run the example against the demo domain
+        run: ../demo/scripts/run-example.sh mongoose

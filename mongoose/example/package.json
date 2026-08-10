@@ -1,0 +1,23 @@
+{
+  "name": "cerbos-orm-mongoose-example",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Example application for @cerbos/orm-mongoose, run against the shared demo domain",
+  "license": "Apache-2.0",
+  "scripts": {
+    "build": "tsc --build",
+    "start": "node lib/main.js"
+  },
+  "//": "@cerbos/orm-mongoose is deliberately ABSENT from these dependencies. run.sh installs it from `npm pack`'s tarball, whose integrity hash changes on every build and would make a committed lockfile unusable with `npm ci`. The ORM and the SDK ARE pinned here, which is the half Renovate manages: a Mongoose bump lands as one PR touching both mongoose/package.json and this file, and the example job on that PR is what blocks automerge if the new ORM broke real usage.",
+  "dependencies": {
+    "@cerbos/grpc": "^0.28.0",
+    "mongoose": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^6.0.0"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

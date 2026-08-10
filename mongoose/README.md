@@ -350,6 +350,21 @@ const filters = result.kind === PlanKind.CONDITIONAL ? result.filters : {};
 await MyModel.find({ $and: [filters ?? {}, { archived: false }] });
 ```
 
+## Example application
+
+This repository carries a runnable [`example/`](example/), which installs the adapter from the
+artifact `npm publish` would upload and exercises it against a live PDP over the shared
+[demo domain](../demo/README.md):
+
+```bash
+# from the repository root
+demo/scripts/run-example.sh mongoose
+```
+
+Unlike the test suites, it resolves the adapter through its **published** surface — the `exports`
+map, `types` and the `files` allowlist — and covers usage shapes past a single flat query:
+pagination, and the adapter's filter composed with an application-owned filter.
+
 ## Error handling
 
 `queryPlanToMongoose` throws descriptive errors in the following scenarios:
