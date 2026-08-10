@@ -46,7 +46,18 @@ npx prisma db push >&2
 
 # 4. Compile. This is half of the packaging proof: `moduleResolution: nodenext` reads the
 #    adapter's `exports` map, so a broken one fails HERE rather than shipping to a consumer.
+#
+#    Discard the incremental state first, because that proof is otherwise standing on a side
+#    effect. `tsc --build` decides it is up to date by comparing this project's OWN inputs —
+#    `include: ["src"]` — against its outputs. A dependency under node_modules is not an input,
+#    so repacking and reinstalling the adapter does not invalidate a warm `lib/`: with the
+#    tarball's `exports` map pointing at a missing file, `tsc --build` still exits 0 and the
+#    break surfaces later, as a MODULE_NOT_FOUND out of step 5, instead of as the TS2307 this
+#    step exists to raise. What saves the run today is that step 3 rewrites `src/generated` on
+#    every invocation, and those ARE inputs — so the recheck happens by accident, and only for
+#    as long as `prisma generate` keeps touching files. One `rm` makes it happen on purpose.
 echo "==> tsc" >&2
+rm -rf lib tsconfig.tsbuildinfo
 npm run build >&2
 
 # 5. Run. stdout is the JSON document and nothing else.
