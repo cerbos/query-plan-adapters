@@ -3,12 +3,13 @@
 #   ./scripts/smoke.sh          # start the components, do the tests, stop the components
 #   ./scripts/run.sh            # start the components and keep them in operation
 #
-# The version of the PDP comes from conformance/CERBOS_VERSION. The scripts put it into the
-# environment. Do not write the version in this file.
+# The PDP is pinned by tag AND digest, both from conformance/ — CERBOS_VERSION and
+# CERBOS_IMAGE_DIGEST. The scripts put them into the environment. Do not write either value in
+# this file.
 
 services:
   cerbos:
-    image: ghcr.io/cerbos/cerbos:${CERBOS_VERSION:?set CERBOS_VERSION - run via scripts/smoke.sh}
+    image: ghcr.io/cerbos/cerbos:${CERBOS_VERSION:?set CERBOS_VERSION - run via scripts/smoke.sh}@${CERBOS_IMAGE_DIGEST:?set CERBOS_IMAGE_DIGEST - run via scripts/smoke.sh}
     command: ["server", "--set=storage.disk.directory=/policies", "--set=storage.driver=disk", "--set=telemetry.disabled=true", "--log-level=error"]
     environment:
       CERBOS_NO_TELEMETRY: "1"

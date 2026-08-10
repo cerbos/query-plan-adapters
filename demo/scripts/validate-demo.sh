@@ -294,7 +294,7 @@ fi
 SOURCE_INCLUDES=(
   --include='*.yml' --include='*.yaml' --include='*.sh' --include='*.py' --include='*.go'
   --include='*.java' --include='*.kts' --include='*.ts' --include='*.js' --include='*.json'
-  --include='Dockerfile' --include='*_IMAGE'
+  --include='*.rb' --include='Gemfile' --include='Dockerfile' --include='*_IMAGE'
 )
 SOURCE_EXCLUDES=(
   --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=lib --exclude-dir=build

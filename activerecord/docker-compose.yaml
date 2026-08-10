@@ -8,12 +8,14 @@
 # harness reads the shared corpus at ../conformance/ (seeds.json, actions.json,
 # CERBOS_VERSION).
 #
-# The version of the PDP comes from conformance/CERBOS_VERSION. scripts/test.sh puts it into
-# the environment. Do not write the version in this file.
+# The PDP is pinned by tag AND digest. The tag says which release a reader is looking at; the
+# digest says which build a green run actually proved. Both come from conformance/ —
+# CERBOS_VERSION and CERBOS_IMAGE_DIGEST — and scripts/test.sh puts them into the environment.
+# Do not write either value in this file.
 
 services:
   cerbos:
-    image: ghcr.io/cerbos/cerbos:${CERBOS_VERSION:?set CERBOS_VERSION - run via scripts/test.sh}
+    image: ghcr.io/cerbos/cerbos:${CERBOS_VERSION:?set CERBOS_VERSION - run via scripts/test.sh}@${CERBOS_IMAGE_DIGEST:?set CERBOS_IMAGE_DIGEST - run via scripts/test.sh}
     command: ["server", "--set=storage.disk.directory=/policies", "--set=storage.driver=disk", "--set=telemetry.disabled=true", "--log-level=error"]
     environment:
       CERBOS_NO_TELEMETRY: "1"

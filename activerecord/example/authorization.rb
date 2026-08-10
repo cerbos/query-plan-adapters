@@ -55,8 +55,16 @@ module Authorization
 
   module_function
 
+  # CERBOS_HOST is required, and has no default on purpose. The default gRPC ports are the ones
+  # every adapter's `cerbos run` test sidecar binds, so a local default does not fail when the
+  # variable is unset — it silently plans against whichever PDP happens to hold that port,
+  # loaded with some other suite's policies. See demo/README.md.
   def client
-    @client ||= Cerbos::Client.new(ENV.fetch("CERBOS_HOST", "localhost:3593"), tls: false)
+    host = ENV.fetch("CERBOS_HOST") do
+      raise "CERBOS_HOST is not set. Start the example with scripts/run.sh or scripts/smoke.sh, " \
+        "which set it to the PDP in docker-compose.yaml."
+    end
+    @client ||= Cerbos::Client.new(host, tls: false)
   end
 
   # Makes the relation for one principal, one resource kind and one action.

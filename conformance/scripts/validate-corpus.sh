@@ -251,7 +251,7 @@ fi
 SOURCE_INCLUDES=(
   --include='*.yml' --include='*.yaml' --include='*.sh' --include='*.py' --include='*.go'
   --include='*.java' --include='*.kts' --include='*.ts' --include='*.js' --include='*.json'
-  --include='Dockerfile' --include='*_IMAGE'
+  --include='*.rb' --include='Gemfile' --include='Dockerfile' --include='*_IMAGE'
 )
 SOURCE_EXCLUDES=(
   --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=.claude --exclude-dir=lib
@@ -291,8 +291,8 @@ if [[ "${version_drift}" -ne 0 ]]; then
 fi
 
 # Every other service image a test or workflow starts is pinned per harness rather than centrally:
-# a shared file would live under conformance/, and conformance/** re-runs all ten adapter
-# workflows, so bumping mongoose's server would cost nine irrelevant CI runs. What is shared is the
+# a shared file would live under conformance/, and conformance/** re-runs all eleven adapter
+# workflows, so bumping mongoose's server would cost ten irrelevant CI runs. What is shared is the
 # RULE, enforced here: a repository named below must appear everywhere as `repo:tag@sha256:<64 hex>`
 # — the tag says which release a reader is looking at, the digest says which build a green run
 # actually proved, and a `repo:tag` may resolve to only one digest across the whole repository, so
