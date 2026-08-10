@@ -380,8 +380,12 @@ One consequence of being an association subquery rather than a bare-table one is
 
 ## Gotchas
 
-Things you're likely to hit when integrating the adapter into a Spring Boot app — see the
-[`example/`](example) photo-sharing application for a runnable end-to-end reference.
+Things you're likely to hit when integrating the adapter into a Spring Boot app — see
+[`example/`](example) for two runnable end-to-end references: a photo-sharing application, and a
+smaller program covering the [shared demo domain](../demo) that every adapter's example
+implements. Both resolve this adapter from mavenLocal as a real Maven coordinate, so they also
+exercise its published POM and module metadata
+([ADR 0002](../docs/adr/0002-examples-install-the-packed-artifact.md)).
 
 ### `size(string)` counts differently for astral characters
 
