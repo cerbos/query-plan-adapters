@@ -129,6 +129,45 @@ what to do when you add a new service.
 the oracle recipe, the NULL conventions, the degeneracy guard, how to add a hostile shape, and how
 to add or onboard an adapter.
 
+## The demo domain
+
+`demo/` is the repository's second shared corpus, and it proves a different property.
+`conformance/` proves **semantics** — that a translated filter returns exactly the rows the PDP
+allows — with hostile shapes and five per-adapter classification buckets. `demo/` proves
+**plumbing** — that the adapter installs, imports, and composes with its ORM's real query methods
+— with realistic shapes and **no per-adapter exceptions at all**
+([ADR 0001](docs/adr/0001-demo-domain-has-no-per-adapter-exceptions.md)).
+
+It exists because every conformance harness imports its adapter from source (`from "."`), which
+leaves the published surface — `exports` maps, type declarations, `files` allowlists, peer ranges,
+POM scopes — executed nowhere, and because a harness only ever runs one flat filtered query.
+Each adapter's `example/` installs the packed artifact
+([ADR 0002](docs/adr/0002-examples-install-the-packed-artifact.md)) and exercises five usage
+shapes, of which the load-bearing one is the adapter's filter composed with an application-owned
+filter.
+
+```bash
+demo/scripts/run-example.sh <adapter>   # pack, install, run, diff against demo/expected.json
+demo/scripts/validate-demo.sh           # corpus integrity; runs in every adapter's example job
+```
+
+The demo domain reuses `conformance/CERBOS_VERSION` and `conformance/CERBOS_IMAGE_DIGEST` and gets
+**no PDP pin of its own** — one pin in the repository, reused, and `validate-demo.sh` asserts it.
+
+Two rules that are easy to get wrong:
+
+- **A shape needing a carve-out for one adapter is wrong for `demo/`.** There is no `actions.json`
+  equivalent here and adding one is exactly what ADR 0001 rules out; the argument belongs in
+  `conformance/`, where the classification buckets already exist.
+- **Each example's job must stay inside that adapter's own workflow.** `renovate.json` automerges
+  non-major bumps, so an ORM bump arrives as one PR touching both the adapter manifest and the
+  example's committed lockfile — the example job on that PR is what blocks the automerge when the
+  new ORM breaks real usage. A nightly or standalone workflow silently restores the gap.
+
+**Read [demo/README.md](demo/README.md) before changing the demo domain.** It covers the five
+usage shapes, the emitted JSON contract, why the expectations are hardcoded here but banned in
+`conformance/`, and what each of `validate-demo.sh`'s four checks stops.
+
 ## Code Style
 
 - TypeScript: 2-space indent, camelCase functions, PascalCase types, ESM-friendly
@@ -217,6 +256,7 @@ never recompute them in a harness.
 - Edit only `src/` — never commit `lib/` until tests pass
 - Shared policies in `/policies/` affect all adapters; edit carefully
 - `conformance/` affects all adapters too: a change there re-runs every adapter's CI, and adding an action requires classifying it for all ten
+- `demo/` likewise re-runs every adapter's example job, and adding a usage shape means implementing it in all ten examples — there is no classification bucket to opt out with
 - Adding a seed row means adding its `conformance/derived-fields.json` entry in the same commit; adding a seed *field* also means widening every harness's declared key set — both are enforced, not optional
 - Regenerate build artifacts in the same commit as source changes
 - Changing what an adapter can translate means updating its `conformance/actions.json` entry and its README contract table in the same commit

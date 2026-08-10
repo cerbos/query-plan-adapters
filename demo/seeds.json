@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Seed rows and principals for the demo domain. Every example application persists exactly these rows into its own store and plans for exactly these principals. Realistic shapes only — the hostile ones live in ../conformance/seeds.json.",
+  "principals": [
+    { "id": "alice", "roles": ["user"] },
+    { "id": "bob", "roles": ["user"] },
+    { "id": "admin", "roles": ["admin"] }
+  ],
+  "applicationFilter": {
+    "description": "The application's OWN predicate, never expressed in policy. Usage shape 5 ANDs it with the adapter-produced filter. Kept here rather than hardcoded in ten examples so validate-demo.sh can recompute it and prove shape 5 discriminates: applying this predicate alone, or the adapter's filter alone, must both give the wrong answer.",
+    "archived": false,
+    "region": "emea"
+  },
+  "documents": [
+    { "id": "d1", "ownerId": "alice", "public": true, "region": "emea", "archived": false },
+    { "id": "d2", "ownerId": "alice", "public": false, "region": "emea", "archived": false },
+    { "id": "d3", "ownerId": "alice", "public": true, "region": "apac", "archived": true },
+    { "id": "d4", "ownerId": "bob", "public": true, "region": "emea", "archived": false },
+    { "id": "d5", "ownerId": "bob", "public": false, "region": "emea", "archived": true },
+    { "id": "d6", "ownerId": "bob", "public": false, "region": "emea", "archived": false },
+    { "id": "d7", "ownerId": "carol", "public": true, "region": "apac", "archived": false },
+    { "id": "d8", "ownerId": "carol", "public": false, "region": "emea", "archived": true }
+  ]
+}

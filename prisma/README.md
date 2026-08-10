@@ -652,6 +652,19 @@ type Mapper = { [key: string]: MapperConfig } | ((key: string) => MapperConfig);
 
 A complete example application using this adapter can be found at [https://github.com/cerbos/express-prisma-cerbos](https://github.com/cerbos/express-prisma-cerbos)
 
+This repository also carries a runnable [`example/`](example/), which installs the adapter from the
+artifact `npm publish` would upload and exercises it against a live PDP over the shared
+[demo domain](../demo/README.md):
+
+```bash
+# from the repository root
+demo/scripts/run-example.sh prisma
+```
+
+Unlike the test suites, it resolves the adapter through its **published** surface — the `exports`
+map, `types`, the `files` allowlist, and the peer range — and covers usage shapes past a single
+flat query: pagination, and the adapter's filter composed with an application-owned filter.
+
 ## Resources
 
 ### Documentation

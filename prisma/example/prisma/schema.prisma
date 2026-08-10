@@ -1,0 +1,22 @@
+// The demo domain's single resource kind, as a consumer would model it: flat scalar columns and
+// no relations. The richer schemas the adapter is PROVED against live in ../../prisma/.
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  engineType   = "client"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Document {
+  id      String  @id
+  ownerId String
+  public  Boolean
+  region  String
+  // Never referenced by policy. `archived` and `region` are the application's own columns, and
+  // ANDing them with the adapter's filter is usage shape 5.
+  archived Boolean
+}
