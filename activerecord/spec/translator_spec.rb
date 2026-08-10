@@ -752,6 +752,114 @@ RSpec.describe Cerbos::ActiveRecord do
       expect { described_class.relation(:tags, fields: {"name" => "name"}) }
         .to raise_error(ArgumentError, /must be a field or relation mapping/)
     end
+
+    it "rejects a null representation it does not know" do
+      expect { described_class.field("title", null_representation: :sometimes) }
+        .to raise_error(ArgumentError, /must be :explicit or :omitted/)
+    end
+  end
+
+  # The convention of a NULL column belongs to the attribute, and the option of the call is
+  # only its fallback (cerbos/query-plan-adapters#308, ADR 0004). A declaration of `:explicit`
+  # makes `eq`, `ne` and `in` definite, because CEL holds a null VALUE under that convention
+  # while SQL answers UNKNOWN and an UNKNOWN keeps the row out under BOTH polarities.
+  describe "a declared null convention" do
+    let(:declared) do
+      {
+        "e" => described_class.field("title", null_representation: :explicit),
+        "f" => described_class.field("n", null_representation: :explicit),
+        "u" => field("author_id")
+      }
+    end
+
+    def declared_sql(condition)
+      described_class.query_plan_to_relation(
+        plan: conditional(condition), model: EdgeDocument, attributes: declared
+      ).to_sql
+    end
+
+    it "guards a declared column in an equality against a constant" do
+      sql = declared_sql(expression("eq", variable("e"), value("x")))
+      expect(sql).to match(/"title" IS NOT NULL/)
+    end
+
+    it "guards a declared column under a negated equality" do
+      # `null != "x"` is TRUE in CEL. Plain `NOT ("title" = 'x')` stays UNKNOWN and loses the
+      # row, so the guard has to sit INSIDE the negation.
+      sql = declared_sql(expression("ne", variable("e"), value("x")))
+      expect(sql).to match(/NOT.*"title" IS NOT NULL/m)
+    end
+
+    it "guards a declared column in a membership against constants" do
+      sql = declared_sql(
+        expression("in", variable("e"), expression("list", value("x"), value("y")))
+      )
+      expect(sql).to match(/"title" IS NOT NULL/)
+      expect(sql).to match(/IN \(/)
+    end
+
+    it "leaves a membership alone when the list already carries a null" do
+      # A null element already forces the `IS NULL` branch, which is definite by itself.
+      sql = declared_sql(
+        expression("in", variable("e"), expression("list", value("x"), value(nil)))
+      )
+      expect(sql).not_to match(/"title" IS NOT NULL/)
+    end
+
+    it "matches two nulls when both columns declare the convention" do
+      sql = declared_sql(expression("eq", variable("e"), variable("f")))
+      expect(sql).to match(/"title" IS NULL AND .*"n" IS NULL/)
+    end
+
+    it "refuses a comparison between two columns under mixed conventions" do
+      expect { declared_sql(expression("ne", variable("e"), variable("u"))) }
+        .to raise_error(
+          Cerbos::ActiveRecord::UnsupportedOperatorError,
+          /between two columns under mixed null conventions/
+        )
+    end
+
+    it "leaves the order operators alone" do
+      # A null receiver raises a no-overload error in CEL, which denies under both polarities.
+      # UNKNOWN already does that, so a guard here would change the meaning.
+      sql = declared_sql(expression("lt", variable("e"), value("x")))
+      expect(sql).not_to match(/IS NOT NULL/)
+    end
+
+    it "keeps an operator override rather than restructuring around it" do
+      # `eq` and `ne` RESTRUCTURE the comparison, so to add the guard would discard the
+      # translation of the caller in silence.
+      sql = described_class.query_plan_to_relation(
+        plan: conditional(expression("eq", variable("e"), value("x"))),
+        model: EdgeDocument,
+        attributes: declared,
+        operator_overrides: {
+          "eq" => ->(left, right) { Arel::Nodes::NotEqual.new(left, Arel::Nodes.build_quoted(right)) }
+        }
+      ).to_sql
+      expect(sql).to match(/"title" != /)
+      expect(sql).not_to match(/IS NOT NULL/)
+    end
+
+    it "does not apply the convention of the call to an attribute that declares nothing" do
+      # `u` declares nothing, so the `:omitted` of the call reaches it and the null constant
+      # is refused. The declared attributes above are unaffected.
+      expect {
+        described_class.query_plan_to_relation(
+          plan: conditional(expression("eq", variable("u"), value(nil))),
+          model: EdgeDocument, attributes: declared,
+          null_attribute_representation: :omitted
+        )
+      }.to raise_error(Cerbos::ActiveRecord::UnsupportedOperatorError, /null constant/)
+
+      expect {
+        described_class.query_plan_to_relation(
+          plan: conditional(expression("eq", variable("e"), value(nil))),
+          model: EdgeDocument, attributes: declared,
+          null_attribute_representation: :omitted
+        )
+      }.not_to raise_error
+    end
   end
 
   describe "generated SQL" do

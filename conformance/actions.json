@@ -426,7 +426,8 @@
         "ent": "under mixed null conventions",
         "pgx": "under mixed null conventions",
         "langchain-chromadb": "Variable-to-variable comparisons are not supported by ChromaDB filters",
-        "elasticsearch-java": "Elasticsearch Query DSL cannot compare two document fields without scripts"
+        "elasticsearch-java": "Elasticsearch Query DSL cannot compare two document fields without scripts",
+        "activerecord": "between two columns under mixed null conventions"
       }
     },
     {

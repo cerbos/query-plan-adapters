@@ -21,16 +21,32 @@ module Cerbos
     # {UnmappedAttributeError}. It also raises that error if the operator around the variable
     # cannot use the mapping. The adapter never selects a column by itself.
     module AttributeMapping
+      # How the caller sends a NULL column to Cerbos. See
+      # {Cerbos::ActiveRecord.field} and {Cerbos::ActiveRecord.query_plan_to_relation}.
+      NULL_REPRESENTATIONS = %i[explicit omitted].freeze
+
       # A scalar mapping.
       #
       # +path+ is a column on the model. It can also be a path with dots through +belongs_to+
       # or +has_one+ associations, for example <tt>"owner.department"</tt>. The adapter
       # translates such a path into a correlated scalar subquery. Thus the path cannot
       # increase the number of rows in the result.
-      Field = Struct.new(:path) do
-        def initialize(path:)
+      #
+      # +null_representation+ declares how the caller sends THIS column when it is NULL. It
+      # overrides the +null_attribute_representation+ of the call for this attribute only.
+      # A mapping that declares nothing keeps the value of the call.
+      Field = Struct.new(:path, :null_representation) do
+        def initialize(path:, null_representation: nil)
           raise ArgumentError, "path is required" if path.nil?
-          super(path: path.to_s)
+
+          unless null_representation.nil? ||
+              NULL_REPRESENTATIONS.include?(null_representation.to_sym)
+            raise ArgumentError,
+              "null_representation must be :explicit or :omitted, got " \
+              "#{null_representation.inspect}"
+          end
+
+          super(path: path.to_s, null_representation: null_representation&.to_sym)
         end
 
         # @return [Array<String>] the path in parts: the association hops and then the column.
@@ -77,9 +93,14 @@ module Cerbos
     #
     # @param path [String, Symbol] a column name, or a path with dots through to-one
     #   associations
+    # @param null_representation [Symbol, nil] +:explicit+ if the caller sends this column as
+    #   an attribute whose value is null when the column is NULL, +:omitted+ if the caller
+    #   sends no attribute at all then. The default, +nil+, keeps the value that the call
+    #   gives. Declare it to make +eq+, +ne+ and +in+ against this column agree with the PDP
+    #   for the rows where it is NULL (cerbos/query-plan-adapters#308).
     # @return [AttributeMapping::Field]
-    def self.field(path)
-      AttributeMapping::Field.new(path: path)
+    def self.field(path, null_representation: nil)
+      AttributeMapping::Field.new(path: path, null_representation: null_representation)
     end
 
     # Makes a collection {AttributeMapping::Relation} mapping.

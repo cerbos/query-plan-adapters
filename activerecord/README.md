@@ -35,8 +35,8 @@ adapter gives the reference behaviour.
 
 | Classification | Coverage |
 | --- | --- |
-| Tested against the oracle | 128 reference actions |
-| Fail-closed | 13 actions: 5 that this adapter cannot show, and the 8 that the reference adapter does not support either. Each one must raise an error whose message the corpus pins, so a typo or a transport error cannot pass as the refusal |
+| Tested against the oracle | 136 reference actions |
+| Fail-closed | 14 actions: 5 that this adapter cannot show, and the 9 that the reference adapter does not support either. Each one must raise an error whose message the corpus pins, so a typo or a transport error cannot pass as the refusal |
 | Refused under the `omitted` NULL convention | 1 action — see [The NULL convention of the caller](#the-null-convention-of-the-caller) |
 | Known difference in the planner | The Cerbos planner changes `has()` on a missing attribute into `ALWAYS_ALLOWED`, but `checkResource` denies the rows in which the attribute is missing. Until the planner has a correction, use `R.attr.x != null` and not `has(R.attr.x)` for the attributes in your database |
 
@@ -119,31 +119,66 @@ Thus a leaf cannot know that a `not` above it will make `IS NOT NULL` into a pre
 selects NULL again. To refuse each null constant is correct for all the shapes. Refer to
 [cerbos/query-plan-adapters#302](https://github.com/cerbos/query-plan-adapters/issues/302).
 
-#### A known limit of the `explicit` convention
+#### Declare the convention on the attribute
 
-Under `:explicit`, CEL holds a null *value*, and thus `null != "x"` is true and `null == "x"` is
-false. SQL does not agree: `NULL != 'x'` is UNKNOWN, and an UNKNOWN keeps the row out. Thus the
-adapter gives fewer rows than the PDP permits when a policy compares a column that holds NULL
-with a constant that is not null:
+`null_attribute_representation:` is the fallback for the whole call. Declare the convention on
+each attribute that can be NULL, with `null_representation:` on the mapping:
 
-```cel
-R.attr.owner != "x"        # Cerbos permits a row whose owner is null; the filter does not
-!(R.attr.owner == "x")     # the same
-!P.attr.teams.exists(t, R.attr.owner == t)
-R.attr.owner == R.attr.otherOwner   # two nulls are equal in CEL; `a = b` is UNKNOWN in SQL
+```ruby
+MAPPING = {
+  # This column sends an attribute whose value is null.
+  "request.resource.attr.owner" => Cerbos::ActiveRecord.field(
+    "owner", null_representation: :explicit
+  ),
+  # This column sends no attribute at all.
+  "request.resource.attr.tag" => Cerbos::ActiveRecord.field(
+    "tag", null_representation: :omitted
+  ),
+  # This column is NOT NULL, so it declares nothing and keeps the value of the call.
+  "request.resource.attr.title" => Cerbos::ActiveRecord.field("title")
+}
 ```
 
-The direction is safe — the filter is narrower than the decision, and never wider — but the two
-do not agree. A row with a NULL column is absent from the result although the policy permits it.
+One setting for the whole call cannot be correct, because one policy suite can correctly use
+both conventions. The shared corpus does exactly that: `owner` sends an explicit null while
+`aOptionalString` sends no attribute, and the two are the same column.
 
-The adapter does not correct this today, because the correction would need the convention for
-each attribute and not one setting for the whole call. The shared corpus uses both conventions
-in one policy suite: `owner` sends an explicit null while `aOptionalString` sends no attribute.
-One setting cannot be right for both. Refer to
-[cerbos/query-plan-adapters#308](https://github.com/cerbos/query-plan-adapters/issues/308).
+A declaration says two things at the same time: that the column can be NULL, **and** how that
+NULL goes to `checkResource`. A mapping that declares nothing keeps the behaviour it always
+had, so no filter of an application changes without a change to its mapping.
 
-Until then: keep a column that a policy compares with a constant `NOT NULL`, or use `:omitted`
-and send no attribute for a NULL column, which the adapter already translates correctly.
+**What the declaration changes.** Only `eq`, `ne` and `in`. Those are the operators that CEL
+calculates to a definite boolean over a null value, and thus the only ones whose SQL must also
+be definite. With `:explicit`, the adapter writes them out:
+
+```
+eq(col, c)     ->  col IS NOT NULL AND col = c
+ne(col, c)     ->  NOT (col IS NOT NULL AND col = c)
+in(col, [cs])  ->  col IS NOT NULL AND col IN (cs)
+eq(a, b)       ->  (a IS NULL AND b IS NULL) OR (a IS NOT NULL AND b IS NOT NULL AND a = b)
+```
+
+Without the declaration, `NULL != 'x'` is UNKNOWN in SQL, an UNKNOWN keeps the row out under
+**both** polarities, and the filter is thus narrower than the decision. The direction is safe,
+but the two do not agree, and to agree is the property that the corpus holds.
+
+`lt`, `le`, `gt`, `ge` and the string operators do not change. A null receiver raises a
+no-overload error in CEL, which denies under both polarities — the same result as UNKNOWN. To
+make them definite would break them.
+
+**A comparison between two columns must not mix the conventions.** The declared side needs a
+definite answer for its NULL. The other side needs UNKNOWN for its NULL, because that is a
+missing attribute. No one predicate is both, so the adapter refuses the comparison:
+
+```ruby
+# owner declares :explicit, scope declares nothing
+# R.attr.owner != R.attr.scope
+# => Cerbos::ActiveRecord::UnsupportedOperatorError
+```
+
+Declare the convention on both attributes, or on neither. Refer to
+[cerbos/query-plan-adapters#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
+[ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
 
 ### The collation is part of the contract
 

@@ -22,7 +22,7 @@
 RSpec.describe "adversarial conformance" do
   before(:all) { AdversarialModels.establish! }
 
-  def self.field(path) = Cerbos::ActiveRecord.field(path)
+  def self.field(path, **kwargs) = Cerbos::ActiveRecord.field(path, **kwargs)
 
   def self.relation(*args, **kwargs) = Cerbos::ActiveRecord.relation(*args, **kwargs)
 
@@ -35,10 +35,18 @@ RSpec.describe "adversarial conformance" do
     "request.resource.attr.createdBy" => field("created_by"),
     "request.resource.attr.scope" => field("scope"),
     "request.resource.attr.createdAt" => field("created_at"),
-    # `owner` uses the same column as aOptionalString. But the corpus sends `owner` as an
-    # explicit null, and it does not remove the attribute. The membership tests find this
-    # difference.
-    "request.resource.attr.owner" => field("a_optional_string"),
+    # `owner` and `coOwner` alias the columns that `aOptionalString` and `scope` also map,
+    # under the OTHER null convention: the oracle sends a real null attribute for them and
+    # does not remove it. The declaration here is what makes the equality family definite for
+    # these two attributes and leaves every other mapping alone
+    # (cerbos/query-plan-adapters#308).
+    "request.resource.attr.owner" => field("a_optional_string", null_representation: :explicit),
+    # The explicit-null alias of the `scope` column, and the second half of `null-value-f2f`.
+    # `scope` itself is omitted when NULL, so the corpus holds the same column under both
+    # conventions and the field-to-field test has two explicit nulls to compare. It is NOT a
+    # second alias of `a_optional_string`: a column compared with itself is TRUE for all 20
+    # seeds, and the degeneracy guard refuses a total oracle.
+    "request.resource.attr.coOwner" => field("scope", null_representation: :explicit),
     # obj.inner is not a true nested column. It uses the same column as aString. The
     # spring-data, prisma and sqlalchemy harnesses use the same substitute for the p-struct
     # test.
@@ -70,6 +78,13 @@ RSpec.describe "adversarial conformance" do
       "subCategories" => relation(:sub_categories, fields: {"name" => field("name")}),
       "subNames" => relation(:sub_categories, member_field: "name")
     })
+  }.freeze
+
+  # The same map with every per-attribute declaration removed, so a test can make the
+  # convention of the call reach every attribute. It is DERIVED from the map above and is not
+  # written out a second time: a new attribute cannot arrive in one and not the other.
+  UNDECLARED_ATTRIBUTES = ATTRIBUTES.transform_values { |mapping|
+    mapping.is_a?(Cerbos::ActiveRecord::AttributeMapping::Field) ? field(mapping.path) : mapping
   }.freeze
 
   def adapter_filtered_ids(action)
@@ -108,7 +123,7 @@ RSpec.describe "adversarial conformance" do
   # into adapterUnsupported fails this list instead of emptying it without a word.
   #
   # The list belongs to this adapter. Do not copy it from another harness: this adapter compares
-  # 128 of the 133 actions, and a list built for an adapter that compares fewer would leave most
+  # 136 of the 141 actions, and a list built for an adapter that compares fewer would leave most
   # of the groups here with no guard at all (cerbos/query-plan-adapters#324).
   #
   # Each entry has an oracle that is not empty and not all 20 seeds. Eight actions cannot join
@@ -155,6 +170,11 @@ RSpec.describe "adversarial conformance" do
     w1-size-nonneg-chain
     w1-not-in-chain
     w1-not-hasint-chain
+    null-value-ne-const
+    null-value-not-eq-const
+    null-value-not-in-const
+    null-value-f2f
+    null-value-pv-not-exists
   ].freeze
 
   # Shapes that this adapter REFUSES, kept because their group has no compared member here and
@@ -174,17 +194,17 @@ RSpec.describe "adversarial conformance" do
     # this adapter without a test. Increase these numbers only when you know why
     # conformance/actions.json is larger.
     it "pins the corpus size" do
-      expect(ConformanceCorpus::ACTIONS_FILE.fetch("conformance").size).to eq(133)
-      expect(ConformanceCorpus::EXPECTED_UNSUPPORTED.size).to eq(8)
+      expect(ConformanceCorpus::ACTIONS_FILE.fetch("conformance").size).to eq(141)
+      expect(ConformanceCorpus::EXPECTED_UNSUPPORTED.size).to eq(9)
       expect(ConformanceCorpus::NULL_REPRESENTATION_OMITTED.size).to eq(1)
-      expect(ConformanceCorpus::MANIFEST_ACTIONS.size).to eq(143)
+      expect(ConformanceCorpus::MANIFEST_ACTIONS.size).to eq(152)
       # Every one of these carries a pinned message, so a throwing action that appears or
       # disappears must be triaged here and cannot join the suite quietly.
-      expect(ConformanceCorpus::THROWING_ACTIONS.size).to eq(13)
+      expect(ConformanceCorpus::THROWING_ACTIONS.size).to eq(14)
       # The guard has one entry for each group of hostile shapes. A new group arrives with a
       # new action, which the count above already stops. This number makes the second half of
       # that decision explicit: name a representative for the new group here.
-      expect(DEGENERACY_GUARD_ACTIONS.size).to eq(38)
+      expect(DEGENERACY_GUARD_ACTIONS.size).to eq(43)
     end
 
     # Adding a throwing action without a pinned message must fail the run and must not turn the
@@ -293,11 +313,39 @@ RSpec.describe "adversarial conformance" do
       end
     end
 
+    # The declaration of an attribute wins over the convention of the call. This is the whole
+    # point of #308: one policy suite can correctly mix the two, so the option of the call is
+    # a fallback and not a switch over the whole plan.
+    it "lets the declaration of an attribute override the convention of the call" do
+      relation = Cerbos::ActiveRecord.query_plan_to_relation(
+        plan: AdversarialOracle.plan("null-eq"),
+        model: AdvResource,
+        attributes: ATTRIBUTES,
+        null_attribute_representation: :omitted
+      )
+      expect(relation.pluck(:id).sort).to eq(AdversarialOracle.allowed_ids("null-eq"))
+
+      # And without the declaration the same call is refused, so the test above passes
+      # because of the declaration and not because the check stopped working.
+      expect {
+        Cerbos::ActiveRecord.query_plan_to_relation(
+          plan: AdversarialOracle.plan("null-eq"),
+          model: AdvResource,
+          attributes: UNDECLARED_ATTRIBUTES,
+          null_attribute_representation: :omitted
+        )
+      }.to raise_error(Cerbos::ActiveRecord::Error, /null constant/)
+    end
+
     # The completeness guard for #302. The refusal must come from the null OPERAND and not from
     # a list of operators: `hasIntersection(tagNames, ["public", null])` carries a null in its
     # list of values, and an allowlist of eq/ne/in would miss it without a word. This test reads
     # every action in the corpus instead of naming shapes, so a new action that carries a null
     # comes here by itself.
+    #
+    # It translates with the UNDECLARED map. The convention of the call only reaches an
+    # attribute that declares nothing, so a declared attribute would leave this loop with
+    # nothing to prove about the fallback (cerbos/query-plan-adapters#308).
     it "refuses every action in the corpus that carries a null constant" do
       message = ConformanceCorpus::NULL_OMITTED_THROWS.first.last
 
@@ -314,7 +362,7 @@ RSpec.describe "adversarial conformance" do
         Cerbos::ActiveRecord.query_plan_to_relation(
           plan: AdversarialOracle.plan(action),
           model: AdvResource,
-          attributes: ATTRIBUTES,
+          attributes: UNDECLARED_ATTRIBUTES,
           null_attribute_representation: :omitted
         )
         false

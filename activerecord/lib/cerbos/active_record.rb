@@ -48,11 +48,22 @@ module Cerbos
     #   for a shape that your database can translate correctly but portable SQL cannot. A JSON
     #   containment operator and a full-text index are two examples.
     # @param null_attribute_representation [Symbol] how the caller sends a NULL column to
-    #   Cerbos. With +:explicit+, the default, a NULL column sends an attribute whose value is
-    #   null, and thus <tt>R.attr.x == null</tt> is true for that row and +IS NULL+ agrees with
-    #   the PDP. With +:omitted+, a NULL column sends no attribute at all. CEL then raises a
+    #   Cerbos, for each attribute that declares nothing of its own. With +:explicit+, the
+    #   default, a NULL column sends an attribute whose value is null, and thus
+    #   <tt>R.attr.x == null</tt> is true for that row and +IS NULL+ agrees with the PDP. With
+    #   +:omitted+, a NULL column sends no attribute at all. CEL then raises a
     #   missing-attribute error and the PDP denies the row, but +IS NULL+ would give that row.
     #   Thus the adapter refuses each null constant in the plan under +:omitted+.
+    #
+    #   Declare the convention PER ATTRIBUTE with the +null_representation:+ argument of
+    #   {Cerbos::ActiveRecord.field}, and this value is then the fallback. One policy suite can
+    #   correctly mix the two: the same column can be mapped twice and sent as an explicit null
+    #   under one attribute name and omitted under another, which one option of the call cannot
+    #   express. An attribute that declares +:explicit+ makes the equality family (+eq+, +ne+,
+    #   +in+) translate so that it can never be SQL UNKNOWN, because CEL holds a null VALUE
+    #   under that convention and UNKNOWN keeps the row out under both polarities. The order
+    #   and string operators do not change: a null receiver raises a no-overload error in CEL,
+    #   which denies exactly as UNKNOWN does (cerbos/query-plan-adapters#308).
     # @return [ActiveRecord::Relation] +model.none+ if the plan always denies, +model.all+ if
     #   the plan always allows, and a filtered relation for all the other plans
     # @raise [Error] if the adapter cannot translate the plan correctly

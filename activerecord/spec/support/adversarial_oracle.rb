@@ -36,8 +36,10 @@ module AdversarialOracle
   # three-valued logic when a NULL is in a comparison. Note that `NOT (NULL = x)` stays
   # UNKNOWN and does not become TRUE.
   #
-  # `owner` and `tagNames` are the two exceptions. They hold explicit nulls, because a CEL
-  # membership test finds a difference between a null element and a missing element.
+  # `owner`, `coOwner` and `tagNames` are the three exceptions. They hold explicit nulls,
+  # because a CEL membership test finds a difference between a null element and a missing
+  # element, and because the equality family answers a null VALUE definitely while a missing
+  # attribute denies under both polarities (cerbos/query-plan-adapters#308).
   def check_resource(seed)
     attr = {
       "aBool" => seed.fetch("aBool"),
@@ -47,6 +49,9 @@ module AdversarialOracle
       "obj" => {"inner" => seed.fetch("aString")},
       "tags" => seed.fetch("tags").map { |tag| tag_attr(tag) },
       "owner" => seed.fetch("aOptionalString"),
+      # The explicit-null alias of the `scope` column. `scope` below is omitted when it is
+      # NULL, so the same column reaches the PDP under both conventions.
+      "coOwner" => ConformanceCorpus.scope(seed),
       "tagNames" => seed.fetch("tags").map { |tag| tag.fetch("name") },
       "categories" => seed.fetch("subCategoryNames").map { |name| category_attr(seed, name) }
     }

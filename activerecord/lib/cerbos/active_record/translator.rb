@@ -49,7 +49,13 @@ module Cerbos
         "endsWith" => {prefix: true, suffix: false}
       }.freeze
 
-      NULL_REPRESENTATIONS = %i[explicit omitted].freeze
+      NULL_REPRESENTATIONS = AttributeMapping::NULL_REPRESENTATIONS
+
+      # The operators that CEL evaluates to a definite boolean over a null value, and thus the
+      # only ones that the declared convention of an attribute can settle. Everything else — a
+      # collection macro, `hasIntersection`, a string match — keeps the convention of the call,
+      # because the declaration says nothing about the meaning of its null there.
+      EQUALITY_FAMILY = %w[eq ne in].freeze
 
       def initialize(model:, attributes:, operator_overrides: {}, null_attribute_representation: :explicit)
         @model = model
@@ -84,13 +90,16 @@ module Cerbos
         return model.none if normalised.always_denied?
         return model.all if normalised.always_allowed?
 
-        assert_no_null_operands(normalised.condition) if null_attribute_representation == :omitted
+        # Always, and not only under `:omitted`. The option of the call is now the fallback:
+        # an attribute can declare `:omitted` while the call declares `:explicit`.
+        assert_no_null_operands(normalised.condition)
 
         @aliaser = Relations::Aliaser.new
         # The keys are object identities. Each column that the adapter resolves is a new Arel
         # node, and that same node goes through the translation without a change. Thus
         # identity is the correct comparison here.
         @column_types = {}.compare_by_identity
+        @null_representations = {}.compare_by_identity
         environment = Environment.new(translator: self, bindings: {})
         model.where(predicate(normalised.condition, environment))
       end
@@ -108,6 +117,26 @@ module Cerbos
       # @api private
       def column_type(node)
         @column_types[node]
+      end
+
+      # Records the convention that the mapping of an attribute declares, against the identity
+      # of the Arel node that the attribute resolved to. The declaration arrives with the
+      # mapping, but the operators see only resolved values, so the node carries it across.
+      #
+      # @api private
+      def register_null_representation(node, representation)
+        @null_representations[node] = representation if representation
+        node
+      end
+
+      # True if this node came from an attribute that the caller declares it sends as an
+      # explicit null. An attribute that declares `:omitted`, and one that declares nothing,
+      # are both false: only `:explicit` puts a null VALUE into CEL, and thus only `:explicit`
+      # needs a comparison that is definite.
+      #
+      # @api private
+      def explicit_null?(node)
+        @null_representations[node] == :explicit
       end
 
       # @api private
@@ -149,17 +178,56 @@ module Cerbos
       def assert_no_null_operands(node)
         case node
         when Plan::Value
-          if node.value.nil? || (node.value.is_a?(Array) && node.value.any?(&:nil?))
-            raise UnsupportedOperatorError,
-              "Cannot translate a null constant with null_attribute_representation: :omitted. " \
-              "A NULL column then sends no attribute, so Cerbos evaluates the comparison as a " \
-              "missing-attribute error and denies the row, but a filter that selects NULL " \
-              "would return that row. Send a NULL column as an explicit null and use " \
-              ":explicit, or keep this shape out of the policy."
-          end
+          raise null_operand_error if carries_null?(node) && null_attribute_representation == :omitted
         when Plan::Expression
+          # A comparison between a mapped attribute and a constant is settled by the
+          # declaration of that attribute, which is what lets one call carry both conventions
+          # (cerbos/query-plan-adapters#308). The rule holds for that shape only: a null
+          # inside a macro over a list of constants reaches a comparison long after this scan,
+          # and nothing here can say which column it will meet, so those keep the convention
+          # of the call.
+          declared = declared_operand_convention(node)
+          unless declared.nil?
+            raise null_operand_error if declared == :omitted && node.operands.any? { |o| carries_null?(o) }
+            return
+          end
+
           node.operands.each { |operand| assert_no_null_operands(operand) }
         end
+      end
+
+      def carries_null?(node)
+        return false unless node.is_a?(Plan::Value)
+
+        node.value.nil? || (node.value.is_a?(Array) && node.value.any?(&:nil?))
+      end
+
+      # The convention that a binary equality-family comparison between one mapped attribute
+      # and one constant declares, in either operand order. Returns nil when the node is not
+      # that shape, or when the attribute declares nothing — the caller then falls back to the
+      # convention of the call.
+      def declared_operand_convention(node)
+        return nil unless EQUALITY_FAMILY.include?(node.operator)
+        return nil unless node.operands.length == 2
+
+        variable, constant = node.operands
+        variable, constant = constant, variable if constant.is_a?(Plan::Variable)
+        return nil unless variable.is_a?(Plan::Variable) && constant.is_a?(Plan::Value)
+
+        mapping = attributes[variable.name]
+        return nil unless mapping.is_a?(AttributeMapping::Field)
+
+        mapping.null_representation
+      end
+
+      def null_operand_error
+        UnsupportedOperatorError.new(
+          "Cannot translate a null constant with null_attribute_representation: :omitted. " \
+          "A NULL column then sends no attribute, so Cerbos evaluates the comparison as a " \
+          "missing-attribute error and denies the row, but a filter that selects NULL " \
+          "would return that row. Send a NULL column as an explicit null and use " \
+          ":explicit, or keep this shape out of the policy."
+        )
       end
 
       def evaluate_expression(node, environment)
@@ -390,10 +458,15 @@ module Cerbos
 
       def apply(operator, values)
         assert_arity(operator, values)
+        assert_uniform_null_conventions(operator, values)
 
         override = operator_overrides[operator]
-        return override.call(*values) if override
+        plain = override ? override.call(*values) : dispatch(operator, values)
 
+        with_null_conventions(operator, values, plain, overridden: !override.nil?)
+      end
+
+      def dispatch(operator, values)
         case operator
         when *COMPARISONS then compare(operator, values.fetch(0), values.fetch(1))
         when "in" then membership(values.fetch(0), values.fetch(1))
@@ -416,6 +489,111 @@ module Cerbos
             "Unsupported operator: #{operator}. Supply an operator override if the database " \
             "can express it faithfully."
         end
+      end
+
+      # --- declared null conventions ----------------------------------------------------
+
+      # Two columns under different conventions have no faithful rendering, so the adapter
+      # refuses the comparison instead of a direction.
+      #
+      # The declared side needs a DEFINITE answer for its NULL, because CEL holds a null value
+      # there and `null != "x"` is TRUE. The other side needs UNKNOWN for its NULL, because
+      # that is a missing attribute and CEL denies it under both polarities. A definite
+      # predicate gives rows that the PDP refuses; a plain one loses rows that the PDP
+      # permits. No one predicate is both. Declare the convention on both attributes, or on
+      # neither (cerbos/query-plan-adapters#308).
+      def assert_uniform_null_conventions(operator, values)
+        return unless %w[eq ne].include?(operator)
+        return unless values.length == 2
+
+        left, right = values
+        return unless ArelSupport.arel_node?(left) && ArelSupport.arel_node?(right)
+        return if explicit_null?(left) == explicit_null?(right)
+
+        raise UnsupportedOperatorError,
+          "Cannot translate #{operator} between two columns under mixed null conventions. " \
+          "One attribute declares null_representation: :explicit and the other does not, so " \
+          "one side must answer NULL definitely and the other must answer UNKNOWN, and no " \
+          "one predicate does both. Declare null_representation on both attributes, or on " \
+          "neither."
+      end
+
+      # The comparison with the declared conventions applied, or +plain+ when no attribute in
+      # it declares +:explicit+.
+      #
+      # +plain+ is the usual translation, and it comes in as an argument and is not made again
+      # here. Thus an operator override stays in effect on every path.
+      def with_null_conventions(operator, values, plain, overridden:)
+        return plain unless EQUALITY_FAMILY.include?(operator)
+        return plain unless values.length == 2
+
+        left, right = values
+        # A comparison against a null constant is already correct: `IS NULL` selects exactly
+        # the rows where CEL holds a null value.
+        return plain if left.nil? || right.nil?
+
+        left_explicit = explicit_null?(left)
+        right_explicit = explicit_null?(right)
+        return plain unless left_explicit || right_explicit
+
+        if operator == "in"
+          return in_with_present_guard(left, right, plain, left_explicit)
+        end
+
+        # `eq` and `ne` RESTRUCTURE the comparison. An operator that the caller overrode is
+        # thus left alone: to replace it would make this declaration discard the translation
+        # of the caller in silence, which is not what the declaration says.
+        return plain if overridden
+
+        definite_equality(operator, left, right, left_explicit, right_explicit)
+      end
+
+      # An equality that can never be SQL UNKNOWN.
+      #
+      # An attribute that the caller sends as an explicit null holds a null VALUE in CEL. Thus
+      # equality against a value that is not null is a definite FALSE, inequality is a definite
+      # TRUE, and two nulls are EQUAL. SQL answers UNKNOWN to all three, and UNKNOWN keeps the
+      # row out under BOTH polarities — so a NOT above it has nothing definite to invert.
+      #
+      # This is deliberately not a null-safe equality operator such as IS NOT DISTINCT FROM.
+      # Two reasons, and the second one carries the weight. The expansion below needs no
+      # knowledge of the dialect, and it must not be SYMMETRIC: when only one side declares
+      # the convention the other side keeps propagating UNKNOWN for its NULL, and a null-safe
+      # operator would match the two NULLs and give too many rows.
+      def definite_equality(operator, left, right, left_explicit, right_explicit)
+        present = []
+        present << ArelSupport.comparison("ne", left, nil) if left_explicit
+        present << ArelSupport.comparison("ne", right, nil) if right_explicit
+
+        equal = ArelSupport.and_node(present + [ArelSupport.comparison("eq", left, right)])
+
+        if left_explicit && right_explicit
+          equal = ArelSupport.or_node([
+            ArelSupport.and_node([
+              ArelSupport.comparison("eq", left, nil),
+              ArelSupport.comparison("eq", right, nil)
+            ]),
+            equal
+          ])
+        end
+
+        (operator == "ne") ? ArelSupport.not_node(equal) : equal
+      end
+
+      # `in` gains a presence guard beside whatever the membership translated to. It does not
+      # replace it, so an operator override still composes.
+      def in_with_present_guard(left, right, plain, left_explicit)
+        return plain unless left_explicit
+        return plain unless ArelSupport.arel_node?(left)
+        # A stored COLLECTION and not a list of constants: a null element can exist at run
+        # time, and `null in coll` is TRUE when it does, so the guard would remove exactly the
+        # rows that CEL permits. The translation of the collection already handles the null
+        # member.
+        return plain unless right.is_a?(Array)
+        # A null member already forces the `IS NULL` branch, which is definite by itself.
+        return plain if right.any?(&:nil?)
+
+        ArelSupport.and_node([ArelSupport.comparison("ne", left, nil), plain])
       end
 
       def assert_arity(operator, values)
@@ -1161,8 +1339,11 @@ module Cerbos
         def resolve_field(mapping, owner_model, owner_table)
           segments = mapping.segments
           if segments.length == 1
-            return translator.register_column_type(
-              owner_table[segments.first], owner_model, segments.first
+            return declare_null_representation(
+              translator.register_column_type(
+                owner_table[segments.first], owner_model, segments.first
+              ),
+              mapping
             )
           end
 
@@ -1173,7 +1354,14 @@ module Cerbos
             association_names: associations,
             aliaser: translator.aliaser
           )
-          translator.register_column_type(scope.scalar(column), scope.model, column)
+          declare_null_representation(
+            translator.register_column_type(scope.scalar(column), scope.model, column),
+            mapping
+          )
+        end
+
+        def declare_null_representation(node, mapping)
+          translator.register_null_representation(node, mapping.null_representation)
         end
       end
     end
