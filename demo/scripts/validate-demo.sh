@@ -15,7 +15,9 @@
 #   2. Non-degeneracy: the expectations still discriminate — a proper subset somewhere, and
 #      shape 5 differing from both of the two filters it composes.
 #   3. Pin reuse: the demo domain has no PDP version of its own and every example reaches the one
-#      in conformance/.
+#      in conformance/ — at $CERBOS_HOST, never at an address of its own. That second half is
+#      not fussiness: 3592/3593 are the ports every adapter's `cerbos run` test sidecar binds,
+#      so a hardcoded default does not fail, it silently plans against the wrong policy suite.
 #   4. Every adapter has an example/ directory. Landed DISABLED — it cannot pass until the last
 #      child of cerbos/query-plan-adapters#349 merges, and turning it on is #360's job.
 
@@ -264,7 +266,7 @@ done < <(jq -r '.shapes | to_entries[] | .key as $s | .value.results | keys[] | 
 # ---------------------------------------------------------------------------------------------
 # 3. PDP pin reuse
 # ---------------------------------------------------------------------------------------------
-echo "==> [3/4] PDP pin: one pin in the repository, reused"
+echo "==> [3/4] PDP pin: one pin in the repository, reused, and reached at \$CERBOS_HOST"
 
 pinned_version="$(tr -d '[:space:]' <"${REPO_ROOT}/conformance/CERBOS_VERSION")"
 pinned_digest="$(tr -d '[:space:]' <"${REPO_ROOT}/conformance/CERBOS_IMAGE_DIGEST")"
@@ -309,6 +311,22 @@ for adapter in $(jq -r '.adapters[]' "${ACTIONS}"); do
     [[ "${ref}" == "${pinned_image}" ]] || \
       fail "${adapter}/example pins Cerbos as '${ref}', expected '${pinned_image}'"
   done < <(grep -rhoE 'ghcr\.io/cerbos/cerbos:[^@"'"'"' )]*(@sha256:[0-9a-f]{64})?' \
+    "${SOURCE_INCLUDES[@]}" "${SOURCE_EXCLUDES[@]}" "${example_dir}" 2>/dev/null || true)
+
+  # ...and must reach it at the address the runner sets, never one of its own. Both examples that
+  # existed when this check was written had shipped `?? "localhost:3593"`, which is not a harmless
+  # default: 3592/3593 are the ports every adapter's `cerbos run` test sidecar binds, and it is
+  # why demo/docker-compose.yml publishes the demo PDP on 13592/13593 instead. An unset
+  # CERBOS_HOST therefore did not fail — the example planned against a sidecar loaded with
+  # `policies/` rather than `demo/policies/`, and the mismatch against expected.json read as an
+  # adapter bug. The rule was already in demo/README.md's "What an example must do" and both
+  # examples broke it anyway, which is what makes it a check rather than prose.
+  #
+  # A CLIENT address specifically. `demo/docker-compose.yml` maps "13592:3592", and the
+  # container-side half of a port mapping is the PDP's own listen port, which is correct.
+  while IFS= read -r addr; do
+    fail "${adapter}/example hardcodes the PDP address '${addr}' — read \$CERBOS_HOST instead (demo/README.md)"
+  done < <(grep -rhoE '(localhost|127\.0\.0\.1):359[23]' \
     "${SOURCE_INCLUDES[@]}" "${SOURCE_EXCLUDES[@]}" "${example_dir}" 2>/dev/null || true)
 done
 
