@@ -94,9 +94,11 @@ instead of returning documents the PDP denies.
 queryPlanToConvex({ queryPlan, mapper, nullAttributeRepresentation: "omitted" });
 ```
 
-Storing the field as absent rather than as an explicit `null` also aligns the two, since
-`q.eq(field, null)` does not match an absent field — but that is a property of your document
-shape, not of the plan, so the option remains the reliable guard.
+Storing the field as absent rather than as an explicit `null` also aligns the two, but not through
+the filter: a field that can be absent must be `nullable: true` in the mapper, and that makes the
+adapter refuse the push-down and evaluate the predicate in the `postFilter`, where an absent path
+is a CEL missing-attribute error and denies — the same three-valued logic `check()` applied. That
+is a property of your document shape, not of the plan, so the option remains the reliable guard.
 
 The rejection is deliberately wider than the shapes that actually over-grant — `x != null` and
 `!(x == null)` are aligned under both conventions — because negation is applied around the built
@@ -106,19 +108,55 @@ under any nesting. See [#302](https://github.com/cerbos/query-plan-adapters/issu
 
 ## Conformance contract
 
-The adapter is differentially tested with 20 hostile seed documents against Cerbos PDP 0.54.0 `checkResource` decisions: each query plan is executed by Convex, and the returned document IDs must equal the PDP's per-document decisions. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
+The adapter is differentially tested with 20 hostile seed documents against Cerbos PDP 0.54.0 `checkResource` decisions: each query plan is translated by the adapter and executed inside a Convex query function, and the returned document IDs must equal the PDP's per-document decisions. The Spring Data adapter defines the reference semantics for this compatibility snapshot. How much of that execution is Convex's filter engine and how much is the adapter's `postFilter` is set out below.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 131 of the 133 reference conformance actions, plus `matches()`, list indexing/`get-field`, `timestamp()`, and `int()`/`double()` cast plans that the Spring Data reference adapter rejects — the post-filter reimplements CEL cast semantics exactly (whole-string parse, truncation toward zero), so the SQL divergences do not apply (137 actions total) |
+| Oracle-tested | 139 of the 141 reference conformance actions, plus `matches()`, list indexing/`get-field`, `timestamp()`, and `int()`/`double()` cast plans that the Spring Data reference adapter rejects — the post-filter reimplements CEL cast semantics exactly (whole-string parse, truncation toward zero), so the SQL divergences do not apply (145 actions total) |
 | Fail-closed | `filter()`/`map()` used as a condition (they return a list, not a boolean) and a constant zero divisor whose sign the JSON hop into a Convex function discards (4 actions). All four throw during translation, before any filter exists; unknown operators and invalid expression structures still throw |
 | Explicit opt-in | Any plan that cannot be represented entirely as a Convex database filter requires `allowPostFilter: true` |
-| Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`. Under the default it already returns the empty set the PDP demands *when the document omits the field for a NULL value*, which is what the conformance harness seeds; a deployment that stores explicit nulls while omitting the attribute would over-grant |
+| Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`. Under the default it already returns the empty set the PDP demands *when the document omits the field for a NULL value*, which is what the conformance harness seeds. The alignment is the `postFilter`'s doing, not a Convex filter's: the field is `nullable: true`, so the predicate is evaluated in JavaScript and the absent path raises the same CEL missing-attribute error that made `check()` deny. A deployment that stores explicit nulls while omitting the attribute would over-grant |
+| Attribute NULL convention | Needs no declaration: Convex stores the value the caller sent, so a stored null already compares as a null *value* exactly as CEL does, and a stored null stays distinguishable from an absent field. Every `null-value-*` corpus probe for the explicit convention (cerbos/query-plan-adapters#308) was aligned before that option existed — including `null-value-f2f-mixed`, which Convex and Mongoose are the only two adapters to translate rather than refuse |
 | Known planner divergence | `has()` on a missing attribute is currently folded by the Cerbos planner to `ALWAYS_ALLOWED`; `checkResource` still denies documents where the attribute is missing. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 
 This support statement includes value-first comparisons, field-to-field expressions, null and missing-attribute behavior, nested lambdas, collection macros, string and arithmetic expressions, timestamps, hierarchy operations, and chained nested fields. Fields that may be absent must be marked `nullable: true` in the mapper so the adapter evaluates their predicates with CEL-compatible missing-value semantics instead of pushing them to a Convex filter.
 
 Every fail-closed shape's error message is pinned in the shared corpus (`conformance/actions.json`) and asserted by this adapter's conformance run, so a classification proves the throw names its declared mechanism rather than merely that something threw.
+
+### What the differential proves, and what it does not
+
+Convex's filter API has no string, collection, arithmetic or cast operators, so most of the corpus
+is decided by the adapter's in-memory `postFilter` after an unfiltered `.collect()`. That is the
+adapter's design rather than a gap in the harness, but it changes what the numbers above mean, so
+the split is pinned by the conformance run instead of being left to inference:
+
+| Decided by | Default mapper | Pushdown mapper |
+| --- | --- | --- |
+| Convex's filter engine, alone | 13 | 21 |
+| the adapter's `postFilter` | 126 | 118 |
+| folded to `ALWAYS_DENIED` before any filter exists (`in-empty`) | 1 | 1 |
+
+For the 126 post-filtered actions the differential compares the adapter's CEL evaluator against the
+PDP's CEL evaluator; Convex's own comparison and ordering semantics only get a say on the 13.
+The **pushdown mapper** is a second leg that clears `nullable` on `owner` — the one nullable field
+the seeded documents always carry, since the table declares it `v.union(v.string(), v.null())`
+rather than `v.optional(...)`. That moves the null-comparison family (`null-eq`, `null-ne`,
+`null-not-eq`, `vf-null-ne` and the four `in-null-elem-*` shapes) into the engine, where
+`q.eq(field, null)` against a stored explicit null is proved against the same oracle. Both legs
+run in CI; the leg re-executes only those eight, because `nullable` is read in exactly one place in
+the adapter and an action whose execution path both mappers agree on is translated identically by
+both — a claim the harness pins rather than assumes.
+
+It cannot go further without lying about the documents: the other `nullable` fields
+(`aOptionalString`, `aDouble`, `createdAt`, `scope`, `mainCategory` and its two chained paths) are
+genuinely **absent** from some seeds, and a comparison against an absent path has CEL
+missing-attribute semantics that a Convex filter cannot reproduce — which is exactly what
+`nullable: true` exists to prevent.
+
+The harness runs against a self-hosted `convex-backend` container, pinned by tag and digest in
+`docker-compose.yml`. Convex Cloud is not exercised, so any divergence between the two — the
+filter engine, value ordering, or the `undefined`/`null` distinction — is outside what this
+contract proves.
 
 ## Mapping hazards
 

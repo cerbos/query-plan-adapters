@@ -41,11 +41,22 @@ func render(e queryplan.Expr, d string) (*sql.Predicate, error) {
 		return nil, err
 	}
 
+	return predicateFor(e), nil
+}
+
+// predicateFor wraps the tree in the lazy predicate ent hands to a selector.
+//
+// A failure on this pass can only be reported by recording it on the builder — the callback returns
+// nothing — and it has to be recorded on the builder the callback was *given*: sql.Builder.Wrap
+// hands nested callbacks a fresh builder and copies back only its string and args, so an error
+// added there is dropped. write therefore carries errors out through wrap's return value rather than
+// calling AddError itself. See TestRenderErrorsEscapeNestedParentheses.
+func predicateFor(e queryplan.Expr) *sql.Predicate {
 	return sql.P(func(b *sql.Builder) {
 		if err := write(b, e); err != nil {
 			b.AddError(err)
 		}
-	}), nil
+	})
 }
 
 // bindValue records a parameter, applying the two dialect-specific adjustments a bound plan value
@@ -386,24 +397,9 @@ func writeSeparated(b *sql.Builder, args []queryplan.Expr, separator string) err
 }
 
 func writeCast(b *sql.Builder, t queryplan.Cast) error {
-	// CEL's int() truncates toward zero. SQLite's CAST does the same, but PostgreSQL and MySQL
-	// round to nearest — `int(1.9)` is 1 in CEL and 2 there — so truncate explicitly first.
-	if t.To == queryplan.CastInt && b.Dialect() != dialect.SQLite {
-		if b.Dialect() == dialect.MySQL {
-			b.WriteString("CAST(TRUNCATE(")
-			if err := write(b, t.X); err != nil {
-				return err
-			}
-			b.WriteString(", 0) AS ").WriteString(castType(b.Dialect(), t.To)).WriteString(")")
-			return nil
-		}
-
-		b.WriteString("CAST(trunc(")
-		if err := write(b, t.X); err != nil {
-			return err
-		}
-		b.WriteString(") AS ").WriteString(castType(b.Dialect(), t.To)).WriteString(")")
-		return nil
+	target, err := castType(b.Dialect(), t.To)
+	if err != nil {
+		return err
 	}
 
 	b.WriteString("CAST")
@@ -411,7 +407,7 @@ func writeCast(b *sql.Builder, t queryplan.Cast) error {
 		if err := write(b, t.X); err != nil {
 			return err
 		}
-		b.WriteString(" AS ").WriteString(castType(b.Dialect(), t.To))
+		b.WriteString(" AS ").WriteString(target)
 		return nil
 	})
 }
@@ -452,36 +448,34 @@ func writeSubquery(b *sql.Builder, s queryplan.Subquery) error {
 }
 
 // castType spells a CEL conversion for the dialect in use. The three engines ent targets disagree
-// on every one of these: MySQL has no `bigint`/`double precision` in CAST, PostgreSQL has no
-// `signed`, and SQLite's `real` is its only floating type. Getting the float cast wrong is not
-// cosmetic — PostgreSQL's `real` is single precision and would silently round a CEL double.
-func castType(d string, to queryplan.CastType) string {
+// on both of these: MySQL spells the text target `char` and has no `double precision`, while
+// SQLite's `real` is its only floating type. Getting the float cast wrong is not cosmetic —
+// PostgreSQL's `real` is single precision and would silently round a CEL double.
+//
+// Only the two casts the translator emits have a spelling; see the CastType constants for why there
+// is no integer target. A target this does not know is an error rather than a nearest guess: an
+// unspelled cast that fell through to a float would compare against a value the policy never named,
+// which is the class of quiet over-grant this adapter refuses on principle.
+func castType(d string, to queryplan.CastType) (string, error) {
 	switch to {
 	case queryplan.CastText:
 		if d == dialect.MySQL {
-			return "char"
+			return "char", nil
 		}
-		return "text"
+		return "text", nil
 
 	case queryplan.CastFloat:
 		switch d {
 		case dialect.MySQL:
-			return "double"
+			return "double", nil
 		case dialect.SQLite:
-			return "real"
+			return "real", nil
 		default:
-			return "double precision"
+			return "double precision", nil
 		}
 
 	default:
-		switch d {
-		case dialect.MySQL:
-			return "signed"
-		case dialect.SQLite:
-			return "integer"
-		default:
-			return "bigint"
-		}
+		return "", fmt.Errorf("cannot render cast to %q", to)
 	}
 }
 

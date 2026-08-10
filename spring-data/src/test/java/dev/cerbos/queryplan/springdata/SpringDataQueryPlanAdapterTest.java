@@ -33,6 +33,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -176,10 +177,8 @@ class SpringDataQueryPlanAdapterTest {
                                 Map<String, OperatorFunction> overrides) {
         PlanResourcesResponse resp =
                 buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
-        Result<ResourceEntity> result =
+        Specification<ResourceEntity> spec =
                 SpringDataQueryPlanAdapter.toSpecification(resp, mapper, overrides);
-        assertInstanceOf(Result.Conditional.class, result);
-        Specification<ResourceEntity> spec = ((Result.Conditional<ResourceEntity>) result).specification();
 
         EntityManager em = emf.createEntityManager();
         try {
@@ -229,19 +228,13 @@ class SpringDataQueryPlanAdapterTest {
     };
 
     @Test
-    void alwaysAllowedResult() {
-        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_ALWAYS_ALLOWED, null);
-        Result<ResourceEntity> result =
-                SpringDataQueryPlanAdapter.toSpecification(resp, MAPPER);
-        assertInstanceOf(Result.AlwaysAllowed.class, result);
-    }
-
-    @Test
     void alwaysAllowedSpecificationReturnsNullPredicate() {
-        // Contract: AlwaysAllowed.toSpecification() must produce a Specification whose
-        // toPredicate returns null — Spring Data's SimpleJpaRepository skips the WHERE
-        // clause entirely in that case. Pins B2 against regression to cb.conjunction().
-        Specification<ResourceEntity> spec = new Result.AlwaysAllowed<ResourceEntity>().toSpecification();
+        // Contract: an always-allowed plan must produce a Specification whose toPredicate
+        // returns null — Spring Data's SimpleJpaRepository skips the WHERE clause entirely
+        // in that case. Pins B2 against regression to cb.conjunction().
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_ALWAYS_ALLOWED, null);
+        Specification<ResourceEntity> spec =
+                SpringDataQueryPlanAdapter.toSpecification(resp, MAPPER);
         EntityManager em = emf.createEntityManager();
         try {
             CriteriaBuilder cb = em.getCriteriaBuilder();
@@ -254,24 +247,18 @@ class SpringDataQueryPlanAdapterTest {
     }
 
     @Test
-    void alwaysDeniedResult() {
-        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_ALWAYS_DENIED, null);
-        Result<ResourceEntity> result =
-                SpringDataQueryPlanAdapter.toSpecification(resp, MAPPER);
-        assertInstanceOf(Result.AlwaysDenied.class, result);
-    }
-
-    @Test
     void alwaysDeniedSpecificationReturnsDisjunction() {
-        // Symmetric pin: AlwaysDenied.toSpecification() must produce a non-null predicate.
-        Specification<ResourceEntity> spec = new Result.AlwaysDenied<ResourceEntity>().toSpecification();
+        // Symmetric pin: an always-denied plan must produce a non-null predicate.
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_ALWAYS_DENIED, null);
+        Specification<ResourceEntity> spec =
+                SpringDataQueryPlanAdapter.toSpecification(resp, MAPPER);
         EntityManager em = emf.createEntityManager();
         try {
             CriteriaBuilder cb = em.getCriteriaBuilder();
             CriteriaQuery<ResourceEntity> cq = cb.createQuery(ResourceEntity.class);
             Root<ResourceEntity> root = cq.from(ResourceEntity.class);
             assertNotNull(spec.toPredicate(root, cq, cb),
-                    "AlwaysDenied must emit an explicit predicate, not null");
+                    "An always-denied plan must emit an explicit predicate, not null");
         } finally {
             em.close();
         }
@@ -1257,7 +1244,7 @@ class SpringDataQueryPlanAdapterTest {
     @Nested
     class NullAttributeRepresentationTest {
 
-        private Result<ResourceEntity> translate(
+        private Specification<ResourceEntity> translate(
                 Operand condition, NullAttributeRepresentation representation) {
             PlanResourcesResponse resp =
                     buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
@@ -1274,9 +1261,7 @@ class SpringDataQueryPlanAdapterTest {
             // The three-arg overload and an EXPLICIT fourth argument agree, and both still
             // translate rather than throw.
             assertEquals(0, runCount(nullEq()));
-            assertInstanceOf(
-                    Result.Conditional.class,
-                    translate(nullEq(), NullAttributeRepresentation.EXPLICIT));
+            assertDoesNotThrow(() -> translate(nullEq(), NullAttributeRepresentation.EXPLICIT));
         }
 
         @Test
@@ -1326,9 +1311,126 @@ class SpringDataQueryPlanAdapterTest {
         void omittedLeavesNullFreeComparisonsUntouched() {
             Operand condition =
                     exprOp("eq", var("request.resource.attr.aString"), sval("x"));
-            assertInstanceOf(
-                    Result.Conditional.class,
-                    translate(condition, NullAttributeRepresentation.OMITTED));
+            assertDoesNotThrow(() -> translate(condition, NullAttributeRepresentation.OMITTED));
+        }
+    }
+
+    // -- the per-attribute NULL convention (issue #308) --
+
+    /**
+     * A call-level {@link NullAttributeRepresentation} cannot describe a policy suite that mixes
+     * both conventions — the same column mapped twice, sent as an explicit null under one
+     * attribute name and omitted under another — so the declaration lives on the mapping and the
+     * call-level option is only its default.
+     *
+     * <p>Every case here runs the query, so an assertion is about the rows the filter actually
+     * returns rather than about the Criteria tree that produced them.
+     */
+    @Nested
+    class PerAttributeNullRepresentationTest {
+
+        private final Map<String, AttributeMapping> mapper = Map.of(
+                "request.resource.attr.owner",
+                AttributeMapping.field("aOptionalString", NullAttributeRepresentation.EXPLICIT),
+                "request.resource.attr.coOwner",
+                AttributeMapping.field("aString", NullAttributeRepresentation.EXPLICIT),
+                "request.resource.attr.plain",
+                AttributeMapping.field("aOptionalString"));
+
+        private int count(Operand condition) {
+            return runCount(condition, mapper, Map.of());
+        }
+
+        private ResourceEntity nullOwner() {
+            ResourceEntity e = new ResourceEntity();
+            e.setId("null-owner");
+            e.setaOptionalString(null);
+            e.setaString(null);
+            return e;
+        }
+
+        /**
+         * A null VALUE is not equal to "x", so CEL returns a definite FALSE and its negation a
+         * definite TRUE. {@code aOptionalString <> 'x'} is UNKNOWN instead, which excludes the
+         * row under BOTH polarities — the row the PDP allows never comes back.
+         */
+        @Test
+        void neAgainstAConstantIncludesANullRow() {
+            withResource(nullOwner(), () -> assertEquals(1, count(
+                    exprOp("ne", var("request.resource.attr.owner"), sval("x")))));
+        }
+
+        @Test
+        void eqAgainstAConstantExcludesANullRow() {
+            withResource(nullOwner(), () -> assertEquals(0, count(
+                    exprOp("eq", var("request.resource.attr.owner"), sval("x")))));
+        }
+
+        /** The negated equality spelling takes the other branch and must agree with {@code ne}. */
+        @Test
+        void negatedEqAgainstAConstantIncludesANullRow() {
+            withResource(nullOwner(), () -> assertEquals(1, count(exprOp("not",
+                    exprOp("eq", var("request.resource.attr.owner"), sval("x"))))));
+        }
+
+        /**
+         * The equality family only. An ordering comparison against a null receiver is a
+         * no-overload error in CEL, which denies under both polarities — exactly what UNKNOWN
+         * already does — so it keeps propagating it.
+         */
+        @Test
+        void orderingComparisonsStayUnknown() {
+            withResource(nullOwner(), () -> assertEquals(0, count(
+                    exprOp("gt", var("request.resource.attr.owner"), sval("x")))));
+        }
+
+        @Test
+        void negatedMembershipWithoutANullElementIncludesANullRow() {
+            withResource(nullOwner(), () -> assertEquals(1, count(exprOp("not",
+                    exprOp("in", var("request.resource.attr.owner"), listOp("x", "y"))))));
+        }
+
+        /** Two explicit nulls are EQUAL in CEL, so the row must come back. */
+        @Test
+        void twoExplicitNullsMatchFieldToField() {
+            withResource(nullOwner(), () -> assertEquals(1, count(exprOp("eq",
+                    var("request.resource.attr.owner"), var("request.resource.attr.coOwner")))));
+        }
+
+        /**
+         * An attribute the mapping does not declare keeps the historical rendering, so declaring
+         * the convention for one cannot change the filter emitted for any other mapping.
+         */
+        @Test
+        void anUndeclaredAttributeIsUntouched() {
+            withResource(nullOwner(), () -> assertEquals(0, count(
+                    exprOp("ne", var("request.resource.attr.plain"), sval("x")))));
+        }
+
+        /**
+         * The declaration overrides the call-level default in both directions, which is the
+         * whole point: one call, two conventions.
+         */
+        @Test
+        void declaringOmittedRejectsANullOperandUnderTheExplicitDefault() {
+            PlanResourcesResponse resp = buildResponse(
+                    PlanResourcesFilter.Kind.KIND_CONDITIONAL,
+                    exprOp("eq", var("request.resource.attr.omitted"), nullVal()));
+            IllegalArgumentException thrown = assertThrows(IllegalArgumentException.class,
+                    () -> SpringDataQueryPlanAdapter.toSpecification(resp,
+                            Map.of("request.resource.attr.omitted", AttributeMapping.field(
+                                    "aOptionalString", NullAttributeRepresentation.OMITTED)),
+                            Map.of(), NullAttributeRepresentation.EXPLICIT));
+            assertTrue(thrown.getMessage().contains("missing-attribute error"));
+        }
+
+        @Test
+        void declaringExplicitTranslatesANullOperandUnderTheOmittedDefault() {
+            PlanResourcesResponse resp = buildResponse(
+                    PlanResourcesFilter.Kind.KIND_CONDITIONAL,
+                    exprOp("eq", var("request.resource.attr.owner"), nullVal()));
+            assertDoesNotThrow(() -> SpringDataQueryPlanAdapter.toSpecification(
+                    resp, mapper, Map.of(), NullAttributeRepresentation.OMITTED));
         }
     }
 
@@ -1964,11 +2066,8 @@ class SpringDataQueryPlanAdapterTest {
         private Set<String> runIds(Operand condition) {
             PlanResourcesResponse resp =
                     buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
-            Result<ResourceEntity> result =
-                    SpringDataQueryPlanAdapter.toSpecification(resp, MAPPER, Map.of());
-            assertInstanceOf(Result.Conditional.class, result);
             Specification<ResourceEntity> spec =
-                    ((Result.Conditional<ResourceEntity>) result).specification();
+                    SpringDataQueryPlanAdapter.toSpecification(resp, MAPPER, Map.of());
             EntityManager em = emf.createEntityManager();
             try {
                 CriteriaBuilder cb = em.getCriteriaBuilder();
@@ -2165,11 +2264,8 @@ class SpringDataQueryPlanAdapterTest {
         private Set<String> runIds(Operand condition) {
             PlanResourcesResponse resp =
                     buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
-            Result<ResourceEntity> result =
-                    SpringDataQueryPlanAdapter.toSpecification(resp, MAPPER, Map.of());
-            assertInstanceOf(Result.Conditional.class, result);
             Specification<ResourceEntity> spec =
-                    ((Result.Conditional<ResourceEntity>) result).specification();
+                    SpringDataQueryPlanAdapter.toSpecification(resp, MAPPER, Map.of());
             EntityManager em = emf.createEntityManager();
             try {
                 CriteriaBuilder cb = em.getCriteriaBuilder();
@@ -3085,6 +3181,57 @@ class SpringDataQueryPlanAdapterTest {
             });
         }
 
+        /**
+         * The FRACTIONAL threshold over a chain. CEL rejects {@code ==}/{@code !=} between an
+         * int and a double ("found no matching overload for '_==_' applied to '(int, double)'"),
+         * so no policy can make the planner emit these and no corpus action reaches them — the
+         * collapse branch is defensive code a consumer can still drive with a hand-built plan,
+         * and this is its only proving ground (cerbos/query-plan-adapters#333).
+         *
+         * <p>A COUNT is never fractional, so the comparison is statically decided — but not
+         * UNCONDITIONALLY. An absent to-one parent is a CEL missing-path error, which denies
+         * under both polarities, so the collapse has to be tri-state like every other chained
+         * comparison. Spelling it {@code hops AND constant} is two-valued: the negations below
+         * were TRUE for the parentless row and returned it.
+         */
+        @Test
+        void fractionalCollapseOverTwoHopChainStaysUnknownForAnAbsentParent() {
+            var fin = new SubCategoryEntity("chain-sub-f1", "finance");
+            var biz = new CategoryEntity("chain-cat-f1", "business");
+            biz.setSubCategories(List.of(fin));
+            ResourceEntity parented = new ResourceEntity("chain-r-f1");
+            parented.setCategories(List.of(biz));
+            // No categories at all: the chain's leading hop is absent, so CEL denies this row
+            // whatever the collapse decides.
+            ResourceEntity orphan = new ResourceEntity("chain-r-f2");
+
+            Operand size = exprOp("size", var(CHAIN));
+            Operand matching = exprOp("size",
+                    exprOp("filter", var(CHAIN),
+                            lambda("s", exprOp("eq", var("s.name"), sval("finance")))));
+
+            withCategoryGraph(parented, List.of(biz), List.of(fin), () ->
+                    withResource(orphan, () -> {
+                        // ne f collapses to always-TRUE: the parented row only, never the orphan.
+                        assertEquals(1, runChainCount(exprOp("ne", size, nval(1.5))));
+                        assertEquals(1, runChainCount(exprOp("ne", matching, nval(1.5))));
+                        // eq f collapses to always-FALSE: neither row.
+                        assertEquals(0, runChainCount(exprOp("eq", size, nval(1.5))));
+                        assertEquals(0, runChainCount(exprOp("eq", matching, nval(1.5))));
+
+                        // The discriminating arms. A two-valued `hops AND constant` makes both
+                        // negations TRUE for the orphan; the tri-state form leaves them UNKNOWN.
+                        assertEquals(0, runChainCount(
+                                exprOp("not", exprOp("ne", size, nval(1.5)))));
+                        assertEquals(0, runChainCount(
+                                exprOp("not", exprOp("ne", matching, nval(1.5)))));
+                        assertEquals(1, runChainCount(
+                                exprOp("not", exprOp("eq", size, nval(1.5)))));
+                        assertEquals(1, runChainCount(
+                                exprOp("not", exprOp("eq", matching, nval(1.5)))));
+                    }));
+        }
+
         @Test
         void rootRelationSubqueryInsideLambdaAnchorsToOwningEntity() {
             // W2: R.attr.categories.exists(c, c.name == "business" && R.attr.tags.exists(u, ...))
@@ -3583,10 +3730,8 @@ class SpringDataQueryPlanAdapterTest {
                 Operand cond = exprOp("eq", var("request.resource.attr.aString"), sval("match"));
                 PlanResourcesResponse resp =
                         buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, cond);
-                Result<ResourceEntity> result =
-                        SpringDataQueryPlanAdapter.toSpecification(resp, mapper);
                 Specification<ResourceEntity> spec =
-                        ((Result.Conditional<ResourceEntity>) result).specification();
+                        SpringDataQueryPlanAdapter.toSpecification(resp, mapper);
 
                 assertEquals(1, countWithSpec(spec));
                 // Redirect the attribute at a different column AFTER construction: the
@@ -4043,9 +4188,7 @@ class SpringDataQueryPlanAdapterTest {
         private Specification<ResourceEntity> spec(Operand condition) {
             PlanResourcesResponse resp =
                     buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
-            Result<ResourceEntity> result =
-                    SpringDataQueryPlanAdapter.toSpecification(resp, MAPPER, Map.of());
-            return ((Result.Conditional<ResourceEntity>) result).specification();
+            return SpringDataQueryPlanAdapter.toSpecification(resp, MAPPER, Map.of());
         }
 
         @Test

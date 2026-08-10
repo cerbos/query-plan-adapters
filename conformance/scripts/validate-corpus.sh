@@ -221,13 +221,44 @@ for action in ts-window ts-vf; do
   fi
 done
 
-# CERBOS_VERSION is the single source of truth for the pinned PDP: every workflow and test
-# harness reads it. Some files cannot read another file (Compose files, echo strings, go.mod
-# requirements), so every hardcoded restatement anywhere in the repository is asserted to
-# agree instead of de-duplicated. A repo-wide scan rather than a fixed path list: the fixed
-# list once missed spring-data/example/docker-compose.yml running `latest` in CI.
+# CERBOS_VERSION and CERBOS_IMAGE_DIGEST are the single source of truth for the pinned PDP: every
+# workflow and test harness reads them. Some files cannot read another file (Compose files, echo
+# strings, go.mod requirements), so every hardcoded restatement anywhere in the repository is
+# asserted to agree instead of de-duplicated. A repo-wide scan rather than a fixed path list: the
+# fixed list once missed spring-data/example/docker-compose.yml running `latest` in CI.
+#
+# The tag and the digest are checked TOGETHER. Checking the tag alone accepts a reference whose
+# digest belongs to some other build entirely — which is what a digest is for, so a half-validated
+# reference is worse than none: it reads as pinned and is not (cerbos/query-plan-adapters#322).
 pinned_version="$(tr -d '[:space:]' <CERBOS_VERSION)"
+pinned_digest="$(tr -d '[:space:]' <CERBOS_IMAGE_DIGEST)"
 REPO_ROOT="$(cd "${CONFORMANCE_DIR}/.." && pwd)"
+
+if [[ ! "${pinned_digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+  echo "conformance/CERBOS_IMAGE_DIGEST must hold a sha256:<64 hex> digest, got '${pinned_digest}'"
+  exit 1
+fi
+
+# Markdown is excluded on purpose: a README telling a *consumer* how to start a PDP of their own
+# is prose, not something a harness runs, and holding it to the corpus pin would be a claim about
+# the reader's environment rather than about this repository's tests.
+#
+# `*_IMAGE` is a convention, not one file's name: a harness whose image cannot live in source
+# (an npm script and a workflow both need it) puts the reference in a `<SERVICE>_IMAGE` file and
+# both read it. Matching the pattern rather than the filename means the next one is scanned
+# without editing this list — a bespoke `--include` for each is how the second such file ends up
+# silently unchecked.
+SOURCE_INCLUDES=(
+  --include='*.yml' --include='*.yaml' --include='*.sh' --include='*.py' --include='*.go'
+  --include='*.java' --include='*.kts' --include='*.ts' --include='*.js' --include='*.json'
+  --include='Dockerfile' --include='*_IMAGE'
+)
+SOURCE_EXCLUDES=(
+  --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=.claude --exclude-dir=lib
+  --exclude-dir=build --exclude-dir=.venv --exclude-dir=.gradle --exclude-dir=bin
+  --exclude-dir=__pypackages__ --exclude-dir=.agents --exclude-dir=.out-of-scope
+  --exclude-dir=dist
+)
 
 version_drift=0
 while IFS=: read -r file _ match; do
@@ -235,19 +266,131 @@ while IFS=: read -r file _ match; do
   tag="$(printf '%s' "${match}" | sed -n 's|.*ghcr\.io/cerbos/cerbos:\([^@)"'\''[:space:]]*\).*|\1|p')"
   [[ -z "${tag}" ]] && continue
   # Workflow/script interpolations (`cerbos:${CERBOS_VERSION}` and language equivalents)
-  # read the pinned file at runtime and cannot drift.
+  # read the pinned files at runtime and cannot drift.
   case "${tag}" in
     '$'*|'%'*|'{'*) continue ;;
   esac
+  relative="${file#"${REPO_ROOT}"/}"
   if [[ "${tag}" != "${pinned_version}" ]]; then
-    echo "${file#"${REPO_ROOT}"/} pins Cerbos '${tag}', expected ${pinned_version} (conformance/CERBOS_VERSION)"
+    echo "${relative} pins Cerbos '${tag}', expected ${pinned_version} (conformance/CERBOS_VERSION)"
+    version_drift=1
+  fi
+  digest="$(printf '%s' "${match}" \
+    | sed -n 's|.*ghcr\.io/cerbos/cerbos:[^@)"'\''[:space:]]*@\(sha256:[0-9a-f]*\).*|\1|p')"
+  if [[ -z "${digest}" ]]; then
+    echo "${relative} pins Cerbos by tag only; append @${pinned_digest} (conformance/CERBOS_IMAGE_DIGEST)"
+    version_drift=1
+  elif [[ "${digest}" != "${pinned_digest}" ]]; then
+    echo "${relative} pins Cerbos digest '${digest}', expected ${pinned_digest} (conformance/CERBOS_IMAGE_DIGEST)"
     version_drift=1
   fi
 done < <(grep -rn 'ghcr\.io/cerbos/cerbos:' "${REPO_ROOT}" \
-  --include='*.yml' --include='*.yaml' --include='*.sh' \
-  --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=.claude --exclude-dir=lib \
-  --exclude-dir=build --exclude-dir=.venv --exclude-dir=.gradle --exclude-dir=bin || true)
+  "${SOURCE_INCLUDES[@]}" "${SOURCE_EXCLUDES[@]}" || true)
 if [[ "${version_drift}" -ne 0 ]]; then
+  exit 1
+fi
+
+# Every other service image a test or workflow starts is pinned per harness rather than centrally:
+# a shared file would live under conformance/, and conformance/** re-runs all ten adapter
+# workflows, so bumping mongoose's server would cost nine irrelevant CI runs. What is shared is the
+# RULE, enforced here: a repository named below must appear everywhere as `repo:tag@sha256:<64 hex>`
+# — the tag says which release a reader is looking at, the digest says which build a green run
+# actually proved, and a `repo:tag` may resolve to only one digest across the whole repository, so
+# two harnesses cannot silently test different builds of the same nominal version.
+#
+# Adding a service means adding its repository here. That is the point of the list, not an obstacle
+# to route around: a repository nothing scans is a repository nothing keeps pinned. ghcr.io/cerbos/
+# cerbos is deliberately absent — the scan above already holds it to a stricter rule (the exact
+# version and digest the corpus declares), and listing it twice would report each drift twice.
+IMAGE_REPOSITORIES=(
+  "postgres"
+  "mysql"
+  "mongo"
+  "chromadb/chroma"
+  "docker.elastic.co/elasticsearch/elasticsearch"
+  "ghcr.io/get-convex/convex-backend"
+  "gradle"
+)
+
+image_drift=0
+: >"${VALIDATION_TMP}/image-refs"
+for repository in "${IMAGE_REPOSITORIES[@]}"; do
+  escaped="${repository//./\\.}"
+  matched=0
+  # A leading character class rather than \b: it keeps `jdbc:mysql://…` and `postgres://…` out
+  # (both are URLs, not image references) while still matching a reference opened by a quote,
+  # a space or the start of a line.
+  while IFS=: read -r file _ match; do
+    matched=$((matched + 1))
+    reference="${match}"
+    [[ "${reference}" == "${repository}"* ]] || reference="${reference:1}"
+    relative="${file#"${REPO_ROOT}"/}"
+    if [[ ! "${reference}" =~ ^${escaped}:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}$ ]]; then
+      echo "${relative} references '${reference}': service images must be pinned as repo:tag@sha256:<64 hex>"
+      image_drift=1
+      continue
+    fi
+    printf '%s\t%s\t%s\n' "${reference%@*}" "${reference#*@}" "${relative}" \
+      >>"${VALIDATION_TMP}/image-refs"
+  done < <(grep -rnoIE "(^|[^A-Za-z0-9._/:-])${escaped}:[A-Za-z0-9._-]+(@sha256:[0-9a-fA-F]*)?" \
+    "${REPO_ROOT}" "${SOURCE_INCLUDES[@]}" "${SOURCE_EXCLUDES[@]}" || true)
+  # A repository nobody references is a guard watching nothing — the same vacuity the corpus's
+  # degeneracy guard exists to catch, applied here. It fires when a harness moves its constant
+  # into a file type SOURCE_INCLUDES does not reach, or when a service is dropped and its entry
+  # left behind, both of which otherwise read as green.
+  if [[ "${matched}" -eq 0 ]]; then
+    echo "No reference to image repository '${repository}' was found: either the scan no longer"
+    echo "reaches the file that pins it, or the service is gone and the entry should be removed."
+    image_drift=1
+  fi
+done
+
+# One `repo:tag`, one digest. Without this, two harnesses sharing a nominal version — the Postgres
+# leg of drizzle, prisma, ent and pgx all name the same tag — could pin it to different builds and
+# still report themselves as testing the same server.
+tag_conflicts="$(sort -u "${VALIDATION_TMP}/image-refs" | awk -F'\t' '
+  { if (!($1 in seen)) { seen[$1] = $2; where[$1] = $3 }
+    else if (seen[$1] != $2) { print "  " $1 ": " seen[$1] " (" where[$1] ") vs " $2 " (" $3 ")" } }
+')"
+if [[ -n "${tag_conflicts}" ]]; then
+  echo "The same image tag is pinned to more than one digest:"
+  echo "${tag_conflicts}"
+  image_drift=1
+fi
+
+if [[ "${image_drift}" -ne 0 ]]; then
+  exit 1
+fi
+
+# The two Go modules are standalone — each vendors the translator under its own
+# internal/queryplan so a consumer pulls in only the one — which means the same source exists
+# twice and a semantic fix can land in one copy alone. Nothing else notices: the corpus catches it
+# only if some action happens to exercise the fixed shape, and the hostile-plan invariants pinned
+# by the unit suites never come off a real planner wire at all
+# (cerbos/query-plan-adapters#319). So the trees are held byte-identical and diffed here, in the
+# script both adapter workflows already run — including on a change under the other adapter's
+# directory, since each workflow triggers on `conformance/**` as well as its own.
+#
+# Byte-identical rather than identical-modulo-an-allowlist on purpose: an allowlist is a place for
+# a real divergence to hide as a comment tweak. Anything genuinely per-module belongs in that
+# module's render.go, which is outside this tree.
+VENDORED_TRANSLATOR="internal/queryplan"
+
+# A tree that is not there would make the diff below pass by comparing nothing, so assert both
+# exist first — the same vacuity guard the image scan applies to a repository nothing references.
+for module in ent pgx; do
+  if [[ ! -d "${REPO_ROOT}/${module}/${VENDORED_TRANSLATOR}" ]]; then
+    echo "${module}/${VENDORED_TRANSLATOR} is missing: the sync check below would guard nothing."
+    exit 1
+  fi
+done
+
+if ! diff -ru \
+  --label "ent/${VENDORED_TRANSLATOR}" --label "pgx/${VENDORED_TRANSLATOR}" \
+  "${REPO_ROOT}/ent/${VENDORED_TRANSLATOR}" "${REPO_ROOT}/pgx/${VENDORED_TRANSLATOR}"; then
+  echo "The vendored translator trees have drifted. Both modules must carry the identical"
+  echo "${VENDORED_TRANSLATOR}: apply the change to both copies, or move whatever is genuinely"
+  echo "per-module into that module's render.go."
   exit 1
 fi
 

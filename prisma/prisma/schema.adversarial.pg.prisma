@@ -1,0 +1,67 @@
+// PostgreSQL client for the shared adversarial differential harness
+// (cerbos/query-plan-adapters#320). Keep the data model in lockstep with
+// schema.adversarial.prisma; only the generator output and the datasource provider differ, so
+// each store leg executes through a genuinely provider-matched client.
+//
+// The provider is the point of the leg: on SQLite `aNumber` is a dynamically typed INTEGER
+// column and `createdAt` is milliseconds since the epoch, while here they are a real `integer`
+// and a real `timestamp(3)`. A filter that renders plausibly and coerces differently — a
+// fractional threshold against an integer column, an unescaped LIKE metacharacter, a NULL
+// propagating through a nested `some` — passes on SQLite and fails here.
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma-adversarial-pg"
+  engineType   = "client"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model AdversarialResource {
+  id              String                @id
+  aBool           Boolean
+  aString         String
+  aNumber         Int
+  aDouble         Float?
+  aOptionalString String?
+  createdBy       String
+  scope           String?
+  createdAt       DateTime?
+  tags            AdversarialTag[]
+  categories      AdversarialCategory[]
+}
+
+// Owned one-to-many child row (unlike the shared, globally-unique Tag model) so hostile seeds
+// can hold NULL and duplicate tag names.
+model AdversarialTag {
+  id         String              @id @default(cuid())
+  tagId      String
+  name       String?
+  resource   AdversarialResource @relation(fields: [resourceId], references: [id])
+  resourceId String
+}
+
+model AdversarialCategory {
+  id            String                   @id @default(cuid())
+  name          String
+  resource      AdversarialResource      @relation(fields: [resourceId], references: [id])
+  resourceId    String
+  subCategories AdversarialSubCategory[]
+}
+
+model AdversarialSubCategory {
+  id         String              @id @default(cuid())
+  name       String
+  category   AdversarialCategory @relation(fields: [categoryId], references: [id])
+  categoryId String
+  labels     AdversarialLabel[]
+}
+
+model AdversarialLabel {
+  id            String                 @id @default(cuid())
+  name          String?
+  subCategory   AdversarialSubCategory @relation(fields: [subCategoryId], references: [id])
+  subCategoryId String
+}

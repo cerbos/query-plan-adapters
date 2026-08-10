@@ -34,6 +34,13 @@ import (
 // own evaluation for any row, the mismatch surfaces mechanically. This file owns only the
 // PostgreSQL-specific half: the schema, the seeding, and the attribute mapping.
 
+// Database container images, pinned by tag AND digest. A tag is mutable, so a tag-only pin
+// records an intent rather than a build; the adversarial suite is a differential whose
+// divergences are dialect behaviour, so "which build was this proved against" has to be
+// answerable from the repository alone. conformance/scripts/validate-corpus.sh asserts every
+// service image reference in the repository carries both halves.
+const postgresImage = "postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193"
+
 const (
 	adapterName = "pgx"
 
@@ -150,9 +157,14 @@ func buildMapper() cerbospgx.Mapper {
 		"request.resource.attr.aDouble":         {Column: "a_double"},
 		"request.resource.attr.aOptionalString": {Column: "a_optional_string"},
 		"request.resource.attr.createdBy":       {Column: "created_by"},
-		"request.resource.attr.owner":           {Column: "a_optional_string"},
-		"request.resource.attr.scope":           {Column: "scope"},
-		"request.resource.attr.createdAt":       {Column: "created_at", ValueType: cerbospgx.ValueTimestamp},
+		// `owner` and `coOwner` alias columns that `aOptionalString` and `scope` also map, under
+		// the OTHER null convention: the oracle sends a real null attribute for them rather than
+		// omitting it. Declaring that here is what makes the equality family definite for these
+		// two attributes and leaves it untouched for every other mapping.
+		"request.resource.attr.owner":     {Column: "a_optional_string", NullConvention: cerbospgx.NullConventionExplicit},
+		"request.resource.attr.coOwner":   {Column: "scope", NullConvention: cerbospgx.NullConventionExplicit},
+		"request.resource.attr.scope":     {Column: "scope"},
+		"request.resource.attr.createdAt": {Column: "created_at", ValueType: cerbospgx.ValueTimestamp},
 		// obj.inner is not a real nested column — it mirrors aString, the same trick the
 		// spring-data and prisma reference harnesses use for the p-struct probe.
 		"request.resource.attr.obj.inner": {Column: "a_string"},
@@ -183,7 +195,7 @@ func setup(t *testing.T) *harness {
 	ctx := t.Context()
 
 	pgContainer, err := postgres.Run(ctx,
-		"postgres:17-alpine",
+		postgresImage,
 		postgres.WithDatabase("conformance"),
 		postgres.WithUsername("conformance"),
 		postgres.WithPassword("conformance"),
@@ -208,7 +220,7 @@ func setup(t *testing.T) *harness {
 
 	cerbosContainer, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: testcontainers.ContainerRequest{
-			Image:        "ghcr.io/cerbos/cerbos:" + corpus.CerbosVersion,
+			Image:        corpus.CerbosImage,
 			ExposedPorts: []string{"3593/tcp"},
 			Cmd:          []string{"server", "--set=storage.disk.directory=/policies"},
 			Files: []testcontainers.ContainerFile{{
@@ -348,6 +360,15 @@ func (h *harness) checkResource(seed Seed) *cerbos.Resource {
 		attr["owner"] = nil
 	}
 
+	// `coOwner` is the explicit-null alias of the `scope` column, the second half of
+	// `null-value-f2f`: `scope` itself is omitted when NULL (below), so the corpus carries the
+	// same column under both conventions and the field-to-field probe has two explicit nulls.
+	if s := h.corpus.scopeOf(seed); s != nil {
+		attr["coOwner"] = *s
+	} else {
+		attr["coOwner"] = nil
+	}
+
 	if d := h.corpus.aDouble(seed); d != nil {
 		attr["aDouble"] = *d
 	}
@@ -461,11 +482,11 @@ func TestAdversarialConformance(t *testing.T) {
 		}
 		// Corpus-size tripwire: bump deliberately when the corpus grows, so a new hostile shape
 		// cannot slip past this adapter unnoticed.
-		require.Len(t, seen, 143, "corpus size changed; triage the new action(s) before bumping")
+		require.Len(t, seen, 152, "corpus size changed; triage the new action(s) before bumping")
 		require.Len(t, h.corpus.Seeds.Seeds, 20, "seed count changed")
 		// Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
 		// lost has to be re-triaged here rather than joining the throw suite unnoticed.
-		require.Len(t, h.corpus.ThrowingActions, 8, "throwing action count changed")
+		require.Len(t, h.corpus.ThrowingActions, 9, "throwing action count changed")
 	})
 
 	t.Run("oracle", func(t *testing.T) {
@@ -575,16 +596,23 @@ func TestAdversarialConformance(t *testing.T) {
 		// guard nothing (cerbos/query-plan-adapters#324). The membership assertion turns moving an
 		// action into adapterUnsupported into a failure here rather than a silent no-op.
 		//
-		// w1-size-zero-chain, w1-not-size-chain, cast-int-string and cast-double-string are
-		// deliberately absent: their oracles are empty by CONSTRUCTION (no seed holds a to-one
-		// parent with zero children; every seed's aString raises in int()/double()), so they
-		// cannot satisfy this guard.
+		// w1-size-zero-chain, w1-not-size-chain, w1-size-frac-chain, cast-int-string and
+		// cast-double-string are deliberately absent: their oracles are empty by CONSTRUCTION (no
+		// seed holds a to-one parent with zero children, nor one with two or more; every seed's
+		// aString raises in int()/double()), so they cannot satisfy this guard.
 		compared := []string{
 			"vf-le", "in-single", "like-percent", "exists-on-empty", "not-exists",
 			"nary-and", "field-to-field", "ternary-cmp", "arith-add", "size-threshold",
 			"hier-ancestor-cf", "pv-exists", "in-null-elem-mixed", "null-eq", "cs-eq",
+			// The explicit-null convention against a non-null operand (#308). All five are
+			// compared rather than thrown, because the mapper declares the convention per
+			// attribute; every one of them under-granted by exactly the NULL-column rows
+			// before that declaration existed.
+			"null-value-ne-const", "null-value-not-eq-const", "null-value-not-in-const",
+			"null-value-f2f", "null-value-pv-not-exists",
 			"w1-all-chain", "w1-not-exists-chain", "w1-size-nonneg-chain",
 			"w1-not-in-chain", "w1-not-hasint-chain",
+			"w1-ternary-chain-cond", "w1-size-frac-le-chain",
 			"cr-div-neg-zero", "cr-div-other-column", "cr-div-then-add", "cr-div-then-add-ne",
 		}
 		// int() over a numeric column is unsupported for every adapter but convex, so there is no

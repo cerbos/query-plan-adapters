@@ -1,7 +1,26 @@
 # cerbos-spring-data
 
-> **Alpha release — `0.1.0-alpha.1`.** API and operator coverage are stable, but field/relation
+> **Alpha release — `0.1.0-alpha.1`.** Operator coverage is stable; the API and the field/relation
 > mapping shapes may still change before `1.0`. We'd love feedback while it's still alpha.
+
+> [!IMPORTANT]
+> **Breaking change since the last alpha:** `toSpecification(...)` now returns
+> `Specification<T>` directly. The `Result<T>` wrapper is gone — drop the second
+> `.toSpecification()` call, and check `planResult.isAlwaysDenied()` on the SDK response if you
+> were pattern-matching the result kind to skip the database.
+>
+> ```java
+> // before
+> Result<Contact> result = SpringDataQueryPlanAdapter.toSpecification(planResult, MAPPING);
+> repository.findAll(tenantBoundary.and(result.toSpecification()));
+>
+> // after
+> Specification<Contact> allowed = SpringDataQueryPlanAdapter.toSpecification(planResult, MAPPING);
+> repository.findAll(tenantBoundary.and(allowed));
+> ```
+>
+> This also raises the Spring Data JPA floor to 3.5.2 (see [Install](#install)). Rationale:
+> [ADR-0003](../docs/adr/0003-spring-data-returns-specification-directly.md).
 
 [Cerbos](https://cerbos.dev) query plan adapter for [Spring Data JPA](https://spring.io/projects/spring-data-jpa). Converts a Cerbos `PlanResources` response into a `org.springframework.data.jpa.domain.Specification<T>` you can pass straight to a `JpaSpecificationExecutor`.
 
@@ -25,13 +44,15 @@ Maven:
 </dependency>
 ```
 
-You'll also need the Cerbos Java SDK (`dev.cerbos:cerbos-sdk-java`) to call the PDP and Spring Data JPA (`org.springframework.data:spring-data-jpa`).
+You'll also need the Cerbos Java SDK (`dev.cerbos:cerbos-sdk-java`) to call the PDP and Spring
+Data JPA (`org.springframework.data:spring-data-jpa`) **3.5.2 or later** — an always-allowed plan
+is translated to `Specification.unrestricted()`, which arrived in 3.5.2. If you take Spring Data
+JPA from the Spring Boot BOM, that means **Boot 3.5.4 or later** (3.5.0–3.5.3 manage 3.5.0/3.5.1).
 
 ## Quick start
 
 ```java
 import dev.cerbos.queryplan.springdata.AttributeMapping;
-import dev.cerbos.queryplan.springdata.Result;
 import dev.cerbos.queryplan.springdata.SpringDataQueryPlanAdapter;
 import dev.cerbos.sdk.CerbosBlockingClient;
 import dev.cerbos.sdk.builders.Principal;
@@ -62,20 +83,24 @@ var planResult = cerbosClient.plan(
     "view");
 
 // 2) Translate to a Specification
-Result<Contact> result =
+Specification<Contact> allowed =
     SpringDataQueryPlanAdapter.toSpecification(planResult, MAPPING);
 
 // 3) Execute via your repository
-List<Contact> contacts = contactRepository.findAll(result.toSpecification());
+List<Contact> contacts = contactRepository.findAll(allowed);
 ```
 
-`Result.toSpecification()` returns a Specification that captures all three plan kinds, so you don't need to switch on the result kind unless you want to short-circuit the DB hit:
+The returned Specification covers all three plan kinds, so there is nothing to switch on:
 
-| Kind                   | Specification                                                |
-|------------------------|--------------------------------------------------------------|
-| `Result.AlwaysAllowed` | `null` predicate — Spring Data omits the `WHERE` clause      |
-| `Result.AlwaysDenied`  | always-false predicate (`1=0`)                               |
-| `Result.Conditional`   | the translated predicate tree                                |
+| Plan kind              | Specification                                                          |
+|------------------------|------------------------------------------------------------------------|
+| `KIND_ALWAYS_ALLOWED`  | `Specification.unrestricted()` — Spring Data omits the `WHERE` clause  |
+| `KIND_ALWAYS_DENIED`   | always-false predicate (`1=0`)                                         |
+| `KIND_CONDITIONAL`     | the translated predicate tree                                          |
+
+To skip the database entirely on a denied plan, ask the plan rather than the Specification —
+`planResult.isAlwaysDenied()` on the SDK response, or `response.getFilter().getKind()` on the raw
+protobuf.
 
 Compose it with your own filters:
 
@@ -83,9 +108,12 @@ Compose it with your own filters:
 Specification<Contact> own =
     (root, query, cb) -> cb.like(root.get("name"), "Smith%");
 
-Page<Contact> results = contactRepository.findAll(
-    own.and(result.toSpecification()), pageable);
+Page<Contact> results = contactRepository.findAll(own.and(allowed), pageable);
 ```
+
+**Hand the Specification to a repository method — composing with `.and(...)` / `.or(...)` first if
+you need to — and let Spring Data invoke it.** Calling `Specification.toPredicate` yourself is not
+a supported path.
 
 > [!WARNING]
 > **The Specification is SELECT-only.** Never pass it to
@@ -101,7 +129,7 @@ Page<Contact> results = contactRepository.findAll(
 > To delete policy-permitted rows, select ids first, then delete by id:
 >
 > ```java
-> List<Long> ids = contactRepository.findAll(result.toSpecification())
+> List<Long> ids = contactRepository.findAll(allowed)
 >         .stream().map(Contact::getId).toList();
 > contactRepository.deleteAllById(ids);
 > ```
@@ -220,7 +248,7 @@ Map<String, OperatorFunction> overrides = Map.of(
         cb.equal(cb.lower(field.as(String.class)), value.toString().toLowerCase())
 );
 
-Result<Contact> result =
+Specification<Contact> allowed =
     SpringDataQueryPlanAdapter.toSpecification(planResult, MAPPING, overrides);
 ```
 
@@ -272,7 +300,7 @@ denies. Unlike the rest of the translation, this check runs eagerly from `toSpec
 than when the Specification is first evaluated.
 
 ```java
-Result<ResourceEntity> result = SpringDataQueryPlanAdapter.toSpecification(
+Specification<ResourceEntity> allowed = SpringDataQueryPlanAdapter.toSpecification(
         planResult, mapper, Map.of(), NullAttributeRepresentation.OMITTED);
 ```
 
@@ -282,15 +310,49 @@ predicate rather than pushed into the leaf, so a leaf cannot tell whether an enc
 flip `IS NOT NULL` back into a NULL-selecting predicate. Rejecting every null operand is correct
 under any nesting. See [#302](https://github.com/cerbos/query-plan-adapters/issues/302).
 
+### Declare the convention per attribute
+
+The option above is a whole-call default, and one policy suite can legitimately use both
+conventions: the same column mapped twice, sent as an explicit null under one attribute name and
+omitted under another. Declare it per attribute instead and the call-level option only covers what
+the mapping does not:
+
+```java
+Map<String, AttributeMapping> mapping = Map.of(
+    // sent as an explicit null when the column is NULL
+    "request.resource.attr.owner",
+    AttributeMapping.field("ownerId", NullAttributeRepresentation.EXPLICIT),
+    // omitted when the column is NULL — the call-level default applies
+    "request.resource.attr.department", AttributeMapping.field("department"));
+```
+
+Declaring the explicit convention asserts two things: the column can be NULL, **and** a NULL reaches
+`check()` as an explicit null. The equality family (`eq`, `ne`, `in`) over that attribute is then
+rendered so it can never be SQL UNKNOWN — CEL holds a null *value* under this convention, so
+`null != "x"` is TRUE and the row must come back, while UNKNOWN would drop it under *both*
+polarities. Ordering and string operators are left alone: a null receiver raises a no-overload error
+in CEL, which denies exactly as UNKNOWN does.
+
+Leaving an attribute undeclared keeps the historical rendering — so nothing changes for a mapping
+that says nothing, and `!=` against a constant keeps under-granting the NULL rows until you declare
+it.
+
+**Declare both sides of a field-to-field comparison, or neither.** Mixing the conventions across one
+comparison has no faithful rendering — the declared side needs a definite answer for its NULL, the
+undeclared side needs UNKNOWN — so the adapter throws rather than picking a direction. See
+[#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
+[ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
+
 ## Conformance contract
 
 The adapter is differentially tested against Cerbos PDP 0.54.0 `check()` decisions using 20 hostile seed rows on H2, PostgreSQL, and MySQL. This Spring Data implementation defines the reference semantics that the other adapters follow.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 131 of the 133 reference conformance actions |
+| Oracle-tested | 139 of the 141 reference conformance actions |
 | Fail-closed corpus shapes | Regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an ambiguous string column, `int()`/`double()` casts, `filter()`/`map()` used as a condition, and arithmetic composed on a division whose denominator may be zero (10 actions) |
 | Representation-dependent | `null-eq-missing` — rejected under `NullAttributeRepresentation.OMITTED`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
+| Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute the caller sends as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare it per attribute — `AttributeMapping.field(path, NullAttributeRepresentation.EXPLICIT)` — or the historical rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute rows; this is pinned separately as an upstream divergence |
 
 The oracle coverage includes value-first and field-to-field comparisons, literal-safe string matching, nested and correlated collection macros, three-valued null/error propagation, arithmetic and ternaries, hierarchy operations, timestamp comparisons on supported absolute-instant columns, and multi-hop relations. Unsupported shapes throw before a predicate can be used — including the two conformance shapes this reference cannot express itself (`cr-div-then-add`, `cr-div-then-add-ne`): CEL carries a NaN through the surrounding arithmetic and SQL has no value that does. Every fail-closed shape's error message is pinned in the shared corpus (`conformance/actions.json`) and asserted by this adapter's conformance run, so a classification proves the throw names its declared mechanism rather than merely that something threw.
@@ -568,15 +630,6 @@ The adapter itself has no opinion here — this is the same `open-in-view=false`
 JPA app hits — but it's worth flagging because Cerbos plans frequently *do* reference
 collection attributes (`tags`, `members`, `categories`), and those are the ones developers
 typically forget to fetch.
-
-### Don't cache the produced `Predicate`
-
-`Result.Conditional.toSpecification()` returns a Specification whose lambda **rebuilds the
-predicate tree against each invocation's `Root`/`CriteriaQuery`**. Spring Data's
-`findAll(spec, Pageable)` fires a separate `COUNT` query with its own root, and Hibernate 6
-rejects a `Predicate` produced against a stale root with
-`SqlTreeCreationException: Could not locate TableGroup`. Pass the Specification to
-repository methods; don't cache the `Predicate` it returns.
 
 ### MySQL / MariaDB `LIKE` backslash escaping
 

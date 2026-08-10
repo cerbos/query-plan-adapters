@@ -15,3 +15,10 @@ Current supported adapters:
 - [Prisma](https://github.com/cerbos/query-plan-adapters/tree/main/prisma)
 - [Spring Data JPA](https://github.com/cerbos/query-plan-adapters/tree/main/spring-data)
 - [SQLAlchemy](https://github.com/cerbos/query-plan-adapters/tree/main/sqlalchemy)
+
+Every adapter is proved against two shared corpora at the root of this repository:
+
+- [`conformance/`](conformance/) — deliberately hostile shapes, proving each adapter's filter
+  returns exactly the rows the PDP allows.
+- [`demo/`](demo/) — one realistic domain, proving each adapter's **published package** installs,
+  imports, and composes with its ORM's real query methods.

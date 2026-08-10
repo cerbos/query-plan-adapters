@@ -1,6 +1,10 @@
 services:
   backend:
-    image: ghcr.io/get-convex/convex-backend@sha256:f0de0647e46c0ac830a6dda036ee78e4956cecc00144d951bf39b14cc570ad4d
+    # Tag AND digest. Convex publishes only commit-SHA tags, so the tag is not more readable than
+    # the digest — it is here because it names the upstream commit this backend was built from,
+    # which is what a bump has to be diffed against. validate-corpus.sh asserts every service
+    # image reference in the repository carries both halves.
+    image: ghcr.io/get-convex/convex-backend:82d5e9f2e8298641e45e5227b9967aa4c1d10620@sha256:f0de0647e46c0ac830a6dda036ee78e4956cecc00144d951bf39b14cc570ad4d
     stop_grace_period: 10s
     stop_signal: SIGINT
     ports:

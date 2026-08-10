@@ -152,6 +152,18 @@ func TestPlanKinds(t *testing.T) {
 	}
 }
 
+// TestUnrecognisedFilterKindIsRejected covers the remaining wire value: an unset kind is neither of
+// the constants above and must not be read as one of them.
+func TestUnrecognisedFilterKindIsRejected(t *testing.T) {
+	t.Parallel()
+
+	plan := &responsev1.PlanResourcesResponse{
+		Filter: &enginev1.PlanResourcesFilter{Kind: enginev1.PlanResourcesFilter_KIND_UNSPECIFIED},
+	}
+	_, err := cerbospgx.Translate(plan, "resource", testMapper())
+	require.ErrorContains(t, err, "unrecognised filter kind")
+}
+
 // -- emitted SQL ---------------------------------------------------------------------------------
 
 // TestNoPlanDataReachesSQLText is the injection guard. Every value in the plan below is chosen to
@@ -204,6 +216,44 @@ func TestSymmetricComparisonsNormaliseToColumnFirst(t *testing.T) {
 	result, err := translate(t, expr("eq", val(t, "x"), variable("request.resource.attr.name")))
 	require.NoError(t, err)
 	require.Equal(t, `("resource"."name" = $1::text)`, result.Where)
+}
+
+// TestOperatorSymbols pins the two lookup tables the renderer spells operators through.
+//
+// They are the kind of thing nothing else catches: a `+` written where `-` belongs, or `<` where
+// `<=` belongs, is valid SQL that quietly returns a different row set, and the corpus only notices
+// if some action happens to straddle the boundary the wrong symbol moves. Every arm is asserted so
+// there is no operator whose spelling is taken on trust.
+func TestOperatorSymbols(t *testing.T) {
+	t.Parallel()
+
+	t.Run("comparisons", func(t *testing.T) {
+		t.Parallel()
+
+		for operator, symbol := range map[string]string{
+			"eq": "=", "ne": "<>", "lt": "<", "le": "<=", "gt": ">", "ge": ">=",
+		} {
+			result, err := translate(t, expr(operator, variable("request.resource.attr.count"), val(t, 2)))
+			require.NoError(t, err, operator)
+			require.Equal(t, `("resource"."count" `+symbol+` $1::double precision)`, result.Where, operator)
+		}
+	})
+
+	t.Run("arithmetic", func(t *testing.T) {
+		t.Parallel()
+
+		// A column dividend keeps `div` and `mod` from folding to a constant, and the division
+		// shapes wrap the arithmetic in the guards that keep a zero divisor UNKNOWN — so these
+		// assert the operator appears rather than pinning the whole surrounding CASE.
+		for operator, symbol := range map[string]string{
+			"add": "+", "sub": "-", "mult": "*", "div": "/", "mod": "%",
+		} {
+			result, err := translate(t, expr("gt",
+				expr(operator, variable("request.resource.attr.count"), val(t, 2)), val(t, 1)))
+			require.NoError(t, err, operator)
+			require.Contains(t, result.Where, " "+symbol+" ", operator+": "+result.Where)
+		}
+	})
 }
 
 // TestReceiverSensitiveOperatorsKeepWireOrder is the reason eq/ne/in are normalised by name rather
@@ -622,4 +672,97 @@ func TestRestrictionMismatchFailsClosed(t *testing.T) {
 		cerbospgx.Restriction{Column: "kind", Op: cerbospgx.RestrictIn, Value: "a"})), cond)
 	require.Contains(t, valueOnIn.Where, "FALSE")
 	require.NotContains(t, valueOnIn.Args, "a")
+}
+
+// -- the per-attribute NULL convention (cerbos/query-plan-adapters#308) --------------------------
+//
+// A call-level NullRepresentation cannot describe a policy suite that mixes both conventions — the
+// same column mapped twice, sent as an explicit null under one attribute name and omitted under
+// another — so the declaration lives on the Entry and the call-level option is only its default.
+
+func explicitNullMapper() cerbospgx.Mapper {
+	return cerbospgx.MapperMap{
+		"request.resource.attr.name":    {Column: "name"},
+		"request.resource.attr.owner":   {Column: "owner", NullConvention: cerbospgx.NullConventionExplicit},
+		"request.resource.attr.coOwner": {Column: "co_owner", NullConvention: cerbospgx.NullConventionExplicit},
+	}
+}
+
+// A null VALUE is not equal to "x", so CEL returns a definite FALSE and its negation a definite
+// TRUE. A bare inequality is UNKNOWN instead, which excludes the row under BOTH polarities — the
+// row the PDP allows never comes back.
+func TestExplicitNullEqualityIsDefinite(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		cond  *operand
+		name  string
+		query string
+	}{
+		{
+			name:  "eq against a constant",
+			cond:  expr("eq", variable("request.resource.attr.owner"), val(t, "x")),
+			query: `(("resource"."owner" IS NOT NULL) AND ("resource"."owner" = $1::text))`,
+		},
+		{
+			name:  "ne against a constant",
+			cond:  expr("ne", variable("request.resource.attr.owner"), val(t, "x")),
+			query: `(NOT (("resource"."owner" IS NOT NULL) AND ("resource"."owner" = $1::text)))`,
+		},
+		{
+			name:  "membership without a null element",
+			cond:  expr("in", variable("request.resource.attr.owner"), val(t, []any{"x", "y"})),
+			query: `(("resource"."owner" IS NOT NULL) AND ("resource"."owner" IN ($1::text, $2::text)))`,
+		},
+		{
+			name: "field-to-field between two explicit nulls",
+			cond: expr("eq", variable("request.resource.attr.owner"), variable("request.resource.attr.coOwner")),
+			query: `((("resource"."owner" IS NULL) AND ("resource"."co_owner" IS NULL)) OR ` +
+				`(("resource"."owner" IS NOT NULL) AND ("resource"."co_owner" IS NOT NULL) AND ("resource"."owner" = "resource"."co_owner")))`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			result := translateWith(t, explicitNullMapper(), tc.cond)
+			require.Equal(t, tc.query, result.Where)
+		})
+	}
+}
+
+// The equality family only. An ordering comparison against a null receiver is a no-overload error
+// in CEL, which denies under both polarities — exactly what UNKNOWN already does — so it must keep
+// propagating it rather than being made definite.
+func TestExplicitNullLeavesOtherOperatorsAlone(t *testing.T) {
+	t.Parallel()
+
+	result := translateWith(t, explicitNullMapper(),
+		expr("gt", variable("request.resource.attr.owner"), val(t, "x")))
+	require.Equal(t, `("resource"."owner" > $1::text)`, result.Where)
+
+	// An undeclared entry keeps the historical rendering, so declaring the convention on one
+	// attribute cannot change the SQL emitted for any other mapping.
+	result = translateWith(t, explicitNullMapper(),
+		expr("ne", variable("request.resource.attr.name"), val(t, "x")))
+	require.Equal(t, `("resource"."name" <> $1::text)`, result.Where)
+}
+
+// The entry-level declaration overrides the call-level option in both directions, which is the
+// whole point: one call, two conventions.
+func TestNullConventionOverridesTheCallLevelRepresentation(t *testing.T) {
+	t.Parallel()
+
+	nullEq := expr("eq", variable("request.resource.attr.owner"), val(t, nil))
+
+	_, err := cerbospgx.Translate(conditional(nullEq), "resource", explicitNullMapper(),
+		cerbospgx.WithNullRepresentation(cerbospgx.NullOmitted))
+	require.NoError(t, err,
+		"an attribute declaring NullConventionExplicit is not the call-level option's business")
+
+	omitted := cerbospgx.MapperMap{
+		"request.resource.attr.owner": {Column: "owner", NullConvention: cerbospgx.NullConventionOmitted},
+	}
+	_, err = cerbospgx.Translate(conditional(nullEq), "resource", omitted)
+	require.ErrorIs(t, err, cerbospgx.ErrUnsupported)
+	require.Contains(t, err.Error(), "null operand")
 }

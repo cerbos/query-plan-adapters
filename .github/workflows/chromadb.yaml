@@ -25,7 +25,6 @@ jobs:
       fail-fast: false
       matrix:
         node-version: ["22", "24", "25"]
-        chroma-image: ["chromadb/chroma@sha256:1e0b73a187a28757c572acba508c46f48c9e8b0acaf5c20e6d95cdedce1acdf6"]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -42,9 +41,13 @@ jobs:
         with:
           version: v${{ steps.cerbos.outputs.version }}
 
+      # The image is read from langchain-chromadb/CHROMA_IMAGE rather than restated here: the
+      # `npm run chroma` helper developers use locally reads the same file, and a matrix entry
+      # that drifted from it would prove the adapter against a different server than anyone
+      # reproducing a failure locally.
       - name: Start ChromaDB
         run: |
-          docker run -d --name chromadb -p 8000:8000 ${{ matrix.chroma-image }}
+          docker run -d --name chromadb -p 8000:8000 "$(cat CHROMA_IMAGE)"
           for _ in {1..30}; do
             if curl -sf http://127.0.0.1:8000/api/v2/heartbeat > /dev/null; then
               exit 0

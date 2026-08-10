@@ -876,6 +876,165 @@ class TestNullAttributeRepresentation:
             )
 
 
+class TestAttributeNullRepresentation:
+    """cerbos/query-plan-adapters#308.
+
+    The per-attribute half of the same option. A call-level flag cannot express
+    a policy suite that mixes the two conventions -- the same column mapped
+    twice, sent explicitly under one attribute name and omitted under another --
+    so the declaration is keyed by attribute and the call-level option is only
+    its default.
+    """
+
+    @staticmethod
+    def _attr_map(resource_table):
+        return {
+            "request.resource.attr.owner": resource_table.name,
+            "request.resource.attr.coOwner": resource_table.aString,
+            "request.resource.attr.plain": resource_table.name,
+        }
+
+    @staticmethod
+    def _declared():
+        return {
+            "request.resource.attr.owner": "explicit",
+            "request.resource.attr.coOwner": "explicit",
+        }
+
+    def _compiled(self, resource_table, condition):
+        query = get_query(
+            _conditional_plan(condition),
+            resource_table,
+            self._attr_map(resource_table),
+            attribute_null_representation=self._declared(),
+        )
+        return str(query.compile(compile_kwargs={"literal_binds": True}))
+
+    @staticmethod
+    def _comparison(operator, variable, value):
+        return {
+            "operator": operator,
+            "operands": [{"variable": variable}, {"value": value}],
+        }
+
+    # A null VALUE is not equal to "x", so CEL returns a definite FALSE and its
+    # negation a definite TRUE. `name != 'x'` is UNKNOWN instead, which excludes
+    # the row under BOTH polarities -- the row the PDP allows never comes back.
+    def test_ne_against_a_constant_includes_a_null_row(self, resource_table):
+        compiled = self._compiled(
+            resource_table,
+            self._comparison("ne", "request.resource.attr.owner", "x"),
+        )
+        assert "IS NOT NULL" in compiled
+        assert compiled.startswith("SELECT") and " NOT (" in compiled
+
+    def test_eq_against_a_constant_is_definite(self, resource_table):
+        compiled = self._compiled(
+            resource_table,
+            self._comparison("eq", "request.resource.attr.owner", "x"),
+        )
+        assert "IS NOT NULL" in compiled
+
+    # The equality family only. An ordering comparison against a null receiver
+    # is a no-overload error in CEL, which denies under both polarities --
+    # exactly what UNKNOWN already does -- so it keeps propagating it.
+    def test_ordering_comparisons_are_left_alone(self, resource_table):
+        compiled = self._compiled(
+            resource_table,
+            self._comparison("gt", "request.resource.attr.owner", "x"),
+        )
+        assert "IS NOT NULL" not in compiled
+
+    def test_membership_without_a_null_element_is_definite(self, resource_table):
+        compiled = self._compiled(
+            resource_table,
+            self._comparison("in", "request.resource.attr.owner", ["x", "y"]),
+        )
+        assert "IS NOT NULL" in compiled
+
+    def test_two_explicit_nulls_match_field_to_field(self, resource_table):
+        compiled = self._compiled(
+            resource_table,
+            {
+                "operator": "eq",
+                "operands": [
+                    {"variable": "request.resource.attr.owner"},
+                    {"variable": "request.resource.attr.coOwner"},
+                ],
+            },
+        )
+        assert compiled.count("IS NULL") == 2
+        assert compiled.count("IS NOT NULL") == 2
+
+    # An attribute the declaration does not name keeps the historical
+    # rendering, so declaring the convention for one cannot change the SQL
+    # emitted for any other mapping.
+    def test_an_undeclared_attribute_is_untouched(self, resource_table):
+        compiled = self._compiled(
+            resource_table,
+            self._comparison("ne", "request.resource.attr.plain", "x"),
+        )
+        assert "IS NOT NULL" not in compiled
+
+    # The declaration overrides the call-level default in both directions,
+    # which is the whole point: one call, two conventions.
+    def test_declaring_omitted_rejects_a_null_operand_under_the_explicit_default(
+        self, resource_table
+    ):
+        with pytest.raises(ValueError, match="null operand"):
+            get_query(
+                _conditional_plan(
+                    self._comparison("eq", "request.resource.attr.owner", None)
+                ),
+                resource_table,
+                self._attr_map(resource_table),
+                null_attribute_representation="explicit",
+                attribute_null_representation={
+                    "request.resource.attr.owner": "omitted"
+                },
+            )
+
+    def test_declaring_explicit_translates_a_null_operand_under_the_omitted_default(
+        self, resource_table
+    ):
+        query = get_query(
+            _conditional_plan(
+                self._comparison("eq", "request.resource.attr.owner", None)
+            ),
+            resource_table,
+            self._attr_map(resource_table),
+            null_attribute_representation="omitted",
+            attribute_null_representation=self._declared(),
+        )
+        assert " IS NULL" in str(query.compile(compile_kwargs={"literal_binds": True}))
+
+    def test_an_unmapped_attribute_is_rejected(self, resource_table):
+        with pytest.raises(ValueError, match="not in the attribute column map"):
+            get_query(
+                _conditional_plan(
+                    self._comparison("eq", "request.resource.attr.owner", "x")
+                ),
+                resource_table,
+                self._attr_map(resource_table),
+                attribute_null_representation={
+                    "request.resource.attr.absent": "explicit"
+                },
+            )
+
+    def test_an_unknown_convention_is_rejected(self, resource_table):
+        with pytest.raises(ValueError, match="must be 'explicit' or 'omitted'"):
+            get_query(
+                _conditional_plan(
+                    self._comparison("eq", "request.resource.attr.owner", "x")
+                ),
+                resource_table,
+                self._attr_map(resource_table),
+                attribute_null_representation={
+                    "request.resource.attr.owner": "sometimes"
+                },
+            )
+
+
 class TestSemanticEdgeTranslations:
     def test_in_list_with_explicit_null_uses_is_null_disjunct(
         self, resource_table, conn

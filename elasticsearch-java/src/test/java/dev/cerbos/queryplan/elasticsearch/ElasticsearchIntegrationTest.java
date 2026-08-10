@@ -49,15 +49,16 @@ class ElasticsearchIntegrationTest {
 
     private static final String INDEX = "resources";
     private static final String SEMANTIC_SAFETY_INDEX = "semantic-safety";
+    private static final String ANALYZED_MAPPING_INDEX = "analyzed-mapping";
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @Container
     static GenericContainer<?> cerbos = createCerbosContainer();
 
     @Container
-    static ElasticsearchContainer elasticsearch = new ElasticsearchContainer(
-            "docker.elastic.co/elasticsearch/elasticsearch:8.15.3")
-            .withEnv("xpack.security.enabled", "false");
+    static ElasticsearchContainer elasticsearch =
+            new ElasticsearchContainer(ElasticsearchTestImage.IMAGE)
+                    .withEnv("xpack.security.enabled", "false");
 
     private static CerbosBlockingClient cerbosClient;
     private static HttpClient httpClient;
@@ -152,6 +153,20 @@ class ElasticsearchIntegrationTest {
                         Map.entry("timestampValue", Map.of(
                                 "type", "date", "format", "strict_date_optional_time_nanos"))))));
         esRequest("PUT", "/" + SEMANTIC_SAFETY_INDEX, semanticSafetyBody);
+
+        // The one index in this harness whose string field is NOT `keyword`. Every other index
+        // here maps strings exactly, which is precisely the condition under which the adapter is
+        // safe — so without this index the README's "use keyword" advice is unenforced, and a
+        // caller who ignores it gets an over-grant no test in the repository would notice
+        // (cerbos/query-plan-adapters#322). `aString` uses the Elasticsearch default multi-field
+        // shape: an analyzed `text` parent with an exact `keyword` sub-field, so the same
+        // documents can be queried both ways and the two row sets compared directly.
+        String analyzedMappingBody = MAPPER.writeValueAsString(Map.of(
+                "mappings", Map.of("properties", Map.of(
+                        "aString", Map.of(
+                                "type", "text",
+                                "fields", Map.of("keyword", Map.of("type", "keyword")))))));
+        esRequest("PUT", "/" + ANALYZED_MAPPING_INDEX, analyzedMappingBody);
     }
 
     private static void seedData() throws Exception {
@@ -221,6 +236,14 @@ class ElasticsearchIntegrationTest {
                 "scenario", "timestamp", "timestampValue", "2024-06-01T00:00:00.123Z"));
         indexDoc(SEMANTIC_SAFETY_INDEX, "timestamp-nanos", Map.of(
                 "scenario", "timestamp", "timestampValue", "2024-06-01T00:00:00.123456Z"));
+
+        // Four values that the standard analyzer and an exact mapping disagree about. "exact" is
+        // the only one a caller means by aString == "string"; the other three are what tokenising
+        // hands back as well.
+        indexDoc(ANALYZED_MAPPING_INDEX, "exact", Map.of("aString", "string"));
+        indexDoc(ANALYZED_MAPPING_INDEX, "phrase", Map.of("aString", "a string of words"));
+        indexDoc(ANALYZED_MAPPING_INDEX, "casing", Map.of("aString", "STRING"));
+        indexDoc(ANALYZED_MAPPING_INDEX, "unrelated", Map.of("aString", "stringent"));
     }
 
     private static Map<String, Object> mapOf(Object... keyValues) {
@@ -242,6 +265,7 @@ class ElasticsearchIntegrationTest {
     private static void refreshIndex() throws Exception {
         esRequest("POST", "/" + INDEX + "/_refresh", null);
         esRequest("POST", "/" + SEMANTIC_SAFETY_INDEX + "/_refresh", null);
+        esRequest("POST", "/" + ANALYZED_MAPPING_INDEX + "/_refresh", null);
     }
 
     private static String esRequest(String method, String path, String body) throws Exception {
@@ -891,6 +915,60 @@ class ElasticsearchIntegrationTest {
         assertEquals(List.of("other-owner"), search(
                 SEMANTIC_SAFETY_INDEX,
                 inScenario("null", ((Result.Conditional) result).query())));
+    }
+
+    // --- Analyzed (`text`) mappings ---
+    //
+    // The adapter is handed a plan, never an index, so it cannot see how a field is mapped. It
+    // emits `term`, `prefix` and `wildcard`, which are exact against `keyword` and per-token
+    // against `text` — so pointing `fieldMap` at an analyzed field silently widens every string
+    // comparison. That is a caller-owned precondition, recorded as a mapping hazard in this
+    // adapter's README, and these two tests are what make it a measured fact rather than a claim:
+    // the same plan, the same documents, two mappings, two row sets
+    // (cerbos/query-plan-adapters#322).
+
+    @Test
+    void analyzedMappingWidensEqualityAndKeywordSubFieldRestoresIt() throws Exception {
+        Operand condition = expressionOperand("eq",
+                variableOperand("request.resource.attr.aString"),
+                stringValueOperand("string"));
+
+        Result analyzed = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
+                conditionalPlan(condition),
+                Map.of("request.resource.attr.aString", "aString"));
+        // "casing" tokenises to [string] because the standard analyzer lowercases; "phrase"
+        // tokenises to [a, string, of, words] and matches on one of them. Neither document has an
+        // aString the policy's `== "string"` is true of, so both are rows the PDP denies.
+        assertEquals(List.of("casing", "exact", "phrase"), search(
+                ANALYZED_MAPPING_INDEX, ((Result.Conditional) analyzed).query()));
+
+        // The documented remedy: point the field map at the exact sub-field, not at the parent.
+        Result exact = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
+                conditionalPlan(condition),
+                Map.of("request.resource.attr.aString", "aString.keyword"));
+        assertEquals(List.of("exact"), search(
+                ANALYZED_MAPPING_INDEX, ((Result.Conditional) exact).query()));
+    }
+
+    @Test
+    void analyzedMappingWidensStartsWith() throws Exception {
+        Operand condition = expressionOperand("startsWith",
+                variableOperand("request.resource.attr.aString"),
+                stringValueOperand("str"));
+
+        Result analyzed = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
+                conditionalPlan(condition),
+                Map.of("request.resource.attr.aString", "aString"));
+        // `prefix` is per-token on `text`: "a string of words" starts with "a", not "str", but it
+        // carries a token that does.
+        assertEquals(List.of("casing", "exact", "phrase", "unrelated"), search(
+                ANALYZED_MAPPING_INDEX, ((Result.Conditional) analyzed).query()));
+
+        Result exact = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
+                conditionalPlan(condition),
+                Map.of("request.resource.attr.aString", "aString.keyword"));
+        assertEquals(List.of("exact", "unrelated"), search(
+                ANALYZED_MAPPING_INDEX, ((Result.Conditional) exact).query()));
     }
 
     @Test

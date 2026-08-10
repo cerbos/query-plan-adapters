@@ -104,6 +104,43 @@ adapter has to be told.
   rather than translated.
 
 Pass `cerbosent.WithNullRepresentation(cerbosent.NullOmitted)` if your attributes omit NULL columns.
+
+### Declare the convention per attribute
+
+The option above is a whole-call default, and one policy suite can legitimately use both
+conventions: the same column mapped twice, sent as an explicit null under one attribute name and
+omitted under another. Declare it per attribute instead and the call-level option only covers what
+the mapping does not:
+
+```go
+mapper := cerbosent.MapperMap{
+    // sent as an explicit null when the column is NULL
+    "request.resource.attr.owner": {
+        Column:         "owner_id",
+        NullConvention: cerbosent.NullConventionExplicit,
+    },
+    // omitted when the column is NULL — the call-level default applies
+    "request.resource.attr.department": {Column: "department"},
+}
+```
+
+Declaring the explicit convention asserts two things: the column can be NULL, **and** a NULL reaches
+`check()` as an explicit null. The equality family (`eq`, `ne`, `in`) over that attribute is then
+rendered so it can never be SQL UNKNOWN — CEL holds a null *value* under this convention, so
+`null != "x"` is TRUE and the row must come back, while UNKNOWN would drop it under *both*
+polarities. Ordering and string operators are left alone: a null receiver raises a no-overload error
+in CEL, which denies exactly as UNKNOWN does.
+
+Leaving an attribute undeclared keeps the historical rendering — so nothing changes for a mapping
+that says nothing, and `!=` against a constant keeps under-granting the NULL rows until you declare
+it.
+
+**Declare both sides of a field-to-field comparison, or neither.** Mixing the conventions across one
+comparison has no faithful rendering — the declared side needs a definite answer for its NULL, the
+undeclared side needs UNKNOWN — so the adapter throws rather than picking a direction. See
+[#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
+[ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
+
 See [#302](https://github.com/cerbos/query-plan-adapters/issues/302).
 
 ## Conformance contract
@@ -115,9 +152,10 @@ assumed. The Spring Data adapter defines the reference semantics for this compat
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 133 reference conformance actions — every conformance shape in the corpus, on SQLite, PostgreSQL and MySQL |
+| Oracle-tested | 141 reference conformance actions — every conformance shape in the corpus, on SQLite, PostgreSQL and MySQL |
 | Fail-closed corpus shapes | Regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an untyped string field, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero) and `filter()`/`map()` used as a condition (both return a list, not a boolean) (8 actions) |
 | Representation-dependent | `null-eq-missing` — rejected under `NullOmitted`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
+| Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute the caller sends as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare it per attribute — `NullConvention: NullConventionExplicit` on the mapper `Entry` — or the historical rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 
 The oracle coverage includes value-first and field-to-field comparisons, escaped string predicates,
@@ -196,14 +234,30 @@ reads it: `RestrictIn` then hides every row, `RestrictNotIn` hides none.
 
 The three proved dialects are not the same test three times: SQLite stores instants as text and
 booleans as integers, PostgreSQL has real types for both, MySQL needs `CONCAT` rather than `||`
-(which it reads as logical OR outside `PIPES_AS_CONCAT`), `CHAR_LENGTH` rather than `LENGTH` (which
-counts bytes), and `TRUNCATE` before an integer cast — and each needs a different null-safe
-equality operator and different cast spellings. Running all three is what makes `WithDialect` a
-checked claim rather than an assertion.
+(which it reads as logical OR outside `PIPES_AS_CONCAT`) and `CHAR_LENGTH` rather than `LENGTH`
+(which counts bytes) — and each needs a different null-safe equality operator (`IS`, `IS NOT
+DISTINCT FROM`, `<=>`) and different cast spellings (`real`, `double precision`, `double`).
+Running all three is what makes `WithDialect` a checked claim rather than an assertion.
 
 The MySQL schema pins a **binary collation** on every string column. MySQL's default
 `utf8mb4_0900_ai_ci` is both case- and accent-insensitive, which over-grants on `cs-eq`,
 `unicode-eq` and every hierarchy prefix probe — see [Collation](#collation) below.
+
+### Identifier quoting
+
+This is about the names in your `Mapper`, not about the rows a subquery sees, so it is not one of the
+hazards above.
+
+Table, column and qualifier names are passed to Ent's `sql.Builder.Ident`, which quotes for the
+dialect in use. `Ident` treats a name that already contains the dialect's own quote character — a
+backtick on SQLite and MySQL, a double quote on PostgreSQL — as pre-quoted and writes it through
+unchanged, so a column named ``we`ird`` is emitted bare rather than escaped. **Name your columns with
+ordinary identifiers.**
+
+No plan data reaches an identifier: every value from the query plan is a bound parameter, which the
+unit suite asserts against deliberately hostile policy strings. A `Mapper` is your own code, so this
+is a naming constraint rather than an injection surface. It is written down because it is a real
+difference from the [pgx adapter](../pgx), which quotes defensively.
 
 ### Known gaps
 
@@ -241,14 +295,27 @@ the adapter cannot detect. Treat collation as part of your policy contract.
 ## Development
 
 ```bash
-go test ./...          # adversarial conformance suite (needs Docker for testcontainers)
+go test -skip TestAdversarialConformance ./...   # unit suite, no Docker
+go test ./...                                    # adds the adversarial conformance suite (Docker)
 golangci-lint run ./...
 golangci-lint fmt ./...
 ```
 
-The suite starts one Cerbos container, reading the pinned PDP version from
-`conformance/CERBOS_VERSION`, then replays the whole corpus against an in-memory SQLite database
-and a PostgreSQL testcontainer in turn.
+The adversarial suite starts one Cerbos container, reading the pinned PDP version from
+`conformance/CERBOS_VERSION`, then replays the whole corpus against an in-memory SQLite database and
+PostgreSQL and MySQL testcontainers in turn.
+
+The unit suite is everything else, and needs nothing running. It covers what the corpus structurally
+cannot: malformed and hostile plans no planner emits (a `mod` that used to panic, typed-nil oneof
+wrappers, policy data chosen to be SQL syntax), and the per-dialect spellings, where a wrong choice
+is often still valid SQL — `||` is legal MySQL, where it means logical OR. CI runs it as its own step
+before the container-backed one, so "these tests need no Docker" stays a checked claim.
+
+The translator under `internal/queryplan` is vendored byte-for-byte into the
+[pgx module](../pgx) as well, so that a consumer of either pulls in only the one.
+`conformance/scripts/validate-corpus.sh` diffs the two trees and fails on any difference: a
+semantic fix has to land in both copies. Anything genuinely per-engine belongs in `render.go`, which
+is outside the shared tree.
 
 ## License
 

@@ -462,7 +462,97 @@ func applyComparison(op CmpOp, l, r value) (Expr, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := assertNoMixedNullConventions(op, lExpr, rExpr); err != nil {
+		return nil, err
+	}
+	if definite, ok := definiteEquality(op, lExpr, rExpr); ok {
+		return definite, nil
+	}
 	return Cmp{Op: op, L: lExpr, R: rExpr}, nil
+}
+
+// definiteEquality rewrites an equality involving an explicit-null column so it is never UNKNOWN.
+//
+// A null VALUE is what CEL holds under that convention, so `null == "x"` is a definite FALSE,
+// `null != "x"` a definite TRUE, and two nulls are EQUAL. SQL answers UNKNOWN to all three, which
+// excludes the row under BOTH polarities — so the NOT an enclosing negation applies has nothing
+// definite to flip. Making the predicate definite here is what lets the rest of the translator go
+// on treating NOT as an ordinary SQL NOT.
+//
+// Deliberately not the NotDistinct node this package already carries for elementMatches, even
+// though it renders a null-safe equality on all three dialects. NotDistinct is symmetric, and this
+// rewrite must not be: when only ONE side declares the convention, the other side's NULL is a
+// MISSING attribute on the check side, so CEL raises an error and denies — and only the asymmetric
+// expansion below keeps propagating UNKNOWN for it. A null-safe equality would match the two NULLs
+// and over-grant. NotDistinct is right in elementMatches because both operands there are on the
+// explicit convention by construction.
+func definiteEquality(op CmpOp, l, r Expr) (Expr, bool) {
+	if op != OpEq && op != OpNe {
+		return nil, false
+	}
+	lCol, lExplicit := explicitNullColumn(l)
+	rCol, rExplicit := explicitNullColumn(r)
+	if !lExplicit && !rExplicit {
+		return nil, false
+	}
+	// Mixing the two conventions across one comparison has no faithful rendering, so it is
+	// refused by the caller rather than answered here. A Lit operand is different: a constant
+	// can never be a missing attribute, so one declared column against a constant is fine.
+	if _, lIsColumn := l.(Column); lIsColumn {
+		if _, rIsColumn := r.(Column); rIsColumn && (!lExplicit || !rExplicit) {
+			return nil, false
+		}
+	}
+
+	// At most both sides' presence tests plus the equality itself.
+	const maxDefiniteEqualityParts = 3
+	present := make([]Expr, 0, maxDefiniteEqualityParts)
+	if lExplicit {
+		present = append(present, IsNull{X: lCol, Negate: true})
+	}
+	if rExplicit {
+		present = append(present, IsNull{X: rCol, Negate: true})
+	}
+	present = append(present, Cmp{Op: OpEq, L: l, R: r})
+
+	equality := and(present...)
+	if lExplicit && rExplicit {
+		equality = or(and(IsNull{X: lCol}, IsNull{X: rCol}), equality)
+	}
+	if op == OpNe {
+		return Not{X: equality}, true
+	}
+	return equality, true
+}
+
+// assertNoMixedNullConventions refuses an equality between two columns where only ONE declares
+// the explicit-null convention.
+//
+// The declared side needs a definite answer for its NULL — CEL holds a null VALUE there. The
+// undeclared side needs UNKNOWN for its NULL — that is a missing attribute, which CEL denies under
+// BOTH polarities. A definite predicate returns rows the PDP refuses; a plain one drops rows the
+// PDP allows. Neither is the decision, so the shape is refused rather than answered in a direction.
+func assertNoMixedNullConventions(op CmpOp, l, r Expr) error {
+	if op != OpEq && op != OpNe {
+		return nil
+	}
+	lCol, lIsColumn := l.(Column)
+	rCol, rIsColumn := r.(Column)
+	if !lIsColumn || !rIsColumn || lCol.ExplicitNull == rCol.ExplicitNull {
+		return nil
+	}
+	return fmt.Errorf(
+		"cannot compare %q and %q under mixed null conventions: one declares the explicit-null "+
+			"convention and the other does not, so the omitted side is UNKNOWN for a NULL column "+
+			"while the declared side is definite, and no single predicate is both. Declare "+
+			"NullConvention on both mapper entries, or on neither",
+		lCol.Name, rCol.Name,
+	)
+}
+
+func explicitNullColumn(e Expr) (Expr, bool) {
+	col, ok := e.(Column)
+	return col, ok && col.ExplicitNull
 }
 
 // membership implements CEL `in`, including explicit-null list elements.
@@ -493,7 +583,15 @@ func membership(x, values value) (Expr, error) {
 
 	var predicates []Expr
 	if len(nonNull) > 0 {
-		predicates = append(predicates, InList{X: xExpr, Vs: nonNull})
+		list := Expr(InList{X: xExpr, Vs: nonNull})
+		// Without a null member nothing has made the membership definite yet: `NOT (col IN (…))`
+		// over a NULL column is UNKNOWN and drops the row, while CEL compares a null VALUE
+		// against each element and gets a definite false. With a null member the IS NULL arm
+		// below already settles it.
+		if col, explicit := explicitNullColumn(xExpr); explicit && !hasNull {
+			list = and(IsNull{X: col, Negate: true}, list)
+		}
+		predicates = append(predicates, list)
 	}
 	if hasNull {
 		predicates = append(predicates, IsNull{X: xExpr})

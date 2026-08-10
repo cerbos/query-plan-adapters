@@ -53,6 +53,10 @@ rows, and one oracle recipe that every adapter's harness implements against its 
 - `CERBOS_VERSION` — the exact Cerbos PDP version the wire fixtures were captured against.
   Deliberately pinned rather than `latest`: a fixture diff should come from a deliberate version
   bump, not silently from whatever `latest` resolved to on a given day.
+- `CERBOS_IMAGE_DIGEST` — the digest of the image that version's tag resolves to. The tag says
+  which release; the digest says which build, and a tag can be re-pushed. Every harness and
+  workflow composes `ghcr.io/cerbos/cerbos:$CERBOS_VERSION@$CERBOS_IMAGE_DIGEST` from the two
+  files, and `scripts/validate-corpus.sh` asserts both halves everywhere either is restated.
 - `scripts/regenerate-wire-fixtures.sh` — regenerates `wire-fixtures/` from a running (pinned)
   Cerbos container. Run it after bumping `CERBOS_VERSION`, review the diff, commit both together.
 
@@ -120,8 +124,13 @@ What that second assertion looks like depends on where the adapter's NULL lives:
   harness asserts the aligned empty result *and* that `owner` (same column, no `nullable`) still
   returns its five explicit-null documents, so the empty set is the flag talking.
 - **convex** — a document store, so the seeded shape mirrors the convention directly: the harness
-  omits the field entirely and `q.eq(field, null)` does not match an absent field. Same paired
-  assertion as mongoose. Alignment here comes from the storage layout, not from the plan.
+  omits the field entirely, and because `aOptionalString` is `nullable: true` in the mapper the
+  adapter refuses the push-down and evaluates the predicate in its own JavaScript post-filter,
+  where the absent path raises the same CEL missing-attribute error that made `check()` deny. Same
+  paired assertion as mongoose — `owner` is the same seed field stored as an explicit null and
+  returns its five documents through that same evaluator. Alignment here comes from the storage
+  layout, not from the plan, and *not* from a Convex `q.eq(field, null)`: that code path never runs
+  for either action (cerbos/query-plan-adapters#327).
 - **langchain-chromadb, elasticsearch-java** — need no option at all: neither store can represent
   an explicit null distinguishably from a missing key, so every null-selecting direction already
   fails closed under both conventions. Their harnesses assert the rejection happens regardless,
@@ -130,6 +139,60 @@ What that second assertion looks like depends on where the adapter's NULL lives:
 Because the oracle for these actions is empty by construction, they must **not** join the
 degeneracy guard below — that guard asserts a non-empty, non-total oracle, which is exactly what
 this shape cannot have.
+
+#### The other side of the same option: an explicit null against a non-null constant
+
+`null-eq` and friends compare the explicit-null attribute only **against null**, where SQL's
+`IS NULL` and CEL's null-valued comparison agree. Against a non-null constant they do not. CEL holds
+a null *value* under that convention, so `null != "x"` is TRUE and `null == "x"` is FALSE — both
+definite — while SQL answers UNKNOWN, which excludes the row under **both** polarities. Every
+SQL-backed adapter therefore returned fewer rows than the PDP allows
+(cerbos/query-plan-adapters#308). `optional-ne` does not reach it: it is the only other comparison
+against a non-null constant and it uses `aOptionalString`, the omitted-convention attribute, where
+UNKNOWN and a missing-attribute error agree.
+
+The direction is safe — narrower than the decision, never wider — but the id sets do not match,
+which is what this corpus exists to enforce. Five actions pin it: `null-value-ne-const`,
+`null-value-not-eq-const`, `null-value-not-in-const`, `null-value-f2f` and
+`null-value-pv-not-exists`.
+
+**A call-level option cannot fix it, which is why the convention is now declared per attribute**
+(see [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md)). This suite
+deliberately maps the same column twice — `owner` sends an explicit null, `aOptionalString` sends
+nothing — because real applications do. Told `explicit`, an adapter has to make `optional-ne` return
+the NULL rows and breaks it; told `omitted`, it already refuses the null-comparison shapes. Each
+adapter's mapper therefore carries a per-attribute declaration, and the call-level
+`nullAttributeRepresentation` is its default. Declaring nothing means "treat this column as NOT
+NULL", which is the historical rendering, so the fix is opt-in per column rather than a silent
+rewrite of every nullable comparison.
+
+The declaration changes only the **equality family** — `eq`, `ne`, `in`. Those are the operators CEL
+evaluates to a definite boolean over a null value, so they are the only ones whose SQL has to be
+definite too. `lt`/`le`/`gt`/`ge` and the string operators raise a no-overload error on a null
+receiver, which denies under both polarities exactly as UNKNOWN does; making them definite would
+break them.
+
+`coOwner` is the second explicit-null attribute the corpus carries, added for `null-value-f2f`. It
+aliases the **`scope`** column rather than `aOptionalString`, because comparing a column with itself
+is TRUE for all 20 seeds and the degeneracy guard forbids a total oracle. Against `scope` the only
+row where both sides are NULL is `e1`, so the oracle is exactly one row — thin, but non-degenerate,
+and it is precisely the row the naive translation loses.
+
+What each adapter does with the declaration differs, and the split is the point:
+
+- **prisma, drizzle, sqlalchemy, spring-data, ent, pgx** translate it. All five actions are
+  oracle-compared.
+- **mongoose, convex** need no declaration: they store the value the caller sent, so a stored null
+  already compares as a null value exactly as CEL does. All five were aligned before the change.
+  (Mongoose refuses `null-value-pv-not-exists` for an unrelated, pre-existing reason — the
+  value-list fold puts a collection macro under a negation.)
+- **langchain-chromadb** refuses all five: its metadata model has no null, so `$ne`/`$nin` match
+  documents missing the key.
+- **elasticsearch-java** takes the declaration in order to **refuse**. It already carried the right
+  message — "cannot distinguish an explicit null value from a missing field without an indexed
+  null-value sentinel" — but the guard keyed off a null *literal* in the plan, so it never fired for
+  these shapes. Every Query DSL spelling of `!= "x"` either requires the field to exist (dropping
+  the row) or matches every document missing it, and neither is the decision.
 
 #### The absent to-one parent
 
@@ -150,30 +213,66 @@ resource row, where an absent parent and a childless parent produce the same emp
 | `!("finance" in mainCategory.subNames)` | deny | no rows → `!false` → **over-grants** |
 | `!hasIntersection(mainCategory.subNames, […])` | deny | no rows → `!false` → **over-grants** |
 | `!(size(mainCategory.subCategories) > 0)` | deny | count 0 → `!false` → **over-grants** |
+| `("finance" in mainCategory.subNames) ? … : …` | deny | no rows → `!false` → else-branch → **over-grants** |
+| `size(mainCategory.subCategories) <= 1.5` | deny | count 0 ≤ 1 → **over-grants** |
 
-Only a universal, a negation, or a zero/lower-bound count discriminates them, which is why
-`w1-exists-chain`, `w1-size-chain` and `w1-in-chain` passed everywhere while the bug was live
-(cerbos/query-plan-adapters#309). `w1-all-chain`, `w1-not-exists-chain`, `w1-size-zero-chain`,
-`w1-size-nonneg-chain`, `w1-not-in-chain`, `w1-not-hasint-chain` and `w1-not-size-chain` are the
-seven that discriminate.
+Only a universal, a negation, a zero/lower-bound count or a ternary's false-branch discriminates
+them, which is why `w1-exists-chain`, `w1-size-chain` and `w1-in-chain` passed everywhere while the
+bug was live (cerbos/query-plan-adapters#309). `w1-all-chain`, `w1-not-exists-chain`,
+`w1-size-zero-chain`, `w1-size-nonneg-chain`, `w1-not-in-chain`, `w1-not-hasint-chain`,
+`w1-not-size-chain`, `w1-ternary-chain-cond` and `w1-size-frac-le-chain` are the nine that
+discriminate.
+
+`w1-size-frac-chain` is the one `w1-*` action that does **not** probe this hazard, and it is worth
+being clear about why it is still here: `>= 1.5` rounds up to `>= 2`, which a count of zero fails
+whether or not the hop is required, so guarded and unguarded agree. It pins the other property of
+a fractional threshold — that the adapter ROUNDS rather than truncates — over a chain, which
+`cr-size-frac-ge` only pins over a direct relation. An adapter that truncates to `>= 1` returns
+`a1/a6/a8/c1` against an empty oracle.
 
 The fix is in the translation, not in the classification: **a chained collection must require its
 intermediate hop to exist**, so an absent parent stays excluded under both polarities instead of
-collapsing onto the empty-collection case. `w1-size-zero-chain` and `w1-not-size-chain` have empty
-oracles by construction (no seed holds a parent with zero children) and therefore stay out of the
-degeneracy guard; `w1-all-chain`, `w1-not-exists-chain`, `w1-size-nonneg-chain`,
-`w1-not-in-chain` and `w1-not-hasint-chain` all have non-degenerate oracles and carry the
+collapsing onto the empty-collection case. `w1-size-zero-chain`, `w1-not-size-chain` and
+`w1-size-frac-chain` have empty oracles by construction (no seed holds a parent with zero children,
+nor one with two or more) and therefore stay out of the degeneracy guard; `w1-all-chain`,
+`w1-not-exists-chain`, `w1-size-nonneg-chain`, `w1-not-in-chain`, `w1-not-hasint-chain`,
+`w1-ternary-chain-cond` and `w1-size-frac-le-chain` all have non-degenerate oracles and carry the
 anti-vacuity assertion for the group.
 
 **Put the guard in the shared relation-scope construction, not in each operator.** The #309 round
 guarded the collection macros, which left every sibling operator reached through the same chain
 unguarded — membership and `hasIntersection` (#315), and the negated count spelling `!(size > 0)`,
 which takes a different branch from `size == 0` because the planner emits the negation verbatim
-rather than normalising it (#316). ent and pgx needed no change in either round: their membership
+rather than normalising it (#316). ent and pgx needed no change in any round: their membership
 routes through the same guarded tri-state existence construction as everything else. Adapters with
 no UNKNOWN to represent (Prisma filters, Mongo query documents) get the same result by requiring
 the hops **outside** the negation rather than inside it, so the negation cannot flip the
 requirement along with the predicate.
+
+**A private copy of "negate this" is how the ternary escaped both rounds.** A ternary rewrites into
+guarded branches, and its false-branch is "the condition is definitively FALSE" — the same
+three-valued negation the `not` handler already computes. Prisma spelled that a second time as a
+bare `NOT`, so the hop requirement #315/#316 added never reached it and the else-branch was selected
+for every parentless row (#334). The repair is delegation, not another patch: one negation with the
+guard inside it, reused wherever a condition has to be falsified.
+
+Mongoose is the other adapter with no UNKNOWN to represent, and it does **not** share that defect:
+its ternary is a single `$cond` inside an aggregation expression, so there is no second negation to
+diverge. It has a *different* latent hazard in the same place — `$cond`'s `if` treats a missing
+field path as falsy, which selects the else-branch for an absent parent — but no corpus action
+reaches it, because every chained operand the corpus carries is a collection and membership has no
+aggregation-expression form there. Probing it needs a chained **scalar** attribute, which is a new
+seed field.
+
+**The fractional-threshold collapse is the one branch the corpus cannot reach.** CEL rejects
+`==`/`!=` between an `int` and a `double` ("found no matching overload for `_==_` applied to
+`(int, double)`"), so no policy can make the planner emit a fractional equality against `size()`,
+and the ordering spellings the corpus does pin (`>= 1.5`, `<= 1.5`) round to an integer threshold
+and travel the ordinary count path. An adapter that folds the fractional equality to a constant
+must still guard it — `hops AND constant` is two-valued and readmits parentless rows under a
+negation — but only that adapter's unit tests can prove it (#333). This is the documented exception
+to "a per-adapter unit test is not a substitute for a corpus action": there is no corpus action to
+substitute for.
 
 ### The degeneracy guard
 
@@ -200,10 +299,10 @@ harness therefore keeps two lists and asserts they are complements of its own or
 
 Both lists still assert the non-empty, non-total oracle. The exclusion for an action whose oracle
 is empty *by construction* is unchanged: it belongs in neither list (see
-`nullRepresentationOmitted` above, and `w1-size-zero-chain`/`w1-not-size-chain`/`in-empty`/the
-string casts).
+`nullRepresentationOmitted` above, and
+`w1-size-zero-chain`/`w1-not-size-chain`/`w1-size-frac-chain`/`in-empty`/the string casts).
 
-Adapters differ widely in what they can express — `langchain-chromadb` compares 15 of the 133
+Adapters differ widely in what they can express — `langchain-chromadb` compares 15 of the 136
 conformance actions where `ent` and `pgx` compare all of them — so the lists are expected to look
 different per harness. That is the point.
 
@@ -221,7 +320,7 @@ So every throwing classification carries the substring that adapter's error must
 - `adapterUnsupported[<adapter>][].message` — the entry is already per-adapter, so the message sits
   on it directly.
 - `expectedUnsupported[].messages[<adapter>]` — one entry per adapter that must reject the shape.
-  This generalises the old `springDataMessage`, which pinned the reference and left the other nine
+  This generalises the old `springDataMessage`, which pinned the reference and left the other ten
   asserting nothing.
 - `nullRepresentationOmitted[].messages[<adapter>]` — the same, for the group every adapter rejects.
 
@@ -346,10 +445,14 @@ guard; run it before trusting it.
    what it actually says; the harness refuses to run with a message missing, so there is no way to
    forget one.
 6. Each harness pins the corpus size AND its throwing-action count as tripwires (e.g.
-   `expect(MANIFEST_ACTIONS.size).toBe(143)` and `expect(THROWING_ACTIONS).toHaveLength(47)` in
+   `expect(MANIFEST_ACTIONS.size).toBe(146)` and `expect(THROWING_ACTIONS).toHaveLength(50)` in
    `prisma/src/adversarial.test.ts`; the oracle counts too in the convex, langchain-chromadb and
    elasticsearch-java harnesses). Bump them deliberately — those assertions exist so a new action
-   cannot slip past an adapter unnoticed.
+   cannot slip past an adapter unnoticed. The convex harness additionally pins WHICH actions its
+   filter engine decides on its own, under each of its two mappers, because its README quotes those
+   counts as the coverage the differential actually buys
+   ([#327](https://github.com/cerbos/query-plan-adapters/issues/327)) — a new action lands in one
+   of those buckets and has to be named.
 7. Add the action to each harness's degeneracy-guard list so it cannot pass vacuously — to that
    harness's *compared* list where the adapter translates the shape, and to its liveness-only list
    where it does not, per "The degeneracy guard" above. Adding it to the compared list of an
@@ -444,13 +547,66 @@ unsupported before you have watched it fail is how a translatable shape gets per
    the new harness alone.
 
 7. **Wire CI.** Copy an existing adapter workflow. It must: read the PDP version from
-   `CERBOS_VERSION` (never hardcode it), run `scripts/validate-corpus.sh` in every job that
-   replays the corpus **or** hardcodes the PDP image — a job that interpolates `CERBOS_VERSION`
-   at runtime cannot drift and does not need it, but a hardcoded pin can, and that assertion is
-   `validate-corpus.sh`'s job — trigger on `conformance/**` as well as the adapter's own
-   directory, and run the adversarial suite **inside the same job as the regular tests**, not as
-   a separate job: the corpus discriminates the translator and the datastore, so a separate job
-   costs runner minutes for no extra coverage. Pin any service image by digest.
+   `CERBOS_VERSION` and its digest from `CERBOS_IMAGE_DIGEST` (never hardcode either), run
+   `scripts/validate-corpus.sh` in every job that replays the corpus **or** hardcodes the PDP
+   image — a job that interpolates the two files at runtime cannot drift and does not need it,
+   but a hardcoded pin can, and that assertion is `validate-corpus.sh`'s job — trigger on
+   `conformance/**` as well as the adapter's own directory, and run the adversarial suite
+   **inside the same job as the regular tests**, not as a separate job: the corpus discriminates
+   the translator and the datastore, so a separate job costs runner minutes for no extra
+   coverage. Pin every service image the harness or the workflow starts, by tag **and** digest —
+   see below.
+
+#### Pinning service images
+
+Every container a test or a workflow starts is written as `repository:tag@sha256:<64 hex>`. The
+tag says which release a reader is looking at; the digest says which build a green run actually
+proved. A tag alone records an intent, not a build — `postgres:16` and
+`docker.elastic.co/elasticsearch/elasticsearch:8.15.3` are both re-pushed — so a suite pinned only
+by tag cannot answer "what did this pass against", and a suite pinned only by digest cannot answer
+"which version is this". `validate-corpus.sh` enforces both halves:
+
+- **The PDP** is corpus-wide, so its two halves live here: `CERBOS_VERSION` and
+  `CERBOS_IMAGE_DIGEST`. Every restatement anywhere in the repository is asserted to match both.
+  A reference that carries the right tag and a digest from some other build reads as pinned and is
+  not, which is why the two are checked together rather than the tag alone
+  ([#322](https://github.com/cerbos/query-plan-adapters/issues/322)).
+- **Everything else** — the databases, the search and vector stores — is pinned *per harness*, in
+  one constant that both that adapter's suites read. It deliberately does **not** live under
+  `conformance/`: a change here re-runs all eleven adapter workflows, so a shared file would make
+  bumping mongoose's server cost ten irrelevant CI runs. What is shared is the rule.
+  `validate-corpus.sh` holds a list of image repositories, scans the repository for each, requires
+  every occurrence to carry a tag and a digest, and requires a given `repo:tag` to resolve to
+  exactly one digest repo-wide — so two harnesses cannot claim the same nominal version while
+  running different builds. **Adding a new service means adding its repository to that list**; a
+  repository nothing scans is a repository nothing keeps pinned.
+- Markdown is out of scope for both scans. A README telling a *consumer* how to start a PDP of
+  their own is prose about their environment, not something this repository runs.
+
+Renovate is configured with `docker:disable`, so nothing proposes these bumps: they are made by
+hand, deliberately, alongside whatever re-verification the bump needs. That is the accepted
+trade — reproducibility now, staleness to be watched for — and re-enabling Docker updates is a
+maintainer decision, not a drive-by one.
+
+#### Vendored code stays byte-identical
+
+The ent and pgx modules are standalone: each vendors the translator under its own
+`internal/queryplan` so a consumer pulls in only the one. That means the same source exists twice,
+and a semantic fix can land in one copy alone. Nothing downstream notices — the corpus catches it
+only if some action happens to exercise the fixed shape, and the hostile-plan invariants the two unit
+suites pin never come off a real planner wire at all
+([#319](https://github.com/cerbos/query-plan-adapters/issues/319)).
+
+So `validate-corpus.sh` diffs `ent/internal/queryplan` against `pgx/internal/queryplan` and fails on
+any difference. Both adapter workflows already run the script, and each triggers on `conformance/**`
+as well as its own directory, so a one-sided edit fails whichever side it lands on. **Byte-identical,
+not identical-modulo-an-allowlist**: an allowlist is a place for a real divergence to hide as a
+comment tweak, so anything genuinely per-engine goes in that module's `render.go`, which is outside
+the shared tree.
+
+Two copies of the same code also need two copies of the same proof, which is why
+`ent/translate_test.go` and `pgx/translate_test.go` share their test names, section order and shapes.
+Keep them in step when you add an invariant to either.
 
 8. **Document the contract** in the adapter's README with a `Conformance contract` table
    (oracle-tested / fail-closed / known divergence counts). Each adapter is published
@@ -527,6 +683,15 @@ omissions were deliberate. The absent to-one parent's row records that it is *pr
 (`w1-all-chain` and its siblings) rather than merely documented — it is what a closed hazard looks
 like, and it is the row that makes the difference visible.
 
+An adapter may append **additional** rows below those six for a hazard only its store has, and must
+say in the prose above the table that it has done so — the six shared rows stay first and in order,
+so the diff against this list still reads cleanly. A hazard is adapter-specific only when no other
+store can reach it; anything two adapters could hit belongs here, in the shared list, so all eleven
+have to record a position on it. The one such row today is elasticsearch-java's **analyzed (`text`)
+field mapping**: Elasticsearch rewrites a stored string into tokens before comparing it, so a field
+mapped `text` widens every string comparison the adapter emits. No other store in this repository
+transforms a value between write and comparison, so there is nothing for the other ten to answer.
+
 The three classes the eleven adapters fall into determine most of the answers:
 
 | Class | Adapters | What the store applies to the subquery |
@@ -568,16 +733,44 @@ the policy suite and classify it like anything else.
 - **The wire fixtures are not consumed by adapter harnesses.** They pin planner shape
   independently and are enforced by the `Conformance Corpus` workflow, which replans against the
   pinned PDP and fails on drift.
-- **A dialect the harness does not exercise is not covered.** Most TypeScript harnesses run on
-  SQLite only; collation and LIKE metacharacter behaviour differ on MySQL and SQL Server, and the
-  READMEs treat collation as part of the policy contract for exactly this reason.
+- **A dialect the harness does not exercise is not covered.** Collation, LIKE metacharacter
+  handling and parameter typing all differ per dialect, and the READMEs treat them as part of the
+  policy contract for exactly this reason. `ent` and `spring-data` run three dialects each;
+  `drizzle` and `prisma` run SQLite and PostgreSQL, chosen with `ADAPTER_TEST_DB`
+  ([#320](https://github.com/cerbos/query-plan-adapters/issues/320)); the remaining TypeScript
+  harnesses are still single-store. That leg is not a formality. Adding it turned up three live
+  mechanisms SQLite could not see, none of them visible in `actions.json` afterwards because two
+  were fixed in the translator:
+  - `drizzle`, `$1 IS NULL` over a bound constant — untypeable on PostgreSQL, so a hard error
+    rather than the redundancy it is on SQLite (`cr-contains`, `like-underscore`, and the five
+    `cr-div-*` shapes).
+  - `drizzle`, a numeric constant typed from the column instead of the value — `aNumber >= 1.5`
+    against an `integer`, `size(aString) > 4294967296` against `length()`'s `integer`
+    (`double-threshold`, `p-double-frac`, `cr-size-frac-ge`, `size-huge-gt`, `size-huge-lt`,
+    `cr-div-neg-zero`, `cr-div-other-column`). Read as SQL `numeric` rather than `float(53)`
+    this one is silent, not loud: `aNumber * 0.1 == 0.3` is exact decimal arithmetic and admits
+    a row CEL's binary floating point denies.
+  - `prisma`, `like-backslash` — `\` is the default `LIKE` escape character on PostgreSQL and
+    MySQL and literal on SQLite, so one needle meant two things. Not expressible without an
+    `ESCAPE` clause Prisma does not emit, so it is now `adapterUnsupported` and throws.
+
+  The same caution applies to a *hosted* store the harness substitutes a local build for: `convex`
+  runs against a pinned self-hosted `convex-backend` container, never Convex Cloud, and most of its
+  corpus is decided by the adapter's own JavaScript post-filter rather than by any filter engine at
+  all ([#327](https://github.com/cerbos/query-plan-adapters/issues/327)).
+
+  Each adapter's README names the stores its contract is actually proved on, and how much of the
+  corpus each one actually executes.
 
 ## Regenerating wire fixtures after a Cerbos version bump
 
 ```bash
-# edit CERBOS_VERSION first
+# edit CERBOS_VERSION first, then resolve the digest the new tag points at:
+#   docker buildx imagetools inspect ghcr.io/cerbos/cerbos:$(cat CERBOS_VERSION) \
+#     --format '{{.Manifest.Digest}}' > CERBOS_IMAGE_DIGEST
 ./scripts/regenerate-wire-fixtures.sh
 git diff conformance/wire-fixtures   # review exactly what the planner's wire output changed
+./scripts/validate-corpus.sh         # fails if any restatement still names the old tag or digest
 ```
 
 Requires `docker`, `curl`, and `jq`.

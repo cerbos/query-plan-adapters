@@ -15,8 +15,22 @@ import type {
   Value,
 } from "@cerbos/core";
 import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
+import { sql } from "drizzle-orm";
+import type { AnyColumn, SQL, Table } from "drizzle-orm";
+import { drizzle as drizzleSqlite } from "drizzle-orm/better-sqlite3";
+import { drizzle as drizzlePostgres } from "drizzle-orm/node-postgres";
+import {
+  boolean,
+  doublePrecision,
+  integer as pgInteger,
+  pgTable,
+  text as pgText,
+  timestamp,
+} from "drizzle-orm/pg-core";
 import { integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { PostgreSqlContainer } from "@testcontainers/postgresql";
+import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { Pool } from "pg";
 
 import { queryPlanToDrizzle, PlanKind } from ".";
 import type { MapperEntry, RelationMapping } from ".";
@@ -31,7 +45,15 @@ import type { MapperEntry, RelationMapping } from ".";
  * No hand-computed expectations: if this adapter's filter semantics diverge from Cerbos's own
  * evaluation for any row, the mismatch surfaces mechanically. See `conformance/README.md` for the
  * oracle recipe (NULL-as-missing-attribute, the degeneracy guard) — this file only owns the
- * Drizzle-specific translation (SQLite schema, seeding, field mapping, executing the query).
+ * Drizzle-specific translation (schema, seeding, field mapping, executing the query).
+ *
+ * The whole corpus is replayed against every store this adapter claims to support, one store per
+ * run, selected with `ADAPTER_TEST_DB` (`sqlite` by default, `postgres` for the container-backed
+ * leg). Drizzle's dialect objects own quoting and placeholders, but the adapter still makes
+ * dialect-sensitive choices of its own — `float(53)` casts, `substr`/`replace` string matching,
+ * boolean-versus-integer CASE arms, timestamp binding, division by zero — and a store the harness
+ * does not execute against is a store this adapter does not actually cover
+ * (cerbos/query-plan-adapters#320).
  */
 
 // Dedicated ports (gRPC 3621) so this suite can run alongside other adapters' sidecars.
@@ -314,9 +336,10 @@ const MANIFEST_ACTIONS = new Set([
 // asserted to be in `ORACLE_ACTIONS` (cerbos/query-plan-adapters#324), which turns moving one
 // into `adapterUnsupported` into a failure here rather than a silent no-op.
 //
-// w1-size-zero-chain and w1-not-size-chain are deliberately absent: their oracles are empty by
-// CONSTRUCTION (no seed holds a to-one parent with zero children), so they cannot satisfy a
-// non-empty assertion. Their siblings below carry it for that group.
+// w1-size-zero-chain, w1-not-size-chain and w1-size-frac-chain are deliberately absent: their
+// oracles are empty by CONSTRUCTION (no seed holds a to-one parent with zero children, nor one
+// with two or more), so they cannot satisfy a non-empty assertion. Their siblings below carry it
+// for that group.
 
 const DEGENERACY_GUARD_ACTIONS = [
   "vf-le",
@@ -326,13 +349,23 @@ const DEGENERACY_GUARD_ACTIONS = [
   "pv-all",
   "null-eq",
   "null-ne",
-  // The absent to-one parent (#309/#315/#316): the five discriminating chain shapes with a
-  // non-empty oracle.
+  // The explicit-null convention against a non-null operand (#308). All five are compared
+  // rather than thrown, because the mapper declares the convention per attribute; every one of
+  // them under-granted by exactly the NULL-column rows before that declaration existed.
+  "null-value-ne-const",
+  "null-value-not-eq-const",
+  "null-value-not-in-const",
+  "null-value-f2f",
+  "null-value-pv-not-exists",
+  // The absent to-one parent (#309/#315/#316/#333/#334): the seven discriminating chain shapes
+  // with a non-empty oracle.
   "w1-all-chain",
   "w1-not-exists-chain",
   "w1-size-nonneg-chain",
   "w1-not-in-chain",
   "w1-not-hasint-chain",
+  "w1-ternary-chain-cond",
+  "w1-size-frac-le-chain",
   // Column arithmetic under a division (#311).
   "cr-div-neg-zero",
   "cr-div-other-column",
@@ -376,228 +409,595 @@ function labelsFor(seed: Seed): (string | null)[] {
   return derivedFor(seed).labels;
 }
 
-// -- dedicated SQLite schema (adversarial.db, gitignored) --
+// -- the seeded rows, derived once and shared by every store ------------------------------------
+//
+// Only the INSERT calls differ per store. Deriving the rows here rather than inside each store
+// keeps a second store from quietly seeding a different graph than the one the check() oracle
+// mirrors, which would make its differential agree for the wrong reason.
 
-const DB_PATH = path.join(__dirname, "..", "adversarial.db");
-fs.rmSync(DB_PATH, { force: true });
-const sqlite = new Database(DB_PATH);
-const db = drizzle(sqlite);
+interface ResourceRow {
+  id: string;
+  aBool: boolean;
+  aString: string;
+  aNumber: number;
+  aDouble: number | null;
+  aOptionalString: string | null;
+  createdBy: string;
+  scope: string | null;
+  createdAt: string | null;
+}
 
-const adversarialResources = sqliteTable("adversarial_resources", {
-  id: text("id").primaryKey(),
-  aBool: integer("a_bool", { mode: "boolean" }).notNull(),
-  aString: text("a_string").notNull(),
-  aNumber: integer("a_number").notNull(),
-  aDouble: real("a_double"),
-  aOptionalString: text("a_optional_string"),
-  createdBy: text("created_by").notNull(),
-  scope: text("scope"),
-  createdAt: text("created_at"),
-});
+interface TagRow {
+  tagId: string;
+  name: string | null;
+  resourceId: string;
+}
 
-const adversarialTags = sqliteTable("adversarial_tags", {
-  tagId: text("tag_id").primaryKey(),
-  // NULLABLE on purpose: a NULL tag name is a missing element attribute on the check
-  // side (a CEL error → deny) and must stay UNKNOWN — never FALSE — in SQL.
-  name: text("name"),
-  resourceId: text("resource_id").notNull(),
-});
+interface CategoryRow {
+  id: string;
+  name: string;
+  resourceId: string;
+}
 
-const adversarialCategories = sqliteTable("adversarial_categories", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  resourceId: text("resource_id").notNull(),
-});
+interface SubCategoryRow {
+  id: string;
+  name: string;
+  categoryId: string;
+}
 
-const adversarialSubCategories = sqliteTable("adversarial_sub_categories", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  categoryId: text("category_id").notNull(),
-});
+interface LabelRow {
+  id: string;
+  name: string | null;
+  subCategoryId: string;
+}
 
-const adversarialLabels = sqliteTable("adversarial_labels", {
-  id: text("id").primaryKey(),
-  name: text("name"),
-  subCategoryId: text("sub_category_id").notNull(),
-});
+interface SeedRows {
+  resources: ResourceRow[];
+  tags: TagRow[];
+  categories: CategoryRow[];
+  subCategories: SubCategoryRow[];
+  labels: LabelRow[];
+}
 
-const labelsRelation: RelationMapping = {
-  type: "many",
-  table: adversarialLabels,
-  sourceColumn: adversarialSubCategories.id,
-  targetColumn: adversarialLabels.subCategoryId,
-  field: adversarialLabels.name,
-  fields: {
-    name: adversarialLabels.name,
-  },
-};
+/** Distinct category/sub-category graphs per seed so no rows share relations by accident. */
+function seedRows(): SeedRows {
+  const rows: SeedRows = {
+    resources: [],
+    tags: [],
+    categories: [],
+    subCategories: [],
+    labels: [],
+  };
 
-const subCategoriesRelation: RelationMapping = {
-  type: "many",
-  table: adversarialSubCategories,
-  sourceColumn: adversarialCategories.id,
-  targetColumn: adversarialSubCategories.categoryId,
-  field: adversarialSubCategories.name,
-  fields: {
-    name: adversarialSubCategories.name,
-    labels: { relation: labelsRelation },
-  },
-};
-
-const MAPPER: Record<string, MapperEntry> = {
-  "request.resource.attr.aBool": adversarialResources.aBool,
-  "request.resource.attr.aString": adversarialResources.aString,
-  "request.resource.attr.aNumber": adversarialResources.aNumber,
-  "request.resource.attr.aDouble": adversarialResources.aDouble,
-  "request.resource.attr.aOptionalString": adversarialResources.aOptionalString,
-  "request.resource.attr.createdBy": adversarialResources.createdBy,
-  "request.resource.attr.scope": adversarialResources.scope,
-  "request.resource.attr.createdAt": {
-    column: adversarialResources.createdAt,
-    valueType: "timestamp",
-  },
-  "request.resource.attr.owner": adversarialResources.aOptionalString,
-  // obj.inner is not a real nested column — mirrors aString, same trick the spring-data
-  // and prisma reference harnesses use for the p-struct probe.
-  "request.resource.attr.obj.inner": adversarialResources.aString,
-  "request.resource.attr.tags": {
-    relation: {
-      type: "many",
-      table: adversarialTags,
-      sourceColumn: adversarialResources.id,
-      targetColumn: adversarialTags.resourceId,
-      field: adversarialTags.name,
-      fields: {
-        id: adversarialTags.tagId,
-        name: adversarialTags.name,
-      },
-    },
-  },
-  "request.resource.attr.tagNames": {
-    collectionValueType: "scalar",
-    relation: {
-      type: "many",
-      table: adversarialTags,
-      sourceColumn: adversarialResources.id,
-      targetColumn: adversarialTags.resourceId,
-      field: adversarialTags.name,
-    },
-  },
-  "request.resource.attr.categories": {
-    relation: {
-      type: "many",
-      table: adversarialCategories,
-      sourceColumn: adversarialResources.id,
-      targetColumn: adversarialCategories.resourceId,
-      fields: {
-        name: adversarialCategories.name,
-        subCategories: { relation: subCategoriesRelation },
-      },
-    },
-  },
-  // Multi-hop chain probe (W1): mainCategory mirrors the SAME categories/subCategories
-  // relation as a single-object dotted chain on the check side (every seed holds at most
-  // one category), pinning that the adapter joins through every intermediate hop, never
-  // off the root. subNames flattens the tail's name column for plain `in` membership.
-  "request.resource.attr.mainCategory": {
-    relation: {
-      type: "many",
-      table: adversarialCategories,
-      sourceColumn: adversarialResources.id,
-      targetColumn: adversarialCategories.resourceId,
-      fields: {
-        name: adversarialCategories.name,
-        subCategories: { relation: subCategoriesRelation },
-        subNames: { relation: subCategoriesRelation },
-      },
-    },
-  },
-};
-
-beforeAll(() => {
-  sqlite.exec(`
-    CREATE TABLE adversarial_resources (
-      id TEXT PRIMARY KEY,
-      a_bool INTEGER NOT NULL,
-      a_string TEXT NOT NULL,
-      a_number INTEGER NOT NULL,
-      a_double REAL,
-      a_optional_string TEXT,
-      created_by TEXT NOT NULL,
-      scope TEXT,
-      created_at TEXT
-    );
-    CREATE TABLE adversarial_tags (
-      tag_id TEXT PRIMARY KEY,
-      name TEXT,
-      resource_id TEXT NOT NULL
-    );
-    CREATE TABLE adversarial_categories (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      resource_id TEXT NOT NULL
-    );
-    CREATE TABLE adversarial_sub_categories (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      category_id TEXT NOT NULL
-    );
-    CREATE TABLE adversarial_labels (
-      id TEXT PRIMARY KEY,
-      name TEXT,
-      sub_category_id TEXT NOT NULL
-    );
-  `);
-
-  // Distinct category/sub-category graphs per seed so no rows share relations by accident.
   for (const seed of SEEDS) {
-    db.insert(adversarialResources)
-      .values({
-        id: seed.id,
-        aBool: seed.aBool,
-        aString: seed.aString,
-        aNumber: seed.aNumber,
-        aDouble: doubleFor(seed),
-        aOptionalString: seed.aOptionalString,
-        createdBy: isoFor(seed),
-        scope: scopeFor(seed),
-        createdAt: timestampFor(seed),
-      })
-      .run();
+    rows.resources.push({
+      id: seed.id,
+      aBool: seed.aBool,
+      aString: seed.aString,
+      aNumber: seed.aNumber,
+      aDouble: doubleFor(seed),
+      aOptionalString: seed.aOptionalString,
+      createdBy: isoFor(seed),
+      scope: scopeFor(seed),
+      createdAt: timestampFor(seed),
+    });
     for (const tag of seed.tags) {
-      db.insert(adversarialTags)
-        .values({ tagId: tag.id, name: tag.name, resourceId: seed.id })
-        .run();
+      rows.tags.push({ tagId: tag.id, name: tag.name, resourceId: seed.id });
     }
     seed.subCategoryNames.forEach((subName, index) => {
       const categoryId = `${seed.id}-cat-${index}`;
-      db.insert(adversarialCategories)
-        .values({ id: categoryId, name: "business", resourceId: seed.id })
-        .run();
-      db.insert(adversarialSubCategories)
-        .values({
-          id: `${categoryId}-sub`,
-          name: subName,
-          categoryId,
-        })
-        .run();
+      const subCategoryId = `${categoryId}-sub`;
+      rows.categories.push({
+        id: categoryId,
+        name: "business",
+        resourceId: seed.id,
+      });
+      rows.subCategories.push({
+        id: subCategoryId,
+        name: subName,
+        categoryId,
+      });
       labelsFor(seed).forEach((labelName, labelIndex) => {
-        db.insert(adversarialLabels)
-          .values({
-            id: `${categoryId}-label-${labelIndex}`,
-            name: labelName,
-            subCategoryId: `${categoryId}-sub`,
-          })
-          .run();
+        rows.labels.push({
+          id: `${categoryId}-label-${labelIndex}`,
+          name: labelName,
+          subCategoryId,
+        });
       });
     });
   }
-});
 
-afterAll(() => {
+  // A store inserts each list in one statement, and drizzle rejects an empty VALUES list — but
+  // the reason to assert it here is that an empty relation table would leave every collection
+  // macro trivially satisfied on both sides of the differential.
+  for (const [label, list] of Object.entries(rows)) {
+    if (list.length === 0) {
+      throw new Error(`seeds.json produced no ${label} rows`);
+    }
+  }
+
+  return rows;
+}
+
+// -- the schema, as the mapper sees it ----------------------------------------------------------
+//
+// Structural `AnyColumn`/`Table` views so ONE mapper definition serves every dialect: the SQLite
+// and PostgreSQL table objects differ in their column types, but the adapter only ever needs the
+// table and the column. Two hand-written mappers could drift, and a drifted mapper reads different
+// rows on one leg than the other — the same silent projection the corpus README warns about.
+
+interface AdversarialSchema {
+  resources: Table & {
+    id: AnyColumn;
+    aBool: AnyColumn;
+    aString: AnyColumn;
+    aNumber: AnyColumn;
+    aDouble: AnyColumn;
+    aOptionalString: AnyColumn;
+    createdBy: AnyColumn;
+    scope: AnyColumn;
+    createdAt: AnyColumn;
+  };
+  tags: Table & {
+    tagId: AnyColumn;
+    name: AnyColumn;
+    resourceId: AnyColumn;
+  };
+  categories: Table & { id: AnyColumn; name: AnyColumn; resourceId: AnyColumn };
+  subCategories: Table & {
+    id: AnyColumn;
+    name: AnyColumn;
+    categoryId: AnyColumn;
+  };
+  labels: Table & {
+    id: AnyColumn;
+    name: AnyColumn;
+    subCategoryId: AnyColumn;
+  };
+}
+
+function buildMapper(schema: AdversarialSchema): Record<string, MapperEntry> {
+  const labelsRelation: RelationMapping = {
+    type: "many",
+    table: schema.labels,
+    sourceColumn: schema.subCategories.id,
+    targetColumn: schema.labels.subCategoryId,
+    field: schema.labels.name,
+    fields: {
+      name: schema.labels.name,
+    },
+  };
+
+  const subCategoriesRelation: RelationMapping = {
+    type: "many",
+    table: schema.subCategories,
+    sourceColumn: schema.categories.id,
+    targetColumn: schema.subCategories.categoryId,
+    field: schema.subCategories.name,
+    fields: {
+      name: schema.subCategories.name,
+      labels: { relation: labelsRelation },
+    },
+  };
+
+  return {
+    "request.resource.attr.aBool": schema.resources.aBool,
+    "request.resource.attr.aString": schema.resources.aString,
+    "request.resource.attr.aNumber": schema.resources.aNumber,
+    "request.resource.attr.aDouble": schema.resources.aDouble,
+    "request.resource.attr.aOptionalString": schema.resources.aOptionalString,
+    "request.resource.attr.createdBy": schema.resources.createdBy,
+    "request.resource.attr.scope": schema.resources.scope,
+    "request.resource.attr.createdAt": {
+      column: schema.resources.createdAt,
+      valueType: "timestamp",
+    },
+    // `owner` and `coOwner` alias columns that `aOptionalString` and `scope` also map, under the
+    // OTHER null convention: the oracle sends a real null attribute for them rather than omitting
+    // it. Declaring that here is what makes the equality family definite for these two
+    // attributes and leaves it untouched for every other mapping.
+    "request.resource.attr.owner": {
+      column: schema.resources.aOptionalString,
+      nullAttributeRepresentation: "explicit",
+    },
+    "request.resource.attr.coOwner": {
+      column: schema.resources.scope,
+      nullAttributeRepresentation: "explicit",
+    },
+    // obj.inner is not a real nested column — mirrors aString, same trick the spring-data
+    // and prisma reference harnesses use for the p-struct probe.
+    "request.resource.attr.obj.inner": schema.resources.aString,
+    "request.resource.attr.tags": {
+      relation: {
+        type: "many",
+        table: schema.tags,
+        sourceColumn: schema.resources.id,
+        targetColumn: schema.tags.resourceId,
+        field: schema.tags.name,
+        fields: {
+          id: schema.tags.tagId,
+          name: schema.tags.name,
+        },
+      },
+    },
+    "request.resource.attr.tagNames": {
+      collectionValueType: "scalar",
+      relation: {
+        type: "many",
+        table: schema.tags,
+        sourceColumn: schema.resources.id,
+        targetColumn: schema.tags.resourceId,
+        field: schema.tags.name,
+      },
+    },
+    "request.resource.attr.categories": {
+      relation: {
+        type: "many",
+        table: schema.categories,
+        sourceColumn: schema.resources.id,
+        targetColumn: schema.categories.resourceId,
+        fields: {
+          name: schema.categories.name,
+          subCategories: { relation: subCategoriesRelation },
+        },
+      },
+    },
+    // Multi-hop chain probe (W1): mainCategory mirrors the SAME categories/subCategories
+    // relation as a single-object dotted chain on the check side (every seed holds at most
+    // one category), pinning that the adapter joins through every intermediate hop, never
+    // off the root. subNames flattens the tail's name column for plain `in` membership.
+    "request.resource.attr.mainCategory": {
+      relation: {
+        type: "many",
+        table: schema.categories,
+        sourceColumn: schema.resources.id,
+        targetColumn: schema.categories.resourceId,
+        fields: {
+          name: schema.categories.name,
+          subCategories: { relation: subCategoriesRelation },
+          subNames: { relation: subCategoriesRelation },
+        },
+      },
+    },
+  };
+}
+
+// -- store targets ------------------------------------------------------------------------------
+
+const STORE_NAMES = ["sqlite", "postgres"] as const;
+type StoreName = (typeof STORE_NAMES)[number];
+
+/**
+ * One database the whole corpus is replayed against. `start` creates the schema and seeds it;
+ * `selectIds` runs the translated filter and returns the ids it selects, sorted.
+ */
+interface AdversarialStore {
+  readonly name: StoreName;
+  readonly mapper: Record<string, MapperEntry>;
+  start(): Promise<void>;
+  stop(): Promise<void>;
+  selectIds(filter: SQL | undefined): Promise<string[]>;
+  /** The engine's own banner, asked of the connection the suite actually queries through. */
+  serverBanner(): Promise<string>;
+}
+
+function sqliteStore(): AdversarialStore {
+  const resources = sqliteTable("adversarial_resources", {
+    id: text("id").primaryKey(),
+    aBool: integer("a_bool", { mode: "boolean" }).notNull(),
+    aString: text("a_string").notNull(),
+    aNumber: integer("a_number").notNull(),
+    aDouble: real("a_double"),
+    aOptionalString: text("a_optional_string"),
+    createdBy: text("created_by").notNull(),
+    scope: text("scope"),
+    createdAt: text("created_at"),
+  });
+
+  const tags = sqliteTable("adversarial_tags", {
+    tagId: text("tag_id").primaryKey(),
+    // NULLABLE on purpose: a NULL tag name is a missing element attribute on the check
+    // side (a CEL error → deny) and must stay UNKNOWN — never FALSE — in SQL.
+    name: text("name"),
+    resourceId: text("resource_id").notNull(),
+  });
+
+  const categories = sqliteTable("adversarial_categories", {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    resourceId: text("resource_id").notNull(),
+  });
+
+  const subCategories = sqliteTable("adversarial_sub_categories", {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    categoryId: text("category_id").notNull(),
+  });
+
+  const labels = sqliteTable("adversarial_labels", {
+    id: text("id").primaryKey(),
+    name: text("name"),
+    subCategoryId: text("sub_category_id").notNull(),
+  });
+
+  // Dedicated file (adversarial.db, gitignored) rather than :memory:, so a failing run leaves
+  // the seeded rows behind to inspect.
+  const dbPath = path.join(__dirname, "..", "adversarial.db");
+  fs.rmSync(dbPath, { force: true });
+  const sqlite = new Database(dbPath);
+  const db = drizzleSqlite(sqlite);
+
+  return {
+    name: "sqlite",
+    mapper: buildMapper({ resources, tags, categories, subCategories, labels }),
+
+    async start(): Promise<void> {
+      sqlite.exec(`
+        CREATE TABLE adversarial_resources (
+          id TEXT PRIMARY KEY,
+          a_bool INTEGER NOT NULL,
+          a_string TEXT NOT NULL,
+          a_number INTEGER NOT NULL,
+          a_double REAL,
+          a_optional_string TEXT,
+          created_by TEXT NOT NULL,
+          scope TEXT,
+          created_at TEXT
+        );
+        CREATE TABLE adversarial_tags (
+          tag_id TEXT PRIMARY KEY,
+          name TEXT,
+          resource_id TEXT NOT NULL
+        );
+        CREATE TABLE adversarial_categories (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          resource_id TEXT NOT NULL
+        );
+        CREATE TABLE adversarial_sub_categories (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          category_id TEXT NOT NULL
+        );
+        CREATE TABLE adversarial_labels (
+          id TEXT PRIMARY KEY,
+          name TEXT,
+          sub_category_id TEXT NOT NULL
+        );
+      `);
+
+      const rows = seedRows();
+      db.insert(resources).values(rows.resources).run();
+      db.insert(tags).values(rows.tags).run();
+      db.insert(categories).values(rows.categories).run();
+      db.insert(subCategories).values(rows.subCategories).run();
+      db.insert(labels).values(rows.labels).run();
+    },
+
+    async stop(): Promise<void> {
+      sqlite.close();
+    },
+
+    async selectIds(filter: SQL | undefined): Promise<string[]> {
+      const selected = db
+        .select({ id: resources.id })
+        .from(resources)
+        .where(filter)
+        .all();
+      return selected.map((row) => row.id).sort();
+    },
+
+    async serverBanner(): Promise<string> {
+      const row = sqlite.prepare("select sqlite_version() as version").get();
+      return `SQLite ${(row as { version: string }).version}`;
+    },
+  };
+}
+
+/**
+ * Mirrors the ent harness's PostgreSQL target so both adapters prove the same server.
+ *
+ * Pinned by tag AND digest: a tag is mutable, so a tag-only pin records an intent rather than a
+ * build, and this leg exists to prove typed-column behaviour a re-pushed image could change under
+ * it. `conformance/scripts/validate-corpus.sh` asserts every service image reference in the
+ * repository carries both halves.
+ */
+const POSTGRES_IMAGE =
+  "postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193";
+
+/**
+ * The PostgreSQL leg (cerbos/query-plan-adapters#320).
+ *
+ * The column types are the point: `boolean` and `timestamptz` exercise the typed paths SQLite
+ * cannot reach — on SQLite a boolean is an integer and a timestamp is text compared
+ * lexicographically, so a CASE arm yielding `1` instead of `true`, or a timestamp bound in a
+ * layout only string comparison tolerates, passes there and fails here. PostgreSQL also raises on
+ * division by zero where SQLite returns NULL, which is what proves the adapter's IEEE CASE arms
+ * guard the division rather than merely reshaping its NULL.
+ *
+ * The default collation the image initialises with is left alone: PostgreSQL collations are
+ * deterministic, so `=` stays byte-exact and matches CEL string equality. (MySQL's default is
+ * case-insensitive, which is why the ent harness has to pin a binary collation there.)
+ */
+function postgresStore(): AdversarialStore {
+  const resources = pgTable("adversarial_resources", {
+    id: pgText("id").primaryKey(),
+    aBool: boolean("a_bool").notNull(),
+    aString: pgText("a_string").notNull(),
+    aNumber: pgInteger("a_number").notNull(),
+    aDouble: doublePrecision("a_double"),
+    aOptionalString: pgText("a_optional_string"),
+    createdBy: pgText("created_by").notNull(),
+    scope: pgText("scope"),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
+  });
+
+  const tags = pgTable("adversarial_tags", {
+    tagId: pgText("tag_id").primaryKey(),
+    // NULLABLE on purpose: a NULL tag name is a missing element attribute on the check
+    // side (a CEL error → deny) and must stay UNKNOWN — never FALSE — in SQL.
+    name: pgText("name"),
+    resourceId: pgText("resource_id").notNull(),
+  });
+
+  const categories = pgTable("adversarial_categories", {
+    id: pgText("id").primaryKey(),
+    name: pgText("name").notNull(),
+    resourceId: pgText("resource_id").notNull(),
+  });
+
+  const subCategories = pgTable("adversarial_sub_categories", {
+    id: pgText("id").primaryKey(),
+    name: pgText("name").notNull(),
+    categoryId: pgText("category_id").notNull(),
+  });
+
+  const labels = pgTable("adversarial_labels", {
+    id: pgText("id").primaryKey(),
+    name: pgText("name"),
+    subCategoryId: pgText("sub_category_id").notNull(),
+  });
+
+  let container: StartedPostgreSqlContainer | undefined;
+  let pool: Pool | undefined;
+  let db: ReturnType<typeof drizzlePostgres> | undefined;
+
+  const connected = (): NonNullable<typeof db> => {
+    if (!db) {
+      throw new Error("PostgreSQL store used before start()");
+    }
+    return db;
+  };
+
+  return {
+    name: "postgres",
+    mapper: buildMapper({ resources, tags, categories, subCategories, labels }),
+
+    async start(): Promise<void> {
+      container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
+      pool = new Pool({ connectionString: container.getConnectionUri() });
+      db = drizzlePostgres(pool);
+
+      await db.execute(sql`
+        CREATE TABLE adversarial_resources (
+          id                 text PRIMARY KEY,
+          a_bool             boolean NOT NULL,
+          a_string           text NOT NULL,
+          a_number           integer NOT NULL,
+          a_double           double precision,
+          a_optional_string  text,
+          created_by         text NOT NULL,
+          scope              text,
+          created_at         timestamptz
+        );
+        CREATE TABLE adversarial_tags (
+          tag_id       text PRIMARY KEY,
+          name         text,
+          resource_id  text NOT NULL REFERENCES adversarial_resources(id)
+        );
+        CREATE TABLE adversarial_categories (
+          id           text PRIMARY KEY,
+          name         text NOT NULL,
+          resource_id  text NOT NULL REFERENCES adversarial_resources(id)
+        );
+        CREATE TABLE adversarial_sub_categories (
+          id           text PRIMARY KEY,
+          name         text NOT NULL,
+          category_id  text NOT NULL REFERENCES adversarial_categories(id)
+        );
+        CREATE TABLE adversarial_labels (
+          id               text PRIMARY KEY,
+          name             text,
+          sub_category_id  text NOT NULL REFERENCES adversarial_sub_categories(id)
+        );
+      `);
+
+      const rows = seedRows();
+      await db.insert(resources).values(rows.resources);
+      await db.insert(tags).values(rows.tags);
+      await db.insert(categories).values(rows.categories);
+      await db.insert(subCategories).values(rows.subCategories);
+      await db.insert(labels).values(rows.labels);
+    },
+
+    async stop(): Promise<void> {
+      await pool?.end();
+      await container?.stop();
+    },
+
+    async selectIds(filter: SQL | undefined): Promise<string[]> {
+      const selected = await connected()
+        .select({ id: resources.id })
+        .from(resources)
+        .where(filter);
+      return selected.map((row) => row.id).sort();
+    },
+
+    async serverBanner(): Promise<string> {
+      const result = await connected().execute<{ version: string }>(
+        sql`select version() as version`
+      );
+      return result.rows[0]?.version ?? "";
+    },
+  };
+}
+
+/** Container start dominates the PostgreSQL leg's setup; the SQLite leg finishes instantly. */
+const STORE_STARTUP_TIMEOUT_MS = 180_000;
+
+function selectedStoreName(): StoreName {
+  const requested = process.env["ADAPTER_TEST_DB"] ?? "sqlite";
+  // A typo must fail rather than silently fall back to SQLite: a CI leg that believes it is
+  // proving PostgreSQL while replaying SQLite is exactly the coverage gap this leg closes.
+  if (!STORE_NAMES.includes(requested as StoreName)) {
+    throw new Error(
+      `Unknown ADAPTER_TEST_DB "${requested}": expected one of ${STORE_NAMES.join(", ")}`
+    );
+  }
+  return requested as StoreName;
+}
+
+const STORE_NAME = selectedStoreName();
+const store: AdversarialStore =
+  STORE_NAME === "postgres" ? postgresStore() : sqliteStore();
+const MAPPER = store.mapper;
+
+/**
+ * The same mapper with every per-attribute null convention stripped, so the call-level option is
+ * the only thing governing null operands.
+ *
+ * The #302 completeness guard is a statement about that option: every corpus action carrying a
+ * null literal must be rejected under `"omitted"`. Declaring `owner`/`coOwner` as explicit-null
+ * (#308) deliberately overrides the option for those two attributes — which would otherwise read
+ * as the guard going quiet, when in fact it is the per-attribute declaration doing exactly its
+ * job. Stripping the declarations keeps the guard testing what it was written to test.
+ */
+const MAPPER_WITHOUT_NULL_CONVENTIONS: Record<string, MapperEntry> =
+  Object.fromEntries(
+    Object.entries(MAPPER).map(([reference, entry]) => {
+      if (
+        typeof entry !== "object" ||
+        entry === null ||
+        !("nullAttributeRepresentation" in entry)
+      ) {
+        return [reference, entry];
+      }
+      const { nullAttributeRepresentation: _stripped, ...rest } = entry;
+      return [reference, rest as MapperEntry];
+    })
+  );
+
+beforeAll(async () => {
+  await store.start();
+}, STORE_STARTUP_TIMEOUT_MS);
+
+afterAll(async () => {
   cerbos.close();
-  sqlite.close();
-});
+  await store.stop();
+}, STORE_STARTUP_TIMEOUT_MS);
 
 function principal(): Principal {
   return seedsFile.principal;
@@ -624,6 +1024,10 @@ function asCheckResource(seed: Seed): Resource {
     aNumber: seed.aNumber,
     createdBy: isoFor(seed),
     owner: seed.aOptionalString,
+    // The explicit-null alias of the `scope` column, the second half of `null-value-f2f`:
+    // `scope` itself is omitted when NULL (below), so the corpus carries the same column under
+    // both conventions and the field-to-field probe has two explicit nulls to compare.
+    coOwner: scopeFor(seed),
     obj: { inner: seed.aString },
     tags: seed.tags.map(asTagAttribute),
     tagNames: seed.tags.map((tag) => tag.name),
@@ -699,7 +1103,8 @@ async function expectNonDegenerateOracle(action: string): Promise<void> {
 
 async function adapterFilteredIds(
   action: string,
-  nullAttributeRepresentation: "explicit" | "omitted" = "explicit"
+  nullAttributeRepresentation: "explicit" | "omitted" = "explicit",
+  mapper: Record<string, MapperEntry> = MAPPER
 ): Promise<string[]> {
   const queryPlan = await cerbos.planResources({
     principal: principal(),
@@ -708,20 +1113,15 @@ async function adapterFilteredIds(
   });
   const result = queryPlanToDrizzle({
     queryPlan,
-    mapper: MAPPER,
+    mapper,
     nullAttributeRepresentation,
   });
   if (result.kind === PlanKind.ALWAYS_DENIED) {
     return [];
   }
-  const baseQuery = db
-    .select({ id: adversarialResources.id })
-    .from(adversarialResources);
-  const rows =
-    result.kind === PlanKind.CONDITIONAL
-      ? baseQuery.where(result.filter).all()
-      : baseQuery.all();
-  return rows.map((row) => row.id).sort();
+  return store.selectIds(
+    result.kind === PlanKind.CONDITIONAL ? result.filter : undefined
+  );
 }
 
 /** Whether any operand anywhere in the plan is a literal null, or a list containing one. */
@@ -736,7 +1136,18 @@ function planCarriesNullLiteral(operand: unknown): boolean {
   return Array.isArray(operands) && operands.some(planCarriesNullLiteral);
 }
 
-describe("adversarial conformance corpus", () => {
+describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
+  // Anti-vacuity for the store split: every other assertion in this file is identical on both
+  // legs, so a PostgreSQL leg that silently fell back to SQLite would pass the entire suite while
+  // proving nothing about PostgreSQL — the exact gap #320 reports. Ask the connection the suite
+  // actually queries through which engine it is.
+  test("executes against the store ADAPTER_TEST_DB selects", async () => {
+    const banner = await store.serverBanner();
+    expect({ store: store.name, engine: banner.split(" ")[0] }).toEqual({
+      store: STORE_NAME,
+      engine: STORE_NAME === "postgres" ? "PostgreSQL" : "SQLite",
+    });
+  });
 
   // Adding a throwing action without pinning its message must fail this harness rather than
   // silently degrade the throw suite to a bare "it threw" (cerbos/query-plan-adapters#326).
@@ -764,11 +1175,11 @@ describe("adversarial conformance corpus", () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(143);
+    expect(MANIFEST_ACTIONS.size).toBe(152);
     expect(NULL_REPRESENTATION_OMITTED).toHaveLength(1);
     // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
     // gained or lost has to be re-triaged here rather than joining the suite unnoticed.
-    expect(THROWING_ACTIONS).toHaveLength(10);
+    expect(THROWING_ACTIONS).toHaveLength(11);
     expect(misclassified).toEqual([]);
     expect(
       [...DRIZZLE_SUPPORTED_EXPECTED].filter(
@@ -836,6 +1247,24 @@ describe("adversarial conformance corpus", () => {
     }
   );
 
+  // #308. The per-attribute declaration overrides the call-level option, which is the property
+  // that makes a suite mixing both conventions expressible at all. Asserted in both directions
+  // against the SAME action and the SAME call-level option, varying only whether the mapper
+  // declares the convention — so a declaration that did nothing would show up here as the two
+  // runs agreeing.
+  test("a per-attribute declaration overrides the call-level representation", async () => {
+    // `owner` declares "explicit", so the call-level "omitted" does not reach it.
+    await expect(
+      adapterFilteredIds("null-eq", "omitted")
+    ).resolves.toEqual(await oracleAllowedIds("null-eq"));
+
+    // Strip the declaration and the same action under the same option is rejected — so the
+    // stripped mapper the completeness guard below uses is not quietly equivalent to MAPPER.
+    await expect(
+      adapterFilteredIds("null-eq", "omitted", MAPPER_WITHOUT_NULL_CONVENTIONS)
+    ).rejects.toThrow(NULL_OMITTED_MESSAGE);
+  });
+
   // #302 completeness guard. The rejection must key off the null OPERAND, not off a list of
   // operators: `hasIntersection(tagNames, ["public", null])` carries one in its value list, and
   // an allowlist of eq/ne/in silently misses it. Enumerating the corpus rather than naming
@@ -863,7 +1292,11 @@ describe("adversarial conformance corpus", () => {
     const notRejected: string[] = [];
     for (const action of nullCarrying) {
       try {
-        await adapterFilteredIds(action, "omitted");
+        await adapterFilteredIds(
+          action,
+          "omitted",
+          MAPPER_WITHOUT_NULL_CONVENTIONS
+        );
         notRejected.push(action);
       } catch (error) {
         // The rejection must be the null-operand check talking, not an incidental failure — a
@@ -912,7 +1345,9 @@ describe("adversarial conformance corpus", () => {
     const negate = (condition: PlanExpressionOperand) =>
       new PlanExpression("not", [condition]);
 
-    const filteredIdsFor = (condition: PlanExpressionOperand): string[] => {
+    const filteredIdsFor = async (
+      condition: PlanExpressionOperand
+    ): Promise<string[]> => {
       const result = queryPlanToDrizzle({
         queryPlan: {
           kind: PlanKind.CONDITIONAL,
@@ -925,12 +1360,9 @@ describe("adversarial conformance corpus", () => {
         mapper: MAPPER,
       });
       expect(result.kind).toBe(PlanKind.CONDITIONAL);
-      const rows = db
-        .select({ id: adversarialResources.id })
-        .from(adversarialResources)
-        .where(result.kind === PlanKind.CONDITIONAL ? result.filter : undefined)
-        .all();
-      return rows.map((row) => row.id).sort();
+      return store.selectIds(
+        result.kind === PlanKind.CONDITIONAL ? result.filter : undefined
+      );
     };
 
     // Every seed that HAS a mainCategory holds at least one subCategory, and the 16 without
@@ -945,7 +1377,7 @@ describe("adversarial conformance corpus", () => {
     ];
 
     for (const [shape, condition] of emptyByConstruction) {
-      expect([shape, filteredIdsFor(condition)]).toEqual([shape, []]);
+      expect([shape, await filteredIdsFor(condition)]).toEqual([shape, []]);
     }
 
     // The mirror image, so the loop above cannot pass by denying everything: `>= 0` and `< 2`
@@ -953,8 +1385,8 @@ describe("adversarial conformance corpus", () => {
     const withParent = await oracleAllowedIds("w1-size-nonneg-chain");
     expect(withParent.length).toBeGreaterThan(0);
     expect(withParent.length).toBeLessThan(SEEDS.length);
-    expect(filteredIdsFor(compare("ge", 0))).toEqual(withParent);
-    expect(filteredIdsFor(compare("lt", 2))).toEqual(withParent);
+    expect(await filteredIdsFor(compare("ge", 0))).toEqual(withParent);
+    expect(await filteredIdsFor(compare("lt", 2))).toEqual(withParent);
   });
 
   test("oracle is not degenerate", async () => {

@@ -28,11 +28,70 @@ import { prisma } from "./test-setup.adversarial";
  * evaluation for any row, the mismatch surfaces mechanically. See `conformance/README.md` for the
  * oracle recipe (NULL-as-missing-attribute, the degeneracy guard) — this file only owns the
  * Prisma-specific translation (seeding, field mapping, executing the query).
+ *
+ * The whole corpus is replayed against every store this adapter is proved on, one store per run,
+ * selected with `ADAPTER_TEST_DB` (`sqlite` by default, `postgres` for the container-backed leg —
+ * see `jest.globalSetup.adversarial.js`). The Prisma major and the store are independent
+ * dimensions: v6/v7 is an ENGINE matrix, and an engine matrix says nothing about how a provider
+ * coerces a fractional threshold against an `Int` column, escapes a LIKE metacharacter, or
+ * compares a real `timestamp` rather than milliseconds since the epoch
+ * (cerbos/query-plan-adapters#320).
  */
 
 const cerbos = new Cerbos("127.0.0.1:3593", { tls: false });
 
 const CONFORMANCE_DIR = path.join(__dirname, "..", "..", "conformance");
+const SCHEMA_DIR = path.join(__dirname, "..", "prisma");
+
+const STORE_NAMES = ["sqlite", "postgres"] as const;
+type StoreName = (typeof STORE_NAMES)[number];
+
+function selectedStoreName(): StoreName {
+  const requested = process.env["ADAPTER_TEST_DB"] ?? "sqlite";
+  // jest.adversarial.config.js rejects an unknown value before jest resolves this module; the
+  // repeat here is what keeps the assertion below reading against a value this file trusts.
+  if (!STORE_NAMES.includes(requested as StoreName)) {
+    throw new Error(
+      `Unknown ADAPTER_TEST_DB "${requested}": expected one of ${STORE_NAMES.join(", ")}`
+    );
+  }
+  return requested as StoreName;
+}
+
+const STORE_NAME = selectedStoreName();
+
+/**
+ * The four adversarial schemas, which must hold one data model between them.
+ *
+ * A generated Prisma client bakes in its provider and its major, so proving the corpus on
+ * (Prisma 6, Prisma 7) x (SQLite, PostgreSQL) needs four schema files. They are only a matrix
+ * over the same models — a column that drifts in one of them would seed a different row shape on
+ * that leg while every assertion in this file stayed identical, which is the projection trap
+ * conformance/README.md describes applied to the schema instead of the seeds.
+ */
+const ADVERSARIAL_SCHEMAS = [
+  "schema.adversarial.prisma",
+  "schema.adversarial.v6.prisma",
+  "schema.adversarial.pg.prisma",
+  "schema.adversarial.pg.v6.prisma",
+] as const;
+
+/**
+ * A schema's `model` blocks, with comments, the generator/datasource blocks and all incidental
+ * whitespace removed — everything that legitimately differs between the four.
+ */
+function modelBlocks(schema: string): string {
+  const withoutComments = schema
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("//"))
+    .join("\n");
+  const models = withoutComments.match(/^model\s[\s\S]*$/m) ?? [];
+  return models
+    .join("\n")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n\s*\n/g, "\n")
+    .trim();
+}
 
 interface Tag {
   id: string;
@@ -321,26 +380,37 @@ const MANIFEST_ACTIONS = new Set([
 // can express. The two lists are asserted to be complements of `ORACLE_ACTIONS`, so neither can
 // drift into the other unnoticed.
 //
-// w1-size-zero-chain, w1-not-size-chain and the two string-cast actions are deliberately absent
-// from both lists: their oracles are empty by CONSTRUCTION (no seed holds a to-one parent with
-// zero children; every seed's aString raises in int()/double()), so they cannot satisfy a
-// non-empty assertion.
+// w1-size-zero-chain, w1-not-size-chain, w1-size-frac-chain and the two string-cast actions are
+// deliberately absent from both lists: their oracles are empty by CONSTRUCTION (no seed holds a
+// to-one parent with zero children, nor one with two or more; every seed's aString raises in
+// int()/double()), so they cannot satisfy a non-empty assertion.
 
 const DEGENERACY_GUARD_ACTIONS = [
   "vf-le",
-  // Prisma cannot express the % needle (see the liveness probe below), so the LIKE
-  // metacharacter group is guarded by the escape spelling it does translate.
-  "like-backslash",
+  // Prisma escapes no LIKE metacharacter at all, so every needle-carrying shape in that group is
+  // a liveness probe below. `[` is the one metacharacter it can leave alone — it is literal on
+  // every provider but SQL Server, which Prisma's own guard only rejects for hierarchy prefixes —
+  // so like-bracket is what carries the group's oracle comparison.
+  "like-bracket",
   "all-on-empty",
   "pv-exists",
   "pv-all",
   "null-eq",
   "null-ne",
-  // The absent to-one parent (#309/#315/#316): the three discriminating chain shapes Prisma
-  // translates. Its two unsupported siblings are liveness probes below.
+  // The explicit-null convention against a non-null operand (#308). All five are compared rather
+  // than thrown, because the mapper declares the convention per attribute; every one of them
+  // under-granted by exactly the NULL-column rows before that declaration existed.
+  "null-value-ne-const",
+  "null-value-not-eq-const",
+  "null-value-not-in-const",
+  "null-value-f2f",
+  "null-value-pv-not-exists",
+  // The absent to-one parent (#309/#315/#316/#334): the four discriminating chain shapes Prisma
+  // translates. Its unsupported siblings are liveness probes below.
   "w1-not-exists-chain",
   "w1-not-in-chain",
   "w1-not-hasint-chain",
+  "w1-ternary-chain-cond",
 ] as const;
 
 /**
@@ -349,12 +419,16 @@ const DEGENERACY_GUARD_ACTIONS = [
  * cerbos/query-plan-adapters#324.
  */
 const DEGENERACY_LIVENESS_PROBES = [
-  // Prisma emits LIKE with no ESCAPE clause, so a % needle throws.
+  // Prisma emits LIKE with no ESCAPE clause, so a % needle throws — and so does a backslash one,
+  // which is the default escape character on PostgreSQL and MySQL and literal on SQLite
+  // (cerbos/query-plan-adapters#320).
   "like-percent",
-  // every() cannot require the intermediate hop of a chain, and a >= 0 relation count has no
-  // none/some spelling — the two chain shapes Prisma throws on.
+  "like-backslash",
+  // every() cannot require the intermediate hop of a chain, and no relation count with an
+  // arbitrary threshold — >= 0 or a rounded fractional one — has a none/some spelling.
   "w1-all-chain",
   "w1-size-nonneg-chain",
+  "w1-size-frac-le-chain",
   // Prisma filters have no column arithmetic, so the whole cr-div group (#311) throws.
   "cr-div-neg-zero",
   // int() over a numeric column: truncation-versus-rounding, unsupported for every adapter but
@@ -398,6 +472,27 @@ function scopeFor(seed: Seed): string | null {
   return derivedFor(seed).scope;
 }
 
+/**
+ * The same mapper with every per-attribute null convention stripped, so the call-level option is
+ * the only thing governing null operands.
+ *
+ * The #302 completeness guard is a statement about that option: every corpus action carrying a
+ * null literal must be rejected under `"omitted"`. Declaring `owner`/`coOwner` as explicit-null
+ * (#308) deliberately overrides the option for those two attributes — which would otherwise read
+ * as the guard going quiet, when in fact it is the per-attribute declaration doing exactly its
+ * job. Stripping the declarations keeps the guard testing what it was written to test.
+ */
+function withoutNullConventions(
+  mapper: Record<string, MapperConfig>
+): Record<string, MapperConfig> {
+  return Object.fromEntries(
+    Object.entries(mapper).map(([reference, config]) => {
+      const { nullAttributeRepresentation: _stripped, ...rest } = config;
+      return [reference, rest];
+    })
+  );
+}
+
 const MAPPER: Record<string, MapperConfig> = {
   "request.resource.attr.aBool": { field: "aBool" },
   "request.resource.attr.aString": { field: "aString" },
@@ -410,9 +505,19 @@ const MAPPER: Record<string, MapperConfig> = {
     field: "createdAt",
     valueType: "dateTime",
   },
+  // `owner` and `coOwner` alias columns that `aOptionalString` and `scope` also map, under the
+  // OTHER null convention: the oracle sends a real null attribute for them rather than omitting
+  // it. Declaring that here is what makes the equality family definite for these two attributes
+  // and leaves it untouched for every other mapping (cerbos/query-plan-adapters#308).
   "request.resource.attr.owner": {
     field: "aOptionalString",
     nullable: true,
+    nullAttributeRepresentation: "explicit",
+  },
+  "request.resource.attr.coOwner": {
+    field: "scope",
+    nullable: true,
+    nullAttributeRepresentation: "explicit",
   },
   // obj.inner is not a real nested column — mirrors aString, same trick the spring-data
   // reference harness uses for the p-struct probe.
@@ -497,6 +602,8 @@ const MAPPER: Record<string, MapperConfig> = {
   },
 };
 
+const MAPPER_WITHOUT_NULL_CONVENTIONS = withoutNullConventions(MAPPER);
+
 beforeAll(async () => {
   await prisma.adversarialLabel.deleteMany();
   await prisma.adversarialSubCategory.deleteMany();
@@ -565,6 +672,10 @@ function asCheckResource(seed: Seed): Resource {
     aNumber: seed.aNumber,
     createdBy: isoFor(seed),
     owner: seed.aOptionalString,
+    // The explicit-null alias of the `scope` column, the second half of `null-value-f2f`:
+    // `scope` itself is omitted when NULL (below), so the corpus carries the same column under
+    // both conventions and the field-to-field probe has two explicit nulls to compare.
+    coOwner: scopeFor(seed),
     tagNames: seed.tags.map((tag) => tag.name),
     obj: { inner: seed.aString },
     tags: seed.tags.map(asTagAttribute),
@@ -642,7 +753,8 @@ async function expectNonDegenerateOracle(action: string): Promise<void> {
 
 async function adapterFilteredIds(
   action: string,
-  nullAttributeRepresentation: "explicit" | "omitted" = "explicit"
+  nullAttributeRepresentation: "explicit" | "omitted" = "explicit",
+  mapper: Record<string, MapperConfig> = MAPPER
 ): Promise<string[]> {
   const queryPlan = await cerbos.planResources({
     principal: principal(),
@@ -651,7 +763,7 @@ async function adapterFilteredIds(
   });
   const result = queryPlanToPrisma({
     queryPlan,
-    mapper: MAPPER,
+    mapper,
     model: "AdversarialResource",
     nullAttributeRepresentation,
   });
@@ -678,7 +790,44 @@ function planCarriesNullLiteral(operand: unknown): boolean {
   return Array.isArray(operands) && operands.some(planCarriesNullLiteral);
 }
 
-describe("adversarial conformance corpus", () => {
+describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
+  // Anti-vacuity for the store split: every other assertion in this file is identical on both
+  // legs, so a PostgreSQL leg that silently fell back to SQLite would pass the entire suite while
+  // proving nothing about PostgreSQL — the exact gap #320 reports. Ask the connection the suite
+  // actually queries through which engine it is. Each spelling is rejected by the other engine, so
+  // this fails in both directions rather than only when the container is missing.
+  test("executes against the store ADAPTER_TEST_DB selects", async () => {
+    const rows = await prisma.$queryRawUnsafe<{ banner: string }[]>(
+      STORE_NAME === "postgres"
+        ? "select version() as banner"
+        : "select 'SQLite ' || sqlite_version() as banner"
+    );
+    expect(rows[0]?.banner?.split(" ")[0]).toBe(
+      STORE_NAME === "postgres" ? "PostgreSQL" : "SQLite"
+    );
+  });
+
+  test("every adversarial schema declares the same data model", () => {
+    const [reference, ...rest] = ADVERSARIAL_SCHEMAS.map((name) => ({
+      name,
+      models: modelBlocks(
+        fs.readFileSync(path.join(SCHEMA_DIR, name), "utf8")
+      ),
+    }));
+    if (!reference) {
+      throw new Error("ADVERSARIAL_SCHEMAS is empty");
+    }
+    // Guard the guard: a regex that stopped matching would make every schema compare equal on an
+    // empty string.
+    expect(reference.models).toContain("model AdversarialResource");
+    for (const schema of rest) {
+      expect({ name: schema.name, models: schema.models }).toEqual({
+        name: schema.name,
+        models: reference.models,
+      });
+    }
+  });
+
   test("adapter-supported expected shapes move from throwing to oracle", () => {
     const promotedAction = "promoted-shape";
     const classification = classifyActionsForAdapter(
@@ -725,7 +874,7 @@ describe("adversarial conformance corpus", () => {
     expect(classify).toThrow(/pins no throw message/);
   });
 
-  test("manifest assigns all 143 policy actions exactly one Prisma outcome", () => {
+  test("manifest assigns all 146 policy actions exactly one Prisma outcome", () => {
     const oracle = new Set(ORACLE_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map(([action]) => action));
     const nullOmitted = new Set(
@@ -741,10 +890,10 @@ describe("adversarial conformance corpus", () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(143);
+    expect(MANIFEST_ACTIONS.size).toBe(152);
     // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
     // gained or lost has to be re-triaged here rather than joining the suite unnoticed.
-    expect(THROWING_ACTIONS).toHaveLength(47);
+    expect(THROWING_ACTIONS).toHaveLength(51);
     expect(misclassified).toEqual([]);
     expect(
       [...PRISMA_SUPPORTED_EXPECTED].filter(
@@ -814,6 +963,24 @@ describe("adversarial conformance corpus", () => {
     }
   );
 
+  // #308. The per-attribute declaration overrides the call-level option, which is the property
+  // that makes a suite mixing both conventions expressible at all. Asserted in both directions
+  // against the SAME action and the SAME call-level option, varying only whether the mapper
+  // declares the convention — so a declaration that did nothing would show up here as the two
+  // runs agreeing.
+  test("a per-attribute declaration overrides the call-level representation", async () => {
+    // `owner` declares "explicit", so the call-level "omitted" does not reach it.
+    await expect(adapterFilteredIds("null-eq", "omitted")).resolves.toEqual(
+      await oracleAllowedIds("null-eq")
+    );
+
+    // Strip the declaration and the same action under the same option is rejected — so the
+    // stripped mapper the completeness guard below uses is not quietly equivalent to MAPPER.
+    await expect(
+      adapterFilteredIds("null-eq", "omitted", MAPPER_WITHOUT_NULL_CONVENTIONS)
+    ).rejects.toThrow(NULL_OMITTED_MESSAGE);
+  });
+
   // #302 completeness guard. The rejection must key off the null OPERAND, not off a list of
   // operators: `hasIntersection(tagNames, ["public", null])` carries one in its value list, and
   // an allowlist of eq/ne/in silently misses it. Enumerating the corpus rather than naming
@@ -841,7 +1008,11 @@ describe("adversarial conformance corpus", () => {
     const notRejected: string[] = [];
     for (const action of nullCarrying) {
       try {
-        await adapterFilteredIds(action, "omitted");
+        await adapterFilteredIds(
+          action,
+          "omitted",
+          MAPPER_WITHOUT_NULL_CONVENTIONS
+        );
         notRejected.push(action);
       } catch (error) {
         // The rejection must be the null-operand check talking, not an incidental failure — a
@@ -936,6 +1107,96 @@ describe("adversarial conformance corpus", () => {
     expect(withParent.length).toBeLessThan(SEEDS.length);
     expect(await filteredIdsFor(negate(compare("eq", 0)))).toEqual(withParent);
     expect(await filteredIdsFor(negate(compare("lt", 1)))).toEqual(withParent);
+  });
+
+  // The corpus pins ONE ternary whose condition reaches a chain — `w1-ternary-chain-cond`, whose
+  // else-branch is a bare `!aBool`. The guard has to be a property of the ternary's false-branch
+  // rather than of that one spelling, so these synthesise the other condition positions onto the
+  // same seeded store (cerbos/query-plan-adapters#334). Each expectation is a real check() oracle,
+  // never a hand-computed row list.
+  test("every ternary condition over the chain inherits the absent-parent guard", async () => {
+    const chainIn = new PlanExpression("in", [
+      new PlanExpressionValue("finance"),
+      new PlanExpressionVariable("request.resource.attr.mainCategory.subNames"),
+    ]);
+    const TRUE = new PlanExpressionValue(true);
+    const FALSE = new PlanExpressionValue(false);
+    const ternary = (
+      condition: PlanExpressionOperand,
+      thenBranch: PlanExpressionOperand,
+      elseBranch: PlanExpressionOperand
+    ) => new PlanExpression("if", [condition, thenBranch, elseBranch]);
+
+    const filteredIdsFor = async (
+      condition: PlanExpressionOperand
+    ): Promise<string[]> => {
+      const result = queryPlanToPrisma({
+        queryPlan: {
+          kind: PlanKind.CONDITIONAL,
+          condition,
+          cerbosCallId: "synthetic",
+          requestId: "synthetic",
+          validationErrors: [],
+          metadata: undefined,
+        },
+        mapper: MAPPER,
+        model: "AdversarialResource",
+      });
+      expect(result.kind).toBe(PlanKind.CONDITIONAL);
+      const where = result.kind === PlanKind.CONDITIONAL ? result.filters : {};
+      const rows = await prisma.adversarialResource.findMany({
+        where,
+        select: { id: true },
+      });
+      return rows.map((row) => row.id).sort();
+    };
+
+    // The rows the chain condition is definitively TRUE for, and the ones it is definitively
+    // FALSE for. Everything else — every row with no mainCategory at all — is a CEL
+    // missing-path error, which selects NEITHER branch.
+    const conditionTrue = await oracleAllowedIds("w1-in-chain");
+    const conditionFalse = await oracleAllowedIds("w1-not-in-chain");
+    expect(conditionTrue.length).toBeGreaterThan(0);
+    expect(conditionFalse.length).toBeGreaterThan(0);
+    expect(conditionTrue.length + conditionFalse.length).toBeLessThan(
+      SEEDS.length
+    );
+
+    // The else-branch is what a bare `NOT` over the chain filter over-grants: it is TRUE for
+    // every parentless row, so each of these returned the 16 missing-parent seeds on top.
+    expect(await filteredIdsFor(ternary(chainIn, FALSE, TRUE))).toEqual(
+      conditionFalse
+    );
+    expect(
+      await filteredIdsFor(
+        ternary(new PlanExpression("not", [chainIn]), TRUE, FALSE)
+      )
+    ).toEqual(conditionFalse);
+    // A `not` condition in false-branch position: the double negation collapses back to the
+    // positive membership, which excludes the parentless rows by itself.
+    expect(
+      await filteredIdsFor(
+        ternary(new PlanExpression("not", [chainIn]), FALSE, TRUE)
+      )
+    ).toEqual(conditionTrue);
+
+    // A conjunction condition needs De Morgan, not an outer NOT with the hops ANDed beside it:
+    // CEL's `&&` absorbs an erroring operand when the other is FALSE, so a parentless row with
+    // aBool=false makes the whole condition definitively FALSE and DOES select the else-branch.
+    const aBoolFalse = SEEDS.filter((seed) => !seed.aBool).map((seed) => seed.id);
+    expect(aBoolFalse.length).toBeGreaterThan(0);
+    expect(
+      await filteredIdsFor(
+        ternary(
+          new PlanExpression("and", [
+            chainIn,
+            new PlanExpressionVariable("request.resource.attr.aBool"),
+          ]),
+          FALSE,
+          TRUE
+        )
+      )
+    ).toEqual([...new Set([...conditionFalse, ...aBoolFalse])].sort());
   });
 
   test("oracle is not degenerate", async () => {

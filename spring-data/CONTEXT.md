@@ -25,6 +25,19 @@ Terms used by this adapter's code, tests, and reviews. Architecture vocabulary
   directional operators (`lt`↔`gt`). Receiver-sensitive operators
   (`contains`/`startsWith`/`endsWith`) are exempt — the receiver's position is
   meaning, not noise. Overrides observe the mirrored operator name.
+- **Scope / Resolution** — the single variable-resolution seam. `resolve(var)` is
+  total: every plan variable lands in `ResolvedScalar` (the mapping it was
+  resolved through, plus a column when this scope's `From` holds one — a Field
+  behind a relation prefix is scalar with no column here) or `ResolvedRelation`
+  (the join chain plus its **owner**), or throws naming why. Chain walking,
+  lambda delegation and owner anchoring live only here; `path(var)` is a
+  narrowing over it, not a second resolver.
+- **Owner anchoring** — a `ResolvedRelation` carries the scope that HOLDS its
+  first hop, not the scope that resolved it. `R.attr.tags` referenced inside a
+  `categories.exists(c, …)` body is owned by the root, so its subquery
+  correlates the root's `From`. Getting this wrong is silent rather than loud:
+  the element entity can carry a collection of the same name, so the query
+  still builds and returns the wrong rows.
 - **ChainSubquery** — the one correlated-subquery skeleton. It anchors
   correlation at the scope that owns the relation and joins through every hop
   of a multi-hop chain; all collection operators compose over it.

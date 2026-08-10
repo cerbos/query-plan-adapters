@@ -1,0 +1,39 @@
+# The single PDP every example application plans against, started and stopped by
+# demo/scripts/run-example.sh.
+#
+# There is one compose file for all ten examples rather than one per example: the demo domain is
+# a single policy suite by construction (ADR 0001), so ten identical compose files would be ten
+# copies of the same PDP pin waiting to drift apart.
+services:
+  cerbos:
+    # Pinned to conformance/CERBOS_VERSION and conformance/CERBOS_IMAGE_DIGEST. The demo domain
+    # gets no version file of its own — one PDP pin in the repository, reused — and
+    # conformance/scripts/validate-corpus.sh asserts that BOTH halves of this reference agree with
+    # it. The tag alone would leave the digest free to name some other build entirely.
+    image: ghcr.io/cerbos/cerbos:0.54.0@sha256:211c261f6031675522a35c6055b13fd719c4aff13747307e4bcb6907326537ef
+    # No `container_name`: the runner gives each adapter its own compose project, and a fixed
+    # container name is global, so a container left behind by one adapter's interrupted run could
+    # not be cleaned up by the next adapter's `compose down`.
+    command:
+      - "server"
+      - "--config=/config/cerbos-config.yaml"
+    environment:
+      CERBOS_NO_TELEMETRY: "1"
+    # Deliberately NOT the default 3592/3593 on the host. Every adapter's test suite starts a
+    # `cerbos run` sidecar on those ports, and a demo PDP still holding them makes that sidecar
+    # fail to bind while the suite happily talks to THIS PDP instead — which serves demo policies,
+    # so the corpus tests fail for a reason nothing in their output names. Different host ports
+    # make that collision impossible; the runner passes the address through $CERBOS_HOST, so no
+    # example hardcodes either number.
+    ports:
+      - "13592:3592"
+      - "13593:3593"
+    volumes:
+      - ./cerbos-config.yaml:/config/cerbos-config.yaml:ro
+      - ./policies:/policies:ro
+    healthcheck:
+      test: ["CMD", "/cerbos", "healthcheck"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 3s

@@ -5,6 +5,8 @@ import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand;
 import dev.cerbos.api.v1.response.Response.PlanResourcesResponse;
 import dev.cerbos.sdk.PlanResourcesResult;
 
+import org.springframework.data.jpa.domain.Specification;
+
 import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.CriteriaQuery;
 import jakarta.persistence.criteria.From;
@@ -20,6 +22,7 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -28,8 +31,36 @@ import java.util.function.Supplier;
 
 /**
  * Translates a Cerbos {@code PlanResources} response into a Spring Data JPA
- * {@link org.springframework.data.jpa.domain.Specification} that can be executed by any
- * {@code JpaSpecificationExecutor}.
+ * {@link Specification} that can be executed by any {@code JpaSpecificationExecutor}.
+ *
+ * <p>Every {@code toSpecification} overload returns a Specification covering all three plan
+ * kinds, so the caller never switches on the kind: {@code KIND_ALWAYS_ALLOWED} yields
+ * {@link Specification#unrestricted()} (Spring Data omits the {@code WHERE} clause),
+ * {@code KIND_ALWAYS_DENIED} yields an always-false predicate ({@code 1=0}), and a
+ * conditional plan yields the translated predicate tree. All three compose with the caller's
+ * own Specifications via {@code .and(...)} / {@code .or(...)}. To skip the database entirely
+ * on a denied plan, test {@code planResult.isAlwaysDenied()} on the SDK response (or
+ * {@code response.getFilter().getKind()} on the raw protobuf) before translating.
+ *
+ * <p>Hand the Specification to a repository method and let Spring Data invoke it. Calling
+ * {@link Specification#toPredicate} yourself is not a supported path.
+ *
+ * <p><strong>The returned Specification is SELECT-only.</strong> Never pass it to
+ * {@code JpaSpecificationExecutor.delete(Specification)} or any other criteria bulk
+ * operation. When the attribute mapping contains {@link AttributeMapping.Relation} entries,
+ * the translation builds correlated subqueries over collection/join tables, and Hibernate's
+ * multi-table bulk delete first clears those {@code @ElementCollection}/join tables using
+ * the same predicate — self-invalidating the correlated subquery so that 0 entity rows are
+ * deleted while their collection rows are silently destroyed (which can in turn flip the
+ * outcome of ownership/blocklist policies for the surviving rows). The adapter detects the
+ * bulk-delete invocation context and throws {@link UnsupportedOperationException} before
+ * anything is deleted. To delete policy-permitted rows, select first and delete by id:
+ *
+ * <pre>{@code
+ * Specification<MyEntity> spec = SpringDataQueryPlanAdapter.toSpecification(plan, MAPPING);
+ * List<Long> ids = repository.findAll(spec).stream().map(MyEntity::getId).toList();
+ * repository.deleteAllById(ids);
+ * }</pre>
  */
 public final class SpringDataQueryPlanAdapter {
 
@@ -56,11 +87,15 @@ public final class SpringDataQueryPlanAdapter {
 
     /**
      * Translates a Cerbos query plan (as returned by the Java SDK's
-     * {@code CerbosBlockingClient.plan(...)}) into a {@link Result} wrapping a Spring Data
-     * JPA Specification, using the default operator translations.
+     * {@code CerbosBlockingClient.plan(...)}) into a Spring Data JPA
+     * {@link Specification}, using the default operator translations.
      *
      * <p>Equivalent to {@link #toSpecification(PlanResourcesResult, Map, Map)} with no
      * operator overrides.
+     *
+     * <p><strong>The returned Specification is SELECT-only</strong> — see
+     * {@link SpringDataQueryPlanAdapter the class documentation} for the corruption
+     * mechanism this prevents and the select-ids-then-{@code deleteAllById} alternative.
      *
      * @param <T> the entity type the Specification will be executed against
      * @param planResult the SDK plan result ({@code KIND_ALWAYS_ALLOWED},
@@ -68,23 +103,25 @@ public final class SpringDataQueryPlanAdapter {
      * @param mapper maps each plan variable ({@code request.resource.attr.<name>},
      *        {@code request.resource.id}) to a JPA path or relation — see
      *        {@link AttributeMapping}
-     * @return {@link Result.AlwaysAllowed}, {@link Result.AlwaysDenied}, or a
-     *         {@link Result.Conditional} wrapping the translated Specification
+     * @return a Specification selecting exactly the rows the plan permits — every row for
+     *         {@code KIND_ALWAYS_ALLOWED} ({@link Specification#unrestricted()}), no row for
+     *         {@code KIND_ALWAYS_DENIED} ({@code 1=0}), the translated predicate tree
+     *         otherwise
      * @throws IllegalArgumentException if the conditional plan carries no condition.
      *         Translation of the condition itself is deferred: unsupported operators,
      *         unmapped attributes, and unresolvable paths throw
      *         {@code IllegalArgumentException} (fail closed) when the Specification is first
      *         evaluated by the repository, not from this call.
      */
-    public static <T> Result<T> toSpecification(
+    public static <T> Specification<T> toSpecification(
             PlanResourcesResult planResult, Map<String, AttributeMapping> mapper) {
         return toSpecification(planResult, mapper, Map.of());
     }
 
     /**
      * Translates a Cerbos query plan (as returned by the Java SDK's
-     * {@code CerbosBlockingClient.plan(...)}) into a {@link Result} wrapping a Spring Data
-     * JPA Specification, consulting {@code overrides} for scalar leaf translations.
+     * {@code CerbosBlockingClient.plan(...)}) into a Spring Data JPA {@link Specification},
+     * consulting {@code overrides} for scalar leaf translations.
      *
      * <p>Prefer this {@link PlanResourcesResult} entry point when using the Cerbos Java SDK
      * client. The {@link #toSpecification(PlanResourcesResponse, Map, Map)} overloads accept
@@ -100,13 +137,13 @@ public final class SpringDataQueryPlanAdapter {
      *        consulted only for resolved scalar (field, value) leaves — see
      *        {@link OperatorFunction} for exactly which translation sites are (and are not)
      *        overridable
-     * @return {@link Result.AlwaysAllowed}, {@link Result.AlwaysDenied}, or a
-     *         {@link Result.Conditional} wrapping the translated Specification
+     * @return a SELECT-only Specification selecting exactly the rows the plan permits — see
+     *         {@link #toSpecification(PlanResourcesResult, Map)}
      * @throws IllegalArgumentException if the conditional plan carries no condition; see
      *         {@link #toSpecification(PlanResourcesResult, Map)} for the deferred
      *         fail-closed contract covering the translation itself
      */
-    public static <T> Result<T> toSpecification(
+    public static <T> Specification<T> toSpecification(
             PlanResourcesResult planResult,
             Map<String, AttributeMapping> mapper,
             Map<String, OperatorFunction> overrides) {
@@ -115,8 +152,8 @@ public final class SpringDataQueryPlanAdapter {
     }
 
     /**
-     * Translates a Cerbos query plan into a {@link Result}, declaring how the caller represents
-     * a NULL column in the attributes it sends to {@code check()}.
+     * Translates a Cerbos query plan into a Spring Data JPA {@link Specification}, declaring
+     * how the caller represents a NULL column in the attributes it sends to {@code check()}.
      *
      * <p>The planner emits the same {@code eq(attr, null)} node under both conventions, so the
      * plan cannot reveal which one is in use. Under
@@ -130,43 +167,36 @@ public final class SpringDataQueryPlanAdapter {
      * @param mapper maps each plan variable to a JPA path or relation
      * @param overrides per-operator replacement translations, keyed by Cerbos operator name
      * @param nullAttributeRepresentation the caller's NULL-column convention
-     * @return {@link Result.AlwaysAllowed}, {@link Result.AlwaysDenied}, or a
-     *         {@link Result.Conditional} wrapping the translated Specification
+     * @return a SELECT-only Specification selecting exactly the rows the plan permits — see
+     *         {@link #toSpecification(PlanResourcesResult, Map)}
      * @throws IllegalArgumentException if the conditional plan carries no condition, or if the
      *         plan carries a null comparison operand under
      *         {@link NullAttributeRepresentation#OMITTED}
      */
-    public static <T> Result<T> toSpecification(
+    public static <T> Specification<T> toSpecification(
             PlanResourcesResult planResult,
             Map<String, AttributeMapping> mapper,
             Map<String, OperatorFunction> overrides,
             NullAttributeRepresentation nullAttributeRepresentation) {
         if (planResult.isAlwaysAllowed()) {
-            return new Result.AlwaysAllowed<>();
+            return alwaysAllowed();
         }
         if (planResult.isAlwaysDenied()) {
-            return new Result.AlwaysDenied<>();
+            return alwaysDenied();
         }
         Operand condition = planResult.getCondition()
                 .orElseThrow(() -> new IllegalArgumentException("Conditional plan has no condition"));
-        if (nullAttributeRepresentation == NullAttributeRepresentation.OMITTED) {
-            assertNoNullComparisonOperands(condition);
-        }
-        // Defensive copies: the returned Specification is re-invoked fresh per query execution
-        // (see Result), so capturing the caller's maps by reference would let post-construction
-        // mutation silently change which columns the authorization filter resolves.
-        Map<String, AttributeMapping> mapperCopy = Map.copyOf(mapper);
-        Map<String, OperatorFunction> overridesCopy = Map.copyOf(overrides);
-        return new Result.Conditional<>((root, query, cb) ->
-                new Translator(cb, overridesCopy, isSelectInvocation(root, query))
-                        .traverse(condition, Scope.root(root, query, mapperCopy)));
+        // Always: the call-level option is only the fallback now, and an attribute can declare
+        // OMITTED while the call declares EXPLICIT.
+        assertNoNullComparisonOperands(condition, mapper, nullAttributeRepresentation);
+        return conditional(condition, mapper, overrides);
     }
 
     // -- PlanResourcesResponse overloads --
 
     /**
-     * Translates a raw {@link PlanResourcesResponse} protobuf into a {@link Result} wrapping
-     * a Spring Data JPA Specification, using the default operator translations.
+     * Translates a raw {@link PlanResourcesResponse} protobuf into a Spring Data JPA
+     * {@link Specification}, using the default operator translations.
      *
      * <p>Equivalent to {@link #toSpecification(PlanResourcesResponse, Map, Map)} with no
      * operator overrides. Accepts the wire-level protobuf directly, so it works with
@@ -178,21 +208,20 @@ public final class SpringDataQueryPlanAdapter {
      * @param response the raw {@code PlanResources} RPC response
      * @param mapper maps each plan variable to a JPA path or relation — see
      *        {@link AttributeMapping}
-     * @return {@link Result.AlwaysAllowed}, {@link Result.AlwaysDenied}, or a
-     *         {@link Result.Conditional} wrapping the translated Specification
+     * @return a SELECT-only Specification selecting exactly the rows the plan permits — see
+     *         {@link #toSpecification(PlanResourcesResult, Map)}
      * @throws IllegalArgumentException if the filter kind is unknown or a conditional filter
      *         carries no condition; see {@link #toSpecification(PlanResourcesResult, Map)}
      *         for the deferred fail-closed contract covering the translation itself
      */
-    public static <T> Result<T> toSpecification(
+    public static <T> Specification<T> toSpecification(
             PlanResourcesResponse response, Map<String, AttributeMapping> mapper) {
         return toSpecification(response, mapper, Map.of());
     }
 
     /**
-     * Translates a raw {@link PlanResourcesResponse} protobuf into a {@link Result} wrapping
-     * a Spring Data JPA Specification, consulting {@code overrides} for scalar leaf
-     * translations.
+     * Translates a raw {@link PlanResourcesResponse} protobuf into a Spring Data JPA
+     * {@link Specification}, consulting {@code overrides} for scalar leaf translations.
      *
      * @param <T> the entity type the Specification will be executed against
      * @param response the raw {@code PlanResources} RPC response
@@ -202,13 +231,13 @@ public final class SpringDataQueryPlanAdapter {
      *        consulted only for resolved scalar (field, value) leaves — see
      *        {@link OperatorFunction} for exactly which translation sites are (and are not)
      *        overridable
-     * @return {@link Result.AlwaysAllowed}, {@link Result.AlwaysDenied}, or a
-     *         {@link Result.Conditional} wrapping the translated Specification
+     * @return a SELECT-only Specification selecting exactly the rows the plan permits — see
+     *         {@link #toSpecification(PlanResourcesResult, Map)}
      * @throws IllegalArgumentException if the filter kind is unknown or a conditional filter
      *         carries no condition; see {@link #toSpecification(PlanResourcesResult, Map)}
      *         for the deferred fail-closed contract covering the translation itself
      */
-    public static <T> Result<T> toSpecification(
+    public static <T> Specification<T> toSpecification(
             PlanResourcesResponse response,
             Map<String, AttributeMapping> mapper,
             Map<String, OperatorFunction> overrides) {
@@ -217,8 +246,9 @@ public final class SpringDataQueryPlanAdapter {
     }
 
     /**
-     * Translates a raw {@link PlanResourcesResponse} protobuf into a {@link Result}, declaring
-     * how the caller represents a NULL column in the attributes it sends to {@code check()}.
+     * Translates a raw {@link PlanResourcesResponse} protobuf into a Spring Data JPA
+     * {@link Specification}, declaring how the caller represents a NULL column in the
+     * attributes it sends to {@code check()}.
      *
      * <p>See {@link #toSpecification(PlanResourcesResult, Map, Map,
      * NullAttributeRepresentation)} for what the representation changes.
@@ -228,38 +258,72 @@ public final class SpringDataQueryPlanAdapter {
      * @param mapper maps each plan variable to a JPA path or relation
      * @param overrides per-operator replacement translations, keyed by Cerbos operator name
      * @param nullAttributeRepresentation the caller's NULL-column convention
-     * @return {@link Result.AlwaysAllowed}, {@link Result.AlwaysDenied}, or a
-     *         {@link Result.Conditional} wrapping the translated Specification
+     * @return a SELECT-only Specification selecting exactly the rows the plan permits — see
+     *         {@link #toSpecification(PlanResourcesResult, Map)}
      * @throws IllegalArgumentException if the filter kind is unknown, a conditional filter
      *         carries no condition, or the plan carries a null comparison operand under
      *         {@link NullAttributeRepresentation#OMITTED}
      */
-    public static <T> Result<T> toSpecification(
+    public static <T> Specification<T> toSpecification(
             PlanResourcesResponse response,
             Map<String, AttributeMapping> mapper,
             Map<String, OperatorFunction> overrides,
             NullAttributeRepresentation nullAttributeRepresentation) {
         PlanResourcesFilter filter = response.getFilter();
         return switch (filter.getKind()) {
-            case KIND_ALWAYS_ALLOWED -> new Result.AlwaysAllowed<>();
-            case KIND_ALWAYS_DENIED -> new Result.AlwaysDenied<>();
+            case KIND_ALWAYS_ALLOWED -> alwaysAllowed();
+            case KIND_ALWAYS_DENIED -> alwaysDenied();
             case KIND_CONDITIONAL -> {
                 Operand cond = filter.getCondition();
                 if (cond.getNodeCase() == Operand.NodeCase.NODE_NOT_SET) {
                     throw new IllegalArgumentException("Conditional plan has no condition");
                 }
-                if (nullAttributeRepresentation == NullAttributeRepresentation.OMITTED) {
-                    assertNoNullComparisonOperands(cond);
-                }
-                // Defensive copies — same rationale as the PlanResourcesResult overload.
-                Map<String, AttributeMapping> mapperCopy = Map.copyOf(mapper);
-                Map<String, OperatorFunction> overridesCopy = Map.copyOf(overrides);
-                yield new Result.Conditional<T>((root, query, cb) ->
-                        new Translator(cb, overridesCopy, isSelectInvocation(root, query))
-                                .traverse(cond, Scope.root(root, query, mapperCopy)));
+                assertNoNullComparisonOperands(cond, mapper, nullAttributeRepresentation);
+                yield conditional(cond, mapper, overrides);
             }
             default -> throw new IllegalArgumentException("Unknown filter kind: " + filter.getKind());
         };
+    }
+
+    // -- The three plan kinds --
+
+    /**
+     * {@code KIND_ALWAYS_ALLOWED} — Spring Data's own "no restriction" Specification, whose
+     * implementation is {@code (root, query, cb) -> null}. {@code SimpleJpaRepository} guards
+     * with {@code if (predicate != null) query.where(predicate)}, so no {@code WHERE 1=1} is
+     * emitted, and it is a true identity for {@code .and(...)} / {@code .or(...)}. Requires
+     * spring-data-jpa 3.5.2 or later.
+     */
+    private static <T> Specification<T> alwaysAllowed() {
+        return Specification.unrestricted();
+    }
+
+    /** {@code KIND_ALWAYS_DENIED} — an always-false predicate ({@code 1=0}). */
+    private static <T> Specification<T> alwaysDenied() {
+        return (root, query, cb) -> cb.disjunction();
+    }
+
+    /**
+     * {@code KIND_CONDITIONAL} — a Specification whose lambda rebuilds the entire predicate
+     * tree from the {@code Root}/{@code CriteriaQuery} it is handed, on every invocation. That
+     * is required, not incidental: {@code JpaSpecificationExecutor.findAll(spec, Pageable)}
+     * fires a separate {@code COUNT} query with its own {@code CriteriaQuery} and {@code Root},
+     * and Hibernate 6 rejects a {@code Predicate} built against a different {@code Root}
+     * ({@code SqlTreeCreationException: Could not locate TableGroup}).
+     *
+     * <p>The caller's maps are defensively copied because of that re-invocation: capturing them
+     * by reference would let post-translation mutation silently change which columns the
+     * authorization filter resolves.
+     */
+    private static <T> Specification<T> conditional(
+            Operand condition,
+            Map<String, AttributeMapping> mapper,
+            Map<String, OperatorFunction> overrides) {
+        Map<String, AttributeMapping> mapperCopy = Map.copyOf(mapper);
+        Map<String, OperatorFunction> overridesCopy = Map.copyOf(overrides);
+        return (root, query, cb) ->
+                new Translator(cb, overridesCopy, isSelectInvocation(root, query))
+                        .traverse(condition, Scope.root(root, query, mapperCopy));
     }
 
     // -- NULL representation guard --
@@ -287,22 +351,77 @@ public final class SpringDataQueryPlanAdapter {
      * every null operand is correct under any nesting; narrowing it requires negation-parity
      * tracking.
      */
-    private static void assertNoNullComparisonOperands(Operand operand) {
+    private static void assertNoNullComparisonOperands(
+            Operand operand, Map<String, AttributeMapping> mapper,
+            NullAttributeRepresentation fallback) {
         if (operand.getNodeCase() != Operand.NodeCase.EXPRESSION) {
             return;
         }
         var expression = operand.getExpression();
         List<Operand> operands = expression.getOperandsList();
-        if (operands.stream().anyMatch(SpringDataQueryPlanAdapter::carriesNull)) {
-            throw new IllegalArgumentException(
-                    "Cannot translate `" + expression.getOperator() + "` against a null operand"
-                            + " under NullAttributeRepresentation.OMITTED: a NULL column sends no"
-                            + " attribute, so Cerbos evaluates the comparison as a"
-                            + " missing-attribute error (deny) while a NULL-selecting filter"
-                            + " would return those rows. Send NULL columns as explicit nulls and"
-                            + " use EXPLICIT, or keep this shape out of the policy.");
+
+        // A comparison between a mapped attribute and a literal is decided by that attribute's
+        // own declaration, which is what lets one call carry both conventions (#308). Confined
+        // to that shape: a null buried in a macro over a literal list reaches a comparison long
+        // after this scan, and nothing here can say which column it will land against, so those
+        // keep using the call-level fallback.
+        NullAttributeRepresentation declared =
+                declaredForComparedAttribute(expression.getOperator(), operands, mapper);
+        if (declared != null) {
+            if (declared == NullAttributeRepresentation.OMITTED
+                    && operands.stream().anyMatch(SpringDataQueryPlanAdapter::carriesNull)) {
+                throw nullOperandUnderOmitted(expression.getOperator());
+            }
+            return;
         }
-        operands.forEach(SpringDataQueryPlanAdapter::assertNoNullComparisonOperands);
+
+        if (fallback == NullAttributeRepresentation.OMITTED
+                && operands.stream().anyMatch(SpringDataQueryPlanAdapter::carriesNull)) {
+            throw nullOperandUnderOmitted(expression.getOperator());
+        }
+        operands.forEach(child -> assertNoNullComparisonOperands(child, mapper, fallback));
+    }
+
+    private static final Set<String> EQUALITY_FAMILY = Set.of("eq", "ne", "in");
+
+    private static IllegalArgumentException nullOperandUnderOmitted(String operator) {
+        return new IllegalArgumentException(
+                "Cannot translate `" + operator + "` against a null operand"
+                        + " under NullAttributeRepresentation.OMITTED: a NULL column sends no"
+                        + " attribute, so Cerbos evaluates the comparison as a"
+                        + " missing-attribute error (deny) while a NULL-selecting filter"
+                        + " would return those rows. Send NULL columns as explicit nulls and"
+                        + " use EXPLICIT, or keep this shape out of the policy.");
+    }
+
+    /**
+     * The declared NULL convention of the attribute a binary comparison names, or {@code null}
+     * when the node is not a comparison between one mapped attribute and one literal.
+     */
+    private static NullAttributeRepresentation declaredForComparedAttribute(
+            String operator, List<Operand> operands, Map<String, AttributeMapping> mapper) {
+        // The operators CEL evaluates to a definite boolean over a null value, and so the only
+        // ones an attribute's declared convention can settle. Anything else — a collection macro,
+        // hasIntersection, a string match — keeps using the call-level fallback, because the
+        // declaration says nothing about what its null means there.
+        if (!EQUALITY_FAMILY.contains(operator) || operands.size() != 2) {
+            return null;
+        }
+        Operand left = operands.get(0);
+        Operand right = operands.get(1);
+        Operand variable = left;
+        Operand literal = right;
+        if (right.getNodeCase() == Operand.NodeCase.VARIABLE) {
+            variable = right;
+            literal = left;
+        }
+        if (variable.getNodeCase() != Operand.NodeCase.VARIABLE
+                || literal.getNodeCase() != Operand.NodeCase.VALUE) {
+            return null;
+        }
+        return mapper.get(variable.getVariable()) instanceof AttributeMapping.Field f
+                ? f.nullAttributeRepresentation()
+                : null;
     }
 
     private static boolean carriesNull(Operand operand) {
@@ -406,7 +525,7 @@ public final class SpringDataQueryPlanAdapter {
         }
 
         private Predicate handleBareVariable(String variable, Scope scope) {
-            Path<?> path = scope.resolvePath(variable);
+            Path<?> path = scope.path(variable);
             return applyLeaf("eq", path, true);
         }
 
@@ -561,6 +680,56 @@ public final class SpringDataQueryPlanAdapter {
                 return override.apply(cb, field, value);
             }
             return dflt.get();
+        }
+
+        /**
+         * Whether {@code cerbosVar} maps to a scalar the caller sends as an explicit null.
+         *
+         * <p>Read from the mapping rather than from the path: the same column is legitimately
+         * mapped twice under two attribute names with two conventions, so the JPA path cannot
+         * discriminate them.
+         */
+        private boolean isExplicitNull(String cerbosVar, Scope scope) {
+            return scope.resolve(cerbosVar) instanceof Scope.ResolvedScalar scalar
+                    && scalar.mapping() instanceof AttributeMapping.Field f
+                    && f.nullAttributeRepresentation() == NullAttributeRepresentation.EXPLICIT;
+        }
+
+        /**
+         * An equality that can never be SQL UNKNOWN, for operands the caller sends as explicit
+         * nulls.
+         *
+         * <p>A null VALUE is what CEL holds under that convention, so {@code null == "x"} is a
+         * definite FALSE, {@code null != "x"} a definite TRUE, and two nulls are EQUAL. SQL
+         * answers UNKNOWN to all three, which excludes the row under BOTH polarities — so the
+         * NOT an enclosing negation applies has nothing definite to flip.
+         *
+         * <p>Deliberately not a null-safe equality operator. Two reasons, and the second is the
+         * load-bearing one: Hibernate would need a dialect function — and a null-safe equality is
+         * SYMMETRIC while this rewrite must not be. When only ONE side declares the convention,
+         * the other side's NULL is a MISSING attribute on the check side, so CEL raises an error
+         * and denies; only the asymmetric expansion below keeps propagating UNKNOWN for it. A
+         * null-safe operator would match the two NULLs and over-grant.
+         */
+        private Predicate definiteEquality(String op,
+                                           jakarta.persistence.criteria.Expression<?> left,
+                                           jakarta.persistence.criteria.Expression<?> right,
+                                           boolean leftExplicit, boolean rightExplicit) {
+            List<Predicate> present = new ArrayList<>();
+            if (leftExplicit) {
+                present.add(cb.isNotNull(left));
+            }
+            if (rightExplicit) {
+                present.add(cb.isNotNull(right));
+            }
+            present.add(cb.equal(left, right));
+            Predicate equality = cb.and(present.toArray(new Predicate[0]));
+            if (leftExplicit && rightExplicit) {
+                equality = cb.or(cb.and(cb.isNull(left), cb.isNull(right)), equality);
+            }
+            // The junction barrier matters: cb.not(cb.not(p)) collapses in Hibernate, and this
+            // predicate is frequently built under an enclosing negation.
+            return "ne".equals(op) ? cb.not(cb.and(equality)) : equality;
         }
 
         @SuppressWarnings({"rawtypes", "unchecked"})
@@ -1016,7 +1185,7 @@ public final class SpringDataQueryPlanAdapter {
                             throw new IllegalArgumentException(
                                     op + " requires a string receiver, got " + typeName(receiver));
                         }
-                        Path<?> needle = scope.resolvePath(needleField.variable());
+                        Path<?> needle = scope.path(needleField.variable());
                         // The needle is a column, so it is escaped dynamically; a NULL needle is
                         // a missing attribute → CEL error → deny (fieldToFieldLike guards it).
                         return switch (op) {
@@ -1056,7 +1225,7 @@ public final class SpringDataQueryPlanAdapter {
                     // plan constant (normalization guarantees the field arrives first). Strings
                     // concatenate here, matching CEL — this shape never enters double space.
                     if (left instanceof Resolved.Field f && right instanceof Resolved.ConstantAdd ca) {
-                        return applyLeaf(op, scope.resolvePath(f.variable()), ca.fold());
+                        return applyLeaf(op, scope.path(f.variable()), ca.fold());
                     }
                     // Solve: `add(field, const) eq/ne constant` — for the ALGEBRAICALLY EXACT
                     // shapes only (string concatenation, in-range long/long integers).
@@ -1128,7 +1297,7 @@ public final class SpringDataQueryPlanAdapter {
                                     + " in/hasIntersection, or compare elements individually.");
                 }
 
-                Path<?> path = scope.resolvePath(field.variable());
+                Path<?> path = scope.path(field.variable());
 
                 if (value == null) {
                     // A registered override owns the operator's full translation, including a null RHS.
@@ -1138,6 +1307,16 @@ public final class SpringDataQueryPlanAdapter {
                         default -> throw new IllegalArgumentException(
                                 "Null values are only supported with eq and ne operators (got " + op + ")");
                     });
+                }
+
+                // An attribute the caller sends as an explicit null holds a null VALUE in CEL,
+                // so equality against a non-null operand is definite. An operator the caller
+                // overrode is left to the override: replacing it would make this declaration
+                // silently discard the caller's own translation (#308).
+                if (("eq".equals(op) || "ne".equals(op))
+                        && overrides.get(op) == null
+                        && isExplicitNull(field.variable(), scope)) {
+                    return definiteEquality(op, path, cb.literal(value), true, false);
                 }
 
                 return applyLeaf(op, path, value);
@@ -1174,7 +1353,7 @@ public final class SpringDataQueryPlanAdapter {
             private Predicate timestampLeaf(String op, Resolved.TimestampField field,
                                             Resolved.TimestampConstant constant, Scope scope) {
                 Instant instant = constant.instant();
-                Path<?> path = scope.resolvePath(field.variable());
+                Path<?> path = scope.path(field.variable());
                 return withOverride(op, path, instant, () -> {
                     Class<?> javaType = path.getJavaType();
                     Object bound;
@@ -1253,9 +1432,9 @@ public final class SpringDataQueryPlanAdapter {
                     if ("eq".equals(op)) {
                         return cb.disjunction();
                     }
-                    return cb.isNotNull(scope.resolvePath(fpc.fieldVariable()));
+                    return cb.isNotNull(scope.path(fpc.fieldVariable()));
                 }
-                return applyLeaf(op, scope.resolvePath(fpc.fieldVariable()), solved);
+                return applyLeaf(op, scope.path(fpc.fieldVariable()), solved);
             }
 
             /**
@@ -1299,7 +1478,7 @@ public final class SpringDataQueryPlanAdapter {
                         throw new IllegalArgumentException(
                                 "add(const, const) compared to a non-field operand is not supported");
                     }
-                    return applyLeaf(op, scope.resolvePath(otherOperand.getVariable()), folded);
+                    return applyLeaf(op, scope.path(otherOperand.getVariable()), folded);
                 }
                 throw new IllegalArgumentException(
                         "add comparison with a field reference only supports eq/ne (got " + op + ")");
@@ -1412,8 +1591,29 @@ public final class SpringDataQueryPlanAdapter {
              */
             private Predicate fieldToFieldComparison(String op, String leftVar, String rightVar,
                                                      Scope scope) {
-                jakarta.persistence.criteria.Expression<?> left = scope.resolvePath(leftVar);
-                jakarta.persistence.criteria.Expression<?> right = scope.resolvePath(rightVar);
+                jakarta.persistence.criteria.Expression<?> left = scope.path(leftVar);
+                jakarta.persistence.criteria.Expression<?> right = scope.path(rightVar);
+                boolean leftExplicit = isExplicitNull(leftVar, scope);
+                boolean rightExplicit = isExplicitNull(rightVar, scope);
+                // Mixing the two conventions across one comparison has no faithful rendering.
+                // The declared side needs a definite answer for its NULL (CEL holds a null
+                // VALUE); the undeclared side needs UNKNOWN for its NULL (a missing attribute,
+                // which CEL denies under both polarities). A definite predicate returns rows the
+                // PDP refuses; a plain one drops rows the PDP allows. Refuse it rather than pick
+                // a direction — declare both attributes, or neither.
+                if (("eq".equals(op) || "ne".equals(op)) && leftExplicit != rightExplicit) {
+                    throw new IllegalArgumentException(
+                            "Cannot translate `" + op + "` between two columns under mixed null"
+                                    + " conventions: cannot compare an attribute declared"
+                                    + " explicit-null with one on the omitted convention: the"
+                                    + " omitted side is UNKNOWN for a NULL column while the"
+                                    + " declared side is definite, and no single predicate is"
+                                    + " both. Declare the convention on both mappings, or on"
+                                    + " neither.");
+                }
+                if (("eq".equals(op) || "ne".equals(op)) && leftExplicit && rightExplicit) {
+                    return definiteEquality(op, left, right, leftExplicit, rightExplicit);
+                }
                 return switch (op) {
                     case "eq", "ne", "lt", "gt", "le", "ge" -> comparePredicate(op, left, right);
                     case "contains" -> fieldToFieldLike(left, right, true, true);
@@ -1836,7 +2036,7 @@ public final class SpringDataQueryPlanAdapter {
                         @SuppressWarnings("unchecked")
                         jakarta.persistence.criteria.Expression<? extends Number> path =
                                 (jakarta.persistence.criteria.Expression<? extends Number>)
-                                        scope.resolvePath(operand.getVariable());
+                                        scope.path(operand.getVariable());
                         return new NumericOperand.Sql(toIeeeDouble(path));
                     }
                     case VALUE -> {
@@ -2068,10 +2268,13 @@ public final class SpringDataQueryPlanAdapter {
                             "Unsupported size() expression: size() argument must be a collection "
                                     + "attribute or filter(...), got " + describeOperand(sizeArg));
                 }
-                Scope.ResolvedRelation ref = scope.resolveRelation(var);
-                if (ref == null) {
-                    AttributeMapping mapping = scope.resolveMapping(var);
-                    if (!(mapping instanceof AttributeMapping.Field)) {
+                Scope.Resolution resolved = scope.resolve(var);
+                if (!(resolved instanceof Scope.ResolvedRelation ref)) {
+                    // Only a genuine scalar ATTRIBUTE has a string length to take. The bare
+                    // lambda element lands in the scalar arm too, but its mapping is the
+                    // Relation it came from — size() of a relation element is not a length.
+                    Scope.ResolvedScalar scalar = (Scope.ResolvedScalar) resolved;
+                    if (!(scalar.mapping() instanceof AttributeMapping.Field)) {
                         throw new IllegalArgumentException(
                                 "size() requires a collection (Relation) mapping for " + var);
                     }
@@ -2080,7 +2283,7 @@ public final class SpringDataQueryPlanAdapter {
                         throw new IllegalArgumentException(
                                 "size(filter(...)) requires a collection (Relation) mapping for " + var);
                     }
-                    Path<?> path = scope.resolvePath(var);
+                    Path<?> path = scope.path(var);
                     if (fractionalCollapse != null) {
                         // ne f is vacuously true only for a PRESENT string: a NULL column is a
                         // missing attribute → CEL error → deny, so it must stay excluded —
@@ -2127,10 +2330,18 @@ public final class SpringDataQueryPlanAdapter {
                         // It is not unconditional though: an absent to-one parent is a CEL
                         // missing-path error (deny), and folding to TRUE would return every
                         // parentless row (#309).
-                        Predicate hops = leadingHopsExist(scope, ref);
-                        Predicate collapsed =
-                                fractionalCollapse ? cb.conjunction() : cb.disjunction();
-                        return hops == null ? collapsed : cb.and(hops, collapsed);
+                        //
+                        // The guard has to be TRI-STATE, like every other chained comparison:
+                        // `hops AND constant` is two-valued, so `NOT(hops AND constant)` is TRUE
+                        // for a parentless row under BOTH collapses and readmits all of them
+                        // (cerbos/query-plan-adapters#333). A CASE with no ELSE yields SQL NULL
+                        // instead, leaving the comparison UNKNOWN under both polarities.
+                        if (leadingHopsExist(scope, ref) == null) {
+                            return fractionalCollapse ? cb.conjunction() : cb.disjunction();
+                        }
+                        return cb.equal(
+                                requireLeadingHops(scope, ref, cb.literal(1L), Long.class),
+                                fractionalCollapse ? 1L : 0L);
                     }
                     boolean nonEmpty = ("gt".equals(cmpOp) && numValue == 0L)
                             || ("ge".equals(cmpOp) && numValue == 1L);
@@ -2179,13 +2390,16 @@ public final class SpringDataQueryPlanAdapter {
                         // poison term is 0 when every element body is determined and SQL NULL
                         // otherwise, making the collapse UNKNOWN exactly when CEL errors.
                         // An absent to-one parent denies for a different reason and needs its
-                        // own guard (#309).
-                        Subquery<Long> poison = undeterminedPoisonSubquery(scope, ref, bodyBuilder);
-                        Predicate collapsed = finalCollapse
+                        // own guard (#309) — carried on the poison EXPRESSION rather than ANDed
+                        // beside it, so both polarities inherit it the way every other chained
+                        // comparison does (cerbos/query-plan-adapters#333).
+                        jakarta.persistence.criteria.Expression<Long> poison =
+                                requireLeadingHops(scope, ref,
+                                        undeterminedPoisonSubquery(scope, ref, bodyBuilder),
+                                        Long.class);
+                        return finalCollapse
                                 ? cb.equal(poison, 0L)
                                 : cb.notEqual(poison, 0L);
-                        Predicate hops = leadingHopsExist(scope, ref);
-                        return hops == null ? collapsed : cb.and(hops, collapsed);
                     }
                     return compareCount(strictMatchCountSubquery(scope, ref, bodyBuilder),
                             finalCmpOp, finalNumValue);
@@ -2248,18 +2462,27 @@ public final class SpringDataQueryPlanAdapter {
             String var = fieldOp.getVariable();
             Object val = PlanValues.protoValueToJava(valueOp.getValue());
 
-            Scope.ResolvedRelation relRef = scope.resolveRelation(var);
-            if (relRef != null) {
+            if (scope.resolve(var) instanceof Scope.ResolvedRelation relRef) {
                 return collectionContainsAny(scope, relRef, asList(val));
             }
 
-            Path<?> path = scope.resolvePath(var);
+            Path<?> path = scope.path(var);
             return withOverride("in", path, val, () -> {
                 if (val instanceof List<?> list) {
                     if (list.isEmpty()) {
                         return cb.disjunction();
                     }
-                    return scalarInWithNullElements(path, list);
+                    Predicate membership = scalarInWithNullElements(path, list);
+                    // Without a null element nothing has made the membership definite yet:
+                    // `NOT (col IN (…))` over a NULL column is UNKNOWN and drops the row, while
+                    // CEL compares a null VALUE against each element and gets a definite false.
+                    // With a null element `scalarInWithNullElements` already adds the IS NULL
+                    // disjunct, which settles it (#308).
+                    if (list.stream().noneMatch(Objects::isNull)
+                            && isExplicitNull(var, scope)) {
+                        return cb.and(cb.isNotNull(path), membership);
+                    }
+                    return membership;
                 }
                 // Scalar membership over a Field mapping is equality — and equality against
                 // the null constant is IS NULL, mirroring the eq-null leaf translation.
@@ -2306,22 +2529,24 @@ public final class SpringDataQueryPlanAdapter {
          */
         private Predicate handleInVariableVariable(String memberVar, String collectionVar,
                                                    Scope scope) {
-            Scope.ResolvedRelation ref = scope.resolveRelation(collectionVar);
-            if (ref == null) {
-                scope.resolveMapping(collectionVar); // throws "Unknown attribute" when unmapped
+            // resolve() is total, so an unmapped collectionVar throws "Unknown attribute" here
+            // rather than needing a separate call made purely for its throw.
+            if (!(scope.resolve(collectionVar) instanceof Scope.ResolvedRelation ref)) {
                 throw new IllegalArgumentException(
                         "in(" + memberVar + ", " + collectionVar + ") requires the second "
                                 + "attribute to be mapped as a Relation (collection membership), "
                                 + "but " + collectionVar + " resolves to a scalar Field mapping");
             }
-            // Resolve the member OUTSIDE the subquery first so an unknown/Relation-valued
-            // member reports its own resolution error rather than a subquery-build failure.
-            scope.resolvePath(memberVar);
+            // Check the member eagerly: resolved only inside the subquery body, an unknown or
+            // Relation-valued member would be masked by chainSubquery's own failure (the
+            // bulk-delete guard). The path itself has to be rebuilt against the REBASED scope
+            // below to be a legal correlation reference, so this call is a check, not a value.
+            scope.path(memberVar);
             return chainContains(scope, ref, (sub, tailJoin, rebased) -> {
                 Path<?> element = Scope.memberPath(tailJoin, ref.tail(), null);
                 // The outer scalar resolves through the REBASED scope so the produced path is
                 // a legal correlation reference inside the subquery.
-                Path<?> outer = rebased.resolvePath(memberVar);
+                Path<?> outer = rebased.path(memberVar);
                 return cb.or(
                         cb.equal(element, outer),
                         cb.and(cb.isNull(element), cb.isNull(outer)));
@@ -2370,11 +2595,10 @@ public final class SpringDataQueryPlanAdapter {
                 Object val = PlanValues.protoValueToJava(second.getValue());
                 List<?> values = asList(val);
 
-                Scope.ResolvedRelation relRef = scope.resolveRelation(var);
-                if (relRef != null) {
+                if (scope.resolve(var) instanceof Scope.ResolvedRelation relRef) {
                     return collectionContainsAny(scope, relRef, values);
                 }
-                Path<?> path = scope.resolvePath(var);
+                Path<?> path = scope.path(var);
                 // hasIntersection(field, []) is always false; avoid a dialect-dependent empty `IN ()`.
                 if (values.isEmpty()) {
                     return cb.disjunction();
@@ -2459,9 +2683,7 @@ public final class SpringDataQueryPlanAdapter {
             // dotted chains ("request.resource.attr.categories.subCategories") share one path:
             // the subquery correlates the OWNING From and joins through every hop, so the
             // projection ranges over the flattened tail elements.
-            Scope.ResolvedRelation ref = scope.resolveRelation(collectionVar);
-            if (ref == null) {
-                scope.resolveMapping(collectionVar); // throws "Unknown attribute" when unmapped
+            if (!(scope.resolve(collectionVar) instanceof Scope.ResolvedRelation ref)) {
                 throw new IllegalArgumentException(
                         "map can only be applied to a collection mapped as Relation: " + collectionVar);
             }
@@ -2585,9 +2807,7 @@ public final class SpringDataQueryPlanAdapter {
             String collectionVar = listOperand.getVariable();
             // Owner-anchored chain resolution: multi-hop chains join through every hop, and a
             // relation referenced from inside a lambda anchors to the scope that owns it.
-            Scope.ResolvedRelation ref = scope.resolveRelation(collectionVar);
-            if (ref == null) {
-                scope.resolveMapping(collectionVar); // throws "Unknown attribute" when unmapped
+            if (!(scope.resolve(collectionVar) instanceof Scope.ResolvedRelation ref)) {
                 throw new IllegalArgumentException(
                         op + " requires a Relation mapping for " + collectionVar);
             }

@@ -1,0 +1,38 @@
+# yaml-language-server: $schema=https://api.cerbos.dev/latest/cerbos/policy/v1/Policy.schema.json
+#
+# The demo domain's only resource policy. Realistic shapes, not hostile ones — the hostile ones
+# live in ../../conformance/policies/adversarial.yaml and are what proves SEMANTICS. This file
+# proves PLUMBING, so every shape in it must be expressible by all ten adapters and there is
+# deliberately no per-adapter classification. See docs/adr/0001-demo-domain-has-no-per-adapter-exceptions.md.
+#
+# Flat scalar attributes only: ownerId, public, region, archived. No relations, no NULLs, no LIKE
+# metacharacters, no arithmetic — each of those splits the adapters, and each is the conformance
+# corpus's job.
+#
+# `archived` and `region` are never referenced here. They are the APPLICATION's own columns, and
+# composing them with the adapter's filter is usage shape 5.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: document
+  rules:
+    # Usage shapes 1, 4 and 5: a conditional plan (KIND_CONDITIONAL) over two flat attributes.
+    - actions:
+        - "view"
+      effect: EFFECT_ALLOW
+      roles:
+        - user
+      condition:
+        match:
+          expr: request.resource.attr.public || request.resource.attr.ownerId == request.principal.id
+
+    # Usage shape 2: unconditional for the admin role, so the planner returns KIND_ALWAYS_ALLOWED.
+    - actions:
+        - "admin-view"
+      effect: EFFECT_ALLOW
+      roles:
+        - admin
+
+    # Usage shape 3 is `publish`, which is deliberately ABSENT from this file. No matching rule
+    # means the planner returns KIND_ALWAYS_DENIED. Adding a `publish` rule here — even a DENY one
+    # — would change what shape 3 exercises.

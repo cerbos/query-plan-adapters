@@ -40,7 +40,7 @@
     "prepare": "npm run build",
     "version": "git add -A src",
     "postversion": "git push && git push --tags",
-    "mongo": "docker run --rm -p 27017:27017 --name test-mongo -v ./data:/data/db mongo@sha256:9bdaeb6dac6e7e762e84e2f84103d1f9bb078fa1ba6bde8bb9d2274f655ad173",
+    "mongo": "docker run --rm -p 27017:27017 --name test-mongo -v ./data:/data/db mongo:7.0@sha256:35a5926f71f8b6cb19206bee928c5a85f241a8be99f20c81abe35ae78a73415d",
     "test": "cerbos run --log-level=debug --set=storage.disk.directory=../policies --set=telemetry.disabled=true -- jest src/index.test.ts",
     "test:adversarial": "cerbos run --log-level=error --set=storage.disk.directory=../conformance/policies --set=telemetry.disabled=true -- jest --config jest.adversarial.config.js",
     "cerbos": "cerbos server --config=./cerbos-config.yaml"

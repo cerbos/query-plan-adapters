@@ -27,6 +27,13 @@ dependencies {
     // the published POM as transitive dependencies so they don't pin a specific version on
     // downstream consumers — matching how Spring Data JPA itself marks `hibernate-core`
     // as `<optional>true</optional>`.
+    //
+    // The consumer's floor is spring-data-jpa 3.5.2, NOT this build-time version:
+    // `Specification.unrestricted()` — what an ALWAYS_ALLOWED plan returns — arrived in 3.5.2,
+    // so anything older fails with NoSuchMethodError at first translation. Nothing compiles or
+    // tests against 3.5.2 itself, so the floor is a documented claim rather than a checked one:
+    // if you change what API the adapter uses, re-derive it. The other two statements of it are
+    // README.md "Install" and the Javadoc on SpringDataQueryPlanAdapter.alwaysAllowed().
     compileOnly("org.springframework.data:spring-data-jpa:3.5.13")
     compileOnly("jakarta.persistence:jakarta.persistence-api:3.2.0")
     // Hibernate is needed only to compile MySqlDoubleCastFunctionContributor (the MySQL

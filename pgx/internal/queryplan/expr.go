@@ -3,12 +3,17 @@
 
 package queryplan
 
-// The SQL expression tree the translator produces. It carries no PostgreSQL syntax: nothing here
-// decides how an identifier is quoted, how a parameter is spelled, or how a cast is written.
-// render.go owns all of that.
+// The SQL expression tree the translator produces. It carries no dialect syntax: nothing here
+// decides how an identifier is quoted, how a parameter is spelled, or how a cast is written. Each
+// module's own render.go owns all of that.
 //
 // The separation exists so the parts that are easy to get subtly wrong — operand order, escaping,
 // three-valued logic — can be read and tested without wading through string building.
+//
+// This package is vendored byte-for-byte into both the ent and pgx modules, so that a consumer of
+// either pulls in only the one. `conformance/scripts/validate-corpus.sh` diffs the two trees and
+// fails on any difference: the same semantic fix has to land in both copies, and nothing else
+// notices when it lands in only one.
 
 // Expr is any node of the abstract expression tree. Expressions are either predicates (boolean
 // results) or values; the translator tracks which is which by construction rather than by type,
@@ -61,16 +66,24 @@ const (
 // CastType is an abstract target type for a CEL type conversion.
 type CastType string
 
+// There is deliberately no integer cast: CEL's int() fails closed rather than lowering to SQL
+// CAST (see the "double", "int" arm in translate.go), so a CastInt would be a constant no
+// translation reaches and a render path no test could reach either
+// (cerbos/query-plan-adapters#319). Re-introducing it belongs with the corpus action that drives
+// it and the caller-declared numeric ValueType it needs.
 const (
 	CastText  CastType = "text"
 	CastFloat CastType = "float"
-	CastInt   CastType = "int"
 )
 
 // Column references a mapped column, optionally qualified by a table or subquery alias.
 type Column struct {
 	Qualifier string
 	Name      string
+	// ExplicitNull marks a column whose NULL the caller sends to check() as an explicit null
+	// attribute, so CEL compares a null VALUE rather than raising a missing-attribute error. The
+	// equality family has to render definitely for such a column; see Entry.NullConvention.
+	ExplicitNull bool
 }
 
 // Lit is a value bound as a query parameter. A nil V renders as SQL NULL.

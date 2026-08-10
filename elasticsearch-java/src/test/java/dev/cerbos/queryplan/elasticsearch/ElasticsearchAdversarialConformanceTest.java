@@ -66,6 +66,10 @@ class ElasticsearchAdversarialConformanceTest {
             Map.entry("request.resource.attr.createdBy", "createdBy"),
             Map.entry("request.resource.attr.createdAt", "createdAt"),
             Map.entry("request.resource.attr.owner", "owner"),
+            // `coOwner` is the explicit-null alias of the `scope` field, the second half of
+            // `null-value-f2f`: `scope` itself is omitted when NULL, so the corpus carries the
+            // same field under both conventions (cerbos/query-plan-adapters#308).
+            Map.entry("request.resource.attr.coOwner", "coOwner"),
             Map.entry("request.resource.attr.scope", "scope"),
             Map.entry("request.resource.attr.obj.inner", "obj.inner"),
             Map.entry("request.resource.attr.tags", "tags"),
@@ -77,6 +81,15 @@ class ElasticsearchAdversarialConformanceTest {
             Map.entry("request.resource.attr.categories", "categories"),
             Map.entry("request.resource.attr.mainCategory.subCategories", "mainCategory.subCategories"),
             Map.entry("request.resource.attr.mainCategory.subNames", "mainCategory.subNames"));
+
+    /**
+     * The attributes the corpus sends to {@code check()} as EXPLICIT nulls
+     * (cerbos/query-plan-adapters#308). Elasticsearch cannot represent that convention — a JSON
+     * null is not indexed, so an explicitly-null value and a missing field are the same document
+     * — so declaring them here is what turns a narrow answer into a refusal.
+     */
+    private static final Set<String> EXPLICIT_NULL_ATTRIBUTES = Set.of(
+            "request.resource.attr.owner", "request.resource.attr.coOwner");
 
     private static final Set<String> NESTED_PATHS = Set.of(
             "tags", "mainCategory.subCategories",
@@ -241,8 +254,7 @@ class ElasticsearchAdversarialConformanceTest {
         client = new CerbosClientBuilder(cerbos.getHost() + ":" + cerbos.getMappedPort(3593))
                 .withPlaintext().buildBlockingClient();
 
-        elasticsearch = new ElasticsearchContainer(
-                "docker.elastic.co/elasticsearch/elasticsearch:8.15.3")
+        elasticsearch = new ElasticsearchContainer(ElasticsearchTestImage.IMAGE)
                 .withEnv("xpack.security.enabled", "false");
         elasticsearch.start();
         httpClient = HttpClient.newHttpClient();
@@ -284,7 +296,7 @@ class ElasticsearchAdversarialConformanceTest {
                 "adapterUnsupported.elasticsearch-java contains non-conformance actions");
         assertTrue(expected.containsAll(supportedExpected),
                 "adapterSupportedExpected.elasticsearch-java contains non-expected actions");
-        assertEquals(92, unsupported.size(),
+        assertEquals(100, unsupported.size(),
                 "Elasticsearch unsupported coverage changed without updating the ledger assertion");
         assertEquals(2, supportedExpected.size(),
                 "Elasticsearch supported-expected coverage changed without updating the ledger assertion");
@@ -329,9 +341,9 @@ class ElasticsearchAdversarialConformanceTest {
         manifest.addAll(nullRepresentationOmittedActions);
         manifest.addAll(divergences);
         assertEquals(43, oracleActions.size());
-        assertEquals(98, throwingActions.size());
+        assertEquals(107, throwingActions.size());
         assertEquals(1, nullRepresentationOmittedActions.size());
-        assertEquals(143, classified.size());
+        assertEquals(152, classified.size());
         assertEquals(manifest, classified, "every manifest action must be classified locally");
     }
 
@@ -365,6 +377,7 @@ class ElasticsearchAdversarialConformanceTest {
         properties.put("aDouble", Map.of("type", "double"));
         properties.put("aOptionalString", Map.of("type", "keyword"));
         properties.put("owner", Map.of("type", "keyword"));
+        properties.put("coOwner", Map.of("type", "keyword"));
         properties.put("tagNames", Map.of("type", "keyword"));
         properties.put("createdBy", Map.of("type", "date", "format", "strict_date_optional_time_nanos"));
         properties.put("createdAt", Map.of("type", "date", "format", "strict_date_optional_time_nanos"));
@@ -391,6 +404,7 @@ class ElasticsearchAdversarialConformanceTest {
             } else {
                 document.put("owner", null);
             }
+            document.put("coOwner", scopeFor(seed));
             document.put("tagNames", seed.tags().stream().map(Tag::name).toList());
             document.put("createdBy", isoFor(seed));
             if (timestampFor(seed) != null) document.put("createdAt", timestampFor(seed).toString());
@@ -495,6 +509,9 @@ class ElasticsearchAdversarialConformanceTest {
         }
         resource = resource.withAttribute("owner", seed.aOptionalString() == null
                 ? nullAttributeValue() : AttributeValue.stringValue(seed.aOptionalString()));
+        // The explicit-null alias of the `scope` field, the second half of `null-value-f2f`.
+        resource = resource.withAttribute("coOwner", scopeFor(seed) == null
+                ? nullAttributeValue() : AttributeValue.stringValue(scopeFor(seed)));
         resource = resource.withAttribute("tagNames", AttributeValue.listValue(seed.tags().stream()
                 .map(tag -> tag.name() == null
                         ? nullAttributeValue() : AttributeValue.stringValue(tag.name()))
@@ -554,7 +571,8 @@ class ElasticsearchAdversarialConformanceTest {
     private static List<String> adapterFilteredIds(String action) throws Exception {
         PlanResourcesResult plan = client.plan(
                 principal(), Resource.newInstance(seedsFile.resourceKind()), action);
-        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(plan, FIELD_MAP, NESTED_PATHS);
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
+                plan, FIELD_MAP, Map.of(), NESTED_PATHS, EXPLICIT_NULL_ATTRIBUTES);
         if (result instanceof Result.AlwaysAllowed) {
             return allIds();
         }
@@ -580,7 +598,8 @@ class ElasticsearchAdversarialConformanceTest {
         PlanResourcesResult plan = client.plan(
                 principal(), Resource.newInstance(seedsFile.resourceKind()), action);
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(plan, FIELD_MAP, NESTED_PATHS),
+                () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
+                plan, FIELD_MAP, Map.of(), NESTED_PATHS, EXPLICIT_NULL_ATTRIBUTES),
                 "unsupported action must fail during translation: " + action);
         // The corpus pins the exact mechanism, which subsumes the old "Unknown attribute" guard:
         // an unmapped FIELD_MAP entry (which once let six actions throw here while never reaching
@@ -657,9 +676,23 @@ class ElasticsearchAdversarialConformanceTest {
             // Elasticsearch does not index an empty nested array, so a positive all() cannot tell
             // an empty collection (true) from a missing one (CEL error).
             "all-on-empty",
+            // The chain reached through a ternary condition (#334) and through a fractional count
+            // threshold (#333): different rejection sites, both still fail-closed here — the
+            // Query DSL has no conditional-value expression and no arbitrary count threshold.
+            "w1-ternary-chain-cond",
+            "w1-size-frac-le-chain",
             // Nor an explicit null scalar, so positive equality against null cannot tell an
             // explicit null (allow) from a missing field (deny). The negated forms stay compared.
-            "null-eq");
+            "null-eq",
+            // The other half of the same limitation (#308): comparing that explicit-null
+            // attribute against a NON-null constant. Every Query DSL spelling either requires
+            // the field to exist or matches every document missing it, and neither is the
+            // decision, so the whole group is refused and probed rather than compared.
+            "null-value-ne-const",
+            "null-value-not-eq-const",
+            "null-value-not-in-const",
+            "null-value-f2f",
+            "null-value-pv-not-exists");
 
     @Test
     void oracleIsNotDegenerate() {

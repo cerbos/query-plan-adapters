@@ -1,11 +1,13 @@
 {
   "//": "Type-checks the full source tree, including the test suites that tsconfig.json excludes from the emitting `tsc --build`. Never emits, so nothing here can reach lib/.",
+  "//rootDir": "The test backends under convex/ are not part of the published surface, so tsconfig.json roots the emitting build at src/. This config emits nothing, and widening the root is what lets a helper shared BETWEEN those backends be checked rather than duplicated into each of them.",
   "extends": "./tsconfig.json",
   "include": ["src"],
   "exclude": [],
   "compilerOptions": {
     "noEmit": true,
     "composite": false,
+    "rootDir": ".",
     "types": ["node"],
     "declaration": false,
     "declarationMap": false,

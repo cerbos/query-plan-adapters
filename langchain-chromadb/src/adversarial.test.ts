@@ -587,7 +587,20 @@ const DEGENERACY_GUARD_ACTIONS = [
 const DEGENERACY_LIVENESS_PROBES = [
   "pv-exists",
   "null-eq",
+  // The explicit-null convention against a non-null operand (#308). Chroma refuses all five:
+  // metadata has no null value, so `owner` is stored as an ABSENT key for a NULL column and
+  // $ne/$nin match absent keys — the convention is not representable in this store at all.
+  // Kept as probes because the group has no compared member here.
+  "null-value-ne-const",
+  "null-value-not-eq-const",
+  "null-value-not-in-const",
+  "null-value-f2f",
+  "null-value-pv-not-exists",
   "w1-all-chain",
+  // The chain reached through a ternary condition (#334) and through a fractional count
+  // threshold (#333): different rejection sites, both still fail-closed here.
+  "w1-ternary-chain-cond",
+  "w1-size-frac-le-chain",
   "cr-div-neg-zero",
   "cast-int-double",
 ] as const;
@@ -662,6 +675,10 @@ function checkResource(seed: Seed): Resource {
     aNumber: seed.aNumber,
     createdBy: isoFor(seed),
     owner: seed.aOptionalString,
+    // The explicit-null alias of the `scope` field, the second half of `null-value-f2f`:
+    // `scope` itself is omitted when NULL (below), so the corpus carries the same field under
+    // both conventions and the field-to-field probe has two explicit nulls to compare.
+    coOwner: scopeFor(seed),
     tagNames: seed.tags.map((tag) => tag.name),
     obj: { inner: seed.aString },
     tags: seed.tags.map(tagAttribute),
@@ -817,7 +834,7 @@ describe("adversarial conformance corpus", () => {
       /pins no throw message/,
     );
   });
-  test("manifest assigns all 143 policy actions exactly one Chroma outcome", () => {
+  test("manifest assigns all 152 policy actions exactly one Chroma outcome", () => {
     const oracle = new Set(CHROMA_SUPPORTED_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map(({ action }) => action));
     const nullOmitted = new Set(
@@ -833,12 +850,12 @@ describe("adversarial conformance corpus", () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(143);
+    expect(MANIFEST_ACTIONS.size).toBe(152);
     expect(CHROMA_SUPPORTED_ACTIONS).toHaveLength(15);
     expect(oracle.size).toBe(CHROMA_SUPPORTED_ACTIONS.length);
-    expect(CHROMA_UNSUPPORTED).toHaveLength(118);
+    expect(CHROMA_UNSUPPORTED).toHaveLength(126);
     expect(CHROMA_SUPPORTED_EXPECTED).toHaveLength(0);
-    expect(THROWING_ACTIONS).toHaveLength(126);
+    expect(THROWING_ACTIONS).toHaveLength(135);
     expect(misclassified).toEqual([]);
   });
 

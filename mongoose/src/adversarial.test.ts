@@ -593,10 +593,10 @@ const MANIFEST_ACTIONS = new Set([
 // can express. The two lists are asserted to be complements of `ORACLE_ACTIONS`, so neither can
 // drift into the other unnoticed.
 //
-// w1-size-zero-chain, w1-not-size-chain and the two string-cast actions are deliberately absent
-// from both lists: their oracles are empty by CONSTRUCTION (no seed holds a to-one parent with
-// zero children; every seed's aString raises in int()/double()), so they cannot satisfy a
-// non-empty assertion.
+// w1-size-zero-chain, w1-not-size-chain, w1-size-frac-chain and the two string-cast actions are
+// deliberately absent from both lists: their oracles are empty by CONSTRUCTION (no seed holds a
+// to-one parent with zero children, nor one with two or more; every seed's aString raises in
+// int()/double()), so they cannot satisfy a non-empty assertion.
 
 const DEGENERACY_GUARD_ACTIONS = [
   "vf-le",
@@ -606,12 +606,22 @@ const DEGENERACY_GUARD_ACTIONS = [
   "pv-all",
   "null-eq",
   "null-ne",
-  // The absent to-one parent (#309/#315/#316): the four discriminating chain shapes Mongoose
-  // translates. Its negated-exists sibling is a liveness probe below.
+  // The explicit-null convention against a non-null operand (#308). Mongoose stores an explicit
+  // null and its query semantics already treat null as a value, so these four needed no change:
+  // they were aligned before the SQL adapters gained their per-attribute declaration. The fifth,
+  // null-value-pv-not-exists, is a liveness probe below — the negated macro the value-list fold
+  // produces is what Mongoose refuses, not the null convention underneath it.
+  "null-value-ne-const",
+  "null-value-not-eq-const",
+  "null-value-not-in-const",
+  "null-value-f2f",
+  // The absent to-one parent (#309/#315/#316/#333/#334): the five discriminating chain shapes
+  // Mongoose translates. Its negated-exists and ternary siblings are liveness probes below.
   "w1-all-chain",
   "w1-size-nonneg-chain",
   "w1-not-in-chain",
   "w1-not-hasint-chain",
+  "w1-size-frac-le-chain",
   // Mongoose throws on the whole cr-div group (#311), so the computed-relation group is guarded
   // by the fractional-size shape it does translate.
   "cr-size-frac-ge",
@@ -625,6 +635,11 @@ const DEGENERACY_GUARD_ACTIONS = [
 const DEGENERACY_LIVENESS_PROBES = [
   // A negated macro over a chain has no UNKNOWN to represent in a Mongo filter.
   "w1-not-exists-chain",
+  // The value-list fold puts a collection macro under a negation, which Mongoose refuses before
+  // it reaches the comparison leaves; its four #308 siblings above are compared instead.
+  "null-value-pv-not-exists",
+  // A bare ternary is planned as $expr/$cond, and $in has no aggregation-expression form here.
+  "w1-ternary-chain-cond",
   // $divide aborts the query on a zero denominator, so the cr-div group throws.
   "cr-div-neg-zero",
   // int() over a numeric column: truncation-versus-rounding, unsupported for every adapter but
@@ -743,6 +758,11 @@ const MAPPER: Mapper = {
     nullable: true,
   },
   "request.resource.attr.owner": { field: "aOptionalString" },
+  // `coOwner` aliases the `scope` field under the explicit-null convention: the oracle sends a
+  // real null attribute for it rather than omitting it. Mongoose stores an explicit null, and
+  // its query semantics already treat null as a value, so no `nullable` flag applies here — the
+  // flag means the opposite (a stored null IS a missing attribute).
+  "request.resource.attr.coOwner": { field: "scope" },
   "request.resource.attr.obj.inner": { field: "aString" },
   "request.resource.attr.tags": {
     relation: {
@@ -862,6 +882,10 @@ function asCheckResource(seed: Seed): Resource {
     aNumber: seed.aNumber,
     createdBy: createdByFor(seed),
     owner: seed.aOptionalString,
+    // The explicit-null alias of the `scope` field, the second half of `null-value-f2f`:
+    // `scope` itself is omitted when NULL (below), so the corpus carries the same field under
+    // both conventions and the field-to-field probe has two explicit nulls to compare.
+    coOwner: scopeFor(seed),
     tagNames: seed.tags.map((tag) => tag.name),
     obj: { inner: seed.aString },
     tags: seed.tags.map(asTagAttribute),
@@ -1013,7 +1037,7 @@ describe("adversarial conformance corpus", () => {
       /pins no throw message/
     );
   });
-  test("manifest assigns all 143 actions exactly one Mongoose outcome", () => {
+  test("manifest assigns all 152 actions exactly one Mongoose outcome", () => {
     const oracle = new Set(ORACLE_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map((entry) => entry.action));
     const nullOmitted = new Set(
@@ -1029,11 +1053,11 @@ describe("adversarial conformance corpus", () => {
       return count !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(143);
-    expect(unsupportedEntries).toHaveLength(36);
-    expect(supportedExpectedEntries).toHaveLength(3);
-    expect(ORACLE_ACTIONS).toHaveLength(100);
-    expect(THROWING_ACTIONS).toHaveLength(41);
+    expect(MANIFEST_ACTIONS.size).toBe(152);
+    expect(unsupportedEntries).toHaveLength(38);
+    expect(supportedExpectedEntries).toHaveLength(4);
+    expect(ORACLE_ACTIONS).toHaveLength(107);
+    expect(THROWING_ACTIONS).toHaveLength(43);
     expect(misclassified).toEqual([]);
     expect(
       [...supportedExpectedActions].filter(

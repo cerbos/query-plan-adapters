@@ -108,6 +108,40 @@ public class ElasticsearchQueryPlanAdapter {
             Map<String, String> fieldMap,
             Map<String, OperatorFunction> operatorOverrides,
             Set<String> nestedPaths) {
+        return toElasticsearchQuery(planResult, fieldMap, operatorOverrides, nestedPaths, Set.of());
+    }
+
+    /**
+     * Translates a plan, declaring which attributes the caller sends to {@code check()} as
+     * EXPLICIT nulls when their field is absent or null.
+     *
+     * <p>Elasticsearch cannot represent that convention: a JSON {@code null} is not indexed, so
+     * an explicitly-null value and a missing field are the same document to every query the DSL
+     * can express. The adapter already refuses a comparison against a null LITERAL for that
+     * reason; what this declaration adds is the other half of the same limitation
+     * (<a href="https://github.com/cerbos/query-plan-adapters/issues/308">#308</a>).
+     *
+     * <p>Under the explicit convention CEL holds a null VALUE, so {@code null != "x"} is TRUE and
+     * the PDP allows the row, while every Elasticsearch spelling of {@code != "x"} either
+     * requires the field to exist (dropping it) or matches every document missing the field
+     * (over-granting some other shape). Neither is the decision, so a comparison of a declared
+     * attribute against a non-null operand is refused rather than answered narrowly.
+     *
+     * @param planResult the SDK plan result
+     * @param fieldMap maps each plan variable to an Elasticsearch field name
+     * @param operatorOverrides per-operator replacement translations
+     * @param nestedPaths field paths mapped as Elasticsearch {@code nested} documents
+     * @param explicitNullAttributes plan variables the caller sends as explicit nulls
+     * @return the translated query
+     * @throws IllegalArgumentException if the plan compares a declared attribute against a
+     *         non-null operand
+     */
+    public static Result toElasticsearchQuery(
+            PlanResourcesResult planResult,
+            Map<String, String> fieldMap,
+            Map<String, OperatorFunction> operatorOverrides,
+            Set<String> nestedPaths,
+            Set<String> explicitNullAttributes) {
         if (planResult.isAlwaysAllowed()) {
             return new Result.AlwaysAllowed();
         }
@@ -118,7 +152,71 @@ public class ElasticsearchQueryPlanAdapter {
         Operand condition = planResult.getCondition()
                 .orElseThrow(() -> new IllegalArgumentException("Conditional plan has no condition"));
 
+        assertNoExplicitNullAttributeComparisons(condition, fieldMap, explicitNullAttributes);
         return new Result.Conditional(traverseOperand(condition, fieldMap, operatorOverrides, nestedPaths));
+    }
+
+    /**
+     * Rejects every equality-family comparison between a declared explicit-null attribute and a
+     * non-null literal, before any query is built.
+     *
+     * <p>Scoped to the equality family on purpose: those are the operators CEL evaluates to a
+     * definite boolean over a null value, and therefore the only ones whose Elasticsearch
+     * translation can disagree with the decision. Ordering and string operators raise a
+     * no-overload error in CEL, which denies — exactly what a document missing the field already
+     * does here. A comparison against a null LITERAL is left to the existing guard, whose message
+     * this shares.
+     */
+    private static void assertNoExplicitNullAttributeComparisons(
+            Operand operand, Map<String, String> fieldMap, Set<String> explicitNullAttributes) {
+        if (explicitNullAttributes.isEmpty() || operand.getNodeCase() != Operand.NodeCase.EXPRESSION) {
+            return;
+        }
+        Expression expression = operand.getExpression();
+        List<Operand> operands = expression.getOperandsList();
+        if (EQUALITY_FAMILY.contains(expression.getOperator()) && operands.size() == 2) {
+            Operand left = operands.get(0);
+            Operand right = operands.get(1);
+            boolean leftDeclared = isDeclaredAttribute(left, explicitNullAttributes);
+            boolean rightDeclared = isDeclaredAttribute(right, explicitNullAttributes);
+            Operand other = leftDeclared ? right : left;
+            if ((leftDeclared || rightDeclared) && comparesAgainstAValue(other, fieldMap)) {
+                throw unsafeExplicitNullComparison();
+            }
+        }
+        operands.forEach(child ->
+                assertNoExplicitNullAttributeComparisons(child, fieldMap, explicitNullAttributes));
+    }
+
+    private static boolean isDeclaredAttribute(Operand operand, Set<String> explicitNullAttributes) {
+        return operand.getNodeCase() == Operand.NodeCase.VARIABLE
+                && explicitNullAttributes.contains(operand.getVariable());
+    }
+
+    /**
+     * Whether the other side of the comparison carries a non-null VALUE at evaluation time.
+     *
+     * <p>A plan constant is one; so is a lambda-bound name, which a value-list macro fold
+     * substitutes with a literal element after this scan has run — that is how the fold reaches
+     * the same unrepresentable convention (#308). A name the field map knows is another DOCUMENT
+     * field, which the Query DSL refuses for its own reason, and a null literal is the existing
+     * guard's business; neither is claimed here, so both keep the message that actually fires.
+     */
+    private static boolean comparesAgainstAValue(Operand other, Map<String, String> fieldMap) {
+        return switch (other.getNodeCase()) {
+            case VALUE -> !carriesNullLiteral(other.getValue());
+            case VARIABLE -> !fieldMap.containsKey(other.getVariable());
+            default -> false;
+        };
+    }
+
+    private static boolean carriesNullLiteral(com.google.protobuf.Value value) {
+        if (value.getKindCase() == com.google.protobuf.Value.KindCase.NULL_VALUE) {
+            return true;
+        }
+        return value.getKindCase() == com.google.protobuf.Value.KindCase.LIST_VALUE
+                && value.getListValue().getValuesList().stream()
+                        .anyMatch(v -> v.getKindCase() == com.google.protobuf.Value.KindCase.NULL_VALUE);
     }
 
     // --- PlanResourcesResponse overloads ---
@@ -148,6 +246,26 @@ public class ElasticsearchQueryPlanAdapter {
             Map<String, String> fieldMap,
             Map<String, OperatorFunction> operatorOverrides,
             Set<String> nestedPaths) {
+        return toElasticsearchQuery(response, fieldMap, operatorOverrides, nestedPaths, Set.of());
+    }
+
+    /**
+     * The {@link PlanResourcesResponse} form of
+     * {@link #toElasticsearchQuery(PlanResourcesResult, Map, Map, Set, Set)}.
+     *
+     * @param response the raw {@code PlanResources} RPC response
+     * @param fieldMap maps each plan variable to an Elasticsearch field name
+     * @param operatorOverrides per-operator replacement translations
+     * @param nestedPaths field paths mapped as Elasticsearch {@code nested} documents
+     * @param explicitNullAttributes plan variables the caller sends as explicit nulls
+     * @return the translated query
+     */
+    public static Result toElasticsearchQuery(
+            PlanResourcesResponse response,
+            Map<String, String> fieldMap,
+            Map<String, OperatorFunction> operatorOverrides,
+            Set<String> nestedPaths,
+            Set<String> explicitNullAttributes) {
         PlanResourcesFilter filter = response.getFilter();
         return switch (filter.getKind()) {
             case KIND_ALWAYS_ALLOWED -> new Result.AlwaysAllowed();
@@ -157,11 +275,18 @@ public class ElasticsearchQueryPlanAdapter {
                 if (condition.getNodeCase() == Operand.NodeCase.NODE_NOT_SET) {
                     throw new IllegalArgumentException("Conditional plan has no condition");
                 }
+                assertNoExplicitNullAttributeComparisons(condition, fieldMap, explicitNullAttributes);
                 yield new Result.Conditional(traverseOperand(condition, fieldMap, operatorOverrides, nestedPaths));
             }
             default -> throw new IllegalArgumentException("Unknown filter kind: " + filter.getKind());
         };
     }
+
+    /**
+     * The operators CEL evaluates to a definite boolean over a null value, and so the only ones an
+     * attribute's declared explicit-null convention can settle.
+     */
+    private static final Set<String> EQUALITY_FAMILY = Set.of("eq", "ne", "in");
 
     // --- Traversal (unscoped) ---
 

@@ -29,7 +29,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -212,10 +211,8 @@ class MacroNestingBenchmarkTest {
                         .setKind(PlanResourcesFilter.Kind.KIND_CONDITIONAL)
                         .setCondition(existsChain(depth)))
                 .build();
-        Result<ResourceEntity> result = SpringDataQueryPlanAdapter.toSpecification(resp, MAPPING);
-        assertInstanceOf(Result.Conditional.class, result);
         Specification<ResourceEntity> spec =
-                ((Result.Conditional<ResourceEntity>) result).specification();
+                SpringDataQueryPlanAdapter.toSpecification(resp, MAPPING);
 
         EntityManager em = emf.createEntityManager();
         try {

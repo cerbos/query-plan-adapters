@@ -128,18 +128,73 @@ The rejection is deliberately wider than the shapes that actually over-grant —
 `not` will flip `IS NOT NULL` back into a NULL-selecting predicate. Rejecting every null operand is
 correct under any nesting. See [#302](https://github.com/cerbos/query-plan-adapters/issues/302).
 
+### Declare the convention per attribute
+
+The option above is a whole-call default, and one policy suite can legitimately use both
+conventions: the same column mapped twice, sent as an explicit null under one attribute name and
+omitted under another. Declare it on the mapping instead and the call-level option only covers what
+the mapping does not:
+
+```ts
+const mapper = {
+  // sent as an explicit null when the column is NULL
+  "request.resource.attr.owner": {
+    field: "ownerId",
+    nullAttributeRepresentation: "explicit",
+  },
+  // omitted when the column is NULL — the call-level default applies
+  "request.resource.attr.department": { field: "department" },
+};
+```
+
+Declaring `"explicit"` asserts two things: the column can be NULL, **and** a NULL reaches `check()`
+as an explicit null. The equality family (`eq`, `ne`, `in`) over that attribute is then rendered so
+it can never be SQL UNKNOWN — CEL holds a null *value* under this convention, so `null != "x"` is
+TRUE and the row must come back, while UNKNOWN would drop it under *both* polarities. Ordering and
+string operators are left alone: a null receiver raises a no-overload error in CEL, which denies
+exactly as UNKNOWN does.
+
+Leaving an attribute undeclared keeps the historical rendering — so nothing changes for a mapping
+that says nothing, and `!=` against a constant keeps under-granting the NULL rows until you declare
+it.
+
+**Declare both sides of a field-to-field comparison, or neither.** Mixing the conventions across one
+comparison has no faithful rendering — the declared side needs a definite answer for its NULL, the
+undeclared side needs UNKNOWN — so the adapter throws rather than picking a direction. See
+[#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
+[ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
+
+
 ### Conformance contract
 
-The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 20 hostile seed rows and both Prisma 6 and 7. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
+The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 20 hostile seed rows, both Prisma 6 and 7, and both SQLite and PostgreSQL. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 94 reference actions |
-| Fail-closed | 39 reference actions plus the 8 reference-unsupported shapes (47 actions total) |
+| Oracle-tested | 99 reference actions |
+| Fail-closed | 42 reference actions plus the 8 reference-unsupported shapes (50 actions total) |
 | Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
+| Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute the caller sends as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare it per attribute — `nullAttributeRepresentation: "explicit"` on the mapper entry — or the historical rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 
 The fail-closed set consists of literal `LIKE` cases Prisma cannot escape safely, cross-model field references, arbitrary relation counts and string lengths, `exists_one`, unsolved column arithmetic, sub-millisecond `now()` thresholds, and the reference probes for regex, ordered indexing, and `timestamp()` over a string field. Supported timestamp plans require a mapper entry with `valueType: "dateTime"` and a strict, millisecond-exact RFC 3339 literal in CEL's supported instant range. These shapes throw instead of producing a broader authorization filter. Every fail-closed shape's error message is pinned in the shared corpus (`conformance/actions.json`) and asserted by this adapter's conformance run, so a classification proves the throw names its declared mechanism rather than merely that something threw.
+
+#### Providers the contract is proved on
+
+The classification above holds where the corpus is **executed**, not where the emitted filter merely looks plausible. Until [#320](https://github.com/cerbos/query-plan-adapters/issues/320) it was executed on SQLite only, and the Prisma 6/7 matrix is an *engine* matrix, not a provider one — it says nothing about how a provider coerces a value or reads a `LIKE` pattern. The suite now runs on SQLite and PostgreSQL:
+
+The store and the Prisma major are independent dimensions, so there are four runs and CI does all four:
+
+```bash
+npm run test:adversarial:v7            # SQLite,     Prisma 7
+npm run test:adversarial:v6            # SQLite,     Prisma 6
+npm run test:adversarial:postgres:v7   # PostgreSQL, Prisma 7  (testcontainers)
+npm run test:adversarial:postgres:v6   # PostgreSQL, Prisma 6  (testcontainers)
+```
+
+MySQL, SQL Server and CockroachDB are **not** executed. Where a fail-closed reason names one of them, it is reasoned from that provider's documented `LIKE` and escaping behaviour rather than observed.
+
+> **Breaking change in this release.** `endsWith`/`contains`/`startsWith` with a needle containing a **backslash**, and hierarchy prefixes containing one, now throw instead of returning a filter. A backslash is the default `LIKE` escape character on PostgreSQL and MySQL and has no meaning at all on SQLite, so one needle meant two different things: `contains("a\\b")` matched `"ab"` on PostgreSQL — a row the PDP denies — and `endsWith("\\")` failed the query outright with `SQLSTATE 22025`. There is no needle spelling that is correct on every provider without an `ESCAPE` clause Prisma does not emit, so the shape is refused. If you match on backslashes, compare the whole value with `==` or move the predicate out of the policy.
 
 ### Mapping hazards
 
@@ -596,6 +651,19 @@ type Mapper = { [key: string]: MapperConfig } | ((key: string) => MapperConfig);
 ## Full Example
 
 A complete example application using this adapter can be found at [https://github.com/cerbos/express-prisma-cerbos](https://github.com/cerbos/express-prisma-cerbos)
+
+This repository also carries a runnable [`example/`](example/), which installs the adapter from the
+artifact `npm publish` would upload and exercises it against a live PDP over the shared
+[demo domain](../demo/README.md):
+
+```bash
+# from the repository root
+demo/scripts/run-example.sh prisma
+```
+
+Unlike the test suites, it resolves the adapter through its **published** surface — the `exports`
+map, `types`, the `files` allowlist, and the peer range — and covers usage shapes past a single
+flat query: pagination, and the adapter's filter composed with an application-owned filter.
 
 ## Resources
 

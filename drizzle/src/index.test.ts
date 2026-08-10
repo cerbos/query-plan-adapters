@@ -1680,6 +1680,136 @@ describe("nullAttributeRepresentation", () => {
   });
 });
 
+// cerbos/query-plan-adapters#308. The per-attribute half of the same option. A call-level flag
+// cannot express a policy suite that mixes the two conventions — the same column mapped twice,
+// sent explicitly under one attribute name and omitted under another — so the declaration lives
+// on the mapper entry and the call-level option is only its default.
+describe("per-attribute nullAttributeRepresentation", () => {
+  const explicitMapper: Record<string, MapperEntry> = {
+    ...mapper,
+    "request.resource.attr.owner": {
+      column: resources.aOptionalString,
+      nullAttributeRepresentation: "explicit",
+    },
+    "request.resource.attr.coOwner": {
+      column: resources.aString,
+      nullAttributeRepresentation: "explicit",
+    },
+  };
+
+  const sqlFor = (
+    expression: PlanExpressionOperand,
+    withMapper: Record<string, MapperEntry> = explicitMapper
+  ) =>
+    db
+      .select()
+      .from(resources)
+      .where(
+        ensureFilter(
+          queryPlanToDrizzle({
+            queryPlan: buildPlan(expression),
+            mapper: withMapper,
+          })
+        )
+      )
+      .toSQL().sql;
+
+  const comparison = (operator: string, name: string, value: unknown) =>
+    ({
+      operator,
+      operands: [{ name }, { value }],
+    }) as PlanExpressionOperand;
+
+  // A null VALUE is not equal to "x", so CEL returns a definite FALSE and its negation a
+  // definite TRUE. `col <> 'x'` is UNKNOWN instead, which excludes the row under BOTH
+  // polarities — the row the PDP allows never comes back.
+  test("renders ne against a constant so a NULL row is included", () => {
+    // `not (col is not null and col = ?)` — definite FALSE for a NULL column inside the NOT,
+    // hence definite TRUE outside it, where a bare `col <> ?` would have been UNKNOWN.
+    expect(
+      sqlFor(comparison("ne", "request.resource.attr.owner", "x"))
+    ).toContain('not ("resources"."a_optional_string" is not null and');
+  });
+
+  test("renders eq against a constant so it is definite under a negation", () => {
+    expect(
+      sqlFor(comparison("eq", "request.resource.attr.owner", "x"))
+    ).toContain('"a_optional_string" is not null');
+  });
+
+  // The equality family only. An ordering comparison against a null receiver is a no-overload
+  // error in CEL, which denies under both polarities — exactly what UNKNOWN already does — so
+  // `gt` must keep propagating it rather than being made definite.
+  test("leaves ordering comparisons propagating UNKNOWN", () => {
+    expect(
+      sqlFor(comparison("gt", "request.resource.attr.owner", "x"))
+    ).not.toContain("is null");
+  });
+
+  test("makes membership without a null element definite", () => {
+    expect(
+      sqlFor(comparison("in", "request.resource.attr.owner", ["x", "y"]))
+    ).toContain('"a_optional_string" is not null');
+  });
+
+  test("matches two explicit nulls in a field-to-field equality", () => {
+    const sql = sqlFor({
+      operator: "eq",
+      operands: [
+        { name: "request.resource.attr.owner" },
+        { name: "request.resource.attr.coOwner" },
+      ],
+    } as PlanExpressionOperand);
+
+    expect(sql).toContain('"a_optional_string" is null');
+    expect(sql).toContain('"a_string" is null');
+  });
+
+  // An entry that declares nothing keeps the historical rendering, so declaring the convention
+  // on one attribute cannot change the SQL emitted for any other mapping.
+  test("leaves an undeclared entry untouched", () => {
+    expect(
+      sqlFor(comparison("ne", "request.resource.attr.aOptionalString", "x"))
+    ).not.toContain("is null");
+  });
+
+  // The entry-level declaration overrides the call-level default in both directions, which is
+  // the whole point: one call, two conventions.
+  test('an entry declaring "omitted" rejects a null operand under the "explicit" default', () => {
+    expect(() =>
+      queryPlanToDrizzle({
+        queryPlan: buildPlan(
+          comparison("eq", "request.resource.attr.omitted", null)
+        ),
+        mapper: {
+          ...mapper,
+          "request.resource.attr.omitted": {
+            column: resources.aOptionalString,
+            nullAttributeRepresentation: "omitted",
+          },
+        },
+        nullAttributeRepresentation: "explicit",
+      })
+    ).toThrow(/missing-attribute error/);
+  });
+
+  test('an entry declaring "explicit" still translates a null operand under the "omitted" default', () => {
+    const filter = ensureFilter(
+      queryPlanToDrizzle({
+        queryPlan: buildPlan(
+          comparison("eq", "request.resource.attr.owner", null)
+        ),
+        mapper: explicitMapper,
+        nullAttributeRepresentation: "omitted",
+      })
+    );
+
+    expect(db.select().from(resources).where(filter).toSQL().sql).toContain(
+      '"a_optional_string" is null'
+    );
+  });
+});
+
 // The class 1 mapping-hazard contract (README, "Mapping hazards"): the adapter reads the relation
 // table directly, so a soft-delete flag, tenant column or subtype discriminator the application
 // applies to its own reads does NOT reach the generated EXISTS unless the caller declares it.

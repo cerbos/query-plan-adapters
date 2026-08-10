@@ -102,6 +102,32 @@ type MappingConfig = {
   relation?: RelationMapping;
   valueType?: "timestamp";
   collectionValueType?: "scalar";
+  /**
+   * Declares that this column can be SQL NULL **and** how the caller represents that NULL in
+   * the attributes it sends to `check()`. Declaring it asserts both facts; leaving it undeclared
+   * means "treat this column as NOT NULL", which is the historical rendering.
+   *
+   * This is per attribute rather than per call because one policy suite can legitimately mix the
+   * two conventions — the same column can be mapped twice, sent as an explicit null under one
+   * attribute name and omitted under another. The call-level option cannot express that, which is
+   * what made cerbos/query-plan-adapters#308 unfixable with #302's option alone.
+   *
+   * - `"explicit"` — a NULL column is sent as an explicit `null` attribute, so CEL holds a null
+   *   VALUE. `null != "x"` is then TRUE and `null == "x"` is FALSE, both definite. SQL's
+   *   `NULL <> 'x'` is UNKNOWN, which excludes the row under both polarities, so the equality
+   *   family (`eq`, `ne`, `in`) is rendered so it can never be UNKNOWN.
+   * - `"omitted"` — a NULL column sends no attribute, so CEL raises a missing-attribute error and
+   *   `check()` denies. UNKNOWN already excludes the row under both polarities, so the rendering
+   *   is unchanged; what the declaration adds is the same null-operand rejection the call-level
+   *   `"omitted"` performs, scoped to this attribute.
+   *
+   * Only the equality family is affected. `lt`/`le`/`gt`/`ge` and the string operators raise a
+   * no-overload error on a null receiver in CEL, which denies under both polarities exactly as
+   * UNKNOWN does, so they keep propagating it.
+   *
+   * See https://github.com/cerbos/query-plan-adapters/issues/308.
+   */
+  nullAttributeRepresentation?: NullAttributeRepresentation;
 };
 
 interface RelationValue {
@@ -677,6 +703,62 @@ const MIRRORED_OPERATORS: Record<string, ComparisonOperator> = {
 
 type StringMatchOperator = "contains" | "startsWith" | "endsWith";
 
+/**
+ * A SQL fragment plus whether the value behind it can be SQL NULL at run time.
+ *
+ * A bound constant's nullness is settled during translation, so guarding one with `IS NULL` asks
+ * the database a question the adapter has already answered. PostgreSQL cannot even answer it: a
+ * bare parameter has no type of its own and `IS NULL` gives it no context to infer one, so
+ * `$1 IS NULL` is rejected outright rather than merely being redundant
+ * (cerbos/query-plan-adapters#320).
+ */
+interface NullableExpression {
+  expr: SQL;
+  canBeNull: boolean;
+}
+
+/** The `IS NULL` disjunction over the operands that can actually be NULL, or nothing. */
+const buildNullGuard = (
+  ...operands: NullableExpression[]
+): SQL | undefined => {
+  const guards = operands
+    .filter((operand) => operand.canBeNull)
+    .map((operand) => sql`${operand.expr} is null`);
+  return guards.length ? sql.join(guards, sql` or `) : undefined;
+};
+
+/**
+ * Classify an operand's rendered SQL by whether it can be NULL.
+ *
+ * A constant renders as a bound literal, so only an operand that reaches a column can be NULL.
+ * Arithmetic over constants folds to one too, which is why it is resolved rather than assumed:
+ * `($1 + $2) IS NULL` is as untypeable on PostgreSQL as `$1 IS NULL`.
+ */
+const operandExpression = (
+  expr: SQL,
+  operand: PlanExpressionOperand
+): NullableExpression => {
+  if (isValueOperand(operand)) {
+    return { expr, canBeNull: operand.value === null };
+  }
+  return {
+    expr,
+    canBeNull: resolveConstantNumber(operand).kind !== "constant",
+  };
+};
+
+/** A column expression, which the schema may allow to be NULL. */
+const columnExpression = (expr: SQL): NullableExpression => ({
+  expr,
+  canBeNull: true,
+});
+
+/** A constant already known to be a non-null literal by the time it is rendered. */
+const constantExpression = (expr: SQL): NullableExpression => ({
+  expr,
+  canBeNull: false,
+});
+
 // CEL-exact string matching: replace/substr are case-sensitive, interpret no LIKE
 // metacharacters (% _ \ in the needle match literally), and propagate NULL as SQL
 // UNKNOWN — which excludes the row under both polarities, mirroring the CEL
@@ -684,21 +766,28 @@ type StringMatchOperator = "contains" | "startsWith" | "endsWith";
 // ALWAYS the pattern; operands are never swapped.
 const buildStringMatchCondition = (
   operator: StringMatchOperator,
-  receiver: SQL,
-  needle: SQL
+  receiver: NullableExpression,
+  needle: NullableExpression
 ): SQL => {
+  const receiverExpr = receiver.expr;
+  const needleExpr = needle.expr;
   switch (operator) {
-    case "contains":
+    case "contains": {
       // REPLACE is case-sensitive and treats the needle literally on SQLite,
       // PostgreSQL, and MySQL. Unlike LIKE it cannot reinterpret %, _, \, or [
       // from a column-valued needle as pattern syntax. The explicit NULL arm
       // preserves CEL missing-attribute errors under negation, and contains("")
       // remains true for every present receiver.
-      return sql`(case when ${receiver} is null or ${needle} is null then null when ${needle} = '' then true else length(replace(${receiver}, ${needle}, '')) < length(${receiver}) end)`;
+      const body = sql`when ${needleExpr} = '' then true else length(replace(${receiverExpr}, ${needleExpr}, '')) < length(${receiverExpr}) end`;
+      const nullGuard = buildNullGuard(receiver, needle);
+      return nullGuard
+        ? sql`(case when ${nullGuard} then null ${body})`
+        : sql`(case ${body})`;
+    }
     case "startsWith":
-      return sql`substr(${receiver}, 1, length(${needle})) = ${needle}`;
+      return sql`substr(${receiverExpr}, 1, length(${needleExpr})) = ${needleExpr}`;
     case "endsWith":
-      return sql`substr(${receiver}, length(${receiver}) - length(${needle}) + 1) = ${needle}`;
+      return sql`substr(${receiverExpr}, length(${receiverExpr}) - length(${needleExpr}) + 1) = ${needleExpr}`;
   }
 };
 
@@ -842,8 +931,8 @@ const buildHierarchyFilter = (
     conditions.push(
       buildStringMatchCondition(
         "startsWith",
-        fieldExpr,
-        sql`${constantPath + field.delimiter}`
+        columnExpression(fieldExpr),
+        constantExpression(sql`${constantPath + field.delimiter}`)
       )
     );
     const combined = or(...conditions);
@@ -864,8 +953,8 @@ const buildHierarchyFilter = (
   } else {
     filter = buildStringMatchCondition(
       "startsWith",
-      fieldExpr,
-      sql`${constantPath + field.delimiter}`
+      columnExpression(fieldExpr),
+      constantExpression(sql`${constantPath + field.delimiter}`)
     );
   }
 
@@ -899,7 +988,44 @@ const CONVERSION_TARGETS: Record<string, string> = {
  */
 const UNSUPPORTED_CONVERSIONS = new Set(["int", "double"]);
 
-const buildValueExpressionFromValue = (value: Value): SQL => sql`${value}`;
+/** The widest exact integer every numeric SQL type a driver might infer can carry. */
+const INT32_MIN = -2147483648;
+const INT32_MAX = 2147483647;
+
+/**
+ * Whether a constant has to be bound as an explicit double rather than left for the engine to
+ * type from whatever it is compared with.
+ *
+ * CEL numbers are IEEE doubles, but a bound parameter carries no type of its own: PostgreSQL
+ * types it from the other side of the comparison — an `integer` column, `length()`'s `integer`,
+ * `count()`'s `bigint` — and then rejects a value that does not fit, so `aNumber >= 1.5` and
+ * `size(aString) > 4294967296` fail outright there while SQLite compares them numerically. The
+ * silent failure mode is worse than the loud one: read as SQL `numeric`, `aNumber * 0.1 == 0.3`
+ * is exact decimal arithmetic and allows a row CEL's binary floating point denies
+ * (cerbos/query-plan-adapters#320).
+ *
+ * An exact 32-bit integer is carried by every numeric type SQL might infer and needs no cast, so
+ * the common `column = 5` predicate keeps whatever index the column has.
+ */
+const requiresDoubleTyping = (value: Value): value is number =>
+  typeof value === "number" &&
+  (!Number.isInteger(value) || value < INT32_MIN || value > INT32_MAX);
+
+/** The constant, typed so the engine reads it as an IEEE double. */
+const buildValueExpressionFromValue = (value: Value): SQL =>
+  requiresDoubleTyping(value) ? sql`cast(${value} as float(53))` : sql`${value}`;
+
+/**
+ * A constant bound for comparison against `column`.
+ *
+ * Normally the column's own encoder types it, which is what keeps the comparison index-friendly.
+ * A value that type cannot carry goes through `buildValueExpressionFromValue` instead, so the
+ * engine widens the comparison rather than rejecting the parameter.
+ */
+const bindAgainstColumn = (value: Value, column: AnyColumn): SQL | Param =>
+  requiresDoubleTyping(value)
+    ? buildValueExpressionFromValue(value)
+    : new Param(value, column);
 
 const buildColumnExpression = (
   mapping: BaseMapperEntry,
@@ -1229,11 +1355,79 @@ const buildConditionFromOperand = (
   options?: BuildFilterOptions
 ): SQL => buildFilterFromExpression(operand, mapper, options);
 
+/**
+ * The definite spelling of an equality between operands that can hold an explicit null.
+ *
+ * Deliberately not `IS [NOT] DISTINCT FROM`. Two reasons, and the second is the load-bearing one:
+ * SQLite spells it `IS`/`IS NOT`, MySQL `<=>` and only PostgreSQL takes the standard form, so the
+ * adapter would need a dialect it does not otherwise know — and, more importantly, a null-safe
+ * equality is SYMMETRIC while this rewrite must not be. When only ONE side declares the
+ * convention, the other side's NULL is a MISSING attribute on the check side, so CEL raises an
+ * error and denies; only the asymmetric expansion below keeps propagating UNKNOWN for it. A
+ * null-safe operator would match the two NULLs and over-grant.
+ */
+const definiteEquality = (
+  leftExpr: SQL,
+  rightExpr: SQL,
+  leftExplicitNull: boolean,
+  rightExplicitNull: boolean
+): SQL => {
+  const nullMatches: SQL[] = [];
+  const bothPresent: SQL[] = [];
+  if (leftExplicitNull) {
+    nullMatches.push(sql`${leftExpr} is null`);
+    bothPresent.push(sql`${leftExpr} is not null`);
+  }
+  if (rightExplicitNull) {
+    nullMatches.push(sql`${rightExpr} is null`);
+    bothPresent.push(sql`${rightExpr} is not null`);
+  }
+  // Two nulls are EQUAL in CEL, so a row where every explicit-null operand is NULL matches.
+  const bothNull = and(...nullMatches);
+  const present = and(...bothPresent, sql`${leftExpr} = ${rightExpr}`);
+  const combined = leftExplicitNull && rightExplicitNull
+    ? or(bothNull, present)
+    : present;
+  if (!combined) {
+    throw new Error("Unable to combine null-aware equality conditions");
+  }
+  return combined;
+};
+
 const applyComparisonWithExpression = (
   operator: ComparisonOperator,
   fieldExpr: SQL,
-  valueExpr: SQL
+  valueExpr: SQL,
+  fieldExplicitNull = false,
+  valueExplicitNull = false
 ): SQL => {
+  // Mixing the two conventions across one comparison has no faithful rendering. The declared side
+  // needs a definite answer for its NULL (CEL holds a null VALUE); the undeclared side needs
+  // UNKNOWN for its NULL (a missing attribute, which CEL denies under both polarities). A definite
+  // predicate returns rows the PDP refuses; a plain one drops rows the PDP allows. Refuse it
+  // rather than pick a direction — declare both attributes, or neither.
+  if (
+    fieldExplicitNull !== valueExplicitNull &&
+    (operator === "eq" || operator === "ne")
+  ) {
+    throw new Error(
+      `Cannot translate \`${operator}\` between two columns under mixed null conventions: ` +
+        "cannot compare an attribute declared explicit-null with one on the omitted convention: the omitted side is UNKNOWN for a NULL column while the declared side is definite, and no single predicate is both. Declare nullAttributeRepresentation on both mapper entries, or on neither."
+    );
+  }
+  if (
+    fieldExplicitNull &&
+    valueExplicitNull &&
+    (operator === "eq" || operator === "ne")
+  ) {
+    const equality = definiteEquality(
+      fieldExpr,
+      valueExpr,
+      fieldExplicitNull,
+      valueExplicitNull
+    );
+    return operator === "eq" ? equality : not(equality);
+  }
   switch (operator) {
     case "eq":
       return sql`${fieldExpr} = ${valueExpr}`;
@@ -1270,8 +1464,20 @@ let nullRepresentation: NullAttributeRepresentation = "explicit";
  * `IS NOT NULL` back into a NULL-selecting predicate. Rejecting every null operand is correct
  * under any nesting; narrowing it requires negation-parity tracking.
  */
-const assertNullOperandTranslatable = (context: string): void => {
-  if (nullRepresentation === "omitted") {
+/**
+ * The convention declared on a mapper entry, if it declares one. An entry that declares nothing
+ * inherits the call-level option, which is what `assertNullOperandTranslatable` falls back to.
+ */
+const mappingNullRepresentation = (
+  mapping: BaseMapperEntry
+): NullAttributeRepresentation | undefined =>
+  isMappingConfig(mapping) ? mapping.nullAttributeRepresentation : undefined;
+
+const assertNullOperandTranslatable = (
+  context: string,
+  declared?: NullAttributeRepresentation
+): void => {
+  if ((declared ?? nullRepresentation) === "omitted") {
     throw new Error(
       `Cannot translate ${context} under nullAttributeRepresentation "omitted": a NULL column ` +
         "sends no attribute, so Cerbos evaluates the comparison as a missing-attribute error " +
@@ -1284,12 +1490,23 @@ const assertNullOperandTranslatable = (context: string): void => {
 const applyComparison = (
   mapping: BaseMapperEntry,
   operator: ComparisonOperator,
-  value: Value
+  value: Value,
+  inherited?: NullAttributeRepresentation
 ): SQL => {
+  // The declaration lives on the mapper entry, but the entry unwraps to a bare column one frame
+  // down, so it has to be carried rather than re-read.
+  const declared = mappingNullRepresentation(mapping) ?? inherited;
+  const explicitNull = declared === "explicit";
   if (value === null) {
-    assertNullOperandTranslatable(`\`${operator}\` against a null operand`);
+    assertNullOperandTranslatable(
+      `\`${operator}\` against a null operand`,
+      declared
+    );
   } else if (Array.isArray(value) && value.includes(null)) {
-    assertNullOperandTranslatable("a null element in an `in` list");
+    assertNullOperandTranslatable(
+      "a null element in an `in` list",
+      declared
+    );
   }
   if (isRelationValue(mapping)) {
     return applyRelationComparison(mapping, operator);
@@ -1308,14 +1525,29 @@ const applyComparison = (
     if (!mapping.column) {
       throw new Error("Mapping configuration requires a column or transform");
     }
-    return applyComparison(mapping.column, operator, value);
+    return applyComparison(mapping.column, operator, value, declared);
   }
 
   if (!isColumn(mapping)) {
     throw new Error("Expected a column mapping");
   }
   const column: AnyColumn = mapping;
-  const bound = new Param(value, column);
+  const bound = bindAgainstColumn(value, column);
+
+  // An attribute the caller sends as an explicit null holds a null VALUE in CEL, so equality
+  // against a non-null operand is FALSE and inequality is TRUE — both definite. SQL's UNKNOWN
+  // excludes the row under BOTH polarities, so the predicate has to be made definite here; a
+  // fix confined to `ne` would leave `!(col = x)` still dropping the row.
+  if (explicitNull && value !== null) {
+    switch (operator) {
+      case "eq":
+        return definiteEquality(sql`${column}`, sql`${bound}`, true, false);
+      case "ne":
+        return not(definiteEquality(sql`${column}`, sql`${bound}`, true, false));
+      default:
+        break;
+    }
+  }
 
   switch (operator) {
     case "eq":
@@ -1341,11 +1573,22 @@ const applyComparison = (
       if (nonNullValues.length === 0) {
         return isNull(column);
       }
-      const membership = sql`${column} in ${nonNullValues.map(
-        (candidate) => new Param(candidate, column)
+      const membership = sql`${column} in ${nonNullValues.map((candidate) =>
+        bindAgainstColumn(candidate, column)
       )}`;
       if (nonNullValues.length === values.length) {
-        return membership;
+        // No null element, so nothing has made the predicate definite yet: `NOT (col IN (…))`
+        // over a NULL column is UNKNOWN and drops the row, while CEL compares a null VALUE
+        // against each element and gets a definite false. A null element takes the branch
+        // below instead, where the `IS NULL` disjunct already settles it.
+        if (!explicitNull) {
+          return membership;
+        }
+        const present = and(sql`${column} is not null`, membership);
+        if (!present) {
+          throw new Error("Unable to combine null-aware membership conditions");
+        }
+        return present;
       }
       const withNull = or(membership, isNull(column));
       if (!withNull) {
@@ -1359,7 +1602,11 @@ const applyComparison = (
       if (typeof value !== "string") {
         throw new Error(`The '${operator}' operator requires a string value`);
       }
-      return buildStringMatchCondition(operator, sql`${column}`, sql`${value}`);
+      return buildStringMatchCondition(
+        operator,
+        columnExpression(sql`${column}`),
+        constantExpression(sql`${value}`)
+      );
     default:
       throw new Error(`Unsupported operator: ${operator}`);
   }
@@ -1547,7 +1794,11 @@ const buildStringMatchFilter = (
   }
   const receiver = resolveScalarOperand(receiverOperand, mapper, options);
   const needle = resolveScalarOperand(needleOperand, mapper, options);
-  const filter = buildStringMatchCondition(operator, receiver.expr, needle.expr);
+  const filter = buildStringMatchCondition(
+    operator,
+    operandExpression(receiver.expr, receiverOperand),
+    operandExpression(needle.expr, needleOperand)
+  );
   const reference = isNameOperand(receiverOperand)
     ? receiverOperand.name
     : isNameOperand(needleOperand)
@@ -2405,13 +2656,24 @@ const buildComparisonFilter = (
       ? applyComparisonWithExpression(operator, enclosingExpr, otherExpr)
       : applyComparisonWithExpression(operator, otherExpr, enclosingExpr);
 
-    return sql`(case
-      when ${numerator} is null or ${denominator} is null or ${otherExpr} is null then null
+    // Only the operands that reach a column can be NULL; a constant one is settled here, and
+    // asking PostgreSQL `$1 IS NULL` about a bare parameter is an error, not a redundancy.
+    const nullGuard = buildNullGuard(
+      operandExpression(numerator, numeratorOperand),
+      operandExpression(denominator, denominatorOperand),
+      operandExpression(otherExpr, other)
+    );
+    const ieeeArms = sql`
       when ${denominator} = 0 and ${numerator} = 0 then ${arm(Number.NaN)}
       when ${denominator} = 0 and ${numerator} > 0 then ${arm(signed(Number.POSITIVE_INFINITY))}
       when ${denominator} = 0 then ${arm(signed(Number.NEGATIVE_INFINITY))}
       else ${negated ? not(finite) : finite}
     end)`;
+
+    return nullGuard
+      ? sql`(case
+      when ${nullGuard} then null ${ieeeArms}`
+      : sql`(case ${ieeeArms}`;
   };
 
   if (isExpressionOperand(left) && left.operator === "if") {
@@ -2525,7 +2787,9 @@ const buildComparisonFilter = (
     const comparison = applyComparisonWithExpression(
       operator,
       buildColumnExpression(leftResolved.mapping, left.name),
-      buildColumnExpression(rightResolved.mapping, right.name)
+      buildColumnExpression(rightResolved.mapping, right.name),
+      mappingNullRepresentation(leftResolved.mapping) === "explicit",
+      mappingNullRepresentation(rightResolved.mapping) === "explicit"
     );
     filter = wrapCombinedRelations(
       comparison,

@@ -367,6 +367,31 @@ a document with no value for the field under either convention. `null-eq` and `n
 fail-closed for the same underlying reason. See
 [#302](https://github.com/cerbos/query-plan-adapters/issues/302).
 
+### Attributes you send as explicit nulls
+
+Elasticsearch does not index a JSON `null`, so an explicitly-null value and a missing field are the
+same document to every query the Query DSL can express. If your application sends a NULL column to
+`check()` as an explicit `null` attribute, name it — the adapter then **refuses** those comparisons
+rather than answering them narrowly:
+
+```java
+ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
+        planResult, fieldMap, Map.of(), nestedPaths,
+        Set.of("request.resource.attr.owner"));
+```
+
+Under that convention CEL holds a null *value*, so `null != "x"` is TRUE and the PDP allows the row.
+Every Elasticsearch spelling of `!= "x"` either requires the field to exist — dropping exactly that
+row — or matches every document missing the field, which over-grants a different shape. Neither is
+the decision, so the equality family (`eq`, `ne`, `in`) over a declared attribute throws. Ordering
+and string operators are unaffected: a null receiver raises a no-overload error in CEL, which denies
+exactly as a document missing the field already does.
+
+Leave the set empty (the default) if your application omits attributes for NULL columns — that
+convention is the one Elasticsearch's storage already matches. See
+[#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
+[ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
+
 ### Conformance contract
 
 The adapter is differentially tested against Cerbos PDP 0.54.0 `check()` decisions using 20 hostile seed documents and real Elasticsearch queries. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
@@ -374,8 +399,9 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `check()` decisio
 | Classification | Coverage |
 | --- | --- |
 | Oracle-tested | 41 reference conformance actions plus regex and timestamp probes (43 actions) |
-| Fail-closed | 92 reference actions plus ordered list indexing/`get-field`, `int()`/`double()` casts and `filter()`/`map()` used as a condition (98 actions total) |
+| Fail-closed | 100 reference actions plus ordered list indexing/`get-field`, `int()`/`double()` casts and `filter()`/`map()` used as a condition (106 actions total) |
 | Representation-independent | `null-eq-missing` — rejected like every other null-selecting comparison, so no NULL-representation option is required |
+| Attribute NULL convention | Declared, in order to REFUSE. Elasticsearch does not index a JSON null, so an explicitly-null value and a missing field are the same document to every query the DSL can express. Pass the attributes you send as explicit nulls in `explicitNullAttributes`, and the equality family over them throws instead of answering narrowly — every spelling of `!= "x"` either requires the field to exist (dropping the row CEL allows) or matches every document missing it (cerbos/query-plan-adapters#308) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute documents. Until the planner is fixed, use `R.attr.x != null` for indexed attributes instead of `has(R.attr.x)` |
 
 The oracle-tested set covers value-first comparisons, literal-safe wildcard matching, safe
@@ -391,7 +417,7 @@ Elasticsearch does not index empty arrays. An `exists` or nested query therefore
 
 ### Mapping hazards
 
-The conformance contract above proves the *plan* side — given a policy shape, does the query select the documents `check()` allows. The other half is the *mapping*: **the documents the query reads must be the documents the application put into the resource attributes.** Six ways that can break are catalogued in the shared corpus, and every adapter has to record a position on each of them.
+The conformance contract above proves the *plan* side — given a policy shape, does the query select the documents `check()` allows. The other half is the *mapping*: **the documents the query reads must be the documents the application put into the resource attributes.** Six ways that can break are catalogued in the shared corpus, and every adapter has to record a position on each of them; those six come first in the table below, in the corpus's order. **A seventh row is appended, specific to this adapter**: an analyzed field mapping. No other store in the repository rewrites a stored value before comparing it, so there is nothing for the other nine adapters to answer — see `conformance/README.md`, "Mapping hazards", on when a hazard is adapter-specific.
 
 This adapter **builds no subquery.** A collection is a `nested` field on the same document (see below), so the `nested` query matches inner objects of the document being scored — it never reaches a second index. The emitted DSL contains no `has_child` and no `has_parent`, and its `terms` queries always carry an inline value list rather than a terms *lookup*.
 
@@ -403,6 +429,25 @@ This adapter **builds no subquery.** A collection is a `nested` field on the sam
 | To-one relation used as a collection | Not applicable — a `nested` field holds exactly the inner objects the application indexed | — |
 | Composite association key | Not applicable — no join, so no key to compose | — |
 | Absent to-one parent | **Reproduced** for the safe polarities, **rejected** for the rest — `w1-exists-chain`, `w1-size-chain` and `w1-in-chain` are oracle-tested; `w1-all-chain`, `w1-not-exists-chain`, `w1-size-zero-chain`, `w1-size-nonneg-chain`, `w1-not-in-chain`, `w1-not-hasint-chain` and `w1-not-size-chain` are in `adapterUnsupported` and throw | None — it is the empty-array limitation above, not a mapping choice: Elasticsearch cannot tell a document with no parent from a document whose parent has no children, so the polarities that would read that as an allow are refused ([#309](https://github.com/cerbos/query-plan-adapters/issues/309)) |
+| Analyzed (`text`) field mapping | **Caller-owned** | `GET <index>/_mapping`. Every field named in your `fieldMap` must be a type Elasticsearch compares exactly — `keyword`, `boolean`, a numeric type, or `date`. A `text` field is tokenized and lowercased before it is indexed, and the `term`, `terms`, `prefix`, `wildcard` and `regexp` queries this adapter emits then run against those tokens rather than against the stored value. See below |
+
+#### Why an analyzed mapping is not something the adapter can reject
+
+The adapter is handed a plan, never an index. It has no way to read your mapping, and no way to tell an exactly-compared field from an analyzed one — the plan looks identical either way. So this is a precondition you own, and the failure is silent: `R.attr.aString == "string"` becomes `{"term": {"aString": {"value": "string"}}}`, which on a `text` field also selects a document whose `aString` is `"a string of words"` (one of its tokens is `string`) and one whose `aString` is `"STRING"` (the standard analyzer lowercases). Both are documents `check()` denies.
+
+The size of the gap is pinned by `ElasticsearchIntegrationTest.analyzedMappingWidensEqualityAndKeywordSubFieldRestoresIt` and `…WidensStartsWith`, which index the same four documents under an analyzed mapping and an exact one and compare the two row sets against a real Elasticsearch.
+
+**The remedy is the mapping, not an operator override.** If a field has to be `text` for full-text search, give it the standard `keyword` sub-field and point `fieldMap` at the sub-field:
+
+```json
+{ "aString": { "type": "text", "fields": { "keyword": { "type": "keyword" } } } }
+```
+
+```java
+Map.entry("request.resource.attr.aString", "aString.keyword")
+```
+
+Do **not** reach for `operatorOverrides` here. An override that swaps `term` for `match` is a best-effort match — it is not the comparison the policy asked for, it applies to every field rather than the analyzed one, and it turns a mapping mistake into an authorization filter that quietly returns more rows. This adapter fails closed everywhere else rather than approximating; an override that approximates gives that up in the one place nothing checks it.
 
 ### Nested object queries (collection operators)
 
@@ -450,8 +495,8 @@ If a collection operator references a field not declared in `nestedPaths`, the a
 
 ### Elasticsearch field type considerations
 
-- Use `keyword` type for string fields that need exact matching (`term`, `prefix`, `wildcard` queries are case-sensitive on `keyword` fields).
-- Use `text` type with a custom operator override (`match` instead of `term`) for full-text search fields.
+- Every field named in `fieldMap` must be mapped to a type Elasticsearch compares exactly: `keyword` for strings, plus `boolean`, the numeric types and `date`. The `term`, `prefix` and `wildcard` queries this adapter emits are exact and case-sensitive on `keyword`.
+- A field that also has to serve full-text search should be `text` **with a `keyword` sub-field**, and `fieldMap` should name the sub-field. Pointing `fieldMap` at the analyzed parent over-grants, and an operator override that swaps `term` for `match` is not a fix — see [Analyzed (`text`) field mapping](#why-an-analyzed-mapping-is-not-something-the-adapter-can-reject) above.
 
 ## Building
 

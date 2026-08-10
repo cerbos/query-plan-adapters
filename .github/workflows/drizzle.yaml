@@ -5,6 +5,7 @@ on:
     paths:
       - "drizzle/**"
       - "conformance/**"
+      - "demo/**"
       - "policies/**"
       - ".github/workflows/drizzle.yaml"
       - ".github/workflows/drizzle-publish.yaml"
@@ -53,6 +54,59 @@ jobs:
       # The adversarial corpus is a property of the translator, not of the Node runtime, so it
       # runs on the baseline leg only — the same single execution the standalone `adversarial`
       # job used to perform, minus the duplicated checkout, Cerbos install and `npm install`.
-      - name: Run adversarial differential suite
+      - name: Run adversarial differential suite (SQLite)
         if: matrix.node-version == '22'
         run: npm run test:adversarial
+
+      # The store IS a translator property, unlike the Node runtime: `float(53)` casts, boolean
+      # CASE arms, timestamp binding and division by zero all evaluate differently on PostgreSQL,
+      # and before this leg existed PostgreSQL support was pinned at the rendered-string level
+      # (cerbos/query-plan-adapters#320). It stays on the baseline Node leg for the same reason
+      # the SQLite one does; the container comes from testcontainers, which needs no service
+      # block on ubuntu-latest.
+      - name: Run adversarial differential suite (PostgreSQL)
+        if: matrix.node-version == '22'
+        run: npm run test:adversarial:postgres
+
+  # The example application: the published package, installed from `npm pack`'s tarball and used
+  # the way a consumer uses it, against the shared demo domain. It covers the two things the
+  # suites above structurally cannot — the packaging surface (`exports`, `types`, the `files`
+  # allowlist, the peer range), which every harness bypasses by importing from `"."`, and the
+  # usage shapes past a single flat query (pagination, and composing the adapter's filter with
+  # the application's own). See cerbos/query-plan-adapters#349 and
+  # docs/adr/0002-examples-install-the-packed-artifact.md.
+  #
+  # THIS JOB MUST STAY IN THIS WORKFLOW. `renovate.json` sets `automerge: true` for every
+  # non-major bump, and that is the path an ORM regression takes into `main` today. Because the
+  # example's lockfile is committed and Renovate manages it, a Drizzle bump arrives as ONE PR
+  # touching both drizzle/package.json and drizzle/example/package.json — and this job, being a
+  # check on that PR, is what blocks the automerge when the new ORM breaks real usage. Moving it
+  # to a nightly run or a workflow of its own silently restores that gap.
+  #
+  # One Node leg only: the demo domain discriminates the package and the ORM, not the runtime —
+  # the same reasoning that gates the adversarial steps above to Node 22. SQLite only, for the
+  # matching reason: the PostgreSQL leg exists to discriminate collation, LIKE escaping and
+  # parameter typing, which are semantics the corpus already covers, and this proves plumbing.
+  example:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate conformance corpus
+        run: ../conformance/scripts/validate-corpus.sh
+
+      - name: Validate demo domain
+        run: ../demo/scripts/validate-demo.sh
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
+      - run: npm install
+
+      # The PDP is a container started by the runner from demo/docker-compose.yml, pinned to
+      # conformance/CERBOS_VERSION and conformance/CERBOS_IMAGE_DIGEST — no cerbos-setup-action
+      # here, because an example must reach the PDP the way a deployed application does.
+      - name: Run the example against the demo domain
+        run: ../demo/scripts/run-example.sh drizzle
