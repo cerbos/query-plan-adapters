@@ -20,7 +20,6 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { GRPC as Cerbos } from "@cerbos/grpc";
-import type { PlanResourcesResponse } from "@cerbos/core";
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import {
   PlanKind,
@@ -68,12 +67,30 @@ const APPLICATION_FILTER = {
   region: seeds.applicationFilter.region,
 } satisfies Prisma.DocumentWhereInput;
 
+/**
+ * The runner sets this, and there is deliberately no fallback. The obvious default — Cerbos's own
+ * 3592/3593 — is the address every adapter's `cerbos run` test sidecar binds, so an unset
+ * CERBOS_HOST would not fail: it would quietly plan against `../policies` and produce a diff
+ * against demo/expected.json that reads as an adapter bug. demo/README.md requires reaching the
+ * PDP at $CERBOS_HOST, "never a hardcoded address", for exactly that reason.
+ *
+ * Checked before anything is opened or deleted, so a misinvocation costs nothing.
+ */
+const cerbosHost = process.env["CERBOS_HOST"];
+if (!cerbosHost) {
+  throw new Error(
+    "CERBOS_HOST is not set — run this example through demo/scripts/run-example.sh prisma"
+  );
+}
+
 const prisma = new PrismaClient({
   adapter: new PrismaBetterSqlite3({ url: "file:./prisma/demo.db" }),
 });
-const cerbos = new Cerbos(process.env["CERBOS_HOST"] ?? "localhost:3593", {
-  tls: false,
-});
+
+const cerbos = new Cerbos(cerbosHost, { tls: false });
+
+/** Exactly `PlanResourcesResponse`, without depending on a package this example never imports. */
+type QueryPlan = Awaited<ReturnType<Cerbos["planResources"]>>;
 
 function principal(id: string): { id: string; roles: string[] } {
   const found = seeds.principals.find((p) => p.id === id);
@@ -84,7 +101,7 @@ function principal(id: string): { id: string; roles: string[] } {
 async function plan(
   principalId: string,
   action: string
-): Promise<PlanResourcesResponse> {
+): Promise<QueryPlan> {
   return cerbos.planResources({
     principal: principal(principalId),
     resource: { kind: RESOURCE_KIND },
