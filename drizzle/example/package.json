@@ -1,0 +1,25 @@
+{
+  "name": "cerbos-orm-drizzle-example",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Example application for @cerbos/orm-drizzle, run against the shared demo domain",
+  "license": "Apache-2.0",
+  "scripts": {
+    "build": "tsc --build",
+    "start": "node lib/main.js"
+  },
+  "//": "@cerbos/orm-drizzle is deliberately ABSENT from these dependencies. run.sh installs it from `npm pack`'s tarball, whose integrity hash changes on every build and would make a committed lockfile unusable with `npm ci`. The ORM and the SDK ARE pinned here, which is the half Renovate manages: an ORM bump lands as one PR touching both drizzle/package.json and this file, and the example job on that PR is what blocks automerge if the new ORM broke real usage.",
+  "dependencies": {
+    "@cerbos/grpc": "^0.28.0",
+    "better-sqlite3": "^12.0.0",
+    "drizzle-orm": "^0.45.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.8",
+    "@types/node": "^24.0.0",
+    "typescript": "^6.0.0"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

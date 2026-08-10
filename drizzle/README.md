@@ -324,6 +324,21 @@ Those `EXISTS` expressions read the mapped table bare. If your own reads of that
 - Scalar collections stored through a relation can opt in with `collectionValueType: "scalar"` and set the relation's `field`. This enables direct membership such as `R.attr.owner in R.attr.tagNames`, including explicit `null` elements.
 - `filter`: Cerbos uses `filter` during plan construction. The adapter discards those lambdas because the entire filter is rerun in Drizzle land.
 
+## Example application
+
+This repository carries a runnable [`example/`](example/), which installs the adapter from the
+artifact `npm publish` would upload and exercises it against a live PDP over the shared
+[demo domain](../demo/README.md):
+
+```bash
+# from the repository root
+demo/scripts/run-example.sh drizzle
+```
+
+Unlike the test suites, it resolves the adapter through its **published** surface — the `exports`
+map, `types`, the `files` allowlist, and the peer range — and covers usage shapes past a single
+flat query: pagination, and the adapter's filter composed with an application-owned filter.
+
 ## Testing
 
 The project ships with a comprehensive test suite that exercises all supported operators using an in-memory SQLite database and the official Drizzle ORM query builder.
