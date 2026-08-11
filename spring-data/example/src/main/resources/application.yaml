@@ -11,10 +11,22 @@ spring:
       hibernate.format_sql: true
     open-in-view: false
 
-# Where the Cerbos PDP is listening. docker-compose.yml maps :3593 to localhost.
+# The Cerbos PDP's gRPC address, as host:port. Set by scripts/smoke.sh and
+# scripts/smoke-edge-cases.sh for the photo-sharing app, and by demo/scripts/run-example.sh for
+# the demo-domain program next to it.
+#
+# There is deliberately NO DEFAULT. The obvious one — Cerbos's own 3593 — is the port every
+# adapter's `cerbos run` test sidecar binds, so an unset CERBOS_HOST would not fail: it would
+# quietly plan against ../../policies and produce a wrong row set that reads as an adapter bug.
+# It is also why docker-compose.yml here publishes on 23592/23593 and demo/docker-compose.yml
+# on 13592/13593. demo/scripts/validate-demo.sh fails the build on a hardcoded client address
+# inside any example, because prose did not hold this: two examples shipped that default anyway.
+#
+# Note that CERBOS_HOST here is a host:port pair, matching what the shared runner sets. The
+# ADAPTER's own test suite reads a CERBOS_HOST/CERBOS_PORT pair instead (see ../../README.md);
+# they are different processes and never share an environment.
 cerbos:
-  host: ${CERBOS_HOST:localhost}
-  port: ${CERBOS_PORT:3593}
+  address: ${CERBOS_HOST}
 
 logging:
   level:

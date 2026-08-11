@@ -66,12 +66,13 @@ is correct under any nesting. See
 
 ## Conformance contract
 
-The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 20 hostile seed documents and real MongoDB 7 and 8 queries. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
+The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 21 hostile seed documents and real MongoDB 7 and 8 queries. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 103 reference conformance actions plus regex, ordered indexing/`get-field`, and timestamp probes (106 actions) |
-| Fail-closed | 38 reference actions plus the 5 reference-unsupported shapes (43 actions total) |
+| Oracle-tested | 128 reference conformance actions plus regex, ordered indexing/`get-field`, timestamp and mixed-null field-to-field probes (132 actions) |
+| Fail-closed | 40 reference actions plus the 5 reference-unsupported shapes (45 actions total) |
+| Operand types the plan does not carry | CEL overloads `+` on strings and a query plan names no field types. One string operand settles it, so `R.attr.a + "x"` translates as `$concat`. Between **two field paths** neither does, and MongoDB spells the two differently — `$add` takes numeric and date types only — so the shape is refused at translation. It previously reached the server as `$add`, which aborts the whole query (cerbos/query-plan-adapters#391) |
 | Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`. Under the default it already returns the empty set the PDP demands, because `nullable: true` on a mapper entry declares per-attribute that a stored null is a missing Cerbos attribute; the global option is the backstop for mappings that do not declare it |
 | Attribute NULL convention | Needs no declaration: Mongoose stores the value the caller sent, so a stored null already compares as a null *value* exactly as CEL does. The four `null-value-*` corpus probes for the explicit convention (cerbos/query-plan-adapters#308) were aligned before that option existed; the fifth is refused by the pre-existing negated-collection-macro limitation, not by the null convention |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute documents. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
@@ -91,7 +92,7 @@ This adapter **builds no subquery.** A relation is a path inside the same docume
 | Subtype discrimination | **Caller-owned** | `Model.discriminator(...)`. Run the filter on the same model the application read the attributes from. Discriminated models share one collection, so a filter executed against the *base* model matches the other subtypes' documents — the `__t` criterion Mongoose adds for the discriminator model is not in the filter the adapter returns, and cannot be: the plan does not say which model the caller will use |
 | To-one relation used as a collection | Not applicable — a document path holds exactly what the application stored | — |
 | Composite association key | Not applicable — no join, so no key to compose | — |
-| Absent to-one parent | **Reproduced**, and proved by the corpus (`w1-all-chain` and siblings) | `relation.requiresParent` — declare the optional to-one parent a flattened path is reached through, so `size(chain)` comparisons yield null rather than 0 for a document that has no parent ([#309](https://github.com/cerbos/query-plan-adapters/issues/309)) |
+| Absent to-one parent | **Reproduced**, and proved by the corpus (`w1-all-chain`, `rel-not-bool-hop` and siblings) | `relation.requiresParent` for a flattened ARRAY parent, so `size(chain)` comparisons yield null rather than 0 ([#309](https://github.com/cerbos/query-plan-adapters/issues/309)). A `type: "one"` relation needs no declaration — it is a hop by definition ([#375](https://github.com/cerbos/query-plan-adapters/issues/375)). **Behaviour change in #375:** a `type: "one"` relation now ANDs `{ <path>: { $ne: null } }` outside any `$nor`, so a negation over it no longer matches documents where the subdocument is absent (an over-grant fix, consumer-visible); and a bare boolean read through a to-one hop is now translated instead of throwing "Bare collection variables are unsupported" |
 
 ## Requirements
 
@@ -349,6 +350,21 @@ If you already have application-specific criteria you can combine them using `$a
 const filters = result.kind === PlanKind.CONDITIONAL ? result.filters : {};
 await MyModel.find({ $and: [filters ?? {}, { archived: false }] });
 ```
+
+## Example application
+
+This repository carries a runnable [`example/`](example/), which installs the adapter from the
+artifact `npm publish` would upload and exercises it against a live PDP over the shared
+[demo domain](../demo/README.md):
+
+```bash
+# from the repository root
+demo/scripts/run-example.sh mongoose
+```
+
+Unlike the test suites, it resolves the adapter through its **published** surface — the `exports`
+map, `types` and the `files` allowlist — and covers usage shapes past a single flat query:
+pagination, and the adapter's filter composed with an application-owned filter.
 
 ## Error handling
 

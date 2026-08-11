@@ -106,6 +106,8 @@ interface Seed {
   aOptionalString: string | null;
   tags: Tag[];
   subCategoryNames: string[];
+  /** The seed whose scalars this row's to-one `parent` carries; null for no parent. */
+  parentSeedId: string | null;
 }
 
 interface SeedsFile {
@@ -243,6 +245,7 @@ const SEED_KEYS = [
   "aOptionalString",
   "tags",
   "subCategoryNames",
+  "parentSeedId",
 ] as const;
 
 /** Corpus prose, never read by a harness: the one documented exclusion from SEED_KEYS. */
@@ -411,6 +414,24 @@ const DEGENERACY_GUARD_ACTIONS = [
   "w1-not-in-chain",
   "w1-not-hasint-chain",
   "w1-ternary-chain-cond",
+  // The real to-one join (#375): one per hazard — the negated hop, the null comparison, two-level
+  // depth, the root conjunction, and the disjunction, whose failure direction is an under-grant.
+  "rel-not-bool-hop",
+  "rel-ne-null-hop",
+  "rel-bool-hop2",
+  "rel-hop-and-root",
+  "rel-hop2-or-exists",
+  // Case sensitivity in STRING MATCHING (#375 follow-up), a different mechanism from cs-eq:
+  // collation governs `=`, and on SQLite nothing but `PRAGMA case_sensitive_like` governs LIKE.
+  "cs-contains",
+  // The primary key as a filterable attribute (#376): the key against a constant, against a
+  // column under negation — the shape that emitted an invalid `not: { _ref }` before this
+  // change — the value-first concatenation solved back to a key equality, and the key inside a
+  // constructed hierarchy path.
+  "id-eq-const",
+  "id-f2f-ne",
+  "id-concat-vf",
+  "hier-list-id",
 ] as const;
 
 /**
@@ -434,6 +455,16 @@ const DEGENERACY_LIVENESS_PROBES = [
   // int() over a numeric column: truncation-versus-rounding, unsupported for every adapter but
   // convex, which promotes it in adapterSupportedExpected.
   "cast-int-double",
+  // string() has no Prisma filter form (#376). cast-string-bool carries the group's probe rather
+  // than cast-string-double because its oracle is 14 of 21 rather than a single row, so a PDP or
+  // policy that went quiet fails the non-total half of the assertion too.
+  "cast-string-bool",
+  // Concatenation against the key where BOTH operands carry a column — the arithmetic solver
+  // needs a value on the other side, so the id-* group's one throwing shape probes here.
+  "id-concat",
+  // The same missing form with BOTH operands columns, so there is no constant to invert off
+  // either side (#391).
+  "concat-f2f",
 ] as const;
 
 // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") --------
@@ -472,6 +503,58 @@ function scopeFor(seed: Seed): string | null {
   return derivedFor(seed).scope;
 }
 
+// -- the real to-one relation (conformance/README.md, "The real to-one relation") ----------------
+//
+// `parentSeedId` names the seed whose four scalars this row's `parent` carries, and that seed's
+// own `parentSeedId` names the ones `parent.inner` carries. The chain is cut at two levels. Every
+// resource owns a FRESH parent (and inner) row rather than pointing at the named seed's own row,
+// so no two resources share one and a filter that returned the parent instead of the child cannot
+// agree with the oracle by accident.
+
+const SEEDS_BY_ID = new Map(SEEDS.map((seed) => [seed.id, seed]));
+
+function parentSeedOf(seed: Seed | undefined): Seed | undefined {
+  const id = seed?.parentSeedId;
+  if (id === undefined || id === null) {
+    return undefined;
+  }
+  const parent = SEEDS_BY_ID.get(id);
+  if (parent === undefined) {
+    throw new Error(
+      `seeds.json: "${seed?.id}" names parent "${id}", which is not a seed id`
+    );
+  }
+  return parent;
+}
+
+/** The four scalars one level of the chain stores, as columns. */
+function relationColumns(seed: Seed): {
+  aBool: boolean;
+  aString: string;
+  aNumber: number;
+  aOptionalString: string | null;
+} {
+  return {
+    aBool: seed.aBool,
+    aString: seed.aString,
+    aNumber: seed.aNumber,
+    aOptionalString: seed.aOptionalString,
+  };
+}
+
+/** The same four as check() attributes: a NULL column is a MISSING attribute, one hop out. */
+function relationAttr(seed: Seed): Record<string, Value> {
+  const attr: Record<string, Value> = {
+    aBool: seed.aBool,
+    aString: seed.aString,
+    aNumber: seed.aNumber,
+  };
+  if (seed.aOptionalString !== null) {
+    attr["aOptionalString"] = seed.aOptionalString;
+  }
+  return attr;
+}
+
 /**
  * The same mapper with every per-attribute null convention stripped, so the call-level option is
  * the only thing governing null operands.
@@ -494,6 +577,10 @@ function withoutNullConventions(
 }
 
 const MAPPER: Record<string, MapperConfig> = {
+  // The primary key, reached as `request.resource.id` rather than through `attr` (the `id-*`
+  // actions). It is a mapping like any other here, which is the point: an adapter that resolves
+  // references by stripping a `request.resource.attr.` prefix never sees this name.
+  "request.resource.id": { field: "id" },
   "request.resource.attr.aBool": { field: "aBool" },
   "request.resource.attr.aString": { field: "aString" },
   "request.resource.attr.aNumber": { field: "aNumber" },
@@ -520,8 +607,39 @@ const MAPPER: Record<string, MapperConfig> = {
     nullAttributeRepresentation: "explicit",
   },
   // obj.inner is not a real nested column — mirrors aString, same trick the spring-data
-  // reference harness uses for the p-struct probe.
+  // reference harness uses for the p-struct probe. `parent.inner` below is the opposite: a real
+  // two-level join. The two are kept side by side on purpose.
   "request.resource.attr.obj.inner": { field: "aString" },
+  // The corpus's one REAL to-one chain (the `rel-*` actions). `type: "one"` is what makes the
+  // adapter emit `is:` rather than `some:`, and `is:` on an optional relation is what requires
+  // the hop to exist — the absent-parent guard the negated shapes discriminate. `inner` nests
+  // the same declaration one level further out; two levels is where alias scoping breaks.
+  "request.resource.attr.parent": {
+    relation: {
+      name: "parent",
+      type: "one",
+      model: "AdversarialParent",
+      fields: {
+        aBool: { field: "aBool" },
+        aString: { field: "aString" },
+        aNumber: { field: "aNumber" },
+        aOptionalString: { field: "aOptionalString", nullable: true },
+        inner: {
+          relation: {
+            name: "inner",
+            type: "one",
+            model: "AdversarialInner",
+            fields: {
+              aBool: { field: "aBool" },
+              aString: { field: "aString" },
+              aNumber: { field: "aNumber" },
+              aOptionalString: { field: "aOptionalString", nullable: true },
+            },
+          },
+        },
+      },
+    },
+  },
   "request.resource.attr.tags": {
     relation: {
       name: "tags",
@@ -605,6 +723,18 @@ const MAPPER: Record<string, MapperConfig> = {
 const MAPPER_WITHOUT_NULL_CONVENTIONS = withoutNullConventions(MAPPER);
 
 beforeAll(async () => {
+  // CEL string matching is case-sensitive, and this adapter lowers contains/startsWith/endsWith
+  // to LIKE. On SQLite, LIKE is case-INSENSITIVE for ASCII no matter what collation the column
+  // was created with — only this pragma changes it — so without it every string predicate
+  // over-grants by exactly the case-variant rows (the `cs-contains` group; proved by c1, "One").
+  // The column collation the README talks about governs `=`, not LIKE, which is why cs-eq passed
+  // here for a long time while the string operators did not. ent and sqlalchemy set the same
+  // pragma; drizzle needs none because it lowers to REPLACE rather than LIKE.
+  if (STORE_NAME === "sqlite") {
+    await prisma.$executeRawUnsafe("PRAGMA case_sensitive_like = ON");
+  }
+  await prisma.adversarialInner.deleteMany();
+  await prisma.adversarialParent.deleteMany();
   await prisma.adversarialLabel.deleteMany();
   await prisma.adversarialSubCategory.deleteMany();
   await prisma.adversarialCategory.deleteMany();
@@ -613,6 +743,8 @@ beforeAll(async () => {
 
   // Distinct sub-category/category graphs per seed so no rows share relations by accident.
   for (const seed of SEEDS) {
+    const parentSeed = parentSeedOf(seed);
+    const innerSeed = parentSeedOf(parentSeed);
     await prisma.adversarialResource.create({
       data: {
         id: seed.id,
@@ -627,6 +759,21 @@ beforeAll(async () => {
         tags: {
           create: seed.tags.map((t) => ({ tagId: t.id, name: t.name })),
         },
+        // The to-one chain, one owned row per level. A seed with no parent gets no row at all,
+        // which is what makes the absent-parent hazard reachable through a SCALAR rather than
+        // only through mainCategory's collection.
+        ...(parentSeed === undefined
+          ? {}
+          : {
+              parent: {
+                create: {
+                  ...relationColumns(parentSeed),
+                  ...(innerSeed === undefined
+                    ? {}
+                    : { inner: { create: relationColumns(innerSeed) } }),
+                },
+              },
+            }),
         categories: {
           create: seed.subCategoryNames.map((subName) => ({
             name: "business",
@@ -718,6 +865,18 @@ function asCheckResource(seed: Seed): Resource {
       subCategories: seed.subCategoryNames.map((name) => ({ name })),
       subNames: seed.subCategoryNames,
     };
+  }
+  // The real to-one chain, mirroring the seeded rows exactly. A row with no parent sends NO
+  // `parent` attribute — a CEL missing-path error (deny) — matching the adapter's join finding
+  // nothing; the same holds one level down for `parent.inner`.
+  const parentSeed = parentSeedOf(seed);
+  if (parentSeed !== undefined) {
+    const parentAttr = relationAttr(parentSeed);
+    const innerSeed = parentSeedOf(parentSeed);
+    if (innerSeed !== undefined) {
+      parentAttr["inner"] = relationAttr(innerSeed);
+    }
+    attr["parent"] = parentAttr;
   }
   return { kind: seedsFile.resourceKind, id: seed.id, attr };
 }
@@ -890,10 +1049,10 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(152);
+    expect(MANIFEST_ACTIONS.size).toBe(179);
     // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
     // gained or lost has to be re-triaged here rather than joining the suite unnoticed.
-    expect(THROWING_ACTIONS).toHaveLength(51);
+    expect(THROWING_ACTIONS).toHaveLength(55);
     expect(misclassified).toEqual([]);
     expect(
       [...PRISMA_SUPPORTED_EXPECTED].filter(
@@ -1163,7 +1322,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
     );
 
     // The else-branch is what a bare `NOT` over the chain filter over-grants: it is TRUE for
-    // every parentless row, so each of these returned the 16 missing-parent seeds on top.
+    // every parentless row, so each of these returned the 17 missing-parent seeds on top.
     expect(await filteredIdsFor(ternary(chainIn, FALSE, TRUE))).toEqual(
       conditionFalse
     );
@@ -1197,6 +1356,47 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
         )
       )
     ).toEqual([...new Set([...conditionFalse, ...aBoolFalse])].sort());
+  });
+
+  // The to-one relation carries no corpus action yet — this is the expand half of
+  // cerbos/query-plan-adapters#372's expand–contract — so nothing else in this file would notice a
+  // seeder that stored no chain at all, or one that attached every parent to the wrong resource.
+  // Read the two hops back through a real join rather than counting rows: a count cannot tell an
+  // inner row carrying the corpus's values from one carrying the root's own columns, which is
+  // exactly the flat-column-alias failure this relation exists to make visible.
+  test("the seeded to-one chain matches the corpus relation", async () => {
+    const withParent = SEEDS.filter((seed) => parentSeedOf(seed) !== undefined);
+    const withInner = SEEDS.filter(
+      (seed) => parentSeedOf(parentSeedOf(seed)) !== undefined
+    );
+    expect(withParent.length).toBeGreaterThan(0);
+    expect(withInner.length).toBeGreaterThan(0);
+    expect(withParent.length).toBeLessThan(SEEDS.length);
+
+    const joined = await prisma.adversarialResource.findMany({
+      select: {
+        id: true,
+        parent: {
+          select: { aString: true, inner: { select: { aString: true } } },
+        },
+      },
+    });
+    const stored = Object.fromEntries(
+      joined.map((row) => [
+        row.id,
+        [row.parent?.aString ?? null, row.parent?.inner?.aString ?? null],
+      ])
+    );
+    const expected = Object.fromEntries(
+      SEEDS.map((seed) => [
+        seed.id,
+        [
+          parentSeedOf(seed)?.aString ?? null,
+          parentSeedOf(parentSeedOf(seed))?.aString ?? null,
+        ],
+      ])
+    );
+    expect(stored).toEqual(expected);
   });
 
   test("oracle is not degenerate", async () => {

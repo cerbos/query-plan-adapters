@@ -135,6 +135,12 @@ func write(b *sql.Builder, e queryplan.Expr) error {
 	case queryplan.Arith:
 		return writeBinary(b, arithSymbol(t.Op), t.L, t.R)
 
+	case queryplan.Concat:
+		// The same dialect-correct spelling the escaping path already uses: CONCAT() on MySQL,
+		// where `||` is logical OR, and `||` elsewhere. Both propagate NULL here, which is what
+		// keeps a row whose operand is a missing attribute excluded under either polarity.
+		return writeConcat(b, []queryplan.Expr{t.L, t.R})
+
 	case queryplan.NotDistinct:
 		return writeNotDistinct(b, t)
 
@@ -419,9 +425,18 @@ func writeSubquery(b *sql.Builder, s queryplan.Subquery) error {
 		}
 
 		return wrap(b, func(b *sql.Builder) error {
-			if s.Kind == queryplan.SubqueryExists {
+			switch s.Kind {
+			case queryplan.SubqueryExists:
 				b.WriteString("SELECT 1 FROM ")
-			} else {
+			case queryplan.SubqueryScalar:
+				// The projection of a to-one hop. No row correlates -> SQL NULL, which is the
+				// missing-attribute error the check side raises (#375).
+				b.WriteString("SELECT ")
+				if err := write(b, s.Select); err != nil {
+					return err
+				}
+				b.WriteString(" FROM ")
+			default:
 				b.WriteString("SELECT COUNT(*) FROM ")
 			}
 

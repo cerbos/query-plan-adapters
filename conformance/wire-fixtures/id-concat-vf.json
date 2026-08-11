@@ -1,0 +1,30 @@
+{
+  "action": "id-concat-vf",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "eq",
+        "operands": [
+          {
+            "value": "projects:f1"
+          },
+          {
+            "expression": {
+              "operator": "add",
+              "operands": [
+                {
+                  "value": "projects:"
+                },
+                {
+                  "variable": "request.resource.id"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

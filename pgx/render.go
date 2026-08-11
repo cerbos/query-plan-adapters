@@ -107,6 +107,13 @@ func (r *renderer) write(e queryplan.Expr) error {
 	case queryplan.Arith:
 		return r.writeBinary(arithSymbol(t.Op), t.L, t.R)
 
+	case queryplan.Concat:
+		// PostgreSQL spells string concatenation `||`, which propagates NULL — so a row whose
+		// operand is a missing attribute stays excluded under either polarity, matching CEL's
+		// error. `+` would be a hard `operator does not exist: text + text` here rather than a
+		// silently wrong filter, but the corpus only proves that once the node exists.
+		return r.writeBinary("||", t.L, t.R)
+
 	case queryplan.Logic:
 		sep := " OR "
 		if t.And {
@@ -314,9 +321,18 @@ func (r *renderer) writeCall(c queryplan.Call) error {
 }
 
 func (r *renderer) writeSubquery(s queryplan.Subquery) error {
-	if s.Kind == queryplan.SubqueryExists {
+	switch s.Kind {
+	case queryplan.SubqueryExists:
 		r.sb.WriteString("(EXISTS (SELECT 1 FROM ")
-	} else {
+	case queryplan.SubqueryScalar:
+		// The projection of a to-one hop. No row correlates -> SQL NULL, which is the
+		// missing-attribute error the check side raises (#375).
+		r.sb.WriteString("(SELECT ")
+		if err := r.write(s.Select); err != nil {
+			return err
+		}
+		r.sb.WriteString(" FROM ")
+	default:
 		r.sb.WriteString("(SELECT count(*) FROM ")
 	}
 

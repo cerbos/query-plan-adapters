@@ -12,6 +12,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+
 GREEN="\033[0;32m"; RED="\033[0;31m"; NC="\033[0m"
 fail() { printf "${RED}FAIL${NC} %s\n" "$*" >&2; exit 1; }
 ok()   { printf "${GREEN}OK${NC}   %s\n" "$*"; }
@@ -36,6 +37,14 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# The example resolves dev.cerbos:cerbos-spring-data from mavenLocal as a real Maven coordinate
+# rather than through a composite build (docs/adr/0002-examples-install-the-packed-artifact.md),
+# so the adapter under review has to be installed before anything here compiles. Doing it in the
+# script rather than in a prerequisite line keeps `./scripts/smoke.sh` one command, and keeps it
+# from silently proving a stale artifact.
+echo "==> gradle -p .. publishToMavenLocal"
+gradle -p .. publishToMavenLocal --no-daemon
+
 echo "==> docker compose up -d"
 docker compose up -d
 
@@ -44,6 +53,16 @@ for i in {1..30}; do
     if docker compose ps --format json cerbos | grep -q '"Health":"healthy"'; then break; fi
     sleep 1
 done
+
+# The PDP address for the app, asked of Compose rather than restated here. docker-compose.yml
+# publishes the PDP well away from Cerbos's default 3593 — that is the port every adapter's
+# `cerbos run` test sidecar binds — and application.yaml reads CERBOS_HOST with no fallback, so
+# this is not a convenience: see the comment on `cerbos.address` there for why a default would be
+# worse than a failure to start. Reading the published port back keeps the number in one place.
+PUBLISHED_PDP=$(docker compose port cerbos 3593) ||
+    fail "docker compose port cerbos 3593 — did the PDP publish its gRPC port?"
+export CERBOS_HOST="localhost:${PUBLISHED_PDP##*:}"
+echo "==> PDP at $CERBOS_HOST"
 
 echo "==> gradle bootRun (background)"
 mkdir -p build/smoke

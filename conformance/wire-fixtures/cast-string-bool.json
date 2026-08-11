@@ -1,0 +1,27 @@
+{
+  "action": "cast-string-bool",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "eq",
+        "operands": [
+          {
+            "expression": {
+              "operator": "string",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aBool"
+                }
+              ]
+            }
+          },
+          {
+            "value": "true"
+          }
+        ]
+      }
+    }
+  }
+}

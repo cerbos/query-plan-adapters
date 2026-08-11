@@ -2,7 +2,12 @@ package dev.cerbos.queryplan.springdata;
 
 import jakarta.persistence.criteria.AbstractQuery;
 import jakarta.persistence.criteria.From;
+import jakarta.persistence.criteria.JoinType;
 import jakarta.persistence.criteria.Path;
+import jakarta.persistence.metamodel.Bindable;
+import jakarta.persistence.metamodel.ManagedType;
+import jakarta.persistence.metamodel.PluralAttribute;
+import jakarta.persistence.metamodel.SingularAttribute;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -309,12 +314,79 @@ sealed interface Scope permits Scope.RootScope, Scope.LambdaScope {
         return traversePath(from, memberField);
     }
 
+    /**
+     * Walks a dotted JPA path, joining any to-ONE association it passes through with a LEFT join.
+     *
+     * <p>{@code Path.get()} on an association is an INNER join, which removes the row from the
+     * WHOLE query when the association is absent. That is indistinguishable from the correct
+     * answer for a predicate that stands alone — both exclude the row — but it is wrong under a
+     * disjunction, where the missing hop must only make ITS OWN branch unknown: a row with no
+     * parent that satisfies the other branch is one the PDP allows, and an inner join drops it
+     * (cerbos/query-plan-adapters#375).
+     *
+     * <p>A LEFT join makes the absent hop SQL NULL instead, which is CEL's missing-path error and
+     * is branch-local: NULL propagates through the comparison, {@code NOT NULL} is still NULL so
+     * the row stays excluded under both polarities, and {@code NULL OR TRUE} is TRUE. The
+     * associations reached this way are to-ONE, so the join cannot multiply rows.
+     *
+     * <p>Embeddable members are left on {@code get()}: they are not associations, they are
+     * columns on the same row, and joining them is not portable.
+     */
     static Path<?> traversePath(From<?, ?> from, String dottedJpaPath) {
+        String[] parts = dottedJpaPath.split("\\.");
         Path<?> p = from;
-        for (String part : dottedJpaPath.split("\\.")) {
-            p = p.get(part);
+        for (int i = 0; i < parts.length; i++) {
+            boolean last = i == parts.length - 1;
+            if (!last && p instanceof From<?, ?> f && isAssociation(f, parts[i])) {
+                p = f.join(parts[i], JoinType.LEFT);
+            } else {
+                p = p.get(parts[i]);
+            }
         }
         return p;
+    }
+
+    /**
+     * Whether {@code part} names an association on {@code from}'s type, asked of the metamodel
+     * rather than by resolving a path — resolving one would register the very implicit inner join
+     * this check exists to avoid.
+     */
+    private static boolean isAssociation(From<?, ?> from, String part) {
+        ManagedType<?> managed = managedTypeOf(from);
+        if (managed == null) {
+            return false;
+        }
+        try {
+            return managed.getAttribute(part).isAssociation();
+        } catch (IllegalArgumentException notAnAttribute) {
+            // An unknown name here is not this method's error to raise: get() below produces the
+            // provider's own diagnostic, which names the entity and the property.
+            return false;
+        }
+    }
+
+    /**
+     * The managed type {@code from} exposes attributes of.
+     *
+     * <p>A {@code Root} models its own entity type, but a {@code Join} models the ATTRIBUTE it was
+     * created from, so the target type has to be read back off that attribute. Missing this is why
+     * only the first hop of a multi-level path would be joined, leaving the second an inner join
+     * off the first — and one inner join anywhere on the path is enough to drop the row.
+     */
+    private static ManagedType<?> managedTypeOf(From<?, ?> from) {
+        Bindable<?> model = from.getModel();
+        if (model instanceof ManagedType<?> managed) {
+            return managed;
+        }
+        if (model instanceof SingularAttribute<?, ?> singular
+                && singular.getType() instanceof ManagedType<?> target) {
+            return target;
+        }
+        if (model instanceof PluralAttribute<?, ?, ?> plural
+                && plural.getElementType() instanceof ManagedType<?> target) {
+            return target;
+        }
+        return null;
     }
 
     static String extractLambdaSuffix(String variable, String lambdaVar) {

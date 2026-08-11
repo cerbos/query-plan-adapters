@@ -132,14 +132,15 @@ See [#302](https://github.com/cerbos/query-plan-adapters/issues/302).
 
 ## Conformance contract
 
-The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 20
+The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 21
 hostile seed rows and real PostgreSQL queries. The Spring Data adapter defines the reference
 semantics for this compatibility snapshot.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 141 reference conformance actions — every conformance shape in the corpus |
-| Fail-closed corpus shapes | Regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an untyped string field, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero) and `filter()`/`map()` used as a condition (both return a list, not a boolean) (8 actions) |
+| Oracle-tested | 166 reference conformance actions |
+| Fail-closed corpus shapes | Regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an untyped string field, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero) `filter()`/`map()` used as a condition (both return a list, not a boolean), `string()` over a column declared `ValueBool` (rejected in the shared vendored translator, which serves MySQL and SQLite too, even though PostgreSQL alone would render it correctly), and a hierarchy path constructed by `list()` rather than read from a column (11 actions) |
+| Operand types the plan does not carry | CEL overloads `+` on strings, and a query plan names no operand types. One string operand settles it, so `R.attr.a + "x"` and `"x" + R.attr.a` translate on their own. Between **two columns** neither does: declare the string column with `ValueType: cerbospgx.ValueString` and the adapter emits concatenation, or it fails closed rather than emitting a numeric `+` — which is a hard error on PostgreSQL, `0` on SQLite, and on MySQL a silent match against every row (cerbos/query-plan-adapters#391) |
 | Representation-dependent | `null-eq-missing` — rejected under `NullOmitted`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute the caller sends as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare it per attribute — `NullConvention: NullConventionExplicit` on the mapper `Entry` — or the historical rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
@@ -150,7 +151,9 @@ hierarchy operations, typed timestamps, and multi-hop relations. Unlike the Pyth
 adapters, sub-millisecond `now()` thresholds (`ts-window`, `ts-vf`) are **not** fail-closed here:
 Go's `time.Time` carries nanoseconds, so those instants survive translation exactly.
 
-The eight fail-closed shapes return an error wrapping `ErrUnsupported` rather than a broader SQL
+**Breaking change (#391).** `R.attr.a + R.attr.b` between two columns now returns an error unless one column is declared `ValueString`. It previously emitted a numeric `+`; on PostgreSQL that is a hard `operator does not exist: text + text` for text columns, so the change turns a runtime failure into a translation-time one and refuses the shape the shared translator cannot type.
+
+The eleven fail-closed shapes return an error wrapping `ErrUnsupported` rather than a broader SQL
 filter. `matches()` is rejected because SQL regex dialects do not guarantee CEL/RE2 semantics.
 
 Every fail-closed shape's error message is pinned in the shared corpus (`conformance/actions.json`) and asserted by this adapter's conformance run, so a classification proves the throw names its declared mechanism rather than merely that something threw.
@@ -177,7 +180,7 @@ warning.
 | Subtype discrimination | **Caller-owned**, reproducible with `SubqueryFilter` | A `type`/`kind` discriminator column where one table holds several row kinds. Declare `{Column: "kind", Value: "…"}`, or `RestrictIn` over the kinds the association admits |
 | To-one relation used as a collection | **Caller-owned** | A relation whose `TargetColumn` has no unique index. The mapping carries no cardinality at all — every relation lowers to the same correlated subquery — so nothing makes the database enforce the single row the application saw. Add the unique constraint, or accept that the subquery examines every matching row |
 | Composite association key | **Rejected by the type system** | `SourceColumn` and `TargetColumn` are each one `string`, so a two-column key cannot be expressed. This is a compile error, not a wrong join |
-| Absent to-one parent | **Reproduced**, and proved by the corpus (`w1-all-chain` and siblings) | None — every operator reached through a `Via` chain requires its intermediate hops separately, so a missing parent is UNKNOWN under both polarities ([#309](https://github.com/cerbos/query-plan-adapters/issues/309), [#315](https://github.com/cerbos/query-plan-adapters/issues/315)). Declaring `SubqueryFilter` on a `Hop` extends that to a parent the application *hides*, which for this purpose is equally absent |
+| Absent to-one parent | **Reproduced**, and proved by the corpus (`w1-all-chain`, `rel-not-bool-hop` and siblings) | None — every operator reached through a `Via` chain requires its intermediate hops separately, so a missing parent is UNKNOWN under both polarities ([#309](https://github.com/cerbos/query-plan-adapters/issues/309), [#315](https://github.com/cerbos/query-plan-adapters/issues/315)). Declaring `SubqueryFilter` on a `Hop` extends that to a parent the application *hides*, which for this purpose is equally absent. A SCALAR read through a to-one hop is `Entry.ScalarRelation`, new in [#375](https://github.com/cerbos/query-plan-adapters/issues/375): it renders a correlated scalar subquery, which is NULL when no row correlates and so needs no separate hop guard |
 
 #### Declaring the application's own predicate
 

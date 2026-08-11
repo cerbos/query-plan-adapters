@@ -35,6 +35,8 @@ interface Seed {
   aOptionalString: string | null;
   tags: Tag[];
   subCategoryNames: string[];
+  /** The seed whose scalars this row's to-one `parent` carries; null for no parent. */
+  parentSeedId: string | null;
 }
 
 interface SeedsFile {
@@ -198,6 +200,7 @@ const SEED_KEYS = [
   "aOptionalString",
   "tags",
   "subCategoryNames",
+  "parentSeedId",
 ] as const;
 
 /** Corpus prose, never read by a harness: the one documented exclusion from SEED_KEYS. */
@@ -325,6 +328,10 @@ function parseSeed(value: unknown, index: number): Seed {
   if (!Array.isArray(tags)) {
     throw new Error(`${label}.tags must be an array`);
   }
+  const parentSeedId = record["parentSeedId"];
+  if (parentSeedId !== null && typeof parentSeedId !== "string") {
+    throw new Error(`${label}.parentSeedId must be a string or null`);
+  }
   return {
     id: expectString(record["id"], `${label}.id`),
     aBool: expectBoolean(record["aBool"], `${label}.aBool`),
@@ -338,6 +345,7 @@ function parseSeed(value: unknown, index: number): Seed {
       record["subCategoryNames"],
       `${label}.subCategoryNames`
     ),
+    parentSeedId,
   };
 }
 
@@ -625,6 +633,26 @@ const DEGENERACY_GUARD_ACTIONS = [
   // Mongoose throws on the whole cr-div group (#311), so the computed-relation group is guarded
   // by the fractional-size shape it does translate.
   "cr-size-frac-ge",
+  // The real to-one join (#375): one per hazard — the negated hop, the null comparison, two-level
+  // depth, the root conjunction, and the disjunction, whose failure direction is an under-grant.
+  "rel-not-bool-hop",
+  "rel-ne-null-hop",
+  "rel-bool-hop2",
+  "rel-hop-and-root",
+  "rel-hop2-or-exists",
+  // Case sensitivity in STRING MATCHING (#375 follow-up), a different mechanism from cs-eq:
+  // collation governs `=`, and on SQLite nothing but `PRAGMA case_sensitive_like` governs LIKE.
+  "cs-contains",
+  // The primary key as a filterable attribute (#376): against a constant, against a field under
+  // negation, and inside a concatenation — the shape that sent `$add` a string and had the
+  // server abort the query before this change.
+  "id-eq-const",
+  "id-f2f-ne",
+  "id-concat",
+  // string() over a boolean. Mongoose is one of the adapters that lowers it, and correctly:
+  // `$toString(true)` is "true", the same rendering CEL uses, so unlike the SQL adapters there
+  // is no store-dependent 1/0 to refuse.
+  "cast-string-bool",
 ] as const;
 
 /**
@@ -645,6 +673,9 @@ const DEGENERACY_LIVENESS_PROBES = [
   // int() over a numeric column: truncation-versus-rounding, unsupported for every adapter but
   // convex, which promotes it in adapterSupportedExpected.
   "cast-int-double",
+  // CEL's `+` between two field paths (#391): no constant to tell $add from $concat, and the
+  // mapper carries no field types. Refused at translation, where the server used to abort.
+  "concat-f2f",
 ] as const;
 
 interface AdversarialLabel {
@@ -661,6 +692,18 @@ interface AdversarialCategory {
   subCategories: AdversarialSubCategory[];
 }
 
+/** One level of the to-one chain, stored as an embedded subdocument. */
+interface AdversarialRelationLevel {
+  aBool: boolean;
+  aString: string;
+  aNumber: number;
+  aOptionalString: string | null;
+}
+
+interface AdversarialParent extends AdversarialRelationLevel {
+  inner: AdversarialRelationLevel | null;
+}
+
 interface AdversarialResourceDocument {
   resourceId: string;
   aBool: boolean;
@@ -673,6 +716,7 @@ interface AdversarialResourceDocument {
   createdAt: Date | null;
   tags: Tag[];
   categories: AdversarialCategory[];
+  parent: AdversarialParent | null;
 }
 
 const tagSchema = new Schema<Tag>(
@@ -700,6 +744,29 @@ const categorySchema = new Schema<AdversarialCategory>(
   },
   { _id: false, id: false }
 );
+// The corpus's one real to-one relation. A document store has no join, so both levels are
+// embedded subdocuments — but the SHAPE is the same to-one chain every other store carries, and
+// an absent level is a missing path here exactly as it is a missing row there.
+const innerSchema = new Schema<AdversarialRelationLevel>(
+  {
+    aBool: { type: Boolean, required: true },
+    // Mongoose's string `required` validator rejects the corpus's intentional empty string.
+    aString: { type: String },
+    aNumber: { type: Number, required: true },
+    aOptionalString: { type: String, default: null },
+  },
+  { _id: false, id: false }
+);
+const parentSchema = new Schema<AdversarialParent>(
+  {
+    aBool: { type: Boolean, required: true },
+    aString: { type: String },
+    aNumber: { type: Number, required: true },
+    aOptionalString: { type: String, default: null },
+    inner: { type: innerSchema, default: null },
+  },
+  { _id: false, id: false }
+);
 const resourceSchema = new Schema<AdversarialResourceDocument>(
   {
     resourceId: { type: String, required: true, unique: true },
@@ -714,6 +781,7 @@ const resourceSchema = new Schema<AdversarialResourceDocument>(
     createdAt: { type: Date, default: null },
     tags: { type: [tagSchema], default: [] },
     categories: { type: [categorySchema], default: [] },
+    parent: { type: parentSchema, default: null },
   },
   { id: false }
 );
@@ -743,6 +811,18 @@ const subCategoriesMapping: MapperConfig = {
   },
 };
 const MAPPER: Mapper = {
+  // The primary key, reached as `request.resource.id` rather than through `attr` (the `id-*`
+  // actions). An adapter that resolves references by stripping a `request.resource.attr.` prefix
+  // never sees this name.
+  //
+  // It maps to `resourceId`, the string field this harness already carries the corpus id in,
+  // NOT to an ObjectId. That is a deliberate limit on what the corpus can prove here: the
+  // ObjectId coercion is a caller-supplied `valueParser` on the mapper entry, and three of the
+  // six id-* actions compare the key against a STRING column (id-f2f, id-f2f-ne, id-concat), so
+  // a single key mapping cannot be an ObjectId and satisfy them. The coercion is pinned where it
+  // belongs instead — against the `id-eq-const` wire fixture in this adapter's translator unit
+  // test (cerbos/query-plan-adapters#378).
+  "request.resource.id": { field: "resourceId" },
   "request.resource.attr.aBool": { field: "aBool" },
   "request.resource.attr.aString": { field: "aString" },
   "request.resource.attr.aNumber": { field: "aNumber" },
@@ -763,7 +843,38 @@ const MAPPER: Mapper = {
   // its query semantics already treat null as a value, so no `nullable` flag applies here — the
   // flag means the opposite (a stored null IS a missing attribute).
   "request.resource.attr.coOwner": { field: "scope" },
+  // obj.inner is not a real nested path — it mirrors aString. `parent.inner` below is the
+  // opposite: a real two-level to-one chain. The two are kept side by side on purpose.
   "request.resource.attr.obj.inner": { field: "aString" },
+  // The corpus's one REAL to-one chain (the `rel-*` actions), stored as an embedded subdocument
+  // per level rather than a joined collection. `type: "one"` flattens the path to `parent.aBool`
+  // AND declares the level as absent-able, which is what makes the adapter require it outside
+  // any `$nor`: a document with `parent: null` has no `parent.aBool` path at all, and an
+  // unguarded negation matches exactly those documents.
+  "request.resource.attr.parent": {
+    relation: {
+      name: "parent",
+      type: "one",
+      fields: {
+        aBool: { field: "aBool" },
+        aString: { field: "aString" },
+        aNumber: { field: "aNumber" },
+        aOptionalString: { field: "aOptionalString", nullable: true },
+      },
+    },
+  },
+  "request.resource.attr.parent.inner": {
+    relation: {
+      name: "parent.inner",
+      type: "one",
+      fields: {
+        aBool: { field: "aBool" },
+        aString: { field: "aString" },
+        aNumber: { field: "aNumber" },
+        aOptionalString: { field: "aOptionalString", nullable: true },
+      },
+    },
+  },
   "request.resource.attr.tags": {
     relation: {
       name: "tags",
@@ -863,6 +974,66 @@ function scopeFor(seed: Seed): string | null {
   return derivedFor(seed).scope;
 }
 
+// -- the real to-one relation (conformance/README.md, "The real to-one relation") ----------------
+//
+// `parentSeedId` names the seed whose four scalars this row's `parent` carries, and that seed's own
+// `parentSeedId` names the ones `parent.inner` carries. The chain is cut at two levels. Every
+// resource owns a FRESH parent (and inner) subdocument rather than pointing at the named seed's own
+// document, so no two resources share one and a filter that returned the parent instead of the
+// child cannot agree with the oracle by accident.
+
+const SEEDS_BY_ID = new Map(SEEDS.map((seed) => [seed.id, seed]));
+
+function parentSeedOf(seed: Seed | undefined): Seed | undefined {
+  const id = seed?.parentSeedId;
+  if (id === undefined || id === null) {
+    return undefined;
+  }
+  const parent = SEEDS_BY_ID.get(id);
+  if (parent === undefined) {
+    throw new Error(
+      `seeds.json: "${seed?.id}" names parent "${id}", which is not a seed id`
+    );
+  }
+  return parent;
+}
+
+/** The four scalars one level of the chain stores. */
+function relationLevel(seed: Seed): AdversarialRelationLevel {
+  return {
+    aBool: seed.aBool,
+    aString: seed.aString,
+    aNumber: seed.aNumber,
+    aOptionalString: seed.aOptionalString,
+  };
+}
+
+/** The stored `parent` subdocument for a seed, or null when it has no parent. */
+function storedParent(seed: Seed): AdversarialParent | null {
+  const parentSeed = parentSeedOf(seed);
+  if (parentSeed === undefined) {
+    return null;
+  }
+  const innerSeed = parentSeedOf(parentSeed);
+  return {
+    ...relationLevel(parentSeed),
+    inner: innerSeed === undefined ? null : relationLevel(innerSeed),
+  };
+}
+
+/** The same four as check() attributes: a NULL field is a MISSING attribute, one hop out. */
+function relationAttr(seed: Seed): Record<string, Value> {
+  const attr: Record<string, Value> = {
+    aBool: seed.aBool,
+    aString: seed.aString,
+    aNumber: seed.aNumber,
+  };
+  if (seed.aOptionalString !== null) {
+    attr["aOptionalString"] = seed.aOptionalString;
+  }
+  return attr;
+}
+
 function asTagAttribute(tag: Tag): Record<string, Value> {
   const attr: Record<string, Value> = { id: tag.id };
   if (tag.name !== null) {
@@ -921,6 +1092,18 @@ function asCheckResource(seed: Seed): Resource {
       subNames: seed.subCategoryNames,
     };
   }
+  // The real to-one chain, mirroring the stored subdocuments exactly. A row with no parent sends
+  // NO `parent` attribute — a CEL missing-path error (deny) — matching the stored document having
+  // no `parent` path; the same holds one level down for `parent.inner`.
+  const parentSeed = parentSeedOf(seed);
+  if (parentSeed !== undefined) {
+    const parentAttr = relationAttr(parentSeed);
+    const innerSeed = parentSeedOf(parentSeed);
+    if (innerSeed !== undefined) {
+      parentAttr["inner"] = relationAttr(innerSeed);
+    }
+    attr["parent"] = parentAttr;
+  }
   return { kind: seedsFile.resourceKind, id: seed.id, attr };
 }
 
@@ -950,6 +1133,7 @@ beforeAll(async () => {
             },
           ],
         })),
+        parent: storedParent(seed),
       };
     })
   );
@@ -1037,7 +1221,7 @@ describe("adversarial conformance corpus", () => {
       /pins no throw message/
     );
   });
-  test("manifest assigns all 152 actions exactly one Mongoose outcome", () => {
+  test("manifest assigns all 170 actions exactly one Mongoose outcome", () => {
     const oracle = new Set(ORACLE_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map((entry) => entry.action));
     const nullOmitted = new Set(
@@ -1053,11 +1237,11 @@ describe("adversarial conformance corpus", () => {
       return count !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(152);
-    expect(unsupportedEntries).toHaveLength(38);
+    expect(MANIFEST_ACTIONS.size).toBe(179);
+    expect(unsupportedEntries).toHaveLength(40);
     expect(supportedExpectedEntries).toHaveLength(4);
-    expect(ORACLE_ACTIONS).toHaveLength(107);
-    expect(THROWING_ACTIONS).toHaveLength(43);
+    expect(ORACLE_ACTIONS).toHaveLength(132);
+    expect(THROWING_ACTIONS).toHaveLength(45);
     expect(misclassified).toEqual([]);
     expect(
       [...supportedExpectedActions].filter(
@@ -1295,6 +1479,45 @@ describe("adversarial conformance corpus", () => {
         expect.not.stringMatching(forbidden),
       ]);
     }
+  });
+
+  // The to-one relation carries no corpus action yet — this is the expand half of
+  // cerbos/query-plan-adapters#372's expand–contract — so nothing else in this file would notice a
+  // seeder that stored no chain at all, or one that wrote the root's own columns one hop out.
+  // Read the two hops back out of the stored documents rather than counting them: a count cannot
+  // tell the corpus's values from the root's, which is exactly the flat-alias failure this
+  // relation exists to make visible.
+  test("the seeded to-one chain matches the corpus relation", async () => {
+    const withParent = SEEDS.filter((seed) => parentSeedOf(seed) !== undefined);
+    const withInner = SEEDS.filter(
+      (seed) => parentSeedOf(parentSeedOf(seed)) !== undefined
+    );
+    expect(withParent.length).toBeGreaterThan(0);
+    expect(withInner.length).toBeGreaterThan(0);
+    expect(withParent.length).toBeLessThan(SEEDS.length);
+
+    const stored = await AdversarialResource.find(
+      {},
+      { resourceId: 1, "parent.aString": 1, "parent.inner.aString": 1, _id: 0 }
+    ).lean();
+    expect(
+      Object.fromEntries(
+        stored.map((doc) => [
+          doc.resourceId,
+          [doc.parent?.aString ?? null, doc.parent?.inner?.aString ?? null],
+        ])
+      )
+    ).toEqual(
+      Object.fromEntries(
+        SEEDS.map((seed) => [
+          seed.id,
+          [
+            parentSeedOf(seed)?.aString ?? null,
+            parentSeedOf(parentSeedOf(seed))?.aString ?? null,
+          ],
+        ])
+      )
+    );
   });
 
   test("oracle is not degenerate", async () => {

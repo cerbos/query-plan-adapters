@@ -11,6 +11,16 @@ is the mandatory tenant boundary, composed outside the Cerbos specification so i
 to `KIND_ALWAYS_ALLOWED`. Changing the resource policies under [`policies/`](policies/) changes
 the policy-controlled result sets without changing the app.
 
+This directory holds **two programs sharing one Gradle build**. The photo-sharing application is
+the larger of the two and the one this README is mostly about. Beside it,
+`dev.cerbos.example.demo` is a no-argument program that exercises the repository's
+[shared demo domain](../../demo) — the five usage shapes every adapter's example implements —
+and prints one JSON document for `demo/scripts/run-example.sh` to diff. See
+[The shared demo domain](#the-shared-demo-domain) below. The two have separate policies,
+separate schemas, and separate PDPs; nothing about the photo-sharing app changed to make room
+for the second, because the demo domain is a floor rather than a ceiling
+([ADR 0001](../../docs/adr/0001-demo-domain-has-no-per-adapter-exceptions.md)).
+
 > [!WARNING]
 > **Demo identity only — do not copy this pattern.** The endpoints accept `user`, `role`,
 > `tenant`, and `groups` as unauthenticated query parameters so the smoke harness can switch
@@ -78,13 +88,22 @@ example/
 ├── policies/album.yaml
 ├── policies/workspace.yaml
 ├── cerbos-config.yaml
-├── docker-compose.yml
-├── settings.gradle.kts          # composite-build include of the adapter source
-├── build.gradle.kts             # Spring Boot 3.5, Spring Data JPA, H2
+├── docker-compose.yml           # the photo-sharing app's PDP, on 23592/23593
+├── settings.gradle.kts          # no composite build — see "How this example resolves the adapter"
+├── build.gradle.kts             # Spring Boot 3.5, Spring Data JPA, H2, and the demoJar task
+├── run.sh                       # the spring-data half of demo/scripts/run-example.sh
 ├── scripts/smoke.sh             # live PDP + Boot + HTTP assertions
 ├── scripts/smoke-edge-cases.sh  # full-stack regression tripwire (see "Edge-case regression scenarios")
 └── src/main/
     ├── resources/application.yaml
+    ├── resources/application-demo.yaml  # the demo-domain program's datasource
+    ├── java/dev/cerbos/example/CerbosClientConfig.java  # the PDP client, shared by both programs
+    ├── java/dev/cerbos/example/demo/
+    │   ├── DemoApplication.java     # no-argument program, one JSON document on stdout
+    │   ├── DemoShapes.java          # the five shared usage shapes
+    │   ├── DemoDocument.java        # the demo domain's one entity
+    │   ├── DemoDocumentRepository.java
+    │   └── DemoSeeds.java           # ../../demo/seeds.json, parsed
     └── java/dev/cerbos/example/photos/
         ├── Photo.java            # tenant-scoped aggregate root and its relations
         ├── PhotoDetails.java     # embedded dimensions
@@ -102,21 +121,52 @@ example/
         ├── WorkspaceService.java # Resource.newInstance("workspace")
         ├── WorkspaceController.java # GET /workspaces
         ├── AccessContext.java    # shared principal/tenant construction
-        ├── CerbosClientConfig.java
         ├── SeedData.java         # nine adversarial photos across two tenants + edge-regression seeds
         └── PhotosApplication.java
 ```
+
+## How this example resolves the adapter
+
+`dev.cerbos:cerbos-spring-data` is resolved from **mavenLocal as a real Maven coordinate**, so
+`gradle -p .. publishToMavenLocal` is a prerequisite of everything here. `run.sh`, `smoke.sh` and
+`smoke-edge-cases.sh` each do it for themselves, so any one of them is still a single command.
+
+It used to be a Gradle composite build (`includeBuild("..")`), which substitutes the adapter's
+source tree for the declared coordinate and therefore resolves neither its POM nor its Gradle
+module metadata. That is half of what an example exists to prove
+([ADR 0002](../../docs/adr/0002-examples-install-the-packed-artifact.md)), and the class of bug it
+hid is not hypothetical: `cerbos-sdk-java` declares protobuf at runtime-only scope in its own
+module metadata. Two things this example now depends on are consequences of resolving the real
+thing:
+
+- it declares `cerbos-sdk-java` itself, because the adapter publishes the SDK at **runtime**
+  scope — correct, since a consumer that never names an SDK type should not compile against one,
+  and this application does name them;
+- it declares **no** `protobuf-java` version, because the adapter publishes one at runtime scope
+  pinned to the gencode the SDK was generated against. gRPC drags in older protobuf-java versions
+  transitively and an older runtime throws `ProtobufRuntimeVersionException` at first message
+  decode, so restating the version here would make the example pass whether or not the adapter
+  still declares it.
+
+The `example/` directory is a separate Gradle build rather than a source set of the adapter, so
+it cannot reach the published jar. `run.sh` asserts that rather than leaving it to inspection.
 
 ## Run it
 
 Prerequisites: Docker, curl, jq, Gradle 8.x, and JDK 17+.
 
+`CERBOS_HOST` has **no default**. Cerbos's own 3592/3593 are the ports every adapter's
+`cerbos run` test sidecar binds, so a default would not fail on a mistake — it would quietly plan
+against the wrong policy suite. This example's PDP is published on 23592/23593 instead, and the
+demo domain's on 13592/13593.
+
 ```bash
-# terminal 1: live Cerbos PDP
+# terminal 1: install the adapter, then start the live Cerbos PDP
+gradle -p .. publishToMavenLocal --no-daemon
 docker compose up -d
 
 # terminal 2: Spring Boot app
-gradle bootRun --no-daemon
+CERBOS_HOST=localhost:23593 gradle bootRun --no-daemon
 
 # terminal 3: queries
 curl -s "http://localhost:8080/photos?user=alice&action=view" | jq '[.[].id]'
@@ -161,6 +211,50 @@ and requires exactly one `PlanResources` access and decision pair—with the sam
 expected action, and a query-plan filter in the PDP response. It also compares the full action
 and resource-kind multiset as a summary and proves controller-rejected requests do not reach
 the PDP. The run fails unless the observed kind set is exactly `album`, `photo`, and `workspace`.
+
+## The shared demo domain
+
+The second program in this build, `dev.cerbos.example.demo`, exercises the repository's
+[demo domain](../../demo): one resource kind, four flat scalar attributes, three actions, shared
+verbatim by all ten adapters' examples. It takes no arguments, prints one JSON document to
+stdout, and is run by the shared runner:
+
+```bash
+demo/scripts/run-example.sh spring-data   # from the repository root
+```
+
+The runner starts the demo PDP, invokes [`run.sh`](run.sh), and diffs the emitted document
+against `demo/expected.json`. `run.sh` publishes the adapter, builds the program's own executable
+jar via the `demoJar` task, and launches it with `java -jar` — Gradle is kept out of the launching
+process because its stdout carries lifecycle output, and the contract is one JSON document on
+stdout with everything else on stderr. `DemoApplication` does the other half by redirecting
+`System.out` to stderr before Spring starts and writing the document through the handle it kept.
+
+The five shapes it implements are the ones defined in
+[cerbos/query-plan-adapters#349](https://github.com/cerbos/query-plan-adapters/issues/349):
+
+| Shape | What it exercises here |
+|---|---|
+| Plain filtered list | `findAll(Specification)` on a `KIND_CONDITIONAL` plan |
+| `KIND_ALWAYS_ALLOWED` | `Specification.unrestricted()` — every row, no `WHERE` clause |
+| `KIND_ALWAYS_DENIED` | the always-false predicate — no rows |
+| Pagination | `findAll(Specification, Pageable)`, whose separate COUNT query rebuilds the predicate against a second `Root` |
+| Composition | the adapter's `Specification` ANDed with one the application owns |
+
+Composition is the shape that earns the exercise, and it is a single `.and(...)` for all three
+plan kinds because every `toSpecification` overload returns a `Specification` covering all of
+them — the caller never switches on the kind. Note what it is *not*: this program does not prove
+what the adapter translates. `AdversarialConformanceTest` does that, against a hostile corpus
+with a live PDP as the oracle, on H2, PostgreSQL and MySQL. What no conformance harness can cover
+is the published package surface (every harness compiles against the adapter's own source set)
+and usage shapes past a single flat query.
+
+Why the photo-sharing application stays: the demo domain is thin by construction — roughly the
+intersection of ten query languages, one of which is a vector store — and
+[ADR 0001](../../docs/adr/0001-demo-domain-has-no-per-adapter-exceptions.md) makes it a floor
+rather than a ceiling. Everything in this README above and below this section is coverage nothing
+shared asserts, including six historical bug fixes pinned by
+[`scripts/smoke-edge-cases.sh`](scripts/smoke-edge-cases.sh).
 
 ## Adapter mapping
 

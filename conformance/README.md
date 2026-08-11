@@ -25,7 +25,8 @@ rows, and one oracle recipe that every adapter's harness implements against its 
   throughout. This is the single source of truth an adapter's harness persists into its own
   schema (SQL rows, Prisma records, whatever) AND mirrors into check() oracle calls — see
   "The oracle recipe" below. Every key except `note` must be consumed by every harness; that is
-  asserted, not assumed (see "Deterministic derived fields").
+  asserted, not assumed (see "Deterministic derived fields"). `parentSeedId` is the one key that
+  resolves against another row — see "The real to-one relation" below.
 - `derived-fields.json` — the five attributes derived from each seed (`createdBy`, `aDouble`,
   `createdAt`, `scope`, `labels`), materialised once per seed id. Every harness reads this file
   instead of restating the rules; `scripts/validate-corpus.sh` re-derives the rule-based fields
@@ -79,6 +80,28 @@ are necessarily language/ORM-specific):
    through the same oracle comparison as conformance actions. A throw must carry the message the
    corpus pins for that adapter — see "Pinned throw messages" below.
 
+### Case sensitivity is two invariants, not one
+
+CEL string comparison is exact. The corpus proves that twice, because a store can satisfy it for
+one operator and not the other:
+
+- **`cs-eq`** proves `=`. Collation governs this one, and the advice every adapter README gives —
+  use a binary or case-sensitive collation — is sufficient for it.
+- **`cs-contains` / `cs-startswith` / `cs-endswith`** prove string MATCHING, which collation does
+  not govern on every engine. SQLite's `LIKE` is case-insensitive for ASCII no matter what
+  collation the column was created with; only `PRAGMA case_sensitive_like = ON` changes it, and
+  it is per-connection.
+
+`c1` (`aString` "One") is the single witness in all four, and the only seed that differs from
+another by case alone, so a case-insensitive store adds exactly one row and nothing else moves.
+
+A harness whose store needs configuring to satisfy the invariant must configure it — that is a
+property of the deployment the adapter documents, not of the translation — but the adapter's
+README has to state the *whole* lever. Three harnesses (ent, sqlalchemy, prisma) set the SQLite
+pragma; drizzle needs none because it lowers string matching to `REPLACE` rather than `LIKE`.
+Prisma's did not until these actions existed, and its README named only the collation, which is
+how a documented invariant can be satisfied on paper and violated in fact.
+
 ### NULL conventions
 
 A DB `NULL` (or a missing element field, e.g. a NULL tag name) must become a **missing attribute**
@@ -106,7 +129,7 @@ have byte-identical wire fixtures apart from the variable name. Their oracles do
 | `null-eq-missing` | omitted | **nothing** | those 5 — **over-grants** |
 
 Under the omitted convention CEL raises a missing-attribute error for every NULL row and compares
-`"set" == null` false for every other, so `check()` denies all 20 seeds. An adapter cannot recover
+`"set" == null` false for every other, so `check()` denies all 21 seeds. An adapter cannot recover
 the caller's convention from the plan, so it has to be told: every adapter that can emit a
 NULL-selecting predicate takes a `nullAttributeRepresentation` option, defaulting to `explicit`
 (the historical translation). See cerbos/query-plan-adapters#302.
@@ -174,7 +197,7 @@ break them.
 
 `coOwner` is the second explicit-null attribute the corpus carries, added for `null-value-f2f`. It
 aliases the **`scope`** column rather than `aOptionalString`, because comparing a column with itself
-is TRUE for all 20 seeds and the degeneracy guard forbids a total oracle. Against `scope` the only
+is TRUE for all 21 seeds and the degeneracy guard forbids a total oracle. Against `scope` the only
 row where both sides are NULL is `e1`, so the oracle is exactly one row — thin, but non-degenerate,
 and it is precisely the row the naive translation loses.
 
@@ -274,6 +297,170 @@ negation — but only that adapter's unit tests can prove it (#333). This is the
 to "a per-adapter unit test is not a substitute for a corpus action": there is no corpus action to
 substitute for.
 
+### The real to-one relation
+
+The corpus carries exactly one **real** to-one join: `parent`, and `parent.inner` one hop further
+out. It is deliberately kept beside `obj.inner`, which looks identical in a policy and is not a
+join at all — every harness maps `obj.inner` to the resource row's own `aString`, the same trick
+the spring-data reference uses for the `p-struct` probe. One of the two dotted attributes emits a
+join and the other does not, and a reader should be able to tell which.
+
+`mainCategory` is a real chain too, but its tail is a **collection**, and the hazards a collection
+reaches are not the hazards a scalar reaches. "The absent to-one parent" above records mongoose's
+`$cond` treating a missing field path as falsy and notes that no corpus action reaches it, because
+"every chained operand the corpus carries is a collection and membership has no
+aggregation-expression form there". This is the seed field that entry asks for. See
+[ADR 0005](../docs/adr/0005-the-conformance-corpus-carries-a-real-to-one-relation.md).
+
+**One seed key, resolved against another row.** `parentSeedId` names the seed whose four scalars —
+`aBool`, `aNumber`, `aString`, `aOptionalString` — a row's `parent` carries; that seed's own
+`parentSeedId` names the ones `parent.inner` carries, and the chain is **cut there**. There is no
+`parent.inner.inner`. `null` is a row with no parent at all. Seed rows stay one line each, which is
+the property the compact-row convention protects, and the parent values are the corpus's own
+hostile strings — LIKE metacharacters, unicode, the empty string, case traps, NULL optionals —
+rather than a second curated set to keep in step with the first.
+
+**Do not write the nested object into `seeds.json`.** It is materialised harness-side, exactly as
+`mainCategory` is materialised from `subCategoryNames`.
+
+**The parent is a copy, not a pointer.** Each harness creates a *fresh* parent (and inner) row per
+resource rather than pointing at the named seed's own row. The corpus already seeds distinct
+category graphs per resource so no two share a relation by accident; here the reason is sharper —
+with shared rows, a filter that returned the parent instead of the child could agree with the
+oracle.
+
+What a store does with it is the store's business, and the split is expected:
+
+| store | how the two levels are materialised |
+|---|---|
+| prisma, drizzle, sqlalchemy, spring-data, ent, pgx | two owned tables, unique foreign key per level — a real join |
+| mongoose, convex, elasticsearch-java | two nested objects embedded in the document |
+| langchain-chromadb | both levels flattened onto dotted metadata keys (`parent.aString`, `parent.inner.aString`) |
+
+How a store spells "this level is not there" is its own business — a missing row, a missing key, or
+a stored null under the convention that harness already uses for a NULL column. What every one of
+them has to agree on is the **check side**: a level that does not exist sends no `parent` attribute
+(or no `parent.inner`), so CEL raises a missing-path error and `check()` denies. That is the scalar
+counterpart of the collection hazard "The absent to-one parent" documents.
+
+**Every harness maps it, and how each one spells the hop is the point.** The fifteen `rel-*`
+actions are what proved it, and reaching a scalar *through* a to-one hop turned out to be a shape
+several translators did not have. What they have in common is that an absent hop must be UNKNOWN
+rather than false, because `NOT UNKNOWN` is still UNKNOWN and the row has to stay excluded under
+both polarities:
+
+| adapter | how the hop is reached | what makes an absent hop UNKNOWN |
+|---|---|---|
+| prisma | `is:` on an optional relation | the hop required as a conjunct OUTSIDE the negation |
+| drizzle | correlated `EXISTS` | `CASE WHEN <hop exists> THEN … END`, no `ELSE` |
+| sqlalchemy, ent, pgx | correlated SCALAR subquery | no correlated row IS already SQL NULL |
+| spring-data | `LEFT JOIN` through the association | an unmatched join row is SQL NULL |
+| mongoose, convex, elasticsearch-java | a nested object path | the path is simply absent from the document |
+| langchain-chromadb | flattened dotted metadata keys | nothing does — a missing key MATCHES `$ne`, so the negated and null-comparison shapes fail closed |
+
+A correlated scalar subquery needs no separate hop guard, which is the reason three adapters have
+none: the guard the COLLECTION chains need exists because `EXISTS` is two-valued and collapses
+"absent parent" onto "no matching child", and a scalar projection never makes that collapse. An
+inner join does not work either — it removes the row from the WHOLE query rather than making one
+branch unknown, which is invisible until the hop sits under a disjunction. `rel-hop2-or-exists` is
+the action that discriminates it, and it is the only one in the group whose failure direction is an
+UNDER-grant.
+
+**A fixture nothing uses can rot, so every harness pins it directly.** Each one reads both hops back
+out of its store — through a real join where it has one — and compares them against the corpus,
+rather than counting rows: a count cannot tell an inner row carrying the corpus's values from one
+carrying the root's own columns, which is exactly the flat-alias failure this relation exists to
+make visible. `scripts/validate-corpus.sh` separately asserts that every `parentSeedId` names a
+seed, that no row is its own parent, and that all three depths — no parent, parent without inner,
+parent with inner — are non-empty.
+
+### The primary key as a filterable attribute
+
+Every action but the `id-*` six filters on a resource **attribute**. Those six filter on
+`request.resource.id` — the resource's own identity, which the planner leaves symbolic because
+PlanResources is asked about a *kind*, not a row, so the operand arrives as a `variable` named
+`request.resource.id` rather than `request.resource.attr.id`.
+
+It is a distinct hazard because the key is the one column whose mapping differs **structurally**
+per adapter rather than merely by name: an ObjectId rather than a string in mongoose, the primary
+key in the SQL adapters, the document identifier rather than a metadata field in ChromaDB, and
+`_id` metadata rather than an indexed field in Elasticsearch. An adapter that resolves references
+by stripping a `request.resource.attr.` prefix never reaches this name at all, and the failure is
+silent — the variable looks like an unmapped attribute rather than the key.
+
+Two harness rules follow, and both were learned by getting them wrong first:
+
+- **A store whose key is not a queryable field must mirror it into one.** ChromaDB's `where`
+  filters metadata only, and Elasticsearch's `_id` is addressed by the `ids` query rather than a
+  term query. Both harnesses index the corpus id as an ordinary field and map the key onto it.
+  Leaving it unmapped makes the group throw for a *harness* reason (no mapping) instead of an
+  adapter one — the trap #326 documents; leaving it unindexed is worse, because the filter is
+  well-formed and simply matches nothing, which reads as an adapter defect.
+- **One key mapping cannot be two types.** Three of the six compare the key against a string
+  column, so mongoose maps it to the string field holding the corpus id rather than to an
+  ObjectId. The ObjectId coercion is a caller-supplied `valueParser` on the mapper entry and is
+  pinned against the `id-eq-const` wire fixture in that adapter's translator unit test instead.
+
+`f1` is the witness seed: its `aString` equals its own id and its `aOptionalString` is that id
+prefixed, so the field-to-field and concatenation oracles are non-degenerate without inventing a
+literal. `principal.attr.context` carries the same id for the value-first and hierarchy shapes.
+
+### Casts and concatenation are store-dependent in opposite directions
+
+`string()` and CEL's `+` over strings are the two shapes where a *correct-looking* lowering is
+wrong on some stores and right on others, so they are classified together.
+
+`cast-string-double` is the agreeing half. CEL formats the shortest decimal that round-trips and so
+does every store the corpus executes against — PostgreSQL 17 renders `CAST((-0.6)::float8 AS TEXT)`
+as `-0.6`, as do SQLite and MySQL. (Measured against the pinned images. The
+`-0.60000000000000009` rendering only appears under `extra_float_digits = 3`; PostgreSQL 12 made
+shortest round-trip the default, so a port built on that divergence would pin nothing.)
+
+`cast-string-bool` is the diverging half, and the reason the two are a pair. SQLite and MySQL have
+no boolean type and store 1/0, so `CAST(a_bool AS TEXT)` is `"1"` where CEL and PostgreSQL say
+`"true"`. One translator, one wire node, two answers decided only by the store — which is why an
+adapter spanning both cannot lower it store-blind. Every SQL adapter refuses it; mongoose and
+convex lower it correctly, because `$toString` and JavaScript render a bool exactly as CEL does.
+
+`id-concat` is the same lesson for `add`. The corpus's `add` is numeric everywhere else, and a
+string concatenation dispatched to SQL `+` is a hard error on PostgreSQL, an under-grant on SQLite
+— and a silent **over-grant** on MySQL, which coerces both operands to 0 and matched 18 of the 21
+seeds against a one-row oracle. Adapters that know their engine render `||` or `CONCAT`; adapters
+that deliberately do not know their dialect refuse it.
+
+#### A constant is what tells the two `+` overloads apart
+
+`id-concat` and `id-concat-vf` both carry a string **literal**, and that literal is the whole reason
+an adapter can translate them: CEL has no mixed-type `+`, so one string operand proves the entire
+expression is a concatenation. `concat-f2f` removes it — `R.attr.aString + R.attr.aOptionalString`
+— and with it the only evidence in the plan. A plan names no operand types, so an adapter looking at
+two variables cannot tell concatenation from arithmetic.
+
+Guessing arithmetic is what every adapter did, and it is wrong in the dangerous direction. The same
+filter answers three ways: a hard error on PostgreSQL, zero rows on SQLite, and on MySQL **16 of the
+21 seeds against a one-row oracle**, because both text operands coerce to 0 and the string constant
+on the other side coerces to 0 with them.
+
+The corpus does not prescribe a resolution, and the ten adapters split four ways, which is the point
+of asking:
+
+- **convex** and **sqlalchemy** need nothing. Convex concatenates in JavaScript, which is CEL's own
+  semantics; SQLAlchemy renders through the column's own declared type, so its dialect layer picks
+  `||` or `CONCAT` without the plan saying anything.
+- **ent** and **pgx** take a declaration — `ValueType: ValueString` on the mapper entry, the same
+  shape `ValueBool` already had for `string()`. Declared, they concatenate; undeclared, they fail
+  closed.
+- **prisma**, **drizzle**, **langchain-chromadb**, **elasticsearch-java** and **spring-data** refuse
+  it for limitations they already had, and needed no change.
+- **mongoose** refuses it, but had to be taught to: it was sending `$add` to the server, which
+  aborts the whole query rather than returning a wrong row set.
+
+There is deliberately no `ValueNumber` to pair with `ValueString`. Every *numeric* `add` the planner
+emits carries a constant operand — that is what makes it arithmetic rather than concatenation — so a
+declaration for the both-columns numeric case would be a constant nothing reads, which is the
+reason there is no `CastInt` either (#319). The corpus action that reaches it is what should
+introduce it.
+
 ### The degeneracy guard
 
 The comparison in step 4 can pass vacuously if the oracle itself is trivial (e.g. the PDP denies
@@ -302,8 +489,8 @@ is empty *by construction* is unchanged: it belongs in neither list (see
 `nullRepresentationOmitted` above, and
 `w1-size-zero-chain`/`w1-not-size-chain`/`w1-size-frac-chain`/`in-empty`/the string casts).
 
-Adapters differ widely in what they can express — `langchain-chromadb` compares 15 of the 136
-conformance actions where `ent` and `pgx` compare all of them — so the lists are expected to look
+Adapters differ widely in what they can express — `langchain-chromadb` compares 25 of the 168
+conformance actions where `ent` and `pgx` compare all but one — so the lists are expected to look
 different per harness. That is the point.
 
 ### Pinned throw messages
@@ -445,7 +632,7 @@ guard; run it before trusting it.
    what it actually says; the harness refuses to run with a message missing, so there is no way to
    forget one.
 6. Each harness pins the corpus size AND its throwing-action count as tripwires (e.g.
-   `expect(MANIFEST_ACTIONS.size).toBe(146)` and `expect(THROWING_ACTIONS).toHaveLength(50)` in
+   `expect(MANIFEST_ACTIONS.size).toBe(179)` and `expect(THROWING_ACTIONS).toHaveLength(55)` in
    `prisma/src/adversarial.test.ts`; the oracle counts too in the convex, langchain-chromadb and
    elasticsearch-java harnesses). Bump them deliberately — those assertions exist so a new action
    cannot slip past an adapter unnoticed. The convex harness additionally pins WHICH actions its

@@ -35,6 +35,8 @@ interface Seed {
   aOptionalString: string | null;
   tags: Tag[];
   subCategoryNames: string[];
+  /** The seed whose scalars this row's to-one `parent` carries; null for no parent. */
+  parentSeedId: string | null;
 }
 
 interface SeedsFile {
@@ -122,6 +124,15 @@ interface StoredDocument {
     subCategories: { name: string }[];
     subNames: string[];
   };
+  parent?: StoredRelationLevel & { inner?: StoredRelationLevel };
+}
+
+/** One level of the to-one chain as stored: an absent `aOptionalString` is a missing attribute. */
+interface StoredRelationLevel {
+  aBool: boolean;
+  aString: string;
+  aNumber: number;
+  aOptionalString?: string;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -145,7 +156,8 @@ const isSeed = (value: unknown): value is Seed =>
     value["aOptionalString"] === null) &&
   Array.isArray(value["tags"]) &&
   value["tags"].every(isTag) &&
-  isStringArray(value["subCategoryNames"]);
+  isStringArray(value["subCategoryNames"]) &&
+  (typeof value["parentSeedId"] === "string" || value["parentSeedId"] === null);
 
 const isPrincipal = (value: unknown): value is Principal =>
   isRecord(value) &&
@@ -164,9 +176,7 @@ const isMessageMap = (value: unknown): value is Record<string, string> =>
   isRecord(value) &&
   Object.values(value).every((message) => typeof message === "string");
 
-const isExpectedUnsupported = (
-  value: unknown,
-): value is ExpectedUnsupported =>
+const isExpectedUnsupported = (value: unknown): value is ExpectedUnsupported =>
   isRecord(value) &&
   typeof value["action"] === "string" &&
   isMessageMap(value["messages"]);
@@ -221,9 +231,7 @@ const isDerivedEntry = (value: unknown): value is DerivedEntry =>
   (typeof value["createdAt"] === "string" || value["createdAt"] === null) &&
   (typeof value["scope"] === "string" || value["scope"] === null) &&
   Array.isArray(value["labels"]) &&
-  value["labels"].every(
-    (label) => label === null || typeof label === "string",
-  );
+  value["labels"].every((label) => label === null || typeof label === "string");
 
 const isDerivedFile = (value: unknown): value is DerivedFile =>
   isRecord(value) &&
@@ -247,6 +255,7 @@ const SEED_KEYS = [
   "aOptionalString",
   "tags",
   "subCategoryNames",
+  "parentSeedId",
 ] as const;
 
 /** Corpus prose, never read by a harness: the one documented exclusion from SEED_KEYS. */
@@ -297,7 +306,8 @@ const seedsFile = parsedSeeds;
 const parsedActions: unknown = JSON.parse(
   fs.readFileSync(path.join(CONFORMANCE_DIR, "actions.json"), "utf8"),
 );
-if (!isActionsFile(parsedActions)) throw new Error("Invalid conformance actions");
+if (!isActionsFile(parsedActions))
+  throw new Error("Invalid conformance actions");
 const actionsFile = parsedActions;
 
 const parsedDerived: unknown = JSON.parse(
@@ -460,6 +470,33 @@ const DEGENERACY_GUARD_ACTIONS = [
   // Convex is the one adapter that promotes the casts in adapterSupportedExpected, so this is
   // a real comparison here rather than the liveness probe it is everywhere else.
   "cast-int-double",
+  // The real to-one join (#375): one per hazard — the negated hop, the null comparison, two-level
+  // depth, the root conjunction (the corpus's only SPLIT execution here), and the disjunction,
+  // whose failure direction is an under-grant.
+  "rel-not-bool-hop",
+  "rel-ne-null-hop",
+  "rel-bool-hop2",
+  "rel-hop-and-root",
+  "rel-hop2-or-exists",
+  // Case sensitivity in STRING MATCHING (#375 follow-up), a different mechanism from cs-eq:
+  // collation governs `=`, and on SQLite nothing but `PRAGMA case_sensitive_like` governs LIKE.
+  "cs-contains",
+  // The primary key as a filterable attribute (#376): the one id-* action the filter engine
+  // decides on its own, the negated field-to-field, and the two concatenations — which the
+  // post-filter answered with an evaluation error, and so no rows, before it learned CEL's
+  // string overload of `+`.
+  "id-eq-const",
+  "id-f2f-ne",
+  "id-concat",
+  "id-concat-vf",
+  // string() over a boolean and over a non-integer double, both of which the post-filter denied
+  // outright before this change. Convex renders them in JavaScript rather than in a store, so
+  // unlike the SQL adapters it can and does agree with CEL exactly.
+  "cast-string-bool",
+  "cast-string-double",
+  // CEL's `+` between two COLUMNS (#391). The post-filter concatenates in JavaScript, which is
+  // CEL's own semantics, so convex needs no operand-type declaration to resolve the overload.
+  "concat-f2f",
 ] as const;
 
 /**
@@ -471,6 +508,9 @@ const DEGENERACY_LIVENESS_PROBES = [
   // JSON.stringify(-0) is "0", so the sign of a zero denominator is gone before the adapter
   // sees it and the shape is refused rather than guessed.
   "cr-div-neg-zero",
+  // `list` is not in the adapter's known-operator set, so the constructed hierarchy path is
+  // refused during structural validation. It is the id-* group's only throwing member here.
+  "hier-list-id",
 ] as const;
 
 // -- pushdown coverage (cerbos/query-plan-adapters#327) ------------------------------------------
@@ -491,6 +531,11 @@ const DB_DECIDED_DEFAULT = [
   "double-negation",
   "double-threshold",
   "empty-string-eq",
+  // The primary key against a constant (#376). It reaches the engine for the same reason `cs-eq`
+  // does — a mapped, non-nullable field compared with one literal — and is the only one of the
+  // six id-* actions that does: the rest compare the key against another field or wrap it in a
+  // concatenation, neither of which `canPushToDb` accepts.
+  "id-eq-const",
   "in-single",
   "nary-and",
   "neg-number",
@@ -536,6 +581,18 @@ const DB_DECIDED_PUSHDOWN = [
 
 /** `in-empty` folds to ALWAYS_DENIED, so no mapper can put it in either category. */
 const UNCONDITIONAL_ACTIONS = ["in-empty"];
+
+/**
+ * Actions whose root `and` splits: part pushed to Convex's filter engine, the rest post-filtered.
+ *
+ * `rel-hop-and-root` is the first corpus action to reach this path (#375) and the reason the split
+ * branch of `buildFilters` is no longer dead code. Its root conjunct `R.attr.aBool == true` is a
+ * required field against a literal, so the engine takes it; its other conjunct reads through the
+ * to-one hop, which is `nullable` and therefore has to be answered by the adapter's own evaluator.
+ * That is the whole point of splitting — the engine narrows, and the semantics that need CEL's
+ * missing-attribute error stay with the adapter.
+ */
+const SPLIT_ACTIONS = ["rel-hop-and-root"];
 
 async function executionFor(
   action: string,
@@ -602,6 +659,51 @@ function scopeFor(seed: Seed): string | null {
   return derivedFor(seed).scope;
 }
 
+// -- the real to-one relation (conformance/README.md, "The real to-one relation") ----------------
+//
+// `parentSeedId` names the seed whose four scalars this row's `parent` carries, and that seed's own
+// `parentSeedId` names the ones `parent.inner` carries. The chain is cut at two levels. Every
+// resource owns a FRESH parent (and inner) object rather than pointing at the named seed's own
+// document, so no two resources share one and a filter that returned the parent instead of the
+// child cannot agree with the oracle by accident.
+
+const seedsById = new Map(seedsFile.seeds.map((seed) => [seed.id, seed]));
+
+function parentSeedOf(seed: Seed | undefined): Seed | undefined {
+  const id = seed?.parentSeedId;
+  if (id === undefined || id === null) return undefined;
+  const parent = seedsById.get(id);
+  if (parent === undefined) {
+    throw new Error(
+      `seeds.json: "${seed?.id}" names parent "${id}", which is not a seed id`,
+    );
+  }
+  return parent;
+}
+
+/** The four scalars one level of the chain carries. A NULL column is an ABSENT key. */
+function relationLevelOf(seed: Seed): StoredRelationLevel {
+  const level: StoredRelationLevel = {
+    aBool: seed.aBool,
+    aString: seed.aString,
+    aNumber: seed.aNumber,
+  };
+  if (seed.aOptionalString !== null)
+    level.aOptionalString = seed.aOptionalString;
+  return level;
+}
+
+/** The stored `parent` object for a seed, or undefined when it has no parent. */
+function storedParent(seed: Seed): StoredDocument["parent"] {
+  const parentSeed = parentSeedOf(seed);
+  if (parentSeed === undefined) return undefined;
+  const innerSeed = parentSeedOf(parentSeed);
+  const parent: NonNullable<StoredDocument["parent"]> =
+    relationLevelOf(parentSeed);
+  if (innerSeed !== undefined) parent.inner = relationLevelOf(innerSeed);
+  return parent;
+}
+
 function storedDocument(seed: Seed): StoredDocument {
   const document: StoredDocument = {
     id: seed.id,
@@ -647,6 +749,8 @@ function storedDocument(seed: Seed): StoredDocument {
       subNames: seed.subCategoryNames,
     };
   }
+  const parent = storedParent(seed);
+  if (parent !== undefined) document.parent = parent;
   return document;
 }
 
@@ -660,16 +764,18 @@ function checkResource(seed: Seed): Resource {
     coOwner: scopeFor(seed),
     tagNames: seed.tags.map((tag) => tag.name),
     obj: { inner: seed.aString },
-    tags: seed.tags.map((tag): Record<string, Value> =>
-      tag.name === null ? { id: tag.id } : { id: tag.id, name: tag.name },
+    tags: seed.tags.map(
+      (tag): Record<string, Value> =>
+        tag.name === null ? { id: tag.id } : { id: tag.id, name: tag.name },
     ),
     categories: seed.subCategoryNames.map((name) => ({
       name: "business",
       subCategories: [
         {
           name,
-          labels: labelsFor(seed).map((labelName): Record<string, Value> =>
-            labelName === null ? {} : { name: labelName },
+          labels: labelsFor(seed).map(
+            (labelName): Record<string, Value> =>
+              labelName === null ? {} : { name: labelName },
           ),
         },
       ],
@@ -691,6 +797,11 @@ function checkResource(seed: Seed): Resource {
       subNames: seed.subCategoryNames,
     };
   }
+  // The real to-one chain, mirroring the stored document exactly. A row with no parent sends NO
+  // `parent` attribute — a CEL missing-path error (deny) — matching the stored document having no
+  // `parent` key; the same holds one level down for `parent.inner`.
+  const parent = storedParent(seed);
+  if (parent !== undefined) attr["parent"] = parent as unknown as Value;
   return { kind: seedsFile.resourceKind, id: seed.id, attr };
 }
 
@@ -775,7 +886,6 @@ function planCarriesNullLiteral(operand: unknown): boolean {
 }
 
 describe("adversarial conformance corpus", () => {
-
   // Adding a throwing action without pinning its message must fail this harness rather than
   // silently degrade the throw suite to a bare "it threw" (cerbos/query-plan-adapters#326).
   test("a throwing action with no pinned message fails classification", () => {
@@ -803,11 +913,11 @@ describe("adversarial conformance corpus", () => {
         ].filter(Boolean).length !== 1,
     );
 
-    expect(allActions.size).toBe(152);
-    expect(CONVEX_UNSUPPORTED).toHaveLength(2);
+    expect(allActions.size).toBe(179);
+    expect(CONVEX_UNSUPPORTED).toHaveLength(3);
     expect(CONVEX_SUPPORTED_EXPECTED).toHaveLength(7);
-    expect(ORACLE_ACTIONS).toHaveLength(146);
-    expect(THROWING_ACTIONS).toHaveLength(4);
+    expect(ORACLE_ACTIONS).toHaveLength(172);
+    expect(THROWING_ACTIONS).toHaveLength(5);
     expect(misclassified).toEqual([]);
   });
 
@@ -850,7 +960,9 @@ describe("adversarial conformance corpus", () => {
       ? "db"
       : UNCONDITIONAL_ACTIONS.includes(action)
         ? "unconditional"
-        : "post";
+        : SPLIT_ACTIONS.includes(action)
+          ? "split"
+          : "post";
     expect({ ids: run.ids, execution: run.execution }).toEqual({
       ids: oracle,
       execution: expected,
@@ -928,19 +1040,20 @@ describe("adversarial conformance corpus", () => {
       pushdownSplit: pushdown.split,
       pushdownPostCount: pushdown.post.length,
       // The two mappers must differ ONLY where the pushdown leg re-executes, which is what makes
-      // skipping the other 138 actions there sound rather than a coverage hole.
+      // skipping the other 145 actions there sound rather than a coverage hole.
       moved: pushdown.db.filter((action) => !base.db.includes(action)),
     }).toEqual({
-      total: 146,
+      total: 172,
       defaultDb: DB_DECIDED_DEFAULT,
-      // No corpus action currently splits: `buildFilters` only splits a root `and`, and every
-      // hostile shape that mixes pushable and non-pushable children is rooted elsewhere.
-      defaultSplit: [],
+      // Exactly one corpus action splits: `buildFilters` only splits a root `and`, and
+      // rel-hop-and-root is the one hostile shape rooted there that mixes a pushable conjunct
+      // with a non-pushable one (#375). Both mappers split it — the hop is `nullable` under each.
+      defaultSplit: SPLIT_ACTIONS,
       defaultUnconditional: UNCONDITIONAL_ACTIONS,
-      defaultPostCount: 132,
+      defaultPostCount: 156,
       pushdownDb: DB_DECIDED_PUSHDOWN,
-      pushdownSplit: [],
-      pushdownPostCount: 121,
+      pushdownSplit: SPLIT_ACTIONS,
+      pushdownPostCount: 145,
       moved: PUSHDOWN_ONLY_ACTIONS,
     });
   });
@@ -1044,7 +1157,9 @@ describe("adversarial conformance corpus", () => {
         // a transport error or mapper typo counting as the required rejection is the silent
         // pass the corpus README warns about.
         if (!String(error).includes(NULL_OMITTED_MESSAGE)) {
-          notRejected.push(`${action} (rejected for the wrong reason: ${String(error)})`);
+          notRejected.push(
+            `${action} (rejected for the wrong reason: ${String(error)})`,
+          );
         }
       }
     }
@@ -1065,6 +1180,41 @@ describe("adversarial conformance corpus", () => {
     expect(oracle.length).toBeGreaterThan(0);
     expect(oracle.length).toBeLessThan(allIds.length);
     expect(await adapterFilteredIds(action)).toEqual(allIds);
+  });
+
+  // The to-one relation carries no corpus action yet — this is the expand half of
+  // cerbos/query-plan-adapters#372's expand–contract — so nothing else in this file would notice a
+  // seeder that stored no chain at all, or one that wrote the root's own columns one hop out.
+  // Read the two hops back out of the stored documents rather than counting them: a count cannot
+  // tell the corpus's values from the root's, which is exactly the flat-alias failure this
+  // relation exists to make visible.
+  test("the seeded to-one chain matches the corpus relation", async () => {
+    const withParent = seedsFile.seeds.filter(
+      (seed) => parentSeedOf(seed) !== undefined,
+    );
+    const withInner = seedsFile.seeds.filter(
+      (seed) => parentSeedOf(parentSeedOf(seed)) !== undefined,
+    );
+    expect(withParent.length).toBeGreaterThan(0);
+    expect(withInner.length).toBeGreaterThan(0);
+    expect(withParent.length).toBeLessThan(seedsFile.seeds.length);
+
+    const stored = await convex.query(api.adversarial.parentChain, {});
+    expect(
+      Object.fromEntries(
+        stored.map((row) => [row.id, [row.parent, row.inner]]),
+      ),
+    ).toEqual(
+      Object.fromEntries(
+        seedsFile.seeds.map((seed) => [
+          seed.id,
+          [
+            parentSeedOf(seed)?.aString ?? null,
+            parentSeedOf(parentSeedOf(seed))?.aString ?? null,
+          ],
+        ]),
+      ),
+    );
   });
 
   test("oracle is not degenerate", async () => {

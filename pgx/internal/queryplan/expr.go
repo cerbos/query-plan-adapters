@@ -84,6 +84,14 @@ type Column struct {
 	// attribute, so CEL compares a null VALUE rather than raising a missing-attribute error. The
 	// equality family has to render definitely for such a column; see Entry.NullConvention.
 	ExplicitNull bool
+	// IsBool marks a column the caller declared as boolean-typed, which is what lets `string()`
+	// over it fail closed. Nothing in the plan names an operand's type, and a boolean is the one
+	// type whose text rendering differs across the engines this module targets; see
+	// Entry.ValueType and castValue.
+	IsBool bool
+	// IsString marks a column the caller declared as string-typed, which is what lets `+` between
+	// two columns resolve to concatenation rather than fail closed. See Entry.ValueType and add.
+	IsString bool
 }
 
 // Lit is a value bound as a query parameter. A nil V renders as SQL NULL.
@@ -110,6 +118,17 @@ type Arith struct {
 	L  Expr
 	R  Expr
 	Op ArithOp
+}
+
+// Concat is CEL's `+` over strings, which is a different operator from Arith{Op: OpAdd} in every
+// engine even though the plan spells them the same. It is a node of its own rather than a sixth
+// ArithOp because the two are not interchangeable anywhere: the SQL spelling differs per dialect
+// (`||` against `CONCAT`), and rendering a string concatenation as `+` is silently wrong rather
+// than a syntax error on MySQL, which coerces both operands to 0 and matches rows the policy never
+// allowed (cerbos/query-plan-adapters#376).
+type Concat struct {
+	L Expr
+	R Expr
 }
 
 // Logic is an n-ary AND/OR over predicates.
@@ -219,7 +238,7 @@ type Cast struct {
 	To CastType
 }
 
-// SubqueryKind distinguishes the two shapes a relation mapping lowers into.
+// SubqueryKind distinguishes the shapes a relation mapping lowers into.
 type SubqueryKind uint8
 
 const (
@@ -228,6 +247,15 @@ const (
 	// SubqueryCount produces the number of correlated rows as a scalar value, which is what
 	// `size(R.attr.tags)` and the relation-count thresholds need.
 	SubqueryCount
+	// SubqueryScalar reads Select from the single correlated row of a to-ONE relation, which is
+	// what a scalar reached THROUGH a hop needs (`R.attr.parent.aString`).
+	//
+	// It is the one kind that can produce SQL NULL for a structural reason rather than a stored
+	// one: no correlated row at all yields NULL, and that is exactly right. An absent to-one hop
+	// sends no attribute, CEL raises a missing-path error and the PDP denies — and because NULL
+	// propagates, `NOT (subquery = TRUE)` is NULL too, so the row stays excluded under BOTH
+	// polarities without a separate hop guard (cerbos/query-plan-adapters#375).
+	SubqueryScalar
 )
 
 // FromItem is one aliased table in a subquery's FROM clause.
@@ -246,8 +274,11 @@ type FromItem struct {
 type Subquery struct {
 	Correlate Expr
 	Where     Expr
-	From      []FromItem
-	Kind      SubqueryKind
+	// Select is the projected expression, set only for SubqueryScalar and nil otherwise —
+	// EXISTS projects a literal and COUNT projects the aggregate.
+	Select Expr
+	From   []FromItem
+	Kind   SubqueryKind
 }
 
 func (Column) isExpr()      {}
@@ -255,6 +286,7 @@ func (Lit) isExpr()         {}
 func (BoolConst) isExpr()   {}
 func (Cmp) isExpr()         {}
 func (Arith) isExpr()       {}
+func (Concat) isExpr()      {}
 func (Logic) isExpr()       {}
 func (Not) isExpr()         {}
 func (IsNull) isExpr()      {}

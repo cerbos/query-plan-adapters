@@ -44,6 +44,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Same two prerequisites smoke.sh explains: the adapter installed into mavenLocal, because this
+# example resolves it as a real Maven coordinate rather than through a composite build, and the
+# PDP address read back from Compose because application.yaml has no fallback for it.
+echo "==> gradle -p .. publishToMavenLocal"
+gradle -p .. publishToMavenLocal --no-daemon
+
 echo "==> docker compose up -d"
 docker compose up -d
 
@@ -52,6 +58,11 @@ for i in {1..30}; do
     if docker compose ps --format json cerbos | grep -q '"Health":"healthy"'; then break; fi
     sleep 1
 done
+
+PUBLISHED_PDP=$(docker compose port cerbos 3593) ||
+    fail "docker compose port cerbos 3593 — did the PDP publish its gRPC port?"
+export CERBOS_HOST="localhost:${PUBLISHED_PDP##*:}"
+echo "==> PDP at $CERBOS_HOST"
 
 echo "==> gradle bootRun (background)"
 mkdir -p build/smoke

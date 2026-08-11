@@ -345,12 +345,12 @@ undeclared side needs UNKNOWN — so the adapter throws rather than picking a di
 
 ## Conformance contract
 
-The adapter is differentially tested against Cerbos PDP 0.54.0 `check()` decisions using 20 hostile seed rows on H2, PostgreSQL, and MySQL. This Spring Data implementation defines the reference semantics that the other adapters follow.
+The adapter is differentially tested against Cerbos PDP 0.54.0 `check()` decisions using 21 hostile seed rows on H2, PostgreSQL, and MySQL. This Spring Data implementation defines the reference semantics that the other adapters follow.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 139 of the 141 reference conformance actions |
-| Fail-closed corpus shapes | Regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an ambiguous string column, `int()`/`double()` casts, `filter()`/`map()` used as a condition, and arithmetic composed on a division whose denominator may be zero (10 actions) |
+| Oracle-tested | 162 of the 166 reference conformance actions |
+| Fail-closed corpus shapes | Regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an ambiguous string column, `int()`/`double()` casts, `filter()`/`map()` used as a condition, arithmetic composed on a division whose denominator may be zero, `string()` over any column (the Criteria API has no cast expression, and a boolean's text rendering differs across the dialects Spring Data JPA targets), and CEL's `+` over strings, which the reference lowers as arithmetic — against a constant and between two columns alike (15 actions) |
 | Representation-dependent | `null-eq-missing` — rejected under `NullAttributeRepresentation.OMITTED`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute the caller sends as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare it per attribute — `AttributeMapping.field(path, NullAttributeRepresentation.EXPLICIT)` — or the historical rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute rows; this is pinned separately as an upstream divergence |
@@ -372,7 +372,7 @@ This adapter builds an **ORM-association subquery.** `AttributeMapping.relation(
 | Subtype discrimination | **Reproduced by Hibernate** | The single-table discriminator restriction is added whenever the join's target type is a subclass, so an association typed to a `@DiscriminatorValue` subclass is restricted to it. Declaring the association to the *base* type sees the siblings — which is also what the application sees, so the two still agree |
 | To-one relation used as a collection | **Caller-owned** | A `@OneToOne(mappedBy = …)` whose foreign key carries no unique constraint. JPA believes the cardinality the mapping declares; the database is what has to enforce it. Add the unique constraint |
 | Composite association key | **Reproduced by JPA** | The mapping names the association, never its columns, so Hibernate resolves `@JoinColumns` itself. There is no key for the adapter to get wrong |
-| Absent to-one parent | **Reproduced**, and proved by the corpus (`w1-all-chain` and siblings) | None — a chained relation requires its intermediate hops separately, so a missing parent is UNKNOWN under both polarities ([#309](https://github.com/cerbos/query-plan-adapters/issues/309)) |
+| Absent to-one parent | **Reproduced**, and proved by the corpus (`w1-all-chain`, `rel-hop2-or-exists` and siblings) | None — a chained relation requires its intermediate hops separately, so a missing parent is UNKNOWN under both polarities ([#309](https://github.com/cerbos/query-plan-adapters/issues/309), [#375](https://github.com/cerbos/query-plan-adapters/issues/375)). **Behaviour change in #375:** a dotted `jpaPath` through a to-one association is now a LEFT join rather than the Criteria API's implicit INNER join. An inner join removes the row from the WHOLE query, which is right for a standalone predicate but wrong under a disjunction — a row whose association is absent but whose OTHER branch holds is one the PDP allows. Such policies now return MORE rows: an under-grant fix, consumer-visible |
 
 The three "Reproduced by Hibernate" rows are claims about Hibernate, not about this adapter, so they are worth being able to check: entity- and collection-level `@SQLRestriction` are documented in the [Hibernate user guide](https://docs.jboss.org/hibernate/orm/current/userguide/html_single/Hibernate_User_Guide.html#pc-where), and Hibernate's own `OneToManySQLRestrictionTests` pins the collection restriction being applied however the collection is reached, an explicit join included. Verify against the Hibernate version you actually run before relying on a row here — a wrong claim in this table is worse than no claim.
 
@@ -380,8 +380,12 @@ One consequence of being an association subquery rather than a bare-table one is
 
 ## Gotchas
 
-Things you're likely to hit when integrating the adapter into a Spring Boot app — see the
-[`example/`](example) photo-sharing application for a runnable end-to-end reference.
+Things you're likely to hit when integrating the adapter into a Spring Boot app — see
+[`example/`](example) for two runnable end-to-end references: a photo-sharing application, and a
+smaller program covering the [shared demo domain](../demo) that every adapter's example
+implements. Both resolve this adapter from mavenLocal as a real Maven coordinate, so they also
+exercise its published POM and module metadata
+([ADR 0002](../docs/adr/0002-examples-install-the-packed-artifact.md)).
 
 ### `size(string)` counts differently for astral characters
 

@@ -5,6 +5,7 @@ on:
     paths:
       - "spring-data/**"
       - "conformance/**"
+      - "demo/**"
       - "policies/**"
       - ".github/workflows/spring-data.yaml"
   push:
@@ -85,24 +86,50 @@ jobs:
           ADAPTER_TEST_DB: ${{ matrix.database }}
           ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS: ${{ matrix.server-prep-stmts || '' }}
 
-  # Compiles the standalone example app (a composite build over the adapter source — building
-  # the adapter alone never compiles it) and runs example/scripts/smoke.sh end-to-end: a live
-  # Cerbos PDP via docker compose, the Spring Boot app on H2, and row-set + PDP audit-log
-  # assertions for every (user, role, action) scenario. This is the repo's only end-to-end
-  # live-PDP row-set verification and the primary onboarding artifact, so an adapter API
-  # change that breaks the example must fail CI. On failure the script dumps the Cerbos
-  # container logs and the Spring Boot log before tearing the environment down.
+  # The example application. What it covers that nothing above does is exactly two things:
+  #
+  #   1. The PUBLISHED package surface. Every test in `test` and `test-database` compiles against
+  #      the adapter's own source set, so its POM and Gradle module metadata — dependency scopes
+  #      included — are executed nowhere. The example resolves `dev.cerbos:cerbos-spring-data`
+  #      from mavenLocal as a real Maven coordinate instead (it used to be a Gradle composite
+  #      build, which substitutes the source tree and hides that entirely). See
+  #      docs/adr/0002-examples-install-the-packed-artifact.md; cerbos-sdk-java declaring
+  #      protobuf at runtime-only scope is the shape of bug this exists for.
+  #   2. ORM usage shapes past a single flat filtered query — pagination through
+  #      `findAll(Specification, Pageable)` and its separate COUNT query, and the adapter's
+  #      Specification composed with the application's own.
+  #
+  # It is NOT the repository's only end-to-end live-PDP row-set verification, which this comment
+  # claimed until cerbos/query-plan-adapters#359. All ten conformance harnesses plan against a
+  # live PDP over gRPC, translate, execute against a real store, and compare the returned ids
+  # against per-row check() — including this adapter's, on H2, PostgreSQL and MySQL.
+  #
+  # THIS JOB MUST STAY IN THIS WORKFLOW. `renovate.json` sets `automerge: true` for every
+  # non-major bump, and that is the path a Spring Boot or Spring Data JPA regression takes into
+  # `main` today: the bump arrives as one PR touching this adapter's manifest and the example's,
+  # and this job, being a check on that PR, is what blocks the automerge when the new ORM breaks
+  # real usage. Moving it to a nightly run or a workflow of its own silently restores that gap.
+  #
+  # Two example programs share one Gradle build here, and both run below: the demo-domain program
+  # against the shared corpus in demo/, and the photo-sharing application that predates it, whose
+  # smoke scripts assert row sets and PDP audit records across three resource kinds. The demo
+  # domain is a floor, not a ceiling — ADR 0001 — so the second one stays.
   example:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # The example's docker-compose.yml hardcodes the PDP image, and validate-corpus.sh is
-      # what asserts that pin still equals conformance/CERBOS_VERSION. Without this step the
-      # smoke tests below would happily run the whole end-to-end flow against a drifted PDP.
+      # Both example programs reach a pinned PDP — the photo-sharing app through this adapter's
+      # own example/docker-compose.yml, the demo-domain one through demo/docker-compose.yml — and
+      # these two scripts are what assert those pins still equal conformance/CERBOS_VERSION and
+      # conformance/CERBOS_IMAGE_DIGEST. Without them the run below would happily execute the
+      # whole end-to-end flow against a drifted PDP.
       - name: Validate conformance corpus
         run: ../conformance/scripts/validate-corpus.sh
+
+      - name: Validate demo domain
+        run: ../demo/scripts/validate-demo.sh
 
       - name: Setup JDK
         uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
@@ -117,8 +144,21 @@ jobs:
           # (smoke.sh's documented prerequisite), not the runner's floating preinstall.
           gradle-version: "8.12"
 
+      # The example resolves the adapter as a coordinate, so it has to exist in mavenLocal before
+      # anything under example/ compiles. Each of the three scripts below publishes it for itself
+      # — they have to, to be one command on a laptop — but `Build example` is a bare `gradle`
+      # invocation and this is its half of that prerequisite.
+      - name: Publish the adapter to mavenLocal
+        run: gradle publishToMavenLocal --no-daemon
+
       - name: Build example
         run: gradle -p example build --no-daemon
+
+      # The PDP here is a container the runner starts from demo/docker-compose.yml, pinned to
+      # conformance/CERBOS_VERSION and conformance/CERBOS_IMAGE_DIGEST — an example must reach
+      # the PDP the way a deployed application does.
+      - name: Run the example against the demo domain
+        run: ../demo/scripts/run-example.sh spring-data
 
       - name: Run smoke test
         run: ./example/scripts/smoke.sh

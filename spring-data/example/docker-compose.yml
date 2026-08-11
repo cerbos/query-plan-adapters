@@ -1,8 +1,10 @@
-# Standalone Cerbos PDP for the photo-sharing example app.
+# Standalone Cerbos PDP for the photo-sharing example app, serving this directory's own
+# policies/. The demo-domain program next to it uses demo/docker-compose.yml instead, started by
+# demo/scripts/run-example.sh — one PDP per policy suite, and these are two suites.
 #
-#   docker compose up -d        # start the PDP
-#   ../gradlew bootRun          # run the Spring Boot app on :8080 (connects to :3593)
-#   docker compose logs cerbos  # see PlanResources decision logs
+#   docker compose up -d                                  # start the PDP
+#   CERBOS_HOST=localhost:23593 gradle bootRun            # the Spring Boot app on :8080
+#   docker compose logs cerbos                            # PlanResources decision logs
 #   docker compose down
 services:
   cerbos:
@@ -19,9 +21,15 @@ services:
     environment:
       CERBOS_NO_TELEMETRY: "1"
       CERBOS_CONFIG: "/config/cerbos-config.yaml"
+    # Deliberately NOT the default 3592/3593 on the host, and not demo/docker-compose.yml's
+    # 13592/13593 either. Every adapter's test suite starts a `cerbos run` sidecar on the
+    # defaults, and a PDP left holding them makes that sidecar fail to bind while the suite
+    # happily talks to THIS one — which serves photo/album/workspace policies, so the suite fails
+    # for a reason nothing in its output names. The container side of each mapping is the PDP's
+    # own listen port and stays 3592/3593.
     ports:
-      - "3592:3592"
-      - "3593:3593"
+      - "23592:3592"
+      - "23593:3593"
     volumes:
       - ./cerbos-config.yaml:/config/cerbos-config.yaml:ro
       - ./policies:/policies:ro

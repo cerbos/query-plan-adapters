@@ -1,0 +1,20 @@
+{
+  "action": "rel-gt-hop",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "gt",
+        "operands": [
+          {
+            "variable": "request.resource.attr.parent.aNumber"
+          },
+          {
+            "value": 2
+          }
+        ]
+      }
+    }
+  }
+}

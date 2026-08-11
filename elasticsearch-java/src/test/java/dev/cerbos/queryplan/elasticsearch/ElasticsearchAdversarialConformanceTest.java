@@ -58,6 +58,11 @@ class ElasticsearchAdversarialConformanceTest {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private static final Map<String, String> FIELD_MAP = Map.ofEntries(
+            // The primary key, reached as `request.resource.id` rather than through `attr` (the
+            // `id-*` actions). It maps onto the indexed `id` keyword field rather than Elasticsearch's
+            // own `_id` metadata field: an adapter that resolves references by stripping a
+            // `request.resource.attr.` prefix never sees this name at all.
+            Map.entry("request.resource.id", "id"),
             Map.entry("request.resource.attr.aBool", "aBool"),
             Map.entry("request.resource.attr.aString", "aString"),
             Map.entry("request.resource.attr.aNumber", "aNumber"),
@@ -80,7 +85,19 @@ class ElasticsearchAdversarialConformanceTest {
             // reason and the claimed limitation is never actually exercised.
             Map.entry("request.resource.attr.categories", "categories"),
             Map.entry("request.resource.attr.mainCategory.subCategories", "mainCategory.subCategories"),
-            Map.entry("request.resource.attr.mainCategory.subNames", "mainCategory.subNames"));
+            Map.entry("request.resource.attr.mainCategory.subNames", "mainCategory.subNames"),
+            // The corpus's one REAL to-one chain (the `rel-*` actions), indexed as plain objects
+            // because Elasticsearch has no join. Every level is mapped even where the action is
+            // fail-closed: an unmapped field throws "Unknown attribute" instead of the mechanism
+            // actions.json names, which passes the throw test for the wrong reason (#326).
+            Map.entry("request.resource.attr.parent.aBool", "parent.aBool"),
+            Map.entry("request.resource.attr.parent.aString", "parent.aString"),
+            Map.entry("request.resource.attr.parent.aNumber", "parent.aNumber"),
+            Map.entry("request.resource.attr.parent.aOptionalString", "parent.aOptionalString"),
+            Map.entry("request.resource.attr.parent.inner.aBool", "parent.inner.aBool"),
+            Map.entry("request.resource.attr.parent.inner.aString", "parent.inner.aString"),
+            Map.entry("request.resource.attr.parent.inner.aNumber", "parent.inner.aNumber"),
+            Map.entry("request.resource.attr.parent.inner.aOptionalString", "parent.inner.aOptionalString"));
 
     /**
      * The attributes the corpus sends to {@code check()} as EXPLICIT nulls
@@ -107,10 +124,16 @@ class ElasticsearchAdversarialConformanceTest {
      */
     private record Seed(String id, boolean aBool, String aString, int aNumber,
                         String aOptionalString, List<Tag> tags, List<String> subCategoryNames,
-                        String note) {}
+                        String parentSeedId, String note) {}
 
+    /**
+     * {@code attr} is typed as raw JSON rather than {@code Map<String, List<String>>}: the corpus
+     * carries scalar principal attributes as well as lists, and a narrower type would reject the
+     * file rather than silently drop one — but it would still be this harness deciding what the
+     * corpus may contain. {@link #principal()} converts each value by its actual JSON type.
+     */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    private record PrincipalSpec(String id, List<String> roles, Map<String, List<String>> attr) {}
+    private record PrincipalSpec(String id, List<String> roles, Map<String, Object> attr) {}
 
     /**
      * conformance/seeds.json. Every key the file carries is named, including the prose ones,
@@ -120,7 +143,7 @@ class ElasticsearchAdversarialConformanceTest {
      */
     private record SeedsFile(@JsonProperty("$schema") String schema, String description,
                              PrincipalSpec principal, String resourceKind, String principalNote,
-                             List<Seed> seeds) {}
+                             String relationNote, List<Seed> seeds) {}
 
     /** One seed's derived fields, exactly as conformance/derived-fields.json carries them. */
     private record DerivedEntry(String createdBy, Double aDouble, String createdAt, String scope,
@@ -166,7 +189,8 @@ class ElasticsearchAdversarialConformanceTest {
     // here reads, and a key this harness reads that the corpus no longer carries.
 
     private static final List<String> SEED_KEYS = List.of(
-            "id", "aBool", "aString", "aNumber", "aOptionalString", "tags", "subCategoryNames");
+            "id", "aBool", "aString", "aNumber", "aOptionalString", "tags", "subCategoryNames",
+            "parentSeedId");
 
     /** Corpus prose, never read by a harness: the one documented exclusion from SEED_KEYS. */
     private static final String SEED_NOTE_KEY = "note";
@@ -296,7 +320,7 @@ class ElasticsearchAdversarialConformanceTest {
                 "adapterUnsupported.elasticsearch-java contains non-conformance actions");
         assertTrue(expected.containsAll(supportedExpected),
                 "adapterSupportedExpected.elasticsearch-java contains non-expected actions");
-        assertEquals(100, unsupported.size(),
+        assertEquals(108, unsupported.size(),
                 "Elasticsearch unsupported coverage changed without updating the ledger assertion");
         assertEquals(2, supportedExpected.size(),
                 "Elasticsearch supported-expected coverage changed without updating the ledger assertion");
@@ -340,10 +364,10 @@ class ElasticsearchAdversarialConformanceTest {
         manifest.addAll(expected);
         manifest.addAll(nullRepresentationOmittedActions);
         manifest.addAll(divergences);
-        assertEquals(43, oracleActions.size());
-        assertEquals(107, throwingActions.size());
+        assertEquals(62, oracleActions.size());
+        assertEquals(115, throwingActions.size());
         assertEquals(1, nullRepresentationOmittedActions.size());
-        assertEquals(152, classified.size());
+        assertEquals(179, classified.size());
         assertEquals(manifest, classified, "every manifest action must be classified locally");
     }
 
@@ -371,6 +395,12 @@ class ElasticsearchAdversarialConformanceTest {
                         "name", Map.of("type", "keyword"))));
 
         Map<String, Object> properties = new LinkedHashMap<>();
+        // The corpus id, indexed as an ordinary keyword field as well as being the document's
+        // `_id`. Elasticsearch's `_id` is metadata addressed by the `ids` query rather than a
+        // term query, so the `id-*` actions need a real field to filter on; leaving it unindexed
+        // would make them return NOTHING against a non-empty oracle, which reads as an adapter
+        // defect and is a harness gap.
+        properties.put("id", Map.of("type", "keyword"));
         properties.put("aBool", Map.of("type", "boolean"));
         properties.put("aString", Map.of("type", "keyword"));
         properties.put("aNumber", Map.of("type", "integer"));
@@ -386,6 +416,16 @@ class ElasticsearchAdversarialConformanceTest {
         properties.put("tags", Map.of("type", "nested", "properties", tagProperties));
         properties.put("categories", Map.of("type", "nested", "properties", categoryProperties));
         properties.put("mainCategory", Map.of("properties", mainCategoryProperties));
+        // The corpus's real to-one relation. `obj.inner` above is a flat alias of aString; this
+        // is a genuine two-level chain, indexed as objects because Elasticsearch has no join.
+        Map<String, Object> relationLevel = Map.of(
+                "aBool", Map.of("type", "boolean"),
+                "aString", Map.of("type", "keyword"),
+                "aNumber", Map.of("type", "integer"),
+                "aOptionalString", Map.of("type", "keyword"));
+        Map<String, Object> parentProperties = new LinkedHashMap<>(relationLevel);
+        parentProperties.put("inner", Map.of("properties", relationLevel));
+        properties.put("parent", Map.of("properties", parentProperties));
 
         esRequest("PUT", "/" + INDEX, MAPPER.writeValueAsString(
                 Map.of("mappings", Map.of("properties", properties))));
@@ -394,6 +434,7 @@ class ElasticsearchAdversarialConformanceTest {
     private static void seedIndex() throws Exception {
         for (Seed seed : seeds) {
             Map<String, Object> document = new LinkedHashMap<>();
+            document.put("id", seed.id());
             document.put("aBool", seed.aBool());
             document.put("aString", seed.aString());
             document.put("aNumber", seed.aNumber());
@@ -423,6 +464,16 @@ class ElasticsearchAdversarialConformanceTest {
                         "subNames", seed.subCategoryNames(),
                         "subCategories", seed.subCategoryNames().stream()
                                 .map(name -> Map.of("name", name)).toList()));
+            }
+            // The to-one chain, one nested object per level. A seed with no parent gets no
+            // `parent` field at all, which is what makes the absent-parent hazard reachable
+            // through a SCALAR rather than only through mainCategory's collection.
+            Seed parentSeed = parentSeedOf(seed);
+            if (parentSeed != null) {
+                Map<String, Object> parent = relationDocument(parentSeed);
+                Seed innerSeed = parentSeedOf(parentSeed);
+                if (innerSeed != null) parent.put("inner", relationDocument(innerSeed));
+                document.put("parent", parent);
             }
             esRequest("PUT", "/" + INDEX + "/_doc/" + seed.id(),
                     MAPPER.writeValueAsString(document));
@@ -477,11 +528,71 @@ class ElasticsearchAdversarialConformanceTest {
     private static Principal principal() {
         PrincipalSpec spec = seedsFile.principal();
         Principal principal = Principal.newInstance(spec.id(), spec.roles().toArray(String[]::new));
-        for (Map.Entry<String, List<String>> entry : spec.attr().entrySet()) {
-            principal = principal.withAttribute(entry.getKey(), AttributeValue.listValue(
-                    entry.getValue().stream().map(AttributeValue::stringValue).toList()));
+        for (Map.Entry<String, Object> entry : spec.attr().entrySet()) {
+            principal = principal.withAttribute(entry.getKey(),
+                    principalAttribute(entry.getKey(), entry.getValue()));
         }
         return principal;
+    }
+
+    /**
+     * One principal attribute, converted by the JSON type the corpus actually carries. Strings and
+     * lists of strings are the two shapes today; anything else fails loudly rather than being
+     * coerced, because a silently reshaped principal attribute feeds the plan and the oracle at
+     * once and they would agree for the wrong reason.
+     */
+    private static AttributeValue principalAttribute(String key, Object value) {
+        if (value instanceof String s) return AttributeValue.stringValue(s);
+        if (value instanceof List<?> list) {
+            return AttributeValue.listValue(list.stream().map(element -> {
+                if (element instanceof String s) return AttributeValue.stringValue(s);
+                throw new IllegalStateException(
+                        "seeds.json principal.attr." + key + " holds a non-string element");
+            }).toList());
+        }
+        throw new IllegalStateException(
+                "seeds.json principal.attr." + key + " is neither a string nor a list of strings");
+    }
+
+    // -- the real to-one relation (conformance/README.md, "The real to-one relation") -----------
+    //
+    // `parentSeedId` names the seed whose four scalars a row's `parent` carries, and that seed's
+    // own `parentSeedId` names the ones `parent.inner` carries. The chain is cut at two levels.
+    // Elasticsearch has no join, so both levels are indexed as nested objects — but the SHAPE is
+    // the same to-one chain every other store carries, and an absent level is a missing path here
+    // exactly as it is a missing row there.
+
+    /** The seed one hop out, or null when this level has no parent. A null argument returns null. */
+    private static Seed parentSeedOf(Seed seed) {
+        if (seed == null || seed.parentSeedId() == null) return null;
+        return seeds.stream()
+                .filter(candidate -> candidate.id().equals(seed.parentSeedId()))
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException(
+                        "seeds.json: \"" + seed.id() + "\" names parent \"" + seed.parentSeedId()
+                                + "\", which is not a seed id"));
+    }
+
+    /** One level of the chain as an indexed object. A NULL column is an ABSENT field. */
+    private static Map<String, Object> relationDocument(Seed seed) {
+        Map<String, Object> level = new LinkedHashMap<>();
+        level.put("aBool", seed.aBool());
+        level.put("aString", seed.aString());
+        level.put("aNumber", seed.aNumber());
+        if (seed.aOptionalString() != null) level.put("aOptionalString", seed.aOptionalString());
+        return level;
+    }
+
+    /** The same four as check() attributes: a NULL column is a MISSING attribute, one hop out. */
+    private static Map<String, AttributeValue> relationAttribute(Seed seed) {
+        Map<String, AttributeValue> level = new LinkedHashMap<>();
+        level.put("aBool", AttributeValue.boolValue(seed.aBool()));
+        level.put("aString", AttributeValue.stringValue(seed.aString()));
+        level.put("aNumber", AttributeValue.doubleValue(seed.aNumber()));
+        if (seed.aOptionalString() != null) {
+            level.put("aOptionalString", AttributeValue.stringValue(seed.aOptionalString()));
+        }
+        return level;
     }
 
     private static Resource checkResource(Seed seed) {
@@ -534,6 +645,18 @@ class ElasticsearchAdversarialConformanceTest {
                                     "name", AttributeValue.stringValue(name)))).toList()),
                     "subNames", AttributeValue.listValue(seed.subCategoryNames().stream()
                             .map(AttributeValue::stringValue).toList()))));
+        }
+        // The real to-one chain, mirroring the indexed document exactly. A row with no parent
+        // sends NO `parent` attribute — a CEL missing-path error (deny) — matching a document with
+        // no `parent` field; the same holds one level down for `parent.inner`.
+        Seed parentSeed = parentSeedOf(seed);
+        if (parentSeed != null) {
+            Map<String, AttributeValue> parent = relationAttribute(parentSeed);
+            Seed innerSeed = parentSeedOf(parentSeed);
+            if (innerSeed != null) {
+                parent.put("inner", AttributeValue.mapValue(relationAttribute(innerSeed)));
+            }
+            resource = resource.withAttribute("parent", AttributeValue.mapValue(parent));
         }
         return resource;
     }
@@ -666,7 +789,19 @@ class ElasticsearchAdversarialConformanceTest {
     private static final List<String> DEGENERACY_GUARD_ACTIONS = List.of(
             "vf-le", "like-percent", "pv-exists", "pv-all", "null-ne",
             // The chained relation (#309): the shapes Elasticsearch's nested queries express.
-            "w1-exists-chain");
+            "w1-exists-chain",
+            // The real to-one join (#375). Indexed as plain objects rather than `nested`, so an
+            // absent level is simply a missing field — already the CEL missing-attribute case,
+            // which is why all fifteen translate here. One per hazard.
+            "rel-not-bool-hop", "rel-ne-null-hop", "rel-bool-hop2",
+            "rel-hop-and-root", "rel-hop2-or-exists",
+            // Case sensitivity in STRING MATCHING, a different mechanism from cs-eq.
+            "cs-contains",
+            // The primary key as a filterable attribute (#376). Exactly one of the six translates:
+            // the key against a literal, which is an ordinary term query once the corpus id is
+            // indexed as a field rather than left as `_id` metadata. Its five siblings need a
+            // second field or a computed operand, and are liveness probes below.
+            "id-eq-const");
 
     /**
      * Shapes this adapter refuses to translate: they have no oracle comparison to guard, and stay
@@ -692,7 +827,16 @@ class ElasticsearchAdversarialConformanceTest {
             "null-value-not-eq-const",
             "null-value-not-in-const",
             "null-value-f2f",
-            "null-value-pv-not-exists");
+            "null-value-pv-not-exists",
+            // The id-* group's fail-closed half (#376), one per rejection site: a second document
+            // field on the value side, and a computed operand there. string() is the same
+            // computed-operand rejection reached through a cast and has no compared member at all.
+            "id-f2f-ne",
+            "id-concat",
+            "cast-string-bool",
+            // A concatenation of two document fields is the same computed operand id-concat is
+            // refused for, without the primary key involved (#391).
+            "concat-f2f");
 
     @Test
     void oracleIsNotDegenerate() {
@@ -711,6 +855,50 @@ class ElasticsearchAdversarialConformanceTest {
                     "'" + action + "' is now oracle-compared: move it into the guard proper");
             assertNonDegenerateOracle(action);
         }
+    }
+
+    /**
+     * The to-one relation carries no corpus action yet — this is the expand half of
+     * cerbos/query-plan-adapters#372's expand–contract — so nothing else in this class would
+     * notice a seeder that indexed no chain at all, or one that wrote the root's own fields one
+     * hop out. Read the two hops back out of the indexed documents rather than counting them: a
+     * count cannot tell the corpus's values from the root's, which is exactly the flat-alias
+     * failure this relation exists to make visible.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void seededToOneChainMatchesTheCorpusRelation() throws Exception {
+        long withParent = seeds.stream().filter(s -> parentSeedOf(s) != null).count();
+        long withInner = seeds.stream()
+                .filter(s -> parentSeedOf(parentSeedOf(s)) != null).count();
+        assertTrue(withParent > 0, "no seed has a parent");
+        assertTrue(withInner > 0, "no seed reaches parent.inner");
+        assertTrue(withParent < seeds.size(), "every seed has a parent");
+
+        Map<String, List<String>> want = new LinkedHashMap<>();
+        for (Seed seed : seeds) {
+            Seed parent = parentSeedOf(seed);
+            Seed inner = parentSeedOf(parent);
+            want.put(seed.id(), java.util.Arrays.asList(
+                    parent == null ? null : parent.aString(),
+                    inner == null ? null : inner.aString()));
+        }
+
+        String json = esRequest("POST", "/" + INDEX + "/_search?size=" + seeds.size(),
+                MAPPER.writeValueAsString(Map.of("query", Map.of("match_all", Map.of()))));
+        Map<String, Object> response = MAPPER.readValue(json, new TypeReference<>() {});
+        Map<String, Object> hits = (Map<String, Object>) response.get("hits");
+        Map<String, List<String>> got = new LinkedHashMap<>();
+        for (Map<String, Object> hit : (List<Map<String, Object>>) hits.get("hits")) {
+            Map<String, Object> source = (Map<String, Object>) hit.get("_source");
+            Map<String, Object> parent = (Map<String, Object>) source.get("parent");
+            Map<String, Object> inner = parent == null
+                    ? null : (Map<String, Object>) parent.get("inner");
+            got.put((String) hit.get("_id"), java.util.Arrays.asList(
+                    parent == null ? null : (String) parent.get("aString"),
+                    inner == null ? null : (String) inner.get("aString")));
+        }
+        assertEquals(want, got);
     }
 
     private static void assertNonDegenerateOracle(String action) {

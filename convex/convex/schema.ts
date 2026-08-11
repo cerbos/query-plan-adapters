@@ -52,5 +52,24 @@ export default defineSchema({
         subNames: v.array(v.string()),
       }),
     ),
+    // The corpus's one real to-one relation. A document store has no join, so both levels are
+    // nested objects — but the SHAPE is the same to-one chain every other store carries, and an
+    // absent level is a missing path here exactly as it is a missing row there.
+    parent: v.optional(
+      v.object({
+        aBool: v.boolean(),
+        aString: v.string(),
+        aNumber: v.number(),
+        aOptionalString: v.optional(v.string()),
+        inner: v.optional(
+          v.object({
+            aBool: v.boolean(),
+            aString: v.string(),
+            aNumber: v.number(),
+            aOptionalString: v.optional(v.string()),
+          }),
+        ),
+      }),
+    ),
   }),
 });

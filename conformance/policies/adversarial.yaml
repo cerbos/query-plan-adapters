@@ -92,6 +92,48 @@ resourcePolicy:
         match:
           expr: R.attr.aString == "one"
 
+    # -- the same hazard through STRING MATCHING, which collation does not govern --
+    # cs-eq above probes `=`, and the advice it points at — "use a case-sensitive collation" —
+    # is genuinely sufficient there. It is NOT sufficient for LIKE. SQLite's `LIKE` is
+    # case-insensitive for ASCII no matter what collation the column was created with; only
+    # `PRAGMA case_sensitive_like = ON` changes it. So an adapter can pass cs-eq on SQLite and
+    # still over-grant every string predicate, which is exactly the state the corpus was in
+    # before these three actions existed.
+    #
+    # One action per operator, matching the like-* group above (startsWith / contains /
+    # endsWith are three different lowerings — LIKE 'x%', LIKE '%x%', LIKE '%x', or `instr`,
+    # or `substr`+compare — and an adapter can get case right in one and wrong in another).
+    #
+    # c1 ("One") is the single witness in all three, and it is the ONLY seed that differs by
+    # case, so a case-insensitive match adds exactly one row and nothing else moves:
+    #   contains   oracle a1/a2/a3/b1  ("one", "100%_done", "100xdone", "oneXtwo")
+    #   startsWith oracle a1/b1
+    #   endsWith   oracle a1/a2/a3
+    # The needles carry no LIKE metacharacter on purpose — like-percent/like-underscore/
+    # like-backslash already own that hazard, and an adapter that rejects metacharacter
+    # needles outright would otherwise never reach the comparison these actions probe.
+
+    - actions: ["cs-contains"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aString.contains("one")
+
+    - actions: ["cs-startswith"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aString.startsWith("one")
+
+    - actions: ["cs-endswith"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aString.endsWith("one")
+
     # -- string edge values --
     - actions: ["unicode-eq"]
       effect: EFFECT_ALLOW
@@ -422,6 +464,34 @@ resourcePolicy:
         match:
           expr: 'R.attr.aDouble + 0.5 == 0.75'
 
+    # CEL's `+` over two COLUMNS, the one `add` shape where the plan carries no constant to say
+    # which overload it is (cerbos/query-plan-adapters#391).
+    #
+    # The `id-concat` pair proved the string overload where one operand is a literal: CEL has no
+    # mixed-type `+`, so a string constant settles it. Here BOTH operands are variables and
+    # nothing in the plan names a column's type, so an adapter that dispatches `add` straight to
+    # SQL `+` cannot know it is concatenating. Every store then answers differently, and one of
+    # them answers WRONGLY IN THE DANGEROUS DIRECTION:
+    #
+    #   - PostgreSQL   `text + text` has no operator — a hard error, which is at least loud.
+    #   - SQLite       'one' + 'set' is 0 + 0 = 0, and `0 = 'oneset'` is FALSE across storage
+    #                  classes — 0 rows, an under-grant.
+    #   - MySQL        the same coercion to 0, but `0 = 'oneset'` coerces the CONSTANT to 0 too,
+    #                  so `0 = 0` is TRUE for every row whose columns are both non-NULL — 16 of
+    #                  the 21 seeds against a ONE-row oracle. A silent over-grant.
+    #
+    # Oracle {a1}: "one" + "set" = "oneset". c1 is the case trap — "One" + "Set" = "OneSet" must
+    # not match, so the shape also crosses concatenation with the collation invariant. The five
+    # NULL-aOptionalString seeds (a2/a4/a8/c2/e1) are missing-attribute errors that deny, and
+    # `col || NULL` is NULL in SQL, so both sides exclude them for the same reason. Every seed's
+    # concatenation is distinct, so no other row can match by accident.
+    - actions: ["concat-f2f"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aString + R.attr.aOptionalString == "oneset"'
+
     # ==================== clean-room probes (coverage gap hunt) ====================
 
     # -- GROUP A: compositions claimed-supported but unproven e2e --
@@ -636,11 +706,54 @@ resourcePolicy:
         match:
           expr: 'int(R.attr.aDouble) == 0'
 
+    # The third cast direction: string(), the OUTBOUND cast. `string` is one of the operators the
+    # corpus has never put on the wire, so no adapter has ever been asked what it does with one
+    # (cerbos/query-plan-adapters#376). Unlike the two inbound casts above these carry REAL
+    # oracles, so an adapter that lowers them can be proved right rather than only refused.
+    #
+    # The pair is split by whether the rendering is store-INDEPENDENT, because that is what
+    # decides whether lowering is defensible at all:
+    #
+    # `cast-string-double` is the agreeing half, for the values this corpus holds. CEL renders
+    # -0.6 as "-0.6" and so does every store the corpus executes against: PostgreSQL 17 renders
+    # `CAST((-0.6)::float8 AS TEXT)` as `-0.6`, as do SQLite and MySQL. (The `-0.60000000000000009`
+    # rendering only appears under `extra_float_digits = 3`; PostgreSQL 12 made shortest
+    # round-trip the default, so a port that relied on that divergence would pin nothing. Measured
+    # against the pinned images, not assumed.) a1 is the sole witness — aDouble is -0.6 there,
+    # 0.25 on a2, MISSING on a3 (a CEL error, denied) and aNumber + 0.3 everywhere else, none of
+    # which formats to "-0.6".
+    #
+    # "Agreeing for these values" is the whole claim. CEL's number formatting is Go's and does NOT
+    # agree with every runtime everywhere — an adapter that reimplements the conversion rather
+    # than delegating to its store has to bound the range it can reproduce; convex does, and says
+    # so at `convertToString`. This action pins the corpus's own values, not the general rule.
+    - actions: ["cast-string-double"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'string(R.attr.aDouble) == "-0.6"'
+
+    # `cast-string-bool` is the diverging half, and the reason this group is a pair. CEL renders a
+    # bool as "true"/"false"; SQLite and MySQL have no boolean type and store 1/0, so
+    # `CAST(a_bool AS TEXT)` is "1" and a direct lowering matches NOTHING. PostgreSQL renders
+    # "true" and the same lowering is correct. One translator, one wire node, two answers
+    # depending only on the store — which is why an adapter spanning both (prisma and drizzle each
+    # run this corpus twice, once per ADAPTER_TEST_DB) cannot lower it store-blind, and why the
+    # oracle is deliberately large: 14 of the 21 seeds carry aBool = true, so the SQLite failure
+    # direction is an UNDER-grant of all 14 rather than a near miss.
+    - actions: ["cast-string-bool"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'string(R.attr.aBool) == "true"'
+
     # B22-B23: filter()/map() in a BOOLEAN position (cerbos/query-plan-adapters#313).
     # Both return a list, not a boolean. Cerbos compiles the policy and the planner emits the
     # macro verbatim as the whole condition (PDP-verified: KIND_CONDITIONAL with a bare
     # `filter`/`map` node), but check() cannot evaluate a non-boolean condition, so the oracle
-    # is empty for all 20 seeds. Every adapter must REJECT the shape: translating it means
+    # is empty for all 21 seeds. Every adapter must REJECT the shape: translating it means
     # choosing a meaning the policy never stated — `filter(...)` is not `size(filter(...)) > 0`,
     # and a `map(...)` projection is not "the projection is non-empty".
     - actions: ["filter-as-condition"]
@@ -878,10 +991,10 @@ resourcePolicy:
     # than collapsing to the empty-collection case.
     #
     # Seeds discriminate already — a category graph is created only for a seed with
-    # subCategoryNames, so 16 of the 20 seeds carry NO mainCategory at all: a1/a6 hold
+    # subCategoryNames, so 17 of the 21 seeds carry NO mainCategory at all: a1/a6 hold
     # "finance", a8 "tech", c1 "Finance" (the case witness).
 
-    # all() over the chain: oracle a1/a6; a vacuous-TRUE chain adds the 16 parentless rows.
+    # all() over the chain: oracle a1/a6; a vacuous-TRUE chain adds the 17 parentless rows.
     - actions: ["w1-all-chain"]
       effect: EFFECT_ALLOW
       roles: ["USER"]
@@ -913,7 +1026,7 @@ resourcePolicy:
     # The lower-bound mirror of w1-size-chain (`> 0`, which agrees for the wrong reason because
     # a positive count already implies the parent exists). A count is never negative, so `>= 0`
     # is TRUE for exactly the rows that HAVE the attribute: oracle a1/a6/a8/c1, while a chain
-    # that folds the threshold to always-true returns all 20. Non-degenerate, so this is the
+    # that folds the threshold to always-true returns all 21. Non-degenerate, so this is the
     # count-path member of the degeneracy guard.
     - actions: ["w1-size-nonneg-chain"]
       effect: EFFECT_ALLOW
@@ -931,7 +1044,7 @@ resourcePolicy:
     # construction every operator builds on (which is why ent and pgx were already aligned).
     #
     # Both oracles are a8 ("tech") and c1 ("Finance") — the present-parent-no-match witnesses.
-    # An unguarded NOT EXISTS wrongly adds the 16 parentless seeds. Non-degenerate, so both
+    # An unguarded NOT EXISTS wrongly adds the 17 parentless seeds. Non-degenerate, so both
     # belong in the degeneracy guard.
 
     # Negated membership over the chained string list.
@@ -959,7 +1072,7 @@ resourcePolicy:
     # w1-size-zero-chain passes. Guarding the COUNT EXPRESSION instead makes `== 0`, `> 0`,
     # `>= N` and their negations all inherit it.
     #
-    # Every seed that HAS a mainCategory has at least one subCategory, and the 16 without it
+    # Every seed that HAS a mainCategory has at least one subCategory, and the 17 without it
     # are CEL missing-path errors, so the oracle is EMPTY by construction — like
     # w1-size-zero-chain it therefore stays OUT of the degeneracy guard, which asserts a
     # non-empty non-total oracle; w1-all-chain, w1-not-exists-chain and w1-size-nonneg-chain
@@ -989,6 +1102,204 @@ resourcePolicy:
       condition:
         match:
           expr: '("finance" in R.attr.mainCategory.subNames) ? R.attr.aBool : !R.attr.aBool'
+
+    # ==================== the real to-one join (G1) ====================
+    # `parent` is the corpus's ONE real to-one relation and `parent.inner` is one hop further
+    # out; both are a JOIN, unlike `obj.inner` above, which is a flat column wearing a dotted
+    # name. See README.md, "The real to-one relation", and ADR 0005. The W1 block above reaches
+    # a COLLECTION through a chain; this block reaches a SCALAR, which is a different set of
+    # hazards: a collection tail has an aggregation form in every adapter, a scalar tail does
+    # not, and mongoose's `$cond` treats a missing scalar path as falsy rather than as an error.
+    #
+    # The seeds split 8 / 6 / 7 by depth and every action below turns on that split:
+    #   no parent at all  (8): a5 a6 a8 b3 b4 b5 c2 d2
+    #   parent, no inner  (6): a3 a7 a9 b2 c1 d1
+    #   parent and inner  (7): a1 a2 a4 b1 b6 e1 f1
+    #
+    # On the check side a level that does not exist sends NO attribute, so the path is a CEL
+    # missing-path error and the PDP DENIES. A filter rooted at the resource row reaches the
+    # same answer only if its join REQUIRES the hop; a LEFT JOIN left unguarded readmits every
+    # row whose parent is absent. That is the same over-grant #309 documents for collections,
+    # and the negated and null-comparison shapes below are what discriminate it — the positive
+    # ones agree for the wrong reason, because "no parent" and "parent that does not match"
+    # both exclude the row.
+    #
+    # A filter that is correct but joins with the wrong MULTIPLICITY returns duplicate or
+    # missing rows, which no wire-shape assertion can see. Only executed rows catch it.
+
+    # Scalar string equality through one hop. Deliberately NOT the shared suite's `== true`
+    # (rel-bool-hop below already covers a boolean): a case trap is worth more here, because a
+    # join carries the operand into whatever collation the JOINED table was created with.
+    # Oracle b1 (parent c1, "One"). e1's parent a1 holds "one", so a case-insensitive collation
+    # one hop out — the column most likely to have been created without the root's collation —
+    # wrongly adds e1.
+    - actions: ["rel-eq-hop"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.parent.aString == "One"'
+
+    # Numeric equality through one hop. Oracle a1/a7 (parents a3 and a8, both aNumber 2).
+    - actions: ["rel-eq-num-hop"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.parent.aNumber == 2'
+
+    # The four orderings through one hop. The parent numbers span negatives and zero (a2 = -2,
+    # b3 = -4, a8 = 0), so none of these folds to a tautology over the parented rows, and each
+    # threshold sits ON a boundary value so `<` and `<=` cannot agree by accident:
+    #   lt  oracle a4/b2        (2 of the 13 parented rows)
+    #   le  oracle a1/a4/a7/b2  (4 — the two boundary rows a1/a7 are the whole difference)
+    #   gt  oracle 9            (the complement of le among parented rows)
+    #   ge  oracle 11           (gt plus the same two boundary rows)
+    # A hop that silently drops the join returns rows against the ROOT's aNumber instead, which
+    # disagrees with every one of these.
+    - actions: ["rel-lt-hop"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.parent.aNumber < 2'
+
+    - actions: ["rel-le-hop"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.parent.aNumber <= 2'
+
+    - actions: ["rel-gt-hop"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.parent.aNumber > 2'
+
+    - actions: ["rel-ge-hop"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.parent.aNumber >= 2'
+
+    # TWO comparisons against the SAME hop under a conjunction. They must resolve to ONE join,
+    # not two: a second independent join multiplies the row set, and against a to-one relation
+    # that is invisible until the two predicates disagree — which is exactly what a range does.
+    # Oracle a2/a3/a9/b1/e1/f1 (parent aNumber strictly between 2 and 12).
+    - actions: ["rel-range-hop"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.parent.aNumber > 2 && R.attr.parent.aNumber < 12'
+
+    # Bare boolean through one hop, and its negation. The pair partitions the 13 parented rows
+    # exactly — oracle a1/a3/a7/b1/b2/b6/e1/f1 (8) and a2/a4/a9/c1/d1 (5) — so the 8 rows with
+    # NO parent must appear in NEITHER. That is the whole absent-parent hazard in two actions:
+    # the positive one cannot see it (absent and false both exclude), the negated one can, and
+    # an unguarded outer join readmits all 8 under the negation only.
+    - actions: ["rel-bool-hop"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.parent.aBool'
+
+    - actions: ["rel-not-bool-hop"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!R.attr.parent.aBool'
+
+    # Substring through one hop. The needle is deliberately free of BOTH a LIKE metacharacter
+    # and a case variant, because what this action exists to prove is the JOIN — and the corpus
+    # already proves the other two at the root (like-percent/like-underscore, cs-eq). A needle
+    # carrying either would be rejected or mismatched before the walk ever reached the hop,
+    # leaving the action classified against a mechanism it never tested. ("one" was tried and
+    # does exactly that: SQLite's LIKE is ASCII-case-insensitive even where `=` is not, so b1's
+    # parent "One" matched — a real store hazard, but not this action's.)
+    # Oracle a1/a4 (parents "100xdone", "100%_done"). Reading the ROOT's own aString instead of
+    # the parent's gives a2/a3 — disjoint, so the wrong level cannot agree by accident.
+    - actions: ["rel-contains-hop"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.parent.aString.contains("done")'
+
+    # `!= null` through one hop. Two different absences have to reach the same answer: the 8
+    # rows with no parent (no `parent` attribute at all) and the 3 whose parent's optional
+    # column IS NULL (a4/a7/c1, parents a2/a8/c2 — a MISSING attribute one hop out, per the
+    # relation's stated convention). Oracle is the other 10. An adapter that emits
+    # `parent.aOptionalString IS NOT NULL` without requiring the join readmits the 8.
+    - actions: ["rel-ne-null-hop"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.parent.aOptionalString != null'
+
+    # -- two levels out: where alias scoping and correlated-subquery nesting break --
+    # One hop and two hops are different bugs. Only 7 seeds have an inner level at all, so 14
+    # rows must be excluded here for one of two distinct reasons (no parent, or a parent with
+    # no parent of its own) that an adapter is free to conflate and must not.
+
+    # Boolean two levels out. Oracle a1/a2/e1 (inners a6, b3, a3). The other four two-level
+    # rows carry a FALSE inner (a4, b1, b6, f1), so the action separates "inner is absent" from
+    # "inner is present and false" as well as from the 14 rows with no inner.
+    - actions: ["rel-bool-hop2"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.parent.inner.aBool == true'
+
+    # String prefix two levels out. The needle separates all three levels PAIRWISE, so an
+    # adapter that anchors the predicate at the wrong depth cannot agree by accident:
+    #   correct (parent.inner.aString): e1          — inner a3, "100xdone"
+    #   wrong, one level short (parent): a1, a4     — "100xdone", "100%_done"
+    #   wrong, at the root:              a2, a3     — "100%_done", "100xdone"
+    # The three sets are disjoint, which is the property "startsWith on a chained string" alone
+    # would not have given.
+    - actions: ["rel-startswith-hop2"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.parent.inner.aString.startsWith("100")'
+
+    # -- the hop composed with something else --
+
+    # A root-level predicate AND a hop predicate. The conjunction must not push the root's
+    # condition into the join, nor drop either conjunct once a join is introduced. The hop
+    # alone is TRUE for b6 and d1 (parents "[SEC]ret" and "Secret"); b6's own aBool is FALSE,
+    # so the oracle is d1 alone and b6 is the witness — a filter that drops the root conjunct
+    # returns it. Metacharacter-free for the same reason as rel-contains-hop above.
+    - actions: ["rel-hop-and-root"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aBool == true && R.attr.parent.aString.contains("re")'
+
+    # A two-level hop OR a collection subquery — a to-one join and a to-many subquery in one
+    # plan, under a disjunction, so neither may be emitted as a row-restricting inner join.
+    # Oracle a1/a2/e1 (inner is TRUE) plus a6/a8/c1 (a category exists), and that second set is
+    # the point: none of the three HAS an inner level, so their left branch is a CEL error, and
+    # CEL's OR absorbs an error when the other branch is TRUE. Both flavours of absence are
+    # represented — a6 and a8 have no parent at all, c1 has a parent with no parent of its own.
+    # An adapter that treats the absent hop as row-excluding rather than as branch-local drops
+    # all three: an UNDER-grant, where every other action in this block probes the over-grant.
+    - actions: ["rel-hop2-or-exists"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.parent.inner.aBool == true || R.attr.categories.exists(c, c.name == "business")'
 
     # ==================== root relation inside a lambda body (W2) ====================
     # The inner R.attr.tags.exists(...) is planned INSIDE the categories lambda; its subquery
@@ -1040,8 +1351,8 @@ resourcePolicy:
 
     # `<= 1.5` rounds DOWN to `<= 1`, which a count of ZERO also satisfies — so this arm
     # discriminates the hop guard as well as the rounding. Oracle a1/a6/a8/c1, the rows that
-    # HAVE the parent (each holds one subCategory); an unguarded chain counts 0 for the 16
-    # parentless rows and returns all 20. Non-degenerate, so this one belongs in the guard.
+    # HAVE the parent (each holds one subCategory); an unguarded chain counts 0 for the 17
+    # parentless rows and returns all 21. Non-degenerate, so this one belongs in the guard.
     - actions: ["w1-size-frac-le-chain"]
       effect: EFFECT_ALLOW
       roles: ["USER"]
@@ -1220,6 +1531,101 @@ resourcePolicy:
         match:
           expr: 'hierarchy(R.attr.scope, ":").descendentOf(hierarchy("[env]:prod", ":"))'
 
+    # ==================== the primary key as a filterable attribute (id-*) ====================
+    # Every other action in this corpus filters on a resource ATTRIBUTE. These six filter on
+    # `request.resource.id` — the resource's own identity, which the planner leaves symbolic
+    # because PlanResources is asked about a KIND, not a row (PDP-verified: the operand is a
+    # `variable` named `request.resource.id`, not `request.resource.attr.id`).
+    #
+    # It is a distinct hazard from any attribute because it is the one column whose mapping is
+    # structurally different per adapter rather than merely named differently: an ObjectId rather
+    # than a string in mongoose, the PRIMARY KEY in the SQL adapters, the document identifier
+    # rather than a metadata field in ChromaDB, and `_id` versus a mapped field in Elasticsearch.
+    # An adapter that resolves attributes by stripping a `request.resource.attr.` prefix does not
+    # reach this name at all, and the failure is silent: the variable looks like an unmapped
+    # attribute rather than the key.
+    #
+    # `f1` is the witness seed, added for exactly this group: its aString EQUALS its own id and
+    # its aOptionalString is that id prefixed, so the field-to-field and concatenation oracles are
+    # non-degenerate without any comparison against a literal the corpus had to invent. The
+    # retired suite's 24-hex ObjectId literal is deliberately NOT reproduced: it matches no seed,
+    # so its oracle would be empty under any mapping, and the corpus cannot mandate an ObjectId
+    # column in the first place — a store's key type is the harness's business. Mongoose's
+    # coercion is a caller-supplied `valueParser` on the mapper entry, and three of these six
+    # compare the key against a STRING column, so one key mapping cannot be an ObjectId and
+    # satisfy them; that adapter pins the coercion against the id-eq-const wire fixture in its
+    # translator unit test instead (#378). See README.md, "The primary key as a filterable
+    # attribute".
+
+    # The key against a constant. Oracle {f1} — one row, and necessarily so: an id is unique, so
+    # this is the largest oracle the shape admits. It still discriminates in both directions, and
+    # it is the shape most adapters CAN express: it reduces to a bare key compared with a literal,
+    # which is the only id-* form ChromaDB and Elasticsearch translate at all.
+    - actions: ["id-eq-const"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.id == "f1"'
+
+    # The key against a COLUMN, both polarities. `field-to-field` already covers column-versus-
+    # column, but never against the key, where an adapter has to name the primary key on one side
+    # of a comparison it usually only reads. The negation is the load-bearing half: its oracle is
+    # 20 of 21, so an adapter that resolves the key to the wrong column, or drops the comparison,
+    # is caught by the row COUNT rather than by a single missing row.
+    - actions: ["id-f2f"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aString == R.id'
+
+    - actions: ["id-f2f-ne"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aString != R.id'
+
+    # STRING concatenation against the key, in both operand orders. The corpus's `add` is numeric
+    # everywhere else (arith-add and friends), so `add` over strings is itself a new wire shape —
+    # an adapter that dispatches `add` straight to SQL `+` produces a numeric addition on
+    # PostgreSQL and a silent 0 on MySQL rather than concatenation.
+    #
+    # Field-first: `eq(V, add(K, V))`. f1's aOptionalString is "prefix:f1"; the five NULL-
+    # aOptionalString seeds (a2/a4/a8/c2/e1) are missing-attribute errors and deny.
+    - actions: ["id-concat"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aOptionalString == "prefix:" + R.id'
+
+    # Value-first: `eq(K, add(K, V))`. The principal side folds to the constant "projects:f1" at
+    # plan time, so the whole comparison is a constant against a concatenation the adapter must
+    # build from the key — operand inversion (this repo's canonical bug class) crossed with the
+    # key and with string `add` at once. `principal.attr.context` carries the id for this and for
+    # hier-list-id below.
+    - actions: ["id-concat-vf"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'P.attr.context == "projects:" + R.id'
+
+    # The key inside a hierarchy path built by `list()`. Two firsts in one shape: `list` is the
+    # third operator the corpus has never put on the wire, and it is the only place a hierarchy
+    # operand is CONSTRUCTED rather than read from a column. The hier-* block above always hands
+    # `hierarchy()` a bare variable or a literal; here the descendant path is `["projects", <key>]`,
+    # so an adapter must build the path from a constant segment and the key before it can compare.
+    # Oracle {f1}: both sides are two segments, so the inclusive overlap reduces to key equality.
+    - actions: ["hier-list-id"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'hierarchy(P.attr.context, ":").overlaps(hierarchy(["projects", R.id]))'
+
     # -- timestamp(field) vs constant-instant comparisons (ts-*) --
     # Wire shape (PDP-verified): the planner folds now()-duration arithmetic to a constant
     # instant and re-wraps it in timestamp("<RFC-3339>"); both operand orders keep policy
@@ -1287,7 +1693,7 @@ resourcePolicy:
     # oracle sends `null` rather than omitting the attribute. Under the default
     # missing-attribute convention `== null` would deny every row at check time while the
     # adapter's IS NULL returned five, which probes attribute representation rather than
-    # the operator. NULL owners: a2/a4/a8/c2/e1 (5 of 20) — non-degenerate either way.
+    # the operator. NULL owners: a2/a4/a8/c2/e1 (5 of 21) — non-degenerate either way.
 
     - actions: ["null-eq"]
       effect: EFFECT_ALLOW
@@ -1360,7 +1766,7 @@ resourcePolicy:
     # predicate definite; a list of plain constants does not, so `NOT (col IN (...))` is UNKNOWN
     # for a NULL column and drops it. CEL compares a null VALUE against each element — false, not
     # an error — so the negation is TRUE. a3 ("x") and b1 ("one_two") are the two matches, so the
-    # oracle is 18 of 20 and the naive translation returns 13.
+    # oracle is 19 of 21 and the naive translation returns 14.
     #
     # This is why the rule is stated over the EQUALITY FAMILY rather than over `ne`: `eq`, `ne`
     # and `in` are the operators CEL evaluates to a definite boolean over a null operand, so they
@@ -1383,7 +1789,7 @@ resourcePolicy:
     #
     # `coOwner` is the explicit-null alias of the `scope` column, added for this action.
     # It is NOT a second alias of `aOptionalString`: comparing a column with itself is TRUE
-    # for all 20 seeds, and the degeneracy guard forbids a total oracle. Against `scope` the
+    # for all 21 seeds, and the degeneracy guard forbids a total oracle. Against `scope` the
     # only row where both sides are NULL is e1, and no row holds the same non-null value in
     # both columns, so the oracle is exactly {e1} — one row, but the only row the naive
     # translation loses.
@@ -1405,8 +1811,10 @@ resourcePolicy:
     # is declared turns `owner != scope` into TRUE for e1 (both columns NULL) and returns a row the
     # PDP refuses. That is an OVER-grant, the direction the rest of this group is safe from.
     #
-    # Oracle: a7 and e1 are denied (scope missing), no row holds the same value in both columns, so
-    # the other 18 are allowed. The definite-everywhere rendering returns 19.
+    # Oracle: a7, e1 and f1 are denied (scope missing), no row holds the same value in both
+    # columns, so the other 18 are allowed. The definite-everywhere rendering returns 20 — it
+    # readmits a7 and f1, whose owner is non-null against a missing scope, while e1's two nulls
+    # compare equal and stay out.
     - actions: ["null-value-f2f-mixed"]
       effect: EFFECT_ALLOW
       roles: ["USER"]
@@ -1426,8 +1834,8 @@ resourcePolicy:
     # `pv-exists`/`pv-all` do not reach it — they use `aOptionalString`, the omitted-convention
     # attribute, where the NULL rows are missing-attribute errors that deny under both
     # polarities. Allowed: every seed whose owner matches no element — a1/a6/a9/b2 match
-    # ("set"/""/"same"/"%_o") and are denied, so the oracle is 16 of 20 and the naive fold
-    # returns 11.
+    # ("set"/""/"same"/"%_o") and are denied, so the oracle is 17 of 21 and the naive fold
+    # returns 12.
     - actions: ["null-value-pv-not-exists"]
       effect: EFFECT_ALLOW
       roles: ["USER"]
@@ -1438,7 +1846,7 @@ resourcePolicy:
     # The SAME shape against `aOptionalString`, which follows the corpus DEFAULT convention:
     # a NULL column sends NO attribute at all. CEL then raises a missing-attribute error for
     # every NULL row, and `"set" == null` is false for every non-NULL row, so check() denies
-    # ALL 20 seeds. The planner emits the identical `eq(a_optional_string, null)` wire node as
+    # ALL 21 seeds. The planner emits the identical `eq(a_optional_string, null)` wire node as
     # `null-eq` — the two are indistinguishable on the wire, which is exactly the point: the
     # adapter cannot recover the caller's representation from the plan.
     #

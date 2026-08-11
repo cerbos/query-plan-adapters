@@ -55,6 +55,8 @@ interface Seed {
   aOptionalString: string | null;
   tags: Tag[];
   subCategoryNames: string[];
+  /** The seed whose scalars this row's to-one `parent` carries; null for no parent. */
+  parentSeedId: string | null;
 }
 
 interface SeedsFile {
@@ -189,6 +191,7 @@ const SEED_KEYS = [
   "aOptionalString",
   "tags",
   "subCategoryNames",
+  "parentSeedId",
 ] as const;
 
 /** Corpus prose, never read by a harness: the one documented exclusion from SEED_KEYS. */
@@ -307,6 +310,10 @@ function parseSeed(value: unknown, index: number): Seed {
   if (optional !== null && typeof optional !== "string") {
     throw Error(`${label}.aOptionalString must be a string or null`);
   }
+  const parentSeedId = seed["parentSeedId"];
+  if (parentSeedId !== null && typeof parentSeedId !== "string") {
+    throw Error(`${label}.parentSeedId must be a string or null`);
+  }
   return {
     id: requireString(seed["id"], `${label}.id`),
     aBool: requireBoolean(seed["aBool"], `${label}.aBool`),
@@ -320,6 +327,7 @@ function parseSeed(value: unknown, index: number): Seed {
       seed["subCategoryNames"],
       `${label}.subCategoryNames`,
     ),
+    parentSeedId,
   };
 }
 
@@ -576,6 +584,17 @@ const DEGENERACY_GUARD_ACTIONS = [
   "p-struct",
   "p-in-null-single",
   "p-in-null-multi",
+  // The real to-one join (#375). Chroma translates 9 of the 15 — the positive scalar shapes over
+  // the flattened chain keys — so the guard names the ones it compares: a scalar leaf one hop out
+  // and the same two levels out. Its six negated, string-matching and composite siblings throw,
+  // and are liveness probes below.
+  "rel-eq-hop",
+  "rel-bool-hop2",
+  // The primary key as a filterable attribute (#376). Chroma translates exactly one of the six:
+  // the key against a literal, which is the only id-* shape that reduces to a bare metadata key
+  // on one side and a constant on the other. Its five siblings compare the key against a second
+  // key or wrap it in a computed operand, and are liveness probes below.
+  "id-eq-const",
 ] as const;
 
 /**
@@ -603,6 +622,23 @@ const DEGENERACY_LIVENESS_PROBES = [
   "w1-size-frac-le-chain",
   "cr-div-neg-zero",
   "cast-int-double",
+  // The real to-one join's fail-closed half (#375). rel-not-bool-hop is the load-bearing one:
+  // a missing metadata key MATCHES $ne, so lowering the negated hop is exactly the parentless
+  // over-grant, and Chroma refuses it rather than emitting it.
+  "rel-not-bool-hop",
+  "rel-ne-null-hop",
+  "rel-hop2-or-exists",
+  // Case sensitivity in string matching: Chroma has no pattern operator at all, so the
+  // comparison these probe is never built and the group has no compared member here.
+  "cs-contains",
+  // The id-* group's fail-closed half (#376), one per rejection site: a second metadata key on
+  // the value side, and a computed operand there. string() is the same computed-operand
+  // rejection reached through a cast, and has no compared member at all.
+  "id-f2f-ne",
+  "id-concat",
+  "cast-string-bool",
+  // A concatenation of two metadata fields is a computed operand, which Chroma has no form for.
+  "concat-f2f",
 ] as const;
 
 // Fields are optional unless declared otherwise, so `$ne`/`$nin` are rejected by default.
@@ -610,6 +646,12 @@ const DEGENERACY_LIVENESS_PROBES = [
 // seed in conformance/seeds.json. `aOptionalString` is null for a2/a4/a8/c2/e1, so it stays
 // optional and its inequality shapes remain fail-closed.
 const FIELD_NAME_MAPPER: Record<string, string | FieldNameMapperConfig> = {
+  // The primary key, reached as `request.resource.id` rather than through `attr` (the `id-*`
+  // actions). Chroma's `where` filters metadata only — the document id is addressed by the
+  // separate `ids` argument to `get()` — so `metadataFor` mirrors the id into a metadata key and
+  // this maps onto that. Leaving it unmapped would make the id-* actions throw for a HARNESS
+  // reason (no mapping) rather than an adapter one, which is the trap #326 documents.
+  "request.resource.id": { field: "id", required: true },
   "request.resource.attr.aBool": { field: "aBool", required: true },
   "request.resource.attr.aString": { field: "aString", required: true },
   "request.resource.attr.aNumber": {
@@ -622,6 +664,32 @@ const FIELD_NAME_MAPPER: Record<string, string | FieldNameMapperConfig> = {
     required: false,
   },
   "request.resource.attr.obj.inner": { field: "obj.inner", required: true },
+  // The corpus's one REAL to-one chain (the `rel-*` actions), flattened onto dotted metadata keys
+  // by `metadataFor`. EVERY level stays `required: false` — the whole point of the relation is
+  // that a level can be absent, and 8 of the 21 seeds have no parent at all — so Chroma's
+  // inequality shapes over these keys stay fail-closed. A metadata key Chroma cannot prove is
+  // present cannot answer `$ne` the way CEL's missing-attribute error does
+  // (cerbos/query-plan-adapters#375).
+  "request.resource.attr.parent.aBool": { field: "parent.aBool" },
+  "request.resource.attr.parent.aString": { field: "parent.aString" },
+  "request.resource.attr.parent.aNumber": {
+    field: "parent.aNumber",
+    numericType: "integer",
+  },
+  "request.resource.attr.parent.aOptionalString": {
+    field: "parent.aOptionalString",
+  },
+  "request.resource.attr.parent.inner.aBool": { field: "parent.inner.aBool" },
+  "request.resource.attr.parent.inner.aString": {
+    field: "parent.inner.aString",
+  },
+  "request.resource.attr.parent.inner.aNumber": {
+    field: "parent.inner.aNumber",
+    numericType: "integer",
+  },
+  "request.resource.attr.parent.inner.aOptionalString": {
+    field: "parent.inner.aOptionalString",
+  },
 };
 
 // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") --------
@@ -664,6 +732,40 @@ function tagAttribute(tag: Tag): Record<string, Value> {
   const attr: Record<string, Value> = { id: tag.id };
   if (tag.name !== null) {
     attr["name"] = tag.name;
+  }
+  return attr;
+}
+
+// -- the real to-one relation (conformance/README.md, "The real to-one relation") ----------------
+//
+// `parentSeedId` names the seed whose four scalars this row's `parent` carries, and that seed's own
+// `parentSeedId` names the ones `parent.inner` carries. The chain is cut at two levels.
+
+const SEEDS_BY_ID = new Map(SEEDS.map((seed) => [seed.id, seed]));
+
+function parentSeedOf(seed: Seed | undefined): Seed | undefined {
+  const id = seed?.parentSeedId;
+  if (id === undefined || id === null) {
+    return undefined;
+  }
+  const parent = SEEDS_BY_ID.get(id);
+  if (parent === undefined) {
+    throw new Error(
+      `seeds.json: "${seed?.id}" names parent "${id}", which is not a seed id`,
+    );
+  }
+  return parent;
+}
+
+/** The four scalars as check() attributes: a NULL column is a MISSING attribute, one hop out. */
+function relationAttr(seed: Seed): Record<string, Value> {
+  const attr: Record<string, Value> = {
+    aBool: seed.aBool,
+    aString: seed.aString,
+    aNumber: seed.aNumber,
+  };
+  if (seed.aOptionalString !== null) {
+    attr["aOptionalString"] = seed.aOptionalString;
   }
   return attr;
 }
@@ -717,6 +819,18 @@ function checkResource(seed: Seed): Resource {
       subNames: seed.subCategoryNames,
     };
   }
+  // The real to-one chain, mirroring the flattened metadata keys exactly. A row with no parent
+  // sends NO `parent` attribute — a CEL missing-path error (deny) — matching the metadata
+  // carrying no `parent.*` key; the same holds one level down for `parent.inner`.
+  const parentSeed = parentSeedOf(seed);
+  if (parentSeed !== undefined) {
+    const parentAttr = relationAttr(parentSeed);
+    const innerSeed = parentSeedOf(parentSeed);
+    if (innerSeed !== undefined) {
+      parentAttr["inner"] = relationAttr(innerSeed);
+    }
+    attr["parent"] = parentAttr;
+  }
 
   return { kind: seedsFile.resourceKind, id: seed.id, attr };
 }
@@ -731,6 +845,21 @@ function metadataFor(seed: Seed): Metadata {
   };
   if (seed.aOptionalString !== null) {
     metadata["aOptionalString"] = seed.aOptionalString;
+  }
+  // The to-one chain, flattened onto dotted keys. A level that does not exist writes no key at
+  // all, which is what the check side's missing `parent` / `parent.inner` path mirrors.
+  const levels: [string, Seed | undefined][] = [
+    ["parent", parentSeedOf(seed)],
+    ["parent.inner", parentSeedOf(parentSeedOf(seed))],
+  ];
+  for (const [prefix, level] of levels) {
+    if (level === undefined) continue;
+    metadata[`${prefix}.aBool`] = level.aBool;
+    metadata[`${prefix}.aString`] = level.aString;
+    metadata[`${prefix}.aNumber`] = level.aNumber;
+    if (level.aOptionalString !== null) {
+      metadata[`${prefix}.aOptionalString`] = level.aOptionalString;
+    }
   }
   return metadata;
 }
@@ -834,7 +963,7 @@ describe("adversarial conformance corpus", () => {
       /pins no throw message/,
     );
   });
-  test("manifest assigns all 152 policy actions exactly one Chroma outcome", () => {
+  test("manifest assigns all 170 policy actions exactly one Chroma outcome", () => {
     const oracle = new Set(CHROMA_SUPPORTED_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map(({ action }) => action));
     const nullOmitted = new Set(
@@ -850,12 +979,12 @@ describe("adversarial conformance corpus", () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(152);
-    expect(CHROMA_SUPPORTED_ACTIONS).toHaveLength(15);
+    expect(MANIFEST_ACTIONS.size).toBe(179);
+    expect(CHROMA_SUPPORTED_ACTIONS).toHaveLength(25);
     expect(oracle.size).toBe(CHROMA_SUPPORTED_ACTIONS.length);
-    expect(CHROMA_UNSUPPORTED).toHaveLength(126);
+    expect(CHROMA_UNSUPPORTED).toHaveLength(143);
     expect(CHROMA_SUPPORTED_EXPECTED).toHaveLength(0);
-    expect(THROWING_ACTIONS).toHaveLength(135);
+    expect(THROWING_ACTIONS).toHaveLength(152);
     expect(misclassified).toEqual([]);
   });
 
@@ -918,6 +1047,51 @@ describe("adversarial conformance corpus", () => {
     expect(oracle.length).toBeGreaterThan(0);
     expect(oracle.length).toBeLessThan(allIds.length);
     expect(await adapterFilteredIds(action)).toEqual(allIds);
+  });
+
+  // The to-one relation carries no corpus action yet — this is the expand half of
+  // cerbos/query-plan-adapters#372's expand–contract — so nothing else in this file would notice a
+  // seeder that wrote no chain keys at all, or one that wrote the root's own columns one hop out.
+  // Read the two hops back out of the stored metadata rather than counting keys: a count cannot
+  // tell the corpus's values from the root's, which is exactly the flat-alias failure this
+  // relation exists to make visible.
+  test("the seeded to-one chain matches the corpus relation", async () => {
+    const withParent = SEEDS.filter((seed) => parentSeedOf(seed) !== undefined);
+    const withInner = SEEDS.filter(
+      (seed) => parentSeedOf(parentSeedOf(seed)) !== undefined,
+    );
+    expect(withParent.length).toBeGreaterThan(0);
+    expect(withInner.length).toBeGreaterThan(0);
+    expect(withParent.length).toBeLessThan(SEEDS.length);
+
+    const stored = await activeCollection().get({
+      ids: SEEDS.map(({ id }) => id),
+      include: ["metadatas"],
+    });
+    expect(
+      Object.fromEntries(
+        stored.ids.map((id, index) => {
+          const metadata = stored.metadatas[index] ?? {};
+          return [
+            id,
+            [
+              metadata["parent.aString"] ?? null,
+              metadata["parent.inner.aString"] ?? null,
+            ],
+          ];
+        }),
+      ),
+    ).toEqual(
+      Object.fromEntries(
+        SEEDS.map((seed) => [
+          seed.id,
+          [
+            parentSeedOf(seed)?.aString ?? null,
+            parentSeedOf(parentSeedOf(seed))?.aString ?? null,
+          ],
+        ]),
+      ),
+    );
   });
 
   test("oracle is not degenerate", async () => {

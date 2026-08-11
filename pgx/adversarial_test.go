@@ -49,6 +49,8 @@ const (
 	categoryTable    = "adversarial_category"
 	subCategoryTable = "adversarial_sub_category"
 	labelTable       = "adversarial_label"
+	parentTable      = "adversarial_parent"
+	innerTable       = "adversarial_inner"
 )
 
 const schemaDDL = `
@@ -87,6 +89,24 @@ CREATE TABLE adversarial_label (
 	id               text PRIMARY KEY,
 	name             text,
 	sub_category_id  text NOT NULL REFERENCES adversarial_sub_category(id)
+);
+
+CREATE TABLE adversarial_parent (
+	id                 text    PRIMARY KEY,
+	a_bool             boolean NOT NULL,
+	a_string           text    NOT NULL,
+	a_number           bigint  NOT NULL,
+	a_optional_string  text,
+	resource_id        text    NOT NULL UNIQUE REFERENCES adversarial_resource(id)
+);
+
+CREATE TABLE adversarial_inner (
+	id                 text    PRIMARY KEY,
+	a_bool             boolean NOT NULL,
+	a_string           text    NOT NULL,
+	a_number           bigint  NOT NULL,
+	a_optional_string  text,
+	parent_id          text    NOT NULL UNIQUE REFERENCES adversarial_parent(id)
 );
 `
 
@@ -150,12 +170,35 @@ func buildMapper() cerbospgx.Mapper {
 		},
 	}
 
+	// The two levels of the corpus's real to-one chain. The resource owns at most one parent
+	// (`resource_id` is UNIQUE) and a parent at most one inner (`parent_id` is UNIQUE), so each
+	// correlation matches at most one row.
+	parentRel := &cerbospgx.Relation{
+		Table:        parentTable,
+		SourceColumn: "id", TargetColumn: "resource_id",
+	}
+	innerRel := &cerbospgx.Relation{
+		Table:        innerTable,
+		Via:          []cerbospgx.Hop{{Table: parentTable, ChildColumn: "parent_id", JoinColumn: "id"}},
+		SourceColumn: "id", TargetColumn: "resource_id",
+	}
+
 	return cerbospgx.MapperMap{
-		"request.resource.attr.aBool":           {Column: "a_bool"},
-		"request.resource.attr.aString":         {Column: "a_string"},
+		// The primary key, reached as `request.resource.id` rather than through `attr` (the
+		// `id-*` actions). An adapter that resolves references by stripping a
+		// `request.resource.attr.` prefix never sees this name.
+		"request.resource.id": {Column: "id"},
+		// Declared boolean so `string()` over it fails closed: SQLite and MySQL store a
+		// boolean as 1/0 and render "1" where CEL and PostgreSQL render "true", and nothing
+		// in the plan names a column's type.
+		"request.resource.attr.aBool": {Column: "a_bool", ValueType: cerbospgx.ValueBool},
+		// Declared string so CEL's `+` between two columns resolves to concatenation:
+		// the operator is overloaded and the plan carries no operand types, so an
+		// undeclared pair fails closed rather than emitting a numeric `+`.
+		"request.resource.attr.aString":         {Column: "a_string", ValueType: cerbospgx.ValueString},
 		"request.resource.attr.aNumber":         {Column: "a_number"},
 		"request.resource.attr.aDouble":         {Column: "a_double"},
-		"request.resource.attr.aOptionalString": {Column: "a_optional_string"},
+		"request.resource.attr.aOptionalString": {Column: "a_optional_string", ValueType: cerbospgx.ValueString},
 		"request.resource.attr.createdBy":       {Column: "created_by"},
 		// `owner` and `coOwner` alias columns that `aOptionalString` and `scope` also map, under
 		// the OTHER null convention: the oracle sends a real null attribute for them rather than
@@ -176,6 +219,20 @@ func buildMapper() cerbospgx.Mapper {
 
 		"request.resource.attr.mainCategory.subCategories": {Relation: mainSub},
 		"request.resource.attr.mainCategory.subNames":      {Relation: mainSub},
+
+		// The corpus's one REAL to-one chain (the `rel-*` actions). `ScalarRelation` reads one
+		// column of the joined row as a correlated scalar subquery; both levels' foreign keys are
+		// UNIQUE, which is the to-ONE claim the field's doc comment says the caller is making.
+		// `parent.inner` reaches two tables out, so it names the inner table and joins THROUGH
+		// the parent with a Hop — the same Via vocabulary mainCategory.subCategories uses.
+		"request.resource.attr.parent.aBool":                 {ScalarRelation: parentRel, Column: "a_bool"},
+		"request.resource.attr.parent.aString":               {ScalarRelation: parentRel, Column: "a_string"},
+		"request.resource.attr.parent.aNumber":               {ScalarRelation: parentRel, Column: "a_number"},
+		"request.resource.attr.parent.aOptionalString":       {ScalarRelation: parentRel, Column: "a_optional_string"},
+		"request.resource.attr.parent.inner.aBool":           {ScalarRelation: innerRel, Column: "a_bool"},
+		"request.resource.attr.parent.inner.aString":         {ScalarRelation: innerRel, Column: "a_string"},
+		"request.resource.attr.parent.inner.aNumber":         {ScalarRelation: innerRel, Column: "a_number"},
+		"request.resource.attr.parent.inner.aOptionalString": {ScalarRelation: innerRel, Column: "a_optional_string"},
 	}
 }
 
@@ -262,6 +319,29 @@ func seedDatabase(t *testing.T, ctx context.Context, pool *pgxpool.Pool, corpus 
 			seed.ID, seed.ABool, seed.AString, seed.ANumber, corpus.aDouble(seed),
 			seed.AOptionalString, corpus.createdBy(seed), corpus.scopeOf(seed), created)
 		require.NoError(t, err, "seeding resource %s", seed.ID)
+
+		// The to-one chain, one owned row per level. A seed with no parent gets no row at all,
+		// which is what makes the absent-parent hazard reachable through a SCALAR rather than
+		// only through mainCategory's collection.
+		if parentSeed := corpus.parentSeedOf(&seed); parentSeed != nil {
+			_, err := pool.Exec(ctx, `
+				INSERT INTO adversarial_parent
+					(id, a_bool, a_string, a_number, a_optional_string, resource_id)
+				VALUES ($1,$2,$3,$4,$5,$6)`,
+				parentID(seed), parentSeed.ABool, parentSeed.AString, parentSeed.ANumber,
+				parentSeed.AOptionalString, seed.ID)
+			require.NoError(t, err, "seeding parent for %s", seed.ID)
+
+			if inner := corpus.parentSeedOf(parentSeed); inner != nil {
+				_, err := pool.Exec(ctx, `
+					INSERT INTO adversarial_inner
+						(id, a_bool, a_string, a_number, a_optional_string, parent_id)
+					VALUES ($1,$2,$3,$4,$5,$6)`,
+					innerID(seed), inner.ABool, inner.AString, inner.ANumber,
+					inner.AOptionalString, parentID(seed))
+				require.NoError(t, err, "seeding inner for %s", seed.ID)
+			}
+		}
 
 		for _, tag := range seed.Tags {
 			_, err := pool.Exec(ctx,
@@ -394,6 +474,17 @@ func (h *harness) checkResource(seed Seed) *cerbos.Resource {
 		}
 	}
 
+	// The real to-one chain, mirroring the seeded rows exactly. A row with no parent sends NO
+	// `parent` attribute — a CEL missing-path error (deny) — matching a join that finds nothing;
+	// the same holds one level down for `parent.inner`.
+	if parentSeed := h.corpus.parentSeedOf(&seed); parentSeed != nil {
+		parent := relationAttr(parentSeed)
+		if inner := h.corpus.parentSeedOf(parentSeed); inner != nil {
+			parent["inner"] = relationAttr(inner)
+		}
+		attr["parent"] = parent
+	}
+
 	return cerbos.NewResource(h.corpus.Seeds.ResourceKind, seed.ID).WithAttributes(attr)
 }
 
@@ -482,11 +573,11 @@ func TestAdversarialConformance(t *testing.T) {
 		}
 		// Corpus-size tripwire: bump deliberately when the corpus grows, so a new hostile shape
 		// cannot slip past this adapter unnoticed.
-		require.Len(t, seen, 152, "corpus size changed; triage the new action(s) before bumping")
-		require.Len(t, h.corpus.Seeds.Seeds, 20, "seed count changed")
+		require.Len(t, seen, 179, "corpus size changed; triage the new action(s) before bumping")
+		require.Len(t, h.corpus.Seeds.Seeds, 21, "seed count changed")
 		// Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
 		// lost has to be re-triaged here rather than joining the throw suite unnoticed.
-		require.Len(t, h.corpus.ThrowingActions, 9, "throwing action count changed")
+		require.Len(t, h.corpus.ThrowingActions, 11, "throwing action count changed")
 	})
 
 	t.Run("oracle", func(t *testing.T) {
@@ -586,6 +677,52 @@ func TestAdversarialConformance(t *testing.T) {
 			"%s: the folded plan makes this adapter return every row", action)
 	})
 
+	// The to-one relation carries no corpus action yet — this is the expand half of
+	// cerbos/query-plan-adapters#372's expand-contract — so nothing else in this suite would
+	// notice a seeder that stored no chain at all, or one that attached every parent to the wrong
+	// resource. Read the two hops back through a real join rather than counting rows: a count
+	// cannot tell an inner row carrying the corpus's values from one carrying the root's own
+	// columns, which is exactly the flat-column-alias failure this relation exists to make
+	// visible.
+	t.Run("the seeded to-one chain matches the corpus relation", func(t *testing.T) {
+		want := map[string][2]*string{}
+		withParent, withInner := 0, 0
+		for i := range h.corpus.Seeds.Seeds {
+			seed := h.corpus.Seeds.Seeds[i]
+			var parent, inner *string
+			if p := h.corpus.parentSeedOf(&seed); p != nil {
+				withParent++
+				parent = &p.AString
+				if in := h.corpus.parentSeedOf(p); in != nil {
+					withInner++
+					inner = &in.AString
+				}
+			}
+			want[seed.ID] = [2]*string{parent, inner}
+		}
+		require.NotZero(t, withParent, "no seed has a parent")
+		require.NotZero(t, withInner, "no seed reaches parent.inner")
+		require.Less(t, withParent, len(h.corpus.Seeds.Seeds), "every seed has a parent")
+
+		rows, err := h.pool.Query(t.Context(), `
+			SELECT r.id, p.a_string, i.a_string
+			FROM `+resourceTable+` r
+			LEFT JOIN `+parentTable+` p ON p.resource_id = r.id
+			LEFT JOIN `+innerTable+` i ON i.parent_id = p.id`)
+		require.NoError(t, err, "reading the seeded chain")
+		defer rows.Close()
+
+		got := map[string][2]*string{}
+		for rows.Next() {
+			var id string
+			var parent, inner *string
+			require.NoError(t, rows.Scan(&id, &parent, &inner))
+			got[id] = [2]*string{parent, inner}
+		}
+		require.NoError(t, rows.Err())
+		require.Equal(t, want, got)
+	})
+
 	t.Run("degeneracy guard", func(t *testing.T) {
 		// The comparison above can pass vacuously if the oracle itself is trivial. Assert that a
 		// representative spread of actions has an oracle that is neither empty nor the full seed
@@ -614,12 +751,37 @@ func TestAdversarialConformance(t *testing.T) {
 			"w1-not-in-chain", "w1-not-hasint-chain",
 			"w1-ternary-chain-cond", "w1-size-frac-le-chain",
 			"cr-div-neg-zero", "cr-div-other-column", "cr-div-then-add", "cr-div-then-add-ne",
+			// The real to-one join (#375): one per hazard — the negated hop, the null comparison,
+			// two-level depth, the root conjunction, and the disjunction, whose failure
+			// direction is an under-grant.
+			"rel-not-bool-hop", "rel-ne-null-hop", "rel-bool-hop2",
+			"rel-hop-and-root", "rel-hop2-or-exists",
+			// Case sensitivity in STRING MATCHING, a different mechanism from cs-eq: collation
+			// governs `=`, and on SQLite only `PRAGMA case_sensitive_like` governs LIKE.
+			"cs-contains",
+			// The primary key as a filterable attribute (#376): against a constant, against a
+			// column under negation, and inside a concatenation in both operand orders. The
+			// concatenations are the load-bearing pair — rendered as numeric `+` they were a
+			// hard error on PostgreSQL and a silent OVER-grant on MySQL, which coerces both
+			// operands to 0.
+			"id-eq-const", "id-f2f-ne", "id-concat", "id-concat-vf",
+			// string() over a NUMERIC column, the half that lowers to CAST on every engine. Its
+			// boolean sibling is refused instead, so this entry proves the supported half still
+			// compares.
+			"cast-string-double",
+			// CEL's `+` between two COLUMNS (#391), resolved by the caller declaring the
+			// columns ValueString. Rendered as numeric `+` PostgreSQL rejects it outright,
+			// which is loud here but silent on the other two engines the shared translator serves.
+			"concat-f2f",
 		}
 		// int() over a numeric column is unsupported for every adapter but convex, so there is no
 		// comparison behind it here: it stays as a PDP/policy liveness probe for the cast group.
 		// Asserting the complement keeps the split honest — a shape this adapter gains support for
 		// must move up into the compared list.
-		livenessOnly := []string{"cast-int-double"}
+		// string() over a BOOLEAN column is refused because CAST is dialect-dependent there
+		// (#376), and the constructed hierarchy path because `list` has no translator case at
+		// all — so neither has a comparison behind it here.
+		livenessOnly := []string{"cast-int-double", "cast-string-bool", "hier-list-id"}
 
 		oracleCompared := h.corpus.OracleComparedActions()
 		total := len(h.corpus.Seeds.Seeds)

@@ -23,6 +23,20 @@ const mainCategory = v.object({
   subNames: v.array(v.string()),
 });
 
+// The corpus's one real to-one relation. A document store has no join, so both levels are nested
+// objects — but the SHAPE is the same to-one chain every other store carries, and an absent level
+// is a missing path here exactly as it is a missing row there.
+const relationLevel = {
+  aBool: v.boolean(),
+  aString: v.string(),
+  aNumber: v.number(),
+  aOptionalString: v.optional(v.string()),
+};
+const parent = v.object({
+  ...relationLevel,
+  inner: v.optional(v.object(relationLevel)),
+});
+
 const document = {
   id: v.string(),
   aBool: v.boolean(),
@@ -40,6 +54,7 @@ const document = {
   tags: v.array(tag),
   categories: v.array(category),
   mainCategory: v.optional(mainCategory),
+  parent: v.optional(parent),
 };
 
 // Exported so the adversarial throw suite can invoke translation with the exact mapper the
@@ -48,6 +63,11 @@ const document = {
 // Typed as the record arm of `Mapper` rather than as `Mapper` itself, so `PUSHDOWN_MAPPER` below
 // can derive from it without asserting away the function arm.
 export const MAPPER: Record<string, MapperConfig> = {
+  // The primary key, reached as `request.resource.id` rather than through `attr` (the `id-*`
+  // actions). An adapter that resolves references by stripping a `request.resource.attr.` prefix
+  // never sees this name. It maps to the corpus id field rather than Convex's own `_id`, which
+  // holds a generated document handle unrelated to the corpus.
+  "request.resource.id": { field: "id" },
   "request.resource.attr.aBool": { field: "aBool" },
   "request.resource.attr.aString": { field: "aString" },
   "request.resource.attr.aNumber": { field: "aNumber" },
@@ -78,6 +98,50 @@ export const MAPPER: Record<string, MapperConfig> = {
   },
   "request.resource.attr.mainCategory.subNames": {
     field: "mainCategory.subNames",
+    nullable: true,
+  },
+  // The corpus's one REAL to-one chain (the `rel-*` actions), stored as nested objects rather
+  // than a joined table. EVERY level is `nullable: true`, which here means "this path may be
+  // absent from the document": a row with no parent carries no `parent` key at all, and one whose
+  // parent has no parent of its own carries no `parent.inner`. That is precisely the CEL
+  // missing-attribute case, so `canPushToDb` keeps these off the Convex filter engine and the
+  // adapter's in-memory post-filter answers them with the right three-valued semantics
+  // (cerbos/query-plan-adapters#375). Each level is declared explicitly, as mainCategory is.
+  "request.resource.attr.parent": { field: "parent", nullable: true },
+  "request.resource.attr.parent.aBool": {
+    field: "parent.aBool",
+    nullable: true,
+  },
+  "request.resource.attr.parent.aString": {
+    field: "parent.aString",
+    nullable: true,
+  },
+  "request.resource.attr.parent.aNumber": {
+    field: "parent.aNumber",
+    nullable: true,
+  },
+  "request.resource.attr.parent.aOptionalString": {
+    field: "parent.aOptionalString",
+    nullable: true,
+  },
+  "request.resource.attr.parent.inner": {
+    field: "parent.inner",
+    nullable: true,
+  },
+  "request.resource.attr.parent.inner.aBool": {
+    field: "parent.inner.aBool",
+    nullable: true,
+  },
+  "request.resource.attr.parent.inner.aString": {
+    field: "parent.inner.aString",
+    nullable: true,
+  },
+  "request.resource.attr.parent.inner.aNumber": {
+    field: "parent.inner.aNumber",
+    nullable: true,
+  },
+  "request.resource.attr.parent.inner.aOptionalString": {
+    field: "parent.inner.aOptionalString",
     nullable: true,
   },
 };
@@ -128,6 +192,22 @@ export const insert = mutation({
   handler: async (ctx, args) => ctx.db.insert("adversarial", args),
 });
 
+/**
+ * The two hops of the to-one chain, per resource id, read back out of the stored documents. The
+ * relation carries no corpus action yet, so this is what keeps the fixture from rotting.
+ */
+export const parentChain = query({
+  args: {},
+  handler: async (ctx) => {
+    const docs = await ctx.db.query("adversarial").collect();
+    return docs.map((doc) => ({
+      id: doc.id,
+      parent: doc.parent?.aString ?? null,
+      inner: doc.parent?.inner?.aString ?? null,
+    }));
+  },
+});
+
 export const deleteAll = mutation({
   args: {},
   handler: async (ctx) => {
@@ -163,13 +243,15 @@ export const executePlan = query({
       queryPlan,
       mapper: MAPPERS[args.mapper ?? "default"],
       allowPostFilter: true,
-      nullAttributeRepresentation: args.nullAttributeRepresentation ?? "explicit",
+      nullAttributeRepresentation:
+        args.nullAttributeRepresentation ?? "explicit",
     });
 
     // Reported alongside the ids so the harness can assert WHICH half answered: a pushdown leg
     // that quietly fell back to the post-filter would return the same ids (#327).
     const execution = executionPathOf(translated);
-    if (translated.kind === PlanKind.ALWAYS_DENIED) return { ids: [], execution };
+    if (translated.kind === PlanKind.ALWAYS_DENIED)
+      return { ids: [], execution };
 
     let queryBuilder = ctx.db.query("adversarial");
     if (translated.kind === PlanKind.CONDITIONAL && translated.filter) {

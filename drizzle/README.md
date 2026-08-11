@@ -78,12 +78,12 @@ undeclared side needs UNKNOWN — so the adapter throws rather than picking a di
 
 ## Conformance contract
 
-The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 20 hostile seed rows and real Drizzle queries, executed on both SQLite and PostgreSQL. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
+The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 21 hostile seed rows and real Drizzle queries, executed on both SQLite and PostgreSQL. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 139 reference conformance actions |
-| Fail-closed corpus shapes | Sub-millisecond `now()` thresholds, regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an untyped string field, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero) and `filter()`/`map()` used as a condition (both return a list, not a boolean) (10 actions) |
+| Oracle-tested | 161 reference conformance actions |
+| Fail-closed corpus shapes | Sub-millisecond `now()` thresholds, regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an untyped string field, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero) `filter()`/`map()` used as a condition (both return a list, not a boolean), `string()` over a boolean column (SQLite and MySQL store 1/0 and render `"1"` where CEL and PostgreSQL render `"true"`), CEL's `+` over strings (`||` concatenates on SQLite and PostgreSQL but is logical OR on MySQL, and the numeric `+` this adapter emits coerces the operands to 0 rather than failing), and a hierarchy path constructed by `list()` rather than read from a column (16 actions) |
 | Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute the caller sends as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare it per attribute — `nullAttributeRepresentation: "explicit"` on the mapper entry — or the historical rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
@@ -114,7 +114,7 @@ This adapter builds a **bare-table subquery.** A relation mapping is a table plu
 | Subtype discrimination | **Caller-owned**, reproducible with `subqueryFilter` | A `type`/`kind` discriminator column where one table holds several row kinds. Declare `eq(table.type, "…")` |
 | To-one relation used as a collection | **Caller-owned** | A `type: "one"` relation whose target column has no unique index. `type` is declarative — the adapter emits the same correlated `EXISTS` for either value — so nothing makes the database enforce the single row the application saw. Add the unique constraint, or accept that the subquery examines every matching row |
 | Composite association key | **Rejected by the type system** | `sourceColumn`/`targetColumn` are each a single `AnyColumn`, so a two-column key cannot be expressed. This is a compile error, not a wrong join |
-| Absent to-one parent | **Reproduced**, and proved by the corpus (`w1-all-chain` and siblings) | None — every operator reached through a relation chain requires its intermediate hops separately, so a missing parent is UNKNOWN under both polarities ([#309](https://github.com/cerbos/query-plan-adapters/issues/309), [#315](https://github.com/cerbos/query-plan-adapters/issues/315)) |
+| Absent to-one parent | **Reproduced**, and proved by the corpus (`w1-all-chain`, `rel-not-bool-hop` and siblings) | None — every operator reached through a relation requires its to-one hops separately, so a missing parent is UNKNOWN under both polarities ([#309](https://github.com/cerbos/query-plan-adapters/issues/309), [#315](https://github.com/cerbos/query-plan-adapters/issues/315), [#375](https://github.com/cerbos/query-plan-adapters/issues/375)). **Behaviour change in #375:** this previously held only for a chain of two or more relations, and a bare boolean read through a hop bypassed the guard entirely. A negation over a SINGLE to-one hop returned every row whose relation was absent; it now returns fewer rows — an over-grant fix, consumer-visible for any policy with that shape |
 
 ### Declaring the application's own predicate
 
@@ -222,6 +222,16 @@ case-sensitive by default, but nondeterministic ICU collations and `citext` are 
 for mapped policy attributes. On SQLite, do not apply `COLLATE NOCASE` to mapped columns.
 This requirement covers equality and ordering, `in`, intersections, string matching, and
 hierarchy prefix/ancestor comparisons.
+
+**`contains`/`startsWith`/`endsWith` are the exception, and in your favour.** This adapter
+lowers them to `REPLACE` rather than `LIKE` — chosen so a column-valued needle cannot be
+reinterpreted as pattern syntax — and `REPLACE` is case-sensitive on SQLite, PostgreSQL and
+MySQL alike. That also sidesteps a hazard `LIKE`-based adapters have to configure around:
+SQLite's `LIKE` is case-insensitive for ASCII *regardless of collation*, so nothing but
+`PRAGMA case_sensitive_like = ON` makes it exact. Here the collation requirement above is
+about equality, ordering, membership and the hierarchy operators; the string operators are
+correct without it. The corpus proves both halves — `cs-eq` for equality, and `cs-contains`,
+`cs-startswith` and `cs-endswith` for string matching, on both the SQLite and PostgreSQL legs.
 
 ### Mapper options
 

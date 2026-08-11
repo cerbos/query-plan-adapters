@@ -1,0 +1,10 @@
+# Profile `demo` — the demo-domain program (dev.cerbos.example.demo.DemoApplication), not the
+# photo-sharing application. Activated from that class, never from the environment.
+#
+# Everything else it needs comes from application.yaml, including `cerbos.address`: one statement
+# of how this example reaches the PDP, shared by both programs.
+spring:
+  datasource:
+    # A separate in-memory database from the photo-sharing app's `photos`, so the two schemas
+    # cannot be confused when both are open in one H2 console. They never run in the same JVM.
+    url: jdbc:h2:mem:demo;DB_CLOSE_DELAY=-1

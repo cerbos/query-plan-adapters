@@ -1,0 +1,47 @@
+{
+  "action": "hier-list-id",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "overlaps",
+        "operands": [
+          {
+            "expression": {
+              "operator": "hierarchy",
+              "operands": [
+                {
+                  "value": "projects:f1"
+                },
+                {
+                  "value": ":"
+                }
+              ]
+            }
+          },
+          {
+            "expression": {
+              "operator": "hierarchy",
+              "operands": [
+                {
+                  "expression": {
+                    "operator": "list",
+                    "operands": [
+                      {
+                        "value": "projects"
+                      },
+                      {
+                        "variable": "request.resource.id"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

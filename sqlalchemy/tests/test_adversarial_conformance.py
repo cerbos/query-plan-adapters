@@ -83,6 +83,7 @@ SEED_KEYS = {
     "aOptionalString",
     "tags",
     "subCategoryNames",
+    "parentSeedId",
 }
 # Corpus prose, never read by a harness: the one documented exclusion.
 SEED_NOTE_KEY = "note"
@@ -270,6 +271,34 @@ DEGENERACY_GUARD_ACTIONS = (
     "cr-div-other-column",
     "cr-div-then-add",
     "cr-div-then-add-ne",
+    # The real to-one join (#375): one per hazard — the negated hop, the null
+    # comparison, two-level depth, the root conjunction, and the disjunction,
+    # whose failure direction is an under-grant.
+    "rel-not-bool-hop",
+    "rel-ne-null-hop",
+    "rel-bool-hop2",
+    "rel-hop-and-root",
+    "rel-hop2-or-exists",
+    # Case sensitivity in STRING MATCHING, a different mechanism from cs-eq:
+    # collation governs `=`, and on SQLite only `PRAGMA case_sensitive_like`
+    # governs LIKE.
+    "cs-contains",
+    # The primary key as a filterable attribute (#376): against a constant,
+    # against a column under negation, and inside a concatenation in both
+    # operand orders. SQLAlchemy renders CEL's string `+` as `||` through the
+    # column's own type, so both concatenations compare rather than raise.
+    "id-eq-const",
+    "id-f2f-ne",
+    "id-concat",
+    "id-concat-vf",
+    # string() over a NUMERIC column, the half this adapter lowers. Its boolean
+    # sibling is refused instead, so this entry proves the supported half still
+    # compares rather than joining the probes below.
+    "cast-string-double",
+    # CEL's `+` between two COLUMNS (#391). SQLAlchemy renders it through the
+    # columns' own String type, so it emits `||` (or CONCAT on MySQL) without
+    # needing the plan to say which overload it is.
+    "concat-f2f",
 )
 
 # Shapes this adapter refuses to translate: they have no oracle comparison to
@@ -282,6 +311,11 @@ DEGENERACY_LIVENESS_PROBES = (
     # int() over a numeric column: truncation-versus-rounding, unsupported for
     # every adapter but convex, which promotes it in adapterSupportedExpected.
     "cast-int-double",
+    # string() over a BOOLEAN column, where CAST is dialect-dependent (#376).
+    "cast-string-bool",
+    # `list` has no operator-table entry, so the constructed hierarchy path is
+    # refused before the hierarchy operators around it are reached.
+    "hier-list-id",
 )
 
 
@@ -323,6 +357,42 @@ def _scope_for(seed: Dict[str, Any]):
 
 def _labels_for(seed: Dict[str, Any]):
     return _derived_for(seed)["labels"]
+
+
+# -- the real to-one relation (conformance/README.md, "The real to-one relation")
+#
+# `parentSeedId` names the seed whose four scalars this row's `parent` carries,
+# and that seed's own `parentSeedId` names the ones `parent.inner` carries. The
+# chain is cut at two levels. Every resource owns a FRESH parent (and inner) row
+# rather than pointing at the named seed's own row, so no two resources share one
+# and a filter that returned the parent instead of the child cannot agree with
+# the oracle by accident.
+
+_SEEDS_BY_ID: Dict[str, Dict[str, Any]] = {seed["id"]: seed for seed in SEEDS}
+
+
+def _parent_seed_of(seed):
+    if seed is None or seed["parentSeedId"] is None:
+        return None
+    parent = _SEEDS_BY_ID.get(seed["parentSeedId"])
+    if parent is None:
+        raise AssertionError(
+            f'seeds.json: "{seed["id"]}" names parent "{seed["parentSeedId"]}", '
+            "which is not a seed id"
+        )
+    return parent
+
+
+def _relation_attr(seed: Dict[str, Any]) -> Dict[str, Any]:
+    """The four scalars as check() attributes: a NULL column is MISSING, one hop out."""
+    attr: Dict[str, Any] = {
+        "aBool": seed["aBool"],
+        "aString": seed["aString"],
+        "aNumber": seed["aNumber"],
+    }
+    if seed["aOptionalString"] is not None:
+        attr["aOptionalString"] = seed["aOptionalString"]
+    return attr
 
 
 # ---------------------------------------------------------------------------
@@ -379,6 +449,44 @@ class AdvLabel(AdvBase):
     name = Column(String, nullable=True)
     sub_category_id = Column(
         String, ForeignKey("adversarial_sub_category.id"), nullable=False
+    )
+
+
+# The corpus's one REAL to-one relation (conformance/seeds.json `parentSeedId`).
+# `parent` and `parent.inner` are separate rows reached through a join, unlike
+# `obj.inner`, which is a flat column wearing a dotted name. A resource owns its
+# own parent chain — the unique foreign key is what makes it to-ONE — so a filter
+# that returned the parent instead of the child could not agree with the oracle
+# by accident.
+#
+# ATTR_MAP deliberately carries no entry for these yet. This adapter has no
+# relation model of its own: reaching a scalar through a to-one hop is a
+# correlated subquery the CALLER supplies, so the mapping is designed alongside
+# the actions that need it rather than guessed here. Seeding it now is the expand
+# half of cerbos/query-plan-adapters#372's expand-contract.
+class AdvParent(AdvBase):
+    __tablename__ = "adversarial_parent"
+
+    id = Column(String, primary_key=True)
+    a_bool = Column(Boolean, nullable=False)
+    a_string = Column(String, nullable=False)
+    a_number = Column(Integer, nullable=False)
+    a_optional_string = Column(String, nullable=True)
+    resource_id = Column(
+        String, ForeignKey("adversarial_resource.id"), nullable=False, unique=True
+    )
+
+
+class AdvInner(AdvBase):
+    __tablename__ = "adversarial_inner"
+
+    id = Column(String, primary_key=True)
+    a_bool = Column(Boolean, nullable=False)
+    a_string = Column(String, nullable=False)
+    a_number = Column(Integer, nullable=False)
+    a_optional_string = Column(String, nullable=True)
+    parent_id = Column(
+        String, ForeignKey("adversarial_parent.id"), nullable=False, unique=True
     )
 
 
@@ -687,7 +795,52 @@ ATTRIBUTE_NULL_REPRESENTATION = {
     "request.resource.attr.coOwner": "explicit",
 }
 
+
+def _parent_scalar(column):
+    """One scalar of the to-one `parent`, as a correlated scalar subquery.
+
+    The resource owns at most one parent row (``resource_id`` is UNIQUE), so this
+    yields that row's value, or SQL NULL when the resource has no parent at all.
+    NULL is precisely what the check side means: an absent level sends no
+    attribute, CEL raises a missing-path error, and the PDP denies. Because
+    ``NOT NULL`` is still NULL, the row stays excluded under both polarities
+    without the explicit ``require_hops`` guard the COLLECTION chains need
+    (cerbos/query-plan-adapters#375).
+    """
+    return (
+        select(column)
+        .where(AdvParent.resource_id == AdvResource.id)
+        .correlate(AdvResource)
+        .scalar_subquery()
+    )
+
+
+def _inner_scalar(column):
+    """The same, one level further out: `parent.inner`.
+
+    Nesting the parent's own lookup inside the correlation is what keeps the two
+    levels distinct — reading off the parent, or off the resource, gives a
+    different row set for every action in the group.
+    """
+    return (
+        select(column)
+        .where(
+            AdvInner.parent_id
+            == select(AdvParent.id)
+            .where(AdvParent.resource_id == AdvResource.id)
+            .correlate(AdvResource)
+            .scalar_subquery()
+        )
+        .correlate(AdvResource)
+        .scalar_subquery()
+    )
+
+
 ATTR_MAP = {
+    # The primary key, reached as `request.resource.id` rather than through `attr` (the `id-*`
+    # actions). An adapter that resolves references by stripping a `request.resource.attr.`
+    # prefix never sees this name.
+    "request.resource.id": AdvResource.id,
     "request.resource.attr.aBool": AdvResource.a_bool,
     "request.resource.attr.aString": AdvResource.a_string,
     "request.resource.attr.aNumber": AdvResource.a_number,
@@ -701,6 +854,23 @@ ATTR_MAP = {
     # obj.inner is not a real nested column — mirrors aString, the same trick
     # the spring-data and prisma reference harnesses use for the p-struct probe.
     "request.resource.attr.obj.inner": AdvResource.a_string,
+    # The corpus's one REAL to-one chain (the `rel-*` actions). This adapter has no
+    # relation model, so the caller supplies the hop as a correlated scalar
+    # subquery — and that spelling needs no separate hop guard: an absent parent
+    # makes the subquery SQL NULL, which is CEL's missing-path error, and NOT NULL
+    # is still NULL, so the row stays excluded under BOTH polarities.
+    "request.resource.attr.parent.aBool": _parent_scalar(AdvParent.a_bool),
+    "request.resource.attr.parent.aString": _parent_scalar(AdvParent.a_string),
+    "request.resource.attr.parent.aNumber": _parent_scalar(AdvParent.a_number),
+    "request.resource.attr.parent.aOptionalString": _parent_scalar(
+        AdvParent.a_optional_string
+    ),
+    "request.resource.attr.parent.inner.aBool": _inner_scalar(AdvInner.a_bool),
+    "request.resource.attr.parent.inner.aString": _inner_scalar(AdvInner.a_string),
+    "request.resource.attr.parent.inner.aNumber": _inner_scalar(AdvInner.a_number),
+    "request.resource.attr.parent.inner.aOptionalString": _inner_scalar(
+        AdvInner.a_optional_string
+    ),
     "request.resource.attr.tags": TAGS,
     "request.resource.attr.tagNames": TAG_NAMES,
     "t": TAGS,
@@ -708,6 +878,10 @@ ATTR_MAP = {
     "t.name": AdvTag.name,
     "request.resource.attr.categories": CATEGORIES,
     "c": CATEGORIES,
+    # The category's own name, read inside the categories lambda. Only
+    # rel-hop2-or-exists reaches it — every other categories probe dots straight
+    # through to subCategories — so it is mapped here rather than alongside them.
+    "c.name": AdvCategory.name,
     "c.subCategories": SUB_OF_CATEGORY,
     "s": SUB_OF_CATEGORY,
     "s.name": AdvSubCategory.name,
@@ -738,6 +912,8 @@ def adv_engine():
     AdvBase.metadata.create_all(engine)
 
     resource_rows = []
+    parent_rows = []
+    inner_rows = []
     tag_rows = []
     category_rows = []
     sub_category_rows = []
@@ -756,6 +932,32 @@ def adv_engine():
                 "created_at": _timestamp_for(seed),
             }
         )
+        # The to-one chain, one owned row per level. A seed with no parent gets no
+        # row at all, which is what makes the absent-parent hazard reachable
+        # through a SCALAR rather than only through mainCategory's collection.
+        if (parent_seed := _parent_seed_of(seed)) is not None:
+            parent_id = f"{seed['id']}-parent"
+            parent_rows.append(
+                {
+                    "id": parent_id,
+                    "a_bool": parent_seed["aBool"],
+                    "a_string": parent_seed["aString"],
+                    "a_number": parent_seed["aNumber"],
+                    "a_optional_string": parent_seed["aOptionalString"],
+                    "resource_id": seed["id"],
+                }
+            )
+            if (inner_seed := _parent_seed_of(parent_seed)) is not None:
+                inner_rows.append(
+                    {
+                        "id": f"{parent_id}-inner",
+                        "a_bool": inner_seed["aBool"],
+                        "a_string": inner_seed["aString"],
+                        "a_number": inner_seed["aNumber"],
+                        "a_optional_string": inner_seed["aOptionalString"],
+                        "parent_id": parent_id,
+                    }
+                )
         for tag in seed["tags"]:
             tag_rows.append(
                 {"tag_id": tag["id"], "name": tag["name"], "resource_id": seed["id"]}
@@ -785,6 +987,10 @@ def adv_engine():
 
     with engine.begin() as conn:
         conn.execute(insert(AdvResource.__table__), resource_rows)
+        if parent_rows:
+            conn.execute(insert(AdvParent.__table__), parent_rows)
+        if inner_rows:
+            conn.execute(insert(AdvInner.__table__), inner_rows)
         if tag_rows:
             conn.execute(insert(AdvTag.__table__), tag_rows)
         if category_rows:
@@ -889,6 +1095,14 @@ def _check_resource(seed: Dict[str, Any]) -> Resource:
             "subCategories": [{"name": n} for n in seed["subCategoryNames"]],
             "subNames": list(seed["subCategoryNames"]),
         }
+    # The real to-one chain, mirroring the seeded rows exactly. A row with no
+    # parent sends NO `parent` attribute — a CEL missing-path error (deny) —
+    # matching the adapter's join finding nothing; likewise for `parent.inner`.
+    if (parent_seed := _parent_seed_of(seed)) is not None:
+        parent_attr = _relation_attr(parent_seed)
+        if (inner_seed := _parent_seed_of(parent_seed)) is not None:
+            parent_attr["inner"] = _relation_attr(inner_seed)
+        attr["parent"] = parent_attr
     return Resource(id=seed["id"], kind=RESOURCE_KIND, attr=attr)
 
 
@@ -972,11 +1186,11 @@ class TestAdversarialConformance:
 
         # Deliberate tripwires: a corpus edit must bump these in the same
         # change, so a new hostile action cannot join (or vanish) silently.
-        assert len(MANIFEST_ACTIONS) == 152
-        assert len(SEEDS) == 20
+        assert len(MANIFEST_ACTIONS) == 179
+        assert len(SEEDS) == 21
         # Each of these carries a pinned message, so a shape gained or lost has
         # to be re-triaged here rather than joining the throw suite unnoticed.
-        assert len(THROWING_ACTIONS) == 13
+        assert len(THROWING_ACTIONS) == 15
         assert misclassified == []
         assert SQLALCHEMY_SUPPORTED_EXPECTED <= {
             u["action"] for u in ACTIONS_FILE["expectedUnsupported"]
@@ -1169,6 +1383,47 @@ class TestAdversarialConformance:
         assert plan.filter.kind == PlanResourcesFilterKind.ALWAYS_ALLOWED
         assert 0 < len(oracle) < len(all_ids)
         assert _adapter_filtered_ids(adv_cerbos_client, adv_conn, action) == all_ids
+
+    def test_seeded_to_one_chain_matches_the_corpus_relation(self, adv_conn):
+        """The relation carries no corpus action yet — this is the expand half of
+        cerbos/query-plan-adapters#372's expand-contract — so nothing else in this
+        file would notice a seeder that stored no chain at all, or one that
+        attached every parent to the wrong resource. Read the two hops back
+        through a real join rather than counting rows: a count cannot tell an
+        inner row carrying the corpus's values from one carrying the root's own
+        columns, which is exactly the flat-column-alias failure this relation
+        exists to make visible.
+        """
+        with_parent = [s for s in SEEDS if _parent_seed_of(s) is not None]
+        with_inner = [
+            s for s in SEEDS if _parent_seed_of(_parent_seed_of(s)) is not None
+        ]
+        assert with_parent
+        assert with_inner
+        assert len(with_parent) < len(SEEDS)
+
+        joined = (
+            select(
+                AdvResource.id,
+                AdvParent.a_string.label("parent"),
+                AdvInner.a_string.label("inner"),
+            )
+            .select_from(AdvResource.__table__)
+            .outerjoin(AdvParent.__table__, AdvParent.resource_id == AdvResource.id)
+            .outerjoin(AdvInner.__table__, AdvInner.parent_id == AdvParent.id)
+        )
+        stored = {row.id: (row.parent, row.inner) for row in adv_conn.execute(joined)}
+
+        def a_string_of(seed) -> Union[str, None]:
+            return None if seed is None else seed["aString"]
+
+        assert stored == {
+            seed["id"]: (
+                a_string_of(_parent_seed_of(seed)),
+                a_string_of(_parent_seed_of(_parent_seed_of(seed))),
+            )
+            for seed in SEEDS
+        }
 
     def test_oracle_is_not_degenerate(self, adv_cerbos_client):
         # Guard the guard: these actions must produce a non-empty, non-total

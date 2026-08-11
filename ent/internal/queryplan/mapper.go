@@ -119,6 +119,16 @@ const (
 	// ValueTimestamp marks a column stored as a temporal type, so a `timestamp()` conversion
 	// around it is a no-op rather than an unsupported shape.
 	ValueTimestamp
+	// ValueBool marks a column stored as a boolean. It exists so `string()` over one can fail
+	// closed: SQLite and MySQL have no boolean type and render the stored 1/0 as "1", while CEL
+	// and PostgreSQL render "true", and nothing in the plan says which type a column holds
+	// (cerbos/query-plan-adapters#376).
+	ValueBool
+	// ValueString marks a column stored as text. It exists so CEL's `+` between two columns can
+	// be resolved to concatenation: the operator is overloaded on strings and the plan carries no
+	// operand types, so without a declaration the shape fails closed rather than emitting a
+	// numeric `+` that MySQL silently answers with 0 (cerbos/query-plan-adapters#391).
+	ValueString
 )
 
 // NullConvention declares, for one attribute, that its column can be SQL NULL and how the caller
@@ -158,7 +168,20 @@ const (
 type Entry struct {
 	// Relation is set when the attribute reaches another table, and Column is empty.
 	Relation *Relation
-	// Column names a column on the row this entry is read from.
+	// ScalarRelation reads Column from another table through a to-ONE hop, as a correlated
+	// scalar subquery — `R.attr.parent.aString`, where `parent` is a joined row rather than a
+	// column on this one. It reuses Relation's vocabulary (Table, SourceColumn, TargetColumn,
+	// Via, SubqueryFilter) because the chain is described identically; only the projection
+	// differs, and Via carries the intermediate levels of a multi-level chain.
+	//
+	// It is a separate field from Relation rather than "Relation plus a Column" so the to-ONE
+	// claim is explicit. The translator cannot check it: nothing in a table name says the
+	// correlation matches at most one row, and against a to-MANY relation the database would
+	// either pick an arbitrary row or fail at runtime depending on dialect. Declaring it here is
+	// the caller asserting the uniqueness their schema enforces.
+	ScalarRelation *Relation
+	// Column names a column on the row this entry is read from — the enclosing scope's row, or
+	// ScalarRelation's element row when that is set.
 	Column string
 	// Qualifier is the table or alias the column is read from. Callers normally leave it empty
 	// and let the translator fill it in — the resource table at the top level, a collection

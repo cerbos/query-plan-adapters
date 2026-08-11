@@ -14,7 +14,9 @@ something the harness structurally cannot.
 
 This is not hypothetical. `cerbos-sdk-java` declares protobuf at runtime-only scope in its Gradle
 metadata, which a composite build hides and a real Maven coordinate exposes.
-`spring-data/example/` is a composite build today and therefore misses exactly this class of bug.
+`spring-data/example/` was a composite build when this was written and therefore missed exactly
+this class of bug; [#359](https://github.com/cerbos/query-plan-adapters/issues/359) moved it onto
+`publishToMavenLocal`.
 
 ## Consequences
 
