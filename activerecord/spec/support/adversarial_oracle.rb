@@ -56,6 +56,17 @@ module AdversarialOracle
       "categories" => seed.fetch("subCategoryNames").map { |name| category_attr(seed, name) }
     }
 
+    # The real to-one chain (ADR 0005). A level that does not exist sends NO attribute, so CEL
+    # raises a missing-path error and check() denies — the same rule the root row follows for a
+    # NULL column.
+    parent_seed = ConformanceCorpus.parent_seed_of(seed)
+    if parent_seed
+      parent_attr = ConformanceCorpus.relation_attr(parent_seed)
+      inner_seed = ConformanceCorpus.parent_seed_of(parent_seed)
+      parent_attr["inner"] = ConformanceCorpus.relation_attr(inner_seed) if inner_seed
+      attr["parent"] = parent_attr
+    end
+
     optional_string = seed.fetch("aOptionalString")
     attr["aOptionalString"] = optional_string unless optional_string.nil?
 

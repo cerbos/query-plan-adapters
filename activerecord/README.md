@@ -28,15 +28,15 @@ into `exists`. If it cannot escape a `LIKE` needle, it never lets the wildcards 
 ### Conformance contract
 
 The tests compare this adapter with Cerbos PDP `0.54.0`. For each action, the test makes a
-plan with a real PDP, translates the plan, runs the query against 20 difficult rows, and
+plan with a real PDP, translates the plan, runs the query against 21 difficult rows, and
 compares the ids in the result with the decisions of `checkResource` for each row. The PDP
 gives the results for both sides. No person writes the expected results. The Spring Data
 adapter gives the reference behaviour.
 
 | Classification | Coverage |
 | --- | --- |
-| Tested against the oracle | 136 reference actions |
-| Fail-closed | 14 actions: 5 that this adapter cannot show, and the 9 that the reference adapter does not support either. Each one must raise an error whose message the corpus pins, so a typo or a transport error cannot pass as the refusal |
+| Tested against the oracle | 162 reference actions |
+| Fail-closed | 15 actions: 6 that this adapter cannot show, and the 9 that the reference adapter does not support either. Each one must raise an error whose message the corpus pins, so a typo or a transport error cannot pass as the refusal |
 | Refused under the `omitted` NULL convention | 1 action — see [The NULL convention of the caller](#the-null-convention-of-the-caller) |
 | Known difference in the planner | The Cerbos planner changes `has()` on a missing attribute into `ALWAYS_ALLOWED`, but `checkResource` denies the rows in which the attribute is missing. Until the planner has a correction, use `R.attr.x != null` and not `has(R.attr.x)` for the attributes in your database |
 
@@ -56,6 +56,7 @@ stay:
 | `p-timestamp` | `timestamp()` on a column that holds a timestamp in text. A comparison between that column and a `Time` compares two different text formats. Thus the order of the results comes from the text and not from the instants. Map the attribute to a `datetime` column. |
 | `cast-int-string`, `cast-double-string` | `int()` and `double()` over a text column. CEL reads the WHOLE string or makes an error, and Cerbos then denies the row, but SQL reads the digits at the front: `CAST('1junk' AS INTEGER)` is `1` on SQLite. Compare the column directly, or give an operator override. |
 | `cast-int-double` | `int()` over a double column. CEL removes the fraction toward zero. PostgreSQL and MySQL round a `CAST` to the nearest whole number, so the two disagree for every value with a fraction of one half or more. |
+| `cast-string-bool` | `string()` over a **boolean** column. SQLite and MySQL have no boolean type and keep 1 or 0, so `CAST(col AS TEXT)` gives `"1"` where CEL gives `"true"`, and the filter would then remove every row. PostgreSQL alone gives `"true"`, but one adapter serves all three dialects, and a translation that is correct on one and incorrect on two is not one this adapter can choose. `string()` over a number or a text column translates, because `CAST` agrees on all three. Compare the boolean column directly, or give an operator override that spells the two words your database uses. |
 | `filter-as-condition`, `map-as-condition` | A `filter()` or a `map()` that a policy uses as the whole condition. Those operations give a list and not a boolean, and only `size(filter(...))` or `hasIntersection(map(...), [...])` has a boolean meaning. |
 
 The adapter also raises an error for a plan whose `and` or `or` carries no operands, and for any
@@ -275,6 +276,29 @@ A path with dots goes through to-one associations. The adapter makes a **correla
 subquery** for it. Thus the path cannot increase the number of rows in the result, but a join
 can do that. If a path with dots contains a collection association, the adapter raises an
 error. A scalar comparison with "one of the elements" is not the request of the policy.
+
+More than one hop is permitted, and each hop must be to-one:
+
+```ruby
+# R.attr.parent.inner.aString
+"request.resource.attr.parent.inner.aString" =>
+  Cerbos::ActiveRecord.field("parent.inner.a_string")
+```
+
+The KEY is the plan variable, and the PATH is the association chain on your model. The two are
+independent, so the names in your policy do not have to be the names of your columns.
+
+A hop that does not exist gives NULL, and the comparison is then UNKNOWN and the row stays out
+of the result. This agrees with Cerbos: your application sends no `parent` attribute for that
+row, so CEL raises a missing-path error and `checkResource` denies it. The corpus holds this
+under one hop and two (`rel-*-hop`).
+
+The primary key is its own plan variable and not an attribute, so map it by name if a policy
+reads `R.id`:
+
+```ruby
+"request.resource.id" => Cerbos::ActiveRecord.field("id")
+```
 
 #### `relation` for collections
 

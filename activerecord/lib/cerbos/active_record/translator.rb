@@ -476,7 +476,7 @@ module Cerbos
         when "size" then size(values.fetch(0))
         when "hasIntersection" then has_intersection(values.fetch(0), values.fetch(1))
         when "timestamp" then timestamp(values.fetch(0))
-        when "string" then cast(values.fetch(0), "TEXT", "VARCHAR")
+        when "string" then cast_to_string(values.fetch(0))
         when "double" then cast_to_double(values.fetch(0))
         when "int" then cast_to_int(values.fetch(0))
         when "list" then values
@@ -947,6 +947,26 @@ module Cerbos
           "string or makes an error, and Cerbos then denies the row, but SQL reads the digits " \
           "at the front and gives a number, so the filter would keep the row. Compare the " \
           "column directly, or give an operator override."
+      end
+
+      # `CAST(x AS TEXT)` gives what CEL gives for a number and for a string. It does not for a
+      # boolean. SQLite and MySQL have no boolean type and keep 1 and 0, so the CAST makes "1"
+      # where CEL makes "true". The filter would then find no row at all, and the PDP permits
+      # 14 of the 21 rows in the corpus.
+      #
+      # One adapter serves all three dialects. PostgreSQL alone gives "true" and would agree,
+      # but a translation that is correct on one dialect and incorrect on two is not a
+      # translation this adapter can choose.
+      def cast_to_string(value)
+        if column_type(value) == :boolean
+          raise UnsupportedOperatorError,
+            "string() over a boolean column is not supported: SQLite and MySQL keep a boolean " \
+            "as 1 or 0, so CAST gives \"1\" where CEL gives \"true\", and the filter would " \
+            "then remove every row that the PDP permits. Compare the boolean column directly, " \
+            "or give an operator override that spells the two words your database uses."
+        end
+
+        cast(value, "TEXT", "VARCHAR")
       end
 
       # The same reason as `int()`: `double("abc")` is an error in CEL and Cerbos denies the

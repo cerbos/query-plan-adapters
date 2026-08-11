@@ -44,13 +44,34 @@ RSpec.describe "adversarial conformance" do
     # The explicit-null alias of the `scope` column, and the second half of `null-value-f2f`.
     # `scope` itself is omitted when NULL, so the corpus holds the same column under both
     # conventions and the field-to-field test has two explicit nulls to compare. It is NOT a
-    # second alias of `a_optional_string`: a column compared with itself is TRUE for all 20
-    # seeds, and the degeneracy guard refuses a total oracle.
+    # second alias of `a_optional_string`: a column compared with itself is TRUE for every
+    # seed, and the degeneracy guard refuses a total oracle.
     "request.resource.attr.coOwner" => field("scope", null_representation: :explicit),
     # obj.inner is not a true nested column. It uses the same column as aString. The
     # spring-data, prisma and sqlalchemy harnesses use the same substitute for the p-struct
     # test.
     "request.resource.attr.obj.inner" => field("a_string"),
+
+    # The primary key as an attribute. `R.id` reaches the wire as its own variable and not as
+    # `R.attr.*`, so it needs a mapping of its own.
+    "request.resource.id" => field("id"),
+
+    # The one REAL to-one relation of the corpus (ADR 0005), and the counterpart of
+    # `obj.inner` above: this one IS a join. A path with dots through a to-one association
+    # becomes a correlated scalar subquery, and each hop is required to exist — an absent
+    # parent gives NULL, which matches the missing-path error that check() denies with.
+    #
+    # No declaration of a null convention here. A NULL column one hop out is a MISSING
+    # attribute for check(), and SQL UNKNOWN denies under both polarities in the same way.
+    "request.resource.attr.parent.aBool" => field("parent.a_bool"),
+    "request.resource.attr.parent.aString" => field("parent.a_string"),
+    "request.resource.attr.parent.aNumber" => field("parent.a_number"),
+    "request.resource.attr.parent.aOptionalString" => field("parent.a_optional_string"),
+    "request.resource.attr.parent.inner.aBool" => field("parent.inner.a_bool"),
+    "request.resource.attr.parent.inner.aString" => field("parent.inner.a_string"),
+    "request.resource.attr.parent.inner.aNumber" => field("parent.inner.a_number"),
+    "request.resource.attr.parent.inner.aOptionalString" =>
+      field("parent.inner.a_optional_string"),
 
     "request.resource.attr.tags" => relation(
       :tags, fields: {"id" => field("tag_id"), "name" => field("name")}
@@ -59,6 +80,10 @@ RSpec.describe "adversarial conformance" do
     "request.resource.attr.tagNames" => relation(:tags, member_field: "name"),
 
     "request.resource.attr.categories" => relation(:categories, fields: {
+      # The category itself carries a name, and a lambda body can read it
+      # (`rel-hop2-or-exists`). Only the sub-category name was mapped before that action
+      # existed.
+      "name" => field("name"),
       "subCategories" => relation(:sub_categories, fields: {
         "name" => field("name"),
         "labels" => relation(:labels, fields: {"name" => field("name")})
@@ -68,7 +93,7 @@ RSpec.describe "adversarial conformance" do
     # The same two hops, but from the root and written as a chain: `mainCategory` is one
     # relation, and `subCategories`/`subNames` are nested relations in its fields. Each seed
     # holds at most one category, so the check side sees `mainCategory` as ONE object, and 16
-    # of the 20 seeds have no category and thus no attribute at all.
+    # of the seeds have no category and thus no attribute at all.
     #
     # The nesting is deliberate. A flat `has_many :through` under the full name with dots gives
     # the same joins, but it does not say which hop is the parent. Then an absent parent and a
@@ -123,10 +148,10 @@ RSpec.describe "adversarial conformance" do
   # into adapterUnsupported fails this list instead of emptying it without a word.
   #
   # The list belongs to this adapter. Do not copy it from another harness: this adapter compares
-  # 136 of the 141 actions, and a list built for an adapter that compares fewer would leave most
+  # 162 of the 168 actions, and a list built for an adapter that compares fewer would leave most
   # of the groups here with no guard at all (cerbos/query-plan-adapters#324).
   #
-  # Each entry has an oracle that is not empty and not all 20 seeds. Eight actions cannot join
+  # Each entry has an oracle that is not empty and not every seed. Eight actions cannot join
   # the list, because their oracle is degenerate BY CONSTRUCTION and no adapter can change that:
   # in-empty, p-double-frac, arith-add-eq-frac, nan-ord-le, size-huge-gt, w1-size-zero-chain and
   # w1-not-size-chain each allow nothing, and size-huge-lt allows every seed. Their groups are
@@ -175,6 +200,17 @@ RSpec.describe "adversarial conformance" do
     null-value-not-in-const
     null-value-f2f
     null-value-pv-not-exists
+    cs-contains
+    rel-eq-hop
+    rel-bool-hop2
+    rel-ne-null-hop
+    rel-hop-and-root
+    id-eq-const
+    id-f2f
+    id-concat
+    concat-f2f
+    cast-string-double
+    hier-list-id
   ].freeze
 
   # Shapes that this adapter REFUSES, kept because their group has no compared member here and
@@ -194,17 +230,17 @@ RSpec.describe "adversarial conformance" do
     # this adapter without a test. Increase these numbers only when you know why
     # conformance/actions.json is larger.
     it "pins the corpus size" do
-      expect(ConformanceCorpus::ACTIONS_FILE.fetch("conformance").size).to eq(141)
+      expect(ConformanceCorpus::ACTIONS_FILE.fetch("conformance").size).to eq(168)
       expect(ConformanceCorpus::EXPECTED_UNSUPPORTED.size).to eq(9)
       expect(ConformanceCorpus::NULL_REPRESENTATION_OMITTED.size).to eq(1)
-      expect(ConformanceCorpus::MANIFEST_ACTIONS.size).to eq(152)
+      expect(ConformanceCorpus::MANIFEST_ACTIONS.size).to eq(179)
       # Every one of these carries a pinned message, so a throwing action that appears or
       # disappears must be triaged here and cannot join the suite quietly.
-      expect(ConformanceCorpus::THROWING_ACTIONS.size).to eq(14)
+      expect(ConformanceCorpus::THROWING_ACTIONS.size).to eq(15)
       # The guard has one entry for each group of hostile shapes. A new group arrives with a
       # new action, which the count above already stops. This number makes the second half of
       # that decision explicit: name a representative for the new group here.
-      expect(DEGENERACY_GUARD_ACTIONS.size).to eq(43)
+      expect(DEGENERACY_GUARD_ACTIONS.size).to eq(54)
     end
 
     # Adding a throwing action without a pinned message must fail the run and must not turn the
@@ -239,6 +275,41 @@ RSpec.describe "adversarial conformance" do
           "#{action}: in the degeneracy guard but this adapter does not compare it"
         expect_non_degenerate_oracle(action)
       end
+    end
+
+    # The seeder for the to-one chain, pinned directly (ADR 0005).
+    #
+    # The two hops are read back THROUGH the joins and compared with the corpus, and the rows
+    # are not counted. A count cannot tell an inner row that carries the values of the corpus
+    # from one that carries the columns of the root row, and that is the failure of a flat
+    # column alias which this relation exists to make visible.
+    it "seeds the to-one chain that the corpus describes" do
+      with_parent = ConformanceCorpus::SEEDS.select { |s| ConformanceCorpus.parent_seed_of(s) }
+      with_inner = ConformanceCorpus::SEEDS.select { |s|
+        ConformanceCorpus.parent_seed_of(ConformanceCorpus.parent_seed_of(s))
+      }
+
+      # All three depths must be present, or the chain proves less than it appears to.
+      expect(with_parent).not_to be_empty
+      expect(with_inner).not_to be_empty
+      expect(with_parent.size).to be < ConformanceCorpus::SEEDS.size
+
+      stored = AdvResource
+        .left_joins(parent: :inner)
+        .pluck(
+          :id,
+          AdvParent.arel_table[:a_string],
+          AdvInner.arel_table[:a_string]
+        )
+        .to_h { |id, parent, inner| [id, [parent, inner]] }
+
+      expected = ConformanceCorpus::SEEDS.to_h { |seed|
+        parent = ConformanceCorpus.parent_seed_of(seed)
+        inner = ConformanceCorpus.parent_seed_of(parent)
+        [seed.fetch("id"), [parent&.fetch("aString"), inner&.fetch("aString")]]
+      }
+
+      expect(stored).to eq(expected)
     end
 
     # The same anti-vacuity assertion for the groups where this adapter compares nothing.

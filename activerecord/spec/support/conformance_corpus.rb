@@ -31,7 +31,9 @@ module ConformanceCorpus
 
   # --- corpus coverage guards ---------------------------------------------------------------
 
-  SEED_KEYS = %w[id aBool aString aNumber aOptionalString tags subCategoryNames].freeze
+  SEED_KEYS = %w[
+    id aBool aString aNumber aOptionalString tags subCategoryNames parentSeedId
+  ].freeze
   # Corpus prose that no harness reads: the one documented exclusion from SEED_KEYS.
   SEED_NOTE_KEY = "note"
   # The one array of nested objects that a seed carries. A key added inside an element
@@ -183,4 +185,40 @@ module ConformanceCorpus
   def scope(seed) = derived(seed).fetch("scope")
 
   def labels(seed) = derived(seed).fetch("labels")
+
+  # --- the real to-one relation (conformance/README.md, ADR 0005) -----------------------------
+  #
+  # `parentSeedId` is the one seed key that resolves against another ROW. It names the seed
+  # whose four scalars this row's `parent` carries, and that seed's own `parentSeedId` names
+  # the ones `parent.inner` carries. The chain stops at two levels.
+  #
+  # A resource owns a FRESH parent row, and does not point at the row of the named seed. Thus
+  # no two resources use one parent, and a filter that gave the parent in place of the child
+  # cannot agree with the oracle by accident.
+  SEEDS_BY_ID = SEEDS.to_h { |seed| [seed.fetch("id"), seed] }.freeze
+
+  def parent_seed_of(seed)
+    return nil if seed.nil?
+
+    parent_id = seed.fetch("parentSeedId")
+    return nil if parent_id.nil?
+
+    SEEDS_BY_ID.fetch(parent_id) do
+      raise "seeds.json: #{seed.fetch("id").inspect} names parent #{parent_id.inspect}, " \
+            "which is not a seed id"
+    end
+  end
+
+  # The four scalars of one hop as check() attributes. A NULL column is a MISSING attribute
+  # one hop out, exactly as it is on the root row.
+  def relation_attr(seed)
+    attr = {
+      "aBool" => seed.fetch("aBool"),
+      "aString" => seed.fetch("aString"),
+      "aNumber" => seed.fetch("aNumber")
+    }
+    optional = seed.fetch("aOptionalString")
+    attr["aOptionalString"] = optional unless optional.nil?
+    attr
+  end
 end
