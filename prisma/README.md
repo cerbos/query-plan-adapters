@@ -95,10 +95,23 @@ mapped authorization columns as part of the policy contract:
   case-insensitive (`_ci`) defaults.
 - SQL Server: use a case-sensitive (`_CS_`) collation rather than a case-insensitive (`_CI_`)
   collation.
-- SQLite: do not apply `COLLATE NOCASE` to mapped fields, and verify the exact comparison
-  behavior of any database configuration or extension used in production.
+- SQLite: do not apply `COLLATE NOCASE` to mapped fields, and **also set
+  `PRAGMA case_sensitive_like = ON`** — see below.
 
-The adapter cannot override a column's collation in a Prisma `where` filter. See Prisma's
+**On SQLite, collation is not enough.** `contains`, `startsWith` and `endsWith` lower to `LIKE`,
+and SQLite's `LIKE` is case-insensitive for ASCII *regardless of the column's collation*: a
+`COLLATE BINARY` column answers `= 'one'` case-sensitively and `LIKE '%one%'` case-insensitively
+in the same query. Only `PRAGMA case_sensitive_like = ON` changes it, and the pragma is
+per-connection, so it must be set on every connection the application uses — not once at schema
+creation.
+
+That distinction is why this was missed for so long: the corpus's `cs-eq` action proved equality
+was case-sensitive on SQLite, and equality is the one operator collation *does* govern. The
+`cs-contains`, `cs-startswith` and `cs-endswith` actions now prove the string operators
+separately, and without the pragma this adapter over-grants every one of them on SQLite.
+
+The adapter cannot override a column's collation, or set a pragma, from inside a Prisma `where`
+filter. See Prisma's
 [case-sensitivity documentation](https://docs.prisma.io/docs/orm/v6/prisma-client/queries/case-sensitivity)
 for provider-specific details.
 
@@ -171,7 +184,7 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` d
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 99 reference actions |
+| Oracle-tested | 117 reference actions |
 | Fail-closed | 42 reference actions plus the 8 reference-unsupported shapes (50 actions total) |
 | Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute the caller sends as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare it per attribute — `nullAttributeRepresentation: "explicit"` on the mapper entry — or the historical rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
@@ -211,7 +224,7 @@ Where the application narrows its own reads of a related model, declare the same
 | Subtype discrimination | **Caller-owned**, reproducible with `subqueryFilter` | A `type`/`kind` discriminator column where one model holds several row kinds. Declare `{ type: "…" }` |
 | To-one relation used as a collection | **Rejected by Prisma** | A `type: "one"` mapping compiles to `is`, an argument Prisma only accepts on a relation its own schema declares to-one, and `@relation(references: …)` must already point at a unique field. Mapping a to-many relation as `type: "one"` is therefore a query-validation error from Prisma, not a silently wider subquery |
 | Composite association key | **Reproduced by Prisma** | Prisma resolves multi-column foreign keys itself from `@relation(fields: […], references: […])`. The mapping names the relation, never its columns, so there is no key for the adapter to get wrong |
-| Absent to-one parent | **Reproduced**, and proved by the corpus (`w1-all-chain` and siblings) | None — every operator reached through a relation chain requires its intermediate hops separately, so a missing parent stays denied under both polarities ([#309](https://github.com/cerbos/query-plan-adapters/issues/309), [#315](https://github.com/cerbos/query-plan-adapters/issues/315)) |
+| Absent to-one parent | **Reproduced**, and proved by the corpus (`w1-all-chain`, `rel-not-bool-hop` and siblings) | None — every operator reached through a relation requires its to-one hops separately, so a missing parent stays denied under both polarities ([#309](https://github.com/cerbos/query-plan-adapters/issues/309), [#315](https://github.com/cerbos/query-plan-adapters/issues/315), [#375](https://github.com/cerbos/query-plan-adapters/issues/375)). **Behaviour change in #375:** this previously held only for a chain of two or more relations. A negation over a SINGLE to-one hop — `!R.attr.parent.aBool` against a `type: "one"` mapping — returned every row whose relation was absent. It now emits `AND: [{ parent: { is: {} } }, { NOT: … }]` and returns fewer rows: an over-grant fix, and consumer-visible for any policy with that shape |
 
 #### Declaring the application's own predicate
 

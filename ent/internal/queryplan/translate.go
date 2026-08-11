@@ -1122,11 +1122,36 @@ func (b *builder) resolveVariable(reference string, m Mapper) (value, error) {
 			"attribute %q maps to a collection and cannot be used as a scalar value", reference,
 		)
 	}
+	if entry.ScalarRelation != nil {
+		return b.scalarThroughHop(entry), nil
+	}
 	return Column{
 		Qualifier:    entry.Qualifier,
 		Name:         entry.Column,
 		ExplicitNull: entry.NullConvention == NullConventionExplicit,
 	}, nil
+}
+
+// scalarThroughHop reads one column of a to-ONE relation as a correlated scalar subquery.
+//
+// No hop guard is wrapped around it, unlike the collection chains: a subquery with no correlated
+// row IS NULL, which is already CEL's missing-path error, and NULL propagates through every
+// comparison and negation built on top of it. The guard the collection macros need exists because
+// EXISTS is two-valued and collapses "absent parent" onto "no matching child"; a scalar projection
+// never makes that collapse.
+func (b *builder) scalarThroughHop(entry Entry) Expr {
+	alias := b.newAlias()
+	from, correlate := b.relationScope(entry.ScalarRelation, alias, entry.Qualifier)
+	return Subquery{
+		Kind:      SubqueryScalar,
+		From:      from,
+		Correlate: correlate,
+		Select: Column{
+			Qualifier:    alias,
+			Name:         entry.Column,
+			ExplicitNull: entry.NullConvention == NullConventionExplicit,
+		},
+	}
 }
 
 // lambdaParts destructures the planner's `lambda(body, variable)` operand.

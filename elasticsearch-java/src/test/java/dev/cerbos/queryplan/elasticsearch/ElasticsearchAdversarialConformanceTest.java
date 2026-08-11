@@ -80,7 +80,19 @@ class ElasticsearchAdversarialConformanceTest {
             // reason and the claimed limitation is never actually exercised.
             Map.entry("request.resource.attr.categories", "categories"),
             Map.entry("request.resource.attr.mainCategory.subCategories", "mainCategory.subCategories"),
-            Map.entry("request.resource.attr.mainCategory.subNames", "mainCategory.subNames"));
+            Map.entry("request.resource.attr.mainCategory.subNames", "mainCategory.subNames"),
+            // The corpus's one REAL to-one chain (the `rel-*` actions), indexed as plain objects
+            // because Elasticsearch has no join. Every level is mapped even where the action is
+            // fail-closed: an unmapped field throws "Unknown attribute" instead of the mechanism
+            // actions.json names, which passes the throw test for the wrong reason (#326).
+            Map.entry("request.resource.attr.parent.aBool", "parent.aBool"),
+            Map.entry("request.resource.attr.parent.aString", "parent.aString"),
+            Map.entry("request.resource.attr.parent.aNumber", "parent.aNumber"),
+            Map.entry("request.resource.attr.parent.aOptionalString", "parent.aOptionalString"),
+            Map.entry("request.resource.attr.parent.inner.aBool", "parent.inner.aBool"),
+            Map.entry("request.resource.attr.parent.inner.aString", "parent.inner.aString"),
+            Map.entry("request.resource.attr.parent.inner.aNumber", "parent.inner.aNumber"),
+            Map.entry("request.resource.attr.parent.inner.aOptionalString", "parent.inner.aOptionalString"));
 
     /**
      * The attributes the corpus sends to {@code check()} as EXPLICIT nulls
@@ -347,10 +359,10 @@ class ElasticsearchAdversarialConformanceTest {
         manifest.addAll(expected);
         manifest.addAll(nullRepresentationOmittedActions);
         manifest.addAll(divergences);
-        assertEquals(43, oracleActions.size());
+        assertEquals(61, oracleActions.size());
         assertEquals(107, throwingActions.size());
         assertEquals(1, nullRepresentationOmittedActions.size());
-        assertEquals(152, classified.size());
+        assertEquals(170, classified.size());
         assertEquals(manifest, classified, "every manifest action must be classified locally");
     }
 
@@ -765,7 +777,14 @@ class ElasticsearchAdversarialConformanceTest {
     private static final List<String> DEGENERACY_GUARD_ACTIONS = List.of(
             "vf-le", "like-percent", "pv-exists", "pv-all", "null-ne",
             // The chained relation (#309): the shapes Elasticsearch's nested queries express.
-            "w1-exists-chain");
+            "w1-exists-chain",
+            // The real to-one join (#375). Indexed as plain objects rather than `nested`, so an
+            // absent level is simply a missing field — already the CEL missing-attribute case,
+            // which is why all fifteen translate here. One per hazard.
+            "rel-not-bool-hop", "rel-ne-null-hop", "rel-bool-hop2",
+            "rel-hop-and-root", "rel-hop2-or-exists",
+            // Case sensitivity in STRING MATCHING, a different mechanism from cs-eq.
+            "cs-contains");
 
     /**
      * Shapes this adapter refuses to translate: they have no oracle comparison to guard, and stay

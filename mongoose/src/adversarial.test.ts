@@ -633,6 +633,16 @@ const DEGENERACY_GUARD_ACTIONS = [
   // Mongoose throws on the whole cr-div group (#311), so the computed-relation group is guarded
   // by the fractional-size shape it does translate.
   "cr-size-frac-ge",
+  // The real to-one join (#375): one per hazard — the negated hop, the null comparison, two-level
+  // depth, the root conjunction, and the disjunction, whose failure direction is an under-grant.
+  "rel-not-bool-hop",
+  "rel-ne-null-hop",
+  "rel-bool-hop2",
+  "rel-hop-and-root",
+  "rel-hop2-or-exists",
+  // Case sensitivity in STRING MATCHING (#375 follow-up), a different mechanism from cs-eq:
+  // collation governs `=`, and on SQLite nothing but `PRAGMA case_sensitive_like` governs LIKE.
+  "cs-contains",
 ] as const;
 
 /**
@@ -811,10 +821,35 @@ const MAPPER: Mapper = {
   // obj.inner is not a real nested path — it mirrors aString. `parent.inner` below is the
   // opposite: a real two-level to-one chain. The two are kept side by side on purpose.
   "request.resource.attr.obj.inner": { field: "aString" },
-  // The corpus's real to-one chain is seeded below and mirrored on the check side, but carries
-  // no mapping yet: nothing references it until the join shapes land (#375), and an unexercised
-  // mapping is a declaration no assertion holds to anything. This is the expand half of
-  // cerbos/query-plan-adapters#372's expand–contract.
+  // The corpus's one REAL to-one chain (the `rel-*` actions), stored as an embedded subdocument
+  // per level rather than a joined collection. `type: "one"` flattens the path to `parent.aBool`
+  // AND declares the level as absent-able, which is what makes the adapter require it outside
+  // any `$nor`: a document with `parent: null` has no `parent.aBool` path at all, and an
+  // unguarded negation matches exactly those documents.
+  "request.resource.attr.parent": {
+    relation: {
+      name: "parent",
+      type: "one",
+      fields: {
+        aBool: { field: "aBool" },
+        aString: { field: "aString" },
+        aNumber: { field: "aNumber" },
+        aOptionalString: { field: "aOptionalString", nullable: true },
+      },
+    },
+  },
+  "request.resource.attr.parent.inner": {
+    relation: {
+      name: "parent.inner",
+      type: "one",
+      fields: {
+        aBool: { field: "aBool" },
+        aString: { field: "aString" },
+        aNumber: { field: "aNumber" },
+        aOptionalString: { field: "aOptionalString", nullable: true },
+      },
+    },
+  },
   "request.resource.attr.tags": {
     relation: {
       name: "tags",
@@ -1161,7 +1196,7 @@ describe("adversarial conformance corpus", () => {
       /pins no throw message/
     );
   });
-  test("manifest assigns all 152 actions exactly one Mongoose outcome", () => {
+  test("manifest assigns all 170 actions exactly one Mongoose outcome", () => {
     const oracle = new Set(ORACLE_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map((entry) => entry.action));
     const nullOmitted = new Set(
@@ -1177,10 +1212,10 @@ describe("adversarial conformance corpus", () => {
       return count !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(152);
+    expect(MANIFEST_ACTIONS.size).toBe(170);
     expect(unsupportedEntries).toHaveLength(38);
     expect(supportedExpectedEntries).toHaveLength(4);
-    expect(ORACLE_ACTIONS).toHaveLength(107);
+    expect(ORACLE_ACTIONS).toHaveLength(125);
     expect(THROWING_ACTIONS).toHaveLength(43);
     expect(misclassified).toEqual([]);
     expect(

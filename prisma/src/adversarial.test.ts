@@ -414,6 +414,16 @@ const DEGENERACY_GUARD_ACTIONS = [
   "w1-not-in-chain",
   "w1-not-hasint-chain",
   "w1-ternary-chain-cond",
+  // The real to-one join (#375): one per hazard — the negated hop, the null comparison, two-level
+  // depth, the root conjunction, and the disjunction, whose failure direction is an under-grant.
+  "rel-not-bool-hop",
+  "rel-ne-null-hop",
+  "rel-bool-hop2",
+  "rel-hop-and-root",
+  "rel-hop2-or-exists",
+  // Case sensitivity in STRING MATCHING (#375 follow-up), a different mechanism from cs-eq:
+  // collation governs `=`, and on SQLite nothing but `PRAGMA case_sensitive_like` governs LIKE.
+  "cs-contains",
 ] as const;
 
 /**
@@ -578,10 +588,36 @@ const MAPPER: Record<string, MapperConfig> = {
   // reference harness uses for the p-struct probe. `parent.inner` below is the opposite: a real
   // two-level join. The two are kept side by side on purpose.
   "request.resource.attr.obj.inner": { field: "aString" },
-  // The corpus's real to-one chain is seeded below and mirrored on the check side, but carries
-  // no mapping yet: nothing references it until the join shapes land (#375), and an unexercised
-  // mapping is a declaration no assertion holds to anything. This is the expand half of
-  // cerbos/query-plan-adapters#372's expand–contract.
+  // The corpus's one REAL to-one chain (the `rel-*` actions). `type: "one"` is what makes the
+  // adapter emit `is:` rather than `some:`, and `is:` on an optional relation is what requires
+  // the hop to exist — the absent-parent guard the negated shapes discriminate. `inner` nests
+  // the same declaration one level further out; two levels is where alias scoping breaks.
+  "request.resource.attr.parent": {
+    relation: {
+      name: "parent",
+      type: "one",
+      model: "AdversarialParent",
+      fields: {
+        aBool: { field: "aBool" },
+        aString: { field: "aString" },
+        aNumber: { field: "aNumber" },
+        aOptionalString: { field: "aOptionalString", nullable: true },
+        inner: {
+          relation: {
+            name: "inner",
+            type: "one",
+            model: "AdversarialInner",
+            fields: {
+              aBool: { field: "aBool" },
+              aString: { field: "aString" },
+              aNumber: { field: "aNumber" },
+              aOptionalString: { field: "aOptionalString", nullable: true },
+            },
+          },
+        },
+      },
+    },
+  },
   "request.resource.attr.tags": {
     relation: {
       name: "tags",
@@ -665,6 +701,16 @@ const MAPPER: Record<string, MapperConfig> = {
 const MAPPER_WITHOUT_NULL_CONVENTIONS = withoutNullConventions(MAPPER);
 
 beforeAll(async () => {
+  // CEL string matching is case-sensitive, and this adapter lowers contains/startsWith/endsWith
+  // to LIKE. On SQLite, LIKE is case-INSENSITIVE for ASCII no matter what collation the column
+  // was created with — only this pragma changes it — so without it every string predicate
+  // over-grants by exactly the case-variant rows (the `cs-contains` group; proved by c1, "One").
+  // The column collation the README talks about governs `=`, not LIKE, which is why cs-eq passed
+  // here for a long time while the string operators did not. ent and sqlalchemy set the same
+  // pragma; drizzle needs none because it lowers to REPLACE rather than LIKE.
+  if (STORE_NAME === "sqlite") {
+    await prisma.$executeRawUnsafe("PRAGMA case_sensitive_like = ON");
+  }
   await prisma.adversarialInner.deleteMany();
   await prisma.adversarialParent.deleteMany();
   await prisma.adversarialLabel.deleteMany();
@@ -981,7 +1027,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(152);
+    expect(MANIFEST_ACTIONS.size).toBe(170);
     // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
     // gained or lost has to be re-triaged here rather than joining the suite unnoticed.
     expect(THROWING_ACTIONS).toHaveLength(51);

@@ -219,7 +219,7 @@ type Cast struct {
 	To CastType
 }
 
-// SubqueryKind distinguishes the two shapes a relation mapping lowers into.
+// SubqueryKind distinguishes the shapes a relation mapping lowers into.
 type SubqueryKind uint8
 
 const (
@@ -228,6 +228,15 @@ const (
 	// SubqueryCount produces the number of correlated rows as a scalar value, which is what
 	// `size(R.attr.tags)` and the relation-count thresholds need.
 	SubqueryCount
+	// SubqueryScalar reads Select from the single correlated row of a to-ONE relation, which is
+	// what a scalar reached THROUGH a hop needs (`R.attr.parent.aString`).
+	//
+	// It is the one kind that can produce SQL NULL for a structural reason rather than a stored
+	// one: no correlated row at all yields NULL, and that is exactly right. An absent to-one hop
+	// sends no attribute, CEL raises a missing-path error and the PDP denies — and because NULL
+	// propagates, `NOT (subquery = TRUE)` is NULL too, so the row stays excluded under BOTH
+	// polarities without a separate hop guard (cerbos/query-plan-adapters#375).
+	SubqueryScalar
 )
 
 // FromItem is one aliased table in a subquery's FROM clause.
@@ -246,8 +255,11 @@ type FromItem struct {
 type Subquery struct {
 	Correlate Expr
 	Where     Expr
-	From      []FromItem
-	Kind      SubqueryKind
+	// Select is the projected expression, set only for SubqueryScalar and nil otherwise —
+	// EXISTS projects a literal and COUNT projects the aggregate.
+	Select Expr
+	From   []FromItem
+	Kind   SubqueryKind
 }
 
 func (Column) isExpr()      {}

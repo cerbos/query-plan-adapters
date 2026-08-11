@@ -374,6 +374,16 @@ const DEGENERACY_GUARD_ACTIONS = [
   "cr-div-other-column",
   "cr-div-then-add",
   "cr-div-then-add-ne",
+  // The real to-one join (#375): one per hazard — the negated hop, the null comparison, two-level
+  // depth, the root conjunction, and the disjunction, whose failure direction is an under-grant.
+  "rel-not-bool-hop",
+  "rel-ne-null-hop",
+  "rel-bool-hop2",
+  "rel-hop-and-root",
+  "rel-hop2-or-exists",
+  // Case sensitivity in STRING MATCHING (#375 follow-up), a different mechanism from cs-eq:
+  // collation governs `=`, and on SQLite nothing but `PRAGMA case_sensitive_like` governs LIKE.
+  "cs-contains",
 ] as const;
 
 // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") --------
@@ -710,10 +720,39 @@ function buildMapper(schema: AdversarialSchema): Record<string, MapperEntry> {
     // and prisma reference harnesses use for the p-struct probe. `parent.inner` below is the
     // opposite: a real two-level join. The two are kept side by side on purpose.
     "request.resource.attr.obj.inner": schema.resources.aString,
-    // The corpus's real to-one chain is seeded below and mirrored on the check side, but carries
-    // no mapping yet: nothing references it until the join shapes land (#375), and an unexercised
-    // mapping is a declaration no assertion holds to anything. This is the expand half of
-    // cerbos/query-plan-adapters#372's expand–contract.
+    // The corpus's one REAL to-one chain (the `rel-*` actions). `type: "one"` is what tells the
+    // adapter this hop can be ABSENT, which is what the negated shapes discriminate: an absent
+    // parent sends no attribute, so CEL raises a missing-path error and the PDP denies, while an
+    // unguarded `NOT EXISTS` over the join is TRUE for exactly those rows. `inner` nests the same
+    // declaration one level further out.
+    "request.resource.attr.parent": {
+      relation: {
+        type: "one",
+        table: schema.parents,
+        sourceColumn: schema.resources.id,
+        targetColumn: schema.parents.resourceId,
+        fields: {
+          aBool: schema.parents.aBool,
+          aString: schema.parents.aString,
+          aNumber: schema.parents.aNumber,
+          aOptionalString: schema.parents.aOptionalString,
+          inner: {
+            relation: {
+              type: "one",
+              table: schema.inners,
+              sourceColumn: schema.parents.id,
+              targetColumn: schema.inners.parentId,
+              fields: {
+                aBool: schema.inners.aBool,
+                aString: schema.inners.aString,
+                aNumber: schema.inners.aNumber,
+                aOptionalString: schema.inners.aOptionalString,
+              },
+            },
+          },
+        },
+      },
+    },
     "request.resource.attr.tags": {
       relation: {
         type: "many",
@@ -1417,7 +1456,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(152);
+    expect(MANIFEST_ACTIONS.size).toBe(170);
     expect(NULL_REPRESENTATION_OMITTED).toHaveLength(1);
     // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
     // gained or lost has to be re-triaged here rather than joining the suite unnoticed.

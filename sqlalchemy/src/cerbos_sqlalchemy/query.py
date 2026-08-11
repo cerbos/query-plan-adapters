@@ -963,6 +963,16 @@ def get_query(
     for variable, column in attributes_to_validate:
         column_table = getattr(column, "table", None)
         if column_table is None:
+            # A self-contained SQL expression — canonically a correlated scalar
+            # subquery — is how a caller reaches a scalar through a to-ONE hop
+            # without a join (cerbos/query-plan-adapters#375). It carries its own
+            # correlation, so it needs no `table_mapping`, and an absent hop makes
+            # it SQL NULL: CEL's missing-path error, excluded under BOTH polarities
+            # because NOT NULL is still NULL. Only a value that is neither a column
+            # nor an expression — a bare relation marker used outside an override —
+            # is a mapping error.
+            if isinstance(column, ColumnElement):
+                continue
             raise TypeError(
                 f"Attribute '{variable}' must be handled by an operator override "
                 "or map to a SQLAlchemy column"

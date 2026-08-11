@@ -1,0 +1,20 @@
+{
+  "action": "rel-ge-hop",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "ge",
+        "operands": [
+          {
+            "variable": "request.resource.attr.parent.aNumber"
+          },
+          {
+            "value": 2
+          }
+        ]
+      }
+    }
+  }
+}

@@ -887,10 +887,17 @@ describe("Field Operations", () => {
       });
 
       // #then
+      // The hop is required OUTSIDE the negation: an absent to-one relation sends no attribute,
+      // so CEL raises a missing-path error and the PDP denies, while a bare
+      // `NOT { nestedResource: { is: … } }` is TRUE for exactly those rows
+      // (cerbos/query-plan-adapters#375).
       expect(result).toStrictEqual({
         kind: PlanKind.CONDITIONAL,
         filters: {
-          NOT: { nestedResource: { is: { aBool: { equals: true } } } },
+          AND: [
+            { nestedResource: { is: {} } },
+            { NOT: { nestedResource: { is: { aBool: { equals: true } } } } },
+          ],
         },
       });
     });
@@ -1076,10 +1083,15 @@ describe("Field Operations", () => {
         },
       });
 
+      // The hop is required outside the negation, so a row with no `nested` at all stays
+      // excluded rather than satisfying the NOT vacuously (cerbos/query-plan-adapters#375).
       expect(result).toStrictEqual({
         kind: PlanKind.CONDITIONAL,
         filters: {
-          NOT: { nested: { is: { aBool: { equals: true } } } },
+          AND: [
+            { nested: { is: {} } },
+            { NOT: { nested: { is: { aBool: { equals: true } } } } },
+          ],
         },
       });
 
@@ -3039,18 +3051,26 @@ describe("Relations", () => {
           },
         });
 
+        // The hop is required outside the negation (cerbos/query-plan-adapters#375), which is
+        // what the row expectation below has always described: it excludes rows with no
+        // createdBy, and only agreed with the old filter because every fixture row has one.
         expect(result).toStrictEqual({
           kind: PlanKind.CONDITIONAL,
           filters: {
-            NOT: {
-              createdBy: {
-                is: {
-                  id: {
-                    equals: "user1",
+            AND: [
+              { createdBy: { is: {} } },
+              {
+                NOT: {
+                  createdBy: {
+                    is: {
+                      id: {
+                        equals: "user1",
+                      },
+                    },
                   },
                 },
               },
-            },
+            ],
           },
         });
 
@@ -5086,20 +5106,28 @@ describe("Complex Operations", () => {
         },
       });
 
+      // Only the to-ONE conjunct gains the hop requirement (#375). The to-MANY one must not:
+      // `!tags.exists(…)` over zero tags is TRUE in CEL, so requiring a tag there would turn a
+      // correct filter into an under-grant.
       expect(result).toStrictEqual({
         kind: PlanKind.CONDITIONAL,
         filters: {
           AND: [
             {
-              NOT: {
-                createdBy: {
-                  is: {
-                    id: {
-                      equals: "user1",
+              AND: [
+                { createdBy: { is: {} } },
+                {
+                  NOT: {
+                    createdBy: {
+                      is: {
+                        id: {
+                          equals: "user1",
+                        },
+                      },
                     },
                   },
                 },
-              },
+              ],
             },
             {
               NOT: {

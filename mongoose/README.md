@@ -70,7 +70,7 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` d
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 103 reference conformance actions plus regex, ordered indexing/`get-field`, and timestamp probes (106 actions) |
+| Oracle-tested | 121 reference conformance actions plus regex, ordered indexing/`get-field`, timestamp and mixed-null field-to-field probes (125 actions) |
 | Fail-closed | 38 reference actions plus the 5 reference-unsupported shapes (43 actions total) |
 | Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`. Under the default it already returns the empty set the PDP demands, because `nullable: true` on a mapper entry declares per-attribute that a stored null is a missing Cerbos attribute; the global option is the backstop for mappings that do not declare it |
 | Attribute NULL convention | Needs no declaration: Mongoose stores the value the caller sent, so a stored null already compares as a null *value* exactly as CEL does. The four `null-value-*` corpus probes for the explicit convention (cerbos/query-plan-adapters#308) were aligned before that option existed; the fifth is refused by the pre-existing negated-collection-macro limitation, not by the null convention |
@@ -91,7 +91,7 @@ This adapter **builds no subquery.** A relation is a path inside the same docume
 | Subtype discrimination | **Caller-owned** | `Model.discriminator(...)`. Run the filter on the same model the application read the attributes from. Discriminated models share one collection, so a filter executed against the *base* model matches the other subtypes' documents — the `__t` criterion Mongoose adds for the discriminator model is not in the filter the adapter returns, and cannot be: the plan does not say which model the caller will use |
 | To-one relation used as a collection | Not applicable — a document path holds exactly what the application stored | — |
 | Composite association key | Not applicable — no join, so no key to compose | — |
-| Absent to-one parent | **Reproduced**, and proved by the corpus (`w1-all-chain` and siblings) | `relation.requiresParent` — declare the optional to-one parent a flattened path is reached through, so `size(chain)` comparisons yield null rather than 0 for a document that has no parent ([#309](https://github.com/cerbos/query-plan-adapters/issues/309)) |
+| Absent to-one parent | **Reproduced**, and proved by the corpus (`w1-all-chain`, `rel-not-bool-hop` and siblings) | `relation.requiresParent` for a flattened ARRAY parent, so `size(chain)` comparisons yield null rather than 0 ([#309](https://github.com/cerbos/query-plan-adapters/issues/309)). A `type: "one"` relation needs no declaration — it is a hop by definition ([#375](https://github.com/cerbos/query-plan-adapters/issues/375)). **Behaviour change in #375:** a `type: "one"` relation now ANDs `{ <path>: { $ne: null } }` outside any `$nor`, so a negation over it no longer matches documents where the subdocument is absent (an over-grant fix, consumer-visible); and a bare boolean read through a to-one hop is now translated instead of throwing "Bare collection variables are unsupported" |
 
 ## Requirements
 

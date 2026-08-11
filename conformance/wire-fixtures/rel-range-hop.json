@@ -1,0 +1,40 @@
+{
+  "action": "rel-range-hop",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "and",
+        "operands": [
+          {
+            "expression": {
+              "operator": "gt",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.parent.aNumber"
+                },
+                {
+                  "value": 2
+                }
+              ]
+            }
+          },
+          {
+            "expression": {
+              "operator": "lt",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.parent.aNumber"
+                },
+                {
+                  "value": 12
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

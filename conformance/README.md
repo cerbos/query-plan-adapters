@@ -80,6 +80,28 @@ are necessarily language/ORM-specific):
    through the same oracle comparison as conformance actions. A throw must carry the message the
    corpus pins for that adapter — see "Pinned throw messages" below.
 
+### Case sensitivity is two invariants, not one
+
+CEL string comparison is exact. The corpus proves that twice, because a store can satisfy it for
+one operator and not the other:
+
+- **`cs-eq`** proves `=`. Collation governs this one, and the advice every adapter README gives —
+  use a binary or case-sensitive collation — is sufficient for it.
+- **`cs-contains` / `cs-startswith` / `cs-endswith`** prove string MATCHING, which collation does
+  not govern on every engine. SQLite's `LIKE` is case-insensitive for ASCII no matter what
+  collation the column was created with; only `PRAGMA case_sensitive_like = ON` changes it, and
+  it is per-connection.
+
+`c1` (`aString` "One") is the single witness in all four, and the only seed that differs from
+another by case alone, so a case-insensitive store adds exactly one row and nothing else moves.
+
+A harness whose store needs configuring to satisfy the invariant must configure it — that is a
+property of the deployment the adapter documents, not of the translation — but the adapter's
+README has to state the *whole* lever. Three harnesses (ent, sqlalchemy, prisma) set the SQLite
+pragma; drizzle needs none because it lowers string matching to `REPLACE` rather than `LIKE`.
+Prisma's did not until these actions existed, and its README named only the collation, which is
+how a documented invariant can be satisfied on paper and violated in fact.
+
 ### NULL conventions
 
 A DB `NULL` (or a missing element field, e.g. a NULL tag name) must become a **missing attribute**
@@ -321,11 +343,28 @@ them has to agree on is the **check side**: a level that does not exist sends no
 (or no `parent.inner`), so CEL raises a missing-path error and `check()` denies. That is the scalar
 counterpart of the collection hazard "The absent to-one parent" documents.
 
-**No mapper wiring, yet.** No action references the relation, so no harness maps it. Reaching a
-scalar *through* a to-one hop is a shape several translators do not have — ent and pgx fail it
-closed today ("attribute maps to a collection and cannot be used as a scalar value"), and
-sqlalchemy has no relation model of its own — so a mapping written before the actions exist is a
-declaration no assertion holds to anything.
+**Every harness maps it, and how each one spells the hop is the point.** The fifteen `rel-*`
+actions are what proved it, and reaching a scalar *through* a to-one hop turned out to be a shape
+several translators did not have. What they have in common is that an absent hop must be UNKNOWN
+rather than false, because `NOT UNKNOWN` is still UNKNOWN and the row has to stay excluded under
+both polarities:
+
+| adapter | how the hop is reached | what makes an absent hop UNKNOWN |
+|---|---|---|
+| prisma | `is:` on an optional relation | the hop required as a conjunct OUTSIDE the negation |
+| drizzle | correlated `EXISTS` | `CASE WHEN <hop exists> THEN … END`, no `ELSE` |
+| sqlalchemy, ent, pgx | correlated SCALAR subquery | no correlated row IS already SQL NULL |
+| spring-data | `LEFT JOIN` through the association | an unmatched join row is SQL NULL |
+| mongoose, convex, elasticsearch-java | a nested object path | the path is simply absent from the document |
+| langchain-chromadb | flattened dotted metadata keys | nothing does — a missing key MATCHES `$ne`, so the negated and null-comparison shapes fail closed |
+
+A correlated scalar subquery needs no separate hop guard, which is the reason three adapters have
+none: the guard the COLLECTION chains need exists because `EXISTS` is two-valued and collapses
+"absent parent" onto "no matching child", and a scalar projection never makes that collapse. An
+inner join does not work either — it removes the row from the WHOLE query rather than making one
+branch unknown, which is invisible until the hop sits under a disjunction. `rel-hop2-or-exists` is
+the action that discriminates it, and it is the only one in the group whose failure direction is an
+UNDER-grant.
 
 **A fixture nothing uses can rot, so every harness pins it directly.** Each one reads both hops back
 out of its store — through a real join where it has one — and compares them against the corpus,

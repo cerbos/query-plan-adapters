@@ -473,6 +473,17 @@ const DEGENERACY_GUARD_ACTIONS = [
   // Convex is the one adapter that promotes the casts in adapterSupportedExpected, so this is
   // a real comparison here rather than the liveness probe it is everywhere else.
   "cast-int-double",
+  // The real to-one join (#375): one per hazard — the negated hop, the null comparison, two-level
+  // depth, the root conjunction (the corpus's only SPLIT execution here), and the disjunction,
+  // whose failure direction is an under-grant.
+  "rel-not-bool-hop",
+  "rel-ne-null-hop",
+  "rel-bool-hop2",
+  "rel-hop-and-root",
+  "rel-hop2-or-exists",
+  // Case sensitivity in STRING MATCHING (#375 follow-up), a different mechanism from cs-eq:
+  // collation governs `=`, and on SQLite nothing but `PRAGMA case_sensitive_like` governs LIKE.
+  "cs-contains",
 ] as const;
 
 /**
@@ -549,6 +560,18 @@ const DB_DECIDED_PUSHDOWN = [
 
 /** `in-empty` folds to ALWAYS_DENIED, so no mapper can put it in either category. */
 const UNCONDITIONAL_ACTIONS = ["in-empty"];
+
+/**
+ * Actions whose root `and` splits: part pushed to Convex's filter engine, the rest post-filtered.
+ *
+ * `rel-hop-and-root` is the first corpus action to reach this path (#375) and the reason the split
+ * branch of `buildFilters` is no longer dead code. Its root conjunct `R.attr.aBool == true` is a
+ * required field against a literal, so the engine takes it; its other conjunct reads through the
+ * to-one hop, which is `nullable` and therefore has to be answered by the adapter's own evaluator.
+ * That is the whole point of splitting — the engine narrows, and the semantics that need CEL's
+ * missing-attribute error stay with the adapter.
+ */
+const SPLIT_ACTIONS = ["rel-hop-and-root"];
 
 async function executionFor(
   action: string,
@@ -867,10 +890,10 @@ describe("adversarial conformance corpus", () => {
         ].filter(Boolean).length !== 1,
     );
 
-    expect(allActions.size).toBe(152);
+    expect(allActions.size).toBe(170);
     expect(CONVEX_UNSUPPORTED).toHaveLength(2);
     expect(CONVEX_SUPPORTED_EXPECTED).toHaveLength(7);
-    expect(ORACLE_ACTIONS).toHaveLength(146);
+    expect(ORACLE_ACTIONS).toHaveLength(164);
     expect(THROWING_ACTIONS).toHaveLength(4);
     expect(misclassified).toEqual([]);
   });
@@ -914,7 +937,9 @@ describe("adversarial conformance corpus", () => {
       ? "db"
       : UNCONDITIONAL_ACTIONS.includes(action)
         ? "unconditional"
-        : "post";
+        : SPLIT_ACTIONS.includes(action)
+          ? "split"
+          : "post";
     expect({ ids: run.ids, execution: run.execution }).toEqual({
       ids: oracle,
       execution: expected,
@@ -995,16 +1020,17 @@ describe("adversarial conformance corpus", () => {
       // skipping the other 138 actions there sound rather than a coverage hole.
       moved: pushdown.db.filter((action) => !base.db.includes(action)),
     }).toEqual({
-      total: 146,
+      total: 164,
       defaultDb: DB_DECIDED_DEFAULT,
-      // No corpus action currently splits: `buildFilters` only splits a root `and`, and every
-      // hostile shape that mixes pushable and non-pushable children is rooted elsewhere.
-      defaultSplit: [],
+      // Exactly one corpus action splits: `buildFilters` only splits a root `and`, and
+      // rel-hop-and-root is the one hostile shape rooted there that mixes a pushable conjunct
+      // with a non-pushable one (#375). Both mappers split it — the hop is `nullable` under each.
+      defaultSplit: SPLIT_ACTIONS,
       defaultUnconditional: UNCONDITIONAL_ACTIONS,
-      defaultPostCount: 132,
+      defaultPostCount: 149,
       pushdownDb: DB_DECIDED_PUSHDOWN,
-      pushdownSplit: [],
-      pushdownPostCount: 121,
+      pushdownSplit: SPLIT_ACTIONS,
+      pushdownPostCount: 138,
       moved: PUSHDOWN_ONLY_ACTIONS,
     });
   });

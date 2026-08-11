@@ -419,9 +419,18 @@ func writeSubquery(b *sql.Builder, s queryplan.Subquery) error {
 		}
 
 		return wrap(b, func(b *sql.Builder) error {
-			if s.Kind == queryplan.SubqueryExists {
+			switch s.Kind {
+			case queryplan.SubqueryExists:
 				b.WriteString("SELECT 1 FROM ")
-			} else {
+			case queryplan.SubqueryScalar:
+				// The projection of a to-one hop. No row correlates -> SQL NULL, which is the
+				// missing-attribute error the check side raises (#375).
+				b.WriteString("SELECT ")
+				if err := write(b, s.Select); err != nil {
+					return err
+				}
+				b.WriteString(" FROM ")
+			default:
 				b.WriteString("SELECT COUNT(*) FROM ")
 			}
 
