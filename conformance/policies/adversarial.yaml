@@ -92,6 +92,48 @@ resourcePolicy:
         match:
           expr: R.attr.aString == "one"
 
+    # -- the same hazard through STRING MATCHING, which collation does not govern --
+    # cs-eq above probes `=`, and the advice it points at — "use a case-sensitive collation" —
+    # is genuinely sufficient there. It is NOT sufficient for LIKE. SQLite's `LIKE` is
+    # case-insensitive for ASCII no matter what collation the column was created with; only
+    # `PRAGMA case_sensitive_like = ON` changes it. So an adapter can pass cs-eq on SQLite and
+    # still over-grant every string predicate, which is exactly the state the corpus was in
+    # before these three actions existed.
+    #
+    # One action per operator, matching the like-* group above (startsWith / contains /
+    # endsWith are three different lowerings — LIKE 'x%', LIKE '%x%', LIKE '%x', or `instr`,
+    # or `substr`+compare — and an adapter can get case right in one and wrong in another).
+    #
+    # c1 ("One") is the single witness in all three, and it is the ONLY seed that differs by
+    # case, so a case-insensitive match adds exactly one row and nothing else moves:
+    #   contains   oracle a1/a2/a3/b1  ("one", "100%_done", "100xdone", "oneXtwo")
+    #   startsWith oracle a1/b1
+    #   endsWith   oracle a1/a2/a3
+    # The needles carry no LIKE metacharacter on purpose — like-percent/like-underscore/
+    # like-backslash already own that hazard, and an adapter that rejects metacharacter
+    # needles outright would otherwise never reach the comparison these actions probe.
+
+    - actions: ["cs-contains"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aString.contains("one")
+
+    - actions: ["cs-startswith"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aString.startsWith("one")
+
+    - actions: ["cs-endswith"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aString.endsWith("one")
+
     # -- string edge values --
     - actions: ["unicode-eq"]
       effect: EFFECT_ALLOW

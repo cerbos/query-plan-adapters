@@ -640,6 +640,9 @@ const DEGENERACY_GUARD_ACTIONS = [
   "rel-bool-hop2",
   "rel-hop-and-root",
   "rel-hop2-or-exists",
+  // Case sensitivity in STRING MATCHING (#375 follow-up), a different mechanism from cs-eq:
+  // collation governs `=`, and on SQLite nothing but `PRAGMA case_sensitive_like` governs LIKE.
+  "cs-contains",
 ] as const;
 
 /**
@@ -1193,7 +1196,7 @@ describe("adversarial conformance corpus", () => {
       /pins no throw message/
     );
   });
-  test("manifest assigns all 167 actions exactly one Mongoose outcome", () => {
+  test("manifest assigns all 170 actions exactly one Mongoose outcome", () => {
     const oracle = new Set(ORACLE_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map((entry) => entry.action));
     const nullOmitted = new Set(
@@ -1209,10 +1212,10 @@ describe("adversarial conformance corpus", () => {
       return count !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(167);
+    expect(MANIFEST_ACTIONS.size).toBe(170);
     expect(unsupportedEntries).toHaveLength(38);
     expect(supportedExpectedEntries).toHaveLength(4);
-    expect(ORACLE_ACTIONS).toHaveLength(122);
+    expect(ORACLE_ACTIONS).toHaveLength(125);
     expect(THROWING_ACTIONS).toHaveLength(43);
     expect(misclassified).toEqual([]);
     expect(

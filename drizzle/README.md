@@ -82,7 +82,7 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` d
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 154 reference conformance actions |
+| Oracle-tested | 157 reference conformance actions |
 | Fail-closed corpus shapes | Sub-millisecond `now()` thresholds, regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an untyped string field, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero) and `filter()`/`map()` used as a condition (both return a list, not a boolean) (10 actions) |
 | Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute the caller sends as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare it per attribute — `nullAttributeRepresentation: "explicit"` on the mapper entry — or the historical rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
@@ -222,6 +222,16 @@ case-sensitive by default, but nondeterministic ICU collations and `citext` are 
 for mapped policy attributes. On SQLite, do not apply `COLLATE NOCASE` to mapped columns.
 This requirement covers equality and ordering, `in`, intersections, string matching, and
 hierarchy prefix/ancestor comparisons.
+
+**`contains`/`startsWith`/`endsWith` are the exception, and in your favour.** This adapter
+lowers them to `REPLACE` rather than `LIKE` — chosen so a column-valued needle cannot be
+reinterpreted as pattern syntax — and `REPLACE` is case-sensitive on SQLite, PostgreSQL and
+MySQL alike. That also sidesteps a hazard `LIKE`-based adapters have to configure around:
+SQLite's `LIKE` is case-insensitive for ASCII *regardless of collation*, so nothing but
+`PRAGMA case_sensitive_like = ON` makes it exact. Here the collation requirement above is
+about equality, ordering, membership and the hierarchy operators; the string operators are
+correct without it. The corpus proves both halves — `cs-eq` for equality, and `cs-contains`,
+`cs-startswith` and `cs-endswith` for string matching, on both the SQLite and PostgreSQL legs.
 
 ### Mapper options
 

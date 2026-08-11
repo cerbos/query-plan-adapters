@@ -1329,7 +1329,7 @@ class AdversarialConformanceTest {
                         .filter(Boolean::booleanValue).count() != 1)
                 .toList();
 
-        assertEquals(167, manifest.size(),
+        assertEquals(170, manifest.size(),
                 "corpus size changed; triage the new action(s) before bumping this pin");
         assertEquals(21, SEEDS.size(), "seed count changed");
         // Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
@@ -1380,7 +1380,10 @@ class AdversarialConformanceTest {
             // two-level depth, the root conjunction, and the disjunction, whose failure
             // direction is an under-grant.
             "rel-not-bool-hop", "rel-ne-null-hop", "rel-bool-hop2",
-            "rel-hop-and-root", "rel-hop2-or-exists");
+            "rel-hop-and-root", "rel-hop2-or-exists",
+            // Case sensitivity in STRING MATCHING, a different mechanism from cs-eq: collation
+            // governs `=`, and on SQLite only `PRAGMA case_sensitive_like` governs LIKE.
+            "cs-contains");
 
     /**
      * Shapes this adapter refuses to translate: they have no oracle comparison to guard, and stay

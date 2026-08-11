@@ -35,7 +35,7 @@
     "rel-eq-hop", "rel-eq-num-hop", "rel-lt-hop", "rel-le-hop", "rel-gt-hop", "rel-ge-hop",
     "rel-range-hop", "rel-bool-hop", "rel-not-bool-hop", "rel-contains-hop", "rel-ne-null-hop",
     "rel-bool-hop2", "rel-startswith-hop2", "rel-hop-and-root", "rel-hop2-or-exists",
-    "like-bracket", "cs-eq",
+    "like-bracket", "cs-eq", "cs-contains", "cs-startswith", "cs-endswith",
     "arith-add-eq-frac", "arith-add-ne-frac", "arith-add-eq-frac-exact",
     "size-huge-gt", "size-huge-lt",
     "nan-ord-ternary", "nan-ord-ternary-vf", "nan-ord-le", "nan-ord-inf",
@@ -285,7 +285,10 @@
       { "action": "rel-contains-hop", "reason": "Chroma metadata filters expose only scalar comparison and membership operators — there is no substring operator — so contains has no faithful Where equivalent, through a chain key exactly as at the root", "message": "Unsupported operator contains" },
       { "action": "rel-startswith-hop2", "reason": "Same missing pattern-operator limitation as like-percent, reached two levels out: Chroma has no prefix operator for the flattened parent.inner.aString key", "message": "Unsupported operator startsWith" },
       { "action": "rel-hop-and-root", "reason": "The conjunction itself is expressible, but its second conjunct is a contains against the chain key, which Chroma has no substring operator for — the walk reaches that limitation before the conjunction is assembled", "message": "Unsupported operator contains" },
-      { "action": "rel-hop2-or-exists", "reason": "Every Chroma comparison operand must be a bare metadata field or a literal, and the disjunction's second branch is an exists macro over a relation — a nested expression the Where model has no form for. The two-level hop in the first branch is never reached", "message": "Nested expressions are not supported by ChromaDB filters" }
+      { "action": "rel-hop2-or-exists", "reason": "Every Chroma comparison operand must be a bare metadata field or a literal, and the disjunction's second branch is an exists macro over a relation — a nested expression the Where model has no form for. The two-level hop in the first branch is never reached", "message": "Nested expressions are not supported by ChromaDB filters" },
+      { "action": "cs-contains", "reason": "Chroma metadata filters expose only scalar comparison and membership operators ($eq/$ne/$lt/$lte/$gt/$gte/$in/$nin) — there is no substring operator — so the case-sensitivity this action probes is never reached: the operator is refused first, exactly as for like-underscore", "message": "Unsupported operator contains" },
+      { "action": "cs-startswith", "reason": "Same missing pattern-operator limitation as like-percent: Chroma has no prefix operator, so the comparison whose case-sensitivity this action probes is never built", "message": "Unsupported operator startsWith" },
+      { "action": "cs-endswith", "reason": "Same missing pattern-operator limitation as like-backslash: Chroma has no suffix operator, so the comparison whose case-sensitivity this action probes is never built", "message": "Unsupported operator endsWith" }
     ],
     "convex": [
       { "action": "cr-div-neg-zero", "reason": "IEEE keeps the sign of a zero, and the planner does ship it (the wire operand for -0.0 is `-0`), but a query plan is JSON-encoded on its way into a Convex function and JSON.stringify(-0) is \"0\" — the sign bit is gone before the adapter sees it, so it rejects a constant zero denominator rather than guess which infinity CEL produced", "message": "division by a constant zero whose sign is indeterminate: a query plan is JSON-encoded on its way into a Convex function and JSON has no -0, so the adapter cannot tell +Infinity from -Infinity" },

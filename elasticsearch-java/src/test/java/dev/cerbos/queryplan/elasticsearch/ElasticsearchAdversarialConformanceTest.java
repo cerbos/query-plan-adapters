@@ -359,10 +359,10 @@ class ElasticsearchAdversarialConformanceTest {
         manifest.addAll(expected);
         manifest.addAll(nullRepresentationOmittedActions);
         manifest.addAll(divergences);
-        assertEquals(58, oracleActions.size());
+        assertEquals(61, oracleActions.size());
         assertEquals(107, throwingActions.size());
         assertEquals(1, nullRepresentationOmittedActions.size());
-        assertEquals(167, classified.size());
+        assertEquals(170, classified.size());
         assertEquals(manifest, classified, "every manifest action must be classified locally");
     }
 
@@ -782,7 +782,9 @@ class ElasticsearchAdversarialConformanceTest {
             // absent level is simply a missing field — already the CEL missing-attribute case,
             // which is why all fifteen translate here. One per hazard.
             "rel-not-bool-hop", "rel-ne-null-hop", "rel-bool-hop2",
-            "rel-hop-and-root", "rel-hop2-or-exists");
+            "rel-hop-and-root", "rel-hop2-or-exists",
+            // Case sensitivity in STRING MATCHING, a different mechanism from cs-eq.
+            "cs-contains");
 
     /**
      * Shapes this adapter refuses to translate: they have no oracle comparison to guard, and stay

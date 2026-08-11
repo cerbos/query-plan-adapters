@@ -279,6 +279,10 @@ DEGENERACY_GUARD_ACTIONS = (
     "rel-bool-hop2",
     "rel-hop-and-root",
     "rel-hop2-or-exists",
+    # Case sensitivity in STRING MATCHING, a different mechanism from cs-eq:
+    # collation governs `=`, and on SQLite only `PRAGMA case_sensitive_like`
+    # governs LIKE.
+    "cs-contains",
 )
 
 # Shapes this adapter refuses to translate: they have no oracle comparison to
@@ -1157,7 +1161,7 @@ class TestAdversarialConformance:
 
         # Deliberate tripwires: a corpus edit must bump these in the same
         # change, so a new hostile action cannot join (or vanish) silently.
-        assert len(MANIFEST_ACTIONS) == 167
+        assert len(MANIFEST_ACTIONS) == 170
         assert len(SEEDS) == 21
         # Each of these carries a pinned message, so a shape gained or lost has
         # to be re-triaged here rather than joining the throw suite unnoticed.

@@ -80,6 +80,28 @@ are necessarily language/ORM-specific):
    through the same oracle comparison as conformance actions. A throw must carry the message the
    corpus pins for that adapter — see "Pinned throw messages" below.
 
+### Case sensitivity is two invariants, not one
+
+CEL string comparison is exact. The corpus proves that twice, because a store can satisfy it for
+one operator and not the other:
+
+- **`cs-eq`** proves `=`. Collation governs this one, and the advice every adapter README gives —
+  use a binary or case-sensitive collation — is sufficient for it.
+- **`cs-contains` / `cs-startswith` / `cs-endswith`** prove string MATCHING, which collation does
+  not govern on every engine. SQLite's `LIKE` is case-insensitive for ASCII no matter what
+  collation the column was created with; only `PRAGMA case_sensitive_like = ON` changes it, and
+  it is per-connection.
+
+`c1` (`aString` "One") is the single witness in all four, and the only seed that differs from
+another by case alone, so a case-insensitive store adds exactly one row and nothing else moves.
+
+A harness whose store needs configuring to satisfy the invariant must configure it — that is a
+property of the deployment the adapter documents, not of the translation — but the adapter's
+README has to state the *whole* lever. Three harnesses (ent, sqlalchemy, prisma) set the SQLite
+pragma; drizzle needs none because it lowers string matching to `REPLACE` rather than `LIKE`.
+Prisma's did not until these actions existed, and its README named only the collation, which is
+how a documented invariant can be satisfied on paper and violated in fact.
+
 ### NULL conventions
 
 A DB `NULL` (or a missing element field, e.g. a NULL tag name) must become a **missing attribute**

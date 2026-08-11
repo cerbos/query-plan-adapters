@@ -563,7 +563,7 @@ func TestAdversarialConformance(t *testing.T) {
 		}
 		// Corpus-size tripwire: bump deliberately when the corpus grows, so a new hostile shape
 		// cannot slip past this adapter unnoticed.
-		require.Len(t, seen, 167, "corpus size changed; triage the new action(s) before bumping")
+		require.Len(t, seen, 170, "corpus size changed; triage the new action(s) before bumping")
 		require.Len(t, h.corpus.Seeds.Seeds, 21, "seed count changed")
 		// Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
 		// lost has to be re-triaged here rather than joining the throw suite unnoticed.
@@ -746,6 +746,9 @@ func TestAdversarialConformance(t *testing.T) {
 			// direction is an under-grant.
 			"rel-not-bool-hop", "rel-ne-null-hop", "rel-bool-hop2",
 			"rel-hop-and-root", "rel-hop2-or-exists",
+			// Case sensitivity in STRING MATCHING, a different mechanism from cs-eq: collation
+			// governs `=`, and on SQLite only `PRAGMA case_sensitive_like` governs LIKE.
+			"cs-contains",
 		}
 		// int() over a numeric column is unsupported for every adapter but convex, so there is no
 		// comparison behind it here: it stays as a PDP/policy liveness probe for the cast group.

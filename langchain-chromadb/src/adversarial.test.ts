@@ -623,6 +623,9 @@ const DEGENERACY_LIVENESS_PROBES = [
   "rel-not-bool-hop",
   "rel-ne-null-hop",
   "rel-hop2-or-exists",
+  // Case sensitivity in string matching: Chroma has no pattern operator at all, so the
+  // comparison these probe is never built and the group has no compared member here.
+  "cs-contains",
 ] as const;
 
 // Fields are optional unless declared otherwise, so `$ne`/`$nin` are rejected by default.
@@ -941,7 +944,7 @@ describe("adversarial conformance corpus", () => {
       /pins no throw message/,
     );
   });
-  test("manifest assigns all 167 policy actions exactly one Chroma outcome", () => {
+  test("manifest assigns all 170 policy actions exactly one Chroma outcome", () => {
     const oracle = new Set(CHROMA_SUPPORTED_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map(({ action }) => action));
     const nullOmitted = new Set(
@@ -957,12 +960,12 @@ describe("adversarial conformance corpus", () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(167);
+    expect(MANIFEST_ACTIONS.size).toBe(170);
     expect(CHROMA_SUPPORTED_ACTIONS).toHaveLength(24);
     expect(oracle.size).toBe(CHROMA_SUPPORTED_ACTIONS.length);
-    expect(CHROMA_UNSUPPORTED).toHaveLength(132);
+    expect(CHROMA_UNSUPPORTED).toHaveLength(135);
     expect(CHROMA_SUPPORTED_EXPECTED).toHaveLength(0);
-    expect(THROWING_ACTIONS).toHaveLength(141);
+    expect(THROWING_ACTIONS).toHaveLength(144);
     expect(misclassified).toEqual([]);
   });
 

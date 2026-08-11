@@ -481,6 +481,9 @@ const DEGENERACY_GUARD_ACTIONS = [
   "rel-bool-hop2",
   "rel-hop-and-root",
   "rel-hop2-or-exists",
+  // Case sensitivity in STRING MATCHING (#375 follow-up), a different mechanism from cs-eq:
+  // collation governs `=`, and on SQLite nothing but `PRAGMA case_sensitive_like` governs LIKE.
+  "cs-contains",
 ] as const;
 
 /**
@@ -887,10 +890,10 @@ describe("adversarial conformance corpus", () => {
         ].filter(Boolean).length !== 1,
     );
 
-    expect(allActions.size).toBe(167);
+    expect(allActions.size).toBe(170);
     expect(CONVEX_UNSUPPORTED).toHaveLength(2);
     expect(CONVEX_SUPPORTED_EXPECTED).toHaveLength(7);
-    expect(ORACLE_ACTIONS).toHaveLength(161);
+    expect(ORACLE_ACTIONS).toHaveLength(164);
     expect(THROWING_ACTIONS).toHaveLength(4);
     expect(misclassified).toEqual([]);
   });
@@ -1017,17 +1020,17 @@ describe("adversarial conformance corpus", () => {
       // skipping the other 138 actions there sound rather than a coverage hole.
       moved: pushdown.db.filter((action) => !base.db.includes(action)),
     }).toEqual({
-      total: 161,
+      total: 164,
       defaultDb: DB_DECIDED_DEFAULT,
       // Exactly one corpus action splits: `buildFilters` only splits a root `and`, and
       // rel-hop-and-root is the one hostile shape rooted there that mixes a pushable conjunct
       // with a non-pushable one (#375). Both mappers split it — the hop is `nullable` under each.
       defaultSplit: SPLIT_ACTIONS,
       defaultUnconditional: UNCONDITIONAL_ACTIONS,
-      defaultPostCount: 146,
+      defaultPostCount: 149,
       pushdownDb: DB_DECIDED_PUSHDOWN,
       pushdownSplit: SPLIT_ACTIONS,
-      pushdownPostCount: 135,
+      pushdownPostCount: 138,
       moved: PUSHDOWN_ONLY_ACTIONS,
     });
   });

@@ -95,10 +95,23 @@ mapped authorization columns as part of the policy contract:
   case-insensitive (`_ci`) defaults.
 - SQL Server: use a case-sensitive (`_CS_`) collation rather than a case-insensitive (`_CI_`)
   collation.
-- SQLite: do not apply `COLLATE NOCASE` to mapped fields, and verify the exact comparison
-  behavior of any database configuration or extension used in production.
+- SQLite: do not apply `COLLATE NOCASE` to mapped fields, and **also set
+  `PRAGMA case_sensitive_like = ON`** — see below.
 
-The adapter cannot override a column's collation in a Prisma `where` filter. See Prisma's
+**On SQLite, collation is not enough.** `contains`, `startsWith` and `endsWith` lower to `LIKE`,
+and SQLite's `LIKE` is case-insensitive for ASCII *regardless of the column's collation*: a
+`COLLATE BINARY` column answers `= 'one'` case-sensitively and `LIKE '%one%'` case-insensitively
+in the same query. Only `PRAGMA case_sensitive_like = ON` changes it, and the pragma is
+per-connection, so it must be set on every connection the application uses — not once at schema
+creation.
+
+That distinction is why this was missed for so long: the corpus's `cs-eq` action proved equality
+was case-sensitive on SQLite, and equality is the one operator collation *does* govern. The
+`cs-contains`, `cs-startswith` and `cs-endswith` actions now prove the string operators
+separately, and without the pragma this adapter over-grants every one of them on SQLite.
+
+The adapter cannot override a column's collation, or set a pragma, from inside a Prisma `where`
+filter. See Prisma's
 [case-sensitivity documentation](https://docs.prisma.io/docs/orm/v6/prisma-client/queries/case-sensitivity)
 for provider-specific details.
 
@@ -171,7 +184,7 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` d
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 114 reference actions |
+| Oracle-tested | 117 reference actions |
 | Fail-closed | 42 reference actions plus the 8 reference-unsupported shapes (50 actions total) |
 | Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute the caller sends as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare it per attribute — `nullAttributeRepresentation: "explicit"` on the mapper entry — or the historical rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |

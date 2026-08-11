@@ -421,6 +421,9 @@ const DEGENERACY_GUARD_ACTIONS = [
   "rel-bool-hop2",
   "rel-hop-and-root",
   "rel-hop2-or-exists",
+  // Case sensitivity in STRING MATCHING (#375 follow-up), a different mechanism from cs-eq:
+  // collation governs `=`, and on SQLite nothing but `PRAGMA case_sensitive_like` governs LIKE.
+  "cs-contains",
 ] as const;
 
 /**
@@ -698,6 +701,16 @@ const MAPPER: Record<string, MapperConfig> = {
 const MAPPER_WITHOUT_NULL_CONVENTIONS = withoutNullConventions(MAPPER);
 
 beforeAll(async () => {
+  // CEL string matching is case-sensitive, and this adapter lowers contains/startsWith/endsWith
+  // to LIKE. On SQLite, LIKE is case-INSENSITIVE for ASCII no matter what collation the column
+  // was created with — only this pragma changes it — so without it every string predicate
+  // over-grants by exactly the case-variant rows (the `cs-contains` group; proved by c1, "One").
+  // The column collation the README talks about governs `=`, not LIKE, which is why cs-eq passed
+  // here for a long time while the string operators did not. ent and sqlalchemy set the same
+  // pragma; drizzle needs none because it lowers to REPLACE rather than LIKE.
+  if (STORE_NAME === "sqlite") {
+    await prisma.$executeRawUnsafe("PRAGMA case_sensitive_like = ON");
+  }
   await prisma.adversarialInner.deleteMany();
   await prisma.adversarialParent.deleteMany();
   await prisma.adversarialLabel.deleteMany();
@@ -1014,7 +1027,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(167);
+    expect(MANIFEST_ACTIONS.size).toBe(170);
     // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
     // gained or lost has to be re-triaged here rather than joining the suite unnoticed.
     expect(THROWING_ACTIONS).toHaveLength(51);

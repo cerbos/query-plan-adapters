@@ -81,7 +81,7 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `check()` decisio
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 152 reference conformance actions |
+| Oracle-tested | 155 reference conformance actions |
 | Fail-closed corpus shapes | Nanosecond `now()` thresholds, regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an ambiguous string column, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero) and `filter()`/`map()` used as a condition (both return a list, not a boolean), and a constant zero divisor whose sign the HTTP transport discards (12 actions) |
 | Representation-dependent | `null-eq-missing` — raises under `null_attribute_representation="omitted"`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute the caller sends as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare it per attribute — `attribute_null_representation={reference: "explicit"}` — or the historical rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
