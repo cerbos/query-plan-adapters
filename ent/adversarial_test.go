@@ -61,6 +61,8 @@ const (
 	categoryTable    = "adversarial_category"
 	subCategoryTable = "adversarial_sub_category"
 	labelTable       = "adversarial_label"
+	parentTable      = "adversarial_parent"
+	innerTable       = "adversarial_inner"
 )
 
 // -- dialect targets ---------------------------------------------------------------------------
@@ -125,6 +127,22 @@ CREATE TABLE adversarial_label (
 	name             text,
 	sub_category_id  text NOT NULL REFERENCES adversarial_sub_category(id)
 );
+CREATE TABLE adversarial_parent (
+	id                 text PRIMARY KEY,
+	a_bool             integer NOT NULL,
+	a_string           text    NOT NULL,
+	a_number           integer NOT NULL,
+	a_optional_string  text,
+	resource_id        text    NOT NULL UNIQUE REFERENCES adversarial_resource(id)
+);
+CREATE TABLE adversarial_inner (
+	id                 text PRIMARY KEY,
+	a_bool             integer NOT NULL,
+	a_string           text    NOT NULL,
+	a_number           integer NOT NULL,
+	a_optional_string  text,
+	parent_id          text    NOT NULL UNIQUE REFERENCES adversarial_parent(id)
+);
 `
 
 // The PostgreSQL schema uses native boolean and timestamptz columns, so it exercises the typed
@@ -162,6 +180,22 @@ CREATE TABLE adversarial_label (
 	id               text PRIMARY KEY,
 	name             text,
 	sub_category_id  text NOT NULL REFERENCES adversarial_sub_category(id)
+);
+CREATE TABLE adversarial_parent (
+	id                 text   PRIMARY KEY,
+	a_bool             boolean NOT NULL,
+	a_string           text    NOT NULL,
+	a_number           bigint  NOT NULL,
+	a_optional_string  text,
+	resource_id        text    NOT NULL UNIQUE REFERENCES adversarial_resource(id)
+);
+CREATE TABLE adversarial_inner (
+	id                 text   PRIMARY KEY,
+	a_bool             boolean NOT NULL,
+	a_string           text    NOT NULL,
+	a_number           bigint  NOT NULL,
+	a_optional_string  text,
+	parent_id          text    NOT NULL UNIQUE REFERENCES adversarial_parent(id)
 );
 `
 
@@ -218,6 +252,22 @@ CREATE TABLE adversarial_label (
 	id               varchar(64) COLLATE utf8mb4_bin PRIMARY KEY,
 	name             varchar(255) COLLATE utf8mb4_bin,
 	sub_category_id  varchar(64) COLLATE utf8mb4_bin NOT NULL REFERENCES adversarial_sub_category(id)
+);
+CREATE TABLE adversarial_parent (
+	id                 varchar(64) COLLATE utf8mb4_bin PRIMARY KEY,
+	a_bool             boolean NOT NULL,
+	a_string           varchar(255) COLLATE utf8mb4_bin NOT NULL,
+	a_number           bigint  NOT NULL,
+	a_optional_string  varchar(255) COLLATE utf8mb4_bin,
+	resource_id        varchar(64) COLLATE utf8mb4_bin NOT NULL UNIQUE REFERENCES adversarial_resource(id)
+);
+CREATE TABLE adversarial_inner (
+	id                 varchar(64) COLLATE utf8mb4_bin PRIMARY KEY,
+	a_bool             boolean NOT NULL,
+	a_string           varchar(255) COLLATE utf8mb4_bin NOT NULL,
+	a_number           bigint  NOT NULL,
+	a_optional_string  varchar(255) COLLATE utf8mb4_bin,
+	parent_id          varchar(64) COLLATE utf8mb4_bin NOT NULL UNIQUE REFERENCES adversarial_parent(id)
 );
 `
 
@@ -360,6 +410,13 @@ func buildMapper() cerbosent.Mapper {
 
 		"request.resource.attr.mainCategory.subCategories": {Relation: mainSub},
 		"request.resource.attr.mainCategory.subNames":      {Relation: mainSub},
+
+		// The corpus's real to-one chain (adversarial_parent -> adversarial_inner) is seeded
+		// below and mirrored on the check side, but carries no entry yet: an Entry is either a
+		// Column or a Relation, and resolveVariable fails a Relation used as a SCALAR closed. A
+		// scalar reached THROUGH a to-one hop is a shape this translator does not yet have, so
+		// the mapping is designed alongside the actions that need it (#375) rather than guessed
+		// here. This is the expand half of cerbos/query-plan-adapters#372's expand-contract.
 	}
 }
 
@@ -453,6 +510,23 @@ func (h *harness) seed(t *testing.T) {
 			seed.ID, seed.ABool, seed.AString, seed.ANumber, nullableFloat(h.corpus.aDouble(seed)),
 			nullableString(seed.AOptionalString), h.corpus.createdBy(seed),
 			nullableString(h.corpus.scopeOf(seed)), h.storedTimestamp(t, seed))
+
+		// The to-one chain, one owned row per level. A seed with no parent gets no row at all,
+		// which is what makes the absent-parent hazard reachable through a SCALAR rather than
+		// only through mainCategory's collection.
+		if parentSeed := h.corpus.parentSeedOf(&seed); parentSeed != nil {
+			h.exec(t, parentTable,
+				[]string{"id", "a_bool", "a_string", "a_number", "a_optional_string", "resource_id"},
+				parentID(seed), parentSeed.ABool, parentSeed.AString, parentSeed.ANumber,
+				nullableString(parentSeed.AOptionalString), seed.ID)
+
+			if inner := h.corpus.parentSeedOf(parentSeed); inner != nil {
+				h.exec(t, innerTable,
+					[]string{"id", "a_bool", "a_string", "a_number", "a_optional_string", "parent_id"},
+					innerID(seed), inner.ABool, inner.AString, inner.ANumber,
+					nullableString(inner.AOptionalString), parentID(seed))
+			}
+		}
 
 		for _, tag := range seed.Tags {
 			h.exec(t, tagTable, []string{"tag_id", "name", "resource_id"},
@@ -607,6 +681,17 @@ func (h *harness) checkResource(seed Seed) *cerbos.Resource {
 		}
 	}
 
+	// The real to-one chain, mirroring the seeded rows exactly. A row with no parent sends NO
+	// `parent` attribute — a CEL missing-path error (deny) — matching a join that finds nothing;
+	// the same holds one level down for `parent.inner`.
+	if parentSeed := h.corpus.parentSeedOf(&seed); parentSeed != nil {
+		parent := relationAttr(parentSeed)
+		if inner := h.corpus.parentSeedOf(parentSeed); inner != nil {
+			parent["inner"] = relationAttr(inner)
+		}
+		attr["parent"] = parent
+	}
+
 	return cerbos.NewResource(h.corpus.Seeds.ResourceKind, seed.ID).WithAttributes(attr)
 }
 
@@ -718,7 +803,7 @@ func runConformance(t *testing.T, h *harness) {
 		// Corpus-size tripwire: bump deliberately when the corpus grows, so a new hostile shape
 		// cannot slip past this adapter unnoticed.
 		require.Len(t, seen, 152, "corpus size changed; triage the new action(s) before bumping")
-		require.Len(t, h.corpus.Seeds.Seeds, 20, "seed count changed")
+		require.Len(t, h.corpus.Seeds.Seeds, 21, "seed count changed")
 		// Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
 		// lost has to be re-triaged here rather than joining the throw suite unnoticed.
 		require.Len(t, h.corpus.ThrowingActions, 9, "throwing action count changed")
@@ -820,6 +905,57 @@ func runConformance(t *testing.T, h *harness) {
 		require.NoError(t, err, "translating %s", action)
 		require.Equal(t, h.allSeedIDs(), filtered,
 			"%s: the folded plan makes this adapter return every row", action)
+	})
+
+	// The to-one relation carries no corpus action yet — this is the expand half of
+	// cerbos/query-plan-adapters#372's expand-contract — so nothing else in this suite would
+	// notice a seeder that stored no chain at all, or one that attached every parent to the wrong
+	// resource. Read the two hops back through a real join rather than counting rows: a count
+	// cannot tell an inner row carrying the corpus's values from one carrying the root's own
+	// columns, which is exactly the flat-column-alias failure this relation exists to make
+	// visible.
+	t.Run("the seeded to-one chain matches the corpus relation", func(t *testing.T) {
+		want := map[string][2]*string{}
+		withParent, withInner := 0, 0
+		for i := range h.corpus.Seeds.Seeds {
+			seed := h.corpus.Seeds.Seeds[i]
+			var parent, inner *string
+			if p := h.corpus.parentSeedOf(&seed); p != nil {
+				withParent++
+				parent = &p.AString
+				if in := h.corpus.parentSeedOf(p); in != nil {
+					withInner++
+					inner = &in.AString
+				}
+			}
+			want[seed.ID] = [2]*string{parent, inner}
+		}
+		require.NotZero(t, withParent, "no seed has a parent")
+		require.NotZero(t, withInner, "no seed reaches parent.inner")
+		require.Less(t, withParent, len(h.corpus.Seeds.Seeds), "every seed has a parent")
+
+		resources := entsql.Table(resourceTable).As("r")
+		parents := entsql.Table(parentTable).As("p")
+		inners := entsql.Table(innerTable).As("i")
+		query, args := entsql.Dialect(h.target.dialect).
+			Select(resources.C("id"), parents.C("a_string"), inners.C("a_string")).
+			From(resources).
+			LeftJoin(parents).On(resources.C("id"), parents.C("resource_id")).
+			LeftJoin(inners).On(parents.C("id"), inners.C("parent_id")).
+			Query()
+		rows, err := h.db.QueryContext(t.Context(), query, args...)
+		require.NoError(t, err, "reading the seeded chain\nSQL: %s", query)
+		defer rows.Close()
+
+		got := map[string][2]*string{}
+		for rows.Next() {
+			var id string
+			var parent, inner *string
+			require.NoError(t, rows.Scan(&id, &parent, &inner))
+			got[id] = [2]*string{parent, inner}
+		}
+		require.NoError(t, rows.Err())
+		require.Equal(t, want, got)
 	})
 
 	t.Run("degeneracy guard", func(t *testing.T) {

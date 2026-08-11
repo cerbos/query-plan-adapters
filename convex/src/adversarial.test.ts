@@ -35,6 +35,8 @@ interface Seed {
   aOptionalString: string | null;
   tags: Tag[];
   subCategoryNames: string[];
+  /** The seed whose scalars this row's to-one `parent` carries; null for no parent. */
+  parentSeedId: string | null;
 }
 
 interface SeedsFile {
@@ -122,6 +124,15 @@ interface StoredDocument {
     subCategories: { name: string }[];
     subNames: string[];
   };
+  parent?: StoredRelationLevel & { inner?: StoredRelationLevel };
+}
+
+/** One level of the to-one chain as stored: an absent `aOptionalString` is a missing attribute. */
+interface StoredRelationLevel {
+  aBool: boolean;
+  aString: string;
+  aNumber: number;
+  aOptionalString?: string;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -145,7 +156,8 @@ const isSeed = (value: unknown): value is Seed =>
     value["aOptionalString"] === null) &&
   Array.isArray(value["tags"]) &&
   value["tags"].every(isTag) &&
-  isStringArray(value["subCategoryNames"]);
+  isStringArray(value["subCategoryNames"]) &&
+  (typeof value["parentSeedId"] === "string" || value["parentSeedId"] === null);
 
 const isPrincipal = (value: unknown): value is Principal =>
   isRecord(value) &&
@@ -247,6 +259,7 @@ const SEED_KEYS = [
   "aOptionalString",
   "tags",
   "subCategoryNames",
+  "parentSeedId",
 ] as const;
 
 /** Corpus prose, never read by a harness: the one documented exclusion from SEED_KEYS. */
@@ -602,6 +615,50 @@ function scopeFor(seed: Seed): string | null {
   return derivedFor(seed).scope;
 }
 
+// -- the real to-one relation (conformance/README.md, "The real to-one relation") ----------------
+//
+// `parentSeedId` names the seed whose four scalars this row's `parent` carries, and that seed's own
+// `parentSeedId` names the ones `parent.inner` carries. The chain is cut at two levels. Every
+// resource owns a FRESH parent (and inner) object rather than pointing at the named seed's own
+// document, so no two resources share one and a filter that returned the parent instead of the
+// child cannot agree with the oracle by accident.
+
+const seedsById = new Map(seedsFile.seeds.map((seed) => [seed.id, seed]));
+
+function parentSeedOf(seed: Seed | undefined): Seed | undefined {
+  const id = seed?.parentSeedId;
+  if (id === undefined || id === null) return undefined;
+  const parent = seedsById.get(id);
+  if (parent === undefined) {
+    throw new Error(
+      `seeds.json: "${seed?.id}" names parent "${id}", which is not a seed id`,
+    );
+  }
+  return parent;
+}
+
+/** The four scalars one level of the chain carries. A NULL column is an ABSENT key. */
+function relationLevelOf(seed: Seed): StoredRelationLevel {
+  const level: StoredRelationLevel = {
+    aBool: seed.aBool,
+    aString: seed.aString,
+    aNumber: seed.aNumber,
+  };
+  if (seed.aOptionalString !== null) level.aOptionalString = seed.aOptionalString;
+  return level;
+}
+
+/** The stored `parent` object for a seed, or undefined when it has no parent. */
+function storedParent(seed: Seed): StoredDocument["parent"] {
+  const parentSeed = parentSeedOf(seed);
+  if (parentSeed === undefined) return undefined;
+  const innerSeed = parentSeedOf(parentSeed);
+  const parent: NonNullable<StoredDocument["parent"]> =
+    relationLevelOf(parentSeed);
+  if (innerSeed !== undefined) parent.inner = relationLevelOf(innerSeed);
+  return parent;
+}
+
 function storedDocument(seed: Seed): StoredDocument {
   const document: StoredDocument = {
     id: seed.id,
@@ -647,6 +704,8 @@ function storedDocument(seed: Seed): StoredDocument {
       subNames: seed.subCategoryNames,
     };
   }
+  const parent = storedParent(seed);
+  if (parent !== undefined) document.parent = parent;
   return document;
 }
 
@@ -691,6 +750,11 @@ function checkResource(seed: Seed): Resource {
       subNames: seed.subCategoryNames,
     };
   }
+  // The real to-one chain, mirroring the stored document exactly. A row with no parent sends NO
+  // `parent` attribute — a CEL missing-path error (deny) — matching the stored document having no
+  // `parent` key; the same holds one level down for `parent.inner`.
+  const parent = storedParent(seed);
+  if (parent !== undefined) attr["parent"] = parent as unknown as Value;
   return { kind: seedsFile.resourceKind, id: seed.id, attr };
 }
 
@@ -1065,6 +1129,39 @@ describe("adversarial conformance corpus", () => {
     expect(oracle.length).toBeGreaterThan(0);
     expect(oracle.length).toBeLessThan(allIds.length);
     expect(await adapterFilteredIds(action)).toEqual(allIds);
+  });
+
+  // The to-one relation carries no corpus action yet — this is the expand half of
+  // cerbos/query-plan-adapters#372's expand–contract — so nothing else in this file would notice a
+  // seeder that stored no chain at all, or one that wrote the root's own columns one hop out.
+  // Read the two hops back out of the stored documents rather than counting them: a count cannot
+  // tell the corpus's values from the root's, which is exactly the flat-alias failure this
+  // relation exists to make visible.
+  test("the seeded to-one chain matches the corpus relation", async () => {
+    const withParent = seedsFile.seeds.filter(
+      (seed) => parentSeedOf(seed) !== undefined,
+    );
+    const withInner = seedsFile.seeds.filter(
+      (seed) => parentSeedOf(parentSeedOf(seed)) !== undefined,
+    );
+    expect(withParent.length).toBeGreaterThan(0);
+    expect(withInner.length).toBeGreaterThan(0);
+    expect(withParent.length).toBeLessThan(seedsFile.seeds.length);
+
+    const stored = await convex.query(api.adversarial.parentChain, {});
+    expect(
+      Object.fromEntries(stored.map((row) => [row.id, [row.parent, row.inner]])),
+    ).toEqual(
+      Object.fromEntries(
+        seedsFile.seeds.map((seed) => [
+          seed.id,
+          [
+            parentSeedOf(seed)?.aString ?? null,
+            parentSeedOf(parentSeedOf(seed))?.aString ?? null,
+          ],
+        ]),
+      ),
+    );
   });
 
   test("oracle is not degenerate", async () => {

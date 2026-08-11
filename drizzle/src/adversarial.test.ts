@@ -15,7 +15,7 @@ import type {
   Value,
 } from "@cerbos/core";
 import Database from "better-sqlite3";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { AnyColumn, SQL, Table } from "drizzle-orm";
 import { drizzle as drizzleSqlite } from "drizzle-orm/better-sqlite3";
 import { drizzle as drizzlePostgres } from "drizzle-orm/node-postgres";
@@ -74,6 +74,8 @@ interface Seed {
   aOptionalString: string | null;
   tags: Tag[];
   subCategoryNames: string[];
+  /** The seed whose scalars this row's to-one `parent` carries; null for no parent. */
+  parentSeedId: string | null;
 }
 
 interface SeedsFile {
@@ -137,6 +139,7 @@ const SEED_KEYS = [
   "aOptionalString",
   "tags",
   "subCategoryNames",
+  "parentSeedId",
 ] as const;
 
 /** Corpus prose, never read by a harness: the one documented exclusion from SEED_KEYS. */
@@ -409,6 +412,43 @@ function labelsFor(seed: Seed): (string | null)[] {
   return derivedFor(seed).labels;
 }
 
+// -- the real to-one relation (conformance/README.md, "The real to-one relation") ----------------
+//
+// `parentSeedId` names the seed whose four scalars this row's `parent` carries, and that seed's own
+// `parentSeedId` names the ones `parent.inner` carries. The chain is cut at two levels. Every
+// resource owns a FRESH parent (and inner) row rather than pointing at the named seed's own row, so
+// no two resources share one and a filter that returned the parent instead of the child cannot
+// agree with the oracle by accident.
+
+const SEEDS_BY_ID = new Map(SEEDS.map((seed) => [seed.id, seed]));
+
+function parentSeedOf(seed: Seed | undefined): Seed | undefined {
+  const id = seed?.parentSeedId;
+  if (id === undefined || id === null) {
+    return undefined;
+  }
+  const parent = SEEDS_BY_ID.get(id);
+  if (parent === undefined) {
+    throw new Error(
+      `seeds.json: "${seed?.id}" names parent "${id}", which is not a seed id`
+    );
+  }
+  return parent;
+}
+
+/** The same four scalars as check() attributes: a NULL column is a MISSING attribute, one hop out. */
+function relationAttr(seed: Seed): Record<string, Value> {
+  const attr: Record<string, Value> = {
+    aBool: seed.aBool,
+    aString: seed.aString,
+    aNumber: seed.aNumber,
+  };
+  if (seed.aOptionalString !== null) {
+    attr["aOptionalString"] = seed.aOptionalString;
+  }
+  return attr;
+}
+
 // -- the seeded rows, derived once and shared by every store ------------------------------------
 //
 // Only the INSERT calls differ per store. Deriving the rows here rather than inside each store
@@ -451,8 +491,29 @@ interface LabelRow {
   subCategoryId: string;
 }
 
+/** One level of the to-one chain. `resourceId`/`parentId` is unique: this is a to-ONE relation. */
+interface ParentRow {
+  id: string;
+  aBool: boolean;
+  aString: string;
+  aNumber: number;
+  aOptionalString: string | null;
+  resourceId: string;
+}
+
+interface InnerRow {
+  id: string;
+  aBool: boolean;
+  aString: string;
+  aNumber: number;
+  aOptionalString: string | null;
+  parentId: string;
+}
+
 interface SeedRows {
   resources: ResourceRow[];
+  parents: ParentRow[];
+  inners: InnerRow[];
   tags: TagRow[];
   categories: CategoryRow[];
   subCategories: SubCategoryRow[];
@@ -463,6 +524,8 @@ interface SeedRows {
 function seedRows(): SeedRows {
   const rows: SeedRows = {
     resources: [],
+    parents: [],
+    inners: [],
     tags: [],
     categories: [],
     subCategories: [],
@@ -481,6 +544,29 @@ function seedRows(): SeedRows {
       scope: scopeFor(seed),
       createdAt: timestampFor(seed),
     });
+    const parentSeed = parentSeedOf(seed);
+    if (parentSeed !== undefined) {
+      const parentId = `${seed.id}-parent`;
+      rows.parents.push({
+        id: parentId,
+        aBool: parentSeed.aBool,
+        aString: parentSeed.aString,
+        aNumber: parentSeed.aNumber,
+        aOptionalString: parentSeed.aOptionalString,
+        resourceId: seed.id,
+      });
+      const innerSeed = parentSeedOf(parentSeed);
+      if (innerSeed !== undefined) {
+        rows.inners.push({
+          id: `${parentId}-inner`,
+          aBool: innerSeed.aBool,
+          aString: innerSeed.aString,
+          aNumber: innerSeed.aNumber,
+          aOptionalString: innerSeed.aOptionalString,
+          parentId,
+        });
+      }
+    }
     for (const tag of seed.tags) {
       rows.tags.push({ tagId: tag.id, name: tag.name, resourceId: seed.id });
     }
@@ -537,6 +623,22 @@ interface AdversarialSchema {
     createdBy: AnyColumn;
     scope: AnyColumn;
     createdAt: AnyColumn;
+  };
+  parents: Table & {
+    id: AnyColumn;
+    aBool: AnyColumn;
+    aString: AnyColumn;
+    aNumber: AnyColumn;
+    aOptionalString: AnyColumn;
+    resourceId: AnyColumn;
+  };
+  inners: Table & {
+    id: AnyColumn;
+    aBool: AnyColumn;
+    aString: AnyColumn;
+    aNumber: AnyColumn;
+    aOptionalString: AnyColumn;
+    parentId: AnyColumn;
   };
   tags: Table & {
     tagId: AnyColumn;
@@ -605,8 +707,13 @@ function buildMapper(schema: AdversarialSchema): Record<string, MapperEntry> {
       nullAttributeRepresentation: "explicit",
     },
     // obj.inner is not a real nested column — mirrors aString, same trick the spring-data
-    // and prisma reference harnesses use for the p-struct probe.
+    // and prisma reference harnesses use for the p-struct probe. `parent.inner` below is the
+    // opposite: a real two-level join. The two are kept side by side on purpose.
     "request.resource.attr.obj.inner": schema.resources.aString,
+    // The corpus's real to-one chain is seeded below and mirrored on the check side, but carries
+    // no mapping yet: nothing references it until the join shapes land (#375), and an unexercised
+    // mapping is a declaration no assertion holds to anything. This is the expand half of
+    // cerbos/query-plan-adapters#372's expand–contract.
     "request.resource.attr.tags": {
       relation: {
         type: "many",
@@ -677,6 +784,12 @@ interface AdversarialStore {
   start(): Promise<void>;
   stop(): Promise<void>;
   selectIds(filter: SQL | undefined): Promise<string[]>;
+  /**
+   * The two hops of the to-one chain read back through a real join, per resource id: the
+   * `aString` of `parent` and of `parent.inner`, or null where that level does not exist. The
+   * relation carries no corpus action yet, so this is what keeps the fixture from rotting.
+   */
+  parentChain(): Promise<Record<string, [string | null, string | null]>>;
   /** The engine's own banner, asked of the connection the suite actually queries through. */
   serverBanner(): Promise<string>;
 }
@@ -692,6 +805,25 @@ function sqliteStore(): AdversarialStore {
     createdBy: text("created_by").notNull(),
     scope: text("scope"),
     createdAt: text("created_at"),
+  });
+
+  // The corpus's one real to-one chain, one owned row per level and per resource.
+  const parents = sqliteTable("adversarial_parents", {
+    id: text("id").primaryKey(),
+    aBool: integer("a_bool", { mode: "boolean" }).notNull(),
+    aString: text("a_string").notNull(),
+    aNumber: integer("a_number").notNull(),
+    aOptionalString: text("a_optional_string"),
+    resourceId: text("resource_id").notNull().unique(),
+  });
+
+  const inners = sqliteTable("adversarial_inners", {
+    id: text("id").primaryKey(),
+    aBool: integer("a_bool", { mode: "boolean" }).notNull(),
+    aString: text("a_string").notNull(),
+    aNumber: integer("a_number").notNull(),
+    aOptionalString: text("a_optional_string"),
+    parentId: text("parent_id").notNull().unique(),
   });
 
   const tags = sqliteTable("adversarial_tags", {
@@ -729,7 +861,15 @@ function sqliteStore(): AdversarialStore {
 
   return {
     name: "sqlite",
-    mapper: buildMapper({ resources, tags, categories, subCategories, labels }),
+    mapper: buildMapper({
+      resources,
+      parents,
+      inners,
+      tags,
+      categories,
+      subCategories,
+      labels,
+    }),
 
     async start(): Promise<void> {
       sqlite.exec(`
@@ -743,6 +883,22 @@ function sqliteStore(): AdversarialStore {
           created_by TEXT NOT NULL,
           scope TEXT,
           created_at TEXT
+        );
+        CREATE TABLE adversarial_parents (
+          id TEXT PRIMARY KEY,
+          a_bool INTEGER NOT NULL,
+          a_string TEXT NOT NULL,
+          a_number INTEGER NOT NULL,
+          a_optional_string TEXT,
+          resource_id TEXT NOT NULL UNIQUE
+        );
+        CREATE TABLE adversarial_inners (
+          id TEXT PRIMARY KEY,
+          a_bool INTEGER NOT NULL,
+          a_string TEXT NOT NULL,
+          a_number INTEGER NOT NULL,
+          a_optional_string TEXT,
+          parent_id TEXT NOT NULL UNIQUE
         );
         CREATE TABLE adversarial_tags (
           tag_id TEXT PRIMARY KEY,
@@ -768,6 +924,8 @@ function sqliteStore(): AdversarialStore {
 
       const rows = seedRows();
       db.insert(resources).values(rows.resources).run();
+      db.insert(parents).values(rows.parents).run();
+      db.insert(inners).values(rows.inners).run();
       db.insert(tags).values(rows.tags).run();
       db.insert(categories).values(rows.categories).run();
       db.insert(subCategories).values(rows.subCategories).run();
@@ -785,6 +943,20 @@ function sqliteStore(): AdversarialStore {
         .where(filter)
         .all();
       return selected.map((row) => row.id).sort();
+    },
+
+    async parentChain(): Promise<Record<string, [string | null, string | null]>> {
+      const rows = db
+        .select({
+          id: resources.id,
+          parent: parents.aString,
+          inner: inners.aString,
+        })
+        .from(resources)
+        .leftJoin(parents, eq(parents.resourceId, resources.id))
+        .leftJoin(inners, eq(inners.parentId, parents.id))
+        .all();
+      return Object.fromEntries(rows.map((row) => [row.id, [row.parent, row.inner]]));
     },
 
     async serverBanner(): Promise<string> {
@@ -835,6 +1007,25 @@ function postgresStore(): AdversarialStore {
     }),
   });
 
+  // The corpus's one real to-one chain, one owned row per level and per resource.
+  const parents = pgTable("adversarial_parents", {
+    id: pgText("id").primaryKey(),
+    aBool: boolean("a_bool").notNull(),
+    aString: pgText("a_string").notNull(),
+    aNumber: pgInteger("a_number").notNull(),
+    aOptionalString: pgText("a_optional_string"),
+    resourceId: pgText("resource_id").notNull().unique(),
+  });
+
+  const inners = pgTable("adversarial_inners", {
+    id: pgText("id").primaryKey(),
+    aBool: boolean("a_bool").notNull(),
+    aString: pgText("a_string").notNull(),
+    aNumber: pgInteger("a_number").notNull(),
+    aOptionalString: pgText("a_optional_string"),
+    parentId: pgText("parent_id").notNull().unique(),
+  });
+
   const tags = pgTable("adversarial_tags", {
     tagId: pgText("tag_id").primaryKey(),
     // NULLABLE on purpose: a NULL tag name is a missing element attribute on the check
@@ -874,7 +1065,15 @@ function postgresStore(): AdversarialStore {
 
   return {
     name: "postgres",
-    mapper: buildMapper({ resources, tags, categories, subCategories, labels }),
+    mapper: buildMapper({
+      resources,
+      parents,
+      inners,
+      tags,
+      categories,
+      subCategories,
+      labels,
+    }),
 
     async start(): Promise<void> {
       container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
@@ -892,6 +1091,22 @@ function postgresStore(): AdversarialStore {
           created_by         text NOT NULL,
           scope              text,
           created_at         timestamptz
+        );
+        CREATE TABLE adversarial_parents (
+          id                 text PRIMARY KEY,
+          a_bool             boolean NOT NULL,
+          a_string           text NOT NULL,
+          a_number           integer NOT NULL,
+          a_optional_string  text,
+          resource_id        text NOT NULL UNIQUE REFERENCES adversarial_resources(id)
+        );
+        CREATE TABLE adversarial_inners (
+          id                 text PRIMARY KEY,
+          a_bool             boolean NOT NULL,
+          a_string           text NOT NULL,
+          a_number           integer NOT NULL,
+          a_optional_string  text,
+          parent_id          text NOT NULL UNIQUE REFERENCES adversarial_parents(id)
         );
         CREATE TABLE adversarial_tags (
           tag_id       text PRIMARY KEY,
@@ -917,6 +1132,8 @@ function postgresStore(): AdversarialStore {
 
       const rows = seedRows();
       await db.insert(resources).values(rows.resources);
+      await db.insert(parents).values(rows.parents);
+      await db.insert(inners).values(rows.inners);
       await db.insert(tags).values(rows.tags);
       await db.insert(categories).values(rows.categories);
       await db.insert(subCategories).values(rows.subCategories);
@@ -934,6 +1151,19 @@ function postgresStore(): AdversarialStore {
         .from(resources)
         .where(filter);
       return selected.map((row) => row.id).sort();
+    },
+
+    async parentChain(): Promise<Record<string, [string | null, string | null]>> {
+      const rows = await connected()
+        .select({
+          id: resources.id,
+          parent: parents.aString,
+          inner: inners.aString,
+        })
+        .from(resources)
+        .leftJoin(parents, eq(parents.resourceId, resources.id))
+        .leftJoin(inners, eq(inners.parentId, parents.id));
+      return Object.fromEntries(rows.map((row) => [row.id, [row.parent, row.inner]]));
     },
 
     async serverBanner(): Promise<string> {
@@ -1053,6 +1283,18 @@ function asCheckResource(seed: Seed): Resource {
   const scope = scopeFor(seed);
   if (scope !== null) {
     attr["scope"] = scope;
+  }
+  // The real to-one chain, mirroring the seeded rows exactly. A row with no parent sends NO
+  // `parent` attribute — a CEL missing-path error (deny) — matching the adapter's join finding
+  // nothing; the same holds one level down for `parent.inner`.
+  const parentSeed = parentSeedOf(seed);
+  if (parentSeed !== undefined) {
+    const parentAttr = relationAttr(parentSeed);
+    const innerSeed = parentSeedOf(parentSeed);
+    if (innerSeed !== undefined) {
+      parentAttr["inner"] = relationAttr(innerSeed);
+    }
+    attr["parent"] = parentAttr;
   }
   const createdAt = timestampFor(seed);
   if (createdAt !== null) {
@@ -1387,6 +1629,34 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
     expect(withParent.length).toBeLessThan(SEEDS.length);
     expect(await filteredIdsFor(compare("ge", 0))).toEqual(withParent);
     expect(await filteredIdsFor(compare("lt", 2))).toEqual(withParent);
+  });
+
+  // The to-one relation carries no corpus action yet — this is the expand half of
+  // cerbos/query-plan-adapters#372's expand–contract — so nothing else in this file would notice a
+  // seeder that stored no chain at all, or one that attached every parent to the wrong resource.
+  // Read the two hops back through a real join rather than counting rows: a count cannot tell an
+  // inner row carrying the corpus's values from one carrying the root's own columns, which is
+  // exactly the flat-column-alias failure this relation exists to make visible.
+  test("the seeded to-one chain matches the corpus relation", async () => {
+    const withParent = SEEDS.filter((seed) => parentSeedOf(seed) !== undefined);
+    const withInner = SEEDS.filter(
+      (seed) => parentSeedOf(parentSeedOf(seed)) !== undefined
+    );
+    expect(withParent.length).toBeGreaterThan(0);
+    expect(withInner.length).toBeGreaterThan(0);
+    expect(withParent.length).toBeLessThan(SEEDS.length);
+
+    expect(await store.parentChain()).toEqual(
+      Object.fromEntries(
+        SEEDS.map((seed) => [
+          seed.id,
+          [
+            parentSeedOf(seed)?.aString ?? null,
+            parentSeedOf(parentSeedOf(seed))?.aString ?? null,
+          ],
+        ])
+      )
+    );
   });
 
   test("oracle is not degenerate", async () => {

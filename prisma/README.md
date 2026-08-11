@@ -167,7 +167,7 @@ undeclared side needs UNKNOWN — so the adapter throws rather than picking a di
 
 ### Conformance contract
 
-The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 20 hostile seed rows, both Prisma 6 and 7, and both SQLite and PostgreSQL. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
+The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 21 hostile seed rows, both Prisma 6 and 7, and both SQLite and PostgreSQL. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
 
 | Classification | Coverage |
 | --- | --- |

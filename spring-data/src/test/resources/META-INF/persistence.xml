@@ -14,6 +14,8 @@
         <class>dev.cerbos.queryplan.springdata.testmodel.OwnerEntity</class>
         <class>dev.cerbos.queryplan.springdata.testmodel.NestedEmbeddable</class>
         <class>dev.cerbos.queryplan.springdata.testmodel.NextLevelEmbeddable</class>
+        <class>dev.cerbos.queryplan.springdata.testmodel.AdversarialParentEntity</class>
+        <class>dev.cerbos.queryplan.springdata.testmodel.AdversarialInnerEntity</class>
         <exclude-unlisted-classes>true</exclude-unlisted-classes>
         <properties>
             <property name="jakarta.persistence.jdbc.url" value="jdbc:h2:mem:cerbostest;DB_CLOSE_DELAY=-1;MODE=PostgreSQL"/>
@@ -39,6 +41,8 @@
         <class>dev.cerbos.queryplan.springdata.testmodel.OwnerEntity</class>
         <class>dev.cerbos.queryplan.springdata.testmodel.NestedEmbeddable</class>
         <class>dev.cerbos.queryplan.springdata.testmodel.NextLevelEmbeddable</class>
+        <class>dev.cerbos.queryplan.springdata.testmodel.AdversarialParentEntity</class>
+        <class>dev.cerbos.queryplan.springdata.testmodel.AdversarialInnerEntity</class>
         <exclude-unlisted-classes>true</exclude-unlisted-classes>
         <properties>
             <property name="jakarta.persistence.jdbc.url" value="jdbc:h2:mem:cerbosadv;DB_CLOSE_DELAY=-1;MODE=PostgreSQL"/>

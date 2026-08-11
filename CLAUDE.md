@@ -126,8 +126,9 @@ enforces the *rule* instead — see "Pinning service images" in `conformance/REA
 what to do when you add a new service.
 
 **Read [conformance/README.md](conformance/README.md) before changing corpus behaviour.** It covers
-the oracle recipe, the NULL conventions, the degeneracy guard, how to add a hostile shape, and how
-to add or onboard an adapter.
+the oracle recipe, the NULL conventions, the degeneracy guard, the corpus's one real to-one
+relation ([ADR 0005](docs/adr/0005-the-conformance-corpus-carries-a-real-to-one-relation.md)), how
+to add a hostile shape, and how to add or onboard an adapter.
 
 ## The demo domain
 

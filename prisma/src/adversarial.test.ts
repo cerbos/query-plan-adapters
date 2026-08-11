@@ -106,6 +106,8 @@ interface Seed {
   aOptionalString: string | null;
   tags: Tag[];
   subCategoryNames: string[];
+  /** The seed whose scalars this row's to-one `parent` carries; null for no parent. */
+  parentSeedId: string | null;
 }
 
 interface SeedsFile {
@@ -243,6 +245,7 @@ const SEED_KEYS = [
   "aOptionalString",
   "tags",
   "subCategoryNames",
+  "parentSeedId",
 ] as const;
 
 /** Corpus prose, never read by a harness: the one documented exclusion from SEED_KEYS. */
@@ -472,6 +475,58 @@ function scopeFor(seed: Seed): string | null {
   return derivedFor(seed).scope;
 }
 
+// -- the real to-one relation (conformance/README.md, "The real to-one relation") ----------------
+//
+// `parentSeedId` names the seed whose four scalars this row's `parent` carries, and that seed's
+// own `parentSeedId` names the ones `parent.inner` carries. The chain is cut at two levels. Every
+// resource owns a FRESH parent (and inner) row rather than pointing at the named seed's own row,
+// so no two resources share one and a filter that returned the parent instead of the child cannot
+// agree with the oracle by accident.
+
+const SEEDS_BY_ID = new Map(SEEDS.map((seed) => [seed.id, seed]));
+
+function parentSeedOf(seed: Seed | undefined): Seed | undefined {
+  const id = seed?.parentSeedId;
+  if (id === undefined || id === null) {
+    return undefined;
+  }
+  const parent = SEEDS_BY_ID.get(id);
+  if (parent === undefined) {
+    throw new Error(
+      `seeds.json: "${seed?.id}" names parent "${id}", which is not a seed id`
+    );
+  }
+  return parent;
+}
+
+/** The four scalars one level of the chain stores, as columns. */
+function relationColumns(seed: Seed): {
+  aBool: boolean;
+  aString: string;
+  aNumber: number;
+  aOptionalString: string | null;
+} {
+  return {
+    aBool: seed.aBool,
+    aString: seed.aString,
+    aNumber: seed.aNumber,
+    aOptionalString: seed.aOptionalString,
+  };
+}
+
+/** The same four as check() attributes: a NULL column is a MISSING attribute, one hop out. */
+function relationAttr(seed: Seed): Record<string, Value> {
+  const attr: Record<string, Value> = {
+    aBool: seed.aBool,
+    aString: seed.aString,
+    aNumber: seed.aNumber,
+  };
+  if (seed.aOptionalString !== null) {
+    attr["aOptionalString"] = seed.aOptionalString;
+  }
+  return attr;
+}
+
 /**
  * The same mapper with every per-attribute null convention stripped, so the call-level option is
  * the only thing governing null operands.
@@ -520,8 +575,13 @@ const MAPPER: Record<string, MapperConfig> = {
     nullAttributeRepresentation: "explicit",
   },
   // obj.inner is not a real nested column — mirrors aString, same trick the spring-data
-  // reference harness uses for the p-struct probe.
+  // reference harness uses for the p-struct probe. `parent.inner` below is the opposite: a real
+  // two-level join. The two are kept side by side on purpose.
   "request.resource.attr.obj.inner": { field: "aString" },
+  // The corpus's real to-one chain is seeded below and mirrored on the check side, but carries
+  // no mapping yet: nothing references it until the join shapes land (#375), and an unexercised
+  // mapping is a declaration no assertion holds to anything. This is the expand half of
+  // cerbos/query-plan-adapters#372's expand–contract.
   "request.resource.attr.tags": {
     relation: {
       name: "tags",
@@ -605,6 +665,8 @@ const MAPPER: Record<string, MapperConfig> = {
 const MAPPER_WITHOUT_NULL_CONVENTIONS = withoutNullConventions(MAPPER);
 
 beforeAll(async () => {
+  await prisma.adversarialInner.deleteMany();
+  await prisma.adversarialParent.deleteMany();
   await prisma.adversarialLabel.deleteMany();
   await prisma.adversarialSubCategory.deleteMany();
   await prisma.adversarialCategory.deleteMany();
@@ -613,6 +675,8 @@ beforeAll(async () => {
 
   // Distinct sub-category/category graphs per seed so no rows share relations by accident.
   for (const seed of SEEDS) {
+    const parentSeed = parentSeedOf(seed);
+    const innerSeed = parentSeedOf(parentSeed);
     await prisma.adversarialResource.create({
       data: {
         id: seed.id,
@@ -627,6 +691,21 @@ beforeAll(async () => {
         tags: {
           create: seed.tags.map((t) => ({ tagId: t.id, name: t.name })),
         },
+        // The to-one chain, one owned row per level. A seed with no parent gets no row at all,
+        // which is what makes the absent-parent hazard reachable through a SCALAR rather than
+        // only through mainCategory's collection.
+        ...(parentSeed === undefined
+          ? {}
+          : {
+              parent: {
+                create: {
+                  ...relationColumns(parentSeed),
+                  ...(innerSeed === undefined
+                    ? {}
+                    : { inner: { create: relationColumns(innerSeed) } }),
+                },
+              },
+            }),
         categories: {
           create: seed.subCategoryNames.map((subName) => ({
             name: "business",
@@ -718,6 +797,18 @@ function asCheckResource(seed: Seed): Resource {
       subCategories: seed.subCategoryNames.map((name) => ({ name })),
       subNames: seed.subCategoryNames,
     };
+  }
+  // The real to-one chain, mirroring the seeded rows exactly. A row with no parent sends NO
+  // `parent` attribute — a CEL missing-path error (deny) — matching the adapter's join finding
+  // nothing; the same holds one level down for `parent.inner`.
+  const parentSeed = parentSeedOf(seed);
+  if (parentSeed !== undefined) {
+    const parentAttr = relationAttr(parentSeed);
+    const innerSeed = parentSeedOf(parentSeed);
+    if (innerSeed !== undefined) {
+      parentAttr["inner"] = relationAttr(innerSeed);
+    }
+    attr["parent"] = parentAttr;
   }
   return { kind: seedsFile.resourceKind, id: seed.id, attr };
 }
@@ -1163,7 +1254,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
     );
 
     // The else-branch is what a bare `NOT` over the chain filter over-grants: it is TRUE for
-    // every parentless row, so each of these returned the 16 missing-parent seeds on top.
+    // every parentless row, so each of these returned the 17 missing-parent seeds on top.
     expect(await filteredIdsFor(ternary(chainIn, FALSE, TRUE))).toEqual(
       conditionFalse
     );
@@ -1197,6 +1288,47 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
         )
       )
     ).toEqual([...new Set([...conditionFalse, ...aBoolFalse])].sort());
+  });
+
+  // The to-one relation carries no corpus action yet — this is the expand half of
+  // cerbos/query-plan-adapters#372's expand–contract — so nothing else in this file would notice a
+  // seeder that stored no chain at all, or one that attached every parent to the wrong resource.
+  // Read the two hops back through a real join rather than counting rows: a count cannot tell an
+  // inner row carrying the corpus's values from one carrying the root's own columns, which is
+  // exactly the flat-column-alias failure this relation exists to make visible.
+  test("the seeded to-one chain matches the corpus relation", async () => {
+    const withParent = SEEDS.filter((seed) => parentSeedOf(seed) !== undefined);
+    const withInner = SEEDS.filter(
+      (seed) => parentSeedOf(parentSeedOf(seed)) !== undefined
+    );
+    expect(withParent.length).toBeGreaterThan(0);
+    expect(withInner.length).toBeGreaterThan(0);
+    expect(withParent.length).toBeLessThan(SEEDS.length);
+
+    const joined = await prisma.adversarialResource.findMany({
+      select: {
+        id: true,
+        parent: {
+          select: { aString: true, inner: { select: { aString: true } } },
+        },
+      },
+    });
+    const stored = Object.fromEntries(
+      joined.map((row) => [
+        row.id,
+        [row.parent?.aString ?? null, row.parent?.inner?.aString ?? null],
+      ])
+    );
+    const expected = Object.fromEntries(
+      SEEDS.map((seed) => [
+        seed.id,
+        [
+          parentSeedOf(seed)?.aString ?? null,
+          parentSeedOf(parentSeedOf(seed))?.aString ?? null,
+        ],
+      ])
+    );
+    expect(stored).toEqual(expected);
   });
 
   test("oracle is not degenerate", async () => {

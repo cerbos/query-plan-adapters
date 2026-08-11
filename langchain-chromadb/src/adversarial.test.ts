@@ -55,6 +55,8 @@ interface Seed {
   aOptionalString: string | null;
   tags: Tag[];
   subCategoryNames: string[];
+  /** The seed whose scalars this row's to-one `parent` carries; null for no parent. */
+  parentSeedId: string | null;
 }
 
 interface SeedsFile {
@@ -189,6 +191,7 @@ const SEED_KEYS = [
   "aOptionalString",
   "tags",
   "subCategoryNames",
+  "parentSeedId",
 ] as const;
 
 /** Corpus prose, never read by a harness: the one documented exclusion from SEED_KEYS. */
@@ -307,6 +310,10 @@ function parseSeed(value: unknown, index: number): Seed {
   if (optional !== null && typeof optional !== "string") {
     throw Error(`${label}.aOptionalString must be a string or null`);
   }
+  const parentSeedId = seed["parentSeedId"];
+  if (parentSeedId !== null && typeof parentSeedId !== "string") {
+    throw Error(`${label}.parentSeedId must be a string or null`);
+  }
   return {
     id: requireString(seed["id"], `${label}.id`),
     aBool: requireBoolean(seed["aBool"], `${label}.aBool`),
@@ -320,6 +327,7 @@ function parseSeed(value: unknown, index: number): Seed {
       seed["subCategoryNames"],
       `${label}.subCategoryNames`,
     ),
+    parentSeedId,
   };
 }
 
@@ -622,6 +630,11 @@ const FIELD_NAME_MAPPER: Record<string, string | FieldNameMapperConfig> = {
     required: false,
   },
   "request.resource.attr.obj.inner": { field: "obj.inner", required: true },
+  // The corpus's real to-one chain is flattened onto dotted metadata keys by `metadataFor` and
+  // mirrored as a nested object on the check side, but carries no mapping yet: nothing references
+  // it until the join shapes land (#375), and an unexercised mapping is a declaration no
+  // assertion holds to anything. This is the expand half of
+  // cerbos/query-plan-adapters#372's expand-contract.
 };
 
 // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") --------
@@ -664,6 +677,40 @@ function tagAttribute(tag: Tag): Record<string, Value> {
   const attr: Record<string, Value> = { id: tag.id };
   if (tag.name !== null) {
     attr["name"] = tag.name;
+  }
+  return attr;
+}
+
+// -- the real to-one relation (conformance/README.md, "The real to-one relation") ----------------
+//
+// `parentSeedId` names the seed whose four scalars this row's `parent` carries, and that seed's own
+// `parentSeedId` names the ones `parent.inner` carries. The chain is cut at two levels.
+
+const SEEDS_BY_ID = new Map(SEEDS.map((seed) => [seed.id, seed]));
+
+function parentSeedOf(seed: Seed | undefined): Seed | undefined {
+  const id = seed?.parentSeedId;
+  if (id === undefined || id === null) {
+    return undefined;
+  }
+  const parent = SEEDS_BY_ID.get(id);
+  if (parent === undefined) {
+    throw new Error(
+      `seeds.json: "${seed?.id}" names parent "${id}", which is not a seed id`,
+    );
+  }
+  return parent;
+}
+
+/** The four scalars as check() attributes: a NULL column is a MISSING attribute, one hop out. */
+function relationAttr(seed: Seed): Record<string, Value> {
+  const attr: Record<string, Value> = {
+    aBool: seed.aBool,
+    aString: seed.aString,
+    aNumber: seed.aNumber,
+  };
+  if (seed.aOptionalString !== null) {
+    attr["aOptionalString"] = seed.aOptionalString;
   }
   return attr;
 }
@@ -717,6 +764,18 @@ function checkResource(seed: Seed): Resource {
       subNames: seed.subCategoryNames,
     };
   }
+  // The real to-one chain, mirroring the flattened metadata keys exactly. A row with no parent
+  // sends NO `parent` attribute — a CEL missing-path error (deny) — matching the metadata
+  // carrying no `parent.*` key; the same holds one level down for `parent.inner`.
+  const parentSeed = parentSeedOf(seed);
+  if (parentSeed !== undefined) {
+    const parentAttr = relationAttr(parentSeed);
+    const innerSeed = parentSeedOf(parentSeed);
+    if (innerSeed !== undefined) {
+      parentAttr["inner"] = relationAttr(innerSeed);
+    }
+    attr["parent"] = parentAttr;
+  }
 
   return { kind: seedsFile.resourceKind, id: seed.id, attr };
 }
@@ -731,6 +790,21 @@ function metadataFor(seed: Seed): Metadata {
   };
   if (seed.aOptionalString !== null) {
     metadata["aOptionalString"] = seed.aOptionalString;
+  }
+  // The to-one chain, flattened onto dotted keys. A level that does not exist writes no key at
+  // all, which is what the check side's missing `parent` / `parent.inner` path mirrors.
+  const levels: [string, Seed | undefined][] = [
+    ["parent", parentSeedOf(seed)],
+    ["parent.inner", parentSeedOf(parentSeedOf(seed))],
+  ];
+  for (const [prefix, level] of levels) {
+    if (level === undefined) continue;
+    metadata[`${prefix}.aBool`] = level.aBool;
+    metadata[`${prefix}.aString`] = level.aString;
+    metadata[`${prefix}.aNumber`] = level.aNumber;
+    if (level.aOptionalString !== null) {
+      metadata[`${prefix}.aOptionalString`] = level.aOptionalString;
+    }
   }
   return metadata;
 }
@@ -918,6 +992,51 @@ describe("adversarial conformance corpus", () => {
     expect(oracle.length).toBeGreaterThan(0);
     expect(oracle.length).toBeLessThan(allIds.length);
     expect(await adapterFilteredIds(action)).toEqual(allIds);
+  });
+
+  // The to-one relation carries no corpus action yet — this is the expand half of
+  // cerbos/query-plan-adapters#372's expand–contract — so nothing else in this file would notice a
+  // seeder that wrote no chain keys at all, or one that wrote the root's own columns one hop out.
+  // Read the two hops back out of the stored metadata rather than counting keys: a count cannot
+  // tell the corpus's values from the root's, which is exactly the flat-alias failure this
+  // relation exists to make visible.
+  test("the seeded to-one chain matches the corpus relation", async () => {
+    const withParent = SEEDS.filter((seed) => parentSeedOf(seed) !== undefined);
+    const withInner = SEEDS.filter(
+      (seed) => parentSeedOf(parentSeedOf(seed)) !== undefined,
+    );
+    expect(withParent.length).toBeGreaterThan(0);
+    expect(withInner.length).toBeGreaterThan(0);
+    expect(withParent.length).toBeLessThan(SEEDS.length);
+
+    const stored = await activeCollection().get({
+      ids: SEEDS.map(({ id }) => id),
+      include: ["metadatas"],
+    });
+    expect(
+      Object.fromEntries(
+        stored.ids.map((id, index) => {
+          const metadata = stored.metadatas[index] ?? {};
+          return [
+            id,
+            [
+              metadata["parent.aString"] ?? null,
+              metadata["parent.inner.aString"] ?? null,
+            ],
+          ];
+        }),
+      ),
+    ).toEqual(
+      Object.fromEntries(
+        SEEDS.map((seed) => [
+          seed.id,
+          [
+            parentSeedOf(seed)?.aString ?? null,
+            parentSeedOf(parentSeedOf(seed))?.aString ?? null,
+          ],
+        ]),
+      ),
+    );
   });
 
   test("oracle is not degenerate", async () => {

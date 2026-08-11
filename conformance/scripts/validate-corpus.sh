@@ -412,6 +412,46 @@ if [[ "${seed_count}" != "${unique_seed_count}" ]]; then
   exit 1
 fi
 
+# `parentSeedId` is the corpus's one real to-one relation and the only seed key that resolves
+# against another row, so it is the only one a typo can break without a harness noticing: an id
+# that names nothing materialises as "no parent" on both sides of every differential at once, and
+# the oracle agrees with the adapter for the wrong reason. Every reference is checked here, in the
+# one place that is a checker rather than an input.
+relation_drift="$(jq -r '
+  (.seeds | map(.id)) as $ids
+  | .seeds[]
+  | .parentSeedId as $parent
+  | if (has("parentSeedId") | not) then "  \(.id): carries no parentSeedId key"
+    elif $parent == .id then "  \(.id): parentSeedId names its own row"
+    elif ($parent != null) and (($ids | index($parent)) == null)
+      then "  \(.id): parentSeedId \"\($parent)\" is not a seed id"
+    else empty end
+' seeds.json)"
+if [[ -n "${relation_drift}" ]]; then
+  echo "seeds.json parentSeedId references are broken:"
+  echo "${relation_drift}"
+  exit 1
+fi
+
+# The relation has to discriminate all three depths it can reach. A corpus where every row has a
+# parent never exercises the absent-parent hazard; one where no parent has a parent of its own
+# leaves `parent.inner` unreachable, which is the whole point of seeding two levels.
+relation_depths="$(jq -r '
+  (.seeds | map({(.id): .parentSeedId}) | add) as $parent
+  | (.seeds | map(select(.parentSeedId == null)) | length) as $none
+  | (.seeds | map(select(.parentSeedId != null and $parent[.parentSeedId] == null)) | length) as $one
+  | (.seeds | map(select(.parentSeedId != null and $parent[.parentSeedId] != null)) | length) as $two
+  | [ (if $none == 0 then "no seed is parentless" else empty end),
+      (if $one  == 0 then "no seed has a parent without an inner" else empty end),
+      (if $two  == 0 then "no seed reaches parent.inner" else empty end) ]
+  | select(length > 0)
+  | join(", ")
+' seeds.json)"
+if [[ -n "${relation_depths}" ]]; then
+  echo "seeds.json parentSeedId chains are degenerate: ${relation_depths}"
+  exit 1
+fi
+
 # derived-fields.json materialises README.md's "Deterministic derived fields" rules once for every
 # harness. Nothing downstream can catch a wrong value there: each harness feeds the same entry to
 # both the stored row and the check() oracle, so a bad value makes both sides agree for the wrong
@@ -516,7 +556,8 @@ cat >"${VALIDATION_TMP}/expected-tables" <<'JSON'
   "c2": { "scope": "dept.eng.",             "labels": [] },
   "d1": { "scope": "[env]:prod:eu",         "labels": [] },
   "d2": { "scope": "e:prod:eu",             "labels": [] },
-  "e1": { "scope": null,                    "labels": [] }
+  "e1": { "scope": null,                    "labels": [] },
+  "f1": { "scope": null,                    "labels": [] }
 }
 JSON
 jq -S '.derived | map_values({scope, labels})' derived-fields.json \

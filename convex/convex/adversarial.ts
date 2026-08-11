@@ -23,6 +23,20 @@ const mainCategory = v.object({
   subNames: v.array(v.string()),
 });
 
+// The corpus's one real to-one relation. A document store has no join, so both levels are nested
+// objects — but the SHAPE is the same to-one chain every other store carries, and an absent level
+// is a missing path here exactly as it is a missing row there.
+const relationLevel = {
+  aBool: v.boolean(),
+  aString: v.string(),
+  aNumber: v.number(),
+  aOptionalString: v.optional(v.string()),
+};
+const parent = v.object({
+  ...relationLevel,
+  inner: v.optional(v.object(relationLevel)),
+});
+
 const document = {
   id: v.string(),
   aBool: v.boolean(),
@@ -40,7 +54,9 @@ const document = {
   tags: v.array(tag),
   categories: v.array(category),
   mainCategory: v.optional(mainCategory),
+  parent: v.optional(parent),
 };
+
 
 // Exported so the adversarial throw suite can invoke translation with the exact mapper the
 // backend uses — a duplicated copy would be a projection that can drift.
@@ -80,6 +96,10 @@ export const MAPPER: Record<string, MapperConfig> = {
     field: "mainCategory.subNames",
     nullable: true,
   },
+  // The corpus's real to-one chain is seeded in the `parent` object above and mirrored on the
+  // check side, but carries no mapping yet: nothing references it until the join shapes land
+  // (#375), and an unexercised mapping is a declaration no assertion holds to anything. This is
+  // the expand half of cerbos/query-plan-adapters#372's expand-contract.
 };
 
 /**
@@ -126,6 +146,22 @@ const MAPPERS: Record<MapperVariant, Mapper> = {
 export const insert = mutation({
   args: document,
   handler: async (ctx, args) => ctx.db.insert("adversarial", args),
+});
+
+/**
+ * The two hops of the to-one chain, per resource id, read back out of the stored documents. The
+ * relation carries no corpus action yet, so this is what keeps the fixture from rotting.
+ */
+export const parentChain = query({
+  args: {},
+  handler: async (ctx) => {
+    const docs = await ctx.db.query("adversarial").collect();
+    return docs.map((doc) => ({
+      id: doc.id,
+      parent: doc.parent?.aString ?? null,
+      inner: doc.parent?.inner?.aString ?? null,
+    }));
+  },
 });
 
 export const deleteAll = mutation({

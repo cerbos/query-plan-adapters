@@ -640,7 +640,7 @@ resourcePolicy:
     # Both return a list, not a boolean. Cerbos compiles the policy and the planner emits the
     # macro verbatim as the whole condition (PDP-verified: KIND_CONDITIONAL with a bare
     # `filter`/`map` node), but check() cannot evaluate a non-boolean condition, so the oracle
-    # is empty for all 20 seeds. Every adapter must REJECT the shape: translating it means
+    # is empty for all 21 seeds. Every adapter must REJECT the shape: translating it means
     # choosing a meaning the policy never stated — `filter(...)` is not `size(filter(...)) > 0`,
     # and a `map(...)` projection is not "the projection is non-empty".
     - actions: ["filter-as-condition"]
@@ -878,10 +878,10 @@ resourcePolicy:
     # than collapsing to the empty-collection case.
     #
     # Seeds discriminate already — a category graph is created only for a seed with
-    # subCategoryNames, so 16 of the 20 seeds carry NO mainCategory at all: a1/a6 hold
+    # subCategoryNames, so 17 of the 21 seeds carry NO mainCategory at all: a1/a6 hold
     # "finance", a8 "tech", c1 "Finance" (the case witness).
 
-    # all() over the chain: oracle a1/a6; a vacuous-TRUE chain adds the 16 parentless rows.
+    # all() over the chain: oracle a1/a6; a vacuous-TRUE chain adds the 17 parentless rows.
     - actions: ["w1-all-chain"]
       effect: EFFECT_ALLOW
       roles: ["USER"]
@@ -913,7 +913,7 @@ resourcePolicy:
     # The lower-bound mirror of w1-size-chain (`> 0`, which agrees for the wrong reason because
     # a positive count already implies the parent exists). A count is never negative, so `>= 0`
     # is TRUE for exactly the rows that HAVE the attribute: oracle a1/a6/a8/c1, while a chain
-    # that folds the threshold to always-true returns all 20. Non-degenerate, so this is the
+    # that folds the threshold to always-true returns all 21. Non-degenerate, so this is the
     # count-path member of the degeneracy guard.
     - actions: ["w1-size-nonneg-chain"]
       effect: EFFECT_ALLOW
@@ -931,7 +931,7 @@ resourcePolicy:
     # construction every operator builds on (which is why ent and pgx were already aligned).
     #
     # Both oracles are a8 ("tech") and c1 ("Finance") — the present-parent-no-match witnesses.
-    # An unguarded NOT EXISTS wrongly adds the 16 parentless seeds. Non-degenerate, so both
+    # An unguarded NOT EXISTS wrongly adds the 17 parentless seeds. Non-degenerate, so both
     # belong in the degeneracy guard.
 
     # Negated membership over the chained string list.
@@ -959,7 +959,7 @@ resourcePolicy:
     # w1-size-zero-chain passes. Guarding the COUNT EXPRESSION instead makes `== 0`, `> 0`,
     # `>= N` and their negations all inherit it.
     #
-    # Every seed that HAS a mainCategory has at least one subCategory, and the 16 without it
+    # Every seed that HAS a mainCategory has at least one subCategory, and the 17 without it
     # are CEL missing-path errors, so the oracle is EMPTY by construction — like
     # w1-size-zero-chain it therefore stays OUT of the degeneracy guard, which asserts a
     # non-empty non-total oracle; w1-all-chain, w1-not-exists-chain and w1-size-nonneg-chain
@@ -1040,8 +1040,8 @@ resourcePolicy:
 
     # `<= 1.5` rounds DOWN to `<= 1`, which a count of ZERO also satisfies — so this arm
     # discriminates the hop guard as well as the rounding. Oracle a1/a6/a8/c1, the rows that
-    # HAVE the parent (each holds one subCategory); an unguarded chain counts 0 for the 16
-    # parentless rows and returns all 20. Non-degenerate, so this one belongs in the guard.
+    # HAVE the parent (each holds one subCategory); an unguarded chain counts 0 for the 17
+    # parentless rows and returns all 21. Non-degenerate, so this one belongs in the guard.
     - actions: ["w1-size-frac-le-chain"]
       effect: EFFECT_ALLOW
       roles: ["USER"]
@@ -1287,7 +1287,7 @@ resourcePolicy:
     # oracle sends `null` rather than omitting the attribute. Under the default
     # missing-attribute convention `== null` would deny every row at check time while the
     # adapter's IS NULL returned five, which probes attribute representation rather than
-    # the operator. NULL owners: a2/a4/a8/c2/e1 (5 of 20) — non-degenerate either way.
+    # the operator. NULL owners: a2/a4/a8/c2/e1 (5 of 21) — non-degenerate either way.
 
     - actions: ["null-eq"]
       effect: EFFECT_ALLOW
@@ -1360,7 +1360,7 @@ resourcePolicy:
     # predicate definite; a list of plain constants does not, so `NOT (col IN (...))` is UNKNOWN
     # for a NULL column and drops it. CEL compares a null VALUE against each element — false, not
     # an error — so the negation is TRUE. a3 ("x") and b1 ("one_two") are the two matches, so the
-    # oracle is 18 of 20 and the naive translation returns 13.
+    # oracle is 19 of 21 and the naive translation returns 14.
     #
     # This is why the rule is stated over the EQUALITY FAMILY rather than over `ne`: `eq`, `ne`
     # and `in` are the operators CEL evaluates to a definite boolean over a null operand, so they
@@ -1383,7 +1383,7 @@ resourcePolicy:
     #
     # `coOwner` is the explicit-null alias of the `scope` column, added for this action.
     # It is NOT a second alias of `aOptionalString`: comparing a column with itself is TRUE
-    # for all 20 seeds, and the degeneracy guard forbids a total oracle. Against `scope` the
+    # for all 21 seeds, and the degeneracy guard forbids a total oracle. Against `scope` the
     # only row where both sides are NULL is e1, and no row holds the same non-null value in
     # both columns, so the oracle is exactly {e1} — one row, but the only row the naive
     # translation loses.
@@ -1405,8 +1405,10 @@ resourcePolicy:
     # is declared turns `owner != scope` into TRUE for e1 (both columns NULL) and returns a row the
     # PDP refuses. That is an OVER-grant, the direction the rest of this group is safe from.
     #
-    # Oracle: a7 and e1 are denied (scope missing), no row holds the same value in both columns, so
-    # the other 18 are allowed. The definite-everywhere rendering returns 19.
+    # Oracle: a7, e1 and f1 are denied (scope missing), no row holds the same value in both
+    # columns, so the other 18 are allowed. The definite-everywhere rendering returns 20 — it
+    # readmits a7 and f1, whose owner is non-null against a missing scope, while e1's two nulls
+    # compare equal and stay out.
     - actions: ["null-value-f2f-mixed"]
       effect: EFFECT_ALLOW
       roles: ["USER"]
@@ -1426,8 +1428,8 @@ resourcePolicy:
     # `pv-exists`/`pv-all` do not reach it — they use `aOptionalString`, the omitted-convention
     # attribute, where the NULL rows are missing-attribute errors that deny under both
     # polarities. Allowed: every seed whose owner matches no element — a1/a6/a9/b2 match
-    # ("set"/""/"same"/"%_o") and are denied, so the oracle is 16 of 20 and the naive fold
-    # returns 11.
+    # ("set"/""/"same"/"%_o") and are denied, so the oracle is 17 of 21 and the naive fold
+    # returns 12.
     - actions: ["null-value-pv-not-exists"]
       effect: EFFECT_ALLOW
       roles: ["USER"]
@@ -1438,7 +1440,7 @@ resourcePolicy:
     # The SAME shape against `aOptionalString`, which follows the corpus DEFAULT convention:
     # a NULL column sends NO attribute at all. CEL then raises a missing-attribute error for
     # every NULL row, and `"set" == null` is false for every non-NULL row, so check() denies
-    # ALL 20 seeds. The planner emits the identical `eq(a_optional_string, null)` wire node as
+    # ALL 21 seeds. The planner emits the identical `eq(a_optional_string, null)` wire node as
     # `null-eq` — the two are indistinguishable on the wire, which is exactly the point: the
     # adapter cannot recover the caller's representation from the plan.
     #
