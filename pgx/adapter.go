@@ -51,6 +51,7 @@ type (
 const (
 	ValueDefault   = queryplan.ValueDefault
 	ValueTimestamp = queryplan.ValueTimestamp
+	ValueBool      = queryplan.ValueBool
 )
 
 // Restriction comparisons, for Relation.SubqueryFilter and Hop.SubqueryFilter.

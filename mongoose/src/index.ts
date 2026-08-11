@@ -632,7 +632,25 @@ const buildAggregationExpressionFromExpression = (
   const { operator, operands } = expression;
 
   switch (operator) {
+    // CEL overloads `+` on strings, and MongoDB does not: `$add` accepts numeric and date types
+    // only and the server rejects the whole query at execution time rather than returning no
+    // rows ("$add only supports numeric or date types"). `$concat` is the string spelling.
+    //
+    // A constant settles which overload it is — CEL has no mixed-type `+`, so one string operand
+    // means every operand is a string. An `add` between two columns carries no constant and the
+    // plan says nothing about field types, so it keeps the numeric spelling it has always had;
+    // no corpus shape reaches that case (cerbos/query-plan-adapters#376).
     case "add":
+      if (
+        operands.some((op) => isValue(op) && typeof op.value === "string")
+      ) {
+        return {
+          $concat: operands.map((op) => buildAggregationExpression(op, mapper)),
+        };
+      }
+      return {
+        $add: operands.map((op) => buildAggregationExpression(op, mapper)),
+      };
     case "sub":
     case "mult":
     case "mod":

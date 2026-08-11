@@ -107,6 +107,13 @@ func (r *renderer) write(e queryplan.Expr) error {
 	case queryplan.Arith:
 		return r.writeBinary(arithSymbol(t.Op), t.L, t.R)
 
+	case queryplan.Concat:
+		// PostgreSQL spells string concatenation `||`, which propagates NULL — so a row whose
+		// operand is a missing attribute stays excluded under either polarity, matching CEL's
+		// error. `+` would be a hard `operator does not exist: text + text` here rather than a
+		// silently wrong filter, but the corpus only proves that once the node exists.
+		return r.writeBinary("||", t.L, t.R)
+
 	case queryplan.Logic:
 		sep := " OR "
 		if t.And {

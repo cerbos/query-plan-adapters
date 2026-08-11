@@ -1,0 +1,30 @@
+{
+  "action": "id-concat",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "eq",
+        "operands": [
+          {
+            "variable": "request.resource.attr.aOptionalString"
+          },
+          {
+            "expression": {
+              "operator": "add",
+              "operands": [
+                {
+                  "value": "prefix:"
+                },
+                {
+                  "variable": "request.resource.id"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

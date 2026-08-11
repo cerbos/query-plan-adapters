@@ -175,13 +175,13 @@ function assertKeys(
   label: string,
   got: string[],
   want: readonly string[],
-  optional: readonly string[] = []
+  optional: readonly string[] = [],
 ): void {
   const allowed = new Set<string>([...want, ...optional]);
   for (const key of got) {
     if (!allowed.has(key)) {
       throw new Error(
-        `${label} carries "${key}", which this harness does not consume: an unconsumed corpus field is dropped from the stored row and the check() oracle at once`
+        `${label} carries "${key}", which this harness does not consume: an unconsumed corpus field is dropped from the stored row and the check() oracle at once`,
       );
     }
   }
@@ -189,20 +189,20 @@ function assertKeys(
   for (const key of want) {
     if (!present.has(key)) {
       throw new Error(
-        `${label} is missing "${key}", which this harness consumes`
+        `${label} is missing "${key}", which this harness consumes`,
       );
     }
   }
 }
 
 const seedsFile: SeedsFile = JSON.parse(
-  fs.readFileSync(path.join(CONFORMANCE_DIR, "seeds.json"), "utf8")
+  fs.readFileSync(path.join(CONFORMANCE_DIR, "seeds.json"), "utf8"),
 );
 const actionsFile: ActionsFile = JSON.parse(
-  fs.readFileSync(path.join(CONFORMANCE_DIR, "actions.json"), "utf8")
+  fs.readFileSync(path.join(CONFORMANCE_DIR, "actions.json"), "utf8"),
 );
 const derivedFile: DerivedFile = JSON.parse(
-  fs.readFileSync(path.join(CONFORMANCE_DIR, "derived-fields.json"), "utf8")
+  fs.readFileSync(path.join(CONFORMANCE_DIR, "derived-fields.json"), "utf8"),
 );
 const SEEDS = seedsFile.seeds;
 
@@ -221,14 +221,14 @@ assertKeys("derived-fields.json fields", derivedFile.fields, DERIVED_KEYS);
 const DERIVED_IDS = Object.keys(derivedFile.derived);
 if (DERIVED_IDS.length !== SEEDS.length) {
   throw new Error(
-    `derived-fields.json has ${DERIVED_IDS.length} entries for ${SEEDS.length} seeds`
+    `derived-fields.json has ${DERIVED_IDS.length} entries for ${SEEDS.length} seeds`,
   );
 }
 for (const seed of SEEDS) {
   assertKeys(
     `derived-fields.json derived["${seed.id}"]`,
     Object.keys(derivedFor(seed)),
-    DERIVED_KEYS
+    DERIVED_KEYS,
   );
 }
 
@@ -240,23 +240,23 @@ const DRIZZLE_UNSUPPORTED: AdapterUnsupportedEntry[] = [
 
 const DRIZZLE_SUPPORTED_EXPECTED = new Set(
   (actionsFile.adapterSupportedExpected?.["drizzle"] ?? []).map(
-    (entry) => entry.action
-  )
+    (entry) => entry.action,
+  ),
 );
 
 const DRIZZLE_DIVERGENCES = new Set(
   (actionsFile.knownDivergences ?? [])
     .filter((entry) => entry.adapters.includes("drizzle"))
-    .map((entry) => entry.action)
+    .map((entry) => entry.action),
 );
 
 const UNSUPPORTED_ACTIONS = new Set(DRIZZLE_UNSUPPORTED.map((u) => u.action));
 const EXPECTED_UNSUPPORTED_ACTIONS = new Set(
-  actionsFile.expectedUnsupported.map((entry) => entry.action)
+  actionsFile.expectedUnsupported.map((entry) => entry.action),
 );
 const ORACLE_ACTIONS = [
   ...actionsFile.conformance.filter(
-    (action) => !UNSUPPORTED_ACTIONS.has(action)
+    (action) => !UNSUPPORTED_ACTIONS.has(action),
   ),
   ...[...DRIZZLE_SUPPORTED_EXPECTED].sort(),
 ];
@@ -267,13 +267,17 @@ const ORACLE_ACTIONS = [
  * mapper typo or an unrelated validation satisfies the assertion just as well as the limitation
  * the corpus documents (cerbos/query-plan-adapters#326).
  */
-type ThrowingAction = readonly [action: string, reason: string, message: string];
+type ThrowingAction = readonly [
+  action: string,
+  reason: string,
+  message: string,
+];
 
 /** The pinned message, or a failure — a throwing action without one asserts nothing. */
 function requireMessage(label: string, message: string | undefined): string {
   if (message === undefined || message === "") {
     throw new Error(
-      `actions.json pins no throw message for ${label}: the throw suite would accept a failure for any reason`
+      `actions.json pins no throw message for ${label}: the throw suite would accept a failure for any reason`,
     );
   }
   return message;
@@ -282,16 +286,11 @@ function requireMessage(label: string, message: string | undefined): string {
 // Globally unsupported planner shapes plus any declared Drizzle limitations: these must
 // fail loudly during translation, never silently return a wrong id set.
 const THROWING_ACTIONS: ThrowingAction[] = [
-  ...DRIZZLE_UNSUPPORTED.map(
-    (entry): ThrowingAction => [
-      entry.action,
-      entry.reason,
-      requireMessage(
-        `adapterUnsupported.drizzle.${entry.action}`,
-        entry.message
-      ),
-    ]
-  ),
+  ...DRIZZLE_UNSUPPORTED.map((entry): ThrowingAction => [
+    entry.action,
+    entry.reason,
+    requireMessage(`adapterUnsupported.drizzle.${entry.action}`, entry.message),
+  ]),
   ...actionsFile.expectedUnsupported
     .filter((entry) => !DRIZZLE_SUPPORTED_EXPECTED.has(entry.action))
     .map((entry): ThrowingAction => [
@@ -299,7 +298,7 @@ const THROWING_ACTIONS: ThrowingAction[] = [
       entry.shape,
       requireMessage(
         `expectedUnsupported.${entry.action}.messages.drizzle`,
-        entry.messages?.["drizzle"]
+        entry.messages?.["drizzle"],
       ),
     ]),
 ];
@@ -313,9 +312,9 @@ const NULL_REPRESENTATION_OMITTED = actionsFile.nullRepresentationOmitted.map(
     entry.reason,
     requireMessage(
       `nullRepresentationOmitted.${entry.action}.messages.drizzle`,
-      entry.messages?.["drizzle"]
+      entry.messages?.["drizzle"],
     ),
-  ]
+  ],
 );
 /** The one message every null-carrying action must be rejected with under `omitted`. */
 const NULL_OMITTED_MESSAGE = NULL_REPRESENTATION_OMITTED[0]?.[2] ?? "";
@@ -384,6 +383,14 @@ const DEGENERACY_GUARD_ACTIONS = [
   // Case sensitivity in STRING MATCHING (#375 follow-up), a different mechanism from cs-eq:
   // collation governs `=`, and on SQLite nothing but `PRAGMA case_sensitive_like` governs LIKE.
   "cs-contains",
+  // The primary key as a filterable attribute (#376): the key against a constant and against a
+  // column under negation. Both stores must agree, so these also cover the id column's typing.
+  "id-eq-const",
+  "id-f2f-ne",
+  // string() over a NUMERIC column, the half this adapter lowers. Its boolean sibling is refused
+  // instead, because CAST(... AS TEXT) is store-dependent there — the two are deliberately
+  // classified apart, so this entry proves the supported half still compares.
+  "cast-string-double",
 ] as const;
 
 // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") --------
@@ -440,7 +447,7 @@ function parentSeedOf(seed: Seed | undefined): Seed | undefined {
   const parent = SEEDS_BY_ID.get(id);
   if (parent === undefined) {
     throw new Error(
-      `seeds.json: "${seed?.id}" names parent "${id}", which is not a seed id`
+      `seeds.json: "${seed?.id}" names parent "${id}", which is not a seed id`,
     );
   }
   return parent;
@@ -693,6 +700,10 @@ function buildMapper(schema: AdversarialSchema): Record<string, MapperEntry> {
   };
 
   return {
+    // The primary key, reached as `request.resource.id` rather than through `attr` (the `id-*`
+    // actions). It is a mapping like any other here, which is the point: an adapter that resolves
+    // references by stripping a `request.resource.attr.` prefix never sees this name.
+    "request.resource.id": schema.resources.id,
     "request.resource.attr.aBool": schema.resources.aBool,
     "request.resource.attr.aString": schema.resources.aString,
     "request.resource.attr.aNumber": schema.resources.aNumber,
@@ -984,7 +995,9 @@ function sqliteStore(): AdversarialStore {
       return selected.map((row) => row.id).sort();
     },
 
-    async parentChain(): Promise<Record<string, [string | null, string | null]>> {
+    async parentChain(): Promise<
+      Record<string, [string | null, string | null]>
+    > {
       const rows = db
         .select({
           id: resources.id,
@@ -995,7 +1008,9 @@ function sqliteStore(): AdversarialStore {
         .leftJoin(parents, eq(parents.resourceId, resources.id))
         .leftJoin(inners, eq(inners.parentId, parents.id))
         .all();
-      return Object.fromEntries(rows.map((row) => [row.id, [row.parent, row.inner]]));
+      return Object.fromEntries(
+        rows.map((row) => [row.id, [row.parent, row.inner]]),
+      );
     },
 
     async serverBanner(): Promise<string> {
@@ -1192,7 +1207,9 @@ function postgresStore(): AdversarialStore {
       return selected.map((row) => row.id).sort();
     },
 
-    async parentChain(): Promise<Record<string, [string | null, string | null]>> {
+    async parentChain(): Promise<
+      Record<string, [string | null, string | null]>
+    > {
       const rows = await connected()
         .select({
           id: resources.id,
@@ -1202,12 +1219,14 @@ function postgresStore(): AdversarialStore {
         .from(resources)
         .leftJoin(parents, eq(parents.resourceId, resources.id))
         .leftJoin(inners, eq(inners.parentId, parents.id));
-      return Object.fromEntries(rows.map((row) => [row.id, [row.parent, row.inner]]));
+      return Object.fromEntries(
+        rows.map((row) => [row.id, [row.parent, row.inner]]),
+      );
     },
 
     async serverBanner(): Promise<string> {
       const result = await connected().execute<{ version: string }>(
-        sql`select version() as version`
+        sql`select version() as version`,
       );
       return result.rows[0]?.version ?? "";
     },
@@ -1223,7 +1242,7 @@ function selectedStoreName(): StoreName {
   // proving PostgreSQL while replaying SQLite is exactly the coverage gap this leg closes.
   if (!STORE_NAMES.includes(requested as StoreName)) {
     throw new Error(
-      `Unknown ADAPTER_TEST_DB "${requested}": expected one of ${STORE_NAMES.join(", ")}`
+      `Unknown ADAPTER_TEST_DB "${requested}": expected one of ${STORE_NAMES.join(", ")}`,
     );
   }
   return requested as StoreName;
@@ -1256,7 +1275,7 @@ const MAPPER_WITHOUT_NULL_CONVENTIONS: Record<string, MapperEntry> =
       }
       const { nullAttributeRepresentation: _stripped, ...rest } = entry;
       return [reference, rest as MapperEntry];
-    })
+    }),
   );
 
 beforeAll(async () => {
@@ -1385,7 +1404,7 @@ async function expectNonDegenerateOracle(action: string): Promise<void> {
 async function adapterFilteredIds(
   action: string,
   nullAttributeRepresentation: "explicit" | "omitted" = "explicit",
-  mapper: Record<string, MapperEntry> = MAPPER
+  mapper: Record<string, MapperEntry> = MAPPER,
 ): Promise<string[]> {
   const queryPlan = await cerbos.planResources({
     principal: principal(),
@@ -1401,7 +1420,7 @@ async function adapterFilteredIds(
     return [];
   }
   return store.selectIds(
-    result.kind === PlanKind.CONDITIONAL ? result.filter : undefined
+    result.kind === PlanKind.CONDITIONAL ? result.filter : undefined,
   );
 }
 
@@ -1434,17 +1453,17 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
   // silently degrade the throw suite to a bare "it threw" (cerbos/query-plan-adapters#326).
   test("a throwing action with no pinned message fails classification", () => {
     expect(() => requireMessage("synthetic-entry", undefined)).toThrow(
-      /pins no throw message/
+      /pins no throw message/,
     );
     expect(() => requireMessage("synthetic-entry", "")).toThrow(
-      /pins no throw message/
+      /pins no throw message/,
     );
   });
   test("manifest assigns every action exactly one Drizzle outcome", () => {
     const oracle = new Set(ORACLE_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map(([action]) => action));
     const nullOmitted = new Set(
-      NULL_REPRESENTATION_OMITTED.map(([action]) => action)
+      NULL_REPRESENTATION_OMITTED.map(([action]) => action),
     );
     const misclassified = [...MANIFEST_ACTIONS].filter((action) => {
       const classificationCount = [
@@ -1456,29 +1475,26 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(170);
+    expect(MANIFEST_ACTIONS.size).toBe(178);
     expect(NULL_REPRESENTATION_OMITTED).toHaveLength(1);
     // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
     // gained or lost has to be re-triaged here rather than joining the suite unnoticed.
-    expect(THROWING_ACTIONS).toHaveLength(11);
+    expect(THROWING_ACTIONS).toHaveLength(15);
     expect(misclassified).toEqual([]);
     expect(
       [...DRIZZLE_SUPPORTED_EXPECTED].filter(
-        (action) => !EXPECTED_UNSUPPORTED_ACTIONS.has(action)
-      )
+        (action) => !EXPECTED_UNSUPPORTED_ACTIONS.has(action),
+      ),
     ).toEqual([]);
   });
 
-  test.each(ORACLE_ACTIONS)(
-    "%s matches the check() oracle",
-    async (action) => {
-      const [oracle, filtered] = await Promise.all([
-        oracleAllowedIds(action),
-        adapterFilteredIds(action),
-      ]);
-      expect(filtered).toEqual(oracle);
-    }
-  );
+  test.each(ORACLE_ACTIONS)("%s matches the check() oracle", async (action) => {
+    const [oracle, filtered] = await Promise.all([
+      oracleAllowedIds(action),
+      adapterFilteredIds(action),
+    ]);
+    expect(filtered).toEqual(oracle);
+  });
 
   // Shapes the adapter does not support must fail during translation, never produce a
   // silently-wrong filter. The plan is fetched OUTSIDE the assertion so a PDP failure fails
@@ -1503,9 +1519,9 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
           queryPlan,
           mapper: MAPPER,
           nullAttributeRepresentation: "explicit",
-        })
+        }),
       ).toThrow(message);
-    }
+    },
   );
 
   // #302. `null-eq-missing` probes `aOptionalString == null`, and `aOptionalString` follows the
@@ -1523,9 +1539,9 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       expect(overGranted.length).toBeGreaterThan(0);
 
       await expect(adapterFilteredIds(action, "omitted")).rejects.toThrow(
-        message
+        message,
       );
-    }
+    },
   );
 
   // #308. The per-attribute declaration overrides the call-level option, which is the property
@@ -1535,14 +1551,14 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
   // runs agreeing.
   test("a per-attribute declaration overrides the call-level representation", async () => {
     // `owner` declares "explicit", so the call-level "omitted" does not reach it.
-    await expect(
-      adapterFilteredIds("null-eq", "omitted")
-    ).resolves.toEqual(await oracleAllowedIds("null-eq"));
+    await expect(adapterFilteredIds("null-eq", "omitted")).resolves.toEqual(
+      await oracleAllowedIds("null-eq"),
+    );
 
     // Strip the declaration and the same action under the same option is rejected — so the
     // stripped mapper the completeness guard below uses is not quietly equivalent to MAPPER.
     await expect(
-      adapterFilteredIds("null-eq", "omitted", MAPPER_WITHOUT_NULL_CONVENTIONS)
+      adapterFilteredIds("null-eq", "omitted", MAPPER_WITHOUT_NULL_CONVENTIONS),
     ).rejects.toThrow(NULL_OMITTED_MESSAGE);
   });
 
@@ -1576,7 +1592,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
         await adapterFilteredIds(
           action,
           "omitted",
-          MAPPER_WITHOUT_NULL_CONVENTIONS
+          MAPPER_WITHOUT_NULL_CONVENTIONS,
         );
         notRejected.push(action);
       } catch (error) {
@@ -1584,7 +1600,9 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
         // transport error or mapper typo counting as the required rejection is the silent pass
         // the corpus README warns about.
         if (!String(error).includes(NULL_OMITTED_MESSAGE)) {
-          notRejected.push(`${action} (rejected for the wrong reason: ${String(error)})`);
+          notRejected.push(
+            `${action} (rejected for the wrong reason: ${String(error)})`,
+          );
         }
       }
     }
@@ -1618,7 +1636,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
   // was already aligned — the assertion pins that it stays that way.
   test("every count threshold over the chain inherits the absent-parent guard", async () => {
     const chain = new PlanExpressionVariable(
-      "request.resource.attr.mainCategory.subCategories"
+      "request.resource.attr.mainCategory.subCategories",
     );
     const size = new PlanExpression("size", [chain]);
     const compare = (operator: string, threshold: number) =>
@@ -1627,7 +1645,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       new PlanExpression("not", [condition]);
 
     const filteredIdsFor = async (
-      condition: PlanExpressionOperand
+      condition: PlanExpressionOperand,
     ): Promise<string[]> => {
       const result = queryPlanToDrizzle({
         queryPlan: {
@@ -1642,7 +1660,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       });
       expect(result.kind).toBe(PlanKind.CONDITIONAL);
       return store.selectIds(
-        result.kind === PlanKind.CONDITIONAL ? result.filter : undefined
+        result.kind === PlanKind.CONDITIONAL ? result.filter : undefined,
       );
     };
 
@@ -1679,7 +1697,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
   test("the seeded to-one chain matches the corpus relation", async () => {
     const withParent = SEEDS.filter((seed) => parentSeedOf(seed) !== undefined);
     const withInner = SEEDS.filter(
-      (seed) => parentSeedOf(parentSeedOf(seed)) !== undefined
+      (seed) => parentSeedOf(parentSeedOf(seed)) !== undefined,
     );
     expect(withParent.length).toBeGreaterThan(0);
     expect(withInner.length).toBeGreaterThan(0);
@@ -1693,8 +1711,8 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
             parentSeedOf(seed)?.aString ?? null,
             parentSeedOf(parentSeedOf(seed))?.aString ?? null,
           ],
-        ])
-      )
+        ]),
+      ),
     );
   });
 

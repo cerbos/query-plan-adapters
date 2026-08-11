@@ -84,6 +84,11 @@ type Column struct {
 	// attribute, so CEL compares a null VALUE rather than raising a missing-attribute error. The
 	// equality family has to render definitely for such a column; see Entry.NullConvention.
 	ExplicitNull bool
+	// IsBool marks a column the caller declared as boolean-typed, which is what lets `string()`
+	// over it fail closed. Nothing in the plan names an operand's type, and a boolean is the one
+	// type whose text rendering differs across the engines this module targets; see
+	// Entry.ValueType and castValue.
+	IsBool bool
 }
 
 // Lit is a value bound as a query parameter. A nil V renders as SQL NULL.
@@ -110,6 +115,17 @@ type Arith struct {
 	L  Expr
 	R  Expr
 	Op ArithOp
+}
+
+// Concat is CEL's `+` over strings, which is a different operator from Arith{Op: OpAdd} in every
+// engine even though the plan spells them the same. It is a node of its own rather than a sixth
+// ArithOp because the two are not interchangeable anywhere: the SQL spelling differs per dialect
+// (`||` against `CONCAT`), and rendering a string concatenation as `+` is silently wrong rather
+// than a syntax error on MySQL, which coerces both operands to 0 and matches rows the policy never
+// allowed (cerbos/query-plan-adapters#376).
+type Concat struct {
+	L Expr
+	R Expr
 }
 
 // Logic is an n-ary AND/OR over predicates.
@@ -267,6 +283,7 @@ func (Lit) isExpr()         {}
 func (BoolConst) isExpr()   {}
 func (Cmp) isExpr()         {}
 func (Arith) isExpr()       {}
+func (Concat) isExpr()      {}
 func (Logic) isExpr()       {}
 func (Not) isExpr()         {}
 func (IsNull) isExpr()      {}

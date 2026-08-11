@@ -1039,6 +1039,15 @@ func (b *builder) arithmetic(n *node, m Mapper) (value, error) {
 
 	op := arithmeticOps[n.operator]
 
+	// CEL overloads `+` on strings. It reaches the wire as the same `add` node as numeric
+	// addition, so the operands are what tell the two apart: CEL has no mixed-type `+`, so one
+	// string constant means the whole expression is a concatenation. Only `add` has the overload
+	// — the other four operators over a string are a CEL no-overload error, which denies, and
+	// they keep falling through to the numeric path that cannot render them.
+	if op == OpAdd && (isStringConst(lv) || isStringConst(rv)) {
+		return concatValue(lv, rv)
+	}
+
 	// A retained ternary (a division that may be non-finite) must keep propagating symbolically
 	// through the surrounding arithmetic rather than being lowered to SQL NULL.
 	if out, ok, err := arithOverConditional(op, lv, rv); err != nil || ok {
@@ -1100,9 +1109,40 @@ func foldArithmetic(op ArithOp, l, r float64) (*float64, error) {
 	return &out, nil
 }
 
+// isStringConst reports whether a translated operand is a string literal from the plan.
+func isStringConst(v value) bool {
+	_, ok := v.(string)
+	return ok
+}
+
+// concatValue lowers CEL's string `+` into the dialect-spelled Concat node.
+func concatValue(lv, rv value) (value, error) {
+	l, err := asExpr(lv)
+	if err != nil {
+		return nil, err
+	}
+	r, err := asExpr(rv)
+	if err != nil {
+		return nil, err
+	}
+	return Concat{L: l, R: r}, nil
+}
+
 // castValue lowers CEL's string() conversion. int() and double() are rejected before they reach
 // here — SQL CAST does not reproduce their semantics (#311) — so string() is the only survivor.
+//
+// It survives only over operands whose text rendering is the same in CEL and in every engine this
+// module targets. Numeric and text columns qualify: all of them format the shortest decimal that
+// round-trips. A BOOLEAN column does not — SQLite and MySQL have no boolean type and store 1/0, so
+// `CAST(a_bool AS TEXT)` is '1' where CEL and PostgreSQL say 'true'. Nothing in the plan names the
+// operand's type, so a caller declares it with ValueBool and the cast fails closed rather than
+// returning every matching row on one engine and none on another (#376).
 func castValue(v value) (value, error) {
+	if c, ok := v.(Column); ok && c.IsBool {
+		return nil, fmt.Errorf(
+			"string() over a boolean column is not supported: SQLite and MySQL store a boolean as 1/0 and render \"1\", while CEL and PostgreSQL render \"true\", so no single CAST is correct on every engine",
+		)
+	}
 	e, err := asExpr(v)
 	if err != nil {
 		return nil, err
@@ -1129,6 +1169,7 @@ func (b *builder) resolveVariable(reference string, m Mapper) (value, error) {
 		Qualifier:    entry.Qualifier,
 		Name:         entry.Column,
 		ExplicitNull: entry.NullConvention == NullConventionExplicit,
+		IsBool:       entry.ValueType == ValueBool,
 	}, nil
 }
 
@@ -1150,6 +1191,7 @@ func (b *builder) scalarThroughHop(entry Entry) Expr {
 			Qualifier:    alias,
 			Name:         entry.Column,
 			ExplicitNull: entry.NullConvention == NullConventionExplicit,
+			IsBool:       entry.ValueType == ValueBool,
 		},
 	}
 }

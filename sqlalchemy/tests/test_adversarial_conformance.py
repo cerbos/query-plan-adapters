@@ -283,6 +283,18 @@ DEGENERACY_GUARD_ACTIONS = (
     # collation governs `=`, and on SQLite only `PRAGMA case_sensitive_like`
     # governs LIKE.
     "cs-contains",
+    # The primary key as a filterable attribute (#376): against a constant,
+    # against a column under negation, and inside a concatenation in both
+    # operand orders. SQLAlchemy renders CEL's string `+` as `||` through the
+    # column's own type, so both concatenations compare rather than raise.
+    "id-eq-const",
+    "id-f2f-ne",
+    "id-concat",
+    "id-concat-vf",
+    # string() over a NUMERIC column, the half this adapter lowers. Its boolean
+    # sibling is refused instead, so this entry proves the supported half still
+    # compares rather than joining the probes below.
+    "cast-string-double",
 )
 
 # Shapes this adapter refuses to translate: they have no oracle comparison to
@@ -295,6 +307,11 @@ DEGENERACY_LIVENESS_PROBES = (
     # int() over a numeric column: truncation-versus-rounding, unsupported for
     # every adapter but convex, which promotes it in adapterSupportedExpected.
     "cast-int-double",
+    # string() over a BOOLEAN column, where CAST is dialect-dependent (#376).
+    "cast-string-bool",
+    # `list` has no operator-table entry, so the constructed hierarchy path is
+    # refused before the hierarchy operators around it are reached.
+    "hier-list-id",
 )
 
 
@@ -816,6 +833,10 @@ def _inner_scalar(column):
 
 
 ATTR_MAP = {
+    # The primary key, reached as `request.resource.id` rather than through `attr` (the `id-*`
+    # actions). An adapter that resolves references by stripping a `request.resource.attr.`
+    # prefix never sees this name.
+    "request.resource.id": AdvResource.id,
     "request.resource.attr.aBool": AdvResource.a_bool,
     "request.resource.attr.aString": AdvResource.a_string,
     "request.resource.attr.aNumber": AdvResource.a_number,
@@ -1161,11 +1182,11 @@ class TestAdversarialConformance:
 
         # Deliberate tripwires: a corpus edit must bump these in the same
         # change, so a new hostile action cannot join (or vanish) silently.
-        assert len(MANIFEST_ACTIONS) == 170
+        assert len(MANIFEST_ACTIONS) == 178
         assert len(SEEDS) == 21
         # Each of these carries a pinned message, so a shape gained or lost has
         # to be re-triaged here rather than joining the throw suite unnoticed.
-        assert len(THROWING_ACTIONS) == 13
+        assert len(THROWING_ACTIONS) == 15
         assert misclassified == []
         assert SQLALCHEMY_SUPPORTED_EXPECTED <= {
             u["action"] for u in ACTIONS_FILE["expectedUnsupported"]

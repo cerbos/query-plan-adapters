@@ -678,6 +678,49 @@ resourcePolicy:
         match:
           expr: 'int(R.attr.aDouble) == 0'
 
+    # The third cast direction: string(), the OUTBOUND cast. `string` is one of the operators the
+    # corpus has never put on the wire, so no adapter has ever been asked what it does with one
+    # (cerbos/query-plan-adapters#376). Unlike the two inbound casts above these carry REAL
+    # oracles, so an adapter that lowers them can be proved right rather than only refused.
+    #
+    # The pair is split by whether the rendering is store-INDEPENDENT, because that is what
+    # decides whether lowering is defensible at all:
+    #
+    # `cast-string-double` is the agreeing half, for the values this corpus holds. CEL renders
+    # -0.6 as "-0.6" and so does every store the corpus executes against: PostgreSQL 17 renders
+    # `CAST((-0.6)::float8 AS TEXT)` as `-0.6`, as do SQLite and MySQL. (The `-0.60000000000000009`
+    # rendering only appears under `extra_float_digits = 3`; PostgreSQL 12 made shortest
+    # round-trip the default, so a port that relied on that divergence would pin nothing. Measured
+    # against the pinned images, not assumed.) a1 is the sole witness — aDouble is -0.6 there,
+    # 0.25 on a2, MISSING on a3 (a CEL error, denied) and aNumber + 0.3 everywhere else, none of
+    # which formats to "-0.6".
+    #
+    # "Agreeing for these values" is the whole claim. CEL's number formatting is Go's and does NOT
+    # agree with every runtime everywhere — an adapter that reimplements the conversion rather
+    # than delegating to its store has to bound the range it can reproduce; convex does, and says
+    # so at `convertToString`. This action pins the corpus's own values, not the general rule.
+    - actions: ["cast-string-double"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'string(R.attr.aDouble) == "-0.6"'
+
+    # `cast-string-bool` is the diverging half, and the reason this group is a pair. CEL renders a
+    # bool as "true"/"false"; SQLite and MySQL have no boolean type and store 1/0, so
+    # `CAST(a_bool AS TEXT)` is "1" and a direct lowering matches NOTHING. PostgreSQL renders
+    # "true" and the same lowering is correct. One translator, one wire node, two answers
+    # depending only on the store — which is why an adapter spanning both (prisma and drizzle each
+    # run this corpus twice, once per ADAPTER_TEST_DB) cannot lower it store-blind, and why the
+    # oracle is deliberately large: 14 of the 21 seeds carry aBool = true, so the SQLite failure
+    # direction is an UNDER-grant of all 14 rather than a near miss.
+    - actions: ["cast-string-bool"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'string(R.attr.aBool) == "true"'
+
     # B22-B23: filter()/map() in a BOOLEAN position (cerbos/query-plan-adapters#313).
     # Both return a list, not a boolean. Cerbos compiles the policy and the planner emits the
     # macro verbatim as the whole condition (PDP-verified: KIND_CONDITIONAL with a bare
@@ -1459,6 +1502,101 @@ resourcePolicy:
       condition:
         match:
           expr: 'hierarchy(R.attr.scope, ":").descendentOf(hierarchy("[env]:prod", ":"))'
+
+    # ==================== the primary key as a filterable attribute (id-*) ====================
+    # Every other action in this corpus filters on a resource ATTRIBUTE. These six filter on
+    # `request.resource.id` — the resource's own identity, which the planner leaves symbolic
+    # because PlanResources is asked about a KIND, not a row (PDP-verified: the operand is a
+    # `variable` named `request.resource.id`, not `request.resource.attr.id`).
+    #
+    # It is a distinct hazard from any attribute because it is the one column whose mapping is
+    # structurally different per adapter rather than merely named differently: an ObjectId rather
+    # than a string in mongoose, the PRIMARY KEY in the SQL adapters, the document identifier
+    # rather than a metadata field in ChromaDB, and `_id` versus a mapped field in Elasticsearch.
+    # An adapter that resolves attributes by stripping a `request.resource.attr.` prefix does not
+    # reach this name at all, and the failure is silent: the variable looks like an unmapped
+    # attribute rather than the key.
+    #
+    # `f1` is the witness seed, added for exactly this group: its aString EQUALS its own id and
+    # its aOptionalString is that id prefixed, so the field-to-field and concatenation oracles are
+    # non-degenerate without any comparison against a literal the corpus had to invent. The
+    # retired suite's 24-hex ObjectId literal is deliberately NOT reproduced: it matches no seed,
+    # so its oracle would be empty under any mapping, and the corpus cannot mandate an ObjectId
+    # column in the first place — a store's key type is the harness's business. Mongoose's
+    # coercion is a caller-supplied `valueParser` on the mapper entry, and three of these six
+    # compare the key against a STRING column, so one key mapping cannot be an ObjectId and
+    # satisfy them; that adapter pins the coercion against the id-eq-const wire fixture in its
+    # translator unit test instead (#378). See README.md, "The primary key as a filterable
+    # attribute".
+
+    # The key against a constant. Oracle {f1} — one row, and necessarily so: an id is unique, so
+    # this is the largest oracle the shape admits. It still discriminates in both directions, and
+    # it is the shape most adapters CAN express: it reduces to a bare key compared with a literal,
+    # which is the only id-* form ChromaDB and Elasticsearch translate at all.
+    - actions: ["id-eq-const"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.id == "f1"'
+
+    # The key against a COLUMN, both polarities. `field-to-field` already covers column-versus-
+    # column, but never against the key, where an adapter has to name the primary key on one side
+    # of a comparison it usually only reads. The negation is the load-bearing half: its oracle is
+    # 20 of 21, so an adapter that resolves the key to the wrong column, or drops the comparison,
+    # is caught by the row COUNT rather than by a single missing row.
+    - actions: ["id-f2f"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aString == R.id'
+
+    - actions: ["id-f2f-ne"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aString != R.id'
+
+    # STRING concatenation against the key, in both operand orders. The corpus's `add` is numeric
+    # everywhere else (arith-add and friends), so `add` over strings is itself a new wire shape —
+    # an adapter that dispatches `add` straight to SQL `+` produces a numeric addition on
+    # PostgreSQL and a silent 0 on MySQL rather than concatenation.
+    #
+    # Field-first: `eq(V, add(K, V))`. f1's aOptionalString is "prefix:f1"; the five NULL-
+    # aOptionalString seeds (a2/a4/a8/c2/e1) are missing-attribute errors and deny.
+    - actions: ["id-concat"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aOptionalString == "prefix:" + R.id'
+
+    # Value-first: `eq(K, add(K, V))`. The principal side folds to the constant "projects:f1" at
+    # plan time, so the whole comparison is a constant against a concatenation the adapter must
+    # build from the key — operand inversion (this repo's canonical bug class) crossed with the
+    # key and with string `add` at once. `principal.attr.context` carries the id for this and for
+    # hier-list-id below.
+    - actions: ["id-concat-vf"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'P.attr.context == "projects:" + R.id'
+
+    # The key inside a hierarchy path built by `list()`. Two firsts in one shape: `list` is the
+    # third operator the corpus has never put on the wire, and it is the only place a hierarchy
+    # operand is CONSTRUCTED rather than read from a column. The hier-* block above always hands
+    # `hierarchy()` a bare variable or a literal; here the descendant path is `["projects", <key>]`,
+    # so an adapter must build the path from a constant segment and the key before it can compare.
+    # Oracle {f1}: both sides are two segments, so the inclusive overlap reduces to key equality.
+    - actions: ["hier-list-id"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'hierarchy(P.attr.context, ":").overlaps(hierarchy(["projects", R.id]))'
 
     # -- timestamp(field) vs constant-instant comparisons (ts-*) --
     # Wire shape (PDP-verified): the planner folds now()-duration arithmetic to a constant

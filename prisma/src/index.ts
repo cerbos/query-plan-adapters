@@ -2516,6 +2516,17 @@ function buildFieldToFieldFilter(
     return operator === "eq" ? equality : { NOT: equality };
   }
 
+  // `ne` is the one operator whose Prisma spelling cannot carry a field reference: `not` nests a
+  // NestedStringFilter, which has no `_ref` form, so `{ col: { not: { _ref } } }` is rejected by
+  // the client rather than executed. Hoisting the negation to the top-level `NOT` combinator says
+  // the same thing with a shape that does accept one — the same rewrite the explicit-null branch
+  // above already performs. Three-valued logic is unchanged by the hoist: a NULL on either side
+  // makes the inner equality UNKNOWN, and `NOT UNKNOWN` is still UNKNOWN, so the row stays out
+  // under both polarities, which is what a missing attribute does on the check side.
+  if (operator === "ne") {
+    return { NOT: { [leftField]: { equals: fieldReference } } };
+  }
+
   return { [leftField]: { [prismaOperator]: fieldReference } };
 }
 

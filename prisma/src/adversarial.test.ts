@@ -424,6 +424,14 @@ const DEGENERACY_GUARD_ACTIONS = [
   // Case sensitivity in STRING MATCHING (#375 follow-up), a different mechanism from cs-eq:
   // collation governs `=`, and on SQLite nothing but `PRAGMA case_sensitive_like` governs LIKE.
   "cs-contains",
+  // The primary key as a filterable attribute (#376): the key against a constant, against a
+  // column under negation — the shape that emitted an invalid `not: { _ref }` before this
+  // change — the value-first concatenation solved back to a key equality, and the key inside a
+  // constructed hierarchy path.
+  "id-eq-const",
+  "id-f2f-ne",
+  "id-concat-vf",
+  "hier-list-id",
 ] as const;
 
 /**
@@ -447,6 +455,13 @@ const DEGENERACY_LIVENESS_PROBES = [
   // int() over a numeric column: truncation-versus-rounding, unsupported for every adapter but
   // convex, which promotes it in adapterSupportedExpected.
   "cast-int-double",
+  // string() has no Prisma filter form (#376). cast-string-bool carries the group's probe rather
+  // than cast-string-double because its oracle is 14 of 21 rather than a single row, so a PDP or
+  // policy that went quiet fails the non-total half of the assertion too.
+  "cast-string-bool",
+  // Concatenation against the key where BOTH operands carry a column — the arithmetic solver
+  // needs a value on the other side, so the id-* group's one throwing shape probes here.
+  "id-concat",
 ] as const;
 
 // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") --------
@@ -559,6 +574,10 @@ function withoutNullConventions(
 }
 
 const MAPPER: Record<string, MapperConfig> = {
+  // The primary key, reached as `request.resource.id` rather than through `attr` (the `id-*`
+  // actions). It is a mapping like any other here, which is the point: an adapter that resolves
+  // references by stripping a `request.resource.attr.` prefix never sees this name.
+  "request.resource.id": { field: "id" },
   "request.resource.attr.aBool": { field: "aBool" },
   "request.resource.attr.aString": { field: "aString" },
   "request.resource.attr.aNumber": { field: "aNumber" },
@@ -1027,10 +1046,10 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(170);
+    expect(MANIFEST_ACTIONS.size).toBe(178);
     // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
     // gained or lost has to be re-triaged here rather than joining the suite unnoticed.
-    expect(THROWING_ACTIONS).toHaveLength(51);
+    expect(THROWING_ACTIONS).toHaveLength(54);
     expect(misclassified).toEqual([]);
     expect(
       [...PRISMA_SUPPORTED_EXPECTED].filter(
