@@ -1280,20 +1280,30 @@ function buildLeadingHopsExistFilter(
     return undefined;
   }
   // The last entry is the collection being iterated; everything before it is a hop.
-  let inner: PrismaFilter = {};
-  for (let i = restRelations.length - 2; i >= 0; i--) {
-    const relation = assertDefined(
-      restRelations[i],
-      "Relation mapping is missing"
-    );
-    inner = relationFilter(relation, getPrismaRelationOperator(relation), inner);
-  }
-  return relationFilter(head, getPrismaRelationOperator(head), inner);
+  return buildHopsExistFilter([head, ...restRelations.slice(0, -1)]);
 }
 
 /**
- * "Every intermediate to-one hop this expression dots through exists", as a Prisma filter,
- * or undefined when it dots through none.
+ * "Every one of these relations exists", as a nested Prisma filter with an empty innermost
+ * predicate — `{ parent: { is: { inner: { is: {} } } } }`.
+ */
+function buildHopsExistFilter(
+  hops: RelationConfig[]
+): PrismaFilter | undefined {
+  if (hops.length === 0) {
+    return undefined;
+  }
+  let inner: PrismaFilter = {};
+  for (let i = hops.length - 1; i >= 0; i--) {
+    const relation = assertDefined(hops[i], "Relation mapping is missing");
+    inner = relationFilter(relation, getPrismaRelationOperator(relation), inner);
+  }
+  return inner;
+}
+
+/**
+ * "Every to-one hop this expression dots through exists", as a Prisma filter, or undefined
+ * when it dots through none.
  *
  * Prisma has no UNKNOWN: a chained relation filter is exact under the POSITIVE polarity —
  * `categories: { some: { subCategories: { some: P } } }` cannot hold without the category —
@@ -1325,11 +1335,22 @@ function buildExpressionHopsExistFilter(
       }
       seen.add(expr.name);
       const { relations } = resolveFieldReference(expr.name, mapper);
-      if (!relations || relations.length < 2) {
+      if (!relations || relations.length === 0) {
         return;
       }
-      const head = assertDefined(relations[0], "Relation mapping is missing");
-      const hopFilter = buildLeadingHopsExistFilter(head, relations.slice(1));
+      // Every to-ONE relation on the path is a hop that must EXIST — including a TRAILING one,
+      // which is the case a chain of to-many relations never produces. `parent.aBool` resolves
+      // to a single to-one relation, and `NOT { parent: { is: { aBool: true } } }` is TRUE for
+      // a row with no parent at all, so the negation returns rows the PDP denies. A trailing
+      // to-MANY relation is the collection being iterated rather than a hop, and keeps its
+      // empty-collection semantics (`!tags.exists(...)` over zero tags is still TRUE).
+      const last = assertDefined(
+        relations[relations.length - 1],
+        "Relation mapping is missing"
+      );
+      const hopFilter = buildHopsExistFilter(
+        last.type === "one" ? relations : relations.slice(0, -1)
+      );
       if (hopFilter !== undefined) {
         hops.push(hopFilter);
       }

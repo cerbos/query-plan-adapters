@@ -170,6 +170,19 @@ func buildMapper() cerbospgx.Mapper {
 		},
 	}
 
+	// The two levels of the corpus's real to-one chain. The resource owns at most one parent
+	// (`resource_id` is UNIQUE) and a parent at most one inner (`parent_id` is UNIQUE), so each
+	// correlation matches at most one row.
+	parentRel := &cerbospgx.Relation{
+		Table:        parentTable,
+		SourceColumn: "id", TargetColumn: "resource_id",
+	}
+	innerRel := &cerbospgx.Relation{
+		Table:        innerTable,
+		Via:          []cerbospgx.Hop{{Table: parentTable, ChildColumn: "parent_id", JoinColumn: "id"}},
+		SourceColumn: "id", TargetColumn: "resource_id",
+	}
+
 	return cerbospgx.MapperMap{
 		"request.resource.attr.aBool":           {Column: "a_bool"},
 		"request.resource.attr.aString":         {Column: "a_string"},
@@ -197,12 +210,19 @@ func buildMapper() cerbospgx.Mapper {
 		"request.resource.attr.mainCategory.subCategories": {Relation: mainSub},
 		"request.resource.attr.mainCategory.subNames":      {Relation: mainSub},
 
-		// The corpus's real to-one chain (adversarial_parent -> adversarial_inner) is seeded
-		// below and mirrored on the check side, but carries no entry yet: an Entry is either a
-		// Column or a Relation, and resolveVariable fails a Relation used as a SCALAR closed. A
-		// scalar reached THROUGH a to-one hop is a shape this translator does not yet have, so
-		// the mapping is designed alongside the actions that need it (#375) rather than guessed
-		// here. This is the expand half of cerbos/query-plan-adapters#372's expand-contract.
+		// The corpus's one REAL to-one chain (the `rel-*` actions). `ScalarRelation` reads one
+		// column of the joined row as a correlated scalar subquery; both levels' foreign keys are
+		// UNIQUE, which is the to-ONE claim the field's doc comment says the caller is making.
+		// `parent.inner` reaches two tables out, so it names the inner table and joins THROUGH
+		// the parent with a Hop — the same Via vocabulary mainCategory.subCategories uses.
+		"request.resource.attr.parent.aBool":                 {ScalarRelation: parentRel, Column: "a_bool"},
+		"request.resource.attr.parent.aString":               {ScalarRelation: parentRel, Column: "a_string"},
+		"request.resource.attr.parent.aNumber":               {ScalarRelation: parentRel, Column: "a_number"},
+		"request.resource.attr.parent.aOptionalString":       {ScalarRelation: parentRel, Column: "a_optional_string"},
+		"request.resource.attr.parent.inner.aBool":           {ScalarRelation: innerRel, Column: "a_bool"},
+		"request.resource.attr.parent.inner.aString":         {ScalarRelation: innerRel, Column: "a_string"},
+		"request.resource.attr.parent.inner.aNumber":         {ScalarRelation: innerRel, Column: "a_number"},
+		"request.resource.attr.parent.inner.aOptionalString": {ScalarRelation: innerRel, Column: "a_optional_string"},
 	}
 }
 
@@ -543,7 +563,7 @@ func TestAdversarialConformance(t *testing.T) {
 		}
 		// Corpus-size tripwire: bump deliberately when the corpus grows, so a new hostile shape
 		// cannot slip past this adapter unnoticed.
-		require.Len(t, seen, 152, "corpus size changed; triage the new action(s) before bumping")
+		require.Len(t, seen, 167, "corpus size changed; triage the new action(s) before bumping")
 		require.Len(t, h.corpus.Seeds.Seeds, 21, "seed count changed")
 		// Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
 		// lost has to be re-triaged here rather than joining the throw suite unnoticed.
@@ -721,6 +741,11 @@ func TestAdversarialConformance(t *testing.T) {
 			"w1-not-in-chain", "w1-not-hasint-chain",
 			"w1-ternary-chain-cond", "w1-size-frac-le-chain",
 			"cr-div-neg-zero", "cr-div-other-column", "cr-div-then-add", "cr-div-then-add-ne",
+			// The real to-one join (#375): one per hazard — the negated hop, the null comparison,
+			// two-level depth, the root conjunction, and the disjunction, whose failure
+			// direction is an under-grant.
+			"rel-not-bool-hop", "rel-ne-null-hop", "rel-bool-hop2",
+			"rel-hop-and-root", "rel-hop2-or-exists",
 		}
 		// int() over a numeric column is unsupported for every adapter but convex, so there is no
 		// comparison behind it here: it stays as a PDP/policy liveness probe for the cast group.

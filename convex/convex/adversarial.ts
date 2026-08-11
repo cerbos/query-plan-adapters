@@ -96,10 +96,50 @@ export const MAPPER: Record<string, MapperConfig> = {
     field: "mainCategory.subNames",
     nullable: true,
   },
-  // The corpus's real to-one chain is seeded in the `parent` object above and mirrored on the
-  // check side, but carries no mapping yet: nothing references it until the join shapes land
-  // (#375), and an unexercised mapping is a declaration no assertion holds to anything. This is
-  // the expand half of cerbos/query-plan-adapters#372's expand-contract.
+  // The corpus's one REAL to-one chain (the `rel-*` actions), stored as nested objects rather
+  // than a joined table. EVERY level is `nullable: true`, which here means "this path may be
+  // absent from the document": a row with no parent carries no `parent` key at all, and one whose
+  // parent has no parent of its own carries no `parent.inner`. That is precisely the CEL
+  // missing-attribute case, so `canPushToDb` keeps these off the Convex filter engine and the
+  // adapter's in-memory post-filter answers them with the right three-valued semantics
+  // (cerbos/query-plan-adapters#375). Each level is declared explicitly, as mainCategory is.
+  "request.resource.attr.parent": { field: "parent", nullable: true },
+  "request.resource.attr.parent.aBool": {
+    field: "parent.aBool",
+    nullable: true,
+  },
+  "request.resource.attr.parent.aString": {
+    field: "parent.aString",
+    nullable: true,
+  },
+  "request.resource.attr.parent.aNumber": {
+    field: "parent.aNumber",
+    nullable: true,
+  },
+  "request.resource.attr.parent.aOptionalString": {
+    field: "parent.aOptionalString",
+    nullable: true,
+  },
+  "request.resource.attr.parent.inner": {
+    field: "parent.inner",
+    nullable: true,
+  },
+  "request.resource.attr.parent.inner.aBool": {
+    field: "parent.inner.aBool",
+    nullable: true,
+  },
+  "request.resource.attr.parent.inner.aString": {
+    field: "parent.inner.aString",
+    nullable: true,
+  },
+  "request.resource.attr.parent.inner.aNumber": {
+    field: "parent.inner.aNumber",
+    nullable: true,
+  },
+  "request.resource.attr.parent.inner.aOptionalString": {
+    field: "parent.inner.aOptionalString",
+    nullable: true,
+  },
 };
 
 /**

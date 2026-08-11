@@ -81,7 +81,7 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `check()` decisio
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 137 reference conformance actions |
+| Oracle-tested | 152 reference conformance actions |
 | Fail-closed corpus shapes | Nanosecond `now()` thresholds, regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an ambiguous string column, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero) and `filter()`/`map()` used as a condition (both return a list, not a boolean), and a constant zero divisor whose sign the HTTP transport discards (12 actions) |
 | Representation-dependent | `null-eq-missing` — raises under `null_attribute_representation="omitted"`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute the caller sends as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare it per attribute — `attribute_null_representation={reference: "explicit"}` — or the historical rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
@@ -107,7 +107,7 @@ The single-table-inheritance half of that is [documented here](https://docs.sqla
 | Subtype discrimination | **Caller-owned** | `polymorphic_identity` on a single-table-inheritance subclass. `select(Subclass)` carries the discriminator; `select(literal(1)).where(subclass_table.c.x == …)` over the shared table does not, and sees the sibling subtypes |
 | To-one relation used as a collection | **Caller-owned** | A `relationship(uselist=False)` whose foreign key has no unique constraint. Nothing in the override mechanism makes the database enforce the single row the application saw — add the constraint |
 | Composite association key | **Caller-owned** | A multi-column foreign key. Unlike the adapters that take one source and one target column, an override is arbitrary SQLAlchemy, so a composite key *is* expressible — which also means nothing stops you writing half of it. Conjoin every column pair |
-| Absent to-one parent | **Reproduced by `require_hops`**, and proved by the corpus (`w1-all-chain` and siblings) | `cerbos_sqlalchemy.require_hops` — see below. Call it from every override that reaches a collection through an intermediate to-one hop |
+| Absent to-one parent | **Reproduced by `require_hops`**, and proved by the corpus (`w1-all-chain`, `rel-not-bool-hop` and siblings) | `cerbos_sqlalchemy.require_hops` — see below. Call it from every override that reaches a COLLECTION through an intermediate to-one hop. A SCALAR read through a to-one hop needs nothing: map it to a correlated scalar subquery and an absent hop is already SQL NULL, excluded under both polarities because `NOT NULL` is still NULL. `get_query` accepts any SQLAlchemy column expression in the attribute map for exactly this, and such an expression carries its own correlation so it needs no `table_mapping` ([#375](https://github.com/cerbos/query-plan-adapters/issues/375)) |
 
 ### `require_hops`: the one hazard with a library helper
 

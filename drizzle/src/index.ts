@@ -535,13 +535,22 @@ const wrapRelationChain = (
   filter: SQL,
   reference: string,
   options?: BuildFilterOptions
-): SQL =>
-  requireLeadingHops(
-    relations.slice(0, -1),
+): SQL => {
+  // Every to-ONE relation on the path is a hop that must EXIST — including a TRAILING one,
+  // which a chain of to-many relations never produces. `parent.aBool` ends AT its hop, and a
+  // bare `NOT EXISTS` over it is TRUE for a row with no parent, so the negation returns rows
+  // the PDP denies (cerbos/query-plan-adapters#375). A trailing to-MANY relation is the
+  // collection being iterated rather than a hop, and keeps its empty-collection semantics:
+  // `!exists` over zero rows is TRUE in CEL as well.
+  const last = relations[relations.length - 1];
+  const required = last?.type === "one" ? relations : relations.slice(0, -1);
+  return requireLeadingHops(
+    required,
     wrapWithRelations(relations, filter, reference, options),
     reference,
     options
   );
+};
 
 /**
  * The correlation predicate of a subquery over `relation`: the join, narrowed by whatever
@@ -2843,11 +2852,14 @@ const buildFilterFromExpression = (
   negated = false
 ): SQL => {
   // Bare variable in boolean position (e.g. `R.attr.aBool` as an and/or/not operand).
+  // Routed through wrapRelationChain, not wrapWithRelations: a bare boolean read through a
+  // to-one hop must require that hop, or `!R.attr.parent.aBool` returns every parentless row
+  // (cerbos/query-plan-adapters#375).
   if (isNameOperand(expression)) {
     const resolved = resolveFieldReference(expression.name, mapper);
     const filter = applyComparison(resolved.mapping, "eq", true);
     const wrapped = resolved.relations.length
-      ? wrapWithRelations(resolved.relations, filter, expression.name, options)
+      ? wrapRelationChain(resolved.relations, filter, expression.name, options)
       : filter;
     return negated ? not(wrapped) : wrapped;
   }

@@ -200,7 +200,14 @@ const canPushToDb = (
   expression: PlanExpressionOperand,
   mapper: Mapper,
 ): boolean => {
-  if (isValue(expression) || isVariable(expression)) return true;
+  if (isValue(expression)) return true;
+  // A BARE variable in boolean position is subject to the same nullability rule as one under a
+  // comparison. It was exempt, which is only invisible while every bare boolean is a required
+  // field: `R.attr.parent.aBool` is absent for a row with no parent, and Convex's engine cannot
+  // tell an absent path from a false one, so the negation readmits every parentless row
+  // (cerbos/query-plan-adapters#375). Keeping it off the engine hands it to the adapter's own CEL
+  // evaluator, which has the missing-attribute error the semantics need.
+  if (isVariable(expression)) return !isNullableField(expression.name, mapper);
   if (!isExpression(expression)) return false;
   if (!DB_PUSHABLE_OPERATORS.has(expression.operator)) return false;
 

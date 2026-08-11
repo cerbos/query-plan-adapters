@@ -171,7 +171,7 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` d
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 99 reference actions |
+| Oracle-tested | 114 reference actions |
 | Fail-closed | 42 reference actions plus the 8 reference-unsupported shapes (50 actions total) |
 | Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute the caller sends as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare it per attribute — `nullAttributeRepresentation: "explicit"` on the mapper entry — or the historical rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
@@ -211,7 +211,7 @@ Where the application narrows its own reads of a related model, declare the same
 | Subtype discrimination | **Caller-owned**, reproducible with `subqueryFilter` | A `type`/`kind` discriminator column where one model holds several row kinds. Declare `{ type: "…" }` |
 | To-one relation used as a collection | **Rejected by Prisma** | A `type: "one"` mapping compiles to `is`, an argument Prisma only accepts on a relation its own schema declares to-one, and `@relation(references: …)` must already point at a unique field. Mapping a to-many relation as `type: "one"` is therefore a query-validation error from Prisma, not a silently wider subquery |
 | Composite association key | **Reproduced by Prisma** | Prisma resolves multi-column foreign keys itself from `@relation(fields: […], references: […])`. The mapping names the relation, never its columns, so there is no key for the adapter to get wrong |
-| Absent to-one parent | **Reproduced**, and proved by the corpus (`w1-all-chain` and siblings) | None — every operator reached through a relation chain requires its intermediate hops separately, so a missing parent stays denied under both polarities ([#309](https://github.com/cerbos/query-plan-adapters/issues/309), [#315](https://github.com/cerbos/query-plan-adapters/issues/315)) |
+| Absent to-one parent | **Reproduced**, and proved by the corpus (`w1-all-chain`, `rel-not-bool-hop` and siblings) | None — every operator reached through a relation requires its to-one hops separately, so a missing parent stays denied under both polarities ([#309](https://github.com/cerbos/query-plan-adapters/issues/309), [#315](https://github.com/cerbos/query-plan-adapters/issues/315), [#375](https://github.com/cerbos/query-plan-adapters/issues/375)). **Behaviour change in #375:** this previously held only for a chain of two or more relations. A negation over a SINGLE to-one hop — `!R.attr.parent.aBool` against a `type: "one"` mapping — returned every row whose relation was absent. It now emits `AND: [{ parent: { is: {} } }, { NOT: … }]` and returns fewer rows: an over-grant fix, and consumer-visible for any policy with that shape |
 
 #### Declaring the application's own predicate
 

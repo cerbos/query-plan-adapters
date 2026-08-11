@@ -421,25 +421,38 @@ const referencesNullableField = (
  * `requiresParent` only ever appears on a top-level mapping, so the paths produced here are
  * always rooted at the document. A nested `fields` entry that declared one would need its
  * path rebased onto the enclosing `$elemMatch` scope instead.
+ *
+ * A `type: "one"` relation needs no `requiresParent` to opt in: a to-one hop is BY DEFINITION
+ * a level that can be absent, and reaching a scalar through one is a missing-path error when it
+ * is. `{ path: { $ne: null } }` is the subdocument spelling of the same requirement — a missing
+ * path compares equal to null in MongoDB, so it excludes both the absent and the stored-null
+ * case, and on a two-level path it subsumes the level above (cerbos/query-plan-adapters#375).
  */
 const buildRequiredParentsFilter = (
   operand: PlanExpressionOperand,
   mapper: Mapper
 ): MongooseFilter | undefined => {
-  const parents = new Set<string>();
+  const clauses: MongooseFilter[] = [];
+  const arrayParents = new Set<string>();
+  const toOnePaths = new Set<string>();
   for (const name of collectVariableNames(operand)) {
-    const parentPath = resolveFieldReference(name, mapper).relation
-      ?.requiresParent;
-    if (parentPath !== undefined) {
-      parents.add(parentPath);
+    const { relation } = resolveFieldReference(name, mapper);
+    if (relation?.requiresParent !== undefined) {
+      arrayParents.add(relation.requiresParent);
+    }
+    if (relation?.type === "one") {
+      toOnePaths.add(relation.name);
     }
   }
-  if (parents.size === 0) {
+  for (const parentPath of arrayParents) {
+    clauses.push({ [`${parentPath}.0`]: { $exists: true } });
+  }
+  for (const path of toOnePaths) {
+    clauses.push({ [path]: { $ne: null } });
+  }
+  if (clauses.length === 0) {
     return undefined;
   }
-  const clauses = [...parents].map((parentPath) => ({
-    [`${parentPath}.0`]: { $exists: true },
-  }));
   return clauses.length === 1 ? clauses[0]! : { $and: clauses };
 };
 
@@ -1354,7 +1367,12 @@ const buildMongooseFilterFromCerbosExpression = (
       collectionVariable
     );
     const { path, relation } = resolveFieldReference(expression.name, mapper);
-    if (relation) {
+    // A to-MANY relation in boolean position is a collection, and a collection has no truth
+    // value. A to-ONE relation is a different thing wearing the same field: it flattens to a
+    // single dotted scalar path (`parent.aBool`), so it reads exactly like a plain column here.
+    // Its absent-hop requirement is applied by whichever operator encloses it — `not` ANDs it
+    // OUTSIDE the `$nor` — rather than by this leaf (cerbos/query-plan-adapters#375).
+    if (relation && relation.type !== "one") {
       throw new Error("Bare collection variables are unsupported");
     }
     return buildGuardedFieldFilter(

@@ -990,6 +990,204 @@ resourcePolicy:
         match:
           expr: '("finance" in R.attr.mainCategory.subNames) ? R.attr.aBool : !R.attr.aBool'
 
+    # ==================== the real to-one join (G1) ====================
+    # `parent` is the corpus's ONE real to-one relation and `parent.inner` is one hop further
+    # out; both are a JOIN, unlike `obj.inner` above, which is a flat column wearing a dotted
+    # name. See README.md, "The real to-one relation", and ADR 0005. The W1 block above reaches
+    # a COLLECTION through a chain; this block reaches a SCALAR, which is a different set of
+    # hazards: a collection tail has an aggregation form in every adapter, a scalar tail does
+    # not, and mongoose's `$cond` treats a missing scalar path as falsy rather than as an error.
+    #
+    # The seeds split 8 / 6 / 7 by depth and every action below turns on that split:
+    #   no parent at all  (8): a5 a6 a8 b3 b4 b5 c2 d2
+    #   parent, no inner  (6): a3 a7 a9 b2 c1 d1
+    #   parent and inner  (7): a1 a2 a4 b1 b6 e1 f1
+    #
+    # On the check side a level that does not exist sends NO attribute, so the path is a CEL
+    # missing-path error and the PDP DENIES. A filter rooted at the resource row reaches the
+    # same answer only if its join REQUIRES the hop; a LEFT JOIN left unguarded readmits every
+    # row whose parent is absent. That is the same over-grant #309 documents for collections,
+    # and the negated and null-comparison shapes below are what discriminate it — the positive
+    # ones agree for the wrong reason, because "no parent" and "parent that does not match"
+    # both exclude the row.
+    #
+    # A filter that is correct but joins with the wrong MULTIPLICITY returns duplicate or
+    # missing rows, which no wire-shape assertion can see. Only executed rows catch it.
+
+    # Scalar string equality through one hop. Deliberately NOT the shared suite's `== true`
+    # (rel-bool-hop below already covers a boolean): a case trap is worth more here, because a
+    # join carries the operand into whatever collation the JOINED table was created with.
+    # Oracle b1 (parent c1, "One"). e1's parent a1 holds "one", so a case-insensitive collation
+    # one hop out — the column most likely to have been created without the root's collation —
+    # wrongly adds e1.
+    - actions: ["rel-eq-hop"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.parent.aString == "One"'
+
+    # Numeric equality through one hop. Oracle a1/a7 (parents a3 and a8, both aNumber 2).
+    - actions: ["rel-eq-num-hop"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.parent.aNumber == 2'
+
+    # The four orderings through one hop. The parent numbers span negatives and zero (a2 = -2,
+    # b3 = -4, a8 = 0), so none of these folds to a tautology over the parented rows, and each
+    # threshold sits ON a boundary value so `<` and `<=` cannot agree by accident:
+    #   lt  oracle a4/b2        (2 of the 13 parented rows)
+    #   le  oracle a1/a4/a7/b2  (4 — the two boundary rows a1/a7 are the whole difference)
+    #   gt  oracle 9            (the complement of le among parented rows)
+    #   ge  oracle 11           (gt plus the same two boundary rows)
+    # A hop that silently drops the join returns rows against the ROOT's aNumber instead, which
+    # disagrees with every one of these.
+    - actions: ["rel-lt-hop"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.parent.aNumber < 2'
+
+    - actions: ["rel-le-hop"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.parent.aNumber <= 2'
+
+    - actions: ["rel-gt-hop"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.parent.aNumber > 2'
+
+    - actions: ["rel-ge-hop"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.parent.aNumber >= 2'
+
+    # TWO comparisons against the SAME hop under a conjunction. They must resolve to ONE join,
+    # not two: a second independent join multiplies the row set, and against a to-one relation
+    # that is invisible until the two predicates disagree — which is exactly what a range does.
+    # Oracle a2/a3/a9/b1/e1/f1 (parent aNumber strictly between 2 and 12).
+    - actions: ["rel-range-hop"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.parent.aNumber > 2 && R.attr.parent.aNumber < 12'
+
+    # Bare boolean through one hop, and its negation. The pair partitions the 13 parented rows
+    # exactly — oracle a1/a3/a7/b1/b2/b6/e1/f1 (8) and a2/a4/a9/c1/d1 (5) — so the 8 rows with
+    # NO parent must appear in NEITHER. That is the whole absent-parent hazard in two actions:
+    # the positive one cannot see it (absent and false both exclude), the negated one can, and
+    # an unguarded outer join readmits all 8 under the negation only.
+    - actions: ["rel-bool-hop"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.parent.aBool'
+
+    - actions: ["rel-not-bool-hop"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!R.attr.parent.aBool'
+
+    # Substring through one hop. The needle is deliberately free of BOTH a LIKE metacharacter
+    # and a case variant, because what this action exists to prove is the JOIN — and the corpus
+    # already proves the other two at the root (like-percent/like-underscore, cs-eq). A needle
+    # carrying either would be rejected or mismatched before the walk ever reached the hop,
+    # leaving the action classified against a mechanism it never tested. ("one" was tried and
+    # does exactly that: SQLite's LIKE is ASCII-case-insensitive even where `=` is not, so b1's
+    # parent "One" matched — a real store hazard, but not this action's.)
+    # Oracle a1/a4 (parents "100xdone", "100%_done"). Reading the ROOT's own aString instead of
+    # the parent's gives a2/a3 — disjoint, so the wrong level cannot agree by accident.
+    - actions: ["rel-contains-hop"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.parent.aString.contains("done")'
+
+    # `!= null` through one hop. Two different absences have to reach the same answer: the 8
+    # rows with no parent (no `parent` attribute at all) and the 3 whose parent's optional
+    # column IS NULL (a4/a7/c1, parents a2/a8/c2 — a MISSING attribute one hop out, per the
+    # relation's stated convention). Oracle is the other 10. An adapter that emits
+    # `parent.aOptionalString IS NOT NULL` without requiring the join readmits the 8.
+    - actions: ["rel-ne-null-hop"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.parent.aOptionalString != null'
+
+    # -- two levels out: where alias scoping and correlated-subquery nesting break --
+    # One hop and two hops are different bugs. Only 7 seeds have an inner level at all, so 14
+    # rows must be excluded here for one of two distinct reasons (no parent, or a parent with
+    # no parent of its own) that an adapter is free to conflate and must not.
+
+    # Boolean two levels out. Oracle a1/a2/e1 (inners a6, b3, a3). The other four two-level
+    # rows carry a FALSE inner (a4, b1, b6, f1), so the action separates "inner is absent" from
+    # "inner is present and false" as well as from the 14 rows with no inner.
+    - actions: ["rel-bool-hop2"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.parent.inner.aBool == true'
+
+    # String prefix two levels out. The needle separates all three levels PAIRWISE, so an
+    # adapter that anchors the predicate at the wrong depth cannot agree by accident:
+    #   correct (parent.inner.aString): e1          — inner a3, "100xdone"
+    #   wrong, one level short (parent): a1, a4     — "100xdone", "100%_done"
+    #   wrong, at the root:              a2, a3     — "100%_done", "100xdone"
+    # The three sets are disjoint, which is the property "startsWith on a chained string" alone
+    # would not have given.
+    - actions: ["rel-startswith-hop2"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.parent.inner.aString.startsWith("100")'
+
+    # -- the hop composed with something else --
+
+    # A root-level predicate AND a hop predicate. The conjunction must not push the root's
+    # condition into the join, nor drop either conjunct once a join is introduced. The hop
+    # alone is TRUE for b6 and d1 (parents "[SEC]ret" and "Secret"); b6's own aBool is FALSE,
+    # so the oracle is d1 alone and b6 is the witness — a filter that drops the root conjunct
+    # returns it. Metacharacter-free for the same reason as rel-contains-hop above.
+    - actions: ["rel-hop-and-root"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aBool == true && R.attr.parent.aString.contains("re")'
+
+    # A two-level hop OR a collection subquery — a to-one join and a to-many subquery in one
+    # plan, under a disjunction, so neither may be emitted as a row-restricting inner join.
+    # Oracle a1/a2/e1 (inner is TRUE) plus a6/a8/c1 (a category exists), and that second set is
+    # the point: none of the three HAS an inner level, so their left branch is a CEL error, and
+    # CEL's OR absorbs an error when the other branch is TRUE. Both flavours of absence are
+    # represented — a6 and a8 have no parent at all, c1 has a parent with no parent of its own.
+    # An adapter that treats the absent hop as row-excluding rather than as branch-local drops
+    # all three: an UNDER-grant, where every other action in this block probes the over-grant.
+    - actions: ["rel-hop2-or-exists"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.parent.inner.aBool == true || R.attr.categories.exists(c, c.name == "business")'
+
     # ==================== root relation inside a lambda body (W2) ====================
     # The inner R.attr.tags.exists(...) is planned INSIDE the categories lambda; its subquery
     # must correlate the ROOT entity (owner of "tags"), not the category join the lambda scope

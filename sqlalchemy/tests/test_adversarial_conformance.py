@@ -271,6 +271,14 @@ DEGENERACY_GUARD_ACTIONS = (
     "cr-div-other-column",
     "cr-div-then-add",
     "cr-div-then-add-ne",
+    # The real to-one join (#375): one per hazard — the negated hop, the null
+    # comparison, two-level depth, the root conjunction, and the disjunction,
+    # whose failure direction is an under-grant.
+    "rel-not-bool-hop",
+    "rel-ne-null-hop",
+    "rel-bool-hop2",
+    "rel-hop-and-root",
+    "rel-hop2-or-exists",
 )
 
 # Shapes this adapter refuses to translate: they have no oracle comparison to
@@ -762,6 +770,47 @@ ATTRIBUTE_NULL_REPRESENTATION = {
     "request.resource.attr.coOwner": "explicit",
 }
 
+
+def _parent_scalar(column):
+    """One scalar of the to-one `parent`, as a correlated scalar subquery.
+
+    The resource owns at most one parent row (``resource_id`` is UNIQUE), so this
+    yields that row's value, or SQL NULL when the resource has no parent at all.
+    NULL is precisely what the check side means: an absent level sends no
+    attribute, CEL raises a missing-path error, and the PDP denies. Because
+    ``NOT NULL`` is still NULL, the row stays excluded under both polarities
+    without the explicit ``require_hops`` guard the COLLECTION chains need
+    (cerbos/query-plan-adapters#375).
+    """
+    return (
+        select(column)
+        .where(AdvParent.resource_id == AdvResource.id)
+        .correlate(AdvResource)
+        .scalar_subquery()
+    )
+
+
+def _inner_scalar(column):
+    """The same, one level further out: `parent.inner`.
+
+    Nesting the parent's own lookup inside the correlation is what keeps the two
+    levels distinct — reading off the parent, or off the resource, gives a
+    different row set for every action in the group.
+    """
+    return (
+        select(column)
+        .where(
+            AdvInner.parent_id
+            == select(AdvParent.id)
+            .where(AdvParent.resource_id == AdvResource.id)
+            .correlate(AdvResource)
+            .scalar_subquery()
+        )
+        .correlate(AdvResource)
+        .scalar_subquery()
+    )
+
+
 ATTR_MAP = {
     "request.resource.attr.aBool": AdvResource.a_bool,
     "request.resource.attr.aString": AdvResource.a_string,
@@ -776,6 +825,23 @@ ATTR_MAP = {
     # obj.inner is not a real nested column — mirrors aString, the same trick
     # the spring-data and prisma reference harnesses use for the p-struct probe.
     "request.resource.attr.obj.inner": AdvResource.a_string,
+    # The corpus's one REAL to-one chain (the `rel-*` actions). This adapter has no
+    # relation model, so the caller supplies the hop as a correlated scalar
+    # subquery — and that spelling needs no separate hop guard: an absent parent
+    # makes the subquery SQL NULL, which is CEL's missing-path error, and NOT NULL
+    # is still NULL, so the row stays excluded under BOTH polarities.
+    "request.resource.attr.parent.aBool": _parent_scalar(AdvParent.a_bool),
+    "request.resource.attr.parent.aString": _parent_scalar(AdvParent.a_string),
+    "request.resource.attr.parent.aNumber": _parent_scalar(AdvParent.a_number),
+    "request.resource.attr.parent.aOptionalString": _parent_scalar(
+        AdvParent.a_optional_string
+    ),
+    "request.resource.attr.parent.inner.aBool": _inner_scalar(AdvInner.a_bool),
+    "request.resource.attr.parent.inner.aString": _inner_scalar(AdvInner.a_string),
+    "request.resource.attr.parent.inner.aNumber": _inner_scalar(AdvInner.a_number),
+    "request.resource.attr.parent.inner.aOptionalString": _inner_scalar(
+        AdvInner.a_optional_string
+    ),
     "request.resource.attr.tags": TAGS,
     "request.resource.attr.tagNames": TAG_NAMES,
     "t": TAGS,
@@ -783,6 +849,10 @@ ATTR_MAP = {
     "t.name": AdvTag.name,
     "request.resource.attr.categories": CATEGORIES,
     "c": CATEGORIES,
+    # The category's own name, read inside the categories lambda. Only
+    # rel-hop2-or-exists reaches it — every other categories probe dots straight
+    # through to subCategories — so it is mapped here rather than alongside them.
+    "c.name": AdvCategory.name,
     "c.subCategories": SUB_OF_CATEGORY,
     "s": SUB_OF_CATEGORY,
     "s.name": AdvSubCategory.name,
@@ -1087,7 +1157,7 @@ class TestAdversarialConformance:
 
         # Deliberate tripwires: a corpus edit must bump these in the same
         # change, so a new hostile action cannot join (or vanish) silently.
-        assert len(MANIFEST_ACTIONS) == 152
+        assert len(MANIFEST_ACTIONS) == 167
         assert len(SEEDS) == 21
         # Each of these carries a pinned message, so a shape gained or lost has
         # to be re-triaged here rather than joining the throw suite unnoticed.

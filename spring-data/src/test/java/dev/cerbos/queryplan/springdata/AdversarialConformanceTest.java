@@ -102,6 +102,25 @@ class AdversarialConformanceTest {
             // Instant column for the ts-* timestamp() comparison actions
             Map.entry("request.resource.attr.createdAt", AttributeMapping.field("createdAt")),
             Map.entry("request.resource.attr.obj.inner", AttributeMapping.field("aString")),
+            // The corpus's one REAL to-one chain (the `rel-*` actions). obj.inner above is a flat
+            // column wearing a dotted name; these are a genuine association, and a dotted jpaPath
+            // through a to-ONE association is an implicit INNER JOIN in the Criteria API. That is
+            // what makes the absent parent deny under BOTH polarities without a separate guard:
+            // a row with no parent produces no join row at all, so it is excluded from the query
+            // rather than being readmitted by a negation (cerbos/query-plan-adapters#375).
+            Map.entry("request.resource.attr.parent.aBool", AttributeMapping.field("parent.aBool")),
+            Map.entry("request.resource.attr.parent.aString", AttributeMapping.field("parent.aString")),
+            Map.entry("request.resource.attr.parent.aNumber", AttributeMapping.field("parent.aNumber")),
+            Map.entry("request.resource.attr.parent.aOptionalString",
+                    AttributeMapping.field("parent.aOptionalString")),
+            Map.entry("request.resource.attr.parent.inner.aBool",
+                    AttributeMapping.field("parent.inner.aBool")),
+            Map.entry("request.resource.attr.parent.inner.aString",
+                    AttributeMapping.field("parent.inner.aString")),
+            Map.entry("request.resource.attr.parent.inner.aNumber",
+                    AttributeMapping.field("parent.inner.aNumber")),
+            Map.entry("request.resource.attr.parent.inner.aOptionalString",
+                    AttributeMapping.field("parent.inner.aOptionalString")),
             // in-null-elem-*: same column as aOptionalString, but the oracle sends an
             // EXPLICIT null attribute for NULL columns (aOptionalString is OMITTED instead)
             // — pinning the adapter's convention that a DB NULL is the explicitly-null
@@ -1310,7 +1329,7 @@ class AdversarialConformanceTest {
                         .filter(Boolean::booleanValue).count() != 1)
                 .toList();
 
-        assertEquals(152, manifest.size(),
+        assertEquals(167, manifest.size(),
                 "corpus size changed; triage the new action(s) before bumping this pin");
         assertEquals(21, SEEDS.size(), "seed count changed");
         // Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
@@ -1356,7 +1375,12 @@ class AdversarialConformanceTest {
             "w1-ternary-chain-cond", "w1-size-frac-le-chain",
             // Column arithmetic under a division (#311). The two shapes that nest further
             // arithmetic on top of the division are liveness probes below.
-            "cr-div-neg-zero", "cr-div-other-column");
+            "cr-div-neg-zero", "cr-div-other-column",
+            // The real to-one join (#375): one per hazard — the negated hop, the null comparison,
+            // two-level depth, the root conjunction, and the disjunction, whose failure
+            // direction is an under-grant.
+            "rel-not-bool-hop", "rel-ne-null-hop", "rel-bool-hop2",
+            "rel-hop-and-root", "rel-hop2-or-exists");
 
     /**
      * Shapes this adapter refuses to translate: they have no oracle comparison to guard, and stay

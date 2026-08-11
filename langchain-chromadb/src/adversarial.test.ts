@@ -584,6 +584,12 @@ const DEGENERACY_GUARD_ACTIONS = [
   "p-struct",
   "p-in-null-single",
   "p-in-null-multi",
+  // The real to-one join (#375). Chroma translates 9 of the 15 — the positive scalar shapes over
+  // the flattened chain keys — so the guard names the ones it compares: a scalar leaf one hop out
+  // and the same two levels out. Its six negated, string-matching and composite siblings throw,
+  // and are liveness probes below.
+  "rel-eq-hop",
+  "rel-bool-hop2",
 ] as const;
 
 /**
@@ -611,6 +617,12 @@ const DEGENERACY_LIVENESS_PROBES = [
   "w1-size-frac-le-chain",
   "cr-div-neg-zero",
   "cast-int-double",
+  // The real to-one join's fail-closed half (#375). rel-not-bool-hop is the load-bearing one:
+  // a missing metadata key MATCHES $ne, so lowering the negated hop is exactly the parentless
+  // over-grant, and Chroma refuses it rather than emitting it.
+  "rel-not-bool-hop",
+  "rel-ne-null-hop",
+  "rel-hop2-or-exists",
 ] as const;
 
 // Fields are optional unless declared otherwise, so `$ne`/`$nin` are rejected by default.
@@ -630,11 +642,32 @@ const FIELD_NAME_MAPPER: Record<string, string | FieldNameMapperConfig> = {
     required: false,
   },
   "request.resource.attr.obj.inner": { field: "obj.inner", required: true },
-  // The corpus's real to-one chain is flattened onto dotted metadata keys by `metadataFor` and
-  // mirrored as a nested object on the check side, but carries no mapping yet: nothing references
-  // it until the join shapes land (#375), and an unexercised mapping is a declaration no
-  // assertion holds to anything. This is the expand half of
-  // cerbos/query-plan-adapters#372's expand-contract.
+  // The corpus's one REAL to-one chain (the `rel-*` actions), flattened onto dotted metadata keys
+  // by `metadataFor`. EVERY level stays `required: false` — the whole point of the relation is
+  // that a level can be absent, and 8 of the 21 seeds have no parent at all — so Chroma's
+  // inequality shapes over these keys stay fail-closed. A metadata key Chroma cannot prove is
+  // present cannot answer `$ne` the way CEL's missing-attribute error does
+  // (cerbos/query-plan-adapters#375).
+  "request.resource.attr.parent.aBool": { field: "parent.aBool" },
+  "request.resource.attr.parent.aString": { field: "parent.aString" },
+  "request.resource.attr.parent.aNumber": {
+    field: "parent.aNumber",
+    numericType: "integer",
+  },
+  "request.resource.attr.parent.aOptionalString": {
+    field: "parent.aOptionalString",
+  },
+  "request.resource.attr.parent.inner.aBool": { field: "parent.inner.aBool" },
+  "request.resource.attr.parent.inner.aString": {
+    field: "parent.inner.aString",
+  },
+  "request.resource.attr.parent.inner.aNumber": {
+    field: "parent.inner.aNumber",
+    numericType: "integer",
+  },
+  "request.resource.attr.parent.inner.aOptionalString": {
+    field: "parent.inner.aOptionalString",
+  },
 };
 
 // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") --------
@@ -908,7 +941,7 @@ describe("adversarial conformance corpus", () => {
       /pins no throw message/,
     );
   });
-  test("manifest assigns all 152 policy actions exactly one Chroma outcome", () => {
+  test("manifest assigns all 167 policy actions exactly one Chroma outcome", () => {
     const oracle = new Set(CHROMA_SUPPORTED_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map(({ action }) => action));
     const nullOmitted = new Set(
@@ -924,12 +957,12 @@ describe("adversarial conformance corpus", () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(152);
-    expect(CHROMA_SUPPORTED_ACTIONS).toHaveLength(15);
+    expect(MANIFEST_ACTIONS.size).toBe(167);
+    expect(CHROMA_SUPPORTED_ACTIONS).toHaveLength(24);
     expect(oracle.size).toBe(CHROMA_SUPPORTED_ACTIONS.length);
-    expect(CHROMA_UNSUPPORTED).toHaveLength(126);
+    expect(CHROMA_UNSUPPORTED).toHaveLength(132);
     expect(CHROMA_SUPPORTED_EXPECTED).toHaveLength(0);
-    expect(THROWING_ACTIONS).toHaveLength(135);
+    expect(THROWING_ACTIONS).toHaveLength(141);
     expect(misclassified).toEqual([]);
   });
 
