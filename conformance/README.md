@@ -374,6 +374,93 @@ make visible. `scripts/validate-corpus.sh` separately asserts that every `parent
 seed, that no row is its own parent, and that all three depths — no parent, parent without inner,
 parent with inner — are non-empty.
 
+### The primary key as a filterable attribute
+
+Every action but the `id-*` six filters on a resource **attribute**. Those six filter on
+`request.resource.id` — the resource's own identity, which the planner leaves symbolic because
+PlanResources is asked about a *kind*, not a row, so the operand arrives as a `variable` named
+`request.resource.id` rather than `request.resource.attr.id`.
+
+It is a distinct hazard because the key is the one column whose mapping differs **structurally**
+per adapter rather than merely by name: an ObjectId rather than a string in mongoose, the primary
+key in the SQL adapters, the document identifier rather than a metadata field in ChromaDB, and
+`_id` metadata rather than an indexed field in Elasticsearch. An adapter that resolves references
+by stripping a `request.resource.attr.` prefix never reaches this name at all, and the failure is
+silent — the variable looks like an unmapped attribute rather than the key.
+
+Two harness rules follow, and both were learned by getting them wrong first:
+
+- **A store whose key is not a queryable field must mirror it into one.** ChromaDB's `where`
+  filters metadata only, and Elasticsearch's `_id` is addressed by the `ids` query rather than a
+  term query. Both harnesses index the corpus id as an ordinary field and map the key onto it.
+  Leaving it unmapped makes the group throw for a *harness* reason (no mapping) instead of an
+  adapter one — the trap #326 documents; leaving it unindexed is worse, because the filter is
+  well-formed and simply matches nothing, which reads as an adapter defect.
+- **One key mapping cannot be two types.** Three of the six compare the key against a string
+  column, so mongoose maps it to the string field holding the corpus id rather than to an
+  ObjectId. The ObjectId coercion is a caller-supplied `valueParser` on the mapper entry and is
+  pinned against the `id-eq-const` wire fixture in that adapter's translator unit test instead.
+
+`f1` is the witness seed: its `aString` equals its own id and its `aOptionalString` is that id
+prefixed, so the field-to-field and concatenation oracles are non-degenerate without inventing a
+literal. `principal.attr.context` carries the same id for the value-first and hierarchy shapes.
+
+### Casts and concatenation are store-dependent in opposite directions
+
+`string()` and CEL's `+` over strings are the two shapes where a *correct-looking* lowering is
+wrong on some stores and right on others, so they are classified together.
+
+`cast-string-double` is the agreeing half. CEL formats the shortest decimal that round-trips and so
+does every store the corpus executes against — PostgreSQL 17 renders `CAST((-0.6)::float8 AS TEXT)`
+as `-0.6`, as do SQLite and MySQL. (Measured against the pinned images. The
+`-0.60000000000000009` rendering only appears under `extra_float_digits = 3`; PostgreSQL 12 made
+shortest round-trip the default, so a port built on that divergence would pin nothing.)
+
+`cast-string-bool` is the diverging half, and the reason the two are a pair. SQLite and MySQL have
+no boolean type and store 1/0, so `CAST(a_bool AS TEXT)` is `"1"` where CEL and PostgreSQL say
+`"true"`. One translator, one wire node, two answers decided only by the store — which is why an
+adapter spanning both cannot lower it store-blind. Every SQL adapter refuses it; mongoose and
+convex lower it correctly, because `$toString` and JavaScript render a bool exactly as CEL does.
+
+`id-concat` is the same lesson for `add`. The corpus's `add` is numeric everywhere else, and a
+string concatenation dispatched to SQL `+` is a hard error on PostgreSQL, an under-grant on SQLite
+— and a silent **over-grant** on MySQL, which coerces both operands to 0 and matched 18 of the 21
+seeds against a one-row oracle. Adapters that know their engine render `||` or `CONCAT`; adapters
+that deliberately do not know their dialect refuse it.
+
+#### A constant is what tells the two `+` overloads apart
+
+`id-concat` and `id-concat-vf` both carry a string **literal**, and that literal is the whole reason
+an adapter can translate them: CEL has no mixed-type `+`, so one string operand proves the entire
+expression is a concatenation. `concat-f2f` removes it — `R.attr.aString + R.attr.aOptionalString`
+— and with it the only evidence in the plan. A plan names no operand types, so an adapter looking at
+two variables cannot tell concatenation from arithmetic.
+
+Guessing arithmetic is what every adapter did, and it is wrong in the dangerous direction. The same
+filter answers three ways: a hard error on PostgreSQL, zero rows on SQLite, and on MySQL **16 of the
+21 seeds against a one-row oracle**, because both text operands coerce to 0 and the string constant
+on the other side coerces to 0 with them.
+
+The corpus does not prescribe a resolution, and the ten adapters split four ways, which is the point
+of asking:
+
+- **convex** and **sqlalchemy** need nothing. Convex concatenates in JavaScript, which is CEL's own
+  semantics; SQLAlchemy renders through the column's own declared type, so its dialect layer picks
+  `||` or `CONCAT` without the plan saying anything.
+- **ent** and **pgx** take a declaration — `ValueType: ValueString` on the mapper entry, the same
+  shape `ValueBool` already had for `string()`. Declared, they concatenate; undeclared, they fail
+  closed.
+- **prisma**, **drizzle**, **langchain-chromadb**, **elasticsearch-java** and **spring-data** refuse
+  it for limitations they already had, and needed no change.
+- **mongoose** refuses it, but had to be taught to: it was sending `$add` to the server, which
+  aborts the whole query rather than returning a wrong row set.
+
+There is deliberately no `ValueNumber` to pair with `ValueString`. Every *numeric* `add` the planner
+emits carries a constant operand — that is what makes it arithmetic rather than concatenation — so a
+declaration for the both-columns numeric case would be a constant nothing reads, which is the
+reason there is no `CastInt` either (#319). The corpus action that reaches it is what should
+introduce it.
+
 ### The degeneracy guard
 
 The comparison in step 4 can pass vacuously if the oracle itself is trivial (e.g. the PDP denies
@@ -402,8 +489,8 @@ is empty *by construction* is unchanged: it belongs in neither list (see
 `nullRepresentationOmitted` above, and
 `w1-size-zero-chain`/`w1-not-size-chain`/`w1-size-frac-chain`/`in-empty`/the string casts).
 
-Adapters differ widely in what they can express — `langchain-chromadb` compares 15 of the 136
-conformance actions where `ent` and `pgx` compare all of them — so the lists are expected to look
+Adapters differ widely in what they can express — `langchain-chromadb` compares 25 of the 168
+conformance actions where `ent` and `pgx` compare all but one — so the lists are expected to look
 different per harness. That is the point.
 
 ### Pinned throw messages
@@ -545,7 +632,7 @@ guard; run it before trusting it.
    what it actually says; the harness refuses to run with a message missing, so there is no way to
    forget one.
 6. Each harness pins the corpus size AND its throwing-action count as tripwires (e.g.
-   `expect(MANIFEST_ACTIONS.size).toBe(146)` and `expect(THROWING_ACTIONS).toHaveLength(50)` in
+   `expect(MANIFEST_ACTIONS.size).toBe(179)` and `expect(THROWING_ACTIONS).toHaveLength(55)` in
    `prisma/src/adversarial.test.ts`; the oracle counts too in the convex, langchain-chromadb and
    elasticsearch-java harnesses). Bump them deliberately — those assertions exist so a new action
    cannot slip past an adapter unnoticed. The convex harness additionally pins WHICH actions its

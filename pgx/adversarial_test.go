@@ -184,11 +184,21 @@ func buildMapper() cerbospgx.Mapper {
 	}
 
 	return cerbospgx.MapperMap{
-		"request.resource.attr.aBool":           {Column: "a_bool"},
-		"request.resource.attr.aString":         {Column: "a_string"},
+		// The primary key, reached as `request.resource.id` rather than through `attr` (the
+		// `id-*` actions). An adapter that resolves references by stripping a
+		// `request.resource.attr.` prefix never sees this name.
+		"request.resource.id": {Column: "id"},
+		// Declared boolean so `string()` over it fails closed: SQLite and MySQL store a
+		// boolean as 1/0 and render "1" where CEL and PostgreSQL render "true", and nothing
+		// in the plan names a column's type.
+		"request.resource.attr.aBool": {Column: "a_bool", ValueType: cerbospgx.ValueBool},
+		// Declared string so CEL's `+` between two columns resolves to concatenation:
+		// the operator is overloaded and the plan carries no operand types, so an
+		// undeclared pair fails closed rather than emitting a numeric `+`.
+		"request.resource.attr.aString":         {Column: "a_string", ValueType: cerbospgx.ValueString},
 		"request.resource.attr.aNumber":         {Column: "a_number"},
 		"request.resource.attr.aDouble":         {Column: "a_double"},
-		"request.resource.attr.aOptionalString": {Column: "a_optional_string"},
+		"request.resource.attr.aOptionalString": {Column: "a_optional_string", ValueType: cerbospgx.ValueString},
 		"request.resource.attr.createdBy":       {Column: "created_by"},
 		// `owner` and `coOwner` alias columns that `aOptionalString` and `scope` also map, under
 		// the OTHER null convention: the oracle sends a real null attribute for them rather than
@@ -563,11 +573,11 @@ func TestAdversarialConformance(t *testing.T) {
 		}
 		// Corpus-size tripwire: bump deliberately when the corpus grows, so a new hostile shape
 		// cannot slip past this adapter unnoticed.
-		require.Len(t, seen, 170, "corpus size changed; triage the new action(s) before bumping")
+		require.Len(t, seen, 179, "corpus size changed; triage the new action(s) before bumping")
 		require.Len(t, h.corpus.Seeds.Seeds, 21, "seed count changed")
 		// Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
 		// lost has to be re-triaged here rather than joining the throw suite unnoticed.
-		require.Len(t, h.corpus.ThrowingActions, 9, "throwing action count changed")
+		require.Len(t, h.corpus.ThrowingActions, 11, "throwing action count changed")
 	})
 
 	t.Run("oracle", func(t *testing.T) {
@@ -749,12 +759,29 @@ func TestAdversarialConformance(t *testing.T) {
 			// Case sensitivity in STRING MATCHING, a different mechanism from cs-eq: collation
 			// governs `=`, and on SQLite only `PRAGMA case_sensitive_like` governs LIKE.
 			"cs-contains",
+			// The primary key as a filterable attribute (#376): against a constant, against a
+			// column under negation, and inside a concatenation in both operand orders. The
+			// concatenations are the load-bearing pair — rendered as numeric `+` they were a
+			// hard error on PostgreSQL and a silent OVER-grant on MySQL, which coerces both
+			// operands to 0.
+			"id-eq-const", "id-f2f-ne", "id-concat", "id-concat-vf",
+			// string() over a NUMERIC column, the half that lowers to CAST on every engine. Its
+			// boolean sibling is refused instead, so this entry proves the supported half still
+			// compares.
+			"cast-string-double",
+			// CEL's `+` between two COLUMNS (#391), resolved by the caller declaring the
+			// columns ValueString. Rendered as numeric `+` PostgreSQL rejects it outright,
+			// which is loud here but silent on the other two engines the shared translator serves.
+			"concat-f2f",
 		}
 		// int() over a numeric column is unsupported for every adapter but convex, so there is no
 		// comparison behind it here: it stays as a PDP/policy liveness probe for the cast group.
 		// Asserting the complement keeps the split honest — a shape this adapter gains support for
 		// must move up into the compared list.
-		livenessOnly := []string{"cast-int-double"}
+		// string() over a BOOLEAN column is refused because CAST is dialect-dependent there
+		// (#376), and the constructed hierarchy path because `list` has no translator case at
+		// all — so neither has a comparison behind it here.
+		livenessOnly := []string{"cast-int-double", "cast-string-bool", "hier-list-id"}
 
 		oracleCompared := h.corpus.OracleComparedActions()
 		total := len(h.corpus.Seeds.Seeds)

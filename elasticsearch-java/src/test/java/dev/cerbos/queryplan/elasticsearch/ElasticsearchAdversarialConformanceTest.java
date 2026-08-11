@@ -58,6 +58,11 @@ class ElasticsearchAdversarialConformanceTest {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private static final Map<String, String> FIELD_MAP = Map.ofEntries(
+            // The primary key, reached as `request.resource.id` rather than through `attr` (the
+            // `id-*` actions). It maps onto the indexed `id` keyword field rather than Elasticsearch's
+            // own `_id` metadata field: an adapter that resolves references by stripping a
+            // `request.resource.attr.` prefix never sees this name at all.
+            Map.entry("request.resource.id", "id"),
             Map.entry("request.resource.attr.aBool", "aBool"),
             Map.entry("request.resource.attr.aString", "aString"),
             Map.entry("request.resource.attr.aNumber", "aNumber"),
@@ -315,7 +320,7 @@ class ElasticsearchAdversarialConformanceTest {
                 "adapterUnsupported.elasticsearch-java contains non-conformance actions");
         assertTrue(expected.containsAll(supportedExpected),
                 "adapterSupportedExpected.elasticsearch-java contains non-expected actions");
-        assertEquals(100, unsupported.size(),
+        assertEquals(108, unsupported.size(),
                 "Elasticsearch unsupported coverage changed without updating the ledger assertion");
         assertEquals(2, supportedExpected.size(),
                 "Elasticsearch supported-expected coverage changed without updating the ledger assertion");
@@ -359,10 +364,10 @@ class ElasticsearchAdversarialConformanceTest {
         manifest.addAll(expected);
         manifest.addAll(nullRepresentationOmittedActions);
         manifest.addAll(divergences);
-        assertEquals(61, oracleActions.size());
-        assertEquals(107, throwingActions.size());
+        assertEquals(62, oracleActions.size());
+        assertEquals(115, throwingActions.size());
         assertEquals(1, nullRepresentationOmittedActions.size());
-        assertEquals(170, classified.size());
+        assertEquals(179, classified.size());
         assertEquals(manifest, classified, "every manifest action must be classified locally");
     }
 
@@ -390,6 +395,12 @@ class ElasticsearchAdversarialConformanceTest {
                         "name", Map.of("type", "keyword"))));
 
         Map<String, Object> properties = new LinkedHashMap<>();
+        // The corpus id, indexed as an ordinary keyword field as well as being the document's
+        // `_id`. Elasticsearch's `_id` is metadata addressed by the `ids` query rather than a
+        // term query, so the `id-*` actions need a real field to filter on; leaving it unindexed
+        // would make them return NOTHING against a non-empty oracle, which reads as an adapter
+        // defect and is a harness gap.
+        properties.put("id", Map.of("type", "keyword"));
         properties.put("aBool", Map.of("type", "boolean"));
         properties.put("aString", Map.of("type", "keyword"));
         properties.put("aNumber", Map.of("type", "integer"));
@@ -423,6 +434,7 @@ class ElasticsearchAdversarialConformanceTest {
     private static void seedIndex() throws Exception {
         for (Seed seed : seeds) {
             Map<String, Object> document = new LinkedHashMap<>();
+            document.put("id", seed.id());
             document.put("aBool", seed.aBool());
             document.put("aString", seed.aString());
             document.put("aNumber", seed.aNumber());
@@ -784,7 +796,12 @@ class ElasticsearchAdversarialConformanceTest {
             "rel-not-bool-hop", "rel-ne-null-hop", "rel-bool-hop2",
             "rel-hop-and-root", "rel-hop2-or-exists",
             // Case sensitivity in STRING MATCHING, a different mechanism from cs-eq.
-            "cs-contains");
+            "cs-contains",
+            // The primary key as a filterable attribute (#376). Exactly one of the six translates:
+            // the key against a literal, which is an ordinary term query once the corpus id is
+            // indexed as a field rather than left as `_id` metadata. Its five siblings need a
+            // second field or a computed operand, and are liveness probes below.
+            "id-eq-const");
 
     /**
      * Shapes this adapter refuses to translate: they have no oracle comparison to guard, and stay
@@ -810,7 +827,16 @@ class ElasticsearchAdversarialConformanceTest {
             "null-value-not-eq-const",
             "null-value-not-in-const",
             "null-value-f2f",
-            "null-value-pv-not-exists");
+            "null-value-pv-not-exists",
+            // The id-* group's fail-closed half (#376), one per rejection site: a second document
+            // field on the value side, and a computed operand there. string() is the same
+            // computed-operand rejection reached through a cast and has no compared member at all.
+            "id-f2f-ne",
+            "id-concat",
+            "cast-string-bool",
+            // A concatenation of two document fields is the same computed operand id-concat is
+            // refused for, without the primary key involved (#391).
+            "concat-f2f");
 
     @Test
     void oracleIsNotDegenerate() {

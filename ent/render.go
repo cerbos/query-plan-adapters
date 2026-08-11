@@ -135,6 +135,12 @@ func write(b *sql.Builder, e queryplan.Expr) error {
 	case queryplan.Arith:
 		return writeBinary(b, arithSymbol(t.Op), t.L, t.R)
 
+	case queryplan.Concat:
+		// The same dialect-correct spelling the escaping path already uses: CONCAT() on MySQL,
+		// where `||` is logical OR, and `||` elsewhere. Both propagate NULL here, which is what
+		// keeps a row whose operand is a missing attribute excluded under either polarity.
+		return writeConcat(b, []queryplan.Expr{t.L, t.R})
+
 	case queryplan.NotDistinct:
 		return writeNotDistinct(b, t)
 

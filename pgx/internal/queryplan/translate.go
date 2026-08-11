@@ -4,6 +4,7 @@
 package queryplan
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -1039,6 +1040,20 @@ func (b *builder) arithmetic(n *node, m Mapper) (value, error) {
 
 	op := arithmeticOps[n.operator]
 
+	// CEL overloads `+` on strings, and it reaches the wire as the same `add` node as numeric
+	// addition. Which overload it is has to be read off the operands, because the plan never
+	// says: CEL has no mixed-type `+`, so ONE string operand means the whole expression is a
+	// concatenation. Only `add` has the overload — the other four over a string are a CEL
+	// no-overload error, which denies, and they keep falling through to the numeric path.
+	if op == OpAdd {
+		return addValue(lv, rv)
+	}
+
+	return numericArith(op, lv, rv)
+}
+
+// numericArith lowers the numeric reading of a binary arithmetic operator.
+func numericArith(op ArithOp, lv, rv value) (value, error) {
 	// A retained ternary (a division that may be non-finite) must keep propagating symbolically
 	// through the surrounding arithmetic rather than being lowered to SQL NULL.
 	if out, ok, err := arithOverConditional(op, lv, rv); err != nil || ok {
@@ -1100,9 +1115,79 @@ func foldArithmetic(op ArithOp, l, r float64) (*float64, error) {
 	return &out, nil
 }
 
+// isStringOperand reports whether a translated operand is known to be a string: a string literal
+// from the plan, or a column the caller declared ValueString.
+func isStringOperand(v value) bool {
+	if _, ok := v.(string); ok {
+		return true
+	}
+	c, ok := v.(Column)
+	return ok && c.IsString
+}
+
+// isUntypedColumn reports whether an operand is a bare column the caller declared no type for.
+// Two of them on one `+` is the only shape whose overload cannot be resolved.
+func isUntypedColumn(v value) bool {
+	c, ok := v.(Column)
+	return ok && !c.IsString && !c.IsBool
+}
+
+// addValue lowers CEL's `+`, choosing between numeric addition and string concatenation.
+//
+// One operand of a known type settles it, because CEL has no mixed-type `+`: a string literal or a
+// column declared ValueString makes the whole expression a concatenation. Everything else keeps the
+// numeric reading it has always had — including the retained ternaries and divisions that arrive as
+// non-constant values — EXCEPT the one shape that reveals nothing at all, two undeclared columns.
+//
+// That shape fails closed. Guessing numeric is what this module used to do, and it is wrong in the
+// dangerous direction: `text + text` is a hard error on PostgreSQL, 0 on SQLite, and 0 on MySQL,
+// where comparing that 0 against a string constant coerces the CONSTANT to 0 as well and matches
+// every row whose columns are non-NULL (cerbos/query-plan-adapters#391).
+//
+// There is no ValueNumber to pair with ValueString: nothing would reach it. Every numeric `add` the
+// planner emits carries a constant operand — that is what makes it arithmetic rather than
+// concatenation — so a declaration for the both-columns numeric case would be a constant no
+// translation reads, the same reason there is no CastInt (#319). A corpus action that reaches it is
+// what should introduce it.
+func addValue(lv, rv value) (value, error) {
+	if isStringOperand(lv) || isStringOperand(rv) {
+		l, err := asExpr(lv)
+		if err != nil {
+			return nil, err
+		}
+		r, err := asExpr(rv)
+		if err != nil {
+			return nil, err
+		}
+		return Concat{L: l, R: r}, nil
+	}
+
+	if isUntypedColumn(lv) && isUntypedColumn(rv) {
+		return nil, errors.New(
+			"cannot tell numeric addition from string concatenation in `+` between two columns: " +
+				"CEL overloads `+` on strings and the query plan carries no operand types, so " +
+				"declare the string column's ValueType as ValueString",
+		)
+	}
+
+	return numericArith(OpAdd, lv, rv)
+}
+
 // castValue lowers CEL's string() conversion. int() and double() are rejected before they reach
 // here — SQL CAST does not reproduce their semantics (#311) — so string() is the only survivor.
+//
+// It survives only over operands whose text rendering is the same in CEL and in every engine this
+// module targets. Numeric and text columns qualify: all of them format the shortest decimal that
+// round-trips. A BOOLEAN column does not — SQLite and MySQL have no boolean type and store 1/0, so
+// `CAST(a_bool AS TEXT)` is '1' where CEL and PostgreSQL say 'true'. Nothing in the plan names the
+// operand's type, so a caller declares it with ValueBool and the cast fails closed rather than
+// returning every matching row on one engine and none on another (#376).
 func castValue(v value) (value, error) {
+	if c, ok := v.(Column); ok && c.IsBool {
+		return nil, fmt.Errorf(
+			"string() over a boolean column is not supported: SQLite and MySQL store a boolean as 1/0 and render \"1\", while CEL and PostgreSQL render \"true\", so no single CAST is correct on every engine",
+		)
+	}
 	e, err := asExpr(v)
 	if err != nil {
 		return nil, err
@@ -1129,6 +1214,8 @@ func (b *builder) resolveVariable(reference string, m Mapper) (value, error) {
 		Qualifier:    entry.Qualifier,
 		Name:         entry.Column,
 		ExplicitNull: entry.NullConvention == NullConventionExplicit,
+		IsBool:       entry.ValueType == ValueBool,
+		IsString:     entry.ValueType == ValueString,
 	}, nil
 }
 
@@ -1150,6 +1237,8 @@ func (b *builder) scalarThroughHop(entry Entry) Expr {
 			Qualifier:    alias,
 			Name:         entry.Column,
 			ExplicitNull: entry.NullConvention == NullConventionExplicit,
+			IsBool:       entry.ValueType == ValueBool,
+			IsString:     entry.ValueType == ValueString,
 		},
 	}
 }

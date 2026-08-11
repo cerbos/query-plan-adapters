@@ -27,6 +27,7 @@ from cerbos.sdk.model import PlanResourcesFilterKind, PlanResourcesResponse
 from google.protobuf.json_format import MessageToDict
 
 from sqlalchemy import (
+    Boolean,
     Column,
     DateTime,
     Float,
@@ -331,6 +332,29 @@ def _reject_numeric_cast(operator: str) -> NoReturn:
     )
 
 
+def _string_cast(c: Any) -> Any:
+    """CEL's ``string()``, for the operand types where CAST reproduces it.
+
+    Numeric and text columns lower cleanly: CEL formats the shortest decimal that
+    round-trips, and so do SQLite, PostgreSQL (12+, where that became the default) and
+    MySQL.
+
+    A BOOLEAN column does not, and it is the one type where lowering is wrong rather
+    than merely unproven. SQLite and MySQL have no boolean type and store 1/0, so
+    ``CAST(a_bool AS VARCHAR)`` is ``'1'`` where CEL's ``string(true)`` is ``'true'`` —
+    the same query returns every matching row on PostgreSQL and none on SQLite. One
+    adapter serves every dialect SQLAlchemy does, so the shape fails closed rather than
+    being silently dialect-dependent (cerbos/query-plan-adapters#376).
+    """
+    if isinstance(getattr(c, "type", None), Boolean):
+        raise ValueError(
+            "'string()' over a boolean column cannot be lowered to SQL CAST: SQLite "
+            "and MySQL store a boolean as 1/0 and render '1', while CEL and PostgreSQL "
+            "render 'true', so no single CAST is correct on every dialect"
+        )
+    return cast(c, String)
+
+
 def _apply_comparison(operator: str, left: Any, right: Any) -> Any:
     comparisons = {
         "eq": lambda: left == right,
@@ -546,7 +570,7 @@ __operator_fns: OperatorFnMap = {
     # does not reproduce CEL's int()/double(), which read a WHOLE string or raise where
     # CAST reads a numeric prefix, and truncate toward zero where PostgreSQL and MySQL
     # round (cerbos/query-plan-adapters#311).
-    "string": lambda c, _: cast(c, String),
+    "string": lambda c, _: _string_cast(c),
     "double": lambda *_: _reject_numeric_cast("double"),
     "int": lambda *_: _reject_numeric_cast("int"),
     # size() over a string column — collection-typed columns require an override.

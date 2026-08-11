@@ -643,6 +643,16 @@ const DEGENERACY_GUARD_ACTIONS = [
   // Case sensitivity in STRING MATCHING (#375 follow-up), a different mechanism from cs-eq:
   // collation governs `=`, and on SQLite nothing but `PRAGMA case_sensitive_like` governs LIKE.
   "cs-contains",
+  // The primary key as a filterable attribute (#376): against a constant, against a field under
+  // negation, and inside a concatenation — the shape that sent `$add` a string and had the
+  // server abort the query before this change.
+  "id-eq-const",
+  "id-f2f-ne",
+  "id-concat",
+  // string() over a boolean. Mongoose is one of the adapters that lowers it, and correctly:
+  // `$toString(true)` is "true", the same rendering CEL uses, so unlike the SQL adapters there
+  // is no store-dependent 1/0 to refuse.
+  "cast-string-bool",
 ] as const;
 
 /**
@@ -663,6 +673,9 @@ const DEGENERACY_LIVENESS_PROBES = [
   // int() over a numeric column: truncation-versus-rounding, unsupported for every adapter but
   // convex, which promotes it in adapterSupportedExpected.
   "cast-int-double",
+  // CEL's `+` between two field paths (#391): no constant to tell $add from $concat, and the
+  // mapper carries no field types. Refused at translation, where the server used to abort.
+  "concat-f2f",
 ] as const;
 
 interface AdversarialLabel {
@@ -798,6 +811,18 @@ const subCategoriesMapping: MapperConfig = {
   },
 };
 const MAPPER: Mapper = {
+  // The primary key, reached as `request.resource.id` rather than through `attr` (the `id-*`
+  // actions). An adapter that resolves references by stripping a `request.resource.attr.` prefix
+  // never sees this name.
+  //
+  // It maps to `resourceId`, the string field this harness already carries the corpus id in,
+  // NOT to an ObjectId. That is a deliberate limit on what the corpus can prove here: the
+  // ObjectId coercion is a caller-supplied `valueParser` on the mapper entry, and three of the
+  // six id-* actions compare the key against a STRING column (id-f2f, id-f2f-ne, id-concat), so
+  // a single key mapping cannot be an ObjectId and satisfy them. The coercion is pinned where it
+  // belongs instead — against the `id-eq-const` wire fixture in this adapter's translator unit
+  // test (cerbos/query-plan-adapters#378).
+  "request.resource.id": { field: "resourceId" },
   "request.resource.attr.aBool": { field: "aBool" },
   "request.resource.attr.aString": { field: "aString" },
   "request.resource.attr.aNumber": { field: "aNumber" },
@@ -1212,11 +1237,11 @@ describe("adversarial conformance corpus", () => {
       return count !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(170);
-    expect(unsupportedEntries).toHaveLength(38);
+    expect(MANIFEST_ACTIONS.size).toBe(179);
+    expect(unsupportedEntries).toHaveLength(40);
     expect(supportedExpectedEntries).toHaveLength(4);
-    expect(ORACLE_ACTIONS).toHaveLength(125);
-    expect(THROWING_ACTIONS).toHaveLength(43);
+    expect(ORACLE_ACTIONS).toHaveLength(132);
+    expect(THROWING_ACTIONS).toHaveLength(45);
     expect(misclassified).toEqual([]);
     expect(
       [...supportedExpectedActions].filter(

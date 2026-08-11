@@ -176,9 +176,7 @@ const isMessageMap = (value: unknown): value is Record<string, string> =>
   isRecord(value) &&
   Object.values(value).every((message) => typeof message === "string");
 
-const isExpectedUnsupported = (
-  value: unknown,
-): value is ExpectedUnsupported =>
+const isExpectedUnsupported = (value: unknown): value is ExpectedUnsupported =>
   isRecord(value) &&
   typeof value["action"] === "string" &&
   isMessageMap(value["messages"]);
@@ -233,9 +231,7 @@ const isDerivedEntry = (value: unknown): value is DerivedEntry =>
   (typeof value["createdAt"] === "string" || value["createdAt"] === null) &&
   (typeof value["scope"] === "string" || value["scope"] === null) &&
   Array.isArray(value["labels"]) &&
-  value["labels"].every(
-    (label) => label === null || typeof label === "string",
-  );
+  value["labels"].every((label) => label === null || typeof label === "string");
 
 const isDerivedFile = (value: unknown): value is DerivedFile =>
   isRecord(value) &&
@@ -310,7 +306,8 @@ const seedsFile = parsedSeeds;
 const parsedActions: unknown = JSON.parse(
   fs.readFileSync(path.join(CONFORMANCE_DIR, "actions.json"), "utf8"),
 );
-if (!isActionsFile(parsedActions)) throw new Error("Invalid conformance actions");
+if (!isActionsFile(parsedActions))
+  throw new Error("Invalid conformance actions");
 const actionsFile = parsedActions;
 
 const parsedDerived: unknown = JSON.parse(
@@ -484,6 +481,22 @@ const DEGENERACY_GUARD_ACTIONS = [
   // Case sensitivity in STRING MATCHING (#375 follow-up), a different mechanism from cs-eq:
   // collation governs `=`, and on SQLite nothing but `PRAGMA case_sensitive_like` governs LIKE.
   "cs-contains",
+  // The primary key as a filterable attribute (#376): the one id-* action the filter engine
+  // decides on its own, the negated field-to-field, and the two concatenations — which the
+  // post-filter answered with an evaluation error, and so no rows, before it learned CEL's
+  // string overload of `+`.
+  "id-eq-const",
+  "id-f2f-ne",
+  "id-concat",
+  "id-concat-vf",
+  // string() over a boolean and over a non-integer double, both of which the post-filter denied
+  // outright before this change. Convex renders them in JavaScript rather than in a store, so
+  // unlike the SQL adapters it can and does agree with CEL exactly.
+  "cast-string-bool",
+  "cast-string-double",
+  // CEL's `+` between two COLUMNS (#391). The post-filter concatenates in JavaScript, which is
+  // CEL's own semantics, so convex needs no operand-type declaration to resolve the overload.
+  "concat-f2f",
 ] as const;
 
 /**
@@ -495,6 +508,9 @@ const DEGENERACY_LIVENESS_PROBES = [
   // JSON.stringify(-0) is "0", so the sign of a zero denominator is gone before the adapter
   // sees it and the shape is refused rather than guessed.
   "cr-div-neg-zero",
+  // `list` is not in the adapter's known-operator set, so the constructed hierarchy path is
+  // refused during structural validation. It is the id-* group's only throwing member here.
+  "hier-list-id",
 ] as const;
 
 // -- pushdown coverage (cerbos/query-plan-adapters#327) ------------------------------------------
@@ -515,6 +531,11 @@ const DB_DECIDED_DEFAULT = [
   "double-negation",
   "double-threshold",
   "empty-string-eq",
+  // The primary key against a constant (#376). It reaches the engine for the same reason `cs-eq`
+  // does — a mapped, non-nullable field compared with one literal — and is the only one of the
+  // six id-* actions that does: the rest compare the key against another field or wrap it in a
+  // concatenation, neither of which `canPushToDb` accepts.
+  "id-eq-const",
   "in-single",
   "nary-and",
   "neg-number",
@@ -667,7 +688,8 @@ function relationLevelOf(seed: Seed): StoredRelationLevel {
     aString: seed.aString,
     aNumber: seed.aNumber,
   };
-  if (seed.aOptionalString !== null) level.aOptionalString = seed.aOptionalString;
+  if (seed.aOptionalString !== null)
+    level.aOptionalString = seed.aOptionalString;
   return level;
 }
 
@@ -742,16 +764,18 @@ function checkResource(seed: Seed): Resource {
     coOwner: scopeFor(seed),
     tagNames: seed.tags.map((tag) => tag.name),
     obj: { inner: seed.aString },
-    tags: seed.tags.map((tag): Record<string, Value> =>
-      tag.name === null ? { id: tag.id } : { id: tag.id, name: tag.name },
+    tags: seed.tags.map(
+      (tag): Record<string, Value> =>
+        tag.name === null ? { id: tag.id } : { id: tag.id, name: tag.name },
     ),
     categories: seed.subCategoryNames.map((name) => ({
       name: "business",
       subCategories: [
         {
           name,
-          labels: labelsFor(seed).map((labelName): Record<string, Value> =>
-            labelName === null ? {} : { name: labelName },
+          labels: labelsFor(seed).map(
+            (labelName): Record<string, Value> =>
+              labelName === null ? {} : { name: labelName },
           ),
         },
       ],
@@ -862,7 +886,6 @@ function planCarriesNullLiteral(operand: unknown): boolean {
 }
 
 describe("adversarial conformance corpus", () => {
-
   // Adding a throwing action without pinning its message must fail this harness rather than
   // silently degrade the throw suite to a bare "it threw" (cerbos/query-plan-adapters#326).
   test("a throwing action with no pinned message fails classification", () => {
@@ -890,11 +913,11 @@ describe("adversarial conformance corpus", () => {
         ].filter(Boolean).length !== 1,
     );
 
-    expect(allActions.size).toBe(170);
-    expect(CONVEX_UNSUPPORTED).toHaveLength(2);
+    expect(allActions.size).toBe(179);
+    expect(CONVEX_UNSUPPORTED).toHaveLength(3);
     expect(CONVEX_SUPPORTED_EXPECTED).toHaveLength(7);
-    expect(ORACLE_ACTIONS).toHaveLength(164);
-    expect(THROWING_ACTIONS).toHaveLength(4);
+    expect(ORACLE_ACTIONS).toHaveLength(172);
+    expect(THROWING_ACTIONS).toHaveLength(5);
     expect(misclassified).toEqual([]);
   });
 
@@ -1017,20 +1040,20 @@ describe("adversarial conformance corpus", () => {
       pushdownSplit: pushdown.split,
       pushdownPostCount: pushdown.post.length,
       // The two mappers must differ ONLY where the pushdown leg re-executes, which is what makes
-      // skipping the other 138 actions there sound rather than a coverage hole.
+      // skipping the other 145 actions there sound rather than a coverage hole.
       moved: pushdown.db.filter((action) => !base.db.includes(action)),
     }).toEqual({
-      total: 164,
+      total: 172,
       defaultDb: DB_DECIDED_DEFAULT,
       // Exactly one corpus action splits: `buildFilters` only splits a root `and`, and
       // rel-hop-and-root is the one hostile shape rooted there that mixes a pushable conjunct
       // with a non-pushable one (#375). Both mappers split it — the hop is `nullable` under each.
       defaultSplit: SPLIT_ACTIONS,
       defaultUnconditional: UNCONDITIONAL_ACTIONS,
-      defaultPostCount: 149,
+      defaultPostCount: 156,
       pushdownDb: DB_DECIDED_PUSHDOWN,
       pushdownSplit: SPLIT_ACTIONS,
-      pushdownPostCount: 138,
+      pushdownPostCount: 145,
       moved: PUSHDOWN_ONLY_ACTIONS,
     });
   });
@@ -1134,7 +1157,9 @@ describe("adversarial conformance corpus", () => {
         // a transport error or mapper typo counting as the required rejection is the silent
         // pass the corpus README warns about.
         if (!String(error).includes(NULL_OMITTED_MESSAGE)) {
-          notRejected.push(`${action} (rejected for the wrong reason: ${String(error)})`);
+          notRejected.push(
+            `${action} (rejected for the wrong reason: ${String(error)})`,
+          );
         }
       }
     }
@@ -1176,7 +1201,9 @@ describe("adversarial conformance corpus", () => {
 
     const stored = await convex.query(api.adversarial.parentChain, {});
     expect(
-      Object.fromEntries(stored.map((row) => [row.id, [row.parent, row.inner]])),
+      Object.fromEntries(
+        stored.map((row) => [row.id, [row.parent, row.inner]]),
+      ),
     ).toEqual(
       Object.fromEntries(
         seedsFile.seeds.map((seed) => [

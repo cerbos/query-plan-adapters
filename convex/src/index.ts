@@ -54,19 +54,48 @@ export interface QueryPlanToConvexResult<Q = unknown, R = unknown> {
 }
 
 const DB_PUSHABLE_OPERATORS = new Set([
-  "and", "or", "not", "eq", "ne", "lt", "le", "gt", "ge", "in",
+  "and",
+  "or",
+  "not",
+  "eq",
+  "ne",
+  "lt",
+  "le",
+  "gt",
+  "ge",
+  "in",
 ]);
 
 const ALL_KNOWN_OPERATORS = new Set([
   ...DB_PUSHABLE_OPERATORS,
-  "contains", "startsWith", "endsWith",
-  "hasIntersection", "exists", "exists_one", "all",
-  "filter", "map", "lambda",
-  "add", "sub", "mult", "div", "mod",
-  "matches", "index", "size",
-  "string", "double", "int",
-  "if", "get-field", "timestamp",
-  "hierarchy", "ancestorOf", "descendentOf", "overlaps",
+  "contains",
+  "startsWith",
+  "endsWith",
+  "hasIntersection",
+  "exists",
+  "exists_one",
+  "all",
+  "filter",
+  "map",
+  "lambda",
+  "add",
+  "sub",
+  "mult",
+  "div",
+  "mod",
+  "matches",
+  "index",
+  "size",
+  "string",
+  "double",
+  "int",
+  "if",
+  "get-field",
+  "timestamp",
+  "hierarchy",
+  "ancestorOf",
+  "descendentOf",
+  "overlaps",
 ]);
 
 const isExpression = (e: PlanExpressionOperand): e is PlanExpression =>
@@ -229,9 +258,7 @@ const canPushToDb = (
         (isVariable(left) && isValue(right)) ||
         (isValue(left) && isVariable(right));
       return Boolean(
-        hasOneLiteral &&
-          variable &&
-          !isNullableField(variable.name, mapper),
+        hasOneLiteral && variable && !isNullableField(variable.name, mapper),
       );
     }
     case "in": {
@@ -239,9 +266,9 @@ const canPushToDb = (
       if (!needle || !haystack) return false;
       return Boolean(
         isVariable(needle) &&
-          isValue(haystack) &&
-          Array.isArray(haystack.value) &&
-          !isNullableField(needle.name, mapper),
+        isValue(haystack) &&
+        Array.isArray(haystack.value) &&
+        !isNullableField(needle.name, mapper),
       );
     }
     default:
@@ -296,7 +323,7 @@ const validateStructure = (expression: PlanExpressionOperand): void => {
     ) {
       throw new Error(
         "matches requires a constant RE2-compatible pattern in the supported " +
-        "literal, anchor, and trailing .* subset",
+          "literal, anchor, and trailing .* subset",
       );
     }
   }
@@ -341,18 +368,14 @@ const translateExpression = (
       if (operands.length === 0) return q.eq(true, true);
       if (operands.length === 1)
         return translateExpression(operands[0]!, q, mapper);
-      return q.and(
-        ...operands.map((op) => translateExpression(op, q, mapper)),
-      );
+      return q.and(...operands.map((op) => translateExpression(op, q, mapper)));
     }
 
     case "or": {
       if (operands.length === 0) return q.eq(true, false);
       if (operands.length === 1)
         return translateExpression(operands[0]!, q, mapper);
-      return q.or(
-        ...operands.map((op) => translateExpression(op, q, mapper)),
-      );
+      return q.or(...operands.map((op) => translateExpression(op, q, mapper)));
     }
 
     case "not": {
@@ -427,9 +450,7 @@ const translateExpression = (
         return q.eq(q.field(field), values[0]);
       }
 
-      return q.or(
-        ...values.map((v: unknown) => q.eq(q.field(field), v)),
-      );
+      return q.or(...values.map((v: unknown) => q.eq(q.field(field), v)));
     }
 
     default:
@@ -450,7 +471,9 @@ interface SafeRegexPattern {
 
 const SAFE_REGEX_PATTERN = /^(\^)?([A-Za-z0-9 _:/-]+?)(\.\*)?(\$)?$/;
 
-const parseSafeRegexPattern = (pattern: string): SafeRegexPattern | undefined => {
+const parseSafeRegexPattern = (
+  pattern: string,
+): SafeRegexPattern | undefined => {
   const match = SAFE_REGEX_PATTERN.exec(pattern);
   const literal = match?.[2];
   if (!literal) return undefined;
@@ -475,9 +498,8 @@ const matchesSafeRegexPattern = (
   return receiver.includes(pattern.literal);
 };
 
-const isEvaluationError = (
-  value: unknown,
-): value is typeof EVALUATION_ERROR => value === EVALUATION_ERROR;
+const isEvaluationError = (value: unknown): value is typeof EVALUATION_ERROR =>
+  value === EVALUATION_ERROR;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -550,7 +572,20 @@ const isLeapYear = (year: number): boolean =>
   year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
 
 const daysInMonth = (year: number, month: number): number => {
-  const days = [31, isLeapYear(year) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  const days = [
+    31,
+    isLeapYear(year) ? 29 : 28,
+    31,
+    30,
+    31,
+    30,
+    31,
+    31,
+    30,
+    31,
+    30,
+    31,
+  ];
   return days[month - 1] ?? 0;
 };
 
@@ -560,8 +595,20 @@ const parseRfc3339Timestamp = (
   const match = RFC3339_TIMESTAMP.exec(value);
   if (!match) return EVALUATION_ERROR;
 
-  const [, yearPart, monthPart, dayPart, hourPart, minutePart, secondPart,
-    fractionPart, zonePart, offsetSign, offsetHourPart, offsetMinutePart] = match;
+  const [
+    ,
+    yearPart,
+    monthPart,
+    dayPart,
+    hourPart,
+    minutePart,
+    secondPart,
+    fractionPart,
+    zonePart,
+    offsetSign,
+    offsetHourPart,
+    offsetMinutePart,
+  ] = match;
   if (
     !yearPart ||
     !monthPart ||
@@ -602,8 +649,8 @@ const parseRfc3339Timestamp = (
     const offsetHour = Number(offsetHourPart);
     const offsetMinute = Number(offsetMinutePart);
     if (offsetHour > 23 || offsetMinute > 59) return EVALUATION_ERROR;
-    offsetMinutes = (offsetHour * 60 + offsetMinute) *
-      (offsetSign === "+" ? 1 : -1);
+    offsetMinutes =
+      (offsetHour * 60 + offsetMinute) * (offsetSign === "+" ? 1 : -1);
   }
 
   const instant = new Date(0);
@@ -620,27 +667,50 @@ const parseRfc3339Timestamp = (
     : timestampNanos;
 };
 
-const CEL_DOUBLE_STRING =
-  /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
+const CEL_DOUBLE_STRING = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
 const CEL_INT_STRING = /^-?\d+$/;
 
-const convertToString = (
-  value: unknown,
-): string | typeof EVALUATION_ERROR => {
+/**
+ * The magnitude band in which `String(n)` was MEASURED to render a double exactly as CEL does.
+ *
+ * CEL's number formatting is Go's, and it does not agree with JavaScript's everywhere. Probing the
+ * pinned PDP with `string(R.attr.d) == R.attr.js` (the two renderings compared by the PDP itself)
+ * puts the disagreements outside this band and nowhere inside it: 0.0000999, 1e15, 1e16, 1e19,
+ * 1234567890123456 and `Number.MAX_SAFE_INTEGER` all differ, while 0, 100, 1000, 0.25, 1.3, 16.3,
+ * -4.7, -0.6, 0.0001 and 0.0001234 all agree.
+ *
+ * The band is deliberately narrower than the agreement it is derived from — 1e21 agrees and is
+ * still refused — because the rule producing it is Go's and is not restated here. Outside the
+ * band the conversion is an evaluation error, which DENIES the row: the same thing CEL does with a
+ * conversion it cannot perform, and the safe direction, since the failure that matters is an
+ * over-grant (cerbos/query-plan-adapters#376).
+ */
+const STRING_CAST_MIN_MAGNITUDE = 1e-4;
+const STRING_CAST_MAX_MAGNITUDE = 1e15;
+
+// A bool needs no band: CEL renders "true"/"false" and so does JavaScript, exactly. That is why
+// convex is one of the two adapters that lower `string()` over a boolean rather than refusing it —
+// the SQL adapters cannot, because SQLite and MySQL store 1/0.
+const convertToString = (value: unknown): string | typeof EVALUATION_ERROR => {
   if (typeof value === "string") return value;
-  if (
-    typeof value === "number" &&
-    Number.isSafeInteger(value) &&
-    !Object.is(value, -0)
-  ) {
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "number" && Number.isFinite(value)) {
+    // JavaScript renders a negative zero as "0" where CEL renders "-0".
+    if (Object.is(value, -0)) return EVALUATION_ERROR;
+    const magnitude = Math.abs(value);
+    if (
+      magnitude !== 0 &&
+      (magnitude < STRING_CAST_MIN_MAGNITUDE ||
+        magnitude >= STRING_CAST_MAX_MAGNITUDE)
+    ) {
+      return EVALUATION_ERROR;
+    }
     return String(value);
   }
   return EVALUATION_ERROR;
 };
 
-const convertToDouble = (
-  value: unknown,
-): number | typeof EVALUATION_ERROR => {
+const convertToDouble = (value: unknown): number | typeof EVALUATION_ERROR => {
   if (typeof value === "number") {
     return Number.isFinite(value) ? value : EVALUATION_ERROR;
   }
@@ -651,9 +721,7 @@ const convertToDouble = (
   return Number.isFinite(converted) ? converted : EVALUATION_ERROR;
 };
 
-const convertToInt = (
-  value: unknown,
-): number | typeof EVALUATION_ERROR => {
+const convertToInt = (value: unknown): number | typeof EVALUATION_ERROR => {
   if (typeof value === "number") {
     if (!Number.isFinite(value)) return EVALUATION_ERROR;
     const converted = Math.trunc(value);
@@ -773,7 +841,9 @@ const evaluateExpression = (
     }
 
     case "not": {
-      const value = asBoolean(resolve(getOperandAt(operands, 0, "not operand")));
+      const value = asBoolean(
+        resolve(getOperandAt(operands, 0, "not operand")),
+      );
       return isEvaluationError(value) ? value : !value;
     }
 
@@ -808,7 +878,9 @@ const evaluateExpression = (
     }
 
     case "startsWith": {
-      const receiver = resolve(getOperandAt(operands, 0, "startsWith receiver"));
+      const receiver = resolve(
+        getOperandAt(operands, 0, "startsWith receiver"),
+      );
       const prefix = resolve(getOperandAt(operands, 1, "startsWith prefix"));
       return typeof receiver === "string" && typeof prefix === "string"
         ? receiver.startsWith(prefix)
@@ -837,7 +909,9 @@ const evaluateExpression = (
     case "exists":
     case "exists_one":
     case "all": {
-      const collection = resolve(getOperandAt(operands, 0, `${operator} collection`));
+      const collection = resolve(
+        getOperandAt(operands, 0, `${operator} collection`),
+      );
       if (!Array.isArray(collection)) return EVALUATION_ERROR;
       const lambda = extractLambdaComponents(
         getOperandAt(operands, 1, `${operator} lambda`),
@@ -868,7 +942,9 @@ const evaluateExpression = (
     }
 
     case "filter": {
-      const collection = resolve(getOperandAt(operands, 0, "filter collection"));
+      const collection = resolve(
+        getOperandAt(operands, 0, "filter collection"),
+      );
       if (!Array.isArray(collection)) return EVALUATION_ERROR;
       const lambda = extractLambdaComponents(
         getOperandAt(operands, 1, "filter lambda"),
@@ -917,6 +993,18 @@ const evaluateExpression = (
     case "mod": {
       const left = resolve(getOperandAt(operands, 0, `${operator} left`));
       const right = resolve(getOperandAt(operands, 1, `${operator} right`));
+      // CEL overloads `+` on strings, and JavaScript's `+` concatenates identically. Only `add`
+      // has the overload — `sub`/`mult`/`div`/`mod` over strings stay a CEL error, which is what
+      // falling through to the numeric guard below already produces. Before this, a string `add`
+      // was an evaluation error too, so a concatenation the PDP allowed returned no rows at all
+      // (cerbos/query-plan-adapters#376).
+      if (
+        operator === "add" &&
+        typeof left === "string" &&
+        typeof right === "string"
+      ) {
+        return left + right;
+      }
       if (typeof left !== "number" || typeof right !== "number") {
         return EVALUATION_ERROR;
       }
@@ -1001,7 +1089,9 @@ const evaluateExpression = (
     }
 
     case "if": {
-      const condition = asBoolean(resolve(getOperandAt(operands, 0, "if condition")));
+      const condition = asBoolean(
+        resolve(getOperandAt(operands, 0, "if condition")),
+      );
       if (isEvaluationError(condition)) return condition;
       return resolve(
         getOperandAt(operands, condition ? 1 : 2, "if selected branch"),
@@ -1062,7 +1152,11 @@ const buildFilters = (
     };
   }
 
-  if (isExpression(expression) && expression.operator === "and" && expression.operands.length > 1) {
+  if (
+    isExpression(expression) &&
+    expression.operator === "and" &&
+    expression.operands.length > 1
+  ) {
     const pushable: PlanExpressionOperand[] = [];
     const nonPushable: PlanExpressionOperand[] = [];
 
@@ -1075,13 +1169,15 @@ const buildFilters = (
     }
 
     if (pushable.length > 0 && nonPushable.length > 0) {
-      const dbExpr: PlanExpressionOperand = pushable.length === 1
-        ? pushable[0]!
-        : { operator: "and", operands: pushable } as PlanExpression;
+      const dbExpr: PlanExpressionOperand =
+        pushable.length === 1
+          ? pushable[0]!
+          : ({ operator: "and", operands: pushable } as PlanExpression);
 
-      const jsExpr: PlanExpressionOperand = nonPushable.length === 1
-        ? nonPushable[0]!
-        : { operator: "and", operands: nonPushable } as PlanExpression;
+      const jsExpr: PlanExpressionOperand =
+        nonPushable.length === 1
+          ? nonPushable[0]!
+          : ({ operator: "and", operands: nonPushable } as PlanExpression);
 
       return {
         filter: (q: FilterQ) => translateExpression(dbExpr, q, mapper),
@@ -1130,10 +1226,10 @@ const assertNoNullComparisonOperands = (
   if (expression.operands.some(carriesNullLiteral)) {
     throw new Error(
       `Cannot translate \`${expression.operator}\` against a null operand under ` +
-      'nullAttributeRepresentation "omitted": a NULL field sends no attribute, so Cerbos ' +
-      "evaluates the comparison as a missing-attribute error (deny) while a null-selecting " +
-      'filter would return those documents. Send NULL fields as explicit nulls and use ' +
-      '"explicit", or keep this shape out of the policy.',
+        'nullAttributeRepresentation "omitted": a NULL field sends no attribute, so Cerbos ' +
+        "evaluates the comparison as a missing-attribute error (deny) while a null-selecting " +
+        "filter would return those documents. Send NULL fields as explicit nulls and use " +
+        '"explicit", or keep this shape out of the policy.',
     );
   }
 
@@ -1177,13 +1273,15 @@ export function queryPlanToConvex<Q = unknown, R = unknown>({
       if (postFilter && !allowPostFilter) {
         throw new Error(
           "The query plan contains conditions that cannot be evaluated by Convex's " +
-          "query engine and require trusted-backend filtering (postFilter). Apply " +
-          "postFilter to every candidate before it is serialized or returned. Set " +
-          "{ allowPostFilter: true } to opt in to this behavior.",
+            "query engine and require trusted-backend filtering (postFilter). Apply " +
+            "postFilter to every candidate before it is serialized or returned. Set " +
+            "{ allowPostFilter: true } to opt in to this behavior.",
         );
       }
 
-      const result: QueryPlanToConvexResult<Q, R> = { kind: PlanKind.CONDITIONAL };
+      const result: QueryPlanToConvexResult<Q, R> = {
+        kind: PlanKind.CONDITIONAL,
+      };
       if (filter) result.filter = filter as ConvexFilter<Q, R>;
       if (postFilter) result.postFilter = postFilter;
       return result;

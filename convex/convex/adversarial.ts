@@ -57,13 +57,17 @@ const document = {
   parent: v.optional(parent),
 };
 
-
 // Exported so the adversarial throw suite can invoke translation with the exact mapper the
 // backend uses — a duplicated copy would be a projection that can drift.
 //
 // Typed as the record arm of `Mapper` rather than as `Mapper` itself, so `PUSHDOWN_MAPPER` below
 // can derive from it without asserting away the function arm.
 export const MAPPER: Record<string, MapperConfig> = {
+  // The primary key, reached as `request.resource.id` rather than through `attr` (the `id-*`
+  // actions). An adapter that resolves references by stripping a `request.resource.attr.` prefix
+  // never sees this name. It maps to the corpus id field rather than Convex's own `_id`, which
+  // holds a generated document handle unrelated to the corpus.
+  "request.resource.id": { field: "id" },
   "request.resource.attr.aBool": { field: "aBool" },
   "request.resource.attr.aString": { field: "aString" },
   "request.resource.attr.aNumber": { field: "aNumber" },
@@ -239,13 +243,15 @@ export const executePlan = query({
       queryPlan,
       mapper: MAPPERS[args.mapper ?? "default"],
       allowPostFilter: true,
-      nullAttributeRepresentation: args.nullAttributeRepresentation ?? "explicit",
+      nullAttributeRepresentation:
+        args.nullAttributeRepresentation ?? "explicit",
     });
 
     // Reported alongside the ids so the harness can assert WHICH half answered: a pushdown leg
     // that quietly fell back to the post-filter would return the same ids (#327).
     const execution = executionPathOf(translated);
-    if (translated.kind === PlanKind.ALWAYS_DENIED) return { ids: [], execution };
+    if (translated.kind === PlanKind.ALWAYS_DENIED)
+      return { ids: [], execution };
 
     let queryBuilder = ctx.db.query("adversarial");
     if (translated.kind === PlanKind.CONDITIONAL && translated.filter) {

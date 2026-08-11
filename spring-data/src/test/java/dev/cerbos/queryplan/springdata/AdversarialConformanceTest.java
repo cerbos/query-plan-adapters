@@ -90,6 +90,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class AdversarialConformanceTest {
 
     private static final Map<String, AttributeMapping> MAPPING = Map.ofEntries(
+            // The primary key, reached as `request.resource.id` rather than through `attr` (the
+            // `id-*` actions). An adapter that resolves references by stripping a
+            // `request.resource.attr.` prefix never sees this name.
+            Map.entry("request.resource.id", AttributeMapping.field("id")),
             Map.entry("request.resource.attr.aBool", AttributeMapping.field("aBool")),
             Map.entry("request.resource.attr.aString", AttributeMapping.field("aString")),
             Map.entry("request.resource.attr.aNumber", AttributeMapping.field("aNumber")),
@@ -1329,14 +1333,14 @@ class AdversarialConformanceTest {
                         .filter(Boolean::booleanValue).count() != 1)
                 .toList();
 
-        assertEquals(170, manifest.size(),
+        assertEquals(179, manifest.size(),
                 "corpus size changed; triage the new action(s) before bumping this pin");
         assertEquals(21, SEEDS.size(), "seed count changed");
         // Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
         // lost has to be re-triaged here rather than joining the throw suite unnoticed. The two
         // @MethodSource streams that feed the throw cases are what resolve those messages, and
         // both fail loudly on a missing one.
-        assertEquals(11, throwing.size(), "throwing action count changed");
+        assertEquals(15, throwing.size(), "throwing action count changed");
         assertEquals(throwing.size(),
                 adapterUnsupportedActions().count() + unsupportedShapes().count(),
                 "every throwing action must reach a parameterised throw case");
@@ -1383,7 +1387,12 @@ class AdversarialConformanceTest {
             "rel-hop-and-root", "rel-hop2-or-exists",
             // Case sensitivity in STRING MATCHING, a different mechanism from cs-eq: collation
             // governs `=`, and on SQLite only `PRAGMA case_sensitive_like` governs LIKE.
-            "cs-contains");
+            "cs-contains",
+            // The primary key as a filterable attribute (#376): against a constant, against a
+            // column under negation, the value-first concatenation solved back to a key
+            // equality, and the key inside a constructed hierarchy path. The field-first
+            // concatenation is the group's one rejection and is a probe below.
+            "id-eq-const", "id-f2f-ne", "id-concat-vf", "hier-list-id");
 
     /**
      * Shapes this adapter refuses to translate: they have no oracle comparison to guard, and stay
@@ -1395,7 +1404,14 @@ class AdversarialConformanceTest {
             "cr-div-then-add", "cr-div-then-add-ne",
             // int() over a numeric column: truncation-versus-rounding, unsupported for every
             // adapter but convex, which promotes it in adapterSupportedExpected.
-            "cast-int-double");
+            "cast-int-double",
+            // string() has no Criteria API form (#376); the boolean half additionally has no
+            // dialect-independent rendering. Neither has a compared member here.
+            "cast-string-bool",
+            // Concatenation against the key where the reference lowers `+` as arithmetic.
+            "id-concat",
+            // The same arithmetic-only lowering of `+` with both operands columns (#391).
+            "concat-f2f");
 
     @Test
     void oracleIsNotDegenerate() {

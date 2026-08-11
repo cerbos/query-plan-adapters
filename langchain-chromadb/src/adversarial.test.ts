@@ -590,6 +590,11 @@ const DEGENERACY_GUARD_ACTIONS = [
   // and are liveness probes below.
   "rel-eq-hop",
   "rel-bool-hop2",
+  // The primary key as a filterable attribute (#376). Chroma translates exactly one of the six:
+  // the key against a literal, which is the only id-* shape that reduces to a bare metadata key
+  // on one side and a constant on the other. Its five siblings compare the key against a second
+  // key or wrap it in a computed operand, and are liveness probes below.
+  "id-eq-const",
 ] as const;
 
 /**
@@ -626,6 +631,14 @@ const DEGENERACY_LIVENESS_PROBES = [
   // Case sensitivity in string matching: Chroma has no pattern operator at all, so the
   // comparison these probe is never built and the group has no compared member here.
   "cs-contains",
+  // The id-* group's fail-closed half (#376), one per rejection site: a second metadata key on
+  // the value side, and a computed operand there. string() is the same computed-operand
+  // rejection reached through a cast, and has no compared member at all.
+  "id-f2f-ne",
+  "id-concat",
+  "cast-string-bool",
+  // A concatenation of two metadata fields is a computed operand, which Chroma has no form for.
+  "concat-f2f",
 ] as const;
 
 // Fields are optional unless declared otherwise, so `$ne`/`$nin` are rejected by default.
@@ -633,6 +646,12 @@ const DEGENERACY_LIVENESS_PROBES = [
 // seed in conformance/seeds.json. `aOptionalString` is null for a2/a4/a8/c2/e1, so it stays
 // optional and its inequality shapes remain fail-closed.
 const FIELD_NAME_MAPPER: Record<string, string | FieldNameMapperConfig> = {
+  // The primary key, reached as `request.resource.id` rather than through `attr` (the `id-*`
+  // actions). Chroma's `where` filters metadata only — the document id is addressed by the
+  // separate `ids` argument to `get()` — so `metadataFor` mirrors the id into a metadata key and
+  // this maps onto that. Leaving it unmapped would make the id-* actions throw for a HARNESS
+  // reason (no mapping) rather than an adapter one, which is the trap #326 documents.
+  "request.resource.id": { field: "id", required: true },
   "request.resource.attr.aBool": { field: "aBool", required: true },
   "request.resource.attr.aString": { field: "aString", required: true },
   "request.resource.attr.aNumber": {
@@ -960,12 +979,12 @@ describe("adversarial conformance corpus", () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(170);
-    expect(CHROMA_SUPPORTED_ACTIONS).toHaveLength(24);
+    expect(MANIFEST_ACTIONS.size).toBe(179);
+    expect(CHROMA_SUPPORTED_ACTIONS).toHaveLength(25);
     expect(oracle.size).toBe(CHROMA_SUPPORTED_ACTIONS.length);
-    expect(CHROMA_UNSUPPORTED).toHaveLength(135);
+    expect(CHROMA_UNSUPPORTED).toHaveLength(143);
     expect(CHROMA_SUPPORTED_EXPECTED).toHaveLength(0);
-    expect(THROWING_ACTIONS).toHaveLength(144);
+    expect(THROWING_ACTIONS).toHaveLength(152);
     expect(misclassified).toEqual([]);
   });
 
