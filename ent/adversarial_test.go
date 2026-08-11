@@ -406,11 +406,14 @@ func buildMapper() cerbosent.Mapper {
 		// Declared boolean so `string()` over it fails closed: SQLite and MySQL store a
 		// boolean as 1/0 and render "1" where CEL and PostgreSQL render "true", and nothing
 		// in the plan names a column's type.
-		"request.resource.attr.aBool":           {Column: "a_bool", ValueType: cerbosent.ValueBool},
-		"request.resource.attr.aString":         {Column: "a_string"},
+		"request.resource.attr.aBool": {Column: "a_bool", ValueType: cerbosent.ValueBool},
+		// Declared string so CEL's `+` between two columns resolves to concatenation:
+		// the operator is overloaded and the plan carries no operand types, so an
+		// undeclared pair fails closed rather than emitting a numeric `+`.
+		"request.resource.attr.aString":         {Column: "a_string", ValueType: cerbosent.ValueString},
 		"request.resource.attr.aNumber":         {Column: "a_number"},
 		"request.resource.attr.aDouble":         {Column: "a_double"},
-		"request.resource.attr.aOptionalString": {Column: "a_optional_string"},
+		"request.resource.attr.aOptionalString": {Column: "a_optional_string", ValueType: cerbosent.ValueString},
 		"request.resource.attr.createdBy":       {Column: "created_by"},
 		// `owner` and `coOwner` alias columns that `aOptionalString` and `scope` also map, under
 		// the OTHER null convention: the oracle sends a real null attribute for them rather than
@@ -829,7 +832,7 @@ func runConformance(t *testing.T, h *harness) {
 		}
 		// Corpus-size tripwire: bump deliberately when the corpus grows, so a new hostile shape
 		// cannot slip past this adapter unnoticed.
-		require.Len(t, seen, 178, "corpus size changed; triage the new action(s) before bumping")
+		require.Len(t, seen, 179, "corpus size changed; triage the new action(s) before bumping")
 		require.Len(t, h.corpus.Seeds.Seeds, 21, "seed count changed")
 		// Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
 		// lost has to be re-triaged here rather than joining the throw suite unnoticed.
@@ -1031,6 +1034,10 @@ func runConformance(t *testing.T, h *harness) {
 			// boolean sibling is refused instead, so this entry proves the supported half still
 			// compares.
 			"cast-string-double",
+			// CEL's `+` between two COLUMNS (#391), resolved by the caller declaring the
+			// columns ValueString. Rendered as numeric `+` it was a hard error on
+			// PostgreSQL, 0 rows on SQLite, and 16 of 21 on MySQL against a one-row oracle.
+			"concat-f2f",
 		}
 		// int() over a numeric column is unsupported for every adapter but convex, so there is no
 		// comparison behind it here: it stays as a PDP/policy liveness probe for the cast group.

@@ -97,7 +97,7 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` d
 | Classification | Coverage |
 | --- | --- |
 | Oracle-tested | 25 reference actions: directional and inequality comparisons, single/empty membership, Unicode and empty strings, negative numbers, n-ary/double/triple negation, membership on an optional resource field, mapped nested-field equality, case-sensitive equality, and the primary key against a literal |
-| Fail-closed | 142 reference conformance actions plus regex, ordered indexing/`get-field`, timestamp, cast and non-boolean-macro probes (151 actions total) |
+| Fail-closed | 143 reference conformance actions plus regex, ordered indexing/`get-field`, timestamp, cast and non-boolean-macro probes (152 actions total) |
 | Representation-independent | `null-eq-missing` — rejected like every other null comparison operand, so no `nullAttributeRepresentation` option is required |
 | Attribute NULL convention | Also representation-independent, and for the same reason: Chroma metadata has no null value, so a NULL column is stored as an ABSENT key and `$ne`/`$nin` match absent records. All five `null-value-*` probes for the explicit convention (cerbos/query-plan-adapters#308) are refused rather than answered narrowly |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute documents. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |

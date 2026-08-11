@@ -464,6 +464,34 @@ resourcePolicy:
         match:
           expr: 'R.attr.aDouble + 0.5 == 0.75'
 
+    # CEL's `+` over two COLUMNS, the one `add` shape where the plan carries no constant to say
+    # which overload it is (cerbos/query-plan-adapters#391).
+    #
+    # The `id-concat` pair proved the string overload where one operand is a literal: CEL has no
+    # mixed-type `+`, so a string constant settles it. Here BOTH operands are variables and
+    # nothing in the plan names a column's type, so an adapter that dispatches `add` straight to
+    # SQL `+` cannot know it is concatenating. Every store then answers differently, and one of
+    # them answers WRONGLY IN THE DANGEROUS DIRECTION:
+    #
+    #   - PostgreSQL   `text + text` has no operator — a hard error, which is at least loud.
+    #   - SQLite       'one' + 'set' is 0 + 0 = 0, and `0 = 'oneset'` is FALSE across storage
+    #                  classes — 0 rows, an under-grant.
+    #   - MySQL        the same coercion to 0, but `0 = 'oneset'` coerces the CONSTANT to 0 too,
+    #                  so `0 = 0` is TRUE for every row whose columns are both non-NULL — 16 of
+    #                  the 21 seeds against a ONE-row oracle. A silent over-grant.
+    #
+    # Oracle {a1}: "one" + "set" = "oneset". c1 is the case trap — "One" + "Set" = "OneSet" must
+    # not match, so the shape also crosses concatenation with the collation invariant. The five
+    # NULL-aOptionalString seeds (a2/a4/a8/c2/e1) are missing-attribute errors that deny, and
+    # `col || NULL` is NULL in SQL, so both sides exclude them for the same reason. Every seed's
+    # concatenation is distinct, so no other row can match by accident.
+    - actions: ["concat-f2f"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aString + R.attr.aOptionalString == "oneset"'
+
     # ==================== clean-room probes (coverage gap hunt) ====================
 
     # -- GROUP A: compositions claimed-supported but unproven e2e --

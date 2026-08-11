@@ -494,6 +494,9 @@ const DEGENERACY_GUARD_ACTIONS = [
   // unlike the SQL adapters it can and does agree with CEL exactly.
   "cast-string-bool",
   "cast-string-double",
+  // CEL's `+` between two COLUMNS (#391). The post-filter concatenates in JavaScript, which is
+  // CEL's own semantics, so convex needs no operand-type declaration to resolve the overload.
+  "concat-f2f",
 ] as const;
 
 /**
@@ -910,10 +913,10 @@ describe("adversarial conformance corpus", () => {
         ].filter(Boolean).length !== 1,
     );
 
-    expect(allActions.size).toBe(178);
+    expect(allActions.size).toBe(179);
     expect(CONVEX_UNSUPPORTED).toHaveLength(3);
     expect(CONVEX_SUPPORTED_EXPECTED).toHaveLength(7);
-    expect(ORACLE_ACTIONS).toHaveLength(171);
+    expect(ORACLE_ACTIONS).toHaveLength(172);
     expect(THROWING_ACTIONS).toHaveLength(5);
     expect(misclassified).toEqual([]);
   });
@@ -1037,20 +1040,20 @@ describe("adversarial conformance corpus", () => {
       pushdownSplit: pushdown.split,
       pushdownPostCount: pushdown.post.length,
       // The two mappers must differ ONLY where the pushdown leg re-executes, which is what makes
-      // skipping the other 144 actions there sound rather than a coverage hole.
+      // skipping the other 145 actions there sound rather than a coverage hole.
       moved: pushdown.db.filter((action) => !base.db.includes(action)),
     }).toEqual({
-      total: 171,
+      total: 172,
       defaultDb: DB_DECIDED_DEFAULT,
       // Exactly one corpus action splits: `buildFilters` only splits a root `and`, and
       // rel-hop-and-root is the one hostile shape rooted there that mixes a pushable conjunct
       // with a non-pushable one (#375). Both mappers split it — the hop is `nullable` under each.
       defaultSplit: SPLIT_ACTIONS,
       defaultUnconditional: UNCONDITIONAL_ACTIONS,
-      defaultPostCount: 155,
+      defaultPostCount: 156,
       pushdownDb: DB_DECIDED_PUSHDOWN,
       pushdownSplit: SPLIT_ACTIONS,
-      pushdownPostCount: 144,
+      pushdownPostCount: 145,
       moved: PUSHDOWN_ONLY_ACTIONS,
     });
   });

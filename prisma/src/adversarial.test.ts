@@ -462,6 +462,9 @@ const DEGENERACY_LIVENESS_PROBES = [
   // Concatenation against the key where BOTH operands carry a column — the arithmetic solver
   // needs a value on the other side, so the id-* group's one throwing shape probes here.
   "id-concat",
+  // The same missing form with BOTH operands columns, so there is no constant to invert off
+  // either side (#391).
+  "concat-f2f",
 ] as const;
 
 // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") --------
@@ -1046,10 +1049,10 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(178);
+    expect(MANIFEST_ACTIONS.size).toBe(179);
     // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
     // gained or lost has to be re-triaged here rather than joining the suite unnoticed.
-    expect(THROWING_ACTIONS).toHaveLength(54);
+    expect(THROWING_ACTIONS).toHaveLength(55);
     expect(misclassified).toEqual([]);
     expect(
       [...PRISMA_SUPPORTED_EXPECTED].filter(

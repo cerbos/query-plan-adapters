@@ -1333,14 +1333,14 @@ class AdversarialConformanceTest {
                         .filter(Boolean::booleanValue).count() != 1)
                 .toList();
 
-        assertEquals(178, manifest.size(),
+        assertEquals(179, manifest.size(),
                 "corpus size changed; triage the new action(s) before bumping this pin");
         assertEquals(21, SEEDS.size(), "seed count changed");
         // Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
         // lost has to be re-triaged here rather than joining the throw suite unnoticed. The two
         // @MethodSource streams that feed the throw cases are what resolve those messages, and
         // both fail loudly on a missing one.
-        assertEquals(14, throwing.size(), "throwing action count changed");
+        assertEquals(15, throwing.size(), "throwing action count changed");
         assertEquals(throwing.size(),
                 adapterUnsupportedActions().count() + unsupportedShapes().count(),
                 "every throwing action must reach a parameterised throw case");
@@ -1409,7 +1409,9 @@ class AdversarialConformanceTest {
             // dialect-independent rendering. Neither has a compared member here.
             "cast-string-bool",
             // Concatenation against the key where the reference lowers `+` as arithmetic.
-            "id-concat");
+            "id-concat",
+            // The same arithmetic-only lowering of `+` with both operands columns (#391).
+            "concat-f2f");
 
     @Test
     void oracleIsNotDegenerate() {

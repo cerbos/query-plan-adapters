@@ -4,6 +4,7 @@
 package queryplan
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -1039,15 +1040,20 @@ func (b *builder) arithmetic(n *node, m Mapper) (value, error) {
 
 	op := arithmeticOps[n.operator]
 
-	// CEL overloads `+` on strings. It reaches the wire as the same `add` node as numeric
-	// addition, so the operands are what tell the two apart: CEL has no mixed-type `+`, so one
-	// string constant means the whole expression is a concatenation. Only `add` has the overload
-	// — the other four operators over a string are a CEL no-overload error, which denies, and
-	// they keep falling through to the numeric path that cannot render them.
-	if op == OpAdd && (isStringConst(lv) || isStringConst(rv)) {
-		return concatValue(lv, rv)
+	// CEL overloads `+` on strings, and it reaches the wire as the same `add` node as numeric
+	// addition. Which overload it is has to be read off the operands, because the plan never
+	// says: CEL has no mixed-type `+`, so ONE string operand means the whole expression is a
+	// concatenation. Only `add` has the overload — the other four over a string are a CEL
+	// no-overload error, which denies, and they keep falling through to the numeric path.
+	if op == OpAdd {
+		return addValue(lv, rv)
 	}
 
+	return numericArith(op, lv, rv)
+}
+
+// numericArith lowers the numeric reading of a binary arithmetic operator.
+func numericArith(op ArithOp, lv, rv value) (value, error) {
 	// A retained ternary (a division that may be non-finite) must keep propagating symbolically
 	// through the surrounding arithmetic rather than being lowered to SQL NULL.
 	if out, ok, err := arithOverConditional(op, lv, rv); err != nil || ok {
@@ -1109,23 +1115,62 @@ func foldArithmetic(op ArithOp, l, r float64) (*float64, error) {
 	return &out, nil
 }
 
-// isStringConst reports whether a translated operand is a string literal from the plan.
-func isStringConst(v value) bool {
-	_, ok := v.(string)
-	return ok
+// isStringOperand reports whether a translated operand is known to be a string: a string literal
+// from the plan, or a column the caller declared ValueString.
+func isStringOperand(v value) bool {
+	if _, ok := v.(string); ok {
+		return true
+	}
+	c, ok := v.(Column)
+	return ok && c.IsString
 }
 
-// concatValue lowers CEL's string `+` into the dialect-spelled Concat node.
-func concatValue(lv, rv value) (value, error) {
-	l, err := asExpr(lv)
-	if err != nil {
-		return nil, err
+// isUntypedColumn reports whether an operand is a bare column the caller declared no type for.
+// Two of them on one `+` is the only shape whose overload cannot be resolved.
+func isUntypedColumn(v value) bool {
+	c, ok := v.(Column)
+	return ok && !c.IsString && !c.IsBool
+}
+
+// addValue lowers CEL's `+`, choosing between numeric addition and string concatenation.
+//
+// One operand of a known type settles it, because CEL has no mixed-type `+`: a string literal or a
+// column declared ValueString makes the whole expression a concatenation. Everything else keeps the
+// numeric reading it has always had — including the retained ternaries and divisions that arrive as
+// non-constant values — EXCEPT the one shape that reveals nothing at all, two undeclared columns.
+//
+// That shape fails closed. Guessing numeric is what this module used to do, and it is wrong in the
+// dangerous direction: `text + text` is a hard error on PostgreSQL, 0 on SQLite, and 0 on MySQL,
+// where comparing that 0 against a string constant coerces the CONSTANT to 0 as well and matches
+// every row whose columns are non-NULL (cerbos/query-plan-adapters#391).
+//
+// There is no ValueNumber to pair with ValueString: nothing would reach it. Every numeric `add` the
+// planner emits carries a constant operand — that is what makes it arithmetic rather than
+// concatenation — so a declaration for the both-columns numeric case would be a constant no
+// translation reads, the same reason there is no CastInt (#319). A corpus action that reaches it is
+// what should introduce it.
+func addValue(lv, rv value) (value, error) {
+	if isStringOperand(lv) || isStringOperand(rv) {
+		l, err := asExpr(lv)
+		if err != nil {
+			return nil, err
+		}
+		r, err := asExpr(rv)
+		if err != nil {
+			return nil, err
+		}
+		return Concat{L: l, R: r}, nil
 	}
-	r, err := asExpr(rv)
-	if err != nil {
-		return nil, err
+
+	if isUntypedColumn(lv) && isUntypedColumn(rv) {
+		return nil, errors.New(
+			"cannot tell numeric addition from string concatenation in `+` between two columns: " +
+				"CEL overloads `+` on strings and the query plan carries no operand types, so " +
+				"declare the string column's ValueType as ValueString",
+		)
 	}
-	return Concat{L: l, R: r}, nil
+
+	return numericArith(OpAdd, lv, rv)
 }
 
 // castValue lowers CEL's string() conversion. int() and double() are rejected before they reach
@@ -1170,6 +1215,7 @@ func (b *builder) resolveVariable(reference string, m Mapper) (value, error) {
 		Name:         entry.Column,
 		ExplicitNull: entry.NullConvention == NullConventionExplicit,
 		IsBool:       entry.ValueType == ValueBool,
+		IsString:     entry.ValueType == ValueString,
 	}, nil
 }
 
@@ -1192,6 +1238,7 @@ func (b *builder) scalarThroughHop(entry Entry) Expr {
 			Name:         entry.Column,
 			ExplicitNull: entry.NullConvention == NullConventionExplicit,
 			IsBool:       entry.ValueType == ValueBool,
+			IsString:     entry.ValueType == ValueString,
 		},
 	}
 }

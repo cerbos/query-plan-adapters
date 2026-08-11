@@ -295,6 +295,10 @@ DEGENERACY_GUARD_ACTIONS = (
     # sibling is refused instead, so this entry proves the supported half still
     # compares rather than joining the probes below.
     "cast-string-double",
+    # CEL's `+` between two COLUMNS (#391). SQLAlchemy renders it through the
+    # columns' own String type, so it emits `||` (or CONCAT on MySQL) without
+    # needing the plan to say which overload it is.
+    "concat-f2f",
 )
 
 # Shapes this adapter refuses to translate: they have no oracle comparison to
@@ -1182,7 +1186,7 @@ class TestAdversarialConformance:
 
         # Deliberate tripwires: a corpus edit must bump these in the same
         # change, so a new hostile action cannot join (or vanish) silently.
-        assert len(MANIFEST_ACTIONS) == 178
+        assert len(MANIFEST_ACTIONS) == 179
         assert len(SEEDS) == 21
         # Each of these carries a pinned message, so a shape gained or lost has
         # to be re-triaged here rather than joining the throw suite unnoticed.

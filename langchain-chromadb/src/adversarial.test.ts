@@ -637,6 +637,8 @@ const DEGENERACY_LIVENESS_PROBES = [
   "id-f2f-ne",
   "id-concat",
   "cast-string-bool",
+  // A concatenation of two metadata fields is a computed operand, which Chroma has no form for.
+  "concat-f2f",
 ] as const;
 
 // Fields are optional unless declared otherwise, so `$ne`/`$nin` are rejected by default.
@@ -977,12 +979,12 @@ describe("adversarial conformance corpus", () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(178);
+    expect(MANIFEST_ACTIONS.size).toBe(179);
     expect(CHROMA_SUPPORTED_ACTIONS).toHaveLength(25);
     expect(oracle.size).toBe(CHROMA_SUPPORTED_ACTIONS.length);
-    expect(CHROMA_UNSUPPORTED).toHaveLength(142);
+    expect(CHROMA_UNSUPPORTED).toHaveLength(143);
     expect(CHROMA_SUPPORTED_EXPECTED).toHaveLength(0);
-    expect(THROWING_ACTIONS).toHaveLength(151);
+    expect(THROWING_ACTIONS).toHaveLength(152);
     expect(misclassified).toEqual([]);
   });
 

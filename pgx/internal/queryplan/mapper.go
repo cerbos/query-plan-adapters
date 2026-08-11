@@ -124,6 +124,11 @@ const (
 	// and PostgreSQL render "true", and nothing in the plan says which type a column holds
 	// (cerbos/query-plan-adapters#376).
 	ValueBool
+	// ValueString marks a column stored as text. It exists so CEL's `+` between two columns can
+	// be resolved to concatenation: the operator is overloaded on strings and the plan carries no
+	// operand types, so without a declaration the shape fails closed rather than emitting a
+	// numeric `+` that MySQL silently answers with 0 (cerbos/query-plan-adapters#391).
+	ValueString
 )
 
 // NullConvention declares, for one attribute, that its column can be SQL NULL and how the caller

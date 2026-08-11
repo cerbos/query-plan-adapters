@@ -673,6 +673,9 @@ const DEGENERACY_LIVENESS_PROBES = [
   // int() over a numeric column: truncation-versus-rounding, unsupported for every adapter but
   // convex, which promotes it in adapterSupportedExpected.
   "cast-int-double",
+  // CEL's `+` between two field paths (#391): no constant to tell $add from $concat, and the
+  // mapper carries no field types. Refused at translation, where the server used to abort.
+  "concat-f2f",
 ] as const;
 
 interface AdversarialLabel {
@@ -1234,11 +1237,11 @@ describe("adversarial conformance corpus", () => {
       return count !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(178);
-    expect(unsupportedEntries).toHaveLength(39);
+    expect(MANIFEST_ACTIONS.size).toBe(179);
+    expect(unsupportedEntries).toHaveLength(40);
     expect(supportedExpectedEntries).toHaveLength(4);
     expect(ORACLE_ACTIONS).toHaveLength(132);
-    expect(THROWING_ACTIONS).toHaveLength(44);
+    expect(THROWING_ACTIONS).toHaveLength(45);
     expect(misclassified).toEqual([]);
     expect(
       [...supportedExpectedActions].filter(

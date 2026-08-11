@@ -428,6 +428,39 @@ string concatenation dispatched to SQL `+` is a hard error on PostgreSQL, an und
 seeds against a one-row oracle. Adapters that know their engine render `||` or `CONCAT`; adapters
 that deliberately do not know their dialect refuse it.
 
+#### A constant is what tells the two `+` overloads apart
+
+`id-concat` and `id-concat-vf` both carry a string **literal**, and that literal is the whole reason
+an adapter can translate them: CEL has no mixed-type `+`, so one string operand proves the entire
+expression is a concatenation. `concat-f2f` removes it — `R.attr.aString + R.attr.aOptionalString`
+— and with it the only evidence in the plan. A plan names no operand types, so an adapter looking at
+two variables cannot tell concatenation from arithmetic.
+
+Guessing arithmetic is what every adapter did, and it is wrong in the dangerous direction. The same
+filter answers three ways: a hard error on PostgreSQL, zero rows on SQLite, and on MySQL **16 of the
+21 seeds against a one-row oracle**, because both text operands coerce to 0 and the string constant
+on the other side coerces to 0 with them.
+
+The corpus does not prescribe a resolution, and the ten adapters split four ways, which is the point
+of asking:
+
+- **convex** and **sqlalchemy** need nothing. Convex concatenates in JavaScript, which is CEL's own
+  semantics; SQLAlchemy renders through the column's own declared type, so its dialect layer picks
+  `||` or `CONCAT` without the plan saying anything.
+- **ent** and **pgx** take a declaration — `ValueType: ValueString` on the mapper entry, the same
+  shape `ValueBool` already had for `string()`. Declared, they concatenate; undeclared, they fail
+  closed.
+- **prisma**, **drizzle**, **langchain-chromadb**, **elasticsearch-java** and **spring-data** refuse
+  it for limitations they already had, and needed no change.
+- **mongoose** refuses it, but had to be taught to: it was sending `$add` to the server, which
+  aborts the whole query rather than returning a wrong row set.
+
+There is deliberately no `ValueNumber` to pair with `ValueString`. Every *numeric* `add` the planner
+emits carries a constant operand — that is what makes it arithmetic rather than concatenation — so a
+declaration for the both-columns numeric case would be a constant nothing reads, which is the
+reason there is no `CastInt` either (#319). The corpus action that reaches it is what should
+introduce it.
+
 ### The degeneracy guard
 
 The comparison in step 4 can pass vacuously if the oracle itself is trivial (e.g. the PDP denies
@@ -456,7 +489,7 @@ is empty *by construction* is unchanged: it belongs in neither list (see
 `nullRepresentationOmitted` above, and
 `w1-size-zero-chain`/`w1-not-size-chain`/`w1-size-frac-chain`/`in-empty`/the string casts).
 
-Adapters differ widely in what they can express — `langchain-chromadb` compares 25 of the 167
+Adapters differ widely in what they can express — `langchain-chromadb` compares 25 of the 168
 conformance actions where `ent` and `pgx` compare all but one — so the lists are expected to look
 different per harness. That is the point.
 
@@ -599,7 +632,7 @@ guard; run it before trusting it.
    what it actually says; the harness refuses to run with a message missing, so there is no way to
    forget one.
 6. Each harness pins the corpus size AND its throwing-action count as tripwires (e.g.
-   `expect(MANIFEST_ACTIONS.size).toBe(178)` and `expect(THROWING_ACTIONS).toHaveLength(54)` in
+   `expect(MANIFEST_ACTIONS.size).toBe(179)` and `expect(THROWING_ACTIONS).toHaveLength(55)` in
    `prisma/src/adversarial.test.ts`; the oracle counts too in the convex, langchain-chromadb and
    elasticsearch-java harnesses). Bump them deliberately — those assertions exist so a new action
    cannot slip past an adapter unnoticed. The convex harness additionally pins WHICH actions its

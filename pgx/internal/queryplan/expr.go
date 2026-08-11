@@ -89,6 +89,9 @@ type Column struct {
 	// type whose text rendering differs across the engines this module targets; see
 	// Entry.ValueType and castValue.
 	IsBool bool
+	// IsString marks a column the caller declared as string-typed, which is what lets `+` between
+	// two columns resolve to concatenation rather than fail closed. See Entry.ValueType and add.
+	IsString bool
 }
 
 // Lit is a value bound as a query parameter. A nil V renders as SQL NULL.
