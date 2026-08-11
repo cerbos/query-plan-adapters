@@ -22,6 +22,7 @@
     "c2": { "createdBy": "2024-06-01T00:00:00Z", "aDouble": 12.3,  "createdAt": "2036-06-06T06:06:06Z",        "scope": "dept.eng.",            "labels": [] },
     "d1": { "createdBy": "2024-06-01T00:00:00Z", "aDouble": 13.3,  "createdAt": "2036-06-06T06:06:06Z",        "scope": "[env]:prod:eu",        "labels": [] },
     "d2": { "createdBy": "2024-06-01T00:00:00Z", "aDouble": 14.3,  "createdAt": "2036-06-06T06:06:06Z",        "scope": "e:prod:eu",            "labels": [] },
-    "e1": { "createdBy": "2024-06-01T00:00:00Z", "aDouble": 15.3,  "createdAt": "2036-06-06T06:06:06Z",        "scope": null,                   "labels": [] }
+    "e1": { "createdBy": "2024-06-01T00:00:00Z", "aDouble": 15.3,  "createdAt": "2036-06-06T06:06:06Z",        "scope": null,                   "labels": [] },
+    "f1": { "createdBy": "2024-06-01T00:00:00Z", "aDouble": 16.3,  "createdAt": "2036-06-06T06:06:06Z",        "scope": null,                   "labels": [] }
   }
 }

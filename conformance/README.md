@@ -25,7 +25,8 @@ rows, and one oracle recipe that every adapter's harness implements against its 
   throughout. This is the single source of truth an adapter's harness persists into its own
   schema (SQL rows, Prisma records, whatever) AND mirrors into check() oracle calls — see
   "The oracle recipe" below. Every key except `note` must be consumed by every harness; that is
-  asserted, not assumed (see "Deterministic derived fields").
+  asserted, not assumed (see "Deterministic derived fields"). `parentSeedId` is the one key that
+  resolves against another row — see "The real to-one relation" below.
 - `derived-fields.json` — the five attributes derived from each seed (`createdBy`, `aDouble`,
   `createdAt`, `scope`, `labels`), materialised once per seed id. Every harness reads this file
   instead of restating the rules; `scripts/validate-corpus.sh` re-derives the rule-based fields
@@ -106,7 +107,7 @@ have byte-identical wire fixtures apart from the variable name. Their oracles do
 | `null-eq-missing` | omitted | **nothing** | those 5 — **over-grants** |
 
 Under the omitted convention CEL raises a missing-attribute error for every NULL row and compares
-`"set" == null` false for every other, so `check()` denies all 20 seeds. An adapter cannot recover
+`"set" == null` false for every other, so `check()` denies all 21 seeds. An adapter cannot recover
 the caller's convention from the plan, so it has to be told: every adapter that can emit a
 NULL-selecting predicate takes a `nullAttributeRepresentation` option, defaulting to `explicit`
 (the historical translation). See cerbos/query-plan-adapters#302.
@@ -174,7 +175,7 @@ break them.
 
 `coOwner` is the second explicit-null attribute the corpus carries, added for `null-value-f2f`. It
 aliases the **`scope`** column rather than `aOptionalString`, because comparing a column with itself
-is TRUE for all 20 seeds and the degeneracy guard forbids a total oracle. Against `scope` the only
+is TRUE for all 21 seeds and the degeneracy guard forbids a total oracle. Against `scope` the only
 row where both sides are NULL is `e1`, so the oracle is exactly one row — thin, but non-degenerate,
 and it is precisely the row the naive translation loses.
 
@@ -273,6 +274,66 @@ must still guard it — `hops AND constant` is two-valued and readmits parentles
 negation — but only that adapter's unit tests can prove it (#333). This is the documented exception
 to "a per-adapter unit test is not a substitute for a corpus action": there is no corpus action to
 substitute for.
+
+### The real to-one relation
+
+The corpus carries exactly one **real** to-one join: `parent`, and `parent.inner` one hop further
+out. It is deliberately kept beside `obj.inner`, which looks identical in a policy and is not a
+join at all — every harness maps `obj.inner` to the resource row's own `aString`, the same trick
+the spring-data reference uses for the `p-struct` probe. One of the two dotted attributes emits a
+join and the other does not, and a reader should be able to tell which.
+
+`mainCategory` is a real chain too, but its tail is a **collection**, and the hazards a collection
+reaches are not the hazards a scalar reaches. "The absent to-one parent" above records mongoose's
+`$cond` treating a missing field path as falsy and notes that no corpus action reaches it, because
+"every chained operand the corpus carries is a collection and membership has no
+aggregation-expression form there". This is the seed field that entry asks for. See
+[ADR 0005](../docs/adr/0005-the-conformance-corpus-carries-a-real-to-one-relation.md).
+
+**One seed key, resolved against another row.** `parentSeedId` names the seed whose four scalars —
+`aBool`, `aNumber`, `aString`, `aOptionalString` — a row's `parent` carries; that seed's own
+`parentSeedId` names the ones `parent.inner` carries, and the chain is **cut there**. There is no
+`parent.inner.inner`. `null` is a row with no parent at all. Seed rows stay one line each, which is
+the property the compact-row convention protects, and the parent values are the corpus's own
+hostile strings — LIKE metacharacters, unicode, the empty string, case traps, NULL optionals —
+rather than a second curated set to keep in step with the first.
+
+**Do not write the nested object into `seeds.json`.** It is materialised harness-side, exactly as
+`mainCategory` is materialised from `subCategoryNames`.
+
+**The parent is a copy, not a pointer.** Each harness creates a *fresh* parent (and inner) row per
+resource rather than pointing at the named seed's own row. The corpus already seeds distinct
+category graphs per resource so no two share a relation by accident; here the reason is sharper —
+with shared rows, a filter that returned the parent instead of the child could agree with the
+oracle.
+
+What a store does with it is the store's business, and the split is expected:
+
+| store | how the two levels are materialised |
+|---|---|
+| prisma, drizzle, sqlalchemy, spring-data, ent, pgx | two owned tables, unique foreign key per level — a real join |
+| mongoose, convex, elasticsearch-java | two nested objects embedded in the document |
+| langchain-chromadb | both levels flattened onto dotted metadata keys (`parent.aString`, `parent.inner.aString`) |
+
+How a store spells "this level is not there" is its own business — a missing row, a missing key, or
+a stored null under the convention that harness already uses for a NULL column. What every one of
+them has to agree on is the **check side**: a level that does not exist sends no `parent` attribute
+(or no `parent.inner`), so CEL raises a missing-path error and `check()` denies. That is the scalar
+counterpart of the collection hazard "The absent to-one parent" documents.
+
+**No mapper wiring, yet.** No action references the relation, so no harness maps it. Reaching a
+scalar *through* a to-one hop is a shape several translators do not have — ent and pgx fail it
+closed today ("attribute maps to a collection and cannot be used as a scalar value"), and
+sqlalchemy has no relation model of its own — so a mapping written before the actions exist is a
+declaration no assertion holds to anything.
+
+**A fixture nothing uses can rot, so every harness pins it directly.** Each one reads both hops back
+out of its store — through a real join where it has one — and compares them against the corpus,
+rather than counting rows: a count cannot tell an inner row carrying the corpus's values from one
+carrying the root's own columns, which is exactly the flat-alias failure this relation exists to
+make visible. `scripts/validate-corpus.sh` separately asserts that every `parentSeedId` names a
+seed, that no row is its own parent, and that all three depths — no parent, parent without inner,
+parent with inner — are non-empty.
 
 ### The degeneracy guard
 

@@ -132,7 +132,7 @@ See [#302](https://github.com/cerbos/query-plan-adapters/issues/302).
 
 ## Conformance contract
 
-The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 20
+The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 21
 hostile seed rows and real PostgreSQL queries. The Spring Data adapter defines the reference
 semantics for this compatibility snapshot.
 

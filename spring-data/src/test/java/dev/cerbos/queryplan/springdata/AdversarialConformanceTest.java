@@ -9,6 +9,8 @@ import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter;
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression;
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand;
 import dev.cerbos.api.v1.response.Response.PlanResourcesResponse;
+import dev.cerbos.queryplan.springdata.testmodel.AdversarialInnerEntity;
+import dev.cerbos.queryplan.springdata.testmodel.AdversarialParentEntity;
 import dev.cerbos.queryplan.springdata.testmodel.CategoryEntity;
 import dev.cerbos.queryplan.springdata.testmodel.LabelEntity;
 import dev.cerbos.queryplan.springdata.testmodel.ResourceEntity;
@@ -180,10 +182,16 @@ class AdversarialConformanceTest {
      */
     private record Seed(String id, boolean aBool, String aString, int aNumber,
                         String aOptionalString, List<Tag> tags, List<String> subCategoryNames,
-                        String note) {}
+                        String parentSeedId, String note) {}
 
+    /**
+     * {@code attr} is typed as raw JSON rather than {@code Map<String, List<String>>}: the corpus
+     * carries scalar principal attributes as well as lists, and a narrower type would reject the
+     * file rather than silently drop one — but it would still be this harness deciding what the
+     * corpus may contain. {@link #principal()} converts each value by its actual JSON type.
+     */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    private record PrincipalSpec(String id, List<String> roles, Map<String, List<String>> attr) {}
+    private record PrincipalSpec(String id, List<String> roles, Map<String, Object> attr) {}
 
     /**
      * conformance/seeds.json. Every key the file carries is named, including the prose ones,
@@ -193,7 +201,7 @@ class AdversarialConformanceTest {
      */
     private record SeedsFile(@JsonProperty("$schema") String schema, String description,
                              PrincipalSpec principal, String resourceKind, String principalNote,
-                             List<Seed> seeds) {}
+                             String relationNote, List<Seed> seeds) {}
 
     /** One seed's derived fields, exactly as conformance/derived-fields.json carries them. */
     private record DerivedEntry(String createdBy, Double aDouble, String createdAt, String scope,
@@ -257,7 +265,8 @@ class AdversarialConformanceTest {
     // here reads, and a key this harness reads that the corpus no longer carries.
 
     private static final List<String> SEED_KEYS = List.of(
-            "id", "aBool", "aString", "aNumber", "aOptionalString", "tags", "subCategoryNames");
+            "id", "aBool", "aString", "aNumber", "aOptionalString", "tags", "subCategoryNames",
+            "parentSeedId");
 
     /** Corpus prose, never read by a harness: the one documented exclusion from SEED_KEYS. */
     private static final String SEED_NOTE_KEY = "note";
@@ -643,6 +652,33 @@ class AdversarialConformanceTest {
             }
             r.setCategories(cats);
             em.persist(r);
+
+            // The to-one chain, one owned row per level. A seed with no parent gets no row at
+            // all, which is what makes the absent-parent hazard reachable through a SCALAR
+            // rather than only through mainCategory's collection.
+            Seed parentSeed = parentSeedOf(s);
+            if (parentSeed != null) {
+                AdversarialParentEntity parent = new AdversarialParentEntity();
+                parent.setId(s.id() + "-parent");
+                parent.setaBool(parentSeed.aBool());
+                parent.setaString(parentSeed.aString());
+                parent.setaNumber(parentSeed.aNumber());
+                parent.setaOptionalString(parentSeed.aOptionalString());
+                parent.setResource(r);
+                em.persist(parent);
+
+                Seed innerSeed = parentSeedOf(parentSeed);
+                if (innerSeed != null) {
+                    AdversarialInnerEntity inner = new AdversarialInnerEntity();
+                    inner.setId(s.id() + "-parent-inner");
+                    inner.setaBool(innerSeed.aBool());
+                    inner.setaString(innerSeed.aString());
+                    inner.setaNumber(innerSeed.aNumber());
+                    inner.setaOptionalString(innerSeed.aOptionalString());
+                    inner.setParent(parent);
+                    em.persist(inner);
+                }
+            }
         }
         tx.commit();
         em.close();
@@ -653,12 +689,71 @@ class AdversarialConformanceTest {
     private static Principal principal() {
         PrincipalSpec spec = seedsFile.principal();
         Principal p = Principal.newInstance(spec.id(), spec.roles().toArray(new String[0]));
-        for (Map.Entry<String, List<String>> attr : spec.attr().entrySet()) {
-            p = p.withAttribute(attr.getKey(), AttributeValue.listValue(attr.getValue().stream()
-                    .map(AttributeValue::stringValue)
-                    .toArray(AttributeValue[]::new)));
+        for (Map.Entry<String, Object> attr : spec.attr().entrySet()) {
+            p = p.withAttribute(attr.getKey(), asPrincipalAttribute(attr.getKey(), attr.getValue()));
         }
         return p;
+    }
+
+    /**
+     * One principal attribute, converted by the JSON type the corpus actually carries. Strings
+     * and lists of strings are the two shapes today; anything else fails loudly rather than being
+     * coerced, because a silently reshaped principal attribute feeds the plan and the oracle at
+     * once and they would agree for the wrong reason.
+     */
+    private static AttributeValue asPrincipalAttribute(String key, Object value) {
+        if (value instanceof String s) {
+            return AttributeValue.stringValue(s);
+        }
+        if (value instanceof List<?> list) {
+            return AttributeValue.listValue(list.stream()
+                    .map(element -> {
+                        if (element instanceof String s) {
+                            return AttributeValue.stringValue(s);
+                        }
+                        throw new IllegalStateException(
+                                "seeds.json principal.attr." + key + " holds a non-string element");
+                    })
+                    .toList());
+        }
+        throw new IllegalStateException(
+                "seeds.json principal.attr." + key + " is neither a string nor a list of strings");
+    }
+
+    // -- the real to-one relation (conformance/README.md, "The real to-one relation") -----------
+    //
+    // `parentSeedId` names the seed whose four scalars a row's `parent` carries, and that seed's
+    // own `parentSeedId` names the ones `parent.inner` carries. The chain is cut at two levels.
+    // Every resource owns a FRESH parent (and inner) row rather than pointing at the named seed's
+    // own row, so no two resources share one and a filter that returned the parent instead of the
+    // child cannot agree with the oracle by accident.
+
+    /** The seed one hop out, or null when this level has no parent. A null argument returns null. */
+    private static Seed parentSeedOf(Seed s) {
+        if (s == null || s.parentSeedId() == null) {
+            return null;
+        }
+        return SEEDS.stream()
+                .filter(candidate -> candidate.id().equals(s.parentSeedId()))
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException(
+                        "seeds.json: \"" + s.id() + "\" names parent \"" + s.parentSeedId()
+                                + "\", which is not a seed id"));
+    }
+
+    /**
+     * One level of the chain as check() attributes. A NULL column is a MISSING attribute one hop
+     * out, exactly as it is on the resource row itself.
+     */
+    private static Map<String, AttributeValue> relationAttr(Seed s) {
+        Map<String, AttributeValue> attrs = new LinkedHashMap<>();
+        attrs.put("aBool", AttributeValue.boolValue(s.aBool()));
+        attrs.put("aString", AttributeValue.stringValue(s.aString()));
+        attrs.put("aNumber", AttributeValue.doubleValue(s.aNumber()));
+        if (s.aOptionalString() != null) {
+            attrs.put("aOptionalString", AttributeValue.stringValue(s.aOptionalString()));
+        }
+        return attrs;
     }
 
     /** Cerbos attributes mirroring exactly what the seeded DB row holds. */
@@ -737,6 +832,18 @@ class AdversarialConformanceTest {
                     "subNames", AttributeValue.listValue(s.subCategoryNames().stream()
                             .map(AttributeValue::stringValue)
                             .toList()))));
+        }
+        // The real to-one chain, mirroring the seeded rows exactly. A row with no parent sends NO
+        // `parent` attribute — a CEL missing-path error (deny) — matching a join that finds
+        // nothing; the same holds one level down for `parent.inner`.
+        Seed parentSeed = parentSeedOf(s);
+        if (parentSeed != null) {
+            Map<String, AttributeValue> parent = relationAttr(parentSeed);
+            Seed innerSeed = parentSeedOf(parentSeed);
+            if (innerSeed != null) {
+                parent.put("inner", AttributeValue.mapValue(relationAttr(innerSeed)));
+            }
+            r = r.withAttribute("parent", AttributeValue.mapValue(parent));
         }
         return r;
     }
@@ -1205,7 +1312,7 @@ class AdversarialConformanceTest {
 
         assertEquals(152, manifest.size(),
                 "corpus size changed; triage the new action(s) before bumping this pin");
-        assertEquals(20, SEEDS.size(), "seed count changed");
+        assertEquals(21, SEEDS.size(), "seed count changed");
         // Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
         // lost has to be re-triaged here rather than joining the throw suite unnoticed. The two
         // @MethodSource streams that feed the throw cases are what resolve those messages, and
@@ -1284,5 +1391,49 @@ class AdversarialConformanceTest {
         samples.forEach((action, ids) -> assertTrue(
                 !ids.isEmpty() && ids.size() < SEEDS.size(),
                 "oracle for '" + action + "' is degenerate: " + ids));
+    }
+
+    /**
+     * The to-one relation carries no corpus action yet — this is the expand half of
+     * cerbos/query-plan-adapters#372's expand–contract — so nothing else in this class would
+     * notice a seeder that stored no chain at all, or one that attached every parent to the wrong
+     * resource. Read the two hops back through a real join rather than counting rows: a count
+     * cannot tell an inner row carrying the corpus's values from one carrying the root's own
+     * columns, which is exactly the flat-column-alias failure this relation exists to make
+     * visible.
+     */
+    @Test
+    void seededToOneChainMatchesTheCorpusRelation() {
+        long withParent = SEEDS.stream().filter(s -> parentSeedOf(s) != null).count();
+        long withInner = SEEDS.stream()
+                .filter(s -> parentSeedOf(parentSeedOf(s)) != null).count();
+        assertTrue(withParent > 0, "no seed has a parent");
+        assertTrue(withInner > 0, "no seed reaches parent.inner");
+        assertTrue(withParent < SEEDS.size(), "every seed has a parent");
+
+        Map<String, List<String>> want = new LinkedHashMap<>();
+        for (Seed s : SEEDS) {
+            Seed parent = parentSeedOf(s);
+            Seed inner = parentSeedOf(parent);
+            want.put(s.id(), java.util.Arrays.asList(
+                    parent == null ? null : parent.aString(),
+                    inner == null ? null : inner.aString()));
+        }
+
+        EntityManager em = emf.createEntityManager();
+        try {
+            Map<String, List<String>> got = new LinkedHashMap<>();
+            for (Object[] row : em.createQuery("""
+                    select r.id, p.aString, i.aString
+                    from ResourceEntity r
+                    left join AdversarialParentEntity p on p.resource = r
+                    left join AdversarialInnerEntity i on i.parent = p
+                    """, Object[].class).getResultList()) {
+                got.put((String) row[0], java.util.Arrays.asList((String) row[1], (String) row[2]));
+            }
+            assertEquals(want, got);
+        } finally {
+            em.close();
+        }
     }
 }

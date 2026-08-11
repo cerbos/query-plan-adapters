@@ -34,7 +34,10 @@ type Tag struct {
 // Seed is one hostile row. Note is corpus documentation this harness never reads; it is named so
 // strict decoding accepts it, and it is the one seed key seedKeys deliberately omits.
 type Seed struct {
-	AOptionalString  *string  `json:"aOptionalString"`
+	AOptionalString *string `json:"aOptionalString"`
+	// ParentSeedID names the seed whose scalars this row's to-one `parent` carries, or nil for a
+	// row with no parent. See conformance/README.md, "The real to-one relation".
+	ParentSeedID     *string  `json:"parentSeedId"` //nolint:tagliatelle // The corpus spells it parentSeedId; Go's ID suffix is not the JSON name.
 	ID               string   `json:"id"`
 	AString          string   `json:"aString"`
 	Note             string   `json:"note"`
@@ -58,6 +61,7 @@ type SeedsFile struct {
 	Description   string    `json:"description"`
 	ResourceKind  string    `json:"resourceKind"`
 	PrincipalNote string    `json:"principalNote"`
+	RelationNote  string    `json:"relationNote"`
 	Seeds         []Seed    `json:"seeds"`
 	Principal     Principal `json:"principal"`
 }
@@ -153,7 +157,8 @@ type Corpus struct {
 // a corpus key nothing here consumes, and a consumed key the corpus no longer carries (which would
 // otherwise decode to its zero value on both sides).
 var seedKeys = []string{
-	"aBool", "aNumber", "aOptionalString", "aString", "id", "subCategoryNames", "tags",
+	"aBool", "aNumber", "aOptionalString", "aString", "id", "parentSeedId",
+	"subCategoryNames", "tags",
 }
 
 // seedNoteKey is documentation, never read by any harness.
@@ -500,6 +505,43 @@ func (c *Corpus) labelsOf(s Seed) []*string { return c.derived(s).Labels }
 // another row's data and still agree with the oracle.
 func categoryID(s Seed, i int) string    { return fmt.Sprintf("%s-cat%d", s.ID, i) }
 func subCategoryID(s Seed, i int) string { return fmt.Sprintf("%s-sub%d", s.ID, i) }
+
+// -- the real to-one relation (conformance/README.md, "The real to-one relation") ----------------
+//
+// `parentSeedId` names the seed whose four scalars a row's `parent` carries, and that seed's own
+// `parentSeedId` names the ones `parent.inner` carries. The chain is cut at two levels. Every
+// resource owns a FRESH parent (and inner) row rather than pointing at the named seed's own row,
+// so no two resources share one and a filter that returned the parent instead of the child cannot
+// agree with the oracle by accident — the same rule the per-seed category graph follows.
+
+// parentSeedOf returns the seed one hop out, or nil when this level has no parent. Passing a nil
+// seed returns nil, so the two-level chain is `parentSeedOf(parentSeedOf(seed))`.
+func (c *Corpus) parentSeedOf(s *Seed) *Seed {
+	if s == nil || s.ParentSeedID == nil {
+		return nil
+	}
+	for i := range c.Seeds.Seeds {
+		if c.Seeds.Seeds[i].ID == *s.ParentSeedID {
+			return &c.Seeds.Seeds[i]
+		}
+	}
+	// Unreachable: validate-corpus.sh proves every parentSeedId names a seed.
+	panic("seeds.json parentSeedId names no seed: " + *s.ParentSeedID)
+}
+
+// relationAttr is one level of the chain as check() attributes. A NULL column is a MISSING
+// attribute one hop out, exactly as it is on the resource row itself.
+func relationAttr(s *Seed) map[string]any {
+	attr := map[string]any{"aBool": s.ABool, "aString": s.AString, "aNumber": s.ANumber}
+	if s.AOptionalString != nil {
+		attr["aOptionalString"] = *s.AOptionalString
+	}
+	return attr
+}
+
+// parentID and innerID name the per-resource chain rows.
+func parentID(s Seed) string { return s.ID + "-parent" }
+func innerID(s Seed) string  { return s.ID + "-parent-inner" }
 
 // TestValidateMessageRejectsAnUnpinnedThrow proves the guard fires: adding a throwing action without
 // pinning its message must fail this harness rather than silently degrade its throw case to a bare

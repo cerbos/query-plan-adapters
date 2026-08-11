@@ -12,6 +12,7 @@ import jakarta.persistence.JoinTable;
 import jakarta.persistence.ManyToMany;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.OneToMany;
+import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
 
 import java.time.Instant;
@@ -92,6 +93,13 @@ public class ResourceEntity {
     @Embedded
     private NestedEmbeddable nested;
 
+    // The conformance corpus's one REAL to-one relation, seeded only by the adversarial suite.
+    // `nested` above is an @Embedded value in this row; this is a separate table reached through
+    // a join. The two are kept side by side on purpose — see conformance/README.md, "The real
+    // to-one relation".
+    @OneToOne(mappedBy = "resource")
+    private AdversarialParentEntity parent;
+
     public ResourceEntity() {}
 
     public ResourceEntity(String id) {
@@ -134,6 +142,8 @@ public class ResourceEntity {
     public void setCreator(OwnerEntity creator) { this.creator = creator; }
     public NestedEmbeddable getNested() { return nested; }
     public void setNested(NestedEmbeddable nested) { this.nested = nested; }
+    public AdversarialParentEntity getParent() { return parent; }
+    public void setParent(AdversarialParentEntity parent) { this.parent = parent; }
 
     public ResourceEntity addTag(String tagId, String tagName) {
         TagEntity t = new TagEntity(tagId, tagName, this);
