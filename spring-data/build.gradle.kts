@@ -1,5 +1,12 @@
 plugins {
     java
+    // For `publishToMavenLocal`. example/ resolves the adapter as a real Maven coordinate
+    // rather than through a Gradle composite build, so the example executes the POM and the
+    // Gradle module metadata a consumer resolves — dependency scopes included. That is the
+    // whole point of docs/adr/0002-examples-install-the-packed-artifact.md, and it is not
+    // hypothetical here: cerbos-sdk-java declares protobuf at runtime-only scope in its own
+    // module metadata, which a composite build hides and a coordinate exposes.
+    `maven-publish`
 }
 
 group = "dev.cerbos"
@@ -103,5 +110,34 @@ tasks.test {
         ?: System.getenv("ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS")
     if (mysqlServerPrep != null) {
         systemProperty("adapter.test.mysql.serverPrepStmts", mysqlServerPrep)
+    }
+}
+
+// One publication, `dev.cerbos:cerbos-spring-data:<version>`, from the `java` component.
+//
+// What it publishes is the point: `implementation` dependencies (cerbos-sdk-java,
+// protobuf-java) land at runtime scope, and the `compileOnly` ones (spring-data-jpa,
+// jakarta.persistence-api, hibernate-core) do not appear at all — a consumer brings its own,
+// which is why they are compileOnly in the first place. example/ resolves this coordinate out
+// of mavenLocal and therefore proves that resolution, which a composite build substitutes away.
+//
+// The example is never part of the artifact: it is a separate Gradle build under example/ with
+// its own settings file, so it is not a source set here and cannot reach the jar. example/run.sh
+// asserts that rather than leaving it to inspection (ADR 0002's "examples must stay out of the
+// published artifacts they exercise", which for Java is a deliberate check rather than a
+// `files` allowlist).
+//
+// This is `publishToMavenLocal` only. Nothing here configures a Maven Central release, which
+// additionally requires POM `name`, `description`, `url`, `licenses`, `developers` and `scm`,
+// plus signing — Central rejects a POM without them. The other Java adapter
+// (elasticsearch-java) declares no publishing at all, so there is no convention here to copy
+// and inventing one is not this change's job; what the example resolves is the dependency
+// metadata, which is what it exists to exercise. Wiring up the `spring-data/v*` release is
+// separate work, and it will change this block.
+publishing {
+    publications {
+        create<MavenPublication>("maven") {
+            from(components["java"])
+        }
     }
 }
