@@ -271,6 +271,7 @@ never recompute them in a harness.
 - `conformance/` affects all adapters too: a change there re-runs every adapter's CI, and adding an action requires classifying it for all ten
 - `demo/` likewise re-runs every adapter's example job, and adding a usage shape means implementing it in all ten examples — there is no classification bucket to opt out with
 - Adding a seed row means adding its `conformance/derived-fields.json` entry in the same commit; adding a seed *field* also means widening every harness's declared key set — both are enforced, not optional
+- Adapters share data, not code: the corpus loader each adapter carries (`prisma/src/corpus.ts`, `mongoose/src/corpus.ts`, `ent/corpus_test.go`, `pgx/corpus_test.go`, …) is duplicated **deliberately**, so every adapter stays standalone. Do not extract a shared loader, and do not add a drift check between the copies — they are allowed to differ. That is the opposite of the byte-identical rule on the vendored Go *translator* trees, which keeps its exact current scope. See [ADR 0007](docs/adr/0007-adapters-share-data-not-code.md)
 - Regenerate build artifacts in the same commit as source changes
 - Changing what an adapter can translate means updating its `conformance/actions.json` entry and its README contract table in the same commit
 - When an adapter cannot express a shape, make it throw with a message naming the real mechanism — never emit a best-effort filter. That message is pinned in `conformance/actions.json` and asserted, so changing it is a deliberate corpus edit

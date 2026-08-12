@@ -41,7 +41,10 @@ policy action, or the behaviour of a plan the planner cannot produce.
 
 **The corpus becomes a dependency of an offline test.** A unit test that reads JSON from a sibling
 directory looks like incidental coupling worth removing. It is not: the coupling is the point, and
-this ADR exists so a future reader finds that out before deleting it.
+this ADR exists so a future reader finds that out before deleting it. The coupling is to the corpus
+*data* only — the loader that decodes a fixture into that language's plan types is written per
+adapter and duplicated deliberately, so the adapter stays standalone
+([ADR 0007](0007-adapters-share-data-not-code.md)).
 
 **Every wire fixture must be classified, exactly once, in every adapter that has one of these
 tests** — as an expected filter, an expected plan kind, or an expected throw carrying the message
