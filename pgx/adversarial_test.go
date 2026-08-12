@@ -573,7 +573,7 @@ func TestAdversarialConformance(t *testing.T) {
 		}
 		// Corpus-size tripwire: bump deliberately when the corpus grows, so a new hostile shape
 		// cannot slip past this adapter unnoticed.
-		require.Len(t, seen, 179, "corpus size changed; triage the new action(s) before bumping")
+		require.Len(t, seen, 187, "corpus size changed; triage the new action(s) before bumping")
 		require.Len(t, h.corpus.Seeds.Seeds, 21, "seed count changed")
 		// Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
 		// lost has to be re-triaged here rather than joining the throw suite unnoticed.
@@ -773,6 +773,11 @@ func TestAdversarialConformance(t *testing.T) {
 			// columns ValueString. Rendered as numeric `+` PostgreSQL rejects it outright,
 			// which is loud here but silent on the other two engines the shared translator serves.
 			"concat-f2f",
+			// Root position and bare operand forms (#388): one per hazard — the negation over a
+			// bare ordering (every other negated ordering in the corpus wraps a size() or a
+			// ternary), the bare boolean at the ROOT of the condition, and the collection
+			// subquery disjoined with a scalar predicate rather than conjoined with one.
+			"not-lt", "root-bare-bool", "or-eq-exists",
 		}
 		// int() over a numeric column is unsupported for every adapter but convex, so there is no
 		// comparison behind it here: it stays as a PDP/policy liveness probe for the cast group.

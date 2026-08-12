@@ -299,6 +299,15 @@ DEGENERACY_GUARD_ACTIONS = (
     # columns' own String type, so it emits `||` (or CONCAT on MySQL) without
     # needing the plan to say which overload it is.
     "concat-f2f",
+    # Root position and bare operand forms (#388): one per hazard — the
+    # negation over a bare ordering (every other negated ordering in the
+    # corpus wraps a size() or a ternary), the bare boolean at the ROOT of the
+    # condition, which this adapter refused outright before this change, and
+    # the collection subquery disjoined with a scalar predicate rather than
+    # conjoined with one.
+    "not-lt",
+    "root-bare-bool",
+    "or-eq-exists",
 )
 
 # Shapes this adapter refuses to translate: they have no oracle comparison to
@@ -1186,7 +1195,7 @@ class TestAdversarialConformance:
 
         # Deliberate tripwires: a corpus edit must bump these in the same
         # change, so a new hostile action cannot join (or vanish) silently.
-        assert len(MANIFEST_ACTIONS) == 179
+        assert len(MANIFEST_ACTIONS) == 187
         assert len(SEEDS) == 21
         # Each of these carries a pinned message, so a shape gained or lost has
         # to be re-triaged here rather than joining the throw suite unnoticed.

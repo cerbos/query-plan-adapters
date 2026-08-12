@@ -364,10 +364,10 @@ class ElasticsearchAdversarialConformanceTest {
         manifest.addAll(expected);
         manifest.addAll(nullRepresentationOmittedActions);
         manifest.addAll(divergences);
-        assertEquals(62, oracleActions.size());
+        assertEquals(70, oracleActions.size());
         assertEquals(115, throwingActions.size());
         assertEquals(1, nullRepresentationOmittedActions.size());
-        assertEquals(179, classified.size());
+        assertEquals(187, classified.size());
         assertEquals(manifest, classified, "every manifest action must be classified locally");
     }
 
@@ -801,7 +801,12 @@ class ElasticsearchAdversarialConformanceTest {
             // the key against a literal, which is an ordinary term query once the corpus id is
             // indexed as a field rather than left as `_id` metadata. Its five siblings need a
             // second field or a computed operand, and are liveness probes below.
-            "id-eq-const");
+            "id-eq-const",
+            // Root position and bare operand forms (#388): one per hazard — the negation over a
+            // bare ordering (every other negated ordering in the corpus wraps a size() or a
+            // ternary), the bare boolean at the ROOT of the condition, and the collection
+            // subquery disjoined with a scalar predicate rather than conjoined with one.
+            "not-lt", "root-bare-bool", "or-eq-exists");
 
     /**
      * Shapes this adapter refuses to translate: they have no oracle comparison to guard, and stay

@@ -461,6 +461,48 @@ declaration for the both-columns numeric case would be a constant nothing reads,
 reason there is no `CastInt` either (#319). The corpus action that reaches it is what should
 introduce it.
 
+### Root position and bare operand forms
+
+Eight actions — `not-lt`, `not-gt`, `gt-bare`, `le-bare`, `root-bare-bool`, `root-or`,
+`or-eq-exists`, `or-eq-in` — pin **positions**, not hazards. They came out of set-differencing the
+node shapes the wire fixtures produce (`operator(child,child)` with immediate child labels in
+source order) against the shapes the corpus's policies could reach, and every one of them is a hole
+the corpus had by accident rather than by argument (#388).
+
+Half introduce a node shape nothing else produces: `not(lt)`, `or(V,lt)`, `or(V,exists)`,
+`or(V,in)`. The other half — `not-gt`, `gt-bare`, `le-bare`, `root-bare-bool` — do not, and are
+worth having anyway, because every existing occurrence of their shape is reached through some other
+mechanism:
+
+- `gt(V,K)` and `le(V,K)` exist only via `rel-gt-hop`/`rel-le-hop`, so they are behind the to-one
+  join walk — and for an adapter that refuses a hop, behind no walk at all.
+- a bare variable at the root exists only via `rel-bool-hop`, the same way.
+- `not(gt)` exists only over a `size()` or a ternary (`w1-not-size-chain`, `ternary-negated`,
+  `p-not-ternary-null`) — never over an operand a store can index.
+
+The expectation going in was that all ten adapters would translate all eight and the classification
+work would be free. That held for eight adapters. It did not for two, and both are the reason the
+group exists rather than a reason to have skipped it:
+
+- **sqlalchemy** refused `root-bare-bool`. Its root-condition guard — written to reject
+  `filter()`/`map()`, which return a list rather than a boolean — tested for a Core `ColumnElement`,
+  and the ORM attribute a bare column resolves to is a descriptor. The identical operand had always
+  been accepted one level down as an `and`/`or`/`not` child, so the *position* was deciding, not the
+  shape.
+- **langchain-chromadb** fails closed on `or-eq-exists` and `or-eq-in`, correctly: its Where model
+  has no nested-expression form, and the left branch being a bare boolean key it *can* express does
+  not give it anywhere to put the branch it cannot.
+
+`or-eq-exists` also matters for a reason the shape alone does not show. The corpus does compose a
+subquery under a disjunction already — `rel-hop2-or-exists` — but that action carries a two-level
+hop, so an adapter that refuses hops never executes the disjunction either. A composition proven
+only inside a shape some adapters throw on is not proven for those adapters.
+
+`root-or`'s second disjunct is `R.attr.aNumber < 0` rather than the `aString != "one"` it was
+specified with: `aString` is never NULL and only one seed holds `"one"`, whose `aBool` is true, so
+that spelling allows all 21 seeds. A total oracle is exactly what the degeneracy guard below exists
+to catch, and it would have passed against any filter whatsoever.
+
 ### The degeneracy guard
 
 The comparison in step 4 can pass vacuously if the oracle itself is trivial (e.g. the PDP denies
@@ -489,8 +531,8 @@ is empty *by construction* is unchanged: it belongs in neither list (see
 `nullRepresentationOmitted` above, and
 `w1-size-zero-chain`/`w1-not-size-chain`/`w1-size-frac-chain`/`in-empty`/the string casts).
 
-Adapters differ widely in what they can express — `langchain-chromadb` compares 25 of the 168
-conformance actions where `ent` and `pgx` compare all but one — so the lists are expected to look
+Adapters differ widely in what they can express — `langchain-chromadb` compares 31 of the 176
+conformance actions where `ent` and `pgx` compare all but two — so the lists are expected to look
 different per harness. That is the point.
 
 ### Pinned throw messages
@@ -632,7 +674,7 @@ guard; run it before trusting it.
    what it actually says; the harness refuses to run with a message missing, so there is no way to
    forget one.
 6. Each harness pins the corpus size AND its throwing-action count as tripwires (e.g.
-   `expect(MANIFEST_ACTIONS.size).toBe(179)` and `expect(THROWING_ACTIONS).toHaveLength(55)` in
+   `expect(MANIFEST_ACTIONS.size).toBe(187)` and `expect(THROWING_ACTIONS).toHaveLength(55)` in
    `prisma/src/adversarial.test.ts`; the oracle counts too in the convex, langchain-chromadb and
    elasticsearch-java harnesses). Bump them deliberately — those assertions exist so a new action
    cannot slip past an adapter unnoticed. The convex harness additionally pins WHICH actions its

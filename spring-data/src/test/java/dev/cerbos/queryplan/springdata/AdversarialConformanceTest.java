@@ -1333,7 +1333,7 @@ class AdversarialConformanceTest {
                         .filter(Boolean::booleanValue).count() != 1)
                 .toList();
 
-        assertEquals(179, manifest.size(),
+        assertEquals(187, manifest.size(),
                 "corpus size changed; triage the new action(s) before bumping this pin");
         assertEquals(21, SEEDS.size(), "seed count changed");
         // Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
@@ -1392,7 +1392,12 @@ class AdversarialConformanceTest {
             // column under negation, the value-first concatenation solved back to a key
             // equality, and the key inside a constructed hierarchy path. The field-first
             // concatenation is the group's one rejection and is a probe below.
-            "id-eq-const", "id-f2f-ne", "id-concat-vf", "hier-list-id");
+            "id-eq-const", "id-f2f-ne", "id-concat-vf", "hier-list-id",
+            // Root position and bare operand forms (#388): one per hazard — the negation over a
+            // bare ordering (every other negated ordering in the corpus wraps a size() or a
+            // ternary), the bare boolean at the ROOT of the condition, and the collection
+            // subquery disjoined with a scalar predicate rather than conjoined with one.
+            "not-lt", "root-bare-bool", "or-eq-exists");
 
     /**
      * Shapes this adapter refuses to translate: they have no oracle comparison to guard, and stay

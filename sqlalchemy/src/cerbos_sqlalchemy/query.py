@@ -1433,7 +1433,20 @@ def get_query(
     # no enclosing override consumed — must be refused HERE, by the adapter, rather than left
     # for SQLAlchemy's where() coercion to trip over: a value that happened to coerce would
     # become a silently-wrong filter.
-    if not isinstance(condition, (ColumnElement, bool)):
+    #
+    # `InstrumentedAttribute` is accepted alongside `ColumnElement` because a bare boolean
+    # COLUMN is a legitimate root: `R.attr.aBool` alone plans to a condition that is a bare
+    # `{"variable": ...}` with no expression wrapper at all (`root-bare-bool`). The ORM
+    # attribute is a descriptor rather than a Core element, so it fails the ColumnElement
+    # check while being exactly what `where()` wants — and the same operand has always been
+    # accepted one level down, as an `and`/`or`/`not` child (`nary-and`). Refusing it only at
+    # the root made the position, not the shape, decide (cerbos/query-plan-adapters#388).
+    #
+    # This widens nothing that a mapper could not already reach: `GenericColumn` is
+    # `Column | InstrumentedAttribute`, and a Core `Column` IS a `ColumnElement`, so a mapper
+    # holding one has always been accepted here. The check was discriminating by which of the
+    # two flavours the mapper happened to hold, not by whether the root was boolean.
+    if not isinstance(condition, (ColumnElement, InstrumentedAttribute, bool)):
         raise ValueError(
             f"the plan's condition translated to {type(condition).__name__!r}, which is not "
             "a boolean SQL expression. filter() and map() return a list, so they cannot be a "

@@ -497,6 +497,13 @@ const DEGENERACY_GUARD_ACTIONS = [
   // CEL's `+` between two COLUMNS (#391). The post-filter concatenates in JavaScript, which is
   // CEL's own semantics, so convex needs no operand-type declaration to resolve the overload.
   "concat-f2f",
+  // Root position and bare operand forms (#388): one per hazard — the negation over a bare
+  // ordering (every other negated ordering in the corpus wraps a size() or a ternary), the bare
+  // boolean at the ROOT of the condition, and the collection subquery disjoined with a scalar
+  // predicate rather than conjoined with one.
+  "not-lt",
+  "root-bare-bool",
+  "or-eq-exists",
 ] as const;
 
 /**
@@ -526,20 +533,37 @@ const DEGENERACY_LIVENESS_PROBES = [
 // post-filter beside it. An action gaining or losing push-down fails this pin, which is the point:
 // the README's numbers are only trustworthy while a test enforces them.
 
+// Sorted, and it has to be: the assertion below compares this list against the classification
+// with `toEqual`, which is order-sensitive, and that classification is accumulated in
+// `ORACLE_ACTIONS` order — which is itself `.sort()`ed where it is built. A new entry therefore
+// goes in its alphabetical place, not at the end.
+//
+// gt-bare, le-bare, not-gt, not-lt, root-bare-bool and root-or are the root-position and
+// bare-operand forms (#388). Every one is a mapped, non-nullable field against a single literal —
+// or, for root-bare-bool, a boolean field with no literal at all — which is exactly what
+// `canPushToDb` accepts, so the engine decides all six with no post-filter beside them. They are
+// the largest single addition this list has taken, and that is the finding: the positions the
+// corpus had never planned turn out to be the ones Convex pushes down best.
 const DB_DECIDED_DEFAULT = [
   "cs-eq",
   "double-negation",
   "double-threshold",
   "empty-string-eq",
+  "gt-bare",
   // The primary key against a constant (#376). It reaches the engine for the same reason `cs-eq`
   // does — a mapped, non-nullable field compared with one literal — and is the only one of the
   // six id-* actions that does: the rest compare the key against another field or wrap it in a
   // concatenation, neither of which `canPushToDb` accepts.
   "id-eq-const",
   "in-single",
+  "le-bare",
   "nary-and",
   "neg-number",
+  "not-gt",
+  "not-lt",
   "p-struct",
+  "root-bare-bool",
+  "root-or",
   "triple-negation",
   "unicode-eq",
   "vf-ge",
@@ -913,10 +937,10 @@ describe("adversarial conformance corpus", () => {
         ].filter(Boolean).length !== 1,
     );
 
-    expect(allActions.size).toBe(179);
+    expect(allActions.size).toBe(187);
     expect(CONVEX_UNSUPPORTED).toHaveLength(3);
     expect(CONVEX_SUPPORTED_EXPECTED).toHaveLength(7);
-    expect(ORACLE_ACTIONS).toHaveLength(172);
+    expect(ORACLE_ACTIONS).toHaveLength(180);
     expect(THROWING_ACTIONS).toHaveLength(5);
     expect(misclassified).toEqual([]);
   });
@@ -1040,20 +1064,20 @@ describe("adversarial conformance corpus", () => {
       pushdownSplit: pushdown.split,
       pushdownPostCount: pushdown.post.length,
       // The two mappers must differ ONLY where the pushdown leg re-executes, which is what makes
-      // skipping the other 145 actions there sound rather than a coverage hole.
+      // skipping the other 147 actions there sound rather than a coverage hole.
       moved: pushdown.db.filter((action) => !base.db.includes(action)),
     }).toEqual({
-      total: 172,
+      total: 180,
       defaultDb: DB_DECIDED_DEFAULT,
       // Exactly one corpus action splits: `buildFilters` only splits a root `and`, and
       // rel-hop-and-root is the one hostile shape rooted there that mixes a pushable conjunct
       // with a non-pushable one (#375). Both mappers split it — the hop is `nullable` under each.
       defaultSplit: SPLIT_ACTIONS,
       defaultUnconditional: UNCONDITIONAL_ACTIONS,
-      defaultPostCount: 156,
+      defaultPostCount: 158,
       pushdownDb: DB_DECIDED_PUSHDOWN,
       pushdownSplit: SPLIT_ACTIONS,
-      pushdownPostCount: 145,
+      pushdownPostCount: 147,
       moved: PUSHDOWN_ONLY_ACTIONS,
     });
   });

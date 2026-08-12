@@ -2021,3 +2021,134 @@ resourcePolicy:
       condition:
         match:
           expr: P.attr.manyTeams.all(t, R.attr.aOptionalString != t)
+
+    # ==================== root position and bare operand forms ====================
+    #
+    # Not hazard classes. These are POSITIONS and operand forms the corpus happens never to
+    # produce, found by set-differencing wire-fixture node shapes — `operator(child,child)` with
+    # immediate child labels in source order — rather than by reasoning about what could go
+    # wrong. Every one is expected to translate everywhere, and the value is closing the hole
+    # rather than catching a live bug: a shape nothing plans is a shape no adapter is proved
+    # against, and "obviously supported" is not evidence.
+    #
+    # Each is spelled against a LOCAL scalar column on purpose. The relation block above reaches
+    # several of these node shapes — `gt(V,K)` via rel-gt-hop, `le(V,K)` via rel-le-hop, a bare
+    # root variable via rel-bool-hop, `or(...)` at the root via rel-hop2-or-exists — but only
+    # ever through the join machinery, which is a different walk and, for the adapters that
+    # refuse a hop, no walk at all.
+
+    # `not` over a BARE ordering. The corpus negates plenty of orderings, but every one of them
+    # wraps a size() or a ternary (w1-not-size-chain, ternary-negated, p-not-ternary-null), so
+    # the operand a store can actually index is never the thing under the negation. `not(lt)`
+    # is absent from the corpus outright; `not(gt)` exists only over those wrapped operands.
+    #
+    # The pair partitions the 21 seeds exactly — oracle a1/a3/a6/a8/a9/b1/b2/b4/b5/b6/c1/c2/
+    # d1/d2/e1/f1 (16) and a2/a4/a5/a7/b3 (5) — because aNumber is never NULL, so there is no
+    # third answer and a row missing from both sets is an adapter dropping rows. Dropping the
+    # negation is the failure this catches: it swaps the two oracles outright.
+    #
+    # `not-lt` shares its oracle with `gt-bare` below, since no seed's aNumber falls strictly
+    # between 1 and 2 and `>= 2` and `> 1` therefore select the same rows. That is an
+    # equivalence, not a blind spot — the two spellings ARE the same predicate on this data, and
+    # separating them would need a fractional seed this ticket deliberately does not add.
+    - actions: ["not-lt"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(R.attr.aNumber < 2)'
+
+    - actions: ["not-gt"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(R.attr.aNumber > 1)'
+
+    # Bare `gt` and `le` on a local column. `lt`, `ge`, `eq` and `ne` in this position all exist
+    # in the corpus (neg-number, double-threshold, cs-eq, optional-ne); these two do not, purely
+    # by accident of construction. The thresholds are chosen so the two oracles are NOT
+    # complements — `> 1` gives 16 rows, `<= 2` gives 7, and they overlap on a3/a8 (aNumber 2) —
+    # so an adapter that confused the two operators cannot land on the other action's answer.
+    - actions: ["gt-bare"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aNumber > 1'
+
+    - actions: ["le-bare"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aNumber <= 2'
+
+    # The ROOT of the condition is a bare boolean column — no comparison to unwrap, no operator
+    # to dispatch on. The corpus reaches this only through a hop (rel-bool-hop), and reaches a
+    # local `aBool` only as an `and` child (nary-and) or under a negation (double-negation).
+    # Root is a position adapters special-case: it is where a filter object is created rather
+    # than composed, and where a walker that assumes an operator node has nothing to read — the
+    # condition here is a bare `{"variable": ...}` with no `expression` wrapper at all.
+    # Oracle is the 14 aBool-TRUE rows.
+    - actions: ["root-bare-bool"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aBool'
+
+    # The root is a DISJUNCTION. Everything else in the corpus roots at a conjunction, a single
+    # comparison, or a negation; the one root-level `or` (rel-hop2-or-exists) is a two-level hop
+    # the join-less adapters never translate.
+    #
+    # The second disjunct is `aNumber < 0` and NOT the `aString != "one"` this action was
+    # specified with, because that spelling is TOTAL: `aString` is never NULL and only a1 holds
+    # "one", and a1's aBool is true, so every one of the 21 seeds is allowed and the comparison
+    # passes vacuously against any filter whatsoever. `< 0` instead admits two aBool-FALSE rows
+    # (a2, a5) and denies five others, so dropping either disjunct changes the answer.
+    - actions: ["root-or"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          any:
+            of:
+              - expr: R.attr.aBool
+              - expr: R.attr.aNumber < 0
+
+    # A subquery-producing operator DISJOINED with a scalar predicate. The corpus composes
+    # exists/in under `and` freely, but for an adapter that builds a correlated subquery,
+    # disjoining one is a different composition path from conjoining it — a subquery emitted as
+    # a row-restricting inner join is correct under `and` and drops rows under `or`.
+    #
+    # b6 is the witness that makes both non-trivial: its aBool is FALSE and its tags are
+    # [NULL-name, "public"], so the right branch has to absorb the NULL element and answer TRUE
+    # on its own. a5 is the plain aBool-FALSE-but-tagged witness. The five denied rows are the
+    # other side: a2/b2/c2/d2 carry no tags at all and b4's only tag is "mirror". Oracle
+    # a1/a3/a4/a5/a6/a7/a8/a9/b1/b3/b5/b6/c1/d1/e1/f1 (16) — an adapter that collapsed the
+    # disjunction to its left operand returns 14 and loses exactly a5 and b6.
+    - actions: ["or-eq-exists"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          any:
+            of:
+              - expr: R.attr.aBool
+              - expr: R.attr.tags.exists(t, t.name == "public")
+
+    # The membership spelling of the same composition. `in` over a relation column plans to a
+    # different operator than `exists` over a lambda — `in(K,V)`, value-first, against the
+    # derived tagNames column — and the two take different paths in every adapter that models
+    # collections, so covering one does not cover the other. Same oracle as or-eq-exists by
+    # construction: the two predicates select the same rows, and only the wire shape differs.
+    - actions: ["or-eq-in"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          any:
+            of:
+              - expr: R.attr.aBool
+              - expr: '"public" in R.attr.tagNames'

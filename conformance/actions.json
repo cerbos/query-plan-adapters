@@ -54,7 +54,9 @@
     "in-var-var", "in-var-var-neg",
     "null-eq", "null-ne", "vf-null-ne", "null-not-eq",
     "null-value-ne-const", "null-value-not-eq-const", "null-value-not-in-const",
-    "null-value-f2f", "null-value-pv-not-exists"
+    "null-value-f2f", "null-value-pv-not-exists",
+    "not-lt", "not-gt", "gt-bare", "le-bare",
+    "root-bare-bool", "root-or", "or-eq-exists", "or-eq-in"
   ],
   "adapterUnsupported": {
     "ent": [
@@ -322,6 +324,8 @@
       { "action": "id-f2f-ne", "reason": "Same variable-to-variable limitation as id-f2f, under negation", "message": "Variable-to-variable comparisons are not supported by ChromaDB filters" },
       { "action": "id-concat", "reason": "The value side is a concatenation of a constant with the primary key — a computed operand, which the Where model has no form for. The comparison is refused before the second metadata key it names is reached", "message": "Nested expressions are not supported by ChromaDB filters" },
       { "action": "id-concat-vf", "reason": "Same missing computed operand as id-concat, in value-first form", "message": "Nested expressions are not supported by ChromaDB filters" },
+      { "action": "or-eq-exists", "reason": "Same missing nested-operand form as rel-hop2-or-exists, without the relation hop that masked it: the disjunction's left branch IS a bare boolean metadata field Chroma can take, and the right branch is an exists macro over a collection, which it cannot. A Where clause has no way to hold one of the two, so the whole disjunction is refused", "message": "Nested expressions are not supported by ChromaDB filters" },
+      { "action": "or-eq-in", "reason": "The membership spelling of or-eq-exists. Chroma's $in tests a metadata field against a literal LIST; the plan asks the mirror image — whether a literal is a member of a list-valued metadata field — and Chroma metadata values are scalars anyway, so the right branch is refused before the disjunction is built", "message": "ChromaDB filters cannot test whether a literal is contained in a metadata field" },
       { "action": "hier-list-id", "reason": "Chroma metadata filters have no path or prefix operator, and both hierarchy(...) operands are computed — one of them from a list() built around the primary key — so neither side reduces to the bare field or literal a Where clause requires", "message": "Nested expressions are not supported by ChromaDB filters" },
       { "action": "concat-f2f", "reason": "The comparison's left operand is a concatenation of two metadata fields — a computed operand, which the Where model has no form for. Chroma never reaches the question of which `+` overload the plan means", "message": "Nested expressions are not supported by ChromaDB filters" }
     ],
