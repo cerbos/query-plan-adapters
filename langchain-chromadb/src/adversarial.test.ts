@@ -595,6 +595,11 @@ const DEGENERACY_GUARD_ACTIONS = [
   // on one side and a constant on the other. Its five siblings compare the key against a second
   // key or wrap it in a computed operand, and are liveness probes below.
   "id-eq-const",
+  // Root position and bare operand forms (#388). Chroma takes both scalar shapes: a bare
+  // metadata key under a negated ordering, and a bare boolean key as the whole condition. Its
+  // two collection-disjunction siblings throw and are liveness probes below.
+  "not-lt",
+  "root-bare-bool",
 ] as const;
 
 /**
@@ -639,6 +644,10 @@ const DEGENERACY_LIVENESS_PROBES = [
   "cast-string-bool",
   // A concatenation of two metadata fields is a computed operand, which Chroma has no form for.
   "concat-f2f",
+  // The disjoined collection subquery (#388). Chroma's Where model has no nested-expression
+  // form, so the exists branch is refused and the whole disjunction with it — the group's only
+  // fail-closed member here, kept as a probe because the compared pair above cannot cover it.
+  "or-eq-exists",
 ] as const;
 
 // Fields are optional unless declared otherwise, so `$ne`/`$nin` are rejected by default.
@@ -979,12 +988,12 @@ describe("adversarial conformance corpus", () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(179);
-    expect(CHROMA_SUPPORTED_ACTIONS).toHaveLength(25);
+    expect(MANIFEST_ACTIONS.size).toBe(187);
+    expect(CHROMA_SUPPORTED_ACTIONS).toHaveLength(31);
     expect(oracle.size).toBe(CHROMA_SUPPORTED_ACTIONS.length);
-    expect(CHROMA_UNSUPPORTED).toHaveLength(143);
+    expect(CHROMA_UNSUPPORTED).toHaveLength(145);
     expect(CHROMA_SUPPORTED_EXPECTED).toHaveLength(0);
-    expect(THROWING_ACTIONS).toHaveLength(152);
+    expect(THROWING_ACTIONS).toHaveLength(154);
     expect(misclassified).toEqual([]);
   });
 

@@ -70,7 +70,7 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` d
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 128 reference conformance actions plus regex, ordered indexing/`get-field`, timestamp and mixed-null field-to-field probes (132 actions) |
+| Oracle-tested | 136 reference conformance actions plus regex, ordered indexing/`get-field`, timestamp and mixed-null field-to-field probes (140 actions) |
 | Fail-closed | 40 reference actions plus the 5 reference-unsupported shapes (45 actions total) |
 | Operand types the plan does not carry | CEL overloads `+` on strings and a query plan names no field types. One string operand settles it, so `R.attr.a + "x"` translates as `$concat`. Between **two field paths** neither does, and MongoDB spells the two differently — `$add` takes numeric and date types only — so the shape is refused at translation. It previously reached the server as `$add`, which aborts the whole query (cerbos/query-plan-adapters#391) |
 | Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`. Under the default it already returns the empty set the PDP demands, because `nullable: true` on a mapper entry declares per-attribute that a stored null is a missing Cerbos attribute; the global option is the backstop for mappings that do not declare it |

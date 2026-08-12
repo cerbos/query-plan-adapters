@@ -653,6 +653,13 @@ const DEGENERACY_GUARD_ACTIONS = [
   // `$toString(true)` is "true", the same rendering CEL uses, so unlike the SQL adapters there
   // is no store-dependent 1/0 to refuse.
   "cast-string-bool",
+  // Root position and bare operand forms (#388): one per hazard — the negation over a bare
+  // ordering (every other negated ordering in the corpus wraps a size() or a ternary), the bare
+  // boolean at the ROOT of the condition, and the collection subquery disjoined with a scalar
+  // predicate rather than conjoined with one.
+  "not-lt",
+  "root-bare-bool",
+  "or-eq-exists",
 ] as const;
 
 /**
@@ -1237,10 +1244,10 @@ describe("adversarial conformance corpus", () => {
       return count !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(179);
+    expect(MANIFEST_ACTIONS.size).toBe(187);
     expect(unsupportedEntries).toHaveLength(40);
     expect(supportedExpectedEntries).toHaveLength(4);
-    expect(ORACLE_ACTIONS).toHaveLength(132);
+    expect(ORACLE_ACTIONS).toHaveLength(140);
     expect(THROWING_ACTIONS).toHaveLength(45);
     expect(misclassified).toEqual([]);
     expect(

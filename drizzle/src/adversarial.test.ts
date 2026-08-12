@@ -391,6 +391,13 @@ const DEGENERACY_GUARD_ACTIONS = [
   // instead, because CAST(... AS TEXT) is store-dependent there — the two are deliberately
   // classified apart, so this entry proves the supported half still compares.
   "cast-string-double",
+  // Root position and bare operand forms (#388): one per hazard — the negation over a bare
+  // ordering (every other negated ordering in the corpus wraps a size() or a ternary), the bare
+  // boolean at the ROOT of the condition, and the collection subquery disjoined with a scalar
+  // predicate rather than conjoined with one.
+  "not-lt",
+  "root-bare-bool",
+  "or-eq-exists",
 ] as const;
 
 // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") --------
@@ -1475,7 +1482,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(179);
+    expect(MANIFEST_ACTIONS.size).toBe(187);
     expect(NULL_REPRESENTATION_OMITTED).toHaveLength(1);
     // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
     // gained or lost has to be re-triaged here rather than joining the suite unnoticed.
