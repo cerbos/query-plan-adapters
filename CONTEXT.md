@@ -18,6 +18,20 @@ An adapter's implementation of the conformance corpus against its own store, bui
 adapter's source rather than its published package. One per adapter.
 _Avoid_: adversarial suite, differential test, integration test
 
+**Wire fixture**:
+One golden `PlanResources` response per corpus action, captured against the pinned PDP and stored
+in `conformance/wire-fixtures/`. Pins planner *shape* — operator, operand order, filter kind —
+independent of any adapter or database.
+_Avoid_: golden plan, plan fixture, recorded response
+
+**Translator unit test**:
+An adapter's offline test that a plan produces the expected database-native filter. Takes its
+plans from wire fixtures, runs without a PDP and without a store, and asserts the emitted filter
+and nothing else — see
+[ADR 0006](docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md). Distinct
+from the conformance harness, which proves the rows that filter returns.
+_Avoid_: unit test, filter test, shape test
+
 **Semantics**:
 Whether a translated filter returns exactly the rows the PDP would allow. The property the
 conformance corpus proves.

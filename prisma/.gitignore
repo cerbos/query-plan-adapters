@@ -2,8 +2,6 @@ node_modules
 dist
 lib
 .DS_Store
-prisma/dev.db
-prisma/dev.db-journal
 prisma/dev-adversarial.db
 prisma/dev-adversarial.db-journal
 tsconfig.tsbuildinfo
