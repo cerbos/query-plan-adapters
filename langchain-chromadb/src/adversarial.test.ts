@@ -600,6 +600,12 @@ const DEGENERACY_GUARD_ACTIONS = [
   // two collection-disjunction siblings throw and are liveness probes below.
   "not-lt",
   "root-bare-bool",
+  // Hazard classes the corpus missed (#387). Chroma takes the two scalar shapes: the De Morgan
+  // branch over a conjunction of metadata keys, and the BELOW-cliff unroll of a principal
+  // collection, which folds to a plain disjunction of equalities. Its eight collection-, cast-
+  // and pattern-carrying siblings throw and are liveness probes below.
+  "not-and",
+  "pv-exists-unrolled",
 ] as const;
 
 /**
@@ -648,6 +654,17 @@ const DEGENERACY_LIVENESS_PROBES = [
   // form, so the exists branch is refused and the whole disjunction with it — the group's only
   // fail-closed member here, kept as a probe because the compared pair above cannot cover it.
   "or-eq-exists",
+  // #387, one probe per group Chroma cannot compare: the negated LIKE (no pattern operator to
+  // negate), the modulo, the scalar-list index and the list equality over a projection (all
+  // computed operands), the mirrored hasIntersection (metadata values are scalars, so there is
+  // no list to intersect), and the unrolled all(), whose $ne chain would match every document
+  // missing the optional key — the same over-grant that refuses pv-all.
+  "not-contains",
+  "arith-mod",
+  "index-scalar-list",
+  "map-eq-list",
+  "vf-hasint",
+  "pv-all-unrolled",
 ] as const;
 
 // Fields are optional unless declared otherwise, so `$ne`/`$nin` are rejected by default.
@@ -988,12 +1005,12 @@ describe("adversarial conformance corpus", () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(187);
-    expect(CHROMA_SUPPORTED_ACTIONS).toHaveLength(31);
+    expect(MANIFEST_ACTIONS.size).toBe(199);
+    expect(CHROMA_SUPPORTED_ACTIONS).toHaveLength(34);
     expect(oracle.size).toBe(CHROMA_SUPPORTED_ACTIONS.length);
-    expect(CHROMA_UNSUPPORTED).toHaveLength(145);
+    expect(CHROMA_UNSUPPORTED).toHaveLength(153);
     expect(CHROMA_SUPPORTED_EXPECTED).toHaveLength(0);
-    expect(THROWING_ACTIONS).toHaveLength(154);
+    expect(THROWING_ACTIONS).toHaveLength(163);
     expect(misclassified).toEqual([]);
   });
 
@@ -1024,12 +1041,39 @@ describe("adversarial conformance corpus", () => {
     },
   );
 
+  // #387. `filter-as-conjunct` puts a filter() one level below the root, where the guard that
+  // refuses `filter-as-condition` does not look. Its oracle is empty BY CONSTRUCTION — check()
+  // cannot evaluate a non-boolean conjunction — so it belongs to neither degeneracy-guard list,
+  // and a bare "it throws" would say nothing about whether refusing it is REQUIRED.
+  //
+  // This is that argument. The other conjunct is `R.attr.aBool`, which Chroma certainly can
+  // express and which `root-bare-bool` spells on its own; an adapter that dropped the conjunct it
+  // could not translate would emit exactly that filter and return every document it selects, all
+  // of which the PDP denies for this action.
+  test("filter-as-conjunct must be refused: dropping its untranslatable half over-grants", async () => {
+    expect(await oracleAllowedIds("filter-as-conjunct")).toEqual([]);
+
+    const survivingHalf = await adapterFilteredIds("root-bare-bool");
+    expect(survivingHalf.length).toBeGreaterThan(0);
+    expect(survivingHalf.length).toBeLessThan(SEEDS.length);
+
+    const entry = THROWING_ACTIONS.find(
+      ({ action }) => action === "filter-as-conjunct",
+    );
+    expect(entry).toBeDefined();
+    const queryPlan = await planFor("filter-as-conjunct");
+    expect(() =>
+      queryPlanToChromaDB({ queryPlan, fieldNameMapper: FIELD_NAME_MAPPER }),
+    ).toThrow(entry?.message);
+  });
+
   // #302. Chroma is one of two adapters that need no `nullAttributeRepresentation` option: its
   // metadata filters accept only finite numbers, strings and booleans, so a null comparison
   // operand is rejected before the representation could matter. `null-eq` (explicit null) is
   // already in `adapterUnsupported` for the same reason, and `null-eq-missing` must fail the same
   // way. This test guards that equivalence: if Chroma ever gains a null sentinel, the shape stops
   // throwing here and the adapter acquires a representation dependency it must then declare.
+
   test.each(NULL_REPRESENTATION_OMITTED)(
     "$action is rejected regardless of representation ($reason)",
     async ({ action, message }) => {

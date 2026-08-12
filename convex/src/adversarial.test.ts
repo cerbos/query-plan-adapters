@@ -504,6 +504,18 @@ const DEGENERACY_GUARD_ACTIONS = [
   "not-lt",
   "root-bare-bool",
   "or-eq-exists",
+  // Hazard classes the corpus missed (#387). Convex translates all eleven of the compared ones,
+  // and for three of them it is the ONLY adapter that does — the post-filter reimplements CEL
+  // rather than lowering to a query language, so modulo, a positional read of a scalar list and
+  // list equality all have exact meanings here. Those three carry the whole corpus's oracle
+  // comparison for their groups; every other adapter probes them fail-closed.
+  "not-and",
+  "not-contains",
+  "arith-mod",
+  "index-scalar-list",
+  "map-eq-list",
+  "vf-hasint",
+  "pv-exists-unrolled",
 ] as const;
 
 /**
@@ -559,6 +571,7 @@ const DB_DECIDED_DEFAULT = [
   "le-bare",
   "nary-and",
   "neg-number",
+  "not-and",
   "not-gt",
   "not-lt",
   "p-struct",
@@ -568,6 +581,7 @@ const DB_DECIDED_DEFAULT = [
   "unicode-eq",
   "vf-ge",
   "vf-le",
+  "vf-lt",
   "vf-ne",
 ];
 
@@ -937,11 +951,11 @@ describe("adversarial conformance corpus", () => {
         ].filter(Boolean).length !== 1,
     );
 
-    expect(allActions.size).toBe(187);
+    expect(allActions.size).toBe(199);
     expect(CONVEX_UNSUPPORTED).toHaveLength(3);
     expect(CONVEX_SUPPORTED_EXPECTED).toHaveLength(7);
-    expect(ORACLE_ACTIONS).toHaveLength(180);
-    expect(THROWING_ACTIONS).toHaveLength(5);
+    expect(ORACLE_ACTIONS).toHaveLength(191);
+    expect(THROWING_ACTIONS).toHaveLength(6);
     expect(misclassified).toEqual([]);
   });
 
@@ -1064,22 +1078,55 @@ describe("adversarial conformance corpus", () => {
       pushdownSplit: pushdown.split,
       pushdownPostCount: pushdown.post.length,
       // The two mappers must differ ONLY where the pushdown leg re-executes, which is what makes
-      // skipping the other 147 actions there sound rather than a coverage hole.
+      // skipping the other 156 actions there sound rather than a coverage hole.
       moved: pushdown.db.filter((action) => !base.db.includes(action)),
     }).toEqual({
-      total: 180,
+      total: 191,
       defaultDb: DB_DECIDED_DEFAULT,
       // Exactly one corpus action splits: `buildFilters` only splits a root `and`, and
       // rel-hop-and-root is the one hostile shape rooted there that mixes a pushable conjunct
       // with a non-pushable one (#375). Both mappers split it — the hop is `nullable` under each.
       defaultSplit: SPLIT_ACTIONS,
       defaultUnconditional: UNCONDITIONAL_ACTIONS,
-      defaultPostCount: 158,
+      defaultPostCount: 167,
       pushdownDb: DB_DECIDED_PUSHDOWN,
       pushdownSplit: SPLIT_ACTIONS,
-      pushdownPostCount: 147,
+      pushdownPostCount: 156,
       moved: PUSHDOWN_ONLY_ACTIONS,
     });
+  });
+
+  // #387. `filter-as-conjunct` puts a filter() one level below the root, where the guard that
+  // refuses `filter-as-condition` did not look — and this adapter is where that mattered: the
+  // post-filter read the held list through asBoolean(), got an evaluation error, and denied every
+  // row, so the emitted filter AGREED with the empty oracle while translating a shape with no
+  // boolean meaning. Its oracle is empty BY CONSTRUCTION, so it belongs to neither
+  // degeneracy-guard list and a bare "it throws" would say nothing about whether refusing it is
+  // REQUIRED.
+  //
+  // This is that argument. The other conjunct is `R.attr.aBool`, which the adapter certainly can
+  // express and which `root-bare-bool` spells on its own; an adapter that dropped the conjunct it
+  // could not translate would emit exactly that filter and return every row it selects, all of
+  // which the PDP denies for this action.
+  test("filter-as-conjunct must be refused: dropping its untranslatable half over-grants", async () => {
+    expect(await oracleAllowedIds("filter-as-conjunct")).toEqual([]);
+
+    const survivingHalf = await adapterFilteredIds("root-bare-bool");
+    expect(survivingHalf.length).toBeGreaterThan(0);
+    expect(survivingHalf.length).toBeLessThan(seedsFile.seeds.length);
+
+    const entry = THROWING_ACTIONS.find(
+      ({ action }) => action === "filter-as-conjunct",
+    );
+    expect(entry).toBeDefined();
+    const queryPlan = await cerbos.planResources({
+      principal: seedsFile.principal,
+      resource: { kind: seedsFile.resourceKind },
+      action: "filter-as-conjunct",
+    });
+    expect(() =>
+      queryPlanToConvex({ queryPlan, mapper: MAPPER, allowPostFilter: true }),
+    ).toThrow(entry?.message);
   });
 
   // #302. `null-eq-missing` probes `aOptionalString == null`, and `aOptionalString` follows the
@@ -1101,6 +1148,7 @@ describe("adversarial conformance corpus", () => {
   //
   // A deployment that stored explicit nulls while omitting the attribute at check time would
   // over-grant exactly as a SQL adapter does, which is what the option guards.
+
   test.each(NULL_REPRESENTATION_OMITTED)(
     "$action aligns via the omitted document shape and is rejected under omitted ($reason)",
     async ({ action, message }) => {

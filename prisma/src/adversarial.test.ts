@@ -383,10 +383,12 @@ const MANIFEST_ACTIONS = new Set([
 // can express. The two lists are asserted to be complements of `ORACLE_ACTIONS`, so neither can
 // drift into the other unnoticed.
 //
-// w1-size-zero-chain, w1-not-size-chain, w1-size-frac-chain and the two string-cast actions are
-// deliberately absent from both lists: their oracles are empty by CONSTRUCTION (no seed holds a
-// to-one parent with zero children, nor one with two or more; every seed's aString raises in
-// int()/double()), so they cannot satisfy a non-empty assertion.
+// w1-size-zero-chain, w1-not-size-chain, w1-size-frac-chain, the two string-cast actions and
+// filter-as-conjunct are deliberately absent from both lists: their oracles are empty by
+// CONSTRUCTION (no seed holds a to-one parent with zero children, nor one with two or more; every
+// seed's aString raises in int()/double(); a filter() in boolean position is not evaluable at
+// all), so they cannot satisfy a non-empty assertion. filter-as-conjunct carries its own
+// anti-vacuity test instead — see "dropping the untranslatable half over-grants" below.
 
 const DEGENERACY_GUARD_ACTIONS = [
   "vf-le",
@@ -439,6 +441,13 @@ const DEGENERACY_GUARD_ACTIONS = [
   "not-lt",
   "root-bare-bool",
   "or-eq-exists",
+  // Hazard classes the corpus missed (#387): the De Morgan branch over a conjunction, the
+  // value-first hasIntersection whose operands are not interchangeable in the emitted query, and
+  // the BELOW-cliff unroll of a principal collection — the shape a principal with three teams
+  // produces, which nothing planned while pv-exists carried only the value-list form.
+  "not-and",
+  "vf-hasint",
+  "pv-exists-unrolled",
 ] as const;
 
 /**
@@ -472,6 +481,13 @@ const DEGENERACY_LIVENESS_PROBES = [
   // The same missing form with BOTH operands columns, so there is no constant to invert off
   // either side (#391).
   "concat-f2f",
+  // #387, one probe per group Prisma cannot compare. The negated LIKE is refused for its COLUMN
+  // needle before the negation matters, so the whole not-* group throws; `mod`, a positional read
+  // of a scalar list, and list equality over a projection have no Prisma filter form at all.
+  "not-contains",
+  "arith-mod",
+  "index-scalar-list",
+  "map-eq-list",
 ] as const;
 
 // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") --------
@@ -1056,10 +1072,10 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(187);
+    expect(MANIFEST_ACTIONS.size).toBe(199);
     // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
     // gained or lost has to be re-triaged here rather than joining the suite unnoticed.
-    expect(THROWING_ACTIONS).toHaveLength(55);
+    expect(THROWING_ACTIONS).toHaveLength(61);
     expect(misclassified).toEqual([]);
     expect(
       [...PRISMA_SUPPORTED_EXPECTED].filter(
@@ -1108,6 +1124,31 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       ).toThrow(message);
     }
   );
+
+  // #387. `filter-as-conjunct` puts a filter() one level below the root, where the guard that
+  // refuses `filter-as-condition` does not look. Its oracle is empty BY CONSTRUCTION — check()
+  // cannot evaluate a non-boolean conjunction — so it belongs to neither degeneracy-guard list,
+  // and a bare "it throws" would say nothing about whether refusing it is REQUIRED.
+  //
+  // This is that argument. The other conjunct is `R.attr.aBool`, which the adapter certainly can
+  // express and which `root-bare-bool` spells on its own; an adapter that dropped the conjunct it
+  // could not translate would emit exactly that filter and return every row it selects, all of
+  // which the PDP denies for this action.
+  test("filter-as-conjunct must be refused: dropping its untranslatable half over-grants", async () => {
+    expect(await oracleAllowedIds("filter-as-conjunct")).toEqual([]);
+
+    const survivingHalf = await adapterFilteredIds("root-bare-bool");
+    expect(survivingHalf.length).toBeGreaterThan(0);
+    expect(survivingHalf.length).toBeLessThan(SEEDS.length);
+
+    const message = THROWING_ACTIONS.find(
+      ([action]) => action === "filter-as-conjunct"
+    )?.[2];
+    expect(message).toBeDefined();
+    await expect(adapterFilteredIds("filter-as-conjunct")).rejects.toThrow(
+      message
+    );
+  });
 
   // #302. `null-eq-missing` probes `aOptionalString == null`, and `aOptionalString` follows the
   // corpus default: a NULL column sends NO attribute. Both halves are asserted because the

@@ -1218,6 +1218,39 @@ const carriesNullLiteral = (operand: PlanExpressionOperand): boolean =>
   (operand.value === null ||
     (Array.isArray(operand.value) && operand.value.includes(null)));
 
+// `filter()` and `map()` return a list, not a boolean. CEL raises for a non-boolean condition
+// (deny), and the post-filter's asBoolean() reads a list as an evaluation error — which
+// happens to deny every row and so to AGREE with the oracle, silently, while still emitting a
+// filter for a shape that has no boolean meaning. The conformance contract forbids that:
+// translating it means choosing a meaning the policy never stated. Throw instead.
+//
+// Every boolean POSITION is checked, not just the root. `and(filter(...), aBool)` puts the
+// macro one level down, where the recursion dispatches on the operator and the root check
+// never runs — the position was deciding rather than the shape (`filter-as-conjunct`,
+// cerbos/query-plan-adapters#387). The walk stops at `and`/`or`/`not` because those are the
+// only operators whose operands are themselves conditions; inside `size()` a list is exactly
+// what is wanted, and both macros stay translatable there.
+const assertNoListValuedCondition = (
+  expression: PlanExpressionOperand,
+): void => {
+  if (!isExpression(expression)) return;
+  if (expression.operator === "filter" || expression.operator === "map") {
+    throw new Error(
+      `${expression.operator}() returns a list, not a boolean, so it cannot be a condition ` +
+        "on its own; only size() over its result has a boolean meaning",
+    );
+  }
+  if (
+    expression.operator === "and" ||
+    expression.operator === "or" ||
+    expression.operator === "not"
+  ) {
+    for (const operand of expression.operands) {
+      assertNoListValuedCondition(operand);
+    }
+  }
+};
+
 const assertNoNullComparisonOperands = (
   expression: PlanExpressionOperand,
 ): void => {
@@ -1250,21 +1283,7 @@ export function queryPlanToConvex<Q = unknown, R = unknown>({
     case PlanKind.ALWAYS_DENIED:
       return { kind: PlanKind.ALWAYS_DENIED };
     case PlanKind.CONDITIONAL: {
-      // A `filter()` or `map()` at the ROOT of the condition returns a list, not a boolean.
-      // CEL raises for a non-boolean condition (deny), and the post-filter's `=== true`
-      // coercion would happen to agree — but silently, by coercing a list to false. That is
-      // an emitted filter for a shape with no boolean meaning, which the conformance
-      // contract forbids: throw instead. Nested inside size() they remain translatable.
-      const root = queryPlan.condition;
-      if (
-        isExpression(root) &&
-        (root.operator === "filter" || root.operator === "map")
-      ) {
-        throw new Error(
-          `${root.operator}() returns a list, not a boolean, so it cannot be a condition ` +
-            "on its own; only size() over its result has a boolean meaning",
-        );
-      }
+      assertNoListValuedCondition(queryPlan.condition);
       if (nullAttributeRepresentation === "omitted") {
         assertNoNullComparisonOperands(queryPlan.condition);
       }

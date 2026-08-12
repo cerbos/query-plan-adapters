@@ -1956,12 +1956,28 @@ const buildHasIntersectionFilter = (
     throw new Error("'hasIntersection' operator requires exactly two operands");
   }
 
-  const leftOperand = operands[0];
-  const rightOperand = operands[1];
-  if (!leftOperand || !rightOperand) {
+  const firstOperand = operands[0];
+  const secondOperand = operands[1];
+  if (!firstOperand || !secondOperand) {
     throw new Error("'hasIntersection' requires exactly two operands");
   }
-  const rightValues = extractArrayValue(rightOperand) ?? [];
+  // hasIntersection is commutative and the planner preserves source order, so the constant
+  // list arrives FIRST when the policy spells it first. The two operands are not
+  // interchangeable in the emitted SQL — one is a column the store can index, the other a
+  // parameter list — so normalize to collection-first rather than reading them positionally.
+  const collectionFirst = extractArrayValue(firstOperand) === undefined;
+  const leftOperand = collectionFirst ? firstOperand : secondOperand;
+  const rightOperand = collectionFirst ? secondOperand : firstOperand;
+
+  // A missing list is NOT an empty one. Folding the two together used to translate the
+  // value-first spelling into `FALSE`, returning no rows for a shape the adapter can express
+  // — an emitted filter the corpus forbids, silent because it never threw (#387).
+  const rightValues = extractArrayValue(rightOperand);
+  if (rightValues === undefined) {
+    throw new Error(
+      "'hasIntersection' requires a literal list as one of its operands",
+    );
+  }
 
   if (rightValues.length === 0) {
     return FALSE_CONDITION;

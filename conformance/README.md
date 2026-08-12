@@ -503,6 +503,65 @@ specified with: `aString` is never NULL and only one seed holds `"one"`, whose `
 that spelling allows all 21 seeds. A total oracle is exactly what the degeneracy guard below exists
 to catch, and it would have passed against any filter whatsoever.
 
+### Hazard classes the corpus missed
+
+Twelve actions — `not-and`, `not-contains`, `not-startswith`, `arith-mod`, `index-scalar-list`,
+`map-eq-list`, `vf-lt`, `vf-size`, `vf-hasint`, `pv-exists-unrolled`, `pv-all-unrolled` and
+`filter-as-conjunct` — were found the same way as the block above, by set-differencing wire-fixture
+node shapes, but they are kept for a different reason (#387). Each pins a place where CEL and a
+store's query language are known to disagree, or where this repository has already shipped the same
+bug to several adapters, and no existing action reaches it:
+
+- **`not-and`** is the De Morgan branch. The corpus negates `eq`, `ne`, `in`, `exists`,
+  `exists_one`, `all`, `gt`, `lt`, `hasIntersection` and `or` — never `and`. It is also, byte for
+  byte, the shape a DENY rule composes to, so the corpus covers that path without a second policy.
+- **`not-contains` / `not-startswith`** negate a LIKE, which the corpus never did, against a
+  **column** needle so the negation meets the NULL-needle rows. Both hazards live there: three-valued
+  logic (a NULL needle must be UNKNOWN, not FALSE, or `NOT` flips it and every such row leaks) and
+  metacharacter escaping in the direction that under-grants, which no positive LIKE action can see.
+- **`arith-mod`** is spelled `int(R.attr.aNumber) % 2 == 1`, not the `== 0` it was specified with:
+  `x % 2 == 0` is sign-INVARIANT, so truncated modulo (CEL, Go, SQL, JavaScript) and floored modulo
+  (Python) give the same answer and the disagreement the action exists to pin cannot change it.
+  `== 1` makes the `-5` seed the witness, and the failure direction is an over-grant.
+- **`index-scalar-list`** indexes a scalar list directly, a bare `index(V,K)` in an operand
+  position; `p-index` reaches its rejection through the `get-field` projection wrapping it.
+- **`map-eq-list`** compares a projection to a literal list. The corpus only ever fed `map` into
+  `hasIntersection` or left it bare.
+- **`vf-lt` / `vf-size` / `vf-hasint`** complete the value-first family, this repository's canonical
+  bug class (#258/#259). `vf-hasint` matters most: the operator is commutative, so an inversion is
+  invisible in the answer, but the two operands are not interchangeable in the emitted query.
+- **`pv-exists-unrolled` / `pv-all-unrolled`** plan the other side of the planner's unroll cliff.
+  `manyTeams` holds eleven elements deliberately, so `pv-exists`/`pv-all` only ever produced the
+  value-list form; `fewTeams` is the same witness set at three, which the planner unrolls into an
+  or/and chain — the shape most real principals actually produce.
+- **`filter-as-conjunct`** puts a `filter()` one level below the root. `filter-as-condition` pins
+  the rejection at the root, which is the position an adapter checks explicitly; an adapter can
+  reject there and still walk a macro sitting in a conjunct.
+
+Six adapters diverged, which is why the group is worth having rather than a reason it should have
+been skipped. Two were emitted filters where the contract demands a throw — **drizzle** translated
+the mirrored `hasIntersection` to a bare `FALSE`, and **sqlalchemy** compared an unconsumed
+override intermediate with Python `==` and got a bare `False` that reached `where()`. Two were
+root-only guards that `filter-as-conjunct` walked around: **convex**'s post-filter read the held
+list through `asBoolean()`, denied every row and so AGREED with the empty oracle while translating
+a shape with no boolean meaning, and **sqlalchemy**'s conjunct reached `and_()` and raised
+SQLAlchemy's own coercion error rather than one naming the mechanism. **ent** and **pgx** bound a
+held collection as a query PARAMETER, so only the driver's encoder refused it, at execution time.
+**elasticsearch-java** scanned a size comparison's operands without mirroring the operator, reading
+`0 < size(c)` as `size(c) < 0` and refusing a supported emptiness check.
+
+The seventh is the one the group was written for. **spring-data** rendered a column-needle LIKE as
+`needle IS NOT NULL AND haystack LIKE pattern` — definite FALSE for a NULL needle, which `NOT`
+flips to TRUE. Every negated column-needle match returned exactly the rows whose needle is NULL,
+which the PDP denies. That is an over-grant in a published package, and no hand-written expectation
+had ever been in a position to notice it.
+
+`filter-as-conjunct`'s oracle is empty by construction, so it stays out of both degeneracy-guard
+lists and carries its own anti-vacuity assertion in every harness: the other conjunct is
+`R.attr.aBool`, which `root-bare-bool` spells on its own and which every adapter can express, so an
+adapter that dropped the untranslatable half would emit that filter and return 14 rows the PDP
+denies. The assertion pins that, not merely that a rejection happens.
+
 ### The degeneracy guard
 
 The comparison in step 4 can pass vacuously if the oracle itself is trivial (e.g. the PDP denies
@@ -531,8 +590,8 @@ is empty *by construction* is unchanged: it belongs in neither list (see
 `nullRepresentationOmitted` above, and
 `w1-size-zero-chain`/`w1-not-size-chain`/`w1-size-frac-chain`/`in-empty`/the string casts).
 
-Adapters differ widely in what they can express — `langchain-chromadb` compares 31 of the 176
-conformance actions where `ent` and `pgx` compare all but two — so the lists are expected to look
+Adapters differ widely in what they can express — `langchain-chromadb` compares 34 of the 187
+conformance actions where `ent` and `pgx` compare all but five — so the lists are expected to look
 different per harness. That is the point.
 
 ### Pinned throw messages
@@ -674,7 +733,7 @@ guard; run it before trusting it.
    what it actually says; the harness refuses to run with a message missing, so there is no way to
    forget one.
 6. Each harness pins the corpus size AND its throwing-action count as tripwires (e.g.
-   `expect(MANIFEST_ACTIONS.size).toBe(187)` and `expect(THROWING_ACTIONS).toHaveLength(55)` in
+   `expect(MANIFEST_ACTIONS.size).toBe(199)` and `expect(THROWING_ACTIONS).toHaveLength(61)` in
    `prisma/src/adversarial.test.ts`; the oracle counts too in the convex, langchain-chromadb and
    elasticsearch-java harnesses). Bump them deliberately — those assertions exist so a new action
    cannot slip past an adapter unnoticed. The convex harness additionally pins WHICH actions its

@@ -398,6 +398,15 @@ const DEGENERACY_GUARD_ACTIONS = [
   "not-lt",
   "root-bare-bool",
   "or-eq-exists",
+  // Hazard classes the corpus missed (#387): the De Morgan branch over a conjunction; the negated
+  // LIKE against a COLUMN needle, where a definite-FALSE null guard would leak every NULL-needle
+  // row through the NOT; the value-first hasIntersection, which used to translate to a bare FALSE
+  // here because the operands were read positionally; and the BELOW-cliff unroll of a principal
+  // collection, the shape a principal with three teams produces.
+  "not-and",
+  "not-contains",
+  "vf-hasint",
+  "pv-exists-unrolled",
 ] as const;
 
 // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") --------
@@ -1482,11 +1491,11 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(187);
+    expect(MANIFEST_ACTIONS.size).toBe(199);
     expect(NULL_REPRESENTATION_OMITTED).toHaveLength(1);
     // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
     // gained or lost has to be re-triaged here rather than joining the suite unnoticed.
-    expect(THROWING_ACTIONS).toHaveLength(16);
+    expect(THROWING_ACTIONS).toHaveLength(20);
     expect(misclassified).toEqual([]);
     expect(
       [...DRIZZLE_SUPPORTED_EXPECTED].filter(
@@ -1531,10 +1540,36 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
     },
   );
 
+  // #387. `filter-as-conjunct` puts a filter() one level below the root, where the guard that
+  // refuses `filter-as-condition` does not look. Its oracle is empty BY CONSTRUCTION — check()
+  // cannot evaluate a non-boolean conjunction — so it belongs to neither degeneracy-guard list,
+  // and a bare "it throws" would say nothing about whether refusing it is REQUIRED.
+  //
+  // This is that argument. The other conjunct is `R.attr.aBool`, which the adapter certainly can
+  // express and which `root-bare-bool` spells on its own; an adapter that dropped the conjunct it
+  // could not translate would emit exactly that filter and return every row it selects, all of
+  // which the PDP denies for this action.
+  test("filter-as-conjunct must be refused: dropping its untranslatable half over-grants", async () => {
+    expect(await oracleAllowedIds("filter-as-conjunct")).toEqual([]);
+
+    const survivingHalf = await adapterFilteredIds("root-bare-bool");
+    expect(survivingHalf.length).toBeGreaterThan(0);
+    expect(survivingHalf.length).toBeLessThan(SEEDS.length);
+
+    const message = THROWING_ACTIONS.find(
+      ([action]) => action === "filter-as-conjunct",
+    )?.[2];
+    expect(message).toBeDefined();
+    await expect(adapterFilteredIds("filter-as-conjunct")).rejects.toThrow(
+      message,
+    );
+  });
+
   // #302. `null-eq-missing` probes `aOptionalString == null`, and `aOptionalString` follows the
   // corpus default: a NULL column sends NO attribute. Both halves are asserted because the
   // rejection alone would pass vacuously if the adapter threw for an unrelated reason — the
   // over-grant under the default representation is what makes the rejection necessary.
+
   test.each(NULL_REPRESENTATION_OMITTED)(
     "%s over-grants under the explicit representation and is rejected under omitted (%s)",
     async (action, _reason, message) => {

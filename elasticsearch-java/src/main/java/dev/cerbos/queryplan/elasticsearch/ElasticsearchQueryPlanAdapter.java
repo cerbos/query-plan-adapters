@@ -36,7 +36,12 @@ public class ElasticsearchQueryPlanAdapter {
     private record LambdaScope(String nestedPath, String lambdaVariable) {}
 
     private record SizeComparison(
-            String variable, String field, double value, boolean nonEmpty, boolean empty) {}
+            String variable,
+            String field,
+            String operator,
+            double value,
+            boolean nonEmpty,
+            boolean empty) {}
 
     private record ResolvedOperand(String variable, Object value, boolean isVariable) {
         static ResolvedOperand variable(String variable) {
@@ -893,7 +898,7 @@ public class ElasticsearchQueryPlanAdapter {
         Map<String, Object> present = collectionPresentQuery(comparison.field(), nestedPaths);
         if (comparison.nonEmpty()) return present;
         if (comparison.empty()) throw unsafeEmptyCollectionSize(comparison.variable());
-        throw unsupportedSizeComparison(operator, comparison);
+        throw unsupportedSizeComparison(comparison);
     }
 
     private static Map<String, Object> trySizeComparisonFalse(
@@ -907,7 +912,7 @@ public class ElasticsearchQueryPlanAdapter {
         Map<String, Object> present = collectionPresentQuery(comparison.field(), nestedPaths);
         if (comparison.empty()) return present;
         if (comparison.nonEmpty()) throw unsafeEmptyCollectionSize(comparison.variable());
-        throw unsupportedSizeComparison(operator, comparison);
+        throw unsupportedSizeComparison(comparison);
     }
 
     private static SizeComparison resolveSizeComparison(
@@ -916,11 +921,19 @@ public class ElasticsearchQueryPlanAdapter {
             Map<String, String> fieldMap) {
         Expression sizeExpression = null;
         Double value = null;
-        for (Operand operand : operands) {
+        // The planner preserves policy source order, so `0 < size(coll)` arrives with the VALUE
+        // first. Scanning the operands for whichever one is the size() discards that order; the
+        // operator then has to be mirrored, exactly as the leaf path already does, or `0 < size`
+        // is read as `size < 0` and a supported emptiness check is refused as an unsupported
+        // threshold (cerbos/query-plan-adapters#387).
+        boolean sizeFirst = true;
+        for (int i = 0; i < operands.size(); i++) {
+            Operand operand = operands.get(i);
             switch (operand.getNodeCase()) {
                 case EXPRESSION -> {
                     if ("size".equals(operand.getExpression().getOperator())) {
                         sizeExpression = operand.getExpression();
+                        sizeFirst = i == 0;
                     }
                 }
                 case VALUE -> {
@@ -931,6 +944,7 @@ public class ElasticsearchQueryPlanAdapter {
             }
         }
         if (sizeExpression == null) return null;
+        String normalizedOperator = normalizeLeafOperator(operator, sizeFirst);
 
         List<Operand> sizeOperands = sizeExpression.getOperandsList();
         if (sizeOperands.size() != 1
@@ -942,12 +956,18 @@ public class ElasticsearchQueryPlanAdapter {
         }
 
         String variable = sizeOperands.get(0).getVariable();
-        boolean nonEmpty = (operator.equals("gt") && value == 0.0)
-                || (operator.equals("ge") && value == 1.0);
-        boolean empty = (operator.equals("eq") && value == 0.0)
-                || (operator.equals("le") && value == 0.0)
-                || (operator.equals("lt") && value == 1.0);
-        return new SizeComparison(variable, mappedField(variable, fieldMap), value, nonEmpty, empty);
+        boolean nonEmpty = (normalizedOperator.equals("gt") && value == 0.0)
+                || (normalizedOperator.equals("ge") && value == 1.0);
+        boolean empty = (normalizedOperator.equals("eq") && value == 0.0)
+                || (normalizedOperator.equals("le") && value == 0.0)
+                || (normalizedOperator.equals("lt") && value == 1.0);
+        return new SizeComparison(
+                variable,
+                mappedField(variable, fieldMap),
+                normalizedOperator,
+                value,
+                nonEmpty,
+                empty);
     }
 
     private static Map<String, Object> collectionPresentQuery(
@@ -957,11 +977,10 @@ public class ElasticsearchQueryPlanAdapter {
                 : exists(field);
     }
 
-    private static IllegalArgumentException unsupportedSizeComparison(
-            String operator, SizeComparison comparison) {
+    private static IllegalArgumentException unsupportedSizeComparison(SizeComparison comparison) {
         return new IllegalArgumentException(
-                "Unsupported size comparison: size(" + comparison.variable() + ") " + operator + " "
-                        + comparison.value()
+                "Unsupported size comparison: size(" + comparison.variable() + ") "
+                        + comparison.operator() + " " + comparison.value()
                         + ". Only emptiness checks (size > 0, size == 0) are supported.");
     }
 

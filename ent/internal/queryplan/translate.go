@@ -777,6 +777,14 @@ type deferredCollection struct {
 	isMap     bool
 }
 
+// macro names the CEL macro this collection came from, for error messages.
+func (d deferredCollection) macro() string {
+	if d.isMap {
+		return "map"
+	}
+	return "filter"
+}
+
 func (b *builder) deferredCollection(n *node, m Mapper) (value, error) {
 	if len(n.operands) != binaryOperands {
 		return nil, fmt.Errorf("'%s' requires exactly two operands", n.operator)

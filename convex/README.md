@@ -112,8 +112,8 @@ The adapter is differentially tested with 21 hostile seed documents against Cerb
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 173 of the 176 reference conformance actions, plus `matches()`, list indexing/`get-field`, `timestamp()`, and `int()`/`double()` cast plans that the Spring Data reference adapter rejects — the post-filter reimplements CEL cast semantics exactly (whole-string parse, truncation toward zero), so the SQL divergences do not apply (180 actions total) |
-| Fail-closed | `filter()`/`map()` used as a condition (they return a list, not a boolean), a constant zero divisor whose sign the JSON hop into a Convex function discards, and a hierarchy path constructed by `list()`, an operator the adapter has no case for (5 actions). All five throw during translation, before any filter exists; unknown operators and invalid expression structures still throw |
+| Oracle-tested | 184 of the 187 reference conformance actions, plus `matches()`, list indexing/`get-field`, `timestamp()`, and `int()`/`double()` cast plans that the Spring Data reference adapter rejects — the post-filter reimplements CEL cast semantics exactly (whole-string parse, truncation toward zero), so the SQL divergences do not apply (191 actions total) |
+| Fail-closed | `filter()`/`map()` used as a condition or as a conjunct (they return a list, not a boolean, in either position), a constant zero divisor whose sign the JSON hop into a Convex function discards, and a hierarchy path constructed by `list()`, an operator the adapter has no case for (6 actions). All six throw during translation, before any filter exists; unknown operators and invalid expression structures still throw |
 | Explicit opt-in | Any plan that cannot be represented entirely as a Convex database filter requires `allowPostFilter: true` |
 | Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`. Under the default it already returns the empty set the PDP demands *when the document omits the field for a NULL value*, which is what the conformance harness seeds. The alignment is the `postFilter`'s doing, not a Convex filter's: the field is `nullable: true`, so the predicate is evaluated in JavaScript and the absent path raises the same CEL missing-attribute error that made `check()` deny. A deployment that stores explicit nulls while omitting the attribute would over-grant |
 | Attribute NULL convention | Needs no declaration: Convex stores the value the caller sent, so a stored null already compares as a null *value* exactly as CEL does, and a stored null stays distinguishable from an absent field. Every `null-value-*` corpus probe for the explicit convention (cerbos/query-plan-adapters#308) was aligned before that option existed — including `null-value-f2f-mixed`, which Convex and Mongoose are the only two adapters to translate rather than refuse |
@@ -157,6 +157,8 @@ The harness runs against a self-hosted `convex-backend` container, pinned by tag
 `docker-compose.yml`. Convex Cloud is not exercised, so any divergence between the two — the
 filter engine, value ordering, or the `undefined`/`null` distinction — is outside what this
 contract proves.
+
+**Behaviour change.** `filter()` and `map()` are now refused in **every** boolean position, not only at the root of the condition. `all: [R.attr.tags.filter(...), R.attr.aBool]` used to translate: the post-filter read the held list through a boolean coercion, got an evaluation error and denied every row — an emitted filter for a shape with no boolean meaning, which happened to agree with the PDP for the wrong reason. It now throws, which is a consumer-visible break for anyone relying on the empty result ([#387](https://github.com/cerbos/query-plan-adapters/issues/387)).
 
 ## Mapping hazards
 

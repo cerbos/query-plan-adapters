@@ -660,6 +660,15 @@ const DEGENERACY_GUARD_ACTIONS = [
   "not-lt",
   "root-bare-bool",
   "or-eq-exists",
+  // Hazard classes the corpus missed (#387): the De Morgan branch over a conjunction; the
+  // positional read of a scalar list, which Mongoose alone among the SQL-shaped adapters can
+  // express ($arrayElemAt); the value-first hasIntersection, which used to be refused here
+  // because the operands were read positionally; and the BELOW-cliff unroll of a principal
+  // collection, the shape a principal with three teams produces.
+  "not-and",
+  "index-scalar-list",
+  "vf-hasint",
+  "pv-exists-unrolled",
 ] as const;
 
 /**
@@ -683,6 +692,13 @@ const DEGENERACY_LIVENESS_PROBES = [
   // CEL's `+` between two field paths (#391): no constant to tell $add from $concat, and the
   // mapper carries no field types. Refused at translation, where the server used to abort.
   "concat-f2f",
+  // #387, one probe per group Mongoose cannot compare. The negated LIKE carries a NULLABLE
+  // needle, and a negated aggregation predicate over a missing field matches, so the whole not-*
+  // group is refused; list equality over a map() projection has no $map form in this builder.
+  // arith-mod needs no entry of its own: it is refused by the int() cast, which cast-int-double
+  // above already probes, and a probe per rejection SITE is what these lists are for.
+  "not-contains",
+  "map-eq-list",
 ] as const;
 
 interface AdversarialLabel {
@@ -1228,7 +1244,7 @@ describe("adversarial conformance corpus", () => {
       /pins no throw message/
     );
   });
-  test("manifest assigns all 170 actions exactly one Mongoose outcome", () => {
+  test("manifest assigns all 199 actions exactly one Mongoose outcome", () => {
     const oracle = new Set(ORACLE_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map((entry) => entry.action));
     const nullOmitted = new Set(
@@ -1244,11 +1260,11 @@ describe("adversarial conformance corpus", () => {
       return count !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(187);
-    expect(unsupportedEntries).toHaveLength(40);
+    expect(MANIFEST_ACTIONS.size).toBe(199);
+    expect(unsupportedEntries).toHaveLength(44);
     expect(supportedExpectedEntries).toHaveLength(4);
-    expect(ORACLE_ACTIONS).toHaveLength(140);
-    expect(THROWING_ACTIONS).toHaveLength(45);
+    expect(ORACLE_ACTIONS).toHaveLength(147);
+    expect(THROWING_ACTIONS).toHaveLength(50);
     expect(misclassified).toEqual([]);
     expect(
       [...supportedExpectedActions].filter(
@@ -1292,6 +1308,31 @@ describe("adversarial conformance corpus", () => {
     }
   );
 
+  // #387. `filter-as-conjunct` puts a filter() one level below the root, where the guard that
+  // refuses `filter-as-condition` does not look. Its oracle is empty BY CONSTRUCTION — check()
+  // cannot evaluate a non-boolean conjunction — so it belongs to neither degeneracy-guard list,
+  // and a bare "it throws" would say nothing about whether refusing it is REQUIRED.
+  //
+  // This is that argument. The other conjunct is `R.attr.aBool`, which the adapter certainly can
+  // express and which `root-bare-bool` spells on its own; an adapter that dropped the conjunct it
+  // could not translate would emit exactly that filter and return every row it selects, all of
+  // which the PDP denies for this action.
+  test("filter-as-conjunct must be refused: dropping its untranslatable half over-grants", async () => {
+    expect(await oracleAllowedIds("filter-as-conjunct")).toEqual([]);
+
+    const survivingHalf = await adapterFilteredIds("root-bare-bool");
+    expect(survivingHalf.length).toBeGreaterThan(0);
+    expect(survivingHalf.length).toBeLessThan(SEEDS.length);
+
+    const entry = THROWING_ACTIONS.find(
+      ({ action }) => action === "filter-as-conjunct"
+    );
+    expect(entry).toBeDefined();
+    await expect(adapterFilteredIds("filter-as-conjunct")).rejects.toThrow(
+      entry?.message
+    );
+  });
+
   // #302. `null-eq-missing` probes `aOptionalString == null`, and `aOptionalString` follows the
   // corpus default: a NULL column sends NO attribute, so check() denies every document.
   //
@@ -1301,6 +1342,7 @@ describe("adversarial conformance corpus", () => {
   // demands. `owner` maps to the SAME column without `nullable`, so `null-eq` still returns its
   // five explicit-null documents. Both are asserted here: the pair is what proves the mapper
   // flag, not the corpus, is doing the discriminating.
+
   test.each(NULL_REPRESENTATION_OMITTED)(
     "$action already aligns via the nullable mapper flag and is rejected under omitted ($reason)",
     async ({ action, message }) => {

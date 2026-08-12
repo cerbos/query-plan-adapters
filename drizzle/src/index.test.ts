@@ -313,12 +313,31 @@ const allResourceIds = resourceAttributes.map((resource) => resource.id).sort();
 
 const expectedCache = new Map<string, Promise<string[]>>();
 
+/**
+ * The principal each action is planned and checked with.
+ *
+ * `has-intersection` compares a resource projection against `P.attr.tags`. With no such
+ * attribute the planner cannot fold it to a value list and ships `get-field(struct(), tags)`
+ * instead — an operand this adapter has no `IN` list to build from. It used to translate that
+ * to a bare FALSE and agree with an equally empty expectation, so the action proved nothing;
+ * it now throws, which is correct but leaves the intersection untested unless the principal
+ * actually carries the attribute (cerbos/query-plan-adapters#387).
+ *
+ * "public" is held by resource1 and resource3, so the expectation is 2 of 3 rather than all or
+ * nothing. Both sides of the differential call this, so the expectation follows automatically.
+ */
+const principalFor = (action: string) => ({
+  id: "user1",
+  roles: ["USER"],
+  ...(action === "has-intersection" ? { attr: { tags: ["public"] } } : {}),
+});
+
 const allowedResourceIds = (action: string): Promise<string[]> => {
   let cached = expectedCache.get(action);
   if (!cached) {
     cached = (async () => {
       const response = await cerbos.checkResources({
-        principal: { id: "user1", roles: ["USER"] },
+        principal: principalFor(action),
         resources: resourceAttributes.map((resource) => ({
           resource: {
             kind: "resource",
@@ -1003,7 +1022,7 @@ describe("queryPlanToDrizzle", () => {
     "produces matching results for %s",
     async (action) => {
       const queryPlan = await cerbos.planResources({
-        principal: { id: "user1", roles: ["USER"] },
+        principal: principalFor(action),
         resource: { kind: "resource" },
         action,
       });

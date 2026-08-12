@@ -308,6 +308,17 @@ DEGENERACY_GUARD_ACTIONS = (
     "not-lt",
     "root-bare-bool",
     "or-eq-exists",
+    # Hazard classes the corpus missed (#387): the De Morgan branch over a
+    # conjunction; the negated LIKE against a COLUMN needle, where a
+    # definite-FALSE null guard would leak every NULL-needle row through the
+    # NOT; the value-first hasIntersection, which used to keep its wire order
+    # and hand the override a literal list where it expected a relation; and
+    # the BELOW-cliff unroll of a principal collection, the shape a principal
+    # with three teams produces.
+    "not-and",
+    "not-contains",
+    "vf-hasint",
+    "pv-exists-unrolled",
 )
 
 # Shapes this adapter refuses to translate: they have no oracle comparison to
@@ -325,6 +336,13 @@ DEGENERACY_LIVENESS_PROBES = (
     # `list` has no operator-table entry, so the constructed hierarchy path is
     # refused before the hierarchy operators around it are reached.
     "hier-list-id",
+    # #387, one probe per group this adapter cannot compare: modulo (reached
+    # through the int() cast that gives `%` an integer operand), the positional
+    # read of a scalar list, and list equality over a map() projection, whose
+    # deferred intermediate no enclosing override consumes.
+    "arith-mod",
+    "index-scalar-list",
+    "map-eq-list",
 )
 
 
@@ -1195,11 +1213,11 @@ class TestAdversarialConformance:
 
         # Deliberate tripwires: a corpus edit must bump these in the same
         # change, so a new hostile action cannot join (or vanish) silently.
-        assert len(MANIFEST_ACTIONS) == 187
+        assert len(MANIFEST_ACTIONS) == 199
         assert len(SEEDS) == 21
         # Each of these carries a pinned message, so a shape gained or lost has
         # to be re-triaged here rather than joining the throw suite unnoticed.
-        assert len(THROWING_ACTIONS) == 15
+        assert len(THROWING_ACTIONS) == 19
         assert misclassified == []
         assert SQLALCHEMY_SUPPORTED_EXPECTED <= {
             u["action"] for u in ACTIONS_FILE["expectedUnsupported"]
@@ -1242,6 +1260,33 @@ class TestAdversarialConformance:
                 # translate cleanly and read as a missing throw.
                 attribute_null_representation=ATTRIBUTE_NULL_REPRESENTATION,
             )
+
+    # #387. `filter-as-conjunct` puts a filter() one level below the root, where
+    # the guard that refuses `filter-as-condition` did not look — and this
+    # adapter is one of the two where that mattered: the held tuple reached
+    # `and_()` and SQLAlchemy raised its own WHERE/HAVING-role ArgumentError,
+    # fail-closed but naming a coercion rather than the mechanism. Its oracle is
+    # empty BY CONSTRUCTION, so it belongs to neither degeneracy-guard list and a
+    # bare "it raises" would say nothing about whether refusing it is REQUIRED.
+    #
+    # This is that argument. The other conjunct is `R.attr.aBool`, which the
+    # adapter certainly can express and which `root-bare-bool` spells on its own;
+    # an adapter that dropped the conjunct it could not translate would emit
+    # exactly that filter and return every row it selects, all of which the PDP
+    # denies for this action.
+    def test_filter_as_conjunct_must_be_refused(self, adv_cerbos_client, adv_conn):
+        assert _oracle_allowed_ids(adv_cerbos_client, "filter-as-conjunct") == set()
+
+        surviving_half = _adapter_filtered_ids(
+            adv_cerbos_client, adv_conn, "root-bare-bool"
+        )
+        assert 0 < len(surviving_half) < len(SEEDS)
+
+        message = next(
+            m for action, m in THROWING_ACTIONS if action == "filter-as-conjunct"
+        )
+        with pytest.raises(ValueError, match=re.escape(message)):
+            _adapter_filtered_ids(adv_cerbos_client, adv_conn, "filter-as-conjunct")
 
     # #302. `null-eq-missing` probes `aOptionalString == null`, and
     # `aOptionalString` follows the corpus default: a NULL column sends NO

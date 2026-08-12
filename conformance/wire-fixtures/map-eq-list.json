@@ -1,0 +1,43 @@
+{
+  "action": "map-eq-list",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "eq",
+        "operands": [
+          {
+            "expression": {
+              "operator": "map",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.tags"
+                },
+                {
+                  "expression": {
+                    "operator": "lambda",
+                    "operands": [
+                      {
+                        "variable": "t.id"
+                      },
+                      {
+                        "variable": "t"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "value": [
+              "t3a",
+              "t3b"
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

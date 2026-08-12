@@ -583,6 +583,44 @@ __operator_fns: OperatorFnMap = {
 }
 OPERATOR_FNS = MappingProxyType(__operator_fns)
 
+# What a DEFAULT operator handler can lower: a SQL construct the mapper produced, a literal
+# decoded from the plan (JSON carries no other kind of value), or one of THIS module's own
+# symbolic values, which the handlers below know how to fold.
+#
+# Everything else is foreign. An operator override may return whatever it likes -- the
+# corpus's `map` and `filter` overrides return deferred tuples -- but such a value only means
+# something to the ENCLOSING override that consumes it, and once a default handler is running
+# there is no enclosing override left to do so. Python then compares the intermediate with
+# `==`, yields a bare `False`, and that reaches `where()` as a perfectly valid boolean which
+# excludes every row: an emitted filter for a shape the adapter cannot express, and silent
+# because it never threw (`map-eq-list`, cerbos/query-plan-adapters#387).
+_LOWERABLE_OPERAND_TYPES = (
+    ColumnElement,
+    InstrumentedAttribute,
+    _IEEEConstant,
+    _ConditionalValue,
+    _Hierarchy,
+    str,
+    bool,
+    int,
+    float,
+    list,
+    dict,
+    datetime,
+    type(None),
+)
+
+
+def _require_lowerable(operator: str, operand: Any) -> None:
+    if not isinstance(operand, _LOWERABLE_OPERAND_TYPES):
+        raise ValueError(
+            f"`{operator}` received an operand of type "
+            f"{type(operand).__name__!r}, which is not a SQL expression or a plan "
+            "literal: an operator override returning an intermediate value must be "
+            "consumed by an enclosing override, and no default handler can lower one"
+        )
+
+
 # Directional operators mirror when their operands swap sides; symmetric operators are
 # unchanged. The planner preserves policy source order, so `1 < R.attr.x` arrives as
 # lt(value(1), variable(x)) and must translate as `x > 1`, not `x < 1` (#257).
@@ -596,12 +634,13 @@ _MIRRORED_OPERATORS = MappingProxyType(
 )
 
 # Operators whose semantics don't depend on which operand holds the column:
-# `eq`/`ne` are symmetric, and value-first `in` (`value in R.attr.list`) still
-# means membership against the column, so all three normalize to column-first.
-# Every OTHER operator keeps its wire (source) order when the value comes
-# first — receiver-style string matches (`"const".contains(R.attr.x)`) would
-# otherwise silently swap haystack and needle.
-_ORDER_INSENSITIVE_OPERATORS = frozenset({"eq", "ne", "in"})
+# `eq`/`ne` are symmetric, value-first `in` (`value in R.attr.list`) still
+# means membership against the column, and set intersection is commutative, so
+# all four normalize to column-first. Every OTHER operator keeps its wire
+# (source) order when the value comes first — receiver-style string matches
+# (`"const".contains(R.attr.x)`) would otherwise silently swap haystack and
+# needle.
+_ORDER_INSENSITIVE_OPERATORS = frozenset({"eq", "ne", "in", "hasIntersection"})
 
 # Unary value-returning operators take a single non-value input.
 _UNARY_VALUE_OPERATORS = frozenset({"string", "double", "int", "size", "timestamp"})
@@ -1028,6 +1067,8 @@ def get_query(
 
         # Otherwise, fall back to default handlers
         if (default_fn := OPERATOR_FNS.get(op)) is not None:
+            _require_lowerable(op, c)
+            _require_lowerable(op, v)
             return default_fn(c, v)
 
         raise ValueError(f"Unrecognised operator: {op}")
@@ -1285,6 +1326,24 @@ def get_query(
             )
         return get_operator_fn(operator, left, right)
 
+    def require_boolean(translated: Any, position: str):
+        # Every position that CONSUMES a value as a boolean has to make the same check, not
+        # just the root. `filter-as-condition` is refused at the root below; a `filter()`
+        # sitting in a conjunct reaches `and_()` instead, where SQLAlchemy raises its own
+        # ArgumentError about a WHERE/HAVING role -- fail-closed, but naming SQLAlchemy's
+        # coercion rather than the mechanism, which is not a rejection this adapter can pin
+        # (cerbos/query-plan-adapters#387). See the root call site below for why
+        # `InstrumentedAttribute` is accepted alongside `ColumnElement`.
+        if not isinstance(translated, (ColumnElement, InstrumentedAttribute, bool)):
+            raise ValueError(
+                f"the plan's {position} translated to {type(translated).__name__!r}, which "
+                "is not a boolean SQL expression. filter() and map() return a list, so they "
+                "cannot be a condition on their own (only size(filter(...)) has a boolean "
+                "meaning), and an operator override returning an intermediate value must be "
+                "consumed by an enclosing override before the root"
+            )
+        return translated
+
     def traverse_and_map_operands(operand: dict):
         if exp := operand.get("expression"):
             return traverse_and_map_operands(exp)
@@ -1301,12 +1360,16 @@ def get_query(
 
         # if `operator` in ["and", "or"], `child_operands` is a nested list of `expression` dicts (handled at the
         # beginning of this closure)
-        if operator == "and":
-            return and_(*[traverse_and_map_operands(o) for o in child_operands])
-        if operator == "or":
-            return or_(*[traverse_and_map_operands(o) for o in child_operands])
-        if operator == "not":
-            return not_(*[traverse_and_map_operands(o) for o in child_operands])
+        if operator in ("and", "or", "not"):
+            branches = [
+                require_boolean(traverse_and_map_operands(o), f"{operator!r} operand")
+                for o in child_operands
+            ]
+            if operator == "and":
+                return and_(*branches)
+            if operator == "or":
+                return or_(*branches)
+            return not_(*branches)
         if operator == "if":
             # A bare boolean-result ternary used directly as a predicate.
             return evaluate_expression(operand)
@@ -1446,14 +1509,7 @@ def get_query(
     # `Column | InstrumentedAttribute`, and a Core `Column` IS a `ColumnElement`, so a mapper
     # holding one has always been accepted here. The check was discriminating by which of the
     # two flavours the mapper happened to hold, not by whether the root was boolean.
-    if not isinstance(condition, (ColumnElement, InstrumentedAttribute, bool)):
-        raise ValueError(
-            f"the plan's condition translated to {type(condition).__name__!r}, which is not "
-            "a boolean SQL expression. filter() and map() return a list, so they cannot be a "
-            "condition on their own (only size(filter(...)) has a boolean meaning), and an "
-            "operator override returning an intermediate value must be consumed by an "
-            "enclosing override before the root"
-        )
+    require_boolean(condition, "condition")
     q = select(table).where(condition)
 
     if table_mapping:
