@@ -16,24 +16,25 @@ import type {
 } from "@cerbos/core";
 import Database from "better-sqlite3";
 import { eq, sql } from "drizzle-orm";
-import type { AnyColumn, SQL, Table } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { drizzle as drizzleSqlite } from "drizzle-orm/better-sqlite3";
 import { drizzle as drizzlePostgres } from "drizzle-orm/node-postgres";
-import {
-  boolean,
-  doublePrecision,
-  integer as pgInteger,
-  pgTable,
-  text as pgText,
-  timestamp,
-} from "drizzle-orm/pg-core";
-import { integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { Pool } from "pg";
 
 import { queryPlanToDrizzle, PlanKind } from ".";
-import type { MapperEntry, RelationMapping } from ".";
+import type { MapperEntry } from ".";
+import {
+  ADAPTER,
+  CONFORMANCE_DIR,
+  buildMapper,
+  classifyActionsForAdapter,
+  postgresSchema,
+  requireMessage,
+  sqliteSchema,
+} from "./corpus";
+import type { ActionsFile, ThrowingAction } from "./corpus";
 
 /**
  * Adversarial differential suite: every action in the shared `../conformance/` corpus is planned
@@ -59,8 +60,6 @@ import type { MapperEntry, RelationMapping } from ".";
 // Dedicated ports (gRPC 3621) so this suite can run alongside other adapters' sidecars.
 const cerbos = new Cerbos("127.0.0.1:3621", { tls: false });
 
-const CONFORMANCE_DIR = path.join(__dirname, "..", "..", "conformance");
-
 interface Tag {
   id: string;
   name: string | null;
@@ -82,45 +81,6 @@ interface SeedsFile {
   principal: Principal;
   resourceKind: string;
   seeds: Seed[];
-}
-
-interface UnsupportedShape {
-  action: string;
-  shape: string;
-  /** One entry per adapter that must reject the shape; the corpus asserts the key set. */
-  messages: Record<string, string>;
-}
-
-interface AdapterUnsupportedEntry {
-  action: string;
-  reason: string;
-  /** Absent on `adapterSupportedExpected` / `nullRepresentationOmitted`, required on a throw. */
-  message?: string;
-}
-
-/**
- * A `nullRepresentationOmitted` entry. Every adapter must reject these — the two NULL conventions
- * are indistinguishable on the wire — so `messages` names the whole roster with no promotions to
- * subtract.
- */
-interface NullRepresentationOmittedEntry {
-  action: string;
-  reason: string;
-  messages: Record<string, string>;
-}
-
-interface KnownDivergence {
-  action: string;
-  adapters: string[];
-}
-
-interface ActionsFile {
-  conformance: string[];
-  adapterUnsupported?: Record<string, AdapterUnsupportedEntry[]>;
-  adapterSupportedExpected?: Record<string, AdapterUnsupportedEntry[]>;
-  expectedUnsupported: UnsupportedShape[];
-  nullRepresentationOmitted: NullRepresentationOmittedEntry[];
-  knownDivergences?: KnownDivergence[];
 }
 
 // -- corpus coverage guards ---------------------------------------------------------------------
@@ -288,75 +248,24 @@ for (const seed of SEEDS) {
 }
 
 // Reference actions this adapter cannot express without changing CEL semantics. The shared
-// manifest is the source of truth so the package-local harness and README stay aligned.
-const DRIZZLE_UNSUPPORTED: AdapterUnsupportedEntry[] = [
-  ...(actionsFile.adapterUnsupported?.["drizzle"] ?? []),
-];
-
-const DRIZZLE_SUPPORTED_EXPECTED = new Set(
-  (actionsFile.adapterSupportedExpected?.["drizzle"] ?? []).map(
-    (entry) => entry.action,
-  ),
-);
+// manifest is the source of truth so the package-local harness and README stay aligned, and the
+// classification itself is read through `./corpus`, the same reader the translator unit test
+// uses — the two suites must agree on which actions this adapter refuses, and with what message.
+const {
+  oracleActions: ORACLE_ACTIONS,
+  throwingActions: THROWING_ACTIONS,
+  supportedExpected: DRIZZLE_SUPPORTED_EXPECTED,
+} = classifyActionsForAdapter(actionsFile, ADAPTER);
 
 const DRIZZLE_DIVERGENCES = new Set(
   (actionsFile.knownDivergences ?? [])
-    .filter((entry) => entry.adapters.includes("drizzle"))
+    .filter((entry) => entry.adapters.includes(ADAPTER))
     .map((entry) => entry.action),
 );
 
-const UNSUPPORTED_ACTIONS = new Set(DRIZZLE_UNSUPPORTED.map((u) => u.action));
 const EXPECTED_UNSUPPORTED_ACTIONS = new Set(
   actionsFile.expectedUnsupported.map((entry) => entry.action),
 );
-const ORACLE_ACTIONS = [
-  ...actionsFile.conformance.filter(
-    (action) => !UNSUPPORTED_ACTIONS.has(action),
-  ),
-  ...[...DRIZZLE_SUPPORTED_EXPECTED].sort(),
-];
-/**
- * A shape this adapter must refuse, with the substring its error has to contain.
- *
- * The message is what turns "it threw" into "it threw for the declared reason": without it a
- * mapper typo or an unrelated validation satisfies the assertion just as well as the limitation
- * the corpus documents (cerbos/query-plan-adapters#326).
- */
-type ThrowingAction = readonly [
-  action: string,
-  reason: string,
-  message: string,
-];
-
-/** The pinned message, or a failure — a throwing action without one asserts nothing. */
-function requireMessage(label: string, message: string | undefined): string {
-  if (message === undefined || message === "") {
-    throw new Error(
-      `actions.json pins no throw message for ${label}: the throw suite would accept a failure for any reason`,
-    );
-  }
-  return message;
-}
-
-// Globally unsupported planner shapes plus any declared Drizzle limitations: these must
-// fail loudly during translation, never silently return a wrong id set.
-const THROWING_ACTIONS: ThrowingAction[] = [
-  ...DRIZZLE_UNSUPPORTED.map((entry): ThrowingAction => [
-    entry.action,
-    entry.reason,
-    requireMessage(`adapterUnsupported.drizzle.${entry.action}`, entry.message),
-  ]),
-  ...actionsFile.expectedUnsupported
-    .filter((entry) => !DRIZZLE_SUPPORTED_EXPECTED.has(entry.action))
-    .map((entry): ThrowingAction => [
-      entry.action,
-      entry.shape,
-      requireMessage(
-        `expectedUnsupported.${entry.action}.messages.drizzle`,
-        entry.messages?.["drizzle"],
-      ),
-    ]),
-];
 
 // Actions whose `== null` probe targets an attribute the oracle OMITS for NULL columns. They
 // carry no oracle comparison: under the omitted representation check() denies every row, so the
@@ -693,202 +602,10 @@ function seedRows(): SeedRows {
   return rows;
 }
 
-// -- the schema, as the mapper sees it ----------------------------------------------------------
-//
-// Structural `AnyColumn`/`Table` views so ONE mapper definition serves every dialect: the SQLite
-// and PostgreSQL table objects differ in their column types, but the adapter only ever needs the
-// table and the column. Two hand-written mappers could drift, and a drifted mapper reads different
-// rows on one leg than the other — the same silent projection the corpus README warns about.
-
-interface AdversarialSchema {
-  resources: Table & {
-    id: AnyColumn;
-    aBool: AnyColumn;
-    aString: AnyColumn;
-    aNumber: AnyColumn;
-    aDouble: AnyColumn;
-    aOptionalString: AnyColumn;
-    createdBy: AnyColumn;
-    scope: AnyColumn;
-    createdAt: AnyColumn;
-  };
-  parents: Table & {
-    id: AnyColumn;
-    aBool: AnyColumn;
-    aString: AnyColumn;
-    aNumber: AnyColumn;
-    aOptionalString: AnyColumn;
-    resourceId: AnyColumn;
-  };
-  inners: Table & {
-    id: AnyColumn;
-    aBool: AnyColumn;
-    aString: AnyColumn;
-    aNumber: AnyColumn;
-    aOptionalString: AnyColumn;
-    parentId: AnyColumn;
-  };
-  tags: Table & {
-    tagId: AnyColumn;
-    name: AnyColumn;
-    resourceId: AnyColumn;
-  };
-  categories: Table & { id: AnyColumn; name: AnyColumn; resourceId: AnyColumn };
-  subCategories: Table & {
-    id: AnyColumn;
-    name: AnyColumn;
-    categoryId: AnyColumn;
-  };
-  labels: Table & {
-    id: AnyColumn;
-    name: AnyColumn;
-    subCategoryId: AnyColumn;
-  };
-}
-
-function buildMapper(schema: AdversarialSchema): Record<string, MapperEntry> {
-  const labelsRelation: RelationMapping = {
-    type: "many",
-    table: schema.labels,
-    sourceColumn: schema.subCategories.id,
-    targetColumn: schema.labels.subCategoryId,
-    field: schema.labels.name,
-    fields: {
-      name: schema.labels.name,
-    },
-  };
-
-  const subCategoriesRelation: RelationMapping = {
-    type: "many",
-    table: schema.subCategories,
-    sourceColumn: schema.categories.id,
-    targetColumn: schema.subCategories.categoryId,
-    field: schema.subCategories.name,
-    fields: {
-      name: schema.subCategories.name,
-      labels: { relation: labelsRelation },
-    },
-  };
-
-  return {
-    // The primary key, reached as `request.resource.id` rather than through `attr` (the `id-*`
-    // actions). It is a mapping like any other here, which is the point: an adapter that resolves
-    // references by stripping a `request.resource.attr.` prefix never sees this name.
-    "request.resource.id": schema.resources.id,
-    "request.resource.attr.aBool": schema.resources.aBool,
-    "request.resource.attr.aString": schema.resources.aString,
-    "request.resource.attr.aNumber": schema.resources.aNumber,
-    "request.resource.attr.aDouble": schema.resources.aDouble,
-    "request.resource.attr.aOptionalString": schema.resources.aOptionalString,
-    "request.resource.attr.createdBy": schema.resources.createdBy,
-    "request.resource.attr.scope": schema.resources.scope,
-    "request.resource.attr.createdAt": {
-      column: schema.resources.createdAt,
-      valueType: "timestamp",
-    },
-    // `owner` and `coOwner` alias columns that `aOptionalString` and `scope` also map, under the
-    // OTHER null convention: the oracle sends a real null attribute for them rather than omitting
-    // it. Declaring that here is what makes the equality family definite for these two
-    // attributes and leaves it untouched for every other mapping.
-    "request.resource.attr.owner": {
-      column: schema.resources.aOptionalString,
-      nullAttributeRepresentation: "explicit",
-    },
-    "request.resource.attr.coOwner": {
-      column: schema.resources.scope,
-      nullAttributeRepresentation: "explicit",
-    },
-    // obj.inner is not a real nested column — mirrors aString, same trick the spring-data
-    // and prisma reference harnesses use for the p-struct probe. `parent.inner` below is the
-    // opposite: a real two-level join. The two are kept side by side on purpose.
-    "request.resource.attr.obj.inner": schema.resources.aString,
-    // The corpus's one REAL to-one chain (the `rel-*` actions). `type: "one"` is what tells the
-    // adapter this hop can be ABSENT, which is what the negated shapes discriminate: an absent
-    // parent sends no attribute, so CEL raises a missing-path error and the PDP denies, while an
-    // unguarded `NOT EXISTS` over the join is TRUE for exactly those rows. `inner` nests the same
-    // declaration one level further out.
-    "request.resource.attr.parent": {
-      relation: {
-        type: "one",
-        table: schema.parents,
-        sourceColumn: schema.resources.id,
-        targetColumn: schema.parents.resourceId,
-        fields: {
-          aBool: schema.parents.aBool,
-          aString: schema.parents.aString,
-          aNumber: schema.parents.aNumber,
-          aOptionalString: schema.parents.aOptionalString,
-          inner: {
-            relation: {
-              type: "one",
-              table: schema.inners,
-              sourceColumn: schema.parents.id,
-              targetColumn: schema.inners.parentId,
-              fields: {
-                aBool: schema.inners.aBool,
-                aString: schema.inners.aString,
-                aNumber: schema.inners.aNumber,
-                aOptionalString: schema.inners.aOptionalString,
-              },
-            },
-          },
-        },
-      },
-    },
-    "request.resource.attr.tags": {
-      relation: {
-        type: "many",
-        table: schema.tags,
-        sourceColumn: schema.resources.id,
-        targetColumn: schema.tags.resourceId,
-        field: schema.tags.name,
-        fields: {
-          id: schema.tags.tagId,
-          name: schema.tags.name,
-        },
-      },
-    },
-    "request.resource.attr.tagNames": {
-      collectionValueType: "scalar",
-      relation: {
-        type: "many",
-        table: schema.tags,
-        sourceColumn: schema.resources.id,
-        targetColumn: schema.tags.resourceId,
-        field: schema.tags.name,
-      },
-    },
-    "request.resource.attr.categories": {
-      relation: {
-        type: "many",
-        table: schema.categories,
-        sourceColumn: schema.resources.id,
-        targetColumn: schema.categories.resourceId,
-        fields: {
-          name: schema.categories.name,
-          subCategories: { relation: subCategoriesRelation },
-        },
-      },
-    },
-    // Multi-hop chain probe (W1): mainCategory mirrors the SAME categories/subCategories
-    // relation as a single-object dotted chain on the check side (every seed holds at most
-    // one category), pinning that the adapter joins through every intermediate hop, never
-    // off the root. subNames flattens the tail's name column for plain `in` membership.
-    "request.resource.attr.mainCategory": {
-      relation: {
-        type: "many",
-        table: schema.categories,
-        sourceColumn: schema.resources.id,
-        targetColumn: schema.categories.resourceId,
-        fields: {
-          name: schema.categories.name,
-          subCategories: { relation: subCategoriesRelation },
-          subNames: { relation: subCategoriesRelation },
-        },
-      },
-    },
-  };
-}
+// The schema and the mapper live in `./corpus`, shared with the translator unit test: that
+// suite pins the SQL this adapter emits for these mappings, and this one proves that same SQL
+// returns the rows the PDP allows. Two copies could drift, leaving the pinned SQL describing a
+// mapping nothing executes.
 
 // -- store targets ------------------------------------------------------------------------------
 
@@ -916,62 +633,9 @@ interface AdversarialStore {
 }
 
 function sqliteStore(): AdversarialStore {
-  const resources = sqliteTable("adversarial_resources", {
-    id: text("id").primaryKey(),
-    aBool: integer("a_bool", { mode: "boolean" }).notNull(),
-    aString: text("a_string").notNull(),
-    aNumber: integer("a_number").notNull(),
-    aDouble: real("a_double"),
-    aOptionalString: text("a_optional_string"),
-    createdBy: text("created_by").notNull(),
-    scope: text("scope"),
-    createdAt: text("created_at"),
-  });
-
-  // The corpus's one real to-one chain, one owned row per level and per resource.
-  const parents = sqliteTable("adversarial_parents", {
-    id: text("id").primaryKey(),
-    aBool: integer("a_bool", { mode: "boolean" }).notNull(),
-    aString: text("a_string").notNull(),
-    aNumber: integer("a_number").notNull(),
-    aOptionalString: text("a_optional_string"),
-    resourceId: text("resource_id").notNull().unique(),
-  });
-
-  const inners = sqliteTable("adversarial_inners", {
-    id: text("id").primaryKey(),
-    aBool: integer("a_bool", { mode: "boolean" }).notNull(),
-    aString: text("a_string").notNull(),
-    aNumber: integer("a_number").notNull(),
-    aOptionalString: text("a_optional_string"),
-    parentId: text("parent_id").notNull().unique(),
-  });
-
-  const tags = sqliteTable("adversarial_tags", {
-    tagId: text("tag_id").primaryKey(),
-    // NULLABLE on purpose: a NULL tag name is a missing element attribute on the check
-    // side (a CEL error → deny) and must stay UNKNOWN — never FALSE — in SQL.
-    name: text("name"),
-    resourceId: text("resource_id").notNull(),
-  });
-
-  const categories = sqliteTable("adversarial_categories", {
-    id: text("id").primaryKey(),
-    name: text("name").notNull(),
-    resourceId: text("resource_id").notNull(),
-  });
-
-  const subCategories = sqliteTable("adversarial_sub_categories", {
-    id: text("id").primaryKey(),
-    name: text("name").notNull(),
-    categoryId: text("category_id").notNull(),
-  });
-
-  const labels = sqliteTable("adversarial_labels", {
-    id: text("id").primaryKey(),
-    name: text("name"),
-    subCategoryId: text("sub_category_id").notNull(),
-  });
+  const schema = sqliteSchema();
+  const { resources, parents, inners, tags, categories, subCategories, labels } =
+    schema;
 
   // Dedicated file (adversarial.db, gitignored) rather than :memory:, so a failing run leaves
   // the seeded rows behind to inspect.
@@ -982,15 +646,7 @@ function sqliteStore(): AdversarialStore {
 
   return {
     name: "sqlite",
-    mapper: buildMapper({
-      resources,
-      parents,
-      inners,
-      tags,
-      categories,
-      subCategories,
-      labels,
-    }),
+    mapper: buildMapper(schema),
 
     async start(): Promise<void> {
       sqlite.exec(`
@@ -1117,65 +773,9 @@ const POSTGRES_IMAGE =
  * case-insensitive, which is why the ent harness has to pin a binary collation there.)
  */
 function postgresStore(): AdversarialStore {
-  const resources = pgTable("adversarial_resources", {
-    id: pgText("id").primaryKey(),
-    aBool: boolean("a_bool").notNull(),
-    aString: pgText("a_string").notNull(),
-    aNumber: pgInteger("a_number").notNull(),
-    aDouble: doublePrecision("a_double"),
-    aOptionalString: pgText("a_optional_string"),
-    createdBy: pgText("created_by").notNull(),
-    scope: pgText("scope"),
-    createdAt: timestamp("created_at", {
-      withTimezone: true,
-      mode: "string",
-    }),
-  });
-
-  // The corpus's one real to-one chain, one owned row per level and per resource.
-  const parents = pgTable("adversarial_parents", {
-    id: pgText("id").primaryKey(),
-    aBool: boolean("a_bool").notNull(),
-    aString: pgText("a_string").notNull(),
-    aNumber: pgInteger("a_number").notNull(),
-    aOptionalString: pgText("a_optional_string"),
-    resourceId: pgText("resource_id").notNull().unique(),
-  });
-
-  const inners = pgTable("adversarial_inners", {
-    id: pgText("id").primaryKey(),
-    aBool: boolean("a_bool").notNull(),
-    aString: pgText("a_string").notNull(),
-    aNumber: pgInteger("a_number").notNull(),
-    aOptionalString: pgText("a_optional_string"),
-    parentId: pgText("parent_id").notNull().unique(),
-  });
-
-  const tags = pgTable("adversarial_tags", {
-    tagId: pgText("tag_id").primaryKey(),
-    // NULLABLE on purpose: a NULL tag name is a missing element attribute on the check
-    // side (a CEL error → deny) and must stay UNKNOWN — never FALSE — in SQL.
-    name: pgText("name"),
-    resourceId: pgText("resource_id").notNull(),
-  });
-
-  const categories = pgTable("adversarial_categories", {
-    id: pgText("id").primaryKey(),
-    name: pgText("name").notNull(),
-    resourceId: pgText("resource_id").notNull(),
-  });
-
-  const subCategories = pgTable("adversarial_sub_categories", {
-    id: pgText("id").primaryKey(),
-    name: pgText("name").notNull(),
-    categoryId: pgText("category_id").notNull(),
-  });
-
-  const labels = pgTable("adversarial_labels", {
-    id: pgText("id").primaryKey(),
-    name: pgText("name"),
-    subCategoryId: pgText("sub_category_id").notNull(),
-  });
+  const schema = postgresSchema();
+  const { resources, parents, inners, tags, categories, subCategories, labels } =
+    schema;
 
   let container: StartedPostgreSqlContainer | undefined;
   let pool: Pool | undefined;
@@ -1190,15 +790,7 @@ function postgresStore(): AdversarialStore {
 
   return {
     name: "postgres",
-    mapper: buildMapper({
-      resources,
-      parents,
-      inners,
-      tags,
-      categories,
-      subCategories,
-      labels,
-    }),
+    mapper: buildMapper(schema),
 
     async start(): Promise<void> {
       container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();

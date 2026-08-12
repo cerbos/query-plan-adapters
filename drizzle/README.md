@@ -90,6 +90,8 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` d
 
 The oracle coverage includes value-first and field-to-field comparisons, escaped string predicates, relation counts and nested collection macros, null/error propagation, arithmetic and ternaries, hierarchy operations, typed timestamps, and multi-hop relations. The fail-closed shapes throw rather than return a broader SQL filter. `matches()` is rejected because SQL regex dialects do not guarantee CEL/RE2 semantics. Every fail-closed shape's error message is pinned in the shared corpus (`conformance/actions.json`) and asserted by this adapter's conformance run, so a classification proves the throw names its declared mechanism rather than merely that something threw.
 
+The SQL each of these actions produces is pinned separately, in the translator unit test (`npm test`) — see [Testing](#testing). That is what makes a change to the emitted SQL show up as a diff even when it selects the same rows from the corpus seeds, and it is the only place the parts of the mapper contract no policy can reach are asserted at all: function mappers, `transform`, `subqueryFilter`, the `nullAttributeRepresentation` boundary, the timestamp literal contract, and malformed input.
+
 ### Dialects the contract is proved on
 
 The classification above holds where the corpus is **executed**, not where the emitted SQL merely looks plausible. Until [#320](https://github.com/cerbos/query-plan-adapters/issues/320) the corpus ran on SQLite only and PostgreSQL support was pinned at the rendered-string level; it now runs end to end on both:
@@ -99,7 +101,7 @@ npm run test:adversarial            # SQLite
 npm run test:adversarial:postgres   # PostgreSQL, via testcontainers
 ```
 
-The PostgreSQL leg is what proves the typed paths SQLite cannot reach — a real `boolean` where SQLite stores an integer, a real `timestamptz` where SQLite compares text, a hard error on division by zero where SQLite returns NULL, and a parameter typed from the column it is compared with rather than from the value. **MySQL and PlanetScale are not executed anywhere.** `src/dialect-rendering.test.ts` renders every filter through `MySqlDialect` so the adapter is at least known to emit no dialect-exclusive function there, which is renderability, not evaluation.
+The PostgreSQL leg is what proves the typed paths SQLite cannot reach — a real `boolean` where SQLite stores an integer, a real `timestamptz` where SQLite compares text, a hard error on division by zero where SQLite returns NULL, and a parameter typed from the column it is compared with rather than from the value. **MySQL and PlanetScale are not executed anywhere.** The translator unit test (`npm test`) renders every corpus action through `MySqlDialect` as well and holds it to the dialect rules — no SQLite-only string function, no single-precision cast, no integer `CASE` arm outside a counting aggregate, no fold that collapses a NULL operand to FALSE. That is renderability, not evaluation, and it is why the golden expectations pin bytes for the two executed stores and rules for the third.
 
 **Behaviour change.** `hasIntersection` now normalizes its operand order, so the value-first spelling — `hasIntersection(["a","b"], R.attr.list)`, which the planner preserves from policy source order — translates instead of silently becoming `FALSE`. The same change makes an operand pair with **no** literal list throw rather than emit that `FALSE`: a shape that returned a filter now raises, which is a consumer-visible break, but the filter it returned selected no rows and the corpus forbids emitting one for a shape the adapter cannot express ([#387](https://github.com/cerbos/query-plan-adapters/issues/387)).
 
@@ -353,4 +355,46 @@ flat query: pagination, and the adapter's filter composed with an application-ow
 
 ## Testing
 
-The project ships with a comprehensive test suite that exercises all supported operators using an in-memory SQLite database and the official Drizzle ORM query builder.
+| Command | What it proves | What it needs |
+| --- | --- | --- |
+| `npm test` | **The SQL this adapter emits.** The translator unit test: every corpus action, classified exactly once as a golden expectation or as a throw | Nothing but Node — no Cerbos sidecar, no database, no Docker |
+| `npm run test:adversarial` | **The rows that SQL returns**, against real SQLite with `check()` as the oracle | Cerbos CLI |
+| `npm run test:adversarial:postgres` | The same corpus against real PostgreSQL | Cerbos CLI, Docker |
+| `npm run golden:update` | — | Rewrites `golden/expectations.json` from what the translator emits today. Review the diff |
+
+### The golden expectations
+
+`npm test` reads its plans from `../conformance/wire-fixtures/` — the golden `PlanResources`
+responses captured against the pinned Cerbos version — and asserts them against
+`golden/expectations.json`, a **golden expectation** file this adapter owns. One entry per corpus
+action, keyed by action name:
+
+```jsonc
+{
+  "adapter": "drizzle",
+  "regenerate": "npm run golden:update",
+  "expectations": {
+    "in-empty":  { "kind": "KIND_ALWAYS_DENIED" },
+    "arith-add": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        // One per store the adversarial suite executes, because what the driver is asked to bind
+        // depends on the column type: a PostgreSQL `boolean` binds `true`, a SQLite one binds 1.
+        "postgresql": { "sql": "\"adversarial_resources\".\"a_number\" + $1 > $2", "params": [1, 2] },
+        "sqlite":     { "sql": "\"adversarial_resources\".\"a_number\" + ? > ?",   "params": [1, 2] }
+      }
+    }
+  }
+}
+```
+
+An action this adapter refuses carries **no entry**: its pinned message is corpus data, in
+`conformance/actions.json`, and duplicating it here would be two places to change one string. A
+wire fixture that is neither in this file nor declared unsupported fails the suite, which is what
+makes a new corpus action land as a failure rather than as silence
+([ADR 0006](../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md),
+[ADR 0007](../docs/adr/0007-adapters-share-data-not-code.md), and the "Golden expectations" section
+of [conformance/README.md](../conformance/README.md)).
+
+Whether those filters return the rows the PDP allows is a separate question, answered by the
+adversarial suite, which does need a Cerbos sidecar and (for the PostgreSQL leg) Docker.

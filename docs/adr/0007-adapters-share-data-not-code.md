@@ -118,7 +118,7 @@ between copies would surface.
 nothing else. Extending it to any loader — Go, TypeScript, or otherwise — reverses this ADR rather
 than elaborating it.
 
-**This ADR records the principle, not a format.** How golden expectations are stored is being
-piloted against a real adapter on
-[#379](https://github.com/cerbos/query-plan-adapters/issues/379), and is documented in
-`conformance/README.md` once it ships.
+**This ADR records the principle, not a format.** How golden expectations are stored was piloted
+against drizzle on [#379](https://github.com/cerbos/query-plan-adapters/issues/379) and is
+documented in `conformance/README.md`, under "Golden expectations". Prisma and mongoose keep their
+inline expectations until they are retrofitted to it.
