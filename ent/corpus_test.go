@@ -173,6 +173,26 @@ var tagKeys = []string{"id", "name"}
 // way and for the same reason as seedKeys.
 var derivedKeys = []string{"aDouble", "createdAt", "createdBy", "labels", "scope"}
 
+// principalKeys is the exact set of top-level keys the corpus principal carries.
+//
+// `id` and `roles` are deliberately IN scope, not excluded. A role dropped on the way in changes
+// every policy decision at once, which is at least as bad as a dropped attribute; that it is less
+// likely to happen is a reason to expect the assertion to stay quiet, not a reason to omit it.
+// Guarding them one level above the attributes is the same two-level shape seedKeys and tagKeys
+// use for a row and its `tags[]` elements.
+var principalKeys = []string{"attr", "id", "roles"}
+
+// principalAttrKeys is the exact set of principal attributes this harness consumes.
+//
+// The corpus principal feeds the PLAN under test and the check() ORACLE, so an attribute dropped on
+// the way in vanishes from both sides at once: the plan folds to ALWAYS_DENIED and the oracle,
+// built from the same principal, agrees. That is how langchain-chromadb's hardcoded attribute
+// allowlist let `pv-exists` pass while testing nothing (conformance/README.md, "Adding a new
+// hostile shape", step 7). This harness hands Principal.Attr to the SDK verbatim, which is correct;
+// the guard is what proves it still does, in both directions — a corpus attribute nothing here
+// consumes, and a consumed attribute the corpus no longer carries.
+var principalAttrKeys = []string{"allowedTags", "context", "fewTeams", "manyTeams"}
+
 // cerbosImageRepository is the PDP image the corpus pins. The tag comes from CERBOS_VERSION and
 // the digest from CERBOS_IMAGE_DIGEST; conformance/scripts/validate-corpus.sh asserts the two
 // agree everywhere they are restated.
@@ -376,15 +396,16 @@ func readJSONStrict(tb testing.TB, path string, out any) {
 	}
 }
 
-// assertCorpusCoverage proves the harness consumes every seed key and every derived field the
-// corpus defines, and nothing it does not. Strict decoding alone cannot do this: it rejects an
-// added key but says nothing about one that disappears, and a disappeared key decodes to its zero
-// value on both sides of the differential.
+// assertCorpusCoverage proves the harness consumes every seed key, every principal key and every
+// derived field the corpus defines, and nothing it does not. Strict decoding alone cannot do this:
+// it rejects an added key but says nothing about one that disappears, and a disappeared key decodes
+// to its zero value on both sides of the differential.
 func assertCorpusCoverage(tb testing.TB, dir string, c *Corpus) {
 	tb.Helper()
 
 	var raw struct {
-		Seeds []map[string]json.RawMessage `json:"seeds"`
+		Principal map[string]json.RawMessage   `json:"principal"`
+		Seeds     []map[string]json.RawMessage `json:"seeds"`
 	}
 	readJSON(tb, filepath.Join(dir, "seeds.json"), &raw)
 	if len(raw.Seeds) != len(c.Seeds.Seeds) {
@@ -403,6 +424,8 @@ func assertCorpusCoverage(tb testing.TB, dir string, c *Corpus) {
 		}
 	}
 
+	assertPrincipalCoverage(tb, raw.Principal)
+
 	assertKeys(tb, "derived-fields.json fields", c.Derived.Fields, derivedKeys)
 
 	var rawDerived struct {
@@ -419,6 +442,44 @@ func assertCorpusCoverage(tb testing.TB, dir string, c *Corpus) {
 	if len(rawDerived.Derived) != len(c.Seeds.Seeds) {
 		tb.Fatalf("derived-fields.json has %d entries for %d seeds", len(rawDerived.Derived), len(c.Seeds.Seeds))
 	}
+}
+
+// assertPrincipalCoverage guards the corpus principal the way assertCorpusCoverage guards a seed
+// row: the top-level keys, then the keys one level in.
+//
+// The attribute VALUES are asserted too, because a key-set guard says nothing about a change inside
+// one and three of the four attributes are lists. The corpus carries exactly two shapes — a string
+// and a list of strings — and every harness converts on that basis, so a third shape has to fail
+// here rather than be coerced by one adapter's SDK and passed through untyped by another. It is the
+// same reason the seed guard descends into `tags[]`.
+func assertPrincipalCoverage(tb testing.TB, principal map[string]json.RawMessage) {
+	tb.Helper()
+
+	assertKeys(tb, "seeds.json principal", keysOf(principal), principalKeys)
+
+	var attr map[string]json.RawMessage
+	if err := json.Unmarshal(principal["attr"], &attr); err != nil {
+		tb.Fatalf("parsing seeds.json principal.attr: %v", err)
+	}
+	assertKeys(tb, "seeds.json principal.attr", keysOf(attr), principalAttrKeys)
+	for key, value := range attr {
+		assertPrincipalAttrShape(tb, "seeds.json principal.attr."+key, value)
+	}
+}
+
+// assertPrincipalAttrShape fails unless the value is one of the two shapes the corpus carries.
+func assertPrincipalAttrShape(tb testing.TB, label string, value json.RawMessage) {
+	tb.Helper()
+
+	var scalar string
+	if json.Unmarshal(value, &scalar) == nil {
+		return
+	}
+	var list []string
+	if json.Unmarshal(value, &list) == nil {
+		return
+	}
+	tb.Fatalf("%s is neither a string nor a list of strings, the only two shapes this harness consumes: a reshaped principal attribute feeds the plan and the check() oracle at once", label)
 }
 
 // assertKeys fails unless got is exactly want, ignoring order, plus any of the optional keys.

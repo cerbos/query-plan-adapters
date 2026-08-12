@@ -163,6 +163,27 @@ const DERIVED_KEYS = [
   "labels",
 ] as const;
 
+// The corpus principal is guarded the same way and for the same reason. It feeds the PLAN under
+// test AND the check() oracle, so an attribute dropped on the way in vanishes from both sides at
+// once: the plan folds to ALWAYS_DENIED and the oracle, built from the same principal, agrees. That
+// is how langchain-chromadb's hardcoded attribute allowlist let `pv-exists` pass while testing
+// nothing (conformance/README.md, "Adding a new hostile shape", step 7). This harness passes the
+// principal through verbatim, which is correct; the guard is what proves it still does.
+//
+// `id` and `roles` are deliberately IN scope, guarded by PRINCIPAL_KEYS one level above the
+// attributes — the same two-level shape SEED_KEYS and TAG_KEYS use for a row and its `tags[]`
+// elements. A role dropped on the way in changes every policy decision at once; that it is less
+// likely to be projected away than an attribute is a reason to expect the assertion to stay quiet,
+// not a reason to omit it.
+const PRINCIPAL_KEYS = ["id", "roles", "attr"] as const;
+
+const PRINCIPAL_ATTR_KEYS = [
+  "allowedTags",
+  "context",
+  "fewTeams",
+  "manyTeams",
+] as const;
+
 /** One seed's derived fields, exactly as conformance/derived-fields.json carries them. */
 interface DerivedEntry {
   createdBy: string;
@@ -201,6 +222,21 @@ function assertKeys(
   }
 }
 
+/**
+ * One principal attribute, checked against the two JSON shapes the corpus carries. A key-set guard
+ * says nothing about a change inside a value and three of the four attributes are lists, so the
+ * element type is asserted for the same reason the seed guard descends into `tags[]`.
+ */
+function assertPrincipalAttrShape(label: string, value: unknown): void {
+  if (typeof value === "string") return;
+  if (Array.isArray(value) && value.every((el) => typeof el === "string")) {
+    return;
+  }
+  throw new Error(
+    `${label} is neither a string nor an array of strings, the only two shapes this harness consumes: a reshaped principal attribute feeds the plan and the check() oracle at once`
+  );
+}
+
 const seedsFile: SeedsFile = JSON.parse(
   fs.readFileSync(path.join(CONFORMANCE_DIR, "seeds.json"), "utf8")
 );
@@ -222,6 +258,25 @@ SEEDS.forEach((seed, index) => {
     assertKeys(`${label}.tags[${tagIndex}]`, Object.keys(tag), TAG_KEYS);
   });
 });
+
+// seedsFile.principal is the parsed JSON object, handed to the SDK untouched, so Object.keys
+// reports the corpus key set on both levels.
+assertKeys(
+  "seeds.json principal",
+  Object.keys(seedsFile.principal),
+  PRINCIPAL_KEYS
+);
+// `attr` is optional on the SDK's Principal type; the corpus always carries it, and the assertion
+// above is what proves it rather than this fallback.
+const PRINCIPAL_ATTR = seedsFile.principal.attr ?? {};
+assertKeys(
+  "seeds.json principal.attr",
+  Object.keys(PRINCIPAL_ATTR),
+  PRINCIPAL_ATTR_KEYS
+);
+for (const [key, value] of Object.entries(PRINCIPAL_ATTR)) {
+  assertPrincipalAttrShape(`seeds.json principal.attr.${key}`, value);
+}
 
 assertKeys("derived-fields.json fields", derivedFile.fields, DERIVED_KEYS);
 const DERIVED_IDS = Object.keys(derivedFile.derived);

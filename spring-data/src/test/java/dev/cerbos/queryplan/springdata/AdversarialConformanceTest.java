@@ -304,6 +304,25 @@ class AdversarialConformanceTest {
     private static final List<String> DERIVED_KEYS =
             List.of("createdBy", "aDouble", "createdAt", "scope", "labels");
 
+    // The corpus principal is guarded the same way and for the same reason. It feeds the PLAN under
+    // test AND the check() oracle, so an attribute dropped on the way in vanishes from both sides
+    // at once: the plan folds to ALWAYS_DENIED and the oracle, built from the same principal,
+    // agrees. That is how langchain-chromadb's hardcoded attribute allowlist let `pv-exists` pass
+    // while testing nothing (conformance/README.md, "Adding a new hostile shape", step 7).
+    // principal() iterates the whole attr map, which is correct; the guard is what proves it does.
+    //
+    // `id` and `roles` are deliberately IN scope, guarded by PRINCIPAL_KEYS one level above the
+    // attributes — the same two-level shape SEED_KEYS and TAG_KEYS use for a row and its `tags[]`
+    // elements. A role dropped on the way in changes every policy decision at once; that it is less
+    // likely to be projected away than an attribute is a reason to expect the assertion to stay
+    // quiet, not a reason to omit it. PrincipalSpec ignores unknown properties so that this
+    // assertion, not a Jackson decode error, is what names an added key.
+
+    private static final List<String> PRINCIPAL_KEYS = List.of("id", "roles", "attr");
+
+    private static final List<String> PRINCIPAL_ATTR_KEYS =
+            List.of("allowedTags", "context", "fewTeams", "manyTeams");
+
     private static SeedsFile seedsFile;
     private static ActionsFile actionsFile;
     private static DerivedFile derivedFile;
@@ -473,14 +492,15 @@ class AdversarialConformanceTest {
     }
 
     /**
-     * Proves this harness consumes every seed key and every derived field the corpus defines, and
-     * nothing it does not. Rejecting unknown properties on decode cannot do this alone: it catches
-     * an added key but says nothing about one that disappears, and a disappeared key decodes to its
-     * default on both sides of the differential.
+     * Proves this harness consumes every seed key, every principal key and every derived field the
+     * corpus defines, and nothing it does not. Rejecting unknown properties on decode cannot do
+     * this alone: it catches an added key but says nothing about one that disappears, and a
+     * disappeared key decodes to its default on both sides of the differential.
      */
     private static void assertCorpusCoverage(ObjectMapper mapper, Path conformance)
             throws IOException {
-        JsonNode rawSeeds = mapper.readTree(conformance.resolve("seeds.json").toFile()).get("seeds");
+        JsonNode rawSeedsFile = mapper.readTree(conformance.resolve("seeds.json").toFile());
+        JsonNode rawSeeds = rawSeedsFile.get("seeds");
         assertEquals(SEEDS.size(), rawSeeds.size(), "seeds.json rows lost in decoding");
         for (int i = 0; i < rawSeeds.size(); i++) {
             String label = "seeds.json seeds[" + i + "]";
@@ -492,6 +512,8 @@ class AdversarialConformanceTest {
             }
         }
 
+        assertPrincipalCoverage(rawSeedsFile.get("principal"));
+
         assertKeys("derived-fields.json fields", derivedFile.fields(), DERIVED_KEYS, List.of());
         assertEquals(SEEDS.stream().map(Seed::id).collect(Collectors.toCollection(TreeSet::new)),
                 new TreeSet<>(derivedFile.derived().keySet()),
@@ -501,6 +523,36 @@ class AdversarialConformanceTest {
         for (Map.Entry<String, JsonNode> entry : rawDerived.properties()) {
             assertKeys("derived-fields.json derived[\"" + entry.getKey() + "\"]",
                     keysOf(entry.getValue()), DERIVED_KEYS, List.of());
+        }
+    }
+
+    /**
+     * Guards the corpus principal the way {@link #assertCorpusCoverage} guards a seed row: the
+     * top-level keys, then the keys one level in.
+     *
+     * <p>Asserted against the RAW JSON because {@link #principal()} rebuilds the principal from
+     * {@link PrincipalSpec} — a rebuilt object could only ever report the keys this harness already
+     * names. The attribute VALUES are asserted too: a key-set guard says nothing about a change
+     * inside one, and three of the four attributes are lists. {@link #asPrincipalAttribute} accepts
+     * exactly a string and a list of strings, so a third shape fails here, next to the
+     * declaration, rather than deep in the conversion. It is the same reason the seed guard
+     * descends into {@code tags[]}.
+     */
+    private static void assertPrincipalCoverage(JsonNode principal) {
+        assertKeys("seeds.json principal", keysOf(principal), PRINCIPAL_KEYS, List.of());
+        JsonNode attr = principal.get("attr");
+        assertKeys("seeds.json principal.attr", keysOf(attr), PRINCIPAL_ATTR_KEYS, List.of());
+        for (Map.Entry<String, JsonNode> entry : attr.properties()) {
+            String label = "seeds.json principal.attr." + entry.getKey();
+            JsonNode value = entry.getValue();
+            boolean listOfStrings = value.isArray();
+            for (JsonNode element : value) {
+                listOfStrings &= element.isTextual();
+            }
+            assertTrue(value.isTextual() || listOfStrings, () -> label
+                    + " is neither a string nor a list of strings, the only two shapes this harness"
+                    + " consumes: a reshaped principal attribute feeds the plan and the check()"
+                    + " oracle at once");
         }
     }
 

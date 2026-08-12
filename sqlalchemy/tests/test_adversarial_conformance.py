@@ -93,6 +93,23 @@ SEED_NOTE_KEY = "note"
 TAG_KEYS = {"id", "name"}
 DERIVED_KEYS = {"createdBy", "aDouble", "createdAt", "scope", "labels"}
 
+# The corpus principal is guarded the same way and for the same reason. It feeds
+# the PLAN under test AND the check() oracle, so an attribute dropped on the way
+# in vanishes from both sides at once: the plan folds to ALWAYS_DENIED and the
+# oracle, built from the same principal, agrees. That is how langchain-chromadb's
+# hardcoded attribute allowlist let `pv-exists` pass while testing nothing
+# (conformance/README.md, "Adding a new hostile shape", step 7). _principal()
+# passes the attributes through verbatim; the guard is what proves it still does.
+#
+# `id` and `roles` are deliberately IN scope, guarded by PRINCIPAL_KEYS one level
+# above the attributes — the same two-level shape SEED_KEYS and TAG_KEYS use for
+# a row and its `tags[]` elements. A role dropped on the way in changes every
+# policy decision at once; that it is less likely to be projected away than an
+# attribute is a reason to expect the assertion to stay quiet, not a reason to
+# omit it.
+PRINCIPAL_KEYS = {"id", "roles", "attr"}
+PRINCIPAL_ATTR_KEYS = {"allowedTags", "context", "fewTeams", "manyTeams"}
+
 
 def _assert_keys(
     label: str,
@@ -114,11 +131,37 @@ def _assert_keys(
         )
 
 
+def _assert_principal_attr_shape(label: str, value: Any) -> None:
+    """One principal attribute, checked against the two JSON shapes the corpus carries.
+
+    A key-set guard says nothing about a change inside a value and three of the
+    four attributes are lists, so the element type is asserted for the same
+    reason the seed guard descends into ``tags[]``.
+    """
+    if isinstance(value, str):
+        return
+    if isinstance(value, list) and all(isinstance(item, str) for item in value):
+        return
+    raise AssertionError(
+        f"{label} is neither a string nor a list of strings, the only two shapes "
+        "this harness consumes: a reshaped principal attribute feeds the plan and "
+        "the check() oracle at once"
+    )
+
+
 for _index, _seed in enumerate(SEEDS):
     _label = f"seeds.json seeds[{_index}]"
     _assert_keys(_label, set(_seed), SEED_KEYS, {SEED_NOTE_KEY})
     for _tag_index, _tag in enumerate(_seed["tags"]):
         _assert_keys(f"{_label}.tags[{_tag_index}]", set(_tag), TAG_KEYS)
+
+# SEEDS_FILE["principal"] is the parsed JSON object, handed to the SDK untouched,
+# so its keys are the corpus key set on both levels.
+_PRINCIPAL: Dict[str, Any] = SEEDS_FILE["principal"]
+_assert_keys("seeds.json principal", set(_PRINCIPAL), PRINCIPAL_KEYS)
+_assert_keys("seeds.json principal.attr", set(_PRINCIPAL["attr"]), PRINCIPAL_ATTR_KEYS)
+for _attr_key, _attr_value in _PRINCIPAL["attr"].items():
+    _assert_principal_attr_shape(f"seeds.json principal.attr.{_attr_key}", _attr_value)
 
 DERIVED: Dict[str, Dict[str, Any]] = DERIVED_FILE["derived"]
 _assert_keys("derived-fields.json fields", set(DERIVED_FILE["fields"]), DERIVED_KEYS)

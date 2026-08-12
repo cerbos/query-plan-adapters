@@ -255,9 +255,11 @@ attribute allowlist, a fixed column list). A projection silently drops anything 
 depends on, and because the same projected input feeds both the plan and the check() oracle, the
 two agree and the action passes vacuously. Pass corpus data through verbatim.
 
-Every harness declares the exact `seeds.json` keys and `derived-fields.json` fields it consumes and
-asserts set equality against the corpus, so adding a seed field fails all ten loudly instead of
-being dropped from both sides at once. Adding a field means updating those declarations
+Every harness declares the exact `seeds.json` keys, corpus **principal** keys (`{id, roles, attr}`
+and the attribute names inside `attr`, with the two value shapes those attributes take) and
+`derived-fields.json` fields it consumes and asserts set equality against the corpus, so adding a
+seed field or a principal attribute fails all ten loudly instead of being dropped from both sides at
+once. Adding one means updating those declarations
 deliberately — that is the point of the guard, not an obstacle to route around. The derived fields
 (`createdBy`, `aDouble`, `createdAt`, `scope`, `labels`) live in `conformance/derived-fields.json`;
 never recompute them in a harness.
