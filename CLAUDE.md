@@ -30,13 +30,14 @@ npm test         # Jest + Cerbos sidecar
 npm run test:adversarial  # differential suite against the shared conformance corpus
 ```
 
-On prisma, `npm test` is the **translator unit test**: it reads its plans from
+On prisma and mongoose, `npm test` is the **translator unit test**: it reads its plans from
 `conformance/wire-fixtures/`, asserts the emitted filter, and needs no sidecar, no database and no
 generated client ([ADR 0006](docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md)).
-It is engine-agnostic, so it has no v6/v7 split; the Prisma major is still a dimension of
-`npm run typecheck` and of the adversarial legs. The other TypeScript adapters have not been
-converted yet ([#378](https://github.com/cerbos/query-plan-adapters/issues/378) onwards) and still
-run their shared-policy suite behind a sidecar.
+On prisma it is engine-agnostic, so it has no v6/v7 split; the Prisma major is still a dimension of
+`npm run typecheck` and of the adversarial legs. On mongoose it never opens a connection, so the
+MongoDB server dimension applies to the adversarial leg alone. The remaining TypeScript adapters
+have not been converted yet ([#379](https://github.com/cerbos/query-plan-adapters/issues/379)
+onwards) and still run their shared-policy suite behind a sidecar.
 
 Drizzle and Prisma also replay the corpus against a real PostgreSQL server (testcontainers, so
 Docker is required): `npm run test:adversarial:postgres`, and `…:postgres:v6` / `…:postgres:v7` on
@@ -85,9 +86,10 @@ Most TypeScript tests run behind a Cerbos sidecar:
 cerbos run --set=storage.disk.directory=../policies -- jest src/**.test.ts
 ```
 
-Cerbos CLI must be installed locally. Shared policies live in `/policies/`. Prisma is the
-exception: its `npm test` needs no sidecar (see above), and only its adversarial suite starts one —
-against `conformance/policies/`, not `/policies/`.
+Cerbos CLI must be installed locally. Shared policies live in `/policies/`. Prisma and mongoose are
+the exceptions: their `npm test` needs no sidecar (see above), and only their adversarial suite
+starts one — against `conformance/policies/`, not `/policies/`. Neither adapter's directory reads
+`/policies/` at all any more, which is why neither workflow lists it as a trigger path.
 
 Some adapters need additional services:
 - Mongoose: `npm run mongo` (Docker MongoDB)
@@ -194,7 +196,7 @@ For pull requests: give a concise summary, note the affected adapters, link rela
 
 Each adapter has its own GitHub Actions workflow triggered by changes in its directory, `/policies/`, or `/conformance/`. Matrix tests across Node versions (22, 24, 25) and relevant service versions. All ten adapter workflows validate the corpus and run their adversarial suite **inside the same job as the regular tests** — there is no separate `adversarial` job. On the TypeScript adapters the adversarial step is gated to the baseline Node leg (`if: matrix.node-version == '22'`), because the corpus discriminates the translator and the datastore, not the Node runtime; the other matrix dimensions still get their own adversarial run, and those divide into two kinds:
 
-- **The datastore is one.** Drizzle and Prisma each run the corpus twice on the baseline Node leg, once per `ADAPTER_TEST_DB` store (SQLite, then PostgreSQL) — collation, LIKE escaping and parameter typing are translator behaviour, so a store the workflow does not execute is a store the adapter does not cover. MongoDB server version is the mongoose equivalent.
+- **The datastore is one.** Drizzle and Prisma each run the corpus twice on the baseline Node leg, once per `ADAPTER_TEST_DB` store (SQLite, then PostgreSQL) — collation, LIKE escaping and parameter typing are translator behaviour, so a store the workflow does not execute is a store the adapter does not cover. MongoDB server version is the mongoose equivalent, and there the store dimension exists **only** on the baseline Node leg: once `npm test` became an offline translator unit test, a second server crossed with a non-baseline Node version ran byte-identical work, so the workflow `exclude`s those legs rather than paying for them.
 - **The client engine is not, on its own.** Prisma's v6/v7 dimension is an engine matrix; it crosses with the store dimension, giving four adversarial runs per Prisma workflow (2 majors × 2 stores), all on Node 22.
 
 Adding a new adversarial job — or dropping the Node gate so the corpus replays on every Node leg — multiplies runner minutes for no extra coverage. Adding a *store* leg does buy coverage; adding a Node leg does not. `conformance.yaml` additionally replans the golden wire fixtures against the pinned PDP and fails on drift.
