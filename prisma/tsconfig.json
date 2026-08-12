@@ -1,7 +1,8 @@
 {
   "extends": ["@tsconfig/node24", "@tsconfig/strictest"],
   "include": ["src"],
-  "exclude": ["src/generated", "src/index.test.ts", "src/adversarial.test.ts", "src/test-setup.*.ts"],
+  "//exclude": "Test-only sources. `corpus.ts` is not a test file but is read by both suites and by neither consumer, so it is excluded for the same reason: nothing here may reach lib/.",
+  "exclude": ["src/generated", "src/corpus.ts", "src/translator.test.ts", "src/adversarial.test.ts", "src/test-setup.*.ts"],
   "compilerOptions": {
     "checkJs": true,
     "composite": true,

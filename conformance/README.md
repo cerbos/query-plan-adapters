@@ -1009,9 +1009,16 @@ the policy suite and classify it like anything else.
   artifacts. The same applies to Prisma's generated clients.
 - **Java harnesses read `../conformance/`**, so containerised runs must mount the repository
   root, not the adapter directory. See the recipe in the repo's `CLAUDE.md`.
-- **The wire fixtures are not consumed by adapter harnesses.** They pin planner shape
-  independently and are enforced by the `Conformance Corpus` workflow, which replans against the
-  pinned PDP and fails on drift.
+- **The wire fixtures are not consumed by adapter harnesses.** A harness plans against a live PDP;
+  the fixtures pin planner shape independently and are enforced by the `Conformance Corpus`
+  workflow, which replans against the pinned PDP and fails on drift. They *are* consumed by
+  **translator unit tests** — an adapter's offline test that a plan produces the expected
+  database-native filter, with no PDP and no store
+  ([ADR 0006](../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md);
+  `prisma/src/translator.test.ts` is the reference). Those tests classify every fixture exactly
+  once, so **adding a corpus action fails every adapter that has one** until someone records the
+  filter it emits. That is deliberate: it is the same forcing function `actions.json` applies to
+  the classification.
 - **A dialect the harness does not exercise is not covered.** Collation, LIKE metacharacter
   handling and parameter typing all differ per dialect, and the READMEs treat them as part of the
   policy contract for exactly this reason. `ent` and `spring-data` run three dialects each;

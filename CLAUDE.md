@@ -30,7 +30,13 @@ npm test         # Jest + Cerbos sidecar
 npm run test:adversarial  # differential suite against the shared conformance corpus
 ```
 
-Prisma has version-specific tests: `npm run test:v6`, `npm run test:v7`
+On prisma, `npm test` is the **translator unit test**: it reads its plans from
+`conformance/wire-fixtures/`, asserts the emitted filter, and needs no sidecar, no database and no
+generated client ([ADR 0006](docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md)).
+It is engine-agnostic, so it has no v6/v7 split; the Prisma major is still a dimension of
+`npm run typecheck` and of the adversarial legs. The other TypeScript adapters have not been
+converted yet ([#378](https://github.com/cerbos/query-plan-adapters/issues/378) onwards) and still
+run their shared-policy suite behind a sidecar.
 
 Drizzle and Prisma also replay the corpus against a real PostgreSQL server (testcontainers, so
 Docker is required): `npm run test:adversarial:postgres`, and `…:postgres:v6` / `…:postgres:v7` on
@@ -74,12 +80,14 @@ docker run --rm -v "$(pwd)":/repo -v /var/run/docker.sock:/var/run/docker.sock \
 
 ## Testing
 
-All TypeScript tests run behind a Cerbos sidecar:
+Most TypeScript tests run behind a Cerbos sidecar:
 ```bash
 cerbos run --set=storage.disk.directory=../policies -- jest src/**.test.ts
 ```
 
-Cerbos CLI must be installed locally. Shared policies live in `/policies/`.
+Cerbos CLI must be installed locally. Shared policies live in `/policies/`. Prisma is the
+exception: its `npm test` needs no sidecar (see above), and only its adversarial suite starts one —
+against `conformance/policies/`, not `/policies/`.
 
 Some adapters need additional services:
 - Mongoose: `npm run mongo` (Docker MongoDB)

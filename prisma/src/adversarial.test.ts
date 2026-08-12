@@ -15,6 +15,18 @@ import type {
 } from "@cerbos/core";
 
 import { queryPlanToPrisma, PlanKind, MapperConfig } from ".";
+import {
+  CONFORMANCE_DIR,
+  MAPPER,
+  MODEL,
+  classifyActionsForAdapter,
+  requireMessage,
+} from "./corpus";
+import type {
+  ActionClassification,
+  ActionsFile,
+  ThrowingAction,
+} from "./corpus";
 import { prisma } from "./test-setup.adversarial";
 
 /**
@@ -26,8 +38,10 @@ import { prisma } from "./test-setup.adversarial";
  *
  * No hand-computed expectations: if this adapter's filter semantics diverge from Cerbos's own
  * evaluation for any row, the mismatch surfaces mechanically. See `conformance/README.md` for the
- * oracle recipe (NULL-as-missing-attribute, the degeneracy guard) — this file only owns the
- * Prisma-specific translation (seeding, field mapping, executing the query).
+ * oracle recipe (NULL-as-missing-attribute, the degeneracy guard) — this file only owns seeding
+ * and executing the query. The mapper and the per-adapter classification live in `./corpus`,
+ * shared with `translator.test.ts`, which pins the filter this suite then proves returns the
+ * right rows.
  *
  * The whole corpus is replayed against every store this adapter is proved on, one store per run,
  * selected with `ADAPTER_TEST_DB` (`sqlite` by default, `postgres` for the container-backed leg —
@@ -40,7 +54,6 @@ import { prisma } from "./test-setup.adversarial";
 
 const cerbos = new Cerbos("127.0.0.1:3593", { tls: false });
 
-const CONFORMANCE_DIR = path.join(__dirname, "..", "..", "conformance");
 const SCHEMA_DIR = path.join(__dirname, "..", "prisma");
 
 const STORE_NAMES = ["sqlite", "postgres"] as const;
@@ -114,119 +127,6 @@ interface SeedsFile {
   principal: Principal;
   resourceKind: string;
   seeds: Seed[];
-}
-
-interface UnsupportedShape {
-  action: string;
-  shape: string;
-  /** One entry per adapter that must reject the shape; the corpus asserts the key set. */
-  messages: Record<string, string>;
-}
-
-interface AdapterUnsupportedEntry {
-  action: string;
-  reason: string;
-  /** Absent on `adapterSupportedExpected` / `nullRepresentationOmitted`, required on a throw. */
-  message?: string;
-}
-
-/**
- * A `nullRepresentationOmitted` entry. Every adapter must reject these — the two NULL conventions
- * are indistinguishable on the wire — so `messages` names the whole roster with no promotions to
- * subtract.
- */
-interface NullRepresentationOmittedEntry {
-  action: string;
-  reason: string;
-  messages: Record<string, string>;
-}
-
-interface KnownDivergence {
-  action: string;
-  adapters: string[];
-}
-
-interface ActionsFile {
-  conformance: string[];
-  adapterUnsupported?: Record<string, AdapterUnsupportedEntry[]>;
-  adapterSupportedExpected?: Record<string, AdapterUnsupportedEntry[]>;
-  expectedUnsupported: UnsupportedShape[];
-  nullRepresentationOmitted: NullRepresentationOmittedEntry[];
-  knownDivergences?: KnownDivergence[];
-}
-
-/**
- * A shape this adapter must refuse, with the substring its error has to contain.
- *
- * The message is what turns "it threw" into "it threw for the declared reason": without it a
- * mapper typo or an unrelated validation satisfies the assertion just as well as the limitation
- * the corpus documents (cerbos/query-plan-adapters#326).
- */
-type ThrowingAction = readonly [action: string, reason: string, message: string];
-
-interface ActionClassification {
-  oracleActions: string[];
-  throwingActions: ThrowingAction[];
-  supportedExpected: Set<string>;
-}
-
-/** The pinned message, or a failure — a throwing action without one asserts nothing. */
-function requireMessage(
-  label: string,
-  message: string | undefined
-): string {
-  if (message === undefined || message === "") {
-    throw new Error(
-      `actions.json pins no throw message for ${label}: the throw suite would accept a failure for any reason`
-    );
-  }
-  return message;
-}
-
-function classifyActionsForAdapter(
-  manifest: ActionsFile,
-  adapter: string
-): ActionClassification {
-  const unsupported = manifest.adapterUnsupported?.[adapter] ?? [];
-  const unsupportedActions = new Set(unsupported.map((entry) => entry.action));
-  const supportedExpected = new Set(
-    (manifest.adapterSupportedExpected?.[adapter] ?? []).map(
-      (entry) => entry.action
-    )
-  );
-  const oracleActions = [
-    ...manifest.conformance.filter(
-      (action) => !unsupportedActions.has(action)
-    ),
-    ...supportedExpected,
-  ];
-  const throwingActions: ThrowingAction[] = [
-    ...unsupported.map(
-      (entry): ThrowingAction => [
-        entry.action,
-        entry.reason,
-        requireMessage(`adapterUnsupported.${adapter}.${entry.action}`, entry.message),
-      ]
-    ),
-    ...manifest.expectedUnsupported
-      .filter((entry) => !supportedExpected.has(entry.action))
-      .map((entry): ThrowingAction => [
-        entry.action,
-        entry.shape,
-        requireMessage(
-          `expectedUnsupported.${entry.action}.messages.${adapter}`,
-          entry.messages?.[adapter]
-        ),
-      ]),
-  ];
-
-  return {
-    oracleActions: [...new Set(oracleActions)].sort(),
-    throwingActions: throwingActions.sort(([left], [right]) =>
-      left.localeCompare(right)
-    ),
-    supportedExpected,
-  };
 }
 
 // -- corpus coverage guards ---------------------------------------------------------------------
@@ -599,150 +499,6 @@ function withoutNullConventions(
   );
 }
 
-const MAPPER: Record<string, MapperConfig> = {
-  // The primary key, reached as `request.resource.id` rather than through `attr` (the `id-*`
-  // actions). It is a mapping like any other here, which is the point: an adapter that resolves
-  // references by stripping a `request.resource.attr.` prefix never sees this name.
-  "request.resource.id": { field: "id" },
-  "request.resource.attr.aBool": { field: "aBool" },
-  "request.resource.attr.aString": { field: "aString" },
-  "request.resource.attr.aNumber": { field: "aNumber" },
-  "request.resource.attr.aDouble": { field: "aDouble" },
-  "request.resource.attr.aOptionalString": { field: "aOptionalString" },
-  "request.resource.attr.createdBy": { field: "createdBy" },
-  "request.resource.attr.scope": { field: "scope" },
-  "request.resource.attr.createdAt": {
-    field: "createdAt",
-    valueType: "dateTime",
-  },
-  // `owner` and `coOwner` alias columns that `aOptionalString` and `scope` also map, under the
-  // OTHER null convention: the oracle sends a real null attribute for them rather than omitting
-  // it. Declaring that here is what makes the equality family definite for these two attributes
-  // and leaves it untouched for every other mapping (cerbos/query-plan-adapters#308).
-  "request.resource.attr.owner": {
-    field: "aOptionalString",
-    nullable: true,
-    nullAttributeRepresentation: "explicit",
-  },
-  "request.resource.attr.coOwner": {
-    field: "scope",
-    nullable: true,
-    nullAttributeRepresentation: "explicit",
-  },
-  // obj.inner is not a real nested column — mirrors aString, same trick the spring-data
-  // reference harness uses for the p-struct probe. `parent.inner` below is the opposite: a real
-  // two-level join. The two are kept side by side on purpose.
-  "request.resource.attr.obj.inner": { field: "aString" },
-  // The corpus's one REAL to-one chain (the `rel-*` actions). `type: "one"` is what makes the
-  // adapter emit `is:` rather than `some:`, and `is:` on an optional relation is what requires
-  // the hop to exist — the absent-parent guard the negated shapes discriminate. `inner` nests
-  // the same declaration one level further out; two levels is where alias scoping breaks.
-  "request.resource.attr.parent": {
-    relation: {
-      name: "parent",
-      type: "one",
-      model: "AdversarialParent",
-      fields: {
-        aBool: { field: "aBool" },
-        aString: { field: "aString" },
-        aNumber: { field: "aNumber" },
-        aOptionalString: { field: "aOptionalString", nullable: true },
-        inner: {
-          relation: {
-            name: "inner",
-            type: "one",
-            model: "AdversarialInner",
-            fields: {
-              aBool: { field: "aBool" },
-              aString: { field: "aString" },
-              aNumber: { field: "aNumber" },
-              aOptionalString: { field: "aOptionalString", nullable: true },
-            },
-          },
-        },
-      },
-    },
-  },
-  "request.resource.attr.tags": {
-    relation: {
-      name: "tags",
-      type: "many",
-      // Model name enables field-to-field comparisons between tag columns; the nullable
-      // flag on `name` enables the adapter's three-valued-logic guards for collection
-      // macros over elements whose name column is NULL (a missing attribute — a CEL
-      // error, hence deny — on the check side).
-      model: "AdversarialTag",
-      fields: {
-        id: { field: "tagId" },
-        name: { field: "name", nullable: true },
-      },
-    },
-  },
-  "request.resource.attr.tagNames": {
-    relation: {
-      name: "tags",
-      type: "many",
-      field: "name",
-      fields: { name: { field: "name", nullable: true } },
-    },
-  },
-  "request.resource.attr.categories": {
-    relation: {
-      name: "categories",
-      type: "many",
-      fields: {
-        name: { field: "name" },
-        subCategories: {
-          relation: {
-            name: "subCategories",
-            type: "many",
-            fields: {
-              name: { field: "name" },
-              labels: {
-                relation: {
-                  name: "labels",
-                  type: "many",
-                  fields: {
-                    name: { field: "name", nullable: true },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-    },
-  },
-  // Multi-hop chain probe (W1): mainCategory mirrors the SAME categories/subCategories relation
-  // as a single-object dotted chain on the check side (every seed holds at most one category),
-  // pinning that the adapter joins through every intermediate hop, never off the root.
-  "request.resource.attr.mainCategory": {
-    relation: {
-      name: "categories",
-      type: "many",
-      fields: {
-        name: { field: "name" },
-        subCategories: {
-          relation: {
-            name: "subCategories",
-            type: "many",
-            fields: { name: { field: "name" } },
-          },
-        },
-        // subNames: the same 2-hop chain but with a bare `field`, so plain `in` membership
-        // compares the flattened tail's name column directly.
-        subNames: {
-          relation: {
-            name: "subCategories",
-            type: "many",
-            field: "name",
-          },
-        },
-      },
-    },
-  },
-};
-
 const MAPPER_WITHOUT_NULL_CONVENTIONS = withoutNullConventions(MAPPER);
 
 beforeAll(async () => {
@@ -946,7 +702,7 @@ async function adapterFilteredIds(
   const result = queryPlanToPrisma({
     queryPlan,
     mapper,
-    model: "AdversarialResource",
+    model: MODEL,
     nullAttributeRepresentation,
   });
   if (result.kind === PlanKind.ALWAYS_DENIED) {
@@ -1001,7 +757,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
     }
     // Guard the guard: a regex that stopped matching would make every schema compare equal on an
     // empty string.
-    expect(reference.models).toContain("model AdversarialResource");
+    expect(reference.models).toContain(`model ${MODEL}`);
     for (const schema of rest) {
       expect({ name: schema.name, models: schema.models }).toEqual({
         name: schema.name,
@@ -1118,7 +874,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
         queryPlanToPrisma({
           queryPlan,
           mapper: MAPPER,
-          model: "AdversarialResource",
+          model: MODEL,
           nullAttributeRepresentation: "explicit",
         })
       ).toThrow(message);
@@ -1282,7 +1038,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
           metadata: undefined,
         },
         mapper: MAPPER,
-        model: "AdversarialResource",
+        model: MODEL,
       });
       expect(result.kind).toBe(PlanKind.CONDITIONAL);
       const where = result.kind === PlanKind.CONDITIONAL ? result.filters : {};
@@ -1347,7 +1103,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
           metadata: undefined,
         },
         mapper: MAPPER,
-        model: "AdversarialResource",
+        model: MODEL,
       });
       expect(result.kind).toBe(PlanKind.CONDITIONAL);
       const where = result.kind === PlanKind.CONDITIONAL ? result.filters : {};

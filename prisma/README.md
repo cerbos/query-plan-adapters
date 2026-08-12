@@ -192,6 +192,8 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` d
 
 The fail-closed set consists of literal `LIKE` cases Prisma cannot escape safely, cross-model field references, arbitrary relation counts and string lengths, `exists_one`, unsolved column arithmetic, sub-millisecond `now()` thresholds, the reference probes for regex, ordered indexing, and `timestamp()` over a string field, `mod`, a positional read of a scalar list, and list equality over a `map()` projection. Supported timestamp plans require a mapper entry with `valueType: "dateTime"` and a strict, millisecond-exact RFC 3339 literal in CEL's supported instant range. These shapes throw instead of producing a broader authorization filter. Every fail-closed shape's error message is pinned in the shared corpus (`conformance/actions.json`) and asserted by this adapter's conformance run, so a classification proves the throw names its declared mechanism rather than merely that something threw.
 
+The `where` input each of these actions produces is pinned separately, in the translator unit test (`npm test`) — every corpus action, classified there exactly once as an emitted filter, an unconditional plan kind, or a throw. That is what makes a change to the emitted SQL show up as a diff even when it selects the same rows from the corpus seeds.
+
 #### Providers the contract is proved on
 
 The classification above holds where the corpus is **executed**, not where the emitted filter merely looks plausible. Until [#320](https://github.com/cerbos/query-plan-adapters/issues/320) it was executed on SQLite only, and the Prisma 6/7 matrix is an *engine* matrix, not a provider one — it says nothing about how a provider coerces a value or reads a `LIKE` pattern. The suite now runs on SQLite and PostgreSQL:
@@ -598,9 +600,11 @@ const result = await primsa.resource.findMany({
 npm test
 ```
 
-> **Note:** The suite seeds `prisma/dev.db` and invokes `prisma db push --force-reset`. Only run it against disposable development databases.
+This is the **translator unit test**: for every action in the shared conformance corpus, the `where` input this adapter emits. It reads its plans from `conformance/wire-fixtures/` — the golden `PlanResources` responses captured against the pinned Cerbos version — so it needs no Cerbos sidecar, no database, and no generated Prisma client, and it is engine-agnostic (there is no v6/v7 split). It also pins the shapes the adapter refuses, with the message `conformance/actions.json` records, and the parts of the mapper contract no policy can reach: the `nullAttributeRepresentation` boundary, `subqueryFilter`, and malformed input.
 
-The tests populate Prisma with fixture data and assert query results directly against those fixtures, covering scalar and relation `in` operators, collection behaviour (including `except`), nested relations, and lambda expressions.
+Every wire fixture must be classified there exactly once, so adding a corpus action fails this suite until someone records the filter it produces. See [ADR 0006](../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md).
+
+Whether those filters return the rows the PDP allows is a separate question, answered by the adversarial suite — see [Conformance contract](#conformance-contract) above, which lists the four runs and what each one covers. That suite does need a Cerbos sidecar, and resets `prisma/dev-adversarial.db` with `prisma db push --force-reset`, so run it only against disposable development databases.
 
 ## Types
 
