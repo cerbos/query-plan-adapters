@@ -22,7 +22,7 @@ _Avoid_: adversarial suite, differential test, integration test
 One golden `PlanResources` response per corpus action, captured against the pinned PDP and stored
 in `conformance/wire-fixtures/`. Pins planner *shape* — operator, operand order, filter kind —
 independent of any adapter or database.
-_Avoid_: golden plan, plan fixture, recorded response
+_Avoid_: plan fixture, recorded response
 
 **Translator unit test**:
 An adapter's offline test that a plan produces the expected database-native filter. Takes its
@@ -31,6 +31,26 @@ and nothing else — see
 [ADR 0006](docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md). Distinct
 from the conformance harness, which proves the rows that filter returns.
 _Avoid_: unit test, filter test, shape test
+
+**Golden asset**:
+A static file a translator unit test reads rather than constructing in code. Shared golden assets
+live in `conformance/` — the wire fixtures, the seeds, the classification ledger; per-adapter
+golden expectations live with the adapter that owns them and never under `conformance/`. Adapters
+share this data; the code that loads it is duplicated per adapter on purpose — see
+[ADR 0007](docs/adr/0007-adapters-share-data-not-code.md).
+_Avoid_: golden file, snapshot, test data
+
+**Golden expectation**:
+The database-native filter one adapter is pinned to emit for one corpus action. Always
+per-adapter, always a filter, never a row set: which rows a filter returns is the PDP `check()`
+oracle's answer and is never written down.
+_Avoid_: golden rows, golden oracle, expected output
+
+**Golden suite**:
+The system-wide pairing of the shared golden assets with every adapter's translator unit test.
+Stands to the translator unit test as the conformance corpus stands to the conformance harness:
+the shared whole against one adapter's instance of it.
+_Avoid_: golden tests, snapshot suite, fixture suite
 
 **Semantics**:
 Whether a translated filter returns exactly the rows the PDP would allow. The property the
