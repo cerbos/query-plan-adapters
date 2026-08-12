@@ -832,11 +832,11 @@ func runConformance(t *testing.T, h *harness) {
 		}
 		// Corpus-size tripwire: bump deliberately when the corpus grows, so a new hostile shape
 		// cannot slip past this adapter unnoticed.
-		require.Len(t, seen, 187, "corpus size changed; triage the new action(s) before bumping")
+		require.Len(t, seen, 199, "corpus size changed; triage the new action(s) before bumping")
 		require.Len(t, h.corpus.Seeds.Seeds, 21, "seed count changed")
 		// Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
 		// lost has to be re-triaged here rather than joining the throw suite unnoticed.
-		require.Len(t, h.corpus.ThrowingActions, 11, "throwing action count changed")
+		require.Len(t, h.corpus.ThrowingActions, 15, "throwing action count changed")
 	})
 
 	t.Run("oracle", func(t *testing.T) {
@@ -878,6 +878,39 @@ func runConformance(t *testing.T, h *harness) {
 				require.ErrorContains(t, err, entry.Message,
 					"%s must be refused for the mechanism actions.json declares", entry.Action)
 			})
+		}
+	})
+
+	// #387. `filter-as-conjunct` puts a filter() one level below the root, where the guard that
+	// refuses `filter-as-condition` does not look. Its oracle is empty BY CONSTRUCTION — check()
+	// cannot evaluate a non-boolean conjunction — so it belongs to neither degeneracy-guard list,
+	// and the throw suite above, on its own, would say nothing about whether refusing it is
+	// REQUIRED.
+	//
+	// This is that argument. The other conjunct is `R.attr.aBool`, which this adapter certainly
+	// can express and which `root-bare-bool` spells on its own; an adapter that dropped the
+	// conjunct it could not translate would emit exactly that predicate and return every row it
+	// selects, all of which the PDP denies for this action.
+	t.Run("filter-as-conjunct must be refused because dropping its untranslatable half over-grants", func(t *testing.T) {
+		require.Empty(t, h.oracleAllowedIDs(t, "filter-as-conjunct"),
+			"check() must deny every seed: a filter() in boolean position is not evaluable")
+
+		survivingHalf, err := h.adapterFilteredIDs(t, "root-bare-bool")
+		require.NoError(t, err, "the surviving conjunct must translate on its own")
+		require.NotEmpty(t, survivingHalf,
+			"root-bare-bool must return rows, else dropping the other conjunct would cost nothing")
+		require.Less(t, len(survivingHalf), len(h.corpus.Seeds.Seeds),
+			"root-bare-bool must not return every seed")
+
+		_, err = h.adapterFilteredIDs(t, "filter-as-conjunct")
+		require.Error(t, err, "filter-as-conjunct must be refused rather than translated")
+		// The pinned message, like every other throwing action: a bare "it errored" is satisfied
+		// by a mapper typo, and this shape used to fail at EXECUTION rather than translation.
+		for _, entry := range h.corpus.ThrowingActions {
+			if entry.Action == "filter-as-conjunct" {
+				require.ErrorContains(t, err, entry.Message,
+					"filter-as-conjunct must be refused for the mechanism actions.json declares")
+			}
 		}
 	})
 
@@ -1043,6 +1076,12 @@ func runConformance(t *testing.T, h *harness) {
 			// ternary), the bare boolean at the ROOT of the condition, and the collection
 			// subquery disjoined with a scalar predicate rather than conjoined with one.
 			"not-lt", "root-bare-bool", "or-eq-exists",
+			// Hazard classes the corpus missed (#387): the De Morgan branch over a conjunction;
+			// the negated LIKE against a COLUMN needle, where a definite-FALSE null guard would
+			// leak every NULL-needle row through the NOT; the value-first hasIntersection, whose
+			// operands are not interchangeable in the emitted SQL; and the BELOW-cliff unroll of
+			// a principal collection, the shape a principal with three teams produces.
+			"not-and", "not-contains", "vf-hasint", "pv-exists-unrolled",
 		}
 		// int() over a numeric column is unsupported for every adapter but convex, so there is no
 		// comparison behind it here: it stays as a PDP/policy liveness probe for the cast group.
@@ -1051,7 +1090,14 @@ func runConformance(t *testing.T, h *harness) {
 		// string() over a BOOLEAN column is refused because CAST is dialect-dependent there
 		// (#376), and the constructed hierarchy path because `list` has no translator case at
 		// all — so neither has a comparison behind it here.
-		livenessOnly := []string{"cast-int-double", "cast-string-bool", "hier-list-id"}
+		// #387 adds three more groups with no comparison behind them: modulo (reached through the
+		// int() cast that gives `%` an integer operand), the positional read of a scalar list, and
+		// list equality over a map() projection, which reaches a plain value position where a held
+		// collection has no scalar meaning.
+		livenessOnly := []string{
+			"cast-int-double", "cast-string-bool", "hier-list-id",
+			"arith-mod", "index-scalar-list", "map-eq-list",
+		}
 
 		oracleCompared := h.corpus.OracleComparedActions()
 		total := len(h.corpus.Seeds.Seeds)

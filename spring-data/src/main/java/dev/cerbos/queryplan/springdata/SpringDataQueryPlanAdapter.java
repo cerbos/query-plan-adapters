@@ -1658,10 +1658,15 @@ public final class SpringDataQueryPlanAdapter {
              * literal {@code [} on every targeted dialect ({@code ]} needs no escaping once no
              * {@code [} can open a class — see {@link PlanValues#escapeLike}).
              *
-             * <p>The explicit {@code IS NOT NULL} guard on the needle matches CEL (a missing
-             * attribute is an evaluation error → deny) and also defends against dialects whose
-             * {@code CONCAT} treats NULL as {@code ''}, which would otherwise turn a NULL needle
-             * into a match-anything {@code '%%'} pattern.
+             * <p>A NULL needle must make the whole predicate UNKNOWN, not FALSE. CEL raises a
+             * missing-attribute error, which denies under BOTH polarities, and only UNKNOWN
+             * reproduces that: this used to be spelled {@code needle IS NOT NULL AND haystack LIKE
+             * pattern}, which is definite-FALSE for a NULL needle, and {@code NOT FALSE} is TRUE —
+             * so every negated column-needle match returned exactly the rows whose needle is NULL,
+             * which the PDP denies (cerbos/query-plan-adapters#387). Nesting the guard in a CASE
+             * that yields a NULL PATTERN keeps the LIKE itself UNKNOWN, and still defends against
+             * dialects whose {@code CONCAT} treats NULL as {@code ''} and would otherwise build a
+             * match-anything {@code '%%'}.
              */
             private Predicate fieldToFieldLike(jakarta.persistence.criteria.Expression<?> haystack,
                                                jakarta.persistence.criteria.Expression<?> needle,
@@ -1683,9 +1688,11 @@ public final class SpringDataQueryPlanAdapter {
                 if (trailingWildcard) {
                     pattern = cb.concat(pattern, cb.literal("%"));
                 }
-                return cb.and(
-                        cb.isNotNull(needle),
-                        cb.like(haystack.as(String.class), pattern, '\\'));
+                jakarta.persistence.criteria.Expression<String> guardedPattern =
+                        cb.<String>selectCase()
+                                .when(cb.isNull(needle), cb.nullLiteral(String.class))
+                                .otherwise(pattern);
+                return cb.like(haystack.as(String.class), guardedPattern, '\\');
             }
 
             // -- arithmetic (add/sub/mult/div) as a comparison operand --
@@ -2060,10 +2067,19 @@ public final class SpringDataQueryPlanAdapter {
                         PlanResourcesFilter.Expression expr = operand.getExpression();
                         String op = expr.getOperator();
                         if ("mod".equals(op)) {
+                            // The original wording here claimed the condition "can never be
+                            // satisfied by the PDP". That holds only for a BARE `attr % n`, which
+                            // is a CEL no-overload error; `int(attr) % n` is satisfiable, and the
+                            // corpus's arith-mod action allows 8 of its 21 seeds
+                            // (cerbos/query-plan-adapters#387). The rejection stands either way,
+                            // because the cast that makes it satisfiable is itself unlowerable —
+                            // the same limitation that refuses cast-int-double.
                             throw new IllegalArgumentException(
-                                    "mod is not supported in comparisons: CEL % is integer-only and "
-                                            + "attribute values are always doubles at check time, so "
-                                            + "the condition can never be satisfied by the PDP");
+                                    "mod is not supported in comparisons: CEL % is integer-only "
+                                            + "while attribute values are always doubles at check "
+                                            + "time, so a satisfiable policy must cast with int() "
+                                            + "first — and int() has no faithful SQL lowering, "
+                                            + "because CAST rounds where CEL truncates toward zero");
                         }
                         if (ARITHMETIC_OPS.contains(op) && !"div".equals(op)
                                 && containsZeroCapableDivision(expr, scope)) {

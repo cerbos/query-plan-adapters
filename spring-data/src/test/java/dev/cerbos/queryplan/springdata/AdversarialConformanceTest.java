@@ -1282,6 +1282,38 @@ class AdversarialConformanceTest {
     }
 
     /**
+     * #387. {@code filter-as-conjunct} puts a filter() one level below the root, where the guard
+     * that refuses {@code filter-as-condition} does not look. Its oracle is empty BY CONSTRUCTION
+     * — check() cannot evaluate a non-boolean conjunction — so it belongs to neither
+     * degeneracy-guard list, and the throw suite on its own would say nothing about whether
+     * refusing it is REQUIRED.
+     *
+     * <p>This is that argument. The other conjunct is {@code R.attr.aBool}, which this adapter
+     * certainly can express and which {@code root-bare-bool} spells on its own; an adapter that
+     * dropped the conjunct it could not translate would emit exactly that Specification and
+     * return every row it selects, all of which the PDP denies for this action.
+     */
+    @Test
+    void filterAsConjunctMustBeRefusedBecauseDroppingItsUntranslatableHalfOverGrants() {
+        assertEquals(List.of(), oracleAllowedIds("filter-as-conjunct"),
+                "check() must deny every seed: a filter() in boolean position is not evaluable");
+
+        List<String> survivingHalf = adapterFilteredIds("root-bare-bool");
+        assertFalse(survivingHalf.isEmpty(),
+                "root-bare-bool must return rows, else dropping the other conjunct would cost nothing");
+        assertTrue(survivingHalf.size() < SEEDS.size(), "root-bare-bool must not return every seed");
+
+        String message = unsupportedShapes()
+                .filter(args -> "filter-as-conjunct".equals(args.get()[0]))
+                .map(args -> (String) args.get()[1])
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("filter-as-conjunct pins no throw message"));
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> adapterFilteredIds("filter-as-conjunct"));
+        assertTrue(ex.getMessage().contains(message), ex.getMessage());
+    }
+
+    /**
      * Adding a throwing action without pinning its message must fail this harness rather than
      * silently degrade the throw suite to a bare "it threw" (cerbos/query-plan-adapters#326).
      */
@@ -1333,14 +1365,14 @@ class AdversarialConformanceTest {
                         .filter(Boolean::booleanValue).count() != 1)
                 .toList();
 
-        assertEquals(187, manifest.size(),
+        assertEquals(199, manifest.size(),
                 "corpus size changed; triage the new action(s) before bumping this pin");
         assertEquals(21, SEEDS.size(), "seed count changed");
         // Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
         // lost has to be re-triaged here rather than joining the throw suite unnoticed. The two
         // @MethodSource streams that feed the throw cases are what resolve those messages, and
         // both fail loudly on a missing one.
-        assertEquals(15, throwing.size(), "throwing action count changed");
+        assertEquals(19, throwing.size(), "throwing action count changed");
         assertEquals(throwing.size(),
                 adapterUnsupportedActions().count() + unsupportedShapes().count(),
                 "every throwing action must reach a parameterised throw case");
@@ -1397,7 +1429,13 @@ class AdversarialConformanceTest {
             // bare ordering (every other negated ordering in the corpus wraps a size() or a
             // ternary), the bare boolean at the ROOT of the condition, and the collection
             // subquery disjoined with a scalar predicate rather than conjoined with one.
-            "not-lt", "root-bare-bool", "or-eq-exists");
+            "not-lt", "root-bare-bool", "or-eq-exists",
+            // Hazard classes the corpus missed (#387). The negated LIKE against a COLUMN needle is
+            // the load-bearing one: the null guard was a definite-FALSE `needle IS NOT NULL AND
+            // ...`, so `NOT` flipped it to TRUE and every NULL-needle row the PDP denies came back.
+            // Beside it, the De Morgan branch over a conjunction, the value-first hasIntersection,
+            // and the BELOW-cliff unroll of a principal collection.
+            "not-and", "not-contains", "vf-hasint", "pv-exists-unrolled");
 
     /**
      * Shapes this adapter refuses to translate: they have no oracle comparison to guard, and stay
@@ -1416,7 +1454,12 @@ class AdversarialConformanceTest {
             // Concatenation against the key where the reference lowers `+` as arithmetic.
             "id-concat",
             // The same arithmetic-only lowering of `+` with both operands columns (#391).
-            "concat-f2f");
+            "concat-f2f",
+            // #387, one probe per group this adapter cannot compare: modulo (CEL `%` is
+            // integer-only, and the int() cast that would make it satisfiable has no faithful
+            // lowering), the positional read of a scalar list, and list equality over a map()
+            // projection.
+            "arith-mod", "index-scalar-list", "map-eq-list");
 
     @Test
     void oracleIsNotDegenerate() {

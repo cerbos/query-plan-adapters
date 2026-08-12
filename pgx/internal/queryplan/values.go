@@ -759,6 +759,13 @@ func asExpr(v value) (Expr, error) {
 		return nil, fmt.Errorf("conditional value used where a plain expression is required")
 	case hierarchyValue:
 		return nil, fmt.Errorf("hierarchy() value used outside a hierarchy operator")
+	case deferredCollection:
+		// A filter()/map() reaching a plain VALUE position: `map(tags, t.id) == [...]` compares
+		// the projection itself rather than feeding it to size() or hasIntersection(). Without
+		// this case the default arm bound the held collection as a query PARAMETER, so the
+		// translator emitted a filter for a shape it cannot express and only the driver's
+		// encoder refused it, at execution time (cerbos/query-plan-adapters#387).
+		return nil, fmt.Errorf("'%s' produces a collection rather than a plain value; it only translates inside size() or hasIntersection(), which give the collection a scalar meaning", t.macro())
 	default:
 		return Lit{V: v}, nil
 	}

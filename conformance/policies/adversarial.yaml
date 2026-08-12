@@ -2152,3 +2152,219 @@ resourcePolicy:
             of:
               - expr: R.attr.aBool
               - expr: '"public" in R.attr.tagNames'
+
+    # ==================== hazard classes the corpus missed ====================
+    #
+    # Unlike the block above, these are not accidental holes in the shapes the corpus happens to
+    # plan. Each one pins a HAZARD — a place where CEL and a store's query language are known to
+    # disagree, or where this repository has already shipped the same bug to several adapters —
+    # that no existing action reaches. They were found the same way (set-differencing the node
+    # shapes the wire fixtures produce against the shapes the corpus's policies can reach), but
+    # they are kept for the argument, not for the coverage arithmetic (#387).
+
+    # De Morgan: `not` over a CONJUNCTION. The corpus negates eq, ne, in, exists, exists_one,
+    # all, gt, lt, hasIntersection and or — never `and`. Its one not-over-or is buried five
+    # levels down inside p-deep-nest, where an adapter that mishandles the branch fails for a
+    # dozen other reasons first. An adapter lowering this to `NOT (a AND b)` is correct; one
+    # distributing it as `NOT a AND NOT b` is not, and nothing here would have caught that.
+    #
+    # This is also, byte for byte, the shape a DENY rule composes to — the deleted shared
+    # suite's `nand` planned to exactly this node — so the corpus covers the DENY composition
+    # path without carrying a second policy that is almost entirely EFFECT_ALLOW.
+    #
+    # a1 is the row that separates the two lowerings: aBool is TRUE and aString IS "one", so it
+    # is allowed only because the SECOND conjunct fails. Distributing the negation drops it.
+    # Oracle a1/a2/a5/b2/b4/b6/c2/d2 — a1 plus the seven aBool-FALSE rows.
+    - actions: ["not-and"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(R.attr.aBool && R.attr.aString != "one")'
+
+    # NEGATED string matching against a COLUMN needle. The corpus matches LIKE patterns in every
+    # metacharacter-hostile spelling it has (like-percent, like-underscore, f2f-contains and
+    # friends) and negates plenty of other operators, but it never negates a LIKE — and NOT LIKE
+    # is exactly where the two hazards meet:
+    #
+    #   * three-valued logic. `NOT (col LIKE pattern)` is UNKNOWN, not TRUE, when the pattern is
+    #     NULL, so a2/a4/a8/c2/e1 must stay excluded. An adapter that renders the negation as
+    #     `NOT LIKE` without a null guard leaks all five, which is an over-grant of rows the PDP
+    #     denies as missing-attribute errors.
+    #   * metacharacter escaping, in the direction that UNDER-grants. An unescaped needle makes
+    #     the positive match too permissive, so the negation excludes rows it should return:
+    #     b1's needle `one_two` would match `oneXtwo` through an unescaped `_`, and b2's `%_o`
+    #     matches `50%_off` through either metacharacter. Both drop out of the oracle if the
+    #     escape is missing — a silent under-grant, which no positive LIKE action can see,
+    #     because there the same bug shows up as a row wrongly INCLUDED.
+    #
+    # The needle is a COLUMN, not a constant, on purpose: a constant needle is never NULL, so
+    # the first hazard is unreachable with one.
+    #
+    # not-contains oracle a1/a7/b1/b5/b6/c1/d2/f1; not-startswith is deliberately a different
+    # partition (a3/a5/b2/b3 join it, d1 leaves) so a translator that confuses the two operators
+    # cannot land on the other's answer.
+    - actions: ["not-contains"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!R.attr.aString.contains(R.attr.aOptionalString)'
+
+    - actions: ["not-startswith"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!R.attr.aString.startsWith(R.attr.aOptionalString)'
+
+    # Modulo. `mod` is one of the three operators that never reach the wire from this corpus
+    # (with `list` and, until #391, `string`), so no adapter is proved to translate it at all.
+    #
+    # The comparison is `== 1`, NOT the `== 0` this action was specified with. `x % 2 == 0` is
+    # sign-INVARIANT: truncated modulo (CEL, Go, SQL, JavaScript) and floored modulo (Python)
+    # give -1 and 1 respectively for a5's -5, and neither is 0, so the very disagreement the
+    # action exists to pin cannot change its answer. `== 1` makes a5 the witness — CEL denies
+    # it, a floored lowering allows it — and the failure direction is an OVER-grant.
+    #
+    # That witness is LATENT today, and worth saying so: nine adapters refuse this shape at the
+    # int() cast, and the tenth (convex) answers it in JavaScript, whose `%` truncates exactly as
+    # CEL does. So what the action pins right now is that `mod` reaches the wire at all — it never
+    # had — and that every rejection is the cast's rather than the operator's. The sign witness is
+    # what catches the first adapter to lower `%` into a floored language.
+    #
+    # int() is required: aNumber arrives as a CEL double and `%` has no double overload.
+    # Oracle a1/a4/a6/b1/b5/c1/d1/e1, the odd POSITIVES.
+    - actions: ["arith-mod"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'int(R.attr.aNumber) % 2 == 1'
+
+    # Indexing a SCALAR list. p-index indexes a relation and then projects a field from the
+    # element (`get-field(index(V,K),V)`); this indexes the derived tagNames column directly, so
+    # the wire node is a bare `index(V,K)` in an operand position and the walk is a different
+    # one. Row order in a SQL relation is not defined, so most adapters must refuse it — and
+    # none is currently asked to, because p-index's rejection is reached through the projection.
+    #
+    # b6 is the row that makes the difference visible: tagNames is [null, "public"], so
+    # `[0] == "public"` is not satisfied while "some element equals public" is. An adapter that
+    # quietly rewrites an index into an ANY-element predicate returns it. Rows with no tags at
+    # all (a2/b1/b2/b3/c2/d1/d2/f1) index out of range, which is an evaluation error and denies.
+    # Oracle a1/a3/a5/a6/a8.
+    - actions: ["index-scalar-list"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.tagNames[0] == "public"'
+
+    # List EQUALITY. The corpus feeds map() into hasIntersection or leaves it bare as a
+    # non-boolean condition; it never compares the projection to anything. Equality over a list
+    # is ordered and exact — a3's two tags project to ["t3a","t3b"] in that order and nothing
+    # else in the corpus does — so an adapter treating it as set containment, or as an
+    # element-wise IN, agrees on a3 and disagrees nowhere, which is why the single witness is
+    # enough only in combination with the rejection most adapters will produce.
+    # b5/b6 carry NULL tag NAMES but non-null ids, so the projection itself never errors here.
+    - actions: ["map-eq-list"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.tags.map(t, t.id) == ["t3a", "t3b"]'
+
+    # -- value-first, the three the family was missing --
+    #
+    # Operand inversion is this repository's canonical bug class (#258, #259): the planner
+    # preserves source order, so a constant on the left arrives as `lt(K,V)` and an adapter that
+    # reads operands positionally emits the MIRRORED predicate. The existing vf-* actions cover
+    # le, ge, ne, null, arithmetic and ternary; lt, size-under-an-ordering and hasIntersection
+    # were never spelled value-first.
+    #
+    # vf-lt shares its oracle with gt-bare and not-lt — all three ARE `aNumber > 1` on this data.
+    # That is the point rather than a redundancy: an inversion turns this one into `aNumber < 1`,
+    # which selects a2/a4/a5/a7/b3 and overlaps the correct answer nowhere.
+    - actions: ["vf-lt"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '1 < R.attr.aNumber'
+
+    # size() on the RIGHT of an ordering. The corpus's size actions all put the count on the
+    # left, so an adapter that special-cases "count on the left" — several build the subquery
+    # from the operand they walk first — has never met the mirrored form. Oracle: the 13 rows
+    # with at least one tag.
+    - actions: ["vf-size"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '0 < size(R.attr.tags)'
+
+    # hasIntersection with the CONSTANT list first. Unlike the orderings, hasIntersection is
+    # commutative, so an inversion here is invisible in the answer — what it breaks is the
+    # translation, because the two operands are not interchangeable in the emitted query: one
+    # side is a column the store can index and the other is a parameter list. An adapter that
+    # assumes the collection is always operand 0 either throws or builds nonsense.
+    # "other" is in the list so a7 joins the oracle; c1's "Public" must not match.
+    # Oracle a1/a3/a5/a6/a7/a8/b6.
+    - actions: ["vf-hasint"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'hasIntersection(["public", "other"], R.attr.tagNames)'
+
+    # -- the OTHER side of the planner's unroll cliff --
+    #
+    # pv-exists/pv-all above use `manyTeams`, whose eleventh element exists precisely to force
+    # the value-list wire shape. That means the corpus only ever plans the ABOVE-cliff form, and
+    # the unrolled or/and chain the planner emits at <= 10 elements — the shape most real
+    # principals actually produce, since a principal with three teams is far commoner than one
+    # with eleven — is planned by nothing in this repository.
+    #
+    # `fewTeams` is the same witness set at three elements: 'set' matches a1, '' matches a6,
+    # '%_o' matches b2 as an equality operand rather than a LIKE pattern, and c1's 'Set' is the
+    # case trap. a9's 'same' is deliberately NOT in fewTeams, so these two actions do not share
+    # an oracle with their manyTeams counterparts and a harness cannot pass one by answering the
+    # other. The NULL-aOptionalString rows (a2/a4/a8/c2/e1) are missing-attribute errors that
+    # must deny under BOTH polarities, exactly as above — a NOT IN admitting them is the failure.
+    # Oracles: exists a1/a6/b2, all everything else with a present aOptionalString.
+    - actions: ["pv-exists-unrolled"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: P.attr.fewTeams.exists(t, R.attr.aOptionalString == t)
+
+    - actions: ["pv-all-unrolled"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: P.attr.fewTeams.all(t, R.attr.aOptionalString != t)
+
+    # filter() in a CONJUNCT rather than at the root. filter-as-condition pins the rejection at
+    # the root of the condition, which is the position an adapter checks explicitly; an adapter
+    # can reject there and still walk a filter() sitting one level down, where the recursion
+    # dispatches on the operator and a lambda node reaches whatever the default branch does.
+    #
+    # The oracle is EMPTY BY CONSTRUCTION, like filter-as-condition: `filter()` returns a list,
+    # so check() cannot evaluate the conjunction and denies all 21 seeds. It therefore stays out
+    # of both degeneracy-guard lists, and its anti-vacuity assertion has to pin WHY the rejection
+    # is required rather than that one happens — see README, "The degeneracy guard".
+    #
+    # The second conjunct is a bare boolean the adapter certainly CAN express, which is what
+    # makes the action discriminate: an adapter that drops the untranslatable conjunct instead of
+    # refusing emits `aBool` alone and returns 14 rows the PDP denies.
+    - actions: ["filter-as-conjunct"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          all:
+            of:
+              - expr: R.attr.tags.filter(t, t.name == "public")
+              - expr: R.attr.aBool

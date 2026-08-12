@@ -1822,14 +1822,21 @@ const buildMongooseFilterFromCerbosExpression = (
         throw new Error("hasIntersection requires exactly two operands");
       }
 
-      const leftOperand = requireOperandAt(
+      const firstOperand = requireOperandAt(
         0,
         "hasIntersection requires a field operand",
       );
-      const rightOperand = requireOperandAt(
+      const secondOperand = requireOperandAt(
         1,
         "hasIntersection requires a value operand",
       );
+      // hasIntersection is commutative and the planner preserves source order, so the constant
+      // list arrives FIRST when the policy spells it first. The operands are not
+      // interchangeable in the emitted query — one becomes the field path, the other the `$in`
+      // list — so normalize to collection-first instead of reading them positionally.
+      const valueFirst = isValue(firstOperand) && Array.isArray(firstOperand.value);
+      const leftOperand = valueFirst ? secondOperand : firstOperand;
+      const rightOperand = valueFirst ? firstOperand : secondOperand;
 
       // A null element in the intersection list lowers to a null-matching disjunct exactly as
       // it does for `in`, so it is subject to the same representation guard.

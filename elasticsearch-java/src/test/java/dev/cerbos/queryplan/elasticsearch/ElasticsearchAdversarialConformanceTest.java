@@ -320,7 +320,7 @@ class ElasticsearchAdversarialConformanceTest {
                 "adapterUnsupported.elasticsearch-java contains non-conformance actions");
         assertTrue(expected.containsAll(supportedExpected),
                 "adapterSupportedExpected.elasticsearch-java contains non-expected actions");
-        assertEquals(108, unsupported.size(),
+        assertEquals(113, unsupported.size(),
                 "Elasticsearch unsupported coverage changed without updating the ledger assertion");
         assertEquals(2, supportedExpected.size(),
                 "Elasticsearch supported-expected coverage changed without updating the ledger assertion");
@@ -364,10 +364,10 @@ class ElasticsearchAdversarialConformanceTest {
         manifest.addAll(expected);
         manifest.addAll(nullRepresentationOmittedActions);
         manifest.addAll(divergences);
-        assertEquals(70, oracleActions.size());
-        assertEquals(115, throwingActions.size());
+        assertEquals(76, oracleActions.size());
+        assertEquals(121, throwingActions.size());
         assertEquals(1, nullRepresentationOmittedActions.size());
-        assertEquals(187, classified.size());
+        assertEquals(199, classified.size());
         assertEquals(manifest, classified, "every manifest action must be classified locally");
     }
 
@@ -754,6 +754,33 @@ class ElasticsearchAdversarialConformanceTest {
     }
 
     /**
+     * #387. {@code filter-as-conjunct} puts a filter() one level below the root, where the guard
+     * that refuses {@code filter-as-condition} does not look. Its oracle is empty BY CONSTRUCTION
+     * — check() cannot evaluate a non-boolean conjunction — so it belongs to neither
+     * degeneracy-guard list, and the throw suite on its own would say nothing about whether
+     * refusing it is REQUIRED.
+     *
+     * <p>This is that argument. The other conjunct is {@code R.attr.aBool}, which this adapter
+     * certainly can express and which {@code root-bare-bool} spells on its own; an adapter that
+     * dropped the conjunct it could not translate would emit exactly that query and return every
+     * document it matches, all of which the PDP denies for this action.
+     */
+    @Test
+    void filterAsConjunctMustBeRefusedBecauseDroppingItsUntranslatableHalfOverGrants() throws Exception {
+        assertEquals(List.of(), oracleAllowedIds("filter-as-conjunct"),
+                "check() must deny every seed: a filter() in boolean position is not evaluable");
+
+        List<String> survivingHalf = adapterFilteredIds("root-bare-bool");
+        assertFalse(survivingHalf.isEmpty(),
+                "root-bare-bool must match documents, else dropping the other conjunct would cost nothing");
+        assertTrue(survivingHalf.size() < seeds.size(), "root-bare-bool must not match every document");
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> adapterFilteredIds("filter-as-conjunct"));
+        assertTrue(ex.getMessage().contains(throwingMessages.get("filter-as-conjunct")), ex.getMessage());
+    }
+
+    /**
      * Adding a throwing action without pinning its message must fail this harness rather than
      * silently degrade the throw suite to a bare "it threw" (cerbos/query-plan-adapters#326).
      */
@@ -806,7 +833,13 @@ class ElasticsearchAdversarialConformanceTest {
             // bare ordering (every other negated ordering in the corpus wraps a size() or a
             // ternary), the bare boolean at the ROOT of the condition, and the collection
             // subquery disjoined with a scalar predicate rather than conjoined with one.
-            "not-lt", "root-bare-bool", "or-eq-exists");
+            "not-lt", "root-bare-bool", "or-eq-exists",
+            // Hazard classes the corpus missed (#387): the De Morgan branch over a conjunction;
+            // size() on the RIGHT of an ordering, which the adapter used to refuse as an
+            // unsupported threshold because it scanned for the size operand without mirroring the
+            // operator; the value-first hasIntersection; and the BELOW-cliff unroll of a principal
+            // collection, the shape a principal with three teams produces.
+            "not-and", "vf-size", "vf-hasint", "pv-exists-unrolled");
 
     /**
      * Shapes this adapter refuses to translate: they have no oracle comparison to guard, and stay
@@ -841,7 +874,15 @@ class ElasticsearchAdversarialConformanceTest {
             "cast-string-bool",
             // A concatenation of two document fields is the same computed operand id-concat is
             // refused for, without the primary key involved (#391).
-            "concat-f2f");
+            "concat-f2f",
+            // #387, one probe per group this adapter cannot compare: the negated LIKE, whose
+            // COLUMN needle is a second document field; modulo; the positional read of a scalar
+            // list; and list equality over a map() projection. All four are computed leaf
+            // operands the Query DSL has no form for without scripts.
+            "not-contains",
+            "arith-mod",
+            "index-scalar-list",
+            "map-eq-list");
 
     @Test
     void oracleIsNotDegenerate() {
