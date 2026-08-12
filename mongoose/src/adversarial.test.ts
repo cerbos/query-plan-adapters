@@ -17,10 +17,22 @@ import { GRPC as Cerbos } from "@cerbos/grpc";
 import mongoose, { model, Schema } from "mongoose";
 
 import { PlanKind, queryPlanToMongoose } from ".";
-import type { Mapper, MapperConfig } from ".";
+import {
+  MAPPER,
+  assertKeys,
+  classifyActionsForAdapter,
+  expectBoolean,
+  expectNumber,
+  expectRecord,
+  expectString,
+  expectStringArray,
+  isValue,
+  parseActionsFile,
+  readJson,
+  requireMessage,
+} from "./corpus";
 
 const cerbos = new Cerbos("127.0.0.1:3593", { tls: false });
-const CONFORMANCE_DIR = path.join(__dirname, "..", "..", "conformance");
 
 interface Tag {
   id: string;
@@ -57,102 +69,6 @@ interface DerivedEntry {
 interface DerivedFile {
   fields: string[];
   derived: Record<string, DerivedEntry>;
-}
-
-interface AdapterEntry {
-  action: string;
-  reason: string;
-  /** Absent on `adapterSupportedExpected` / `nullRepresentationOmitted`, required on a throw. */
-  message?: string;
-}
-
-interface ExpectedUnsupportedEntry {
-  action: string;
-  shape: string;
-  /** One entry per adapter that must reject the shape; the corpus asserts the key set. */
-  messages: Record<string, string>;
-}
-
-/**
- * A `nullRepresentationOmitted` entry. Every adapter must reject these — the two NULL conventions
- * are indistinguishable on the wire — so `messages` names the whole roster with no promotions to
- * subtract.
- */
-interface NullRepresentationOmittedEntry {
-  action: string;
-  reason: string;
-  messages: Record<string, string>;
-}
-
-interface KnownDivergence {
-  action: string;
-  adapters: string[];
-}
-
-interface ActionsFile {
-  conformance: string[];
-  adapterUnsupported: Record<string, AdapterEntry[]>;
-  adapterSupportedExpected: Record<string, AdapterEntry[]>;
-  expectedUnsupported: ExpectedUnsupportedEntry[];
-  nullRepresentationOmitted: NullRepresentationOmittedEntry[];
-  knownDivergences: KnownDivergence[];
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function expectRecord(value: unknown, label: string): Record<string, unknown> {
-  if (!isRecord(value)) {
-    throw new Error(`${label} must be an object`);
-  }
-  return value;
-}
-
-function expectString(value: unknown, label: string): string {
-  if (typeof value !== "string") {
-    throw new Error(`${label} must be a string`);
-  }
-  return value;
-}
-
-function expectBoolean(value: unknown, label: string): boolean {
-  if (typeof value !== "boolean") {
-    throw new Error(`${label} must be a boolean`);
-  }
-  return value;
-}
-
-function expectNumber(value: unknown, label: string): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new Error(`${label} must be a finite number`);
-  }
-  return value;
-}
-
-function expectStringArray(value: unknown, label: string): string[] {
-  if (
-    !Array.isArray(value) ||
-    !value.every((entry): entry is string => typeof entry === "string")
-  ) {
-    throw new Error(`${label} must be an array of strings`);
-  }
-  return value;
-}
-
-function isValue(value: unknown): value is Value {
-  if (
-    value === null ||
-    typeof value === "string" ||
-    typeof value === "number" ||
-    typeof value === "boolean"
-  ) {
-    return true;
-  }
-  if (Array.isArray(value)) {
-    return value.every(isValue);
-  }
-  return isRecord(value) && Object.values(value).every(isValue);
 }
 
 function parsePrincipal(value: unknown): Principal {
@@ -217,30 +133,6 @@ const DERIVED_KEYS = [
   "scope",
   "labels",
 ] as const;
-
-function assertKeys(
-  label: string,
-  got: string[],
-  want: readonly string[],
-  optional: readonly string[] = []
-): void {
-  const allowed = new Set<string>([...want, ...optional]);
-  for (const key of got) {
-    if (!allowed.has(key)) {
-      throw new Error(
-        `${label} carries "${key}", which this harness does not consume: an unconsumed corpus field is dropped from the stored document and the check() oracle at once`
-      );
-    }
-  }
-  const present = new Set(got);
-  for (const key of want) {
-    if (!present.has(key)) {
-      throw new Error(
-        `${label} is missing "${key}", which this harness consumes`
-      );
-    }
-  }
-}
 
 /**
  * Asserted against the RAW json rather than the parsed seeds: parseSeed rebuilds each row field by
@@ -349,10 +241,6 @@ function parseSeed(value: unknown, index: number): Seed {
   };
 }
 
-function readJson(file: string): unknown {
-  return JSON.parse(fs.readFileSync(path.join(CONFORMANCE_DIR, file), "utf8"));
-}
-
 function parseSeedsFile(value: unknown): SeedsFile {
   const record = expectRecord(value, "seeds.json");
   const seeds = record["seeds"];
@@ -363,128 +251,6 @@ function parseSeedsFile(value: unknown): SeedsFile {
     principal: parsePrincipal(record["principal"]),
     resourceKind: expectString(record["resourceKind"], "resourceKind"),
     seeds: seeds.map(parseSeed),
-  };
-}
-
-function parseAdapterEntry(value: unknown, label: string): AdapterEntry {
-  const record = expectRecord(value, label);
-  const message = record["message"];
-  return {
-    action: expectString(record["action"], `${label}.action`),
-    reason: expectString(record["reason"], `${label}.reason`),
-    // `adapterUnsupported` carries this and the classification below requires it;
-    // `adapterSupportedExpected` and `nullRepresentationOmitted` do not throw, so they do not.
-    ...(message === undefined
-      ? {}
-      : { message: expectString(message, `${label}.message`) }),
-  };
-}
-
-/** The `messages` map of one `expectedUnsupported` entry: adapter key -> required substring. */
-function parseMessages(
-  value: unknown,
-  label: string
-): Record<string, string> {
-  const record = expectRecord(value, label);
-  const result: Record<string, string> = {};
-  for (const [adapter, message] of Object.entries(record)) {
-    result[adapter] = expectString(message, `${label}.${adapter}`);
-  }
-  return result;
-}
-
-function parseAdapterMap(
-  value: unknown,
-  label: string
-): Record<string, AdapterEntry[]> {
-  if (value === undefined) {
-    return {};
-  }
-  const record = expectRecord(value, label);
-  const result: Record<string, AdapterEntry[]> = {};
-  for (const [adapter, entries] of Object.entries(record)) {
-    if (!Array.isArray(entries)) {
-      throw new Error(`${label}.${adapter} must be an array`);
-    }
-    result[adapter] = entries.map((entry, index) =>
-      parseAdapterEntry(entry, `${label}.${adapter}[${index}]`)
-    );
-  }
-  return result;
-}
-
-function parseActionsFile(value: unknown): ActionsFile {
-  const record = expectRecord(value, "actions.json");
-  const expected = record["expectedUnsupported"];
-  const divergences = record["knownDivergences"];
-  const nullOmitted = record["nullRepresentationOmitted"];
-  if (
-    !Array.isArray(expected) ||
-    !Array.isArray(divergences) ||
-    !Array.isArray(nullOmitted)
-  ) {
-    throw new Error("actions.json classifications must be arrays");
-  }
-  return {
-    conformance: expectStringArray(record["conformance"], "conformance"),
-    adapterUnsupported: parseAdapterMap(
-      record["adapterUnsupported"],
-      "adapterUnsupported"
-    ),
-    adapterSupportedExpected: parseAdapterMap(
-      record["adapterSupportedExpected"],
-      "adapterSupportedExpected"
-    ),
-    expectedUnsupported: expected.map((entry, index) => {
-      const parsed = expectRecord(entry, `expectedUnsupported[${index}]`);
-      return {
-        action: expectString(
-          parsed["action"],
-          `expectedUnsupported[${index}].action`
-        ),
-        shape: expectString(
-          parsed["shape"],
-          `expectedUnsupported[${index}].shape`
-        ),
-        messages: parseMessages(
-          parsed["messages"],
-          `expectedUnsupported[${index}].messages`
-        ),
-      };
-    }),
-    // This parser rebuilds the manifest field by field, so a corpus group it does not name is
-    // silently dropped — and a dropped group makes its actions vanish from every count and
-    // every test.each, passing vacuously. Parse each group explicitly.
-    nullRepresentationOmitted: nullOmitted.map((entry, index) => {
-      const parsed = expectRecord(entry, `nullRepresentationOmitted[${index}]`);
-      return {
-        action: expectString(
-          parsed["action"],
-          `nullRepresentationOmitted[${index}].action`
-        ),
-        reason: expectString(
-          parsed["reason"],
-          `nullRepresentationOmitted[${index}].reason`
-        ),
-        messages: parseMessages(
-          parsed["messages"],
-          `nullRepresentationOmitted[${index}].messages`
-        ),
-      };
-    }),
-    knownDivergences: divergences.map((entry, index) => {
-      const parsed = expectRecord(entry, `knownDivergences[${index}]`);
-      return {
-        action: expectString(
-          parsed["action"],
-          `knownDivergences[${index}].action`
-        ),
-        adapters: expectStringArray(
-          parsed["adapters"],
-          `knownDivergences[${index}].adapters`
-        ),
-      };
-    }),
   };
 }
 
@@ -507,93 +273,21 @@ for (const seed of SEEDS) {
   derivedFor(seed);
 }
 
-const unsupportedEntries = actionsFile.adapterUnsupported["mongoose"] ?? [];
-const unsupportedActions = new Set(
-  unsupportedEntries.map((entry) => entry.action)
-);
-const supportedExpectedEntries =
-  actionsFile.adapterSupportedExpected["mongoose"] ?? [];
-const supportedExpectedActions = new Set(
-  supportedExpectedEntries.map((entry) => entry.action)
-);
-const divergenceActions = new Set(
-  actionsFile.knownDivergences
-    .filter((entry) => entry.adapters.includes("mongoose"))
-    .map((entry) => entry.action)
-);
-const expectedUnsupportedActions = new Set(
-  actionsFile.expectedUnsupported.map((entry) => entry.action)
-);
-const ORACLE_ACTIONS = [
-  ...actionsFile.conformance.filter(
-    (action) => !unsupportedActions.has(action)
-  ),
-  ...supportedExpectedActions,
-].sort();
-/**
- * A shape this adapter must refuse, with the substring its error has to contain.
- *
- * The message is what turns "it threw" into "it threw for the declared reason": without it a
- * mapper typo or an unrelated validation satisfies the assertion just as well as the limitation
- * the corpus documents (cerbos/query-plan-adapters#326).
- */
-interface ThrowingAction {
-  action: string;
-  reason: string;
-  message: string;
-}
+const {
+  manifestActions: MANIFEST_ACTIONS,
+  oracleActions: ORACLE_ACTIONS,
+  throwingActions: THROWING_ACTIONS,
+  // Actions whose `== null` probe targets an attribute the oracle OMITS for NULL columns. They
+  // carry no oracle comparison: under the omitted representation check() denies every document, so
+  // the adapter must reject the shape rather than emit a filter (#302).
+  nullRepresentationOmitted: NULL_REPRESENTATION_OMITTED,
+  divergenceActions,
+  unsupportedCount,
+  supportedExpectedCount,
+} = classifyActionsForAdapter(actionsFile, "mongoose");
 
-/** The pinned message, or a failure — a throwing action without one asserts nothing. */
-function requireMessage(label: string, message: string | undefined): string {
-  if (message === undefined || message === "") {
-    throw new Error(
-      `actions.json pins no throw message for ${label}: the throw suite would accept a failure for any reason`
-    );
-  }
-  return message;
-}
-
-const THROWING_ACTIONS: ThrowingAction[] = [
-  ...unsupportedEntries.map((entry) => ({
-    action: entry.action,
-    reason: entry.reason,
-    message: requireMessage(
-      `adapterUnsupported.mongoose.${entry.action}`,
-      entry.message
-    ),
-  })),
-  ...actionsFile.expectedUnsupported
-    .filter((entry) => !supportedExpectedActions.has(entry.action))
-    .map((entry) => ({
-      action: entry.action,
-      reason: entry.shape,
-      message: requireMessage(
-        `expectedUnsupported.${entry.action}.messages.mongoose`,
-        entry.messages["mongoose"]
-      ),
-    })),
-].sort((left, right) => left.action.localeCompare(right.action));
-// Actions whose `== null` probe targets an attribute the oracle OMITS for NULL columns. They
-// carry no oracle comparison: under the omitted representation check() denies every document, so
-// the adapter must reject the shape rather than emit a filter (#302).
-const NULL_REPRESENTATION_OMITTED = actionsFile.nullRepresentationOmitted.map(
-  (entry): ThrowingAction => ({
-    action: entry.action,
-    reason: entry.reason,
-    message: requireMessage(
-      `nullRepresentationOmitted.${entry.action}.messages.mongoose`,
-      entry.messages["mongoose"]
-    ),
-  })
-);
 /** The one message every null-carrying action must be rejected with under `omitted`. */
 const NULL_OMITTED_MESSAGE = NULL_REPRESENTATION_OMITTED[0]?.message ?? "";
-const MANIFEST_ACTIONS = new Set([
-  ...actionsFile.conformance,
-  ...actionsFile.expectedUnsupported.map((entry) => entry.action),
-  ...NULL_REPRESENTATION_OMITTED.map((entry) => entry.action),
-  ...actionsFile.knownDivergences.map((entry) => entry.action),
-]);
 
 // -- the degeneracy guard (conformance/README.md, "The degeneracy guard") -----------------------
 //
@@ -812,155 +506,6 @@ const AdversarialResource = model<AdversarialResourceDocument>(
   "MongooseAdversarialResource",
   resourceSchema
 );
-
-const labelsMapping: MapperConfig = {
-  relation: {
-    name: "labels",
-    type: "many",
-    fields: {
-      name: { field: "name", nullable: true },
-    },
-  },
-};
-const subCategoriesMapping: MapperConfig = {
-  relation: {
-    name: "subCategories",
-    type: "many",
-    field: "name",
-    fields: {
-      name: { field: "name" },
-      labels: labelsMapping,
-    },
-  },
-};
-const MAPPER: Mapper = {
-  // The primary key, reached as `request.resource.id` rather than through `attr` (the `id-*`
-  // actions). An adapter that resolves references by stripping a `request.resource.attr.` prefix
-  // never sees this name.
-  //
-  // It maps to `resourceId`, the string field this harness already carries the corpus id in,
-  // NOT to an ObjectId. That is a deliberate limit on what the corpus can prove here: the
-  // ObjectId coercion is a caller-supplied `valueParser` on the mapper entry, and three of the
-  // six id-* actions compare the key against a STRING column (id-f2f, id-f2f-ne, id-concat), so
-  // a single key mapping cannot be an ObjectId and satisfy them. The coercion is pinned where it
-  // belongs instead — against the `id-eq-const` wire fixture in this adapter's translator unit
-  // test (cerbos/query-plan-adapters#378).
-  "request.resource.id": { field: "resourceId" },
-  "request.resource.attr.aBool": { field: "aBool" },
-  "request.resource.attr.aString": { field: "aString" },
-  "request.resource.attr.aNumber": { field: "aNumber" },
-  "request.resource.attr.aDouble": { field: "aDouble", nullable: true },
-  "request.resource.attr.aOptionalString": {
-    field: "aOptionalString",
-    nullable: true,
-  },
-  "request.resource.attr.createdBy": { field: "createdBy" },
-  "request.resource.attr.scope": { field: "scope", nullable: true },
-  "request.resource.attr.createdAt": {
-    field: "createdAt",
-    nullable: true,
-  },
-  "request.resource.attr.owner": { field: "aOptionalString" },
-  // `coOwner` aliases the `scope` field under the explicit-null convention: the oracle sends a
-  // real null attribute for it rather than omitting it. Mongoose stores an explicit null, and
-  // its query semantics already treat null as a value, so no `nullable` flag applies here — the
-  // flag means the opposite (a stored null IS a missing attribute).
-  "request.resource.attr.coOwner": { field: "scope" },
-  // obj.inner is not a real nested path — it mirrors aString. `parent.inner` below is the
-  // opposite: a real two-level to-one chain. The two are kept side by side on purpose.
-  "request.resource.attr.obj.inner": { field: "aString" },
-  // The corpus's one REAL to-one chain (the `rel-*` actions), stored as an embedded subdocument
-  // per level rather than a joined collection. `type: "one"` flattens the path to `parent.aBool`
-  // AND declares the level as absent-able, which is what makes the adapter require it outside
-  // any `$nor`: a document with `parent: null` has no `parent.aBool` path at all, and an
-  // unguarded negation matches exactly those documents.
-  "request.resource.attr.parent": {
-    relation: {
-      name: "parent",
-      type: "one",
-      fields: {
-        aBool: { field: "aBool" },
-        aString: { field: "aString" },
-        aNumber: { field: "aNumber" },
-        aOptionalString: { field: "aOptionalString", nullable: true },
-      },
-    },
-  },
-  "request.resource.attr.parent.inner": {
-    relation: {
-      name: "parent.inner",
-      type: "one",
-      fields: {
-        aBool: { field: "aBool" },
-        aString: { field: "aString" },
-        aNumber: { field: "aNumber" },
-        aOptionalString: { field: "aOptionalString", nullable: true },
-      },
-    },
-  },
-  "request.resource.attr.tags": {
-    relation: {
-      name: "tags",
-      type: "many",
-      fields: {
-        id: { field: "id" },
-        name: { field: "name", nullable: true },
-      },
-    },
-  },
-  "request.resource.attr.tagNames": {
-    relation: {
-      name: "tags",
-      type: "many",
-      field: "name",
-      fields: { name: { field: "name" } },
-    },
-  },
-  "request.resource.attr.categories": {
-    relation: {
-      name: "categories",
-      type: "many",
-      fields: {
-        name: { field: "name" },
-        subCategories: subCategoriesMapping,
-      },
-    },
-  },
-  "request.resource.attr.mainCategory": {
-    relation: {
-      name: "categories",
-      type: "many",
-      fields: {
-        name: { field: "name" },
-        subCategories: subCategoriesMapping,
-        subNames: subCategoriesMapping,
-      },
-    },
-  },
-  // mainCategory is a to-ONE parent on the check side: a seed with no subCategoryNames
-  // sends NO mainCategory attribute, so CEL raises a missing-path error and check()
-  // denies. The flattened `categories.subCategories` path cannot see that on its own —
-  // an absent parent and a childless parent both give an empty array — so the mapping
-  // declares the parent and the adapter makes the count UNKNOWN when it is missing
-  // (cerbos/query-plan-adapters#309).
-  "request.resource.attr.mainCategory.subCategories": {
-    relation: {
-      name: "categories.subCategories",
-      type: "many",
-      requiresParent: "categories",
-      fields: { name: { field: "name" } },
-    },
-  },
-  "request.resource.attr.mainCategory.subNames": {
-    relation: {
-      name: "categories.subCategories",
-      type: "many",
-      field: "name",
-      requiresParent: "categories",
-      fields: { name: { field: "name" } },
-    },
-  },
-};
 
 // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") --------
 //
@@ -1261,16 +806,29 @@ describe("adversarial conformance corpus", () => {
     });
 
     expect(MANIFEST_ACTIONS.size).toBe(199);
-    expect(unsupportedEntries).toHaveLength(44);
-    expect(supportedExpectedEntries).toHaveLength(4);
+    expect(unsupportedCount).toBe(44);
+    expect(supportedExpectedCount).toBe(4);
     expect(ORACLE_ACTIONS).toHaveLength(147);
     expect(THROWING_ACTIONS).toHaveLength(50);
     expect(misclassified).toEqual([]);
-    expect(
-      [...supportedExpectedActions].filter(
-        (action) => !expectedUnsupportedActions.has(action)
+  });
+
+  // A promotion subtracts a throw, so one naming a shape `expectedUnsupported` never declared
+  // would move an action into the oracle set with nothing asserting it. `classifyActionsForAdapter`
+  // refuses to classify such a manifest; this is the assertion that the refusal is real, made the
+  // same way the missing-message one above is.
+  test("a promotion with no shape to promote fails classification", () => {
+    expect(() =>
+      classifyActionsForAdapter(
+        {
+          ...actionsFile,
+          adapterSupportedExpected: {
+            mongoose: [{ action: "not-a-declared-shape", reason: "synthetic" }],
+          },
+        },
+        "mongoose"
       )
-    ).toEqual([]);
+    ).toThrow(/declares no such shape to promote/);
   });
 
   test.each(ORACLE_ACTIONS)("%s matches the check() oracle", async (action) => {

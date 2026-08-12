@@ -2,11 +2,13 @@ name: Mongoose Test
 
 on:
   pull_request:
+    # `policies/**` is deliberately absent: nothing under mongoose/ reads the shared policy suite
+    # any more. The unit test reads conformance/wire-fixtures/, the adversarial suite loads
+    # conformance/policies/, and the example runs against demo/.
     paths:
       - "mongoose/**"
       - "conformance/**"
       - "demo/**"
-      - "policies/**"
       - ".github/workflows/mongoose.yaml"
       - ".github/workflows/mongoose-publish.yaml"
   push:
@@ -50,6 +52,15 @@ jobs:
           - MONGO_IMAGE
           - MONGO_NEXT_IMAGE
         node-version: ["22", "24", "25"]
+        # The server dimension only discriminates the adversarial suite, which is gated to the
+        # baseline Node leg — so off that leg the two server legs would run byte-identical work
+        # (a typecheck and an offline unit test that never opens a connection). Excluding them
+        # keeps the coverage and drops two runners.
+        exclude:
+          - mongodb-image-file: MONGO_NEXT_IMAGE
+            node-version: "24"
+          - mongodb-image-file: MONGO_NEXT_IMAGE
+            node-version: "25"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -57,16 +68,23 @@ jobs:
       - name: Validate conformance corpus
         run: ../conformance/scripts/validate-corpus.sh
 
+      # Only the adversarial suite needs a PDP and a server: the translator unit test reads its
+      # plans from conformance/wire-fixtures/, which the `Conformance Corpus` workflow replans and
+      # diffs against this same pinned version. Both are therefore gated to the baseline Node leg,
+      # the one the adversarial step below runs on.
       - name: Read pinned Cerbos version
+        if: matrix.node-version == '22'
         id: cerbos
         run: echo "version=$(tr -d '[:space:]' < ../conformance/CERBOS_VERSION)" >> "$GITHUB_OUTPUT"
 
       - name: Setup Cerbos
+        if: matrix.node-version == '22'
         uses: cerbos/cerbos-setup-action@f772482c8504a05c49018a0bf2d84012a607733c # v1
         with:
           version: v${{ steps.cerbos.outputs.version }}
 
       - name: Start MongoDB
+        if: matrix.node-version == '22'
         run: |
           docker run -d --name mongodb -p 27017:27017 "$(cat "${{ matrix.mongodb-image-file }}")"
           for _ in {1..30}; do
@@ -92,14 +110,13 @@ jobs:
       # The adversarial corpus discriminates MongoDB server behaviour, not the Node runtime, so
       # it runs once per server version on the baseline Node leg — the same two executions the
       # standalone `adversarial` job used to perform, minus the duplicated checkout, Cerbos
-      # install, MongoDB start and `npm install`. The two suites use separate databases (`test`
-      # vs `cerbos_mongoose_adversarial`), so sharing one server does not cross-contaminate them.
+      # install, MongoDB start and `npm install`.
       - name: Run adversarial differential suite
         if: matrix.node-version == '22'
         run: npm run test:adversarial
 
       - name: Stop MongoDB
-        if: always()
+        if: always() && matrix.node-version == '22'
         run: docker rm -f mongodb
 
   # The example application: the published package, installed from `npm pack`'s tarball and used
