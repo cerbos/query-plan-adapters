@@ -134,6 +134,27 @@ const DERIVED_KEYS = [
   "labels",
 ] as const;
 
+// The corpus principal is guarded the same way and for the same reason. It feeds the PLAN under
+// test AND the check() oracle, so an attribute dropped on the way in vanishes from both sides at
+// once: the plan folds to ALWAYS_DENIED and the oracle, built from the same principal, agrees. That
+// is how langchain-chromadb's hardcoded attribute allowlist let `pv-exists` pass while testing
+// nothing (conformance/README.md, "Adding a new hostile shape", step 7). parsePrincipal carries
+// every attribute through verbatim, which is correct; the guard is what proves it still does.
+//
+// `id` and `roles` are deliberately IN scope, guarded by PRINCIPAL_KEYS one level above the
+// attributes — the same two-level shape SEED_KEYS and TAG_KEYS use for a row and its `tags[]`
+// elements. A role dropped on the way in changes every policy decision at once; that it is less
+// likely to be projected away than an attribute is a reason to expect the assertion to stay quiet,
+// not a reason to omit it.
+const PRINCIPAL_KEYS = ["id", "roles", "attr"] as const;
+
+const PRINCIPAL_ATTR_KEYS = [
+  "allowedTags",
+  "context",
+  "fewTeams",
+  "manyTeams",
+] as const;
+
 /**
  * Asserted against the RAW json rather than the parsed seeds: parseSeed rebuilds each row field by
  * field, so a parsed seed can only ever carry the keys this harness already names and the
@@ -157,6 +178,39 @@ function assertSeedKeyCoverage(value: unknown): void {
       assertKeys(tagLabel, Object.keys(expectRecord(tag, tagLabel)), TAG_KEYS);
     });
   });
+}
+
+/**
+ * Asserted against the RAW json for the same reason as the seed keys: parsePrincipal rebuilds `id`
+ * and `roles`, so a rebuilt principal could only ever report the keys this harness already names.
+ *
+ * The attribute VALUES are asserted too. parsePrincipal accepts any Cerbos `Value`, but the corpus
+ * carries exactly two shapes — a string and a list of strings — and every other harness converts on
+ * that basis, so a third has to fail here rather than be reshaped by one adapter and passed through
+ * by another. A key-set guard says nothing about a change inside a value, and three of the four
+ * attributes are lists; this is the same reason the seed guard descends into `tags[]`.
+ */
+function assertPrincipalKeyCoverage(value: unknown): void {
+  const principal = expectRecord(
+    expectRecord(value, "seeds.json")["principal"],
+    "seeds.json principal"
+  );
+  assertKeys("seeds.json principal", Object.keys(principal), PRINCIPAL_KEYS);
+  const attr = expectRecord(principal["attr"], "seeds.json principal.attr");
+  assertKeys(
+    "seeds.json principal.attr",
+    Object.keys(attr),
+    PRINCIPAL_ATTR_KEYS
+  );
+  for (const [key, entry] of Object.entries(attr)) {
+    if (typeof entry === "string") continue;
+    if (Array.isArray(entry) && entry.every((el) => typeof el === "string")) {
+      continue;
+    }
+    throw new Error(
+      `seeds.json principal.attr.${key} is neither a string nor an array of strings, the only two shapes this harness consumes: a reshaped principal attribute feeds the plan and the check() oracle at once`
+    );
+  }
 }
 
 function parseDerivedEntry(value: unknown, label: string): DerivedEntry {
@@ -256,6 +310,7 @@ function parseSeedsFile(value: unknown): SeedsFile {
 
 const rawSeedsJson = readJson("seeds.json");
 assertSeedKeyCoverage(rawSeedsJson);
+assertPrincipalKeyCoverage(rawSeedsJson);
 const seedsFile = parseSeedsFile(rawSeedsJson);
 const actionsFile = parseActionsFile(readJson("actions.json"));
 const derivedFile = parseDerivedFile(readJson("derived-fields.json"));

@@ -690,7 +690,7 @@ The rules the file materialises:
 These are part of the shared contract. Do not replace them with adapter-specific fixtures, and do
 not recompute them in a harness — read `derived-fields.json`.
 
-### Seed and derived-field coverage
+### Seed, principal and derived-field coverage
 
 The projection trap this README documents for `actions.json` applies to the seeds too, and it is
 worse there: a seed key a harness does not consume is dropped from the stored row **and** the
@@ -710,8 +710,30 @@ and fails if the file's `fields` list, or any entry's key set, differs. Concrete
 seed field by field (mongoose, langchain-chromadb) assert against the *raw* JSON — a rebuilt object
 can only ever report the keys the parser already names, so asserting on it would pass vacuously.
 
-Adding a field to a seed must fail every harness loudly. That is the acceptance test for this
-guard; run it before trusting it.
+The **principal** is guarded the same way, and it is the input the trap actually caught: the same
+principal feeds the plan under test and the check() oracle, so an attribute dropped on the way in
+vanishes from both sides at once — the plan folds to `ALWAYS_DENIED`, the oracle agrees, and the
+action passes while testing nothing. Every harness therefore declares two key sets,
+`{id, roles, attr}` and the attribute names inside `attr`, and asserts equality in both directions,
+exactly as it does for a seed row and its `tags[]` elements.
+
+`id` and `roles` are deliberately **inside** the guard rather than documented as an exclusion. A
+role dropped on the way in changes every policy decision at once; that it is less likely to be
+projected away than an attribute is a reason to expect that half of the assertion to stay quiet, not
+a reason to omit it.
+
+The attribute *values* are asserted too, because the key set says nothing about a change inside one
+and three of the four attributes are lists. The corpus carries exactly two shapes — a string and a
+list of strings — and the Java harnesses convert on exactly that basis, so a third shape has to fail
+at the declaration rather than be reshaped by one adapter's SDK and passed through untyped by
+another. That is the same reason the seed guard descends into `tags[]`.
+
+The construction itself stays verbatim pass-through: the guard exists to keep it that way, not to
+replace it. `scripts/regenerate-wire-fixtures.sh` needs no equivalent — it copies `.principal`
+wholesale with `jq` and never names a key.
+
+Adding a field to a seed, or an attribute to the principal, must fail every harness loudly. That is
+the acceptance test for these guards; run it before trusting them.
 
 ## Adding a new hostile shape
 
@@ -725,6 +747,8 @@ guard; run it before trusting it.
    entry in the same commit — `scripts/validate-corpus.sh` names the expected values when it fails.
    A seed field that is genuinely new (rather than a new row) has to be added to every harness's
    consumed key set too; the guard described above makes that a loud failure, not a silent drop.
+   The same applies to a new **principal attribute**: every harness declares those as well, so
+   adding one fails all ten until each declaration names it.
 4. Run `scripts/regenerate-wire-fixtures.sh` and commit the new fixture alongside the policy change.
 5. Every adapter harness picks up the new action automatically from `actions.json` on next run;
    triage any divergence into a per-adapter fix issue rather than special-casing it in the harness.
@@ -750,7 +774,9 @@ guard; run it before trusting it.
    rebuild the principal from a hardcoded attribute allowlist; when `pv-exists` added
    `principal.attr.manyTeams`, the projection dropped it, the plan folded to `ALWAYS_DENIED`, and
    the oracle — built from the same projected principal — agreed. The action passed on both sides
-   while testing nothing. Pass corpus data through verbatim.
+   while testing nothing. Pass corpus data through verbatim. Every harness now declares the
+   principal keys it consumes and asserts them, so that particular projection fails loudly — see
+   "Seed, principal and derived-field coverage" above.
 
    The one exception is a `nullRepresentationOmitted` action: its oracle is empty *by
    construction*, which the degeneracy guard asserts against, so it must stay out of that list.
@@ -801,9 +827,10 @@ unsupported before you have watched it fail is how a translatable shape gets per
    three-valued-logic probes discriminate on. Getting them wrong makes the oracle agree with the
    adapter for the wrong reason.
 
-   Declare the seed keys and derived fields the harness consumes and assert set equality against
-   the JSON, as "Seed and derived-field coverage" above describes. A harness without that guard
-   silently drops the next corpus field from both sides of its own differential.
+   Declare the seed keys, the principal keys and the derived fields the harness consumes and assert
+   set equality against the JSON, as "Seed, principal and derived-field coverage" above describes. A
+   harness without those guards silently drops the next corpus field from both sides of its own
+   differential.
 
 4. **Assert the degeneracy guard** (see above) and pin the corpus size, so a silently broken PDP
    connection or a newly added action cannot pass vacuously. Derive the guard's compared list from
