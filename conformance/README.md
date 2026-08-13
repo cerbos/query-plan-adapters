@@ -61,6 +61,10 @@ rows, and one oracle recipe that every adapter's harness implements against its 
 - `scripts/regenerate-wire-fixtures.sh` — regenerates `wire-fixtures/` from a running (pinned)
   Cerbos container. Run it after bumping `CERBOS_VERSION`, review the diff, commit both together.
 
+Deliberately **not** here: the filter each adapter is pinned to emit for each action. Those are
+per-adapter **golden expectations**, they live in the adapter's own directory, and the format is
+documented under "Golden expectations" below.
+
 ## The oracle recipe
 
 The differential harness pattern (implemented per-adapter, since translation and query execution
@@ -784,6 +788,104 @@ the acceptance test for these guards; run it before trusting them.
    not merely that one happens. See the `nullRepresentationOmitted` section above for the form
    that takes in each adapter. It pins a message like any other rejection (see "Pinned throw
    messages"), so a new one needs a `messages` entry per adapter.
+8. Regenerate the **golden expectations** of every adapter that has a translator unit test, and read
+   the added entry. Those suites fail until the new action is accounted for, which is the point —
+   see "Golden expectations" below.
+
+## Golden expectations
+
+A **golden expectation** is the database-native filter one adapter is pinned to emit for one corpus
+action. It is the assertion a *translator unit test* makes — the offline suite that reads its plans
+from `wire-fixtures/` and asserts nothing but the emitted filter
+([ADR 0006](../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md)).
+
+**The expectations are not corpus data and must never live here.** Eleven workflows trigger on
+`conformance/**` — all ten adapter workflows plus `conformance.yaml` — so one adapter re-pinning one
+filter would re-run the other ten for nothing. This is the same argument that keeps per-harness
+service image pins out of the corpus, and
+[ADR 0007](../docs/adr/0007-adapters-share-data-not-code.md) records it as a rule. What lives here is
+the *format*.
+
+### The file
+
+One file per adapter, at `<adapter>/golden/expectations.json`:
+
+```jsonc
+{
+  "adapter": "drizzle",
+  "regenerate": "npm run golden:update",
+  "expectations": {
+    "<action>": { "note": "optional, human, preserved across regeneration", /* … */ }
+  }
+}
+```
+
+- **`adapter`** is checked by the loader, not ignored. The file is a flat map of corpus action
+  names, so a copy taken from another adapter parses cleanly and would be compared against the
+  wrong translator with only the diff to say something went wrong.
+- **`regenerate`** is the command that rewrites the file. Documentation that travels with the data.
+- **`expectations`** is keyed by corpus action, **sorted**, so a translator change reads as the list
+  of shapes it moved. The suite asserts the sort order.
+- **`note`** is the one reserved key inside an entry: commentary, never compared, and carried across
+  by the regenerator. Everything else in the entry is the adapter's own filter document.
+
+### What the entry holds is per adapter, and has to be
+
+There is no cross-adapter type for "a database-native filter" — a Prisma `where` input, a Mongoose
+query document, a Drizzle `SQL` tree and an Elasticsearch query are four unrelated things — so the
+*value* schema is the adapter's, documented in the adapter's own README. Only the layout is shared:
+a JSON object, keyed by action, one entry per accounted-for fixture.
+
+Two rules constrain the value:
+
+- **It must be JSON that round-trips.** A value the encoding cannot hold has to be normalised in the
+  data and pinned in code instead — the drizzle suite records `0` where the adapter binds `-0`,
+  because JSON has no negative zero, and asserts the list of actions that bind one separately.
+- **It is a filter, never a row set.** Which rows a filter returns is the PDP `check()` oracle's
+  answer, established by the adversarial harness against real data. Writing it down would freeze an
+  authorization decision into a file that no longer tracks the policy.
+
+### A throwing action carries no entry
+
+If `actions.json` says the adapter must refuse an action, its pinned message is **already corpus
+data**. The translator unit test reads `adapterUnsupported[adapter]`, `expectedUnsupported` and
+`nullRepresentationOmitted` the same way the harness does and asserts the throw against the message
+pinned there. Writing that message into the adapter's asset too would create two places to change one
+string with nothing to say which is authoritative — and it would make an adapter that rejects most of
+the corpus (langchain-chromadb, elasticsearch-java) carry a file that is almost entirely restatement.
+
+### The completeness guard
+
+ADR 0006 requires every wire fixture to be accounted for **exactly once** in every adapter carrying
+this test. With the expectations as data that becomes one set equation the suite asserts:
+
+```
+keys(golden/expectations.json)  ∪  throwing actions from actions.json  ==  wire-fixtures/*.json
+```
+
+Total, so a fixture with neither lands as a failure; disjoint, so an action that has both is caught
+rather than silently satisfying the union. Add per-bucket count tripwires next to it, for the same
+reason the harnesses carry them.
+
+### Regeneration is a deliberate act, and the diff is the review
+
+A golden file large enough to be useful is too large to hand-write, so each adapter ships a command
+that rewrites it from what the translator emits today (`npm run golden:update` on drizzle). That is
+the same workflow as `scripts/regenerate-wire-fixtures.sh`, with the same safety: **CI never
+regenerates**, so a translator change that moves the emitted filter fails there whatever anyone ran
+locally, and the diff is what a reviewer reads.
+
+The one thing regeneration cannot protect is a property nobody wrote down — a regenerated file
+happily records a filter that collapses a NULL to FALSE. So keep the *rules* as assertions next to
+the pinned bytes: they survive regeneration, and they hold for a corpus action nobody has added yet.
+
+### Language neutrality
+
+The layout is JSON, the guard is set arithmetic, and enumeration is "iterate the keys". A pytest
+suite parametrises over them with `@pytest.mark.parametrize`, a JUnit one with `@MethodSource`, a Go
+one with `t.Run` in a loop — no part of the format assumes a TypeScript runner. What is not shared is
+the code that reads it: per ADR 0007 each adapter writes its own loader, deliberately duplicated, and
+is free to make it idiomatic.
 
 ## Adding a new adapter
 

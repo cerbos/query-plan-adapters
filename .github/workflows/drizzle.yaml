@@ -2,11 +2,14 @@ name: Drizzle Test
 
 on:
   pull_request:
+    # `policies/**` is deliberately absent: nothing under drizzle/ reads the shared policy suite
+    # any more. The translator unit test reads conformance/wire-fixtures/ and this adapter's own
+    # golden/expectations.json, the adversarial suite loads conformance/policies/, and the example
+    # runs against demo/.
     paths:
       - "drizzle/**"
       - "conformance/**"
       - "demo/**"
-      - "policies/**"
       - ".github/workflows/drizzle.yaml"
       - ".github/workflows/drizzle-publish.yaml"
   push:
@@ -33,11 +36,17 @@ jobs:
       - name: Validate conformance corpus
         run: ../conformance/scripts/validate-corpus.sh
 
+      # Only the adversarial suite needs a PDP: the translator unit test reads its plans from
+      # conformance/wire-fixtures/, which the `Conformance Corpus` workflow replans and diffs
+      # against this same pinned version. Both steps are therefore gated to the baseline Node leg,
+      # the one the adversarial steps below run on.
       - name: Read pinned Cerbos version
+        if: matrix.node-version == '22'
         id: cerbos
         run: echo "version=$(tr -d '[:space:]' < ../conformance/CERBOS_VERSION)" >> "$GITHUB_OUTPUT"
 
       - name: Setup Cerbos
+        if: matrix.node-version == '22'
         uses: cerbos/cerbos-setup-action@f772482c8504a05c49018a0bf2d84012a607733c # v1
         with:
           version: v${{ steps.cerbos.outputs.version }}
