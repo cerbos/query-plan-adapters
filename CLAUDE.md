@@ -30,19 +30,24 @@ npm test         # Jest + Cerbos sidecar
 npm run test:adversarial  # differential suite against the shared conformance corpus
 ```
 
-On prisma, mongoose and drizzle, `npm test` is the **translator unit test**: it reads its plans from
-`conformance/wire-fixtures/`, asserts the emitted filter, and needs no sidecar, no database and no
-generated client ([ADR 0006](docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md)).
+On prisma, mongoose, drizzle and convex, `npm test` is the **translator unit test**: it reads its
+plans from `conformance/wire-fixtures/`, asserts the emitted filter, and needs no sidecar, no
+database and no generated client ([ADR 0006](docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md)).
 On prisma it is engine-agnostic, so it has no v6/v7 split; the Prisma major is still a dimension of
 `npm run typecheck` and of the adversarial legs. On mongoose it never opens a connection, so the
-MongoDB server dimension applies to the adversarial leg alone. On drizzle the expected filters are
-**golden expectations** — static data in `drizzle/golden/expectations.json`, rewritten by
-`npm run golden:update` and reviewed as a diff — which is the format
-[#379](https://github.com/cerbos/query-plan-adapters/issues/379) piloted and the remaining adapters
-copy; prisma and mongoose keep their inline expectations until they are retrofitted. The schema is
-in `conformance/README.md`, "Golden expectations"; the principle is
+MongoDB server dimension applies to the adversarial leg alone. On convex it needs neither a Convex
+backend nor `convex/_generated`, which is why the mapper it shares with the harness lives in
+`convex/convex/adversarialMapper.ts` rather than beside the backend functions that import the
+generated API. On drizzle and convex the expected filters are **golden expectations** — static data
+in `<adapter>/golden/expectations.json`, rewritten by `npm run golden:update` and reviewed as a
+diff — which is the format [#379](https://github.com/cerbos/query-plan-adapters/issues/379) piloted
+and the remaining adapters copy; prisma and mongoose keep their inline expectations until they are
+retrofitted. Convex is the case that generalised the format: it emits a *function*, so its entry
+records the calls that function makes against a recording query builder plus which half of the
+output — Convex's filter engine or the adapter's in-memory post-filter — answers the query. The
+schema is in `conformance/README.md`, "Golden expectations"; the principle is
 [ADR 0007](docs/adr/0007-adapters-share-data-not-code.md). The remaining TypeScript adapters have
-not been converted yet ([#380](https://github.com/cerbos/query-plan-adapters/issues/380) onwards)
+not been converted yet ([#381](https://github.com/cerbos/query-plan-adapters/issues/381) onwards)
 and still run their shared-policy suite behind a sidecar.
 
 Drizzle and Prisma also replay the corpus against a real PostgreSQL server (testcontainers, so
@@ -92,11 +97,11 @@ Most TypeScript tests run behind a Cerbos sidecar:
 cerbos run --set=storage.disk.directory=../policies -- jest src/**.test.ts
 ```
 
-Cerbos CLI must be installed locally. Shared policies live in `/policies/`. Prisma, mongoose and
-drizzle are the exceptions: their `npm test` needs no sidecar (see above), and only their
-adversarial suite starts one — against `conformance/policies/`, not `/policies/`. None of those
-three directories reads `/policies/` at all any more, which is why none of their workflows lists it
-as a trigger path.
+Cerbos CLI must be installed locally. Shared policies live in `/policies/`. Prisma, mongoose,
+drizzle and convex are the exceptions: their `npm test` needs no sidecar (see above), and only their
+adversarial suite starts one — against `conformance/policies/`, not `/policies/`. The first three
+read `/policies/` nowhere at all any more, which is why none of their workflows lists it as a
+trigger path; convex still does, from `npm run test:integration`, so its workflow keeps it.
 
 Some adapters need additional services:
 - Mongoose: `npm run mongo` (Docker MongoDB)
@@ -278,7 +283,7 @@ never recompute them in a harness.
 - `conformance/` affects all adapters too: a change there re-runs every adapter's CI, and adding an action requires classifying it for all ten
 - `demo/` likewise re-runs every adapter's example job, and adding a usage shape means implementing it in all ten examples — there is no classification bucket to opt out with
 - Adding a seed row means adding its `conformance/derived-fields.json` entry in the same commit; adding a seed *field* also means widening every harness's declared key set — both are enforced, not optional
-- Adapters share data, not code: the corpus loader each adapter carries (`prisma/src/corpus.ts`, `mongoose/src/corpus.ts`, `drizzle/src/corpus.ts`, `ent/corpus_test.go`, `pgx/corpus_test.go`, …) is duplicated **deliberately**, so every adapter stays standalone. Do not extract a shared loader, and do not add a drift check between the copies — they are allowed to differ. That is the opposite of the byte-identical rule on the vendored Go *translator* trees, which keeps its exact current scope. See [ADR 0007](docs/adr/0007-adapters-share-data-not-code.md)
+- Adapters share data, not code: the corpus loader each adapter carries (`prisma/src/corpus.ts`, `mongoose/src/corpus.ts`, `drizzle/src/corpus.ts`, `convex/src/corpus.ts`, `ent/corpus_test.go`, `pgx/corpus_test.go`, …) is duplicated **deliberately**, so every adapter stays standalone. Do not extract a shared loader, and do not add a drift check between the copies — they are allowed to differ. That is the opposite of the byte-identical rule on the vendored Go *translator* trees, which keeps its exact current scope. See [ADR 0007](docs/adr/0007-adapters-share-data-not-code.md)
 - A per-adapter **golden expectation** — the filter one adapter is pinned to emit for one corpus action — lives in that adapter's own `golden/expectations.json`, never under `conformance/`; a throwing action carries no entry, because its message is already pinned in `conformance/actions.json`. Schema and rationale: `conformance/README.md`, "Golden expectations"
 - Regenerate build artifacts in the same commit as source changes
 - Changing what an adapter can translate means updating its `conformance/actions.json` entry and its README contract table in the same commit

@@ -1,0 +1,1163 @@
+{
+  "adapter": "convex",
+  "regenerate": "npm run golden:update",
+  "expectations": {
+    "all-on-empty": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "arith-add": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "arith-add-eq-frac": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "arith-add-eq-frac-exact": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "arith-add-ne-frac": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "arith-both": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "arith-div": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "arith-div-frac": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "arith-mod": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "arith-mult-neg": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "arith-sub": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "arith-vf": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "cast-double-string": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "cast-int-double": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "cast-int-string": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "cast-string-bool": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "cast-string-double": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "concat-f2f": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "cr-contains": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "cr-div-other-column": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "cr-div-then-add": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "cr-div-then-add-ne": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "cr-div-zero": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "cr-div-zero-eq-neg": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "cr-div-zero-ne": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "cr-endswith": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "cr-size-frac-ge": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "cr-startswith": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "cr-startswith-concat": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "cs-contains": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "cs-endswith": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "cs-eq": {
+      "note": "The shape of a pushed-down comparison, and the reason case sensitivity needs no declaration here: the engine compares the value the application stored, so there is no collation to get wrong.",
+      "kind": "KIND_CONDITIONAL",
+      "path": "db",
+      "filter": {
+        "op": "eq",
+        "args": [
+          {
+            "op": "field",
+            "args": [
+              "aString"
+            ]
+          },
+          "one"
+        ]
+      }
+    },
+    "cs-startswith": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "double-negation": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "db",
+      "filter": {
+        "op": "not",
+        "args": [
+          {
+            "op": "not",
+            "args": [
+              {
+                "op": "eq",
+                "args": [
+                  {
+                    "op": "field",
+                    "args": [
+                      "aBool"
+                    ]
+                  },
+                  true
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "double-threshold": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "db",
+      "filter": {
+        "op": "gte",
+        "args": [
+          {
+            "op": "field",
+            "args": [
+              "aNumber"
+            ]
+          },
+          1.5
+        ]
+      }
+    },
+    "empty-string-eq": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "db",
+      "filter": {
+        "op": "eq",
+        "args": [
+          {
+            "op": "field",
+            "args": [
+              "aString"
+            ]
+          },
+          ""
+        ]
+      }
+    },
+    "exists-on-empty": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "exists-one-multi": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "f2f-contains": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "f2f-endswith": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "f2f-startswith": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "field-to-field": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "gt-bare": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "db",
+      "filter": {
+        "op": "gt",
+        "args": [
+          {
+            "op": "field",
+            "args": [
+              "aNumber"
+            ]
+          },
+          1
+        ]
+      }
+    },
+    "hier-ancestor-cf": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "hier-ancestor-ff": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "hier-bracket": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "hier-descendent-cf": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "hier-descendent-ff": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "hier-meta-in": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "hier-meta-like": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "hier-overlaps-cf": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "hier-overlaps-ff": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "hier-overlaps-meta": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "id-concat": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "id-concat-vf": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "id-eq-const": {
+      "note": "The primary key as a filterable attribute (#376), reached as `request.resource.id` rather than through `attr`. The only one of the six `id-*` actions the engine decides on its own: the rest compare the key against another field or wrap it in a concatenation.",
+      "kind": "KIND_CONDITIONAL",
+      "path": "db",
+      "filter": {
+        "op": "eq",
+        "args": [
+          {
+            "op": "field",
+            "args": [
+              "id"
+            ]
+          },
+          "f1"
+        ]
+      }
+    },
+    "id-f2f": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "id-f2f-ne": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "in-empty": {
+      "note": "The one plan the planner folds before any filter exists. `in` over an empty list can allow nothing, so there is nothing for either half of the adapter to decide.",
+      "kind": "KIND_ALWAYS_DENIED"
+    },
+    "in-null-elem-hasint": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "in-null-elem-mixed": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "in-null-elem-neg": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "in-null-elem-only": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "in-null-elem-only-neg": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "in-null-elem-rel": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "in-null-elem-rel-neg": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "in-single": {
+      "note": "`in` is composed as `eq` comparisons joined with `or`; a one-element list collapses to the bare `eq` rather than a one-armed `or`.",
+      "kind": "KIND_CONDITIONAL",
+      "path": "db",
+      "filter": {
+        "op": "eq",
+        "args": [
+          {
+            "op": "field",
+            "args": [
+              "aString"
+            ]
+          },
+          "one"
+        ]
+      }
+    },
+    "in-var-var": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "in-var-var-neg": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "index-scalar-list": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "lambda-field-to-field": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "lambda-in-principal": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "le-bare": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "db",
+      "filter": {
+        "op": "lte",
+        "args": [
+          {
+            "op": "field",
+            "args": [
+              "aNumber"
+            ]
+          },
+          2
+        ]
+      }
+    },
+    "like-backslash": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "like-bracket": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "like-percent": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "like-underscore": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "macro-depth3-all": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "macro-depth3-exists": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "macro-depth3-not-exists": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "map-eq-list": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "n-all-mixed-null": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "n-not-all-absorb": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "n-not-all-null": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "n-not-exists-one-null": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "nan-ord-le": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "nan-ord-ternary": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "nan-ord-ternary-vf": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "nary-and": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "db",
+      "filter": {
+        "op": "and",
+        "args": [
+          {
+            "op": "eq",
+            "args": [
+              {
+                "op": "field",
+                "args": [
+                  "aBool"
+                ]
+              },
+              true
+            ]
+          },
+          {
+            "op": "gte",
+            "args": [
+              {
+                "op": "field",
+                "args": [
+                  "aNumber"
+                ]
+              },
+              0
+            ]
+          },
+          {
+            "op": "neq",
+            "args": [
+              {
+                "op": "field",
+                "args": [
+                  "aString"
+                ]
+              },
+              "one"
+            ]
+          }
+        ]
+      }
+    },
+    "neg-number": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "db",
+      "filter": {
+        "op": "lt",
+        "args": [
+          {
+            "op": "field",
+            "args": [
+              "aNumber"
+            ]
+          },
+          -1
+        ]
+      }
+    },
+    "not-and": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "db",
+      "filter": {
+        "op": "not",
+        "args": [
+          {
+            "op": "and",
+            "args": [
+              {
+                "op": "eq",
+                "args": [
+                  {
+                    "op": "field",
+                    "args": [
+                      "aBool"
+                    ]
+                  },
+                  true
+                ]
+              },
+              {
+                "op": "neq",
+                "args": [
+                  {
+                    "op": "field",
+                    "args": [
+                      "aString"
+                    ]
+                  },
+                  "one"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "not-contains": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "not-empty": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "not-exists": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "not-gt": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "db",
+      "filter": {
+        "op": "not",
+        "args": [
+          {
+            "op": "gt",
+            "args": [
+              {
+                "op": "field",
+                "args": [
+                  "aNumber"
+                ]
+              },
+              1
+            ]
+          }
+        ]
+      }
+    },
+    "not-lt": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "db",
+      "filter": {
+        "op": "not",
+        "args": [
+          {
+            "op": "lt",
+            "args": [
+              {
+                "op": "field",
+                "args": [
+                  "aNumber"
+                ]
+              },
+              2
+            ]
+          }
+        ]
+      }
+    },
+    "not-startswith": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "null-eq": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "null-eq-missing": {
+      "note": "The `nullRepresentationOmitted` probe, recorded under the DEFAULT representation. The planner emits the same `eq(attr, null)` node either way, so the wire cannot tell the two conventions apart and this entry is what the adapter does when told `explicit`. Under `omitted` it throws, with the message actions.json pins.",
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "null-ne": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "null-not-eq": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "null-value-f2f": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "null-value-f2f-mixed": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "null-value-ne-const": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "null-value-not-eq-const": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "null-value-not-in-const": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "null-value-pv-not-exists": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "optional-ne": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "or-eq-exists": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "or-eq-in": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "outer-attr-depth2": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "p-arith-in-lambda": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "p-deep-nest": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "p-double-frac": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "p-has": {
+      "note": "`has()` over a missing attribute, which the planner folds to ALWAYS_ALLOWED while check() denies. That is the corpus's one knownDivergence, so this entry pins what the adapter does with the fold rather than claiming the fold is right.",
+      "kind": "KIND_ALWAYS_ALLOWED"
+    },
+    "p-hasintersection-map": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "p-in-null-multi": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "p-in-null-single": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "p-index": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "p-lambda-f2f-like": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "p-lambda-inner-f2f": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "p-matches": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "p-not-exists-empty": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "p-not-ternary-null": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "p-size-nested": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "p-startswith-concat": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "p-struct": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "db",
+      "filter": {
+        "op": "eq",
+        "args": [
+          {
+            "op": "field",
+            "args": [
+              "obj.inner"
+            ]
+          },
+          "one"
+        ]
+      }
+    },
+    "p-ternary-in-exists": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "p-ternary-of-ternaries": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "p-ternary-under-all": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "p-ternary-vs-ternary": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "p-timestamp": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "pv-all": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "pv-all-unrolled": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "pv-exists": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "pv-exists-unrolled": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "rel-bool-hop": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "rel-bool-hop2": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "rel-contains-hop": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "rel-eq-hop": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "rel-eq-num-hop": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "rel-ge-hop": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "rel-gt-hop": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "rel-hop-and-root": {
+      "note": "The corpus's only SPLIT. `buildFilters` splits a root `and` alone, and this is the one hostile shape rooted there that mixes a pushable conjunct with a non-pushable one: `R.attr.aBool == true` is a required field against a literal, so the engine takes it, while the to-one hop is `nullable` and needs the missing-attribute semantics only the adapter's own evaluator has (#375).",
+      "kind": "KIND_CONDITIONAL",
+      "path": "split",
+      "filter": {
+        "op": "eq",
+        "args": [
+          {
+            "op": "field",
+            "args": [
+              "aBool"
+            ]
+          },
+          true
+        ]
+      }
+    },
+    "rel-hop2-or-exists": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "rel-le-hop": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "rel-lt-hop": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "rel-ne-null-hop": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "rel-not-bool-hop": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "rel-range-hop": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "rel-startswith-hop2": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "root-bare-bool": {
+      "note": "A bare boolean at the ROOT of the condition (#388). It reaches the engine because `aBool` is a required field — the same predicate over a `nullable` field stays with the adapter's evaluator, which is what #375 changed.",
+      "kind": "KIND_CONDITIONAL",
+      "path": "db",
+      "filter": {
+        "op": "eq",
+        "args": [
+          {
+            "op": "field",
+            "args": [
+              "aBool"
+            ]
+          },
+          true
+        ]
+      }
+    },
+    "root-or": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "db",
+      "filter": {
+        "op": "or",
+        "args": [
+          {
+            "op": "eq",
+            "args": [
+              {
+                "op": "field",
+                "args": [
+                  "aBool"
+                ]
+              },
+              true
+            ]
+          },
+          {
+            "op": "lt",
+            "args": [
+              {
+                "op": "field",
+                "args": [
+                  "aNumber"
+                ]
+              },
+              0
+            ]
+          }
+        ]
+      }
+    },
+    "size-filter-count": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "size-huge-gt": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "size-huge-lt": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "size-threshold": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "string-size": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "ternary-bare": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "ternary-cmp": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "ternary-expr-cond": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "ternary-negated": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "ternary-nested": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "ternary-null-cond": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "ternary-value-first": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "triple-negation": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "db",
+      "filter": {
+        "op": "not",
+        "args": [
+          {
+            "op": "not",
+            "args": [
+              {
+                "op": "not",
+                "args": [
+                  {
+                    "op": "eq",
+                    "args": [
+                      {
+                        "op": "field",
+                        "args": [
+                          "aBool"
+                        ]
+                      },
+                      true
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "ts-eq": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "ts-eq-offset": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "ts-ne": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "ts-vf": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "ts-window": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "unicode-eq": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "db",
+      "filter": {
+        "op": "eq",
+        "args": [
+          {
+            "op": "field",
+            "args": [
+              "aString"
+            ]
+          },
+          "héllo🚀"
+        ]
+      }
+    },
+    "vf-ge": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "db",
+      "filter": {
+        "op": "lte",
+        "args": [
+          {
+            "op": "field",
+            "args": [
+              "aNumber"
+            ]
+          },
+          2
+        ]
+      }
+    },
+    "vf-hasint": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "vf-le": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "db",
+      "filter": {
+        "op": "gte",
+        "args": [
+          {
+            "op": "field",
+            "args": [
+              "aNumber"
+            ]
+          },
+          3
+        ]
+      }
+    },
+    "vf-lt": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "db",
+      "filter": {
+        "op": "gt",
+        "args": [
+          {
+            "op": "field",
+            "args": [
+              "aNumber"
+            ]
+          },
+          1
+        ]
+      }
+    },
+    "vf-ne": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "db",
+      "filter": {
+        "op": "neq",
+        "args": [
+          {
+            "op": "field",
+            "args": [
+              "aString"
+            ]
+          },
+          "one"
+        ]
+      }
+    },
+    "vf-null-ne": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "vf-size": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "w1-all-chain": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "w1-exists-chain": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "w1-in-chain": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "w1-not-exists-chain": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "w1-not-hasint-chain": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "w1-not-in-chain": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "w1-not-size-chain": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "w1-size-chain": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "w1-size-frac-chain": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "w1-size-frac-le-chain": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "w1-size-nonneg-chain": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "w1-size-zero-chain": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "w1-ternary-chain-cond": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "w2-outer-relation": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    }
+  }
+}

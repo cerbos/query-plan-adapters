@@ -123,6 +123,8 @@ This support statement includes value-first comparisons, field-to-field expressi
 
 Every fail-closed shape's error message is pinned in the shared corpus (`conformance/actions.json`) and asserted by this adapter's conformance run, so a classification proves the throw names its declared mechanism rather than merely that something threw.
 
+The filter each of these actions produces is pinned separately, in the translator unit test (`npm test`) — see [Testing](#testing). That is what makes a change to the emitted filter show up as a diff even when it selects the same documents from the corpus seeds, and it is the only place the parts of the contract no policy can reach are asserted at all: the `allowPostFilter` gate, function mappers, the identity fallback for an unmapped reference, the `nullAttributeRepresentation` boundary, and malformed input.
+
 ### What the differential proves, and what it does not
 
 Convex's filter API has no string, collection, arithmetic or cast operators, so most of the corpus
@@ -132,20 +134,22 @@ the split is pinned by the conformance run instead of being left to inference:
 
 | Decided by | Default mapper | Pushdown mapper |
 | --- | --- | --- |
-| Convex's filter engine, alone | 13 | 21 |
-| the adapter's `postFilter` | 126 | 118 |
+| Convex's filter engine, alone | 22 | 33 |
+| the engine narrowing and the `postFilter` deciding (`rel-hop-and-root`) | 1 | 1 |
+| the adapter's `postFilter`, alone | 167 | 156 |
 | folded to `ALWAYS_DENIED` before any filter exists (`in-empty`) | 1 | 1 |
 
-For the 126 post-filtered actions the differential compares the adapter's CEL evaluator against the
-PDP's CEL evaluator; Convex's own comparison and ordering semantics only get a say on the 13.
+For the 167 post-filtered actions the differential compares the adapter's CEL evaluator against the
+PDP's CEL evaluator; Convex's own comparison and ordering semantics only get a say on the 22.
 The **pushdown mapper** is a second leg that clears `nullable` on `owner` — the one nullable field
 the seeded documents always carry, since the table declares it `v.union(v.string(), v.null())`
 rather than `v.optional(...)`. That moves the null-comparison family (`null-eq`, `null-ne`,
-`null-not-eq`, `vf-null-ne` and the four `in-null-elem-*` shapes) into the engine, where
-`q.eq(field, null)` against a stored explicit null is proved against the same oracle. Both legs
-run in CI; the leg re-executes only those eight, because `nullable` is read in exactly one place in
-the adapter and an action whose execution path both mappers agree on is translated identically by
-both — a claim the harness pins rather than assumes.
+`null-not-eq`, `vf-null-ne`, the four `in-null-elem-*` shapes and the three `null-value-*-const`
+probes) into the engine, where `q.eq(field, null)` against a stored explicit null is proved against
+the same oracle. Both legs run in CI; the leg re-executes only those eleven, because `nullable` is
+read in exactly one place in the adapter and an action whose execution path both mappers agree on
+is translated identically by both — a claim the suites pin rather than assume, offline in
+`npm test` and again against the running backend.
 
 It cannot go further without lying about the documents: the other `nullable` fields
 (`aOptionalString`, `aDouble`, `createdAt`, `scope`, `mainCategory` and its two chained paths) are
@@ -174,6 +178,63 @@ This adapter **builds no subquery.** Convex has no joins, so the mapper resolves
 | To-one relation used as a collection | Not applicable — a document path holds exactly what the application stored | — |
 | Composite association key | Not applicable — no join, so no key to compose | — |
 | Absent to-one parent | **Reproduced**, and proved by the corpus (`w1-all-chain`, `rel-not-bool-hop` and siblings) | None — the post-filter evaluates a missing path as a CEL error, which denies, so an absent parent is excluded under both polarities rather than reading as an empty collection ([#309](https://github.com/cerbos/query-plan-adapters/issues/309), [#375](https://github.com/cerbos/query-plan-adapters/issues/375)). **Behaviour change in #375:** a BARE variable in boolean position was pushed to Convex's filter engine regardless of `nullable`, and the engine cannot tell an absent path from a false one, so a negation over one readmitted every row missing that path. A `nullable` bare variable is now answered by the adapter's own evaluator instead — correct rows, and one more shape scanned rather than indexed |
+
+## Testing
+
+| Command | What it proves | What it needs |
+| --- | --- | --- |
+| `npm test` | **The filter this adapter emits.** The translator unit test: every corpus action, classified exactly once as a golden expectation or as a throw | Nothing but Node — no Cerbos sidecar, no Convex backend, no Docker |
+| `npm run test:integration` | That Convex's real filter engine evaluates a pushed-down filter the way the adapter assumes | Cerbos CLI, Docker |
+| `npm run test:adversarial` | **The documents that filter returns**, inside a real Convex backend with `check()` as the oracle | Cerbos CLI, Docker |
+| `npm run golden:update` | — | Rewrites `golden/expectations.json` from what the translator emits today. Review the diff |
+
+### The golden expectations
+
+`npm test` reads its plans from `../conformance/wire-fixtures/` — the golden `PlanResources`
+responses captured against the pinned Cerbos version — and asserts them against
+`golden/expectations.json`, a **golden expectation** file this adapter owns. One entry per corpus
+action, keyed by action name:
+
+```jsonc
+{
+  "adapter": "convex",
+  "regenerate": "npm run golden:update",
+  "expectations": {
+    "in-empty": { "kind": "KIND_ALWAYS_DENIED" },
+    // Answered entirely by the adapter's own evaluator: there is no filter to record, and what
+    // that evaluator decides is a question about documents, which the adversarial suite answers.
+    "null-eq":  { "kind": "KIND_CONDITIONAL", "path": "post" },
+    "cs-eq": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "db",
+      // The adapter emits a FUNCTION, `(q) => Expression<boolean>`, so there is no query text to
+      // pin. What is recorded is the calls that function makes against the `FilterBuilder` it is
+      // handed — here `q.eq(q.field("aString"), "one")`.
+      "filter": {
+        "op": "eq",
+        "args": [{ "op": "field", "args": ["aString"] }, "one"]
+      }
+    }
+  }
+}
+```
+
+`path` is the routing decision — `db`, `post`, or `split` for a root `and` whose pushable conjuncts
+narrow before the post-filter decides. It is pinned because it is the most consequential thing this
+translator chooses and the least visible: both halves are supposed to return the same documents, so
+an action that silently crossed the boundary would pass the adversarial suite unchanged while
+altering what the database is asked to do.
+
+An action this adapter refuses carries **no entry**: its pinned message is corpus data, in
+`conformance/actions.json`, and duplicating it here would be two places to change one string. A
+wire fixture that is neither in this file nor declared unsupported fails the suite, which is what
+makes a new corpus action land as a failure rather than as silence
+([ADR 0006](../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md),
+[ADR 0007](../docs/adr/0007-adapters-share-data-not-code.md), and the "Golden expectations" section
+of [conformance/README.md](../conformance/README.md)).
+
+Whether those filters return the documents the PDP allows is a separate question, answered by the
+adversarial suite, which does need a Cerbos sidecar and a Convex backend.
 
 ## Requirements
 

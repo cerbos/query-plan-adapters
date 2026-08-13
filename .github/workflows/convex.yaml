@@ -25,15 +25,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Read pinned Cerbos version
-        id: cerbos
-        run: echo "version=$(tr -d '[:space:]' < ../conformance/CERBOS_VERSION)" >> "$GITHUB_OUTPUT"
-
-      - name: Setup Cerbos
-        uses: cerbos/cerbos-setup-action@f772482c8504a05c49018a0bf2d84012a607733c # v1
-        with:
-          version: v${{ steps.cerbos.outputs.version }}
-
+      # No Cerbos sidecar: `npm test` is the translator unit test, which reads its plans from
+      # conformance/wire-fixtures/ — replanned against the pinned PDP and diffed by the
+      # `Conformance Corpus` workflow — and its expected filters from golden/expectations.json.
+      # No PDP, no Convex backend, no Docker.
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
