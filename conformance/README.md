@@ -836,6 +836,12 @@ query document, a Drizzle `SQL` tree and an Elasticsearch query are four unrelat
 *value* schema is the adapter's, documented in the adapter's own README. Only the layout is shared:
 a JSON object, keyed by action, one entry per accounted-for fixture.
 
+An adapter whose output is not data at all still fits: convex emits a **function** of the query
+builder plus an in-memory post-filter, so its entry records the calls that function makes against a
+recording builder, and which half of the output answers the query. The general shape is "the
+observable the translator produced", not "the query text" — and where an adapter has a boundary the
+corpus cannot see, that boundary is the observable worth pinning.
+
 Two rules constrain the value:
 
 - **It must be JSON that round-trips.** A value the encoding cannot hold has to be normalised in the

@@ -7,11 +7,11 @@ import { api } from "../convex/_generated/api.js";
 
 // What this suite is for, and what it deliberately leaves alone.
 //
-// `index.test.ts` proves the SHAPE of the filter the adapter builds, but it runs that filter
-// against a hand-rolled mock of Convex's `FilterBuilder`. Nothing in that suite can catch the mock
-// lying about what Convex's real filter engine does with the expression tree it is handed. That is
-// the gap this suite closes, so every case here is one the adapter PUSHES DOWN — plus the one that
-// splits, which carries a `postFilter` alongside the pushed-down half.
+// `translator.test.ts` pins the SHAPE of the filter the adapter builds, by handing it a recorder
+// in place of Convex's `FilterBuilder` and writing down the calls. Nothing in that suite can catch
+// the recorder lying about what Convex's real filter engine does with the expression tree it is
+// handed. That is the gap this suite closes, so every case here is one the adapter PUSHES DOWN —
+// plus the one that splits, which carries a `postFilter` alongside the pushed-down half.
 //
 // It used to assert `result.kind === CONDITIONAL` and then run a hand-written query built from a
 // `filterType`/`filterField`/`filterValue` switch, so the translated filter was discarded and the

@@ -12,7 +12,7 @@ import {
   PUSHDOWN_DEMOTED_FIELDS,
   PUSHDOWN_MAPPER,
   type MapperVariant,
-} from "../convex/adversarial";
+} from "../convex/adversarialMapper";
 import type { ExecutionPath } from "../convex/planExecution";
 import type { Mapper } from ".";
 import { PlanKind, queryPlanToConvex } from ".";
@@ -1131,7 +1131,7 @@ describe("adversarial conformance corpus", () => {
       pushdownSplit: pushdown.split,
       pushdownPostCount: pushdown.post.length,
       // The two mappers must differ ONLY where the pushdown leg re-executes, which is what makes
-      // skipping the other 156 actions there sound rather than a coverage hole.
+      // skipping the other 180 actions there sound rather than a coverage hole.
       moved: pushdown.db.filter((action) => !base.db.includes(action)),
     }).toEqual({
       total: 191,
