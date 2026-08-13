@@ -23,6 +23,8 @@ import {
   ADAPTER,
   GOLDEN_REGENERATE_COMMAND,
   classifyActionsForAdapter,
+  nullRepresentationOmittedFor,
+  parseActionsFile,
   planFromWireFixture,
   readCorpusJson,
   readGoldenExpectations,
@@ -30,7 +32,7 @@ import {
   wireFixtureActions,
   writeGoldenExpectations,
 } from "./corpus";
-import type { ActionsFile, FilterNode, GoldenExpectation } from "./corpus";
+import type { FilterNode, GoldenExpectation } from "./corpus";
 
 /**
  * Translator unit test: for every action in the shared `../conformance/` corpus, the filter this
@@ -83,7 +85,7 @@ import type { ActionsFile, FilterNode, GoldenExpectation } from "./corpus";
  * below is what makes a new action land as a failure rather than as silence.
  */
 
-const actionsFile = readCorpusJson("actions.json") as ActionsFile;
+const actionsFile = parseActionsFile(readCorpusJson("actions.json"));
 
 /**
  * The shapes `actions.json` says this adapter must refuse, each with the message it must refuse
@@ -99,7 +101,7 @@ const { throwingActions: THROWING_ACTIONS } = classifyActionsForAdapter(
   actionsFile,
   ADAPTER,
 );
-const THROWING = new Set(THROWING_ACTIONS.map(([action]) => action));
+const THROWING = new Set(THROWING_ACTIONS.map(({ action }) => action));
 
 // -- recording what the adapter asks Convex to do -------------------------------------------------
 
@@ -314,8 +316,8 @@ describe("corpus shapes", () => {
   // same assertion against a live PDP; here it costs a millisecond and covers the whole roster,
   // which is what lets the completeness guard below be total.
   test.each(THROWING_ACTIONS)(
-    "%s is refused with the message actions.json pins (%s)",
-    (action, _reason, message) => {
+    "$action is refused with the message actions.json pins ($reason)",
+    ({ action, message }) => {
       expect(() => translate(action)).toThrow(message);
     },
   );
@@ -332,7 +334,7 @@ describe("corpus shapes", () => {
   });
 
   test("every corpus action is accounted for here exactly once", () => {
-    const throwing = THROWING_ACTIONS.map(([action]) => action);
+    const throwing = THROWING_ACTIONS.map(({ action }) => action);
     const classified = [...RECORDED_ACTIONS, ...throwing].sort();
 
     // Total: a corpus action with no golden expectation and no pinned throw lands as a failure
@@ -543,9 +545,9 @@ describe("nullAttributeRepresentation", () => {
   // be told, and the whole behaviour is a translator property with no store in it.
   const OMITTED_MESSAGE = requireMessage(
     "nullRepresentationOmitted.null-eq-missing.messages.convex",
-    actionsFile.nullRepresentationOmitted.find(
+    nullRepresentationOmittedFor(actionsFile, ADAPTER).find(
       (entry) => entry.action === "null-eq-missing",
-    )?.messages?.[ADAPTER],
+    )?.message,
   );
 
   test("explicit is the default, and keeps the null-matching translation", () => {

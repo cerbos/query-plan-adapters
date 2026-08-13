@@ -1,8 +1,5 @@
-import * as fs from "fs";
-import * as path from "path";
-
 import { afterAll, beforeAll, describe, expect, test } from "@jest/globals";
-import type { Principal, Resource, Value } from "@cerbos/core";
+import type { Resource, Value } from "@cerbos/core";
 import { GRPC as Cerbos } from "@cerbos/grpc";
 import { ConvexHttpClient } from "convex/browser";
 
@@ -16,86 +13,25 @@ import {
 import type { ExecutionPath } from "../convex/planExecution";
 import type { Mapper } from ".";
 import { PlanKind, queryPlanToConvex } from ".";
+// The corpus reader this adapter carries, shared with src/translator.test.ts. Nothing about
+// actions.json, seeds.json or derived-fields.json is parsed twice inside one adapter: one loader
+// means one answer to "which shapes must this adapter refuse" and one declaration of the corpus
+// keys it consumes. The duplication ACROSS adapters stays deliberate (ADR 0007).
+import {
+  classifyActionsForAdapter,
+  isRecord,
+  nullRepresentationOmittedFor,
+  parseActionsFile,
+  parseDerivedFile,
+  parseSeedsFile,
+  readCorpusJson,
+  requireMessage,
+} from "./corpus";
+import type { DerivedEntry, Seed } from "./corpus";
 
 const CONVEX_URL = process.env["CONVEX_URL"] ?? "http://127.0.0.1:3210";
 const convex = new ConvexHttpClient(CONVEX_URL);
 const cerbos = new Cerbos("127.0.0.1:3593", { tls: false });
-const CONFORMANCE_DIR = path.join(__dirname, "..", "..", "conformance");
-
-interface Tag {
-  id: string;
-  name: string | null;
-}
-
-interface Seed {
-  id: string;
-  aBool: boolean;
-  aString: string;
-  aNumber: number;
-  aOptionalString: string | null;
-  tags: Tag[];
-  subCategoryNames: string[];
-  /** The seed whose scalars this row's to-one `parent` carries; null for no parent. */
-  parentSeedId: string | null;
-}
-
-interface SeedsFile {
-  principal: Principal;
-  resourceKind: string;
-  seeds: Seed[];
-}
-
-/** One seed's derived fields, exactly as conformance/derived-fields.json carries them. */
-interface DerivedEntry {
-  createdBy: string;
-  aDouble: number | null;
-  createdAt: string | null;
-  scope: string | null;
-  labels: (string | null)[];
-}
-
-interface DerivedFile {
-  fields: string[];
-  derived: Record<string, DerivedEntry>;
-}
-
-interface ExpectedUnsupported {
-  action: string;
-  /** One entry per adapter that must reject the shape; the corpus asserts the key set. */
-  messages: Record<string, string>;
-}
-
-interface AdapterOutcome {
-  action: string;
-  reason: string;
-  /** Absent on `adapterSupportedExpected` / `nullRepresentationOmitted`, required on a throw. */
-  message?: string;
-}
-
-/**
- * A `nullRepresentationOmitted` entry. Every adapter must reject these — the two NULL conventions
- * are indistinguishable on the wire — so `messages` names the whole roster with no promotions to
- * subtract.
- */
-interface NullRepresentationOmitted {
-  action: string;
-  reason: string;
-  messages: Record<string, string>;
-}
-
-interface KnownDivergence {
-  action: string;
-  adapters: string[];
-}
-
-interface ActionsFile {
-  conformance: string[];
-  adapterUnsupported: Record<string, AdapterOutcome[]>;
-  adapterSupportedExpected: Record<string, AdapterOutcome[]>;
-  expectedUnsupported: ExpectedUnsupported[];
-  nullRepresentationOmitted: NullRepresentationOmitted[];
-  knownDivergences: KnownDivergence[];
-}
 
 interface StoredDocument {
   id: string;
@@ -135,320 +71,30 @@ interface StoredRelationLevel {
   aOptionalString?: string;
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-const isStringArray = (value: unknown): value is string[] =>
-  Array.isArray(value) && value.every((item) => typeof item === "string");
-
-const isTag = (value: unknown): value is Tag =>
-  isRecord(value) &&
-  typeof value["id"] === "string" &&
-  (typeof value["name"] === "string" || value["name"] === null);
-
-const isSeed = (value: unknown): value is Seed =>
-  isRecord(value) &&
-  typeof value["id"] === "string" &&
-  typeof value["aBool"] === "boolean" &&
-  typeof value["aString"] === "string" &&
-  typeof value["aNumber"] === "number" &&
-  (typeof value["aOptionalString"] === "string" ||
-    value["aOptionalString"] === null) &&
-  Array.isArray(value["tags"]) &&
-  value["tags"].every(isTag) &&
-  isStringArray(value["subCategoryNames"]) &&
-  (typeof value["parentSeedId"] === "string" || value["parentSeedId"] === null);
-
-const isPrincipal = (value: unknown): value is Principal =>
-  isRecord(value) &&
-  typeof value["id"] === "string" &&
-  isStringArray(value["roles"]) &&
-  isRecord(value["attr"]);
-
-const isSeedsFile = (value: unknown): value is SeedsFile =>
-  isRecord(value) &&
-  isPrincipal(value["principal"]) &&
-  typeof value["resourceKind"] === "string" &&
-  Array.isArray(value["seeds"]) &&
-  value["seeds"].every(isSeed);
-
-const isMessageMap = (value: unknown): value is Record<string, string> =>
-  isRecord(value) &&
-  Object.values(value).every((message) => typeof message === "string");
-
-const isExpectedUnsupported = (value: unknown): value is ExpectedUnsupported =>
-  isRecord(value) &&
-  typeof value["action"] === "string" &&
-  isMessageMap(value["messages"]);
-
-const isNullRepresentationOmitted = (
-  value: unknown,
-): value is NullRepresentationOmitted =>
-  isRecord(value) &&
-  typeof value["action"] === "string" &&
-  typeof value["reason"] === "string" &&
-  isMessageMap(value["messages"]);
-
-const isAdapterOutcome = (value: unknown): value is AdapterOutcome =>
-  isRecord(value) &&
-  typeof value["action"] === "string" &&
-  typeof value["reason"] === "string" &&
-  // `adapterUnsupported` carries this and the classification below requires it;
-  // `adapterSupportedExpected` and `nullRepresentationOmitted` do not throw, so they do not.
-  (value["message"] === undefined || typeof value["message"] === "string");
-
-const isAdapterMap = (
-  value: unknown,
-): value is Record<string, AdapterOutcome[]> =>
-  isRecord(value) &&
-  Object.values(value).every(
-    (entries) => Array.isArray(entries) && entries.every(isAdapterOutcome),
-  );
-
-const isKnownDivergence = (value: unknown): value is KnownDivergence =>
-  isRecord(value) &&
-  typeof value["action"] === "string" &&
-  isStringArray(value["adapters"]);
-
-const isActionsFile = (value: unknown): value is ActionsFile =>
-  isRecord(value) &&
-  isStringArray(value["conformance"]) &&
-  isAdapterMap(value["adapterUnsupported"]) &&
-  isAdapterMap(value["adapterSupportedExpected"]) &&
-  Array.isArray(value["expectedUnsupported"]) &&
-  value["expectedUnsupported"].every(isExpectedUnsupported) &&
-  // Every group the interface declares must be validated: a group this predicate does not
-  // name is the projection trap the corpus README warns about.
-  Array.isArray(value["nullRepresentationOmitted"]) &&
-  value["nullRepresentationOmitted"].every(isNullRepresentationOmitted) &&
-  Array.isArray(value["knownDivergences"]) &&
-  value["knownDivergences"].every(isKnownDivergence);
-
-const isDerivedEntry = (value: unknown): value is DerivedEntry =>
-  isRecord(value) &&
-  typeof value["createdBy"] === "string" &&
-  (typeof value["aDouble"] === "number" || value["aDouble"] === null) &&
-  (typeof value["createdAt"] === "string" || value["createdAt"] === null) &&
-  (typeof value["scope"] === "string" || value["scope"] === null) &&
-  Array.isArray(value["labels"]) &&
-  value["labels"].every((label) => label === null || typeof label === "string");
-
-const isDerivedFile = (value: unknown): value is DerivedFile =>
-  isRecord(value) &&
-  isStringArray(value["fields"]) &&
-  isRecord(value["derived"]) &&
-  Object.values(value["derived"]).every(isDerivedEntry);
-
-// -- corpus coverage guards ---------------------------------------------------------------------
+// -- the corpus, read once ----------------------------------------------------------------------
 //
-// The same parsed seed feeds the stored document AND the check() oracle, so a corpus field this
-// harness does not consume is dropped from both sides at once and the differential agrees for the
-// wrong reason — the projection trap conformance/README.md describes for actions.json, applied to
-// the seeds. Asserting set equality catches both directions: a corpus key nothing here reads, and a
-// key this harness reads that the corpus no longer carries.
+// The declared-key guards run inside these parsers, in src/corpus.ts: the seed key set, the tag
+// key set, the principal and its attributes, and the derived-fields roster. They are what make a
+// corpus field this harness does not consume fail loudly instead of being dropped from the stored
+// document and the check() oracle at once (conformance/README.md, "Adding a new hostile shape").
 
-const SEED_KEYS = [
-  "id",
-  "aBool",
-  "aString",
-  "aNumber",
-  "aOptionalString",
-  "tags",
-  "subCategoryNames",
-  "parentSeedId",
-] as const;
-
-/** Corpus prose, never read by a harness: the one documented exclusion from SEED_KEYS. */
-const SEED_NOTE_KEY = "note";
-
-/** The one nested object array a seed carries. A key added inside an element is dropped from both
- * sides of the differential just as silently as a top-level one, so it is guarded the same way. */
-const TAG_KEYS = ["id", "name"] as const;
-
-const DERIVED_KEYS = [
-  "createdBy",
-  "aDouble",
-  "createdAt",
-  "scope",
-  "labels",
-] as const;
-
-// The corpus principal is guarded the same way and for the same reason. It feeds the PLAN under
-// test AND the check() oracle, so an attribute dropped on the way in vanishes from both sides at
-// once: the plan folds to ALWAYS_DENIED and the oracle, built from the same principal, agrees. That
-// is how langchain-chromadb's hardcoded attribute allowlist let `pv-exists` pass while testing
-// nothing (conformance/README.md, "Adding a new hostile shape", step 7). This harness passes the
-// principal through verbatim, which is correct; the guard is what proves it still does.
-//
-// `id` and `roles` are deliberately IN scope, guarded by PRINCIPAL_KEYS one level above the
-// attributes — the same two-level shape SEED_KEYS and TAG_KEYS use for a row and its `tags[]`
-// elements. A role dropped on the way in changes every policy decision at once; that it is less
-// likely to be projected away than an attribute is a reason to expect the assertion to stay quiet,
-// not a reason to omit it.
-const PRINCIPAL_KEYS = ["id", "roles", "attr"] as const;
-
-const PRINCIPAL_ATTR_KEYS = [
-  "allowedTags",
-  "context",
-  "fewTeams",
-  "manyTeams",
-] as const;
-
-/**
- * One principal attribute, checked against the two JSON shapes the corpus carries. A key-set guard
- * says nothing about a change inside a value and three of the four attributes are lists, so the
- * element type is asserted for the same reason the seed guard descends into `tags[]`.
- */
-function assertPrincipalAttrShape(label: string, value: unknown): void {
-  if (typeof value === "string") return;
-  if (isStringArray(value)) return;
-  throw new Error(
-    `${label} is neither a string nor an array of strings, the only two shapes this harness consumes: a reshaped principal attribute feeds the plan and the check() oracle at once`,
-  );
-}
-
-function assertKeys(
-  label: string,
-  got: string[],
-  want: readonly string[],
-  optional: readonly string[] = [],
-): void {
-  const allowed = new Set<string>([...want, ...optional]);
-  for (const key of got) {
-    if (!allowed.has(key)) {
-      throw new Error(
-        `${label} carries "${key}", which this harness does not consume: an unconsumed corpus field is dropped from the stored document and the check() oracle at once`,
-      );
-    }
-  }
-  const present = new Set(got);
-  for (const key of want) {
-    if (!present.has(key)) {
-      throw new Error(
-        `${label} is missing "${key}", which this harness consumes`,
-      );
-    }
-  }
-}
-
-const parsedSeeds: unknown = JSON.parse(
-  fs.readFileSync(path.join(CONFORMANCE_DIR, "seeds.json"), "utf8"),
+const seedsFile = parseSeedsFile(readCorpusJson("seeds.json"));
+const actionsFile = parseActionsFile(readCorpusJson("actions.json"));
+const derivedFile = parseDerivedFile(
+  readCorpusJson("derived-fields.json"),
+  seedsFile.seeds,
 );
-if (!isSeedsFile(parsedSeeds)) throw new Error("Invalid conformance seeds");
-const seedsFile = parsedSeeds;
-
-const parsedActions: unknown = JSON.parse(
-  fs.readFileSync(path.join(CONFORMANCE_DIR, "actions.json"), "utf8"),
-);
-if (!isActionsFile(parsedActions))
-  throw new Error("Invalid conformance actions");
-const actionsFile = parsedActions;
-
-const parsedDerived: unknown = JSON.parse(
-  fs.readFileSync(path.join(CONFORMANCE_DIR, "derived-fields.json"), "utf8"),
-);
-if (!isDerivedFile(parsedDerived)) {
-  throw new Error("Invalid conformance derived fields");
-}
-const derivedFile = parsedDerived;
-
-// seedsFile.seeds holds the parsed JSON rows verbatim, so Object.keys reports the corpus key set.
-// Keep it that way: a parser that rebuilt each row field by field could only ever report the keys
-// this harness already names, and the assertion would pass vacuously.
-seedsFile.seeds.forEach((seed, index) => {
-  const label = `seeds.json seeds[${index}]`;
-  assertKeys(label, Object.keys(seed), SEED_KEYS, [SEED_NOTE_KEY]);
-  seed.tags.forEach((tag, tagIndex) => {
-    assertKeys(`${label}.tags[${tagIndex}]`, Object.keys(tag), TAG_KEYS);
-  });
-});
-
-// seedsFile.principal is the parsed JSON object — isPrincipal validates it rather than rebuilding
-// it — so Object.keys reports the corpus key set on both levels.
-assertKeys(
-  "seeds.json principal",
-  Object.keys(seedsFile.principal),
-  PRINCIPAL_KEYS,
-);
-// `attr` is optional on the SDK's Principal type; the corpus always carries it, and the assertion
-// above is what proves it rather than this fallback.
-const PRINCIPAL_ATTR = seedsFile.principal.attr ?? {};
-assertKeys(
-  "seeds.json principal.attr",
-  Object.keys(PRINCIPAL_ATTR),
-  PRINCIPAL_ATTR_KEYS,
-);
-for (const [key, value] of Object.entries(PRINCIPAL_ATTR)) {
-  assertPrincipalAttrShape(`seeds.json principal.attr.${key}`, value);
-}
-
-assertKeys("derived-fields.json fields", derivedFile.fields, DERIVED_KEYS);
-if (Object.keys(derivedFile.derived).length !== seedsFile.seeds.length) {
-  throw new Error(
-    `derived-fields.json has ${Object.keys(derivedFile.derived).length} entries for ${seedsFile.seeds.length} seeds`,
-  );
-}
-for (const seed of seedsFile.seeds) {
-  assertKeys(
-    `derived-fields.json derived["${seed.id}"]`,
-    Object.keys(derivedFor(seed)),
-    DERIVED_KEYS,
-  );
-}
 
 const CONVEX_UNSUPPORTED = actionsFile.adapterUnsupported["convex"] ?? [];
-const UNSUPPORTED_ACTIONS = new Set(
-  CONVEX_UNSUPPORTED.map(({ action }) => action),
-);
 const CONVEX_SUPPORTED_EXPECTED =
   actionsFile.adapterSupportedExpected["convex"] ?? [];
-const SUPPORTED_EXPECTED_ACTIONS = new Set(
-  CONVEX_SUPPORTED_EXPECTED.map(({ action }) => action),
-);
-const ORACLE_ACTIONS = [
-  ...actionsFile.conformance.filter(
-    (action) => !UNSUPPORTED_ACTIONS.has(action),
-  ),
-  ...SUPPORTED_EXPECTED_ACTIONS,
-].sort();
-/**
- * A shape this adapter must refuse, with the substring its error has to contain.
- *
- * The message is what turns "it threw" into "it threw for the declared reason": without it a
- * mapper typo or an unrelated validation satisfies the assertion just as well as the limitation
- * the corpus documents. This harness used to keep the map locally; it now reads the corpus, so
- * the pin covers every adapter rather than this one (cerbos/query-plan-adapters#326).
- */
-interface ThrowingAction {
-  action: string;
-  message: string;
-}
 
-/** The pinned message, or a failure — a throwing action without one asserts nothing. */
-const requireMessage = (label: string, message: string | undefined): string => {
-  if (message === undefined || message === "") {
-    throw new Error(
-      `actions.json pins no throw message for ${label}: the throw suite would accept a failure for any reason`,
-    );
-  }
-  return message;
-};
+// The classification is a corpus decision, so it is read rather than re-derived: which actions
+// this adapter oracle-compares, which it must refuse, and with which message. src/translator.test.ts
+// asserts the same throws offline against the same classifier — two suites, one answer.
+const { oracleActions: ORACLE_ACTIONS, throwingActions: THROWING_ACTIONS } =
+  classifyActionsForAdapter(actionsFile, "convex");
 
-const THROWING_ACTIONS: ThrowingAction[] = [
-  ...CONVEX_UNSUPPORTED.map(({ action, message }) => ({
-    action,
-    message: requireMessage(`adapterUnsupported.convex.${action}`, message),
-  })),
-  ...actionsFile.expectedUnsupported
-    .filter(({ action }) => !SUPPORTED_EXPECTED_ACTIONS.has(action))
-    .map(({ action, messages }) => ({
-      action,
-      message: requireMessage(
-        `expectedUnsupported.${action}.messages.convex`,
-        messages["convex"],
-      ),
-    })),
-].sort((left, right) => left.action.localeCompare(right.action));
 const KNOWN_DIVERGENCES = new Set(
   actionsFile.knownDivergences
     .filter((entry) => entry.adapters.includes("convex"))
@@ -457,15 +103,9 @@ const KNOWN_DIVERGENCES = new Set(
 // Actions whose `== null` probe targets an attribute the oracle OMITS for NULL columns. They
 // carry no oracle comparison: under the omitted representation check() denies every document, so
 // the adapter must reject the shape rather than emit a filter (#302).
-const NULL_REPRESENTATION_OMITTED = actionsFile.nullRepresentationOmitted.map(
-  ({ action, reason, messages }) => ({
-    action,
-    reason,
-    message: requireMessage(
-      `nullRepresentationOmitted.${action}.messages.convex`,
-      messages["convex"],
-    ),
-  }),
+const NULL_REPRESENTATION_OMITTED = nullRepresentationOmittedFor(
+  actionsFile,
+  "convex",
 );
 /** The one message every null-carrying action must be rejected with under `omitted`. */
 const NULL_OMITTED_MESSAGE = NULL_REPRESENTATION_OMITTED[0]?.message ?? "";
