@@ -189,7 +189,7 @@ Two rules that are easy to get wrong:
 
 **Read [demo/README.md](demo/README.md) before changing the demo domain.** It covers the five
 usage shapes, the emitted JSON contract, why the expectations are hardcoded here but banned in
-`conformance/`, and what each of `validate-demo.sh`'s four checks stops.
+`conformance/`, and what each of `validate-demo.sh`'s five checks stops.
 
 ## Code Style
 

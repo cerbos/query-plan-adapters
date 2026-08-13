@@ -97,6 +97,10 @@ adapter. Its `run.sh` must:
   sidecar loaded with `policies/` and the mismatch against `expected.json` read as an adapter bug
   (cerbos/query-plan-adapters#367).
 
+- take its principal from `seeds.json` — look the id up in `principals` and plan with what comes
+  back, never write out an `{ id, roles }` of its own. `validate-demo.sh` fails the build on a
+  restated one. The id itself is fine to name; its **roles** are the half that exists nowhere else.
+
 The document is:
 
 ```jsonc
@@ -152,6 +156,32 @@ The rot risk is real, and `validate-demo.sh` is what answers it:
    cerbos/query-plan-adapters#360's job. Run with `DEMO_REQUIRE_ALL_EXAMPLES=1` to see where it
    stands. The roster it reads is `adapters` in `conformance/actions.json`; there is deliberately
    no second list.
+5. **Principal provenance.** An example looks its principal up in `seeds.json` rather than writing
+   one out. Unlike the hardcoded PDP address check 3 catches, a restated principal does **not** fail
+   quietly — it matches the corpus until someone edits `seeds.json`, and then that example's frozen
+   id lists mismatch and it fails loudly, as an adapter bug rather than as the misinvocation it is.
+   So this is a latency problem, and it earns a check only because six more examples are queued
+   (cerbos/query-plan-adapters#349): a rule constraining examples being *written* is worth more than
+   one added after they exist.
+
+   The signal is an id **next to a role**: naming `alice` is unavoidable (it is the lookup key, the
+   `expected.json` entry key, and the word a printed line uses), but naming `alice` alongside `user`
+   restates the record, because roles come from nowhere else. Comments are skipped and literals are
+   matched whole, so an id in prose, in a Javadoc block, or inside a printed message is fine —
+   `spring-data/example/`'s photo domain documents `?user=alice&role=user` and passes untouched. An
+   example's **own Cerbos policies are skipped**, identified by their `apiVersion`: a policy is the
+   one file where writing a role out is the point, and two rules four lines apart granting `user`
+   and `admin` would otherwise pair exactly like a restated principal.
+
+   Three limits, stated rather than hidden. A role that is **also a principal id** is dropped from
+   the role side — `admin` is both here, so restating *only* the admin principal is not caught (it
+   stays a principal id, so `{ id: "admin", roles: ["user"] }` still pairs). A diagnostic passing an
+   id and a role as two separate literals reads as a restatement; put both in the message, or
+   interpolate the id. And the pairing is **windowed**, so an id and a role bound to variables far
+   enough apart are not seen — widening it is not the fix, because the shapes block every example
+   emits puts `alice` and `admin` within a few lines of each other. This catches a principal
+   *written out*, which is the mistake copying a literal makes; it is not a proof that one was not
+   assembled piecewise.
 
 ## Changing the demo domain
 

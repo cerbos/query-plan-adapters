@@ -20,6 +20,8 @@
 #      so a hardcoded default does not fail, it silently plans against the wrong policy suite.
 #   4. Every adapter has an example/ directory. Landed DISABLED — it cannot pass until the last
 #      child of cerbos/query-plan-adapters#349 merges, and turning it on is #360's job.
+#   5. Principal provenance: an example reads its principal out of seeds.json rather than
+#      restating one inline.
 
 set -euo pipefail
 
@@ -63,7 +65,7 @@ echo "==> demo domain: ${SEED_COUNT} seed rows, application filter selects $(jq 
 # ---------------------------------------------------------------------------------------------
 # 1. Structural
 # ---------------------------------------------------------------------------------------------
-echo "==> [1/4] structural: five usage shapes, well-formed entries"
+echo "==> [1/5] structural: five usage shapes, well-formed entries"
 
 declared="$(jq -r '.shapes | keys_unsorted | join(",")' "${EXPECTED}")"
 expected_shapes="$(IFS=,; echo "${SHAPES[*]}")"
@@ -154,7 +156,7 @@ done < <(jq -r --argjson seedIds "${SEED_IDS}" '
 # ---------------------------------------------------------------------------------------------
 # 2. Non-degeneracy
 # ---------------------------------------------------------------------------------------------
-echo "==> [2/4] non-degeneracy: the expectations still discriminate"
+echo "==> [2/5] non-degeneracy: the expectations still discriminate"
 
 # The analogue of the conformance degeneracy guard. Without it these lists can rot to all-empty,
 # or to every-seed-row, and still pass every diff.
@@ -266,7 +268,7 @@ done < <(jq -r '.shapes | to_entries[] | .key as $s | .value.results | keys[] | 
 # ---------------------------------------------------------------------------------------------
 # 3. PDP pin reuse
 # ---------------------------------------------------------------------------------------------
-echo "==> [3/4] PDP pin: one pin in the repository, reused, and reached at \$CERBOS_HOST"
+echo "==> [3/5] PDP pin: one pin in the repository, reused, and reached at \$CERBOS_HOST"
 
 pinned_version="$(tr -d '[:space:]' <"${REPO_ROOT}/conformance/CERBOS_VERSION")"
 pinned_digest="$(tr -d '[:space:]' <"${REPO_ROOT}/conformance/CERBOS_IMAGE_DIGEST")"
@@ -344,14 +346,215 @@ for adapter in $(jq -r '.adapters[]' "${ACTIONS}"); do
 done
 
 if [[ "${REQUIRE_ALL_EXAMPLES}" == "1" ]]; then
-  echo "==> [4/4] example coverage: enforced"
+  echo "==> [4/5] example coverage: enforced"
   if (( ${#missing[@]} > 0 )); then
     fail "no runnable example/run.sh for: ${missing[*]}"
   fi
 else
-  echo "==> [4/4] example coverage: ${#have[@]}/$(( ${#have[@]} + ${#missing[@]} )) adapters" \
+  echo "==> [4/5] example coverage: ${#have[@]}/$(( ${#have[@]} + ${#missing[@]} )) adapters" \
     "(check disabled until cerbos/query-plan-adapters#360; still missing: ${missing[*]:-none})"
 fi
+
+# ---------------------------------------------------------------------------------------------
+# 5. Principal provenance
+# ---------------------------------------------------------------------------------------------
+echo "==> [5/5] principal provenance: examples read their principal from seeds.json"
+
+# Every example plans for the principals seeds.json declares, and is supposed to look them up
+# there rather than write one out. Nothing said so.
+#
+# Unlike the hardcoded PDP address check 3 catches, a restated principal does NOT fail quietly: it
+# matches what the corpus carries until someone edits seeds.json, and then that example's frozen
+# id lists stop matching and it fails loudly — as an adapter bug rather than as the misinvocation
+# it is. So this is a latency problem, not a correctness hole, and it earns a check only because
+# six more examples are queued (cerbos/query-plan-adapters#349): a rule constraining examples
+# being written is worth more than one added after they exist.
+#
+# What makes it checkable is that a principal is an id AND its roles, and only the roles are
+# unobtainable any other way. An example naming `alice` is fine and unavoidable — it is the
+# lookup key, the expected.json entry key, and the word a printed line uses. An example naming
+# `alice` NEXT TO `user` has restated the corpus record, because roles are what the policy's
+# rules are keyed on and the corpus is the only place they come from.
+#
+# A role that is ALSO a principal id cannot carry that signal, and `admin` is both here. Every
+# example emits `"admin/admin-view": filtered("admin", "admin-view")` two lines from an `alice`,
+# so pairing on it would fail all four; suppressing that pair is not tuning around a false
+# positive, it is that the two readings are genuinely indistinguishable from the literals alone.
+# Note what is and is not dropped: `admin` leaves the ROLE set only. It is still a principal id,
+# so `{ id: "admin", roles: ["user"] }` pairs like any other. The consequence is stated rather
+# than hidden: a restatement of the `admin` principal ALONE, with only its `admin` role, is not
+# caught. Restating the other two is, and an example that looks two principals up in the corpus
+# and writes the third out by hand is not the mistake this exists to stop.
+PRINCIPAL_IDS="$(jq -r '[.principals[].id] | unique | join(",")' "${SEEDS}")"
+PRINCIPAL_ROLES="$(jq -r '([.principals[].roles[]] - [.principals[].id]) | unique | join(",")' \
+  "${SEEDS}")"
+
+# Both derived from seeds.json rather than spelled here, for the same reason check 2 derives the
+# action names from the policy: renaming a principal or a role in the corpus must not leave a
+# stale literal in this script silently guarding nothing.
+#
+# And the corpus can empty that second list — give every principal a role named after a principal
+# and there is nothing left to pair, so the scan below would pass every example vacuously. That is
+# a corpus problem with a corpus fix (one principal holding one role no principal is named after),
+# which is why it fails here rather than being worked around in the scan.
+if [[ -z "${PRINCIPAL_IDS}" || -z "${PRINCIPAL_ROLES}" ]]; then
+  fail "seeds.json must declare a principal, and a role no principal is NAMED after —" \
+    "otherwise every role reads as an id and the scan below guards nothing"
+fi
+
+# Extracts every string literal outside comments, and reports two things per example:
+#
+#   INLINE  a window of consecutive lines carrying a principal id and a role as two distinct
+#           literals — the signature of `{ id: "alice", roles: ["user"] }` in any of the five
+#           languages, however it is wrapped.
+#   CORPUS  whether the example names seeds.json and its principals array in code at all.
+#
+# Comments are skipped rather than scanned, because an id in a comment or a printed line of
+# output is a legitimate mention: spring-data's photo domain documents `?user=alice&role=user` in
+# a Javadoc block and must keep passing unmodified. Only string LITERALS count, and they are
+# matched WHOLE, so that same domain's `new Album("a1", "acme", "alice", …)` rows and
+# `@RequestParam(defaultValue = "user")` defaults stay clear of each other, and a printed
+# `"planning for alice as user"` is one literal matching neither. It is the pairing that means
+# something, not either half.
+#
+# The one shape that reads as a restatement without being one is a diagnostic passing the id and
+# the role as SEPARATE literals — `console.error("principal", "alice", "role", "user")`. Nothing
+# in the literals distinguishes that from building a principal out of them; put both words in the
+# message, or interpolate the id, and it is a whole literal matching neither.
+#
+# And the window cuts the other way too: an id and a role bound to separate variables far enough
+# apart — `const id = "bob"` with `const roles = ["user"]` six lines later — is a restatement this
+# does not see. Widening the window is not the fix, because the shapes block every example emits
+# puts `alice` and `admin` within a few lines of each other and a wide enough window starts
+# reporting those. This catches a principal WRITTEN OUT, which is the mistake a new example makes
+# by copying a literal; it is not a proof that one was not assembled piecewise.
+#
+# One lexer nuance in the same spirit: `#` ends a line, which is right for shell, YAML and Python
+# and wrong for a shell parameter expansion like `${ref##*/}`, where it drops the rest of that
+# line. It costs a finding rather than inventing one, so it stays the simple rule.
+read -r -d '' AWK_PRINCIPALS <<'AWK' || true
+BEGIN {
+  n = split(IDS, a, ",");   for (i = 1; i <= n; i++) isId[a[i]] = 1
+  n = split(ROLES, a, ","); for (i = 1; i <= n; i++) isRole[a[i]] = 1
+}
+
+# Comment state is per file; so is the window, which must not straddle two files.
+FNR == 1 { inBlock = 0; inDoc = 0; head = 1; tail = 0; split("", lit); split("", ln) }
+
+{
+  code = ""
+  i = 1
+  len = length($0)
+  while (i <= len) {
+    if (inBlock) {                                  # inside /* ... */
+      p = index(substr($0, i), "*/")
+      if (p == 0) break
+      i += p + 1; inBlock = 0; continue
+    }
+    if (inDoc) {                                    # inside a Python docstring
+      p = index(substr($0, i), docDelim)
+      if (p == 0) break
+      i += p + 2; inDoc = 0; continue
+    }
+    c = substr($0, i, 1)
+    if (substr($0, i, 3) == "\"\"\"" || substr($0, i, 3) == "'''") {
+      inDoc = 1; docDelim = substr($0, i, 3); i += 3; continue
+    }
+    if (substr($0, i, 2) == "/*") { inBlock = 1; i += 2; continue }
+    if (substr($0, i, 2) == "//" || c == "#") break  # to end of line
+    # A template literal is one literal, not a window onto the quotes inside it: `${a} 'b'` must
+    # not yield `b`, and an apostrophe in interpolated prose must not swallow the rest of the line.
+    if (c == "\"" || c == "'" || c == "`") {
+      q = c; i++; buf = ""
+      while (i <= len) {
+        ch = substr($0, i, 1)
+        if (ch == "\\") { i += 2; continue }
+        if (ch == q) { i++; break }
+        buf = buf ch; i++
+      }
+      tail++; lit[tail] = buf; ln[tail] = FNR
+      code = code " " buf " "                       # a path or key may sit inside the quotes
+      continue
+    }
+    code = code c
+    i++
+  }
+
+  if (code ~ /seeds\.json/) sawSeeds = 1
+  if (code ~ /principals/)  sawPrincipals = 1
+
+  while (head <= tail && ln[head] < FNR - WINDOW + 1) { delete lit[head]; delete ln[head]; head++ }
+
+  # Deduplicated on the MESSAGE, not on the pair of literals that produced it. Every window
+  # holding both halves re-examines the same pair, and one line can hold a literal several times
+  # over — `{ id: "admin", roles: ["admin"], fallback: "admin" }` is three pairs saying one thing.
+  # Keying on the indices deduplicates the wrong one and reports the same sentence three times,
+  # which inflates the failure count the summary line prints.
+  for (x = head; x <= tail; x++) {
+    if (!isId[lit[x]]) continue
+    for (y = head; y <= tail; y++) {
+      if (x == y || !isRole[lit[y]]) continue
+      message = sprintf("INLINE %s:%d: id \"%s\" alongside role \"%s\" (line %d)",
+        FILENAME, ln[x], lit[x], lit[y], ln[y])
+      if (message in seen) continue
+      seen[message] = 1
+      print message
+    }
+  }
+}
+
+END {
+  if (!sawSeeds)      print "CORPUS demo/seeds.json"
+  if (!sawPrincipals) print "CORPUS its principals array"
+}
+AWK
+
+for adapter in $(jq -r '.adapters[]' "${ACTIONS}"); do
+  example_dir="${REPO_ROOT}/${adapter}/example"
+  [[ -d "${example_dir}" ]] || continue
+
+  # Same file set as check 3 and as validate-corpus.sh: things that RUN, never prose, and never
+  # installed or built output. Minus the Cerbos policies, which that set includes as *.yaml.
+  #
+  # A policy is the one file where writing a role out is the POINT — it is what the PDP keys its
+  # rules on, and an example is free to carry policies of its own (spring-data's photo domain
+  # does). Two rules four lines apart, one granting `user` and one granting `admin`, pair exactly
+  # like a restated principal and would be reported as "look it up in demo/seeds.json", which is
+  # meaningless advice for a policy. spring-data's happen to sit ten lines apart, so this is a
+  # trap the next example walks into rather than a failure today.
+  #
+  # Identified by the apiVersion every Cerbos policy declares, not by living under policies/: a
+  # path rule is a carve-out the next adapter has to know about, and ADR 0001 is about not having
+  # those. A file that says what it is gets taken at its word.
+  sources=()
+  while IFS= read -r file; do
+    grep -qE '^[[:space:]]*apiVersion:[[:space:]]*"?api\.cerbos\.dev/' "${file}" && continue
+    sources+=("${file}")
+  done < <(grep -rlE '.' "${SOURCE_INCLUDES[@]}" "${SOURCE_EXCLUDES[@]}" \
+    "${example_dir}" 2>/dev/null || true)
+  if (( ${#sources[@]} == 0 )); then
+    fail "${adapter}/example has no scannable source files — there is nothing here to scan"
+    continue
+  fi
+
+  # A four-line window rather than a single line: prettier and google-java-format both break a
+  # principal literal across its `id:` and `roles:` lines, and a per-line scan would see one half
+  # of it at a time and report neither.
+  while IFS= read -r finding; do
+    case "${finding}" in
+      INLINE\ *)
+        location="${finding#INLINE }"
+        fail "${adapter}/example restates a principal at ${location#"${REPO_ROOT}/"} — look it" \
+          "up in demo/seeds.json instead (demo/README.md)"
+        ;;
+      CORPUS\ *)
+        fail "${adapter}/example never reads ${finding#CORPUS } — its principal must come from" \
+          "demo/seeds.json, not be restated (demo/README.md)"
+        ;;
+    esac
+  done < <(awk -v IDS="${PRINCIPAL_IDS}" -v ROLES="${PRINCIPAL_ROLES}" -v WINDOW=4 \
+    "${AWK_PRINCIPALS}" "${sources[@]}")
+done
 
 if (( failures > 0 )); then
   echo >&2
