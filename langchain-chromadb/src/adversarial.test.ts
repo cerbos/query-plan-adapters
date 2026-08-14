@@ -1,6 +1,3 @@
-import * as fs from "node:fs";
-import * as path from "node:path";
-
 import { afterAll, beforeAll, describe, expect, jest, test } from "@jest/globals";
 import type { Principal, Resource, Value } from "@cerbos/core";
 import { GRPC as Cerbos } from "@cerbos/grpc";
@@ -12,7 +9,21 @@ import {
 } from "chromadb";
 
 import { PlanKind, queryPlanToChromaDB } from ".";
-import type { FieldNameMapperConfig } from ".";
+import {
+  ADAPTER,
+  FIELD_NAME_MAPPER,
+  classifyActionsForAdapter,
+  nullRepresentationThrows,
+  parseActionsFile,
+  parseStringArray,
+  readCorpusJson,
+  requireArray,
+  requireBoolean,
+  requireMessage,
+  requireNumber,
+  requireRecord,
+  requireString,
+} from "./corpus";
 
 /**
  * Shared-corpus differential suite for the flat scalar subset Chroma metadata filters can
@@ -23,6 +34,12 @@ import type { FieldNameMapperConfig } from ".";
  * The resulting IDs are compared with per-row checkResource decisions from the same PDP. Shapes
  * outside Chroma's scalar filter model must fail during translation, before a malformed or
  * silently incomplete Where filter reaches Chroma.
+ *
+ * The corpus reader, the classification and the metadata mapping live in `./corpus`, shared with
+ * `translator.test.ts` — the offline suite pins the filter this adapter emits for a mapping, and
+ * this one proves that same filter returns the documents the PDP allows, so a second copy of the
+ * mapper would leave the pinned filters describing metadata nothing seeds. What stays here is what
+ * only this suite needs: the seeds, the derived fields, the stored metadata and the oracle.
  */
 
 jest.setTimeout(120_000);
@@ -36,11 +53,8 @@ const chroma = new ChromaClient({
   host: chromaUrl.hostname,
   port: Number(chromaUrl.port) || 8000,
 });
-const CONFORMANCE_DIR = path.join(__dirname, "..", "..", "conformance");
 const COLLECTION_NAME = "adapter-adversarial-tests";
 const BASE_EMBEDDING = [0.1, 0.2, 0.3, 0.4];
-
-type JsonRecord = Record<string, unknown>;
 
 interface Tag {
   id: string;
@@ -77,90 +91,6 @@ interface DerivedEntry {
 interface DerivedFile {
   fields: string[];
   derived: Record<string, DerivedEntry>;
-}
-
-interface UnsupportedShape {
-  action: string;
-  shape: string;
-  /** One entry per adapter that must reject the shape; the corpus asserts the key set. */
-  messages: Record<string, string>;
-}
-
-interface ActionsFile {
-  conformance: string[];
-  adapterUnsupported: Record<string, UnsupportedAction[]>;
-  adapterSupportedExpected: Record<string, UnsupportedAction[]>;
-  expectedUnsupported: UnsupportedShape[];
-  nullRepresentationOmitted: NullRepresentationOmitted[];
-  knownDivergences: KnownDivergence[];
-}
-
-interface UnsupportedAction {
-  action: string;
-  reason: string;
-  /** Absent on `adapterSupportedExpected` / `nullRepresentationOmitted`, required on a throw. */
-  message?: string;
-}
-
-/**
- * A `nullRepresentationOmitted` entry. Every adapter must reject these — the two NULL conventions
- * are indistinguishable on the wire — so `messages` names the whole roster with no promotions to
- * subtract.
- */
-interface NullRepresentationOmitted {
-  action: string;
-  reason: string;
-  messages: Record<string, string>;
-}
-
-interface KnownDivergence {
-  action: string;
-  adapters: string[];
-}
-
-function isRecord(value: unknown): value is JsonRecord {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function requireRecord(value: unknown, label: string): JsonRecord {
-  if (!isRecord(value)) {
-    throw Error(`${label} must be an object`);
-  }
-  return value;
-}
-
-function requireString(value: unknown, label: string): string {
-  if (typeof value !== "string") {
-    throw Error(`${label} must be a string`);
-  }
-  return value;
-}
-
-function requireBoolean(value: unknown, label: string): boolean {
-  if (typeof value !== "boolean") {
-    throw Error(`${label} must be a boolean`);
-  }
-  return value;
-}
-
-function requireNumber(value: unknown, label: string): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw Error(`${label} must be a finite number`);
-  }
-  return value;
-}
-
-function requireArray(value: unknown, label: string): unknown[] {
-  if (!Array.isArray(value)) {
-    throw Error(`${label} must be an array`);
-  }
-  return value;
-}
-
-function parseStringArray(value: unknown, label: string): string[] {
-  return requireArray(value, label).map((item, index) =>
-    requireString(item, `${label}[${index}]`),
-  );
 }
 
 function parseTag(value: unknown, label: string): Tag {
@@ -406,120 +336,12 @@ function parseSeedsFile(value: unknown): SeedsFile {
   };
 }
 
-/** The `messages` map of one `expectedUnsupported` entry: adapter key -> required substring. */
-function parseMessages(value: unknown, label: string): Record<string, string> {
-  const messages = requireRecord(value, label);
-  const result: Record<string, string> = {};
-  for (const [adapter, message] of Object.entries(messages)) {
-    result[adapter] = requireString(message, `${label}.${adapter}`);
-  }
-  return result;
-}
-
-function parseUnsupportedShape(value: unknown, index: number): UnsupportedShape {
-  const shape = requireRecord(value, `expectedUnsupported[${index}]`);
-  return {
-    action: requireString(shape["action"], `expectedUnsupported[${index}].action`),
-    shape: requireString(shape["shape"], `expectedUnsupported[${index}].shape`),
-    messages: parseMessages(
-      shape["messages"],
-      `expectedUnsupported[${index}].messages`,
-    ),
-  };
-}
-
-function parseUnsupportedAction(
-  value: unknown,
-  label: string,
-): UnsupportedAction {
-  const entry = requireRecord(value, label);
-  const message = entry["message"];
-  return {
-    action: requireString(entry["action"], `${label}.action`),
-    reason: requireString(entry["reason"], `${label}.reason`),
-    // `adapterUnsupported` carries this and the classification below requires it;
-    // `adapterSupportedExpected` and `nullRepresentationOmitted` do not throw, so they do not.
-    ...(message === undefined
-      ? {}
-      : { message: requireString(message, `${label}.message`) }),
-  };
-}
-
-function parseAdapterMap(
-  value: unknown,
-  label: string,
-): Record<string, UnsupportedAction[]> {
-  const adapters = requireRecord(value, label);
-  const result: Record<string, UnsupportedAction[]> = {};
-  for (const [adapter, entries] of Object.entries(adapters)) {
-    result[adapter] = requireArray(entries, `${label}.${adapter}`).map(
-      (entry, index) =>
-        parseUnsupportedAction(entry, `${label}.${adapter}[${index}]`),
-    );
-  }
-  return result;
-}
-
-function parseKnownDivergence(
-  value: unknown,
-  index: number,
-): KnownDivergence {
-  const label = `knownDivergences[${index}]`;
-  const entry = requireRecord(value, label);
-  return {
-    action: requireString(entry["action"], `${label}.action`),
-    adapters: parseStringArray(entry["adapters"], `${label}.adapters`),
-  };
-}
-
-function parseActionsFile(value: unknown): ActionsFile {
-  const file = requireRecord(value, "actions file");
-  return {
-    conformance: parseStringArray(file["conformance"], "conformance"),
-    adapterUnsupported: parseAdapterMap(
-      file["adapterUnsupported"],
-      "adapterUnsupported",
-    ),
-    adapterSupportedExpected: parseAdapterMap(
-      file["adapterSupportedExpected"],
-      "adapterSupportedExpected",
-    ),
-    expectedUnsupported: requireArray(
-      file["expectedUnsupported"],
-      "expectedUnsupported",
-    ).map(parseUnsupportedShape),
-    // This parser rebuilds the manifest field by field, so a corpus group it does not name is
-    // silently dropped — and a dropped group makes its actions vanish from every count and every
-    // test.each, passing vacuously. Parse each group explicitly.
-    nullRepresentationOmitted: requireArray(
-      file["nullRepresentationOmitted"],
-      "nullRepresentationOmitted",
-    ).map((entry, index) => {
-      const label = `nullRepresentationOmitted[${index}]`;
-      const record = requireRecord(entry, label);
-      return {
-        action: requireString(record["action"], `${label}.action`),
-        reason: requireString(record["reason"], `${label}.reason`),
-        messages: parseMessages(record["messages"], `${label}.messages`),
-      };
-    }),
-    knownDivergences: requireArray(
-      file["knownDivergences"],
-      "knownDivergences",
-    ).map(parseKnownDivergence),
-  };
-}
-
-function readJson(fileName: string): unknown {
-  return JSON.parse(fs.readFileSync(path.join(CONFORMANCE_DIR, fileName), "utf8"));
-}
-
-const rawSeedsJson = readJson("seeds.json");
+const rawSeedsJson = readCorpusJson("seeds.json");
 assertSeedKeyCoverage(rawSeedsJson);
 assertPrincipalKeyCoverage(rawSeedsJson);
 const seedsFile = parseSeedsFile(rawSeedsJson);
-const actionsFile = parseActionsFile(readJson("actions.json"));
-const derivedFile = parseDerivedFile(readJson("derived-fields.json"));
+const actionsFile = parseActionsFile(readCorpusJson("actions.json"));
+const derivedFile = parseDerivedFile(readCorpusJson("derived-fields.json"));
 const SEEDS = seedsFile.seeds;
 
 if (Object.keys(derivedFile.derived).length !== SEEDS.length) {
@@ -532,88 +354,34 @@ for (const seed of SEEDS) {
   derivedFor(seed);
 }
 
-const CHROMA_UNSUPPORTED =
-  actionsFile.adapterUnsupported["langchain-chromadb"] ?? [];
-const CHROMA_UNSUPPORTED_ACTIONS = new Set(
-  CHROMA_UNSUPPORTED.map(({ action }) => action),
-);
+const CHROMA_UNSUPPORTED = actionsFile.adapterUnsupported[ADAPTER] ?? [];
 const CHROMA_SUPPORTED_EXPECTED =
-  actionsFile.adapterSupportedExpected["langchain-chromadb"] ?? [];
-const CHROMA_SUPPORTED_EXPECTED_ACTIONS = new Set(
-  CHROMA_SUPPORTED_EXPECTED.map(({ action }) => action),
-);
-const CHROMA_SUPPORTED_ACTIONS = [
-  ...actionsFile.conformance.filter(
-    (action) => !CHROMA_UNSUPPORTED_ACTIONS.has(action),
-  ),
-  ...CHROMA_SUPPORTED_EXPECTED_ACTIONS,
-];
+  actionsFile.adapterSupportedExpected[ADAPTER] ?? [];
 const CHROMA_DIVERGENCES = new Set(
   actionsFile.knownDivergences
-    .filter(({ adapters }) => adapters.includes("langchain-chromadb"))
+    .filter(({ adapters }) => adapters.includes(ADAPTER))
     .map(({ action }) => action),
 );
 /**
- * A shape this adapter must refuse, with the substring its error has to contain.
- *
- * The message is what turns "it threw" into "it threw for the declared reason": without it a
- * mapper typo or an unrelated validation satisfies the assertion just as well as the limitation
- * the corpus documents. Chroma is the largest consumer of this — most of its corpus is
- * fail-closed, so a bare throw assertion proved almost nothing (cerbos/query-plan-adapters#326).
+ * The classification, read from the corpus by the loader `translator.test.ts` shares. Which actions
+ * this adapter must refuse, and with which message, is a corpus decision — asserting it identically
+ * in both suites is what makes the offline completeness guard total.
  */
-interface ThrowingAction {
-  action: string;
-  reason: string;
-  message: string;
-}
-
-/** The pinned message, or a failure — a throwing action without one asserts nothing. */
-function requireMessage(label: string, message: string | undefined): string {
-  if (message === undefined || message === "") {
-    throw Error(
-      `actions.json pins no throw message for ${label}: the throw suite would accept a failure for any reason`,
-    );
-  }
-  return message;
-}
-
-const THROWING_ACTIONS: ThrowingAction[] = [
-  ...CHROMA_UNSUPPORTED.map(({ action, reason, message }) => ({
-    action,
-    reason,
-    message: requireMessage(
-      `adapterUnsupported.langchain-chromadb.${action}`,
-      message,
-    ),
-  })),
-  ...actionsFile.expectedUnsupported
-    .filter(({ action }) => !CHROMA_SUPPORTED_EXPECTED_ACTIONS.has(action))
-    .map(({ action, shape, messages }) => ({
-      action,
-      reason: shape,
-      message: requireMessage(
-        `expectedUnsupported.${action}.messages.langchain-chromadb`,
-        messages["langchain-chromadb"],
-      ),
-    })),
-];
+const {
+  oracleActions: CHROMA_SUPPORTED_ACTIONS,
+  throwingActions: THROWING_ACTIONS,
+} = classifyActionsForAdapter(actionsFile, ADAPTER);
 // Actions whose `== null` probe targets an attribute the oracle OMITS for NULL columns. Chroma
 // needs no representation option: it cannot index an explicit null distinguishably from a missing
 // key, so every null comparison operand is already rejected outright (#302).
-const NULL_REPRESENTATION_OMITTED = actionsFile.nullRepresentationOmitted.map(
-  ({ action, reason, messages }) => ({
-    action,
-    reason,
-    message: requireMessage(
-      `nullRepresentationOmitted.${action}.messages.langchain-chromadb`,
-      messages["langchain-chromadb"],
-    ),
-  }),
+const NULL_REPRESENTATION_OMITTED = nullRepresentationThrows(
+  actionsFile,
+  ADAPTER,
 );
 const MANIFEST_ACTIONS = new Set([
   ...actionsFile.conformance,
   ...actionsFile.expectedUnsupported.map(({ action }) => action),
-  ...NULL_REPRESENTATION_OMITTED.map(({ action }) => action),
+  ...NULL_REPRESENTATION_OMITTED.map(([action]) => action),
   ...CHROMA_DIVERGENCES,
 ]);
 
@@ -722,57 +490,6 @@ const DEGENERACY_LIVENESS_PROBES = [
   "vf-hasint",
   "pv-all-unrolled",
 ] as const;
-
-// Fields are optional unless declared otherwise, so `$ne`/`$nin` are rejected by default.
-// `required: true` is asserted only for the metadata keys that `metadataFor` writes for every
-// seed in conformance/seeds.json. `aOptionalString` is null for a2/a4/a8/c2/e1, so it stays
-// optional and its inequality shapes remain fail-closed.
-const FIELD_NAME_MAPPER: Record<string, string | FieldNameMapperConfig> = {
-  // The primary key, reached as `request.resource.id` rather than through `attr` (the `id-*`
-  // actions). Chroma's `where` filters metadata only — the document id is addressed by the
-  // separate `ids` argument to `get()` — so `metadataFor` mirrors the id into a metadata key and
-  // this maps onto that. Leaving it unmapped would make the id-* actions throw for a HARNESS
-  // reason (no mapping) rather than an adapter one, which is the trap #326 documents.
-  "request.resource.id": { field: "id", required: true },
-  "request.resource.attr.aBool": { field: "aBool", required: true },
-  "request.resource.attr.aString": { field: "aString", required: true },
-  "request.resource.attr.aNumber": {
-    field: "aNumber",
-    numericType: "integer",
-    required: true,
-  },
-  "request.resource.attr.aOptionalString": {
-    field: "aOptionalString",
-    required: false,
-  },
-  "request.resource.attr.obj.inner": { field: "obj.inner", required: true },
-  // The corpus's one REAL to-one chain (the `rel-*` actions), flattened onto dotted metadata keys
-  // by `metadataFor`. EVERY level stays `required: false` — the whole point of the relation is
-  // that a level can be absent, and 8 of the 21 seeds have no parent at all — so Chroma's
-  // inequality shapes over these keys stay fail-closed. A metadata key Chroma cannot prove is
-  // present cannot answer `$ne` the way CEL's missing-attribute error does
-  // (cerbos/query-plan-adapters#375).
-  "request.resource.attr.parent.aBool": { field: "parent.aBool" },
-  "request.resource.attr.parent.aString": { field: "parent.aString" },
-  "request.resource.attr.parent.aNumber": {
-    field: "parent.aNumber",
-    numericType: "integer",
-  },
-  "request.resource.attr.parent.aOptionalString": {
-    field: "parent.aOptionalString",
-  },
-  "request.resource.attr.parent.inner.aBool": { field: "parent.inner.aBool" },
-  "request.resource.attr.parent.inner.aString": {
-    field: "parent.inner.aString",
-  },
-  "request.resource.attr.parent.inner.aNumber": {
-    field: "parent.inner.aNumber",
-    numericType: "integer",
-  },
-  "request.resource.attr.parent.inner.aOptionalString": {
-    field: "parent.inner.aOptionalString",
-  },
-};
 
 // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") --------
 //
@@ -1045,11 +762,11 @@ describe("adversarial conformance corpus", () => {
       /pins no throw message/,
     );
   });
-  test("manifest assigns all 170 policy actions exactly one Chroma outcome", () => {
+  test("manifest assigns all 199 policy actions exactly one Chroma outcome", () => {
     const oracle = new Set(CHROMA_SUPPORTED_ACTIONS);
-    const throwing = new Set(THROWING_ACTIONS.map(({ action }) => action));
+    const throwing = new Set(THROWING_ACTIONS.map(([action]) => action));
     const nullOmitted = new Set(
-      NULL_REPRESENTATION_OMITTED.map(({ action }) => action),
+      NULL_REPRESENTATION_OMITTED.map(([action]) => action),
     );
     const misclassified = [...MANIFEST_ACTIONS].filter((action) => {
       const classificationCount = [
@@ -1085,8 +802,8 @@ describe("adversarial conformance corpus", () => {
   // typo or an unrelated validation, which would leave the classification resting on a failure
   // that has nothing to do with the limitation it declares (cerbos/query-plan-adapters#326).
   test.each(THROWING_ACTIONS)(
-    "$action fails during translation with the declared message ($reason)",
-    async ({ action, message }) => {
+    "%s fails during translation with the declared message (%s)",
+    async (action, _reason, message) => {
       const queryPlan = await planFor(action);
       expect(() =>
         queryPlanToChromaDB({
@@ -1114,13 +831,13 @@ describe("adversarial conformance corpus", () => {
     expect(survivingHalf.length).toBeLessThan(SEEDS.length);
 
     const entry = THROWING_ACTIONS.find(
-      ({ action }) => action === "filter-as-conjunct",
+      ([action]) => action === "filter-as-conjunct",
     );
     expect(entry).toBeDefined();
     const queryPlan = await planFor("filter-as-conjunct");
     expect(() =>
       queryPlanToChromaDB({ queryPlan, fieldNameMapper: FIELD_NAME_MAPPER }),
-    ).toThrow(entry?.message);
+    ).toThrow(entry?.[2]);
   });
 
   // #302. Chroma is one of two adapters that need no `nullAttributeRepresentation` option: its
@@ -1131,8 +848,8 @@ describe("adversarial conformance corpus", () => {
   // throwing here and the adapter acquires a representation dependency it must then declare.
 
   test.each(NULL_REPRESENTATION_OMITTED)(
-    "$action is rejected regardless of representation ($reason)",
-    async ({ action, message }) => {
+    "%s is rejected regardless of representation (%s)",
+    async (action, _reason, message) => {
       expect(await oracleAllowedIds(action)).toEqual([]);
 
       const queryPlan = await planFor(action);
@@ -1206,8 +923,8 @@ describe("adversarial conformance corpus", () => {
   test("oracle is not degenerate", async () => {
     // Guard the guard: each of these actions must produce a non-empty, non-total oracle set,
     // otherwise the differential comparison could pass vacuously (e.g. PDP denying all). The
-    // membership assertion is what keeps the list honest — Chroma compares 15 of the corpus's
-    // 133 conformance actions, so a guard list shared with a relational harness would name
+    // membership assertion is what keeps the list honest — Chroma compares 34 of the corpus's
+    // 187 conformance actions, so a guard list shared with a relational harness would name
     // shapes it never compares (cerbos/query-plan-adapters#324).
     for (const action of DEGENERACY_GUARD_ACTIONS) {
       expect(CHROMA_SUPPORTED_ACTIONS).toContain(action);

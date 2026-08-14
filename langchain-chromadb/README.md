@@ -73,8 +73,26 @@ over-granted.
 The membership form has no such threshold. It reaches the adapter as `in`
 against a literal list at every collection size and maps to a single `$in`
 filter, which is also cheaper for ChromaDB to evaluate than an `or` chain, and
-needs no `required` assertion. All three spellings are pinned across the
-10-element boundary in the adapter's test suite.
+needs no `required` assertion.
+
+The cliff itself is pinned in the shared corpus rather than here, by a pair of
+actions over the same policy at two collection sizes: `pv-exists-unrolled`
+(three elements, below the cap) translates to a nested `$or` chain, and
+`pv-exists` (eleven elements, above it) throws. `pv-all-unrolled` and `pv-all`
+are the `all` half of the same pair, and both throw — the unrolled `$ne` chain
+targets an optional metadata key, which is the over-grant `required: true`
+exists to prevent.
+
+**The membership spelling has no such pair, because it has no boundary to
+straddle.** `P.attr.*` is folded before the adapter sees anything, so
+`R.attr.x in P.attr.xs` reaches the wire as `in(key, [literals])` at every
+collection size — structurally the corpus's `p-in-null-multi`, which is
+oracle-tested — and there is no size at which the planner emits something else.
+What the retired suite pinned by planning at 9, 10, 11 and 40 elements was
+therefore a **planner** property, not a translator one, and a wire fixture
+cannot carry it. A corpus action that spells the recommendation directly is
+tracked in
+[#411](https://github.com/cerbos/query-plan-adapters/issues/411).
 
 ## NULL attribute representation
 
@@ -103,6 +121,10 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` d
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute documents. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 
 Chroma metadata filters are limited to flat scalar comparisons and membership. Nested collections, field-to-field and arithmetic expressions, string helpers, hierarchy/timestamp operations, ternaries, nullable inequality, and other shapes that cannot be represented faithfully throw before a filter is returned. Every fail-closed shape's error message is pinned in the shared corpus (`conformance/actions.json`) and asserted by this adapter's conformance run, so a classification proves the throw names its declared mechanism rather than merely that something threw.
+
+The `Where` document each translated action produces is pinned separately, in the translator unit test (`npm test`) — see [Testing](#testing). That is what makes a change to the emitted filter show up as a diff even when it selects the same documents from the corpus seeds, and it is the only place the parts of the mapper contract no policy can reach are asserted at all: function mappers, the `required` and `numericType` declarations, the fallback for an unmapped reference, and malformed input.
+
+That test also pins **where** each refusal happens — all 164 of them, which is the `Fail-closed` row's 163 plus the `Representation-independent` row's `null-eq-missing`, since the adapter refuses both alike. Five sixths of this corpus is fail-closed here, so the interesting property is not that a shape throws but which of the adapter's nine rejection sites it reaches — and `binaryOperands` refusing a computed operand accounts for 101 of them, because arithmetic, casts, ternaries, projections and above-cap collection macros all arrive at the wire as the same thing: an operand that is neither a bare metadata key nor a literal.
 
 ## Mapping hazards
 
@@ -253,3 +275,64 @@ const matches = await chroma.similaritySearch("query", 10, filters);
 - A filter literal is null, nested, non-finite, or otherwise invalid for Chroma metadata.
 - `$ne` or `$nin` targets a field that is not declared `required: true`.
 - A fractional ordered comparison targets a field that is not configured with `numericType: "float"`.
+
+## Testing
+
+| Command | What it does | What it needs |
+| --- | --- | --- |
+| `npm test` | Proves **the `Where` filter this adapter emits.** The translator unit test: every corpus action, classified exactly once as a golden expectation or as a throw | Nothing but Node — no Cerbos sidecar, no ChromaDB, no Docker |
+| `npm run test:adversarial` | Proves **the documents that filter returns**, against a real ChromaDB collection with `check()` as the oracle | Cerbos CLI, Docker |
+| `npm run golden:update` | Rewrites `golden/expectations.json` from what the translator emits today, preserving every `note`. Review the diff — CI never regenerates | Nothing but Node |
+
+### The golden expectations
+
+`npm test` reads its plans from `../conformance/wire-fixtures/` — the golden `PlanResources`
+responses captured against the pinned Cerbos version — and asserts them against
+`golden/expectations.json`, a **golden expectation** file this adapter owns. One entry per corpus
+action, keyed by action name.
+
+The value schema is the cheapest one in the repository, because a Chroma `Where` clause **is** a JSON
+document: the entry holds the translator's whole `{ kind, filters? }` result verbatim, with no
+rendering step and no dialect. Nothing is normalised on the way in — a literal JSON cannot carry (a
+non-finite number, a negative zero) fails regeneration rather than being rewritten, because such a
+literal is one the deployed adapter could not have put in a query body either.
+
+```jsonc
+{
+  "adapter": "langchain-chromadb",
+  "regenerate": "npm run golden:update",
+  "expectations": {
+    "in-empty": { "kind": "KIND_ALWAYS_DENIED" },
+    "vf-le": {
+      "note": "optional, human, preserved across regeneration",
+      "kind": "KIND_CONDITIONAL",
+      // Value-first: the plan reads `3 <= R.attr.aNumber`, and the emitted operator is mirrored.
+      "filters": { "aNumber": { "$gte": 3 } }
+    }
+  }
+}
+```
+
+An action this adapter refuses carries **no entry**: its pinned message is corpus data, in
+`conformance/actions.json`, and duplicating it here would be two places to change one string — which
+on an adapter that refuses 164 of the corpus's 199 shapes would make the asset almost entirely
+restatement. A wire fixture that is neither in this file nor declared unsupported fails the suite,
+which is what makes a new corpus action land as a failure rather than as silence
+([ADR 0006](../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md),
+[ADR 0007](../docs/adr/0007-adapters-share-data-not-code.md), and the "Golden expectations" section
+of [conformance/README.md](../conformance/README.md)).
+
+Alongside the pinned bytes the suite states the properties a regeneration must not silently accept,
+as rules over every translated action rather than over chosen shapes: every field a filter names is a
+metadata key the mapper declares, no `$not`/`$nor` survives into a filter Chroma would reject at
+query time, an inequality is emitted only over a field declared `required` — and clearing `required`
+moves exactly the actions that emit one — and an ordered comparison binds a fractional threshold only
+where `numericType: "float"` is declared.
+
+Whether those filters return the documents the PDP allows is a separate question, answered by the
+adversarial suite, which does need a Cerbos sidecar and a ChromaDB container:
+
+```bash
+npm run chroma            # in one shell: the pinned ChromaDB image on port 8234
+npm run test:adversarial  # in another
+```

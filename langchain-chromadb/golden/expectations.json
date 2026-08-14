@@ -1,0 +1,349 @@
+{
+  "adapter": "langchain-chromadb",
+  "regenerate": "npm run golden:update",
+  "expectations": {
+    "cs-eq": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "aString": {
+          "$eq": "one"
+        }
+      }
+    },
+    "double-negation": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "aBool": {
+          "$eq": true
+        }
+      }
+    },
+    "empty-string-eq": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "aString": {
+          "$eq": ""
+        }
+      }
+    },
+    "gt-bare": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "aNumber": {
+          "$gt": 1
+        }
+      }
+    },
+    "id-eq-const": {
+      "note": "The primary key as a filterable attribute (#376). Chroma's `where` filters METADATA only — the document id is addressed by the separate `ids` argument — so this works only because the harness mirrors the id into a metadata key and the mapper points `request.resource.id` at it. Its five id-* siblings compare the key against a second key or a computed operand and are fail-closed.",
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "id": {
+          "$eq": "f1"
+        }
+      }
+    },
+    "in-empty": {
+      "note": "The plan kind, not a filter: `x in []` is false for every document, so the planner folds it to ALWAYS_DENIED and the caller short-circuits without querying Chroma at all. There is no `filters` key to emit.",
+      "kind": "KIND_ALWAYS_DENIED"
+    },
+    "in-single": {
+      "note": "The planner folds a single-element `in` to an equality before the adapter ever sees it, so this is `$eq` rather than a one-element `$in`. Pinned because it is a shape a reader would otherwise expect to be `$in` and reach for the wrong assertion.",
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "aString": {
+          "$eq": "one"
+        }
+      }
+    },
+    "le-bare": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "aNumber": {
+          "$lte": 2
+        }
+      }
+    },
+    "nary-and": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "$and": [
+          {
+            "aBool": {
+              "$eq": true
+            }
+          },
+          {
+            "aNumber": {
+              "$gte": 0
+            }
+          },
+          {
+            "aString": {
+              "$ne": "one"
+            }
+          }
+        ]
+      }
+    },
+    "neg-number": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "aNumber": {
+          "$lt": -1
+        }
+      }
+    },
+    "not-and": {
+      "note": "De Morgan, because Chroma's `Where` grammar has no `$not` and no `$nor`. `!(aBool && aString != 'one')` has to arrive as `$or` of the two inverted leaves; a `$not` left in the tree would be rejected by Chroma at query time rather than by the adapter at translation time.",
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "$or": [
+          {
+            "aBool": {
+              "$ne": true
+            }
+          },
+          {
+            "aString": {
+              "$eq": "one"
+            }
+          }
+        ]
+      }
+    },
+    "not-gt": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "aNumber": {
+          "$lte": 1
+        }
+      }
+    },
+    "not-lt": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "aNumber": {
+          "$gte": 2
+        }
+      }
+    },
+    "p-has": {
+      "note": "The corpus's one known planner divergence for this adapter. `has()` over a missing attribute folds to ALWAYS_ALLOWED, and the adapter faithfully emits the empty filter that plan kind means — which selects every document, while `check()` denies the ones missing the attribute. Pinned here because the over-grant is the PLANNER's, not the translation's: an adapter that quietly narrowed it would be inventing a filter the plan does not carry. See the README's `Conformance contract`.",
+      "kind": "KIND_ALWAYS_ALLOWED",
+      "filters": {}
+    },
+    "p-in-null-multi": {
+      "note": "`$in` over an OPTIONAL metadata key, which is sound where `$nin` is not: a document missing `aOptionalString` fails `$in` the way CEL's missing-attribute error denies it, while `$nin` would match it and over-grant. The asymmetry is the whole reason `required` gates only the negative operators.",
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "aOptionalString": {
+          "$in": [
+            "x",
+            "one_two"
+          ]
+        }
+      }
+    },
+    "p-in-null-single": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "aOptionalString": {
+          "$eq": "x"
+        }
+      }
+    },
+    "p-struct": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "obj.inner": {
+          "$eq": "one"
+        }
+      }
+    },
+    "pv-exists-unrolled": {
+      "note": "Below the planner's 10-element unroll cap, `P.attr.fewTeams.exists(t, R.attr.aOptionalString == t)` arrives as a plain nested `or` chain and translates. Above it — `pv-exists`, over the eleven-element `manyTeams` — the macro ships as a lambda over a literal value list and throws. That data-dependent cliff is why the README tells integrators to spell membership as `R.attr.x in P.attr.xs`, which is one `$in` at every size.",
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "$or": [
+          {
+            "aOptionalString": {
+              "$eq": "set"
+            }
+          },
+          {
+            "$or": [
+              {
+                "aOptionalString": {
+                  "$eq": ""
+                }
+              },
+              {
+                "aOptionalString": {
+                  "$eq": "%_o"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "rel-bool-hop": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "parent.aBool": {
+          "$eq": true
+        }
+      }
+    },
+    "rel-bool-hop2": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "parent.inner.aBool": {
+          "$eq": true
+        }
+      }
+    },
+    "rel-eq-hop": {
+      "note": "The corpus's one real to-one relation (#375), flattened onto a dotted metadata key. Chroma has no join, so the chain resolves only because the application stored `parent.aString` on the document itself — and every `parent.*` mapping stays optional, because 8 of the 21 seeds have no parent, which is why the NEGATED hop shapes are fail-closed.",
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "parent.aString": {
+          "$eq": "One"
+        }
+      }
+    },
+    "rel-eq-num-hop": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "parent.aNumber": {
+          "$eq": 2
+        }
+      }
+    },
+    "rel-ge-hop": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "parent.aNumber": {
+          "$gte": 2
+        }
+      }
+    },
+    "rel-gt-hop": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "parent.aNumber": {
+          "$gt": 2
+        }
+      }
+    },
+    "rel-le-hop": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "parent.aNumber": {
+          "$lte": 2
+        }
+      }
+    },
+    "rel-lt-hop": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "parent.aNumber": {
+          "$lt": 2
+        }
+      }
+    },
+    "rel-range-hop": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "$and": [
+          {
+            "parent.aNumber": {
+              "$gt": 2
+            }
+          },
+          {
+            "parent.aNumber": {
+              "$lt": 12
+            }
+          }
+        ]
+      }
+    },
+    "root-bare-bool": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "aBool": {
+          "$eq": true
+        }
+      }
+    },
+    "root-or": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "$or": [
+          {
+            "aBool": {
+              "$eq": true
+            }
+          },
+          {
+            "aNumber": {
+              "$lt": 0
+            }
+          }
+        ]
+      }
+    },
+    "triple-negation": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "aBool": {
+          "$ne": true
+        }
+      }
+    },
+    "unicode-eq": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "aString": {
+          "$eq": "héllo🚀"
+        }
+      }
+    },
+    "vf-ge": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "aNumber": {
+          "$lte": 2
+        }
+      }
+    },
+    "vf-le": {
+      "note": "Value-first. The plan reads `3 <= R.attr.aNumber`, and the emitted operator is the MIRRORED one — `$gte` against the metadata key, not `$lte`. Emitting the operator as written is the operand-inversion bug the shared corpus exists to catch, and it is invisible to a harness whose seeds happen to be symmetric around the threshold.",
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "aNumber": {
+          "$gte": 3
+        }
+      }
+    },
+    "vf-lt": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "aNumber": {
+          "$gt": 1
+        }
+      }
+    },
+    "vf-ne": {
+      "note": "The only inequality shape in this asset that is safe, and it is safe only because the corpus mapper declares `aString` as `required: true`. Chroma's `$ne` MATCHES a document missing the key, where CEL raises a missing-attribute error and the PDP denies — so without that declaration this action throws. The \"clearing required moves exactly the actions that emit an inequality\" assertion is what keeps the two in step.",
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "aString": {
+          "$ne": "one"
+        }
+      }
+    }
+  }
+}
