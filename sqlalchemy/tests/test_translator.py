@@ -3,9 +3,9 @@ this adapter emits. Offline — no Cerbos sidecar, no container, no database.
 
 This adapter had no test of this kind at all. Its per-adapter suite planned every shape
 against a live PDP loaded with ``/policies/``, executed the query against three seeded rows
-and compared the result with a hardcoded count — the weakest oracle of the ten, and one that
-never asserted the emitted filter anywhere. Three of the four assertions that suite braided
-together are somebody else's job now, and this file makes only the fourth:
+and compared the result with a hardcoded count — the weakest oracle any adapter had, and one
+that never asserted the emitted filter anywhere. Three of the four assertions that suite
+braided together are somebody else's job now, and this file makes only the fourth:
 
 ===================================================  ==========================================
 assertion                                            who owns it
@@ -53,7 +53,7 @@ import json
 import math
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytest
 from corpus import (
@@ -205,15 +205,32 @@ def recorded_statement(action, dialect_name):
     return statement_from(RECORDED[action]["expectation"]["where"][dialect_name])
 
 
-#: Every emitted statement, compiled once under whichever SQLAlchemy is installed.
+#: Every emitted statement and its bound parameters, compiled once per action per dialect.
 #:
 #: The rules below read these rather than the pinned bytes, so each holds on both majors CI
 #: runs. The asset is a snapshot of what one compiler produced; a rule is about what the
 #: adapter emits, and only one of those two is the same on 1.4 and 2.x.
-EMITTED_STATEMENTS = {
-    action: {name: render(translate(action), name)[0] for name in GOLDEN_DIALECTS}
+#:
+#: Parameters are kept alongside the statements rather than recompiled per rule: the loop is
+#: the same shape every time (translate, compile both dialects, walk the result) and running
+#: it once means a rule reads a scan rather than restating it.
+EMITTED = {
+    action: {name: render(translate(action), name) for name in GOLDEN_DIALECTS}
     for action in RECORDED_ACTIONS
 }
+
+
+def emitted_statement(action, dialect_name):
+    return EMITTED[action][dialect_name][0]
+
+
+def emitted_parameters():
+    """``(action, dialect, key, value)`` for every parameter the corpus binds."""
+    for action, per_dialect in EMITTED.items():
+        for name, (_statement, params) in per_dialect.items():
+            for key, value in params.items():
+                yield action, name, key, value
+
 
 #: Corpus actions SQLAlchemy 1.4's compiler renders differently from 2.x's, from the SAME
 #: expression tree — which is why they are pinned as a list rather than as a second asset.
@@ -370,7 +387,7 @@ class TestWhatTheEmittedStatementContains:
         preamble = statement_preamble()
         for action in RECORDED_ACTIONS:
             for name in GOLDEN_DIALECTS:
-                assert EMITTED_STATEMENTS[action][name].startswith(preamble), action
+                assert emitted_statement(action, name).startswith(preamble), action
         assert preamble.endswith("FROM adversarial_resource")
         assert len(RECORDED_ACTIONS) > 0
 
@@ -386,8 +403,8 @@ class TestWhatTheEmittedStatementContains:
         # asset could be a faithful record of something the adapter never built.
         for action in RECORDED_ACTIONS:
             for name in GOLDEN_DIALECTS:
-                assert (
-                    recorded_statement(action, name) == EMITTED_STATEMENTS[action][name]
+                assert recorded_statement(action, name) == emitted_statement(
+                    action, name
                 ), f"{action} ({name})"
 
     def test_the_resource_table_is_named_in_exactly_one_from_clause(self):
@@ -400,7 +417,7 @@ class TestWhatTheEmittedStatementContains:
             f"{action} ({name})"
             for action in RECORDED_ACTIONS
             for name in GOLDEN_DIALECTS
-            if _from_clauses_naming_the_resource(EMITTED_STATEMENTS[action][name]) != 1
+            if _from_clauses_naming_the_resource(emitted_statement(action, name)) != 1
         ]
         assert offenders == []
         # Anti-vacuity, in two parts because the rule needs both to say anything.
@@ -409,7 +426,7 @@ class TestWhatTheEmittedStatementContains:
         # a chained collection macro, a scalar read through two to-one hops, and a direct
         # EXISTS.
         for action in ("w1-all-chain", "rel-bool-hop2", "exists-on-empty"):
-            assert "(SELECT" in EMITTED_STATEMENTS[action]["sqlite"], action
+            assert "(SELECT" in emitted_statement(action, "sqlite"), action
         # And the detector must recognise the thing it is looking for. An uncorrelated
         # subquery renders the outer table into a comma-joined FROM list rather than a second
         # `FROM adversarial_resource`, so a naive substring count reads 1 for both the correct
@@ -436,7 +453,7 @@ class TestWhatTheEmittedStatementContains:
         with_like = 0
         for action in CONDITIONAL_ACTIONS:
             for name in GOLDEN_DIALECTS:
-                statement = EMITTED_STATEMENTS[action][name]
+                statement = emitted_statement(action, name)
                 likes = statement.count(" LIKE ")
                 if not likes:
                     continue
@@ -456,7 +473,7 @@ class TestWhatTheEmittedStatementContains:
         for action in RECORDED_ACTIONS:
             for name in GOLDEN_DIALECTS:
                 for identifier in re.findall(
-                    r"\badversarial_\w+\.\w+\b", EMITTED_STATEMENTS[action][name]
+                    r"\badversarial_\w+\.\w+\b", emitted_statement(action, name)
                 ):
                     if identifier not in declared:
                         stray.add(f"{action}: {identifier}")
@@ -469,14 +486,11 @@ class TestWhatTheEmittedStatementContains:
         # an executed leg agrees either way and only the parameter list distinguishes them.
         # The harness pins this for three actions against the PostgreSQL compiler; stating it
         # over the whole corpus is what makes a NEW non-finite fold visible.
-        offenders = []
-        for action in RECORDED_ACTIONS:
-            query = translate(action)
-            for name in GOLDEN_DIALECTS:
-                _statement, params = render(query, name)
-                for key, value in params.items():
-                    if isinstance(value, float) and not math.isfinite(value):
-                        offenders.append(f"{action} ({name}) {key}={value}")
+        offenders = [
+            f"{action} ({name}) {key}={value}"
+            for action, name, key, value in emitted_parameters()
+            if isinstance(value, float) and not math.isfinite(value)
+        ]
         assert offenders == []
 
     def test_the_corpus_still_drives_the_folds_that_rule_polices(self):
@@ -499,17 +513,16 @@ class TestWhatTheEmittedStatementContains:
         # hiding a change — and the second half is what keeps the encoding unambiguous: a
         # STRING parameter that happened to be ISO-8601 would read back indistinguishably
         # from an instant, and the corpus does carry ISO-8601 strings (`createdBy`).
-        instants = set()
-        ambiguous = []
-        for action in RECORDED_ACTIONS:
-            query = translate(action)
-            for name in GOLDEN_DIALECTS:
-                _statement, params = render(query, name)
-                for key, value in params.items():
-                    if isinstance(value, datetime):
-                        instants.add(action)
-                    elif isinstance(value, str) and _looks_like_an_instant(value):
-                        ambiguous.append(f"{action} ({name}) {key}={value}")
+        instants = {
+            action
+            for action, _name, _key, value in emitted_parameters()
+            if isinstance(value, datetime)
+        }
+        ambiguous = [
+            f"{action} ({name}) {key}={value}"
+            for action, name, key, value in emitted_parameters()
+            if isinstance(value, str) and _looks_like_an_instant(value)
+        ]
         assert sorted(instants) == ["ts-eq", "ts-eq-offset", "ts-ne"]
         assert ambiguous == []
 
@@ -524,6 +537,15 @@ def _from_clauses_naming_the_resource(statement):
     return sum(
         "adversarial_resource" in clause.split(", ")
         for clause in re.findall(r"FROM ([a-z_]+(?:, [a-z_]+)*)", statement)
+    )
+
+
+def _null_omitted_message(action):
+    """The message ``actions.json`` pins for one ``nullRepresentationOmitted`` action."""
+    return next(
+        message
+        for candidate, _reason, message in NULL_REPRESENTATION_OMITTED
+        if candidate == action
     )
 
 
@@ -546,11 +568,7 @@ class TestNullAttributeRepresentation:
     """
 
     ACTION = "null-eq-missing"
-    MESSAGE = next(
-        message
-        for action, _reason, message in NULL_REPRESENTATION_OMITTED
-        if action == "null-eq-missing"
-    )
+    MESSAGE = _null_omitted_message(ACTION)
 
     def test_explicit_emits_an_is_null_filter(self):
         statement, _params = render(
@@ -621,6 +639,119 @@ class TestOperatorOverrides:
         # Dropping it would emit a filter that answers a different question from the policy.
         with pytest.raises(KeyError, match="Attribute does not exist"):
             translate("cs-eq", attr_map={}, attribute_null_representation=None)
+
+    # The two tests below are the coverage the retired suite had that the corpus genuinely
+    # cannot carry, and the distinction is worth stating once. `actions.json` classifies a
+    # shape against ONE mapping — the corpus's — so "unsupported" there means "this adapter
+    # refuses it with these overrides", not "no caller can translate it". Both shapes are
+    # documented in the README as caller-supplied, so an assertion that the documented
+    # override actually works is not a corpus question. Each asserts BOTH halves: the refusal
+    # the corpus pins, and the translation the declaration buys.
+
+    def test_a_matches_override_admits_the_regex_the_corpus_refuses(self):
+        # `p-matches` is `expectedUnsupported` because SQL dialect regex engines do not
+        # guarantee CEL/RE2 semantics, so the adapter has no default lowering. An application
+        # whose database translation is known to be equivalent may supply one — the README
+        # says so — and this is what says that path still works.
+        action = "p-matches"
+        with pytest.raises(ValueError, match="Unrecognised operator: matches"):
+            translate(action)
+
+        statement, params = render(
+            translate(
+                action,
+                operator_override_fns={
+                    **OPERATOR_OVERRIDES,
+                    "matches": lambda column, pattern: column.regexp_match(pattern),
+                },
+            ),
+            "postgresql",
+        )
+        assert "adversarial_resource.a_string ~ %(a_string_1)s" in statement
+        assert params["a_string_1"] == "^h"
+
+    def test_an_index_override_admits_the_positional_read_the_corpus_refuses(self):
+        # `index-scalar-list` is `adapterUnsupported` because row order in a SQL relation is
+        # not defined — but the refusal the corpus pins comes from the MAPPING, not the
+        # operator: `tagNames` is a relation marker, `index` is not in the corpus's override
+        # map, so the reference is not override-owned and `get_query`'s pre-validation refuses
+        # it before the walk. An application whose storage makes a positional read meaningful
+        # supplies both halves — here a scalar column standing for a single-element list,
+        # which is the shape the retired suite used — and the same plan translates.
+        action = "index-scalar-list"
+        with pytest.raises(TypeError, match="must be handled by an operator override"):
+            translate(action)
+
+        statement, params = render(
+            translate(
+                action,
+                attr_map={"request.resource.attr.tagNames": AdvResource.a_string},
+                operator_override_fns={"index": lambda column, _position: column},
+                attribute_null_representation=None,
+            ),
+            "sqlite",
+        )
+        assert statement.endswith("WHERE adversarial_resource.a_string = ?")
+        assert params == {"a_string_1": "public"}
+
+
+class TestTimestampLiterals:
+    """The one operand a wire fixture cannot pin, and why this adapter's reader chooses a
+    nanosecond instant.
+
+    ``regenerate-wire-fixtures.sh`` rewrites ``ts-window``'s folded ``now() - duration("24h")``
+    literal to a placeholder, because it differs on every capture — so reading the fixture back
+    means choosing a value, and here that choice is load-bearing. The PDP emits NANOSECOND
+    precision, which is the entire reason ``actions.json`` classifies ``ts-window`` and
+    ``ts-vf`` as ``adapterUnsupported`` for this adapter. A tidy millisecond substitution in
+    ``corpus.py`` would translate cleanly and quietly contradict the corpus, so the throw suite
+    above would be asserting a limitation that does not exist.
+
+    These are the assertions that make ``PLANNED_AT`` a decision rather than an accident.
+    """
+
+    @pytest.mark.parametrize("action", ["ts-window", "ts-vf"])
+    def test_the_refusal_is_the_precision_and_not_the_shape(self, action):
+        message = next(
+            pinned for candidate, pinned in THROWING_ACTIONS if candidate == action
+        )
+        with pytest.raises(ValueError, match=re.escape(message)):
+            translate(action)
+
+        # The same plan at microsecond precision translates. Both directions matter: the
+        # refusal is real, and it is a property of the instant rather than of the shape.
+        statement, _params = render(
+            translate(action, planned_at="2026-08-11T09:13:39.123456Z"), "sqlite"
+        )
+        assert "adversarial_resource.created_at" in statement
+
+    def test_excess_fractional_digits_are_accepted_only_when_they_are_zero(self):
+        # CEL's instant range is exact to the microsecond and no further, so trailing zeroes
+        # are information-free and a non-zero digit is a value the column cannot hold.
+        statement, params = render(
+            translate("ts-window", planned_at="2026-08-11T09:13:39.123456000Z"),
+            "sqlite",
+        )
+        assert "adversarial_resource.created_at" in statement
+        assert list(params.values()) == [
+            datetime(2026, 8, 11, 9, 13, 39, 123456, tzinfo=timezone.utc)
+        ]
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "2024-01-01",
+            "0000-01-01T00:00:00Z",
+            "2024-02-30T00:00:00Z",
+            "9999-12-31T23:00:00-02:00",
+        ],
+    )
+    def test_an_instant_the_adapter_cannot_carry_fails_closed(self, value):
+        # Each is refused rather than coerced: a datetime parsed leniently would compare
+        # against the column as some OTHER instant, which is a filter returning rows the PDP
+        # denies rather than an error the caller can see.
+        with pytest.raises(ValueError, match="RFC-3339|precision|instant range|offset"):
+            translate("ts-window", planned_at=value)
 
 
 class TestTransportDecoding:

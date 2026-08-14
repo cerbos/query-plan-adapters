@@ -125,16 +125,13 @@ _RESOURCE_ROWS = [
 
 @pytest.fixture(scope="module")
 def engine():
-    # in-memory database
+    # in-memory database.
+    #
+    # A SQLite REGEXP function used to be registered here, for the one retired test that
+    # EXECUTED a caller-supplied `matches` override. What that override does to the emitted
+    # SQL is now asserted in `test_translator.py` from the `p-matches` wire fixture, and
+    # nothing left in this file executes one, so registering it would be dead setup.
     engine = create_engine("sqlite://")
-
-    # SQLite has no built-in REGEXP function; register one so that the
-    # adapter's `regexp_match` lowers to a working SQL operator under tests.
-    @event.listens_for(engine, "connect")
-    def _register_regexp(dbapi_conn, _):
-        dbapi_conn.create_function(
-            "regexp", 2, lambda pat, s: 1 if re.search(pat, s or "") else 0
-        )
 
     # generate tables from sqla metadata
     Base.metadata.create_all(engine)

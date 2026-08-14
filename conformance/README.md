@@ -33,6 +33,7 @@ heading, regenerate this list with `scripts/check-docs.sh --print-toc` — CI ch
 - [Golden expectations](#golden-expectations)
   - [The file](#the-file)
   - [What the entry holds is per adapter, and has to be](#what-the-entry-holds-is-per-adapter-and-has-to-be)
+  - [When the generator is an input](#when-the-generator-is-an-input)
   - [A throwing action carries no entry](#a-throwing-action-carries-no-entry)
   - [The completeness guard](#the-completeness-guard)
   - [Regeneration is a deliberate act, and the diff is the review](#regeneration-is-a-deliberate-act-and-the-diff-is-the-review)
@@ -853,6 +854,8 @@ One file per adapter, at `<adapter>/golden/expectations.json`:
 {
   "adapter": "drizzle",
   "regenerate": "npm run golden:update",
+  // Optional, and only where the value needs it — see "When the generator is an input" below.
+  "sqlalchemy": "2.x",
   "expectations": {
     "<action>": { "note": "optional, human, preserved across regeneration", /* … */ }
   }
@@ -867,6 +870,10 @@ One file per adapter, at `<adapter>/golden/expectations.json`:
   of shapes it moved. The suite asserts the sort order.
 - **`note`** is the one reserved key inside an entry: commentary, never compared, and carried across
   by the regenerator. Everything else in the entry is the adapter's own filter document.
+
+An adapter may add a header key of its own alongside these, and exactly one reason justifies it:
+the value depends on something other than the plan. Checked by the loader like `adapter`, never
+ignored.
 
 ### What the entry holds is per adapter, and has to be
 
@@ -889,6 +896,32 @@ Two rules constrain the value:
 - **It is a filter, never a row set.** Which rows a filter returns is the PDP `check()` oracle's
   answer, established by the adversarial harness against real data. Writing it down would freeze an
   authorization decision into a file that no longer tracks the policy.
+
+### When the generator is an input
+
+Most adapters record their translator's return value directly, and a plan is the only input to it.
+Where that does not hold — where producing the recorded value runs the output through something
+whose version or configuration can change the bytes — the asset has to say which one, or the next
+person to open it cannot tell a translation change from a toolchain change.
+
+sqlalchemy is the case. It emits a Python expression object, so its entry records that object
+*compiled*: a `WHERE` clause per SQL dialect plus the parameters bound, which the dialects are
+asserted to share. That makes SQLAlchemy's own compiler an input, and the two majors the package
+supports do not render every tree the same way. So the file carries a `"sqlalchemy": "2.x"` header
+key, three things follow from it, and an adapter in the same position should copy all three:
+
+1. **The loader checks the key**, exactly as it checks `adapter`.
+2. **Regeneration refuses under any other version.** Otherwise `golden:update` rewrites every
+   affected entry and presents a toolchain swap as a translation change — a diff a reviewer has to
+   read line by line to discover said nothing.
+3. **The other version asserts a pinned divergence list rather than the bytes**, in *both*
+   directions, so a shape that stops diverging fails as loudly as one that starts. Skipping instead
+   would leave that leg proving nothing about the emitted filter.
+
+This is not licence to add a key per environment difference. The test for it is whether the
+difference is *outside* the adapter and *inside* the recorded value; a dialect is neither (it is a
+dimension of the value, so it lives in the entry), and a Node version is neither (it changes
+nothing).
 
 ### A throwing action carries no entry
 

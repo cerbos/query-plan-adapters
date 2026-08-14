@@ -4,6 +4,7 @@
   "regenerate": "pdm run golden:update",
   "expectations": {
     "all-on-empty": {
+      "note": "Three-valued logic, and the shape every collection macro follows here. The first EXISTS looks for a FALSE witness, the second for an element whose body is UNKNOWN (`IS NULL`) \u2014 a NULL tag name is a MISSING element attribute on the check side, so CEL raises and the PDP denies \u2014 and only then does the CASE fall through to TRUE. Dropping the second arm would return rows the PDP refuses.",
       "where": {
         "sqlite": "CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name != ?)) THEN 0 WHEN (EXISTS (SELECT ? AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name = ?) IS NULL)) THEN NULL ELSE 1 END",
         "postgresql": "CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name != %(name_1)s)) THEN false WHEN (EXISTS (SELECT %(param_2)s AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name = %(name_1)s) IS NULL)) THEN NULL ELSE true END"
@@ -149,6 +150,7 @@
       }
     },
     "cr-contains": {
+      "note": "The receiver is the CONSTANT and the needle a COLUMN, so the escaping has to happen in SQL rather than in Python: four nested REPLACEs, one per metacharacter. A NULL needle propagates through them to a NULL pattern, so the LIKE stays UNKNOWN and the row is excluded \u2014 which is what CEL's missing-attribute error does for the same row. Note the operand order is the wire's: `?` LIKE column, not the reverse.",
       "where": {
         "sqlite": "? LIKE (? || replace(replace(replace(replace(adversarial_resource.a_string, ?, ?), ?, ?), ?, ?), ?, ?) || ?) ESCAPE '\\'",
         "postgresql": "%(param_1)s LIKE (%(param_2)s || replace(replace(replace(replace(adversarial_resource.a_string, %(replace_1)s, %(replace_2)s), %(replace_3)s, %(replace_4)s), %(replace_5)s, %(replace_6)s), %(replace_7)s, %(replace_8)s) || %(param_3)s) ESCAPE '\\\\'"
@@ -218,6 +220,7 @@
       }
     },
     "cr-div-zero": {
+      "note": "A division whose denominator may be zero, kept symbolic rather than lowered to NULL (#312). CEL's `x/0` is a signed infinity and `0/0` is NaN, and `NaN != 1.0` is TRUE where `NULL != 1.0` is UNKNOWN \u2014 so each IEEE arm is FOLDED into the enclosing comparison at translation time. That is why no parameter here is non-finite. Its sibling `cr-div-neg-zero` carries no entry at all: a CONSTANT `-0` arrives over HTTP as the integer 0 with the sign gone, so the adapter refuses it rather than guess.",
       "where": {
         "sqlite": "CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = ?) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = ?) THEN ? WHEN (CAST(adversarial_resource.a_number AS FLOAT) != ?) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) > ?) THEN ? WHEN (CAST(adversarial_resource.a_number AS FLOAT) <= ?) THEN ? END END WHEN (CAST(adversarial_resource.a_number AS FLOAT) != ?) THEN CAST(adversarial_resource.a_number AS FLOAT) / (nullif(CAST(adversarial_resource.a_number AS FLOAT), ?) + 0.0) > ? END = 1",
         "postgresql": "CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = %(param_1)s) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = %(param_2)s) THEN %(param_3)s WHEN (CAST(adversarial_resource.a_number AS FLOAT) != %(param_2)s) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) > %(param_4)s) THEN %(param_5)s WHEN (CAST(adversarial_resource.a_number AS FLOAT) <= %(param_4)s) THEN %(param_6)s END END WHEN (CAST(adversarial_resource.a_number AS FLOAT) != %(param_1)s) THEN CAST(adversarial_resource.a_number AS FLOAT) / CAST(nullif(CAST(adversarial_resource.a_number AS FLOAT), %(nullif_1)s) AS NUMERIC) > %(param_7)s END"
@@ -329,6 +332,7 @@
       }
     },
     "cs-contains": {
+      "note": "Case sensitivity in string MATCHING, which collation does not govern. This lowers to LIKE, and SQLite's LIKE is case-insensitive for ASCII whatever the column collation says; only `PRAGMA case_sensitive_like = ON` changes it, per connection. The adversarial harness sets it. A deployment that does not gets an over-grant this pinned SQL cannot show.",
       "where": {
         "sqlite": "adversarial_resource.a_string LIKE ? ESCAPE '\\'",
         "postgresql": "adversarial_resource.a_string LIKE %(a_string_1)s ESCAPE '\\\\'"
@@ -621,6 +625,7 @@
       "params": {}
     },
     "in-empty": {
+      "note": "`x in []` is false for every row, and the adapter says so with a literal FALSE rather than an empty `IN ()` no dialect accepts. Note SQLite has no boolean type \u2014 `0 = 1` where PostgreSQL emits `false` \u2014 which is the smallest instance of why both dialects are pinned.",
       "where": {
         "sqlite": "0 = 1",
         "postgresql": "false"
@@ -766,6 +771,7 @@
       }
     },
     "like-percent": {
+      "note": "LIKE metacharacter escaping, the bug class this corpus was founded on (#258/#259). The needle is the literal `100%`, and the emitted pattern is `100\\%%` \u2014 the `%` in the value escaped, the trailing `%` the startsWith wildcard \u2014 under an ESCAPE clause that declares the backslash. Without the escape this would match every string beginning `100`, which is rows the PDP denies.",
       "where": {
         "sqlite": "adversarial_resource.a_string LIKE ? ESCAPE '\\'",
         "postgresql": "adversarial_resource.a_string LIKE %(a_string_1)s ESCAPE '\\\\'"
@@ -1006,6 +1012,7 @@
       }
     },
     "null-eq": {
+      "note": "The explicit-null convention (#302/#308). `owner` aliases the same column as `aOptionalString` but is declared `explicit` in the attribute map, so `== null` is a definite `IS NULL` here. Its sibling `null-eq-missing` probes the same column under the default convention and is REJECTED under `omitted` \u2014 same wire node, different answer, which is the whole reason the option exists.",
       "where": {
         "sqlite": "adversarial_resource.a_optional_string IS NULL",
         "postgresql": "adversarial_resource.a_optional_string IS NULL"
@@ -1041,6 +1048,7 @@
       "params": {}
     },
     "null-value-ne-const": {
+      "note": "The other side of that declaration. CEL holds a null VALUE under the explicit convention, so `null != \"x\"` is TRUE and the NULL rows must come back \u2014 but SQL answers UNKNOWN, which drops them under both polarities. The `IS NOT NULL` guard wrapped in a NOT is the asymmetric expansion that makes the comparison definite; `is_distinct_from` would be symmetric and would over-grant.",
       "where": {
         "sqlite": "NOT (adversarial_resource.a_optional_string IS NOT NULL AND adversarial_resource.a_optional_string = ?)",
         "postgresql": "NOT (adversarial_resource.a_optional_string IS NOT NULL AND adversarial_resource.a_optional_string = %(a_optional_string_1)s)"
@@ -1168,6 +1176,7 @@
       }
     },
     "p-has": {
+      "note": "The corpus's one `knownDivergences` entry, and the only action here with no WHERE clause at all. The planner folds `has()` on a missing attribute to ALWAYS_ALLOWED while `check()` denies those rows; the adapter must translate that faithfully, so an unfiltered SELECT is correct and the over-grant is upstream.",
       "where": {
         "sqlite": null,
         "postgresql": null
@@ -1405,6 +1414,7 @@
       "params": {}
     },
     "rel-bool-hop2": {
+      "note": "The corpus's one REAL to-one relation, read two levels out (#375). Each hop is a correlated scalar subquery and the inner one nests the outer's lookup, which is what keeps the levels distinct. No `require_hops` guard is needed for a SCALAR read: an absent parent makes the subquery SQL NULL, which is already CEL's missing-path error.",
       "where": {
         "sqlite": "(SELECT adversarial_inner.a_bool FROM adversarial_inner WHERE adversarial_inner.parent_id = (SELECT adversarial_parent.id FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id)) = 1",
         "postgresql": "(SELECT adversarial_inner.a_bool FROM adversarial_inner WHERE adversarial_inner.parent_id = (SELECT adversarial_parent.id FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id)) = true"
@@ -1771,6 +1781,7 @@
       }
     },
     "w1-all-chain": {
+      "note": "The absent to-one parent (#309). The OUTER `CASE WHEN (EXISTS ...)` is `require_hops`: it has no ELSE on purpose, so a resource with no category yields NULL rather than the `all`-over-empty TRUE the inner CASE would give it. `NOT NULL` is still NULL, so the row stays excluded under BOTH polarities.",
       "where": {
         "sqlite": "CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id)) THEN CASE WHEN (EXISTS (SELECT ? AS anon_2 FROM adversarial_sub_category, adversarial_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_category.resource_id = adversarial_resource.id AND adversarial_sub_category.name != ?)) THEN 0 WHEN (EXISTS (SELECT ? AS anon_3 FROM adversarial_sub_category, adversarial_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_category.resource_id = adversarial_resource.id AND (adversarial_sub_category.name = ?) IS NULL)) THEN NULL ELSE 1 END END",
         "postgresql": "CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id)) THEN CASE WHEN (EXISTS (SELECT %(param_2)s AS anon_2 FROM adversarial_sub_category, adversarial_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_category.resource_id = adversarial_resource.id AND adversarial_sub_category.name != %(name_1)s)) THEN false WHEN (EXISTS (SELECT %(param_3)s AS anon_3 FROM adversarial_sub_category, adversarial_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_category.resource_id = adversarial_resource.id AND (adversarial_sub_category.name = %(name_1)s) IS NULL)) THEN NULL ELSE true END END"

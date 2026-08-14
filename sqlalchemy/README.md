@@ -98,7 +98,7 @@ parameters it binds. It is regenerated with the command above and reviewed as a 
 regenerates it, so a change to how a shape is translated fails there and shows up as the list of
 statements it moved. The format is shared across adapters and documented under "Golden
 expectations" in [`conformance/README.md`](../conformance/README.md); what an entry *holds* is this
-adapter's own, and the two rules behind the choice made here are worth knowing:
+adapter's own, and three things about the choice made here are worth knowing:
 
 - **The whole `Select` is compiled, not the bare `WHERE` clause.** Correlation is only observable
   inside the enclosing SELECT: compiled on its own, a correlated subquery renders the outer table
