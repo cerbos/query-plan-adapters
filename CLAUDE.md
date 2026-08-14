@@ -12,6 +12,7 @@ Multi-language ORM adapters that translate Cerbos query plan responses into data
 | convex | TypeScript | `@cerbos/orm-convex` | Convex |
 | langchain-chromadb | TypeScript | `@cerbos/langchain-chromadb` | ChromaDB |
 | sqlalchemy | Python | `cerbos-sqlalchemy` | SQLAlchemy |
+| activerecord | Ruby | `cerbos-activerecord` | ActiveRecord 7.1–8.x |
 | ent | Go | `github.com/cerbos/query-plan-adapters/ent` | Ent |
 | pgx | Go | `github.com/cerbos/query-plan-adapters/pgx` | pgx / PostgreSQL |
 | elasticsearch-java | Java | `cerbos-elasticsearch` | Elasticsearch |
@@ -42,7 +43,7 @@ backend nor `convex/_generated`, which is why the mapper it shares with the harn
 generated API. On langchain-chromadb it needs no ChromaDB container, so that server is started for
 the adversarial leg alone.
 
-On drizzle, convex, langchain-chromadb, sqlalchemy, spring-data and elasticsearch-java the expected
+On drizzle, convex, langchain-chromadb, sqlalchemy, activerecord, spring-data and elasticsearch-java the expected
 filters are **golden expectations** — static data in `<adapter>/golden/expectations.json`, rewritten
 by that adapter's `golden:update` command and reviewed as a diff — which is the format
 [#379](https://github.com/cerbos/query-plan-adapters/issues/379) piloted
@@ -94,6 +95,32 @@ pdm run format         # isort + black
 cannot produce; none of the three starts anything, so `pdm run pytest tests/test_translator.py`
 needs no PDP and no database. Only `tests/test_adversarial_conformance.py` needs Docker, and it
 starts its own pinned PDP against `conformance/policies/`.
+
+### Ruby (ActiveRecord)
+```bash
+# Everything runs in Docker. The PDP is pinned by tag AND digest, from
+# conformance/CERBOS_VERSION and conformance/CERBOS_IMAGE_DIGEST, which scripts/test.sh reads.
+cd activerecord
+./scripts/test.sh                                      # all three suites
+./scripts/test.sh spec/translator_spec.rb              # offline: no PDP, no database server
+./scripts/golden-update.sh                             # rewrite golden/expectations.json
+RUBY_VERSION=3.2 ACTIVERECORD_VERSION=7.1 ./scripts/test.sh
+./scripts/lint.sh
+```
+
+`spec/translator_spec.rb` is the **translator unit test** and `spec/adapter_contract_spec.rb` is
+the caller-supplied contract — mapper forms, operator overrides, the per-call null
+representation, and the association shapes the adapter refuses to guess at. Neither starts a PDP;
+their models are SQLite in memory. Only `spec/adversarial_conformance_spec.rb` needs Docker, and
+it starts its own pinned PDP against `conformance/policies/`.
+
+Its golden expectations record the emitted relation **rendered as SQL** — `to_sql` against
+SQLite, with literals inlined, so the operands are in the asset rather than behind a `?`. That
+makes ActiveRecord's own renderer an input to the bytes, so the file declares
+`"activerecord": "8.0"`, `golden-update.sh` refuses to run under another minor series, and the
+7.1 leg asserts a pinned divergence list in both directions. The Gemfile pins each CI leg to one
+minor series for that reason: a floating `~> 7.1` resolves to the newest 7.x, and the leg named
+7.1 would quietly become 7.2.
 
 ### Go (Ent, pgx)
 ```bash
@@ -274,7 +301,7 @@ Each adapter has its own GitHub Actions workflow triggered by changes in its dir
 
 Adding a new adversarial job — or dropping the Node gate so the corpus replays on every Node leg — multiplies runner minutes for no extra coverage. Adding a *store* leg does buy coverage; adding a Node leg does not. `conformance.yaml` additionally replans the golden wire fixtures against the pinned PDP and fails on drift.
 
-Tag-based publishing: `prisma/v*` -> npm, `sqla/v*` -> PyPI, `elasticsearch-java/v*` and `spring-data/v*` -> Maven Central; `ent/v*` and `pgx/v*` are Go
+Tag-based publishing: `prisma/v*` -> npm, `sqla/v*` -> PyPI, `activerecord/v*` -> RubyGems, `elasticsearch-java/v*` and `spring-data/v*` -> Maven Central; `ent/v*` and `pgx/v*` are Go
 module tags resolved directly from the repository.
 
 ## Changing how a condition is translated
@@ -378,7 +405,7 @@ never recompute them in a harness.
 - `conformance/` affects all adapters: a change there re-runs every adapter's CI, and adding an action requires classifying it for every adapter
 - `demo/` likewise re-runs every adapter's example job, and adding a usage shape means implementing it in every example — there is no classification bucket to opt out with
 - Adding a seed row means adding its `conformance/derived-fields.json` entry in the same commit; adding a seed *field* also means widening every harness's declared key set — both are enforced, not optional
-- Adapters share data, not code: the corpus loader each adapter carries (`prisma/src/corpus.ts`, `mongoose/src/corpus.ts`, `drizzle/src/corpus.ts`, `convex/src/corpus.ts`, `langchain-chromadb/src/corpus.ts`, `sqlalchemy/tests/corpus.py`, `spring-data/src/test/java/dev/cerbos/queryplan/springdata/Corpus.java`, `elasticsearch-java/src/test/java/dev/cerbos/queryplan/elasticsearch/Corpus.java`, `ent/corpus_test.go`, `pgx/corpus_test.go`, …) is duplicated **deliberately**, so every adapter stays standalone. Do not extract a shared loader, and do not add a drift check between the copies — they are allowed to differ. That is the opposite of the byte-identical rule on the vendored Go *translator* trees, which keeps its exact current scope. See [ADR 0007](docs/adr/0007-adapters-share-data-not-code.md)
+- Adapters share data, not code: the corpus loader each adapter carries (`prisma/src/corpus.ts`, `mongoose/src/corpus.ts`, `drizzle/src/corpus.ts`, `convex/src/corpus.ts`, `langchain-chromadb/src/corpus.ts`, `sqlalchemy/tests/corpus.py`, `activerecord/spec/support/conformance_corpus.rb`, `spring-data/src/test/java/dev/cerbos/queryplan/springdata/Corpus.java`, `elasticsearch-java/src/test/java/dev/cerbos/queryplan/elasticsearch/Corpus.java`, `ent/corpus_test.go`, `pgx/corpus_test.go`, …) is duplicated **deliberately**, so every adapter stays standalone. Do not extract a shared loader, and do not add a drift check between the copies — they are allowed to differ. That is the opposite of the byte-identical rule on the vendored Go *translator* trees, which keeps its exact current scope. See [ADR 0007](docs/adr/0007-adapters-share-data-not-code.md)
 - A per-adapter **golden expectation** — the filter one adapter is pinned to emit for one corpus action — lives in that adapter's own `golden/expectations.json`, never under `conformance/`; a throwing action carries no entry, because its message is already pinned in `conformance/actions.json`. Schema and rationale: `conformance/README.md`, "Golden expectations"
 - Write "every adapter" / "every harness" / "every example" wherever prose spans the roster — in docs, test-file comments and JSON `description`s alike. `conformance/actions.json` declares `adapters`, so the phrasing stays true when the roster changes and nothing else has to count them. Genuine counts of something else (corpus actions, seed rows) go in digits. `conformance/scripts/check-docs.sh` enforces it across every tracked file
 - Regenerate build artifacts in the same commit as source changes

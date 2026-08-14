@@ -251,13 +251,14 @@ fi
 SOURCE_INCLUDES=(
   --include='*.yml' --include='*.yaml' --include='*.sh' --include='*.py' --include='*.go'
   --include='*.java' --include='*.kts' --include='*.ts' --include='*.js' --include='*.json'
+  --include='*.rb' --include='*.gemspec' --include='Gemfile' --include='Rakefile'
   --include='Dockerfile' --include='*_IMAGE'
 )
 SOURCE_EXCLUDES=(
   --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=.claude --exclude-dir=lib
   --exclude-dir=build --exclude-dir=.venv --exclude-dir=.gradle --exclude-dir=bin
   --exclude-dir=__pypackages__ --exclude-dir=.agents --exclude-dir=.out-of-scope
-  --exclude-dir=dist
+  --exclude-dir=dist --exclude-dir=.gems --exclude-dir=.bundle-path
 )
 
 version_drift=0

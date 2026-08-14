@@ -4,6 +4,7 @@ These are reference implementations of adapters that take a [Cerbos](https://cer
 
 Current supported adapters:
 
+- [ActiveRecord (Ruby)](https://github.com/cerbos/query-plan-adapters/tree/main/activerecord)
 - [Convex](https://github.com/cerbos/query-plan-adapters/tree/main/convex)
 - [Drizzle ORM](https://github.com/cerbos/query-plan-adapters/tree/main/drizzle)
 - [Elasticsearch (Java)](https://github.com/cerbos/query-plan-adapters/tree/main/elasticsearch-java)

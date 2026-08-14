@@ -1,0 +1,19 @@
+# frozen_string_literal: true
+
+# The adapter comes from the PACKED ARTIFACT, never from ../lib
+# (docs/adr/0002-examples-install-the-packed-artifact.md). run.sh builds the gem and unpacks it
+# into vendor/, so this path holds exactly the files the gemspec's `files` allowlist shipped —
+# a lib/ file left out of that allowlist fails here rather than for the first consumer.
+#
+# `../` would be the easy thing to write and would prove nothing: it resolves the source tree,
+# where the allowlist has never been applied.
+source "https://rubygems.org"
+
+gem "cerbos-activerecord", path: "vendor/cerbos-activerecord"
+
+# The gemspec's whole declared range, not one series. The example resolves fresh on every run
+# and commits no lockfile, so this is what puts a NEW ActiveRecord release in front of the five
+# usage shapes — the check that a lockfile plus a Renovate bump gives the TypeScript examples.
+gem "activerecord", ">= 7.1", "< 9.0"
+gem "cerbos", "~> 0.13"
+gem "sqlite3", "~> 2.6"

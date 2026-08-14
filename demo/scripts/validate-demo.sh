@@ -296,12 +296,14 @@ fi
 SOURCE_INCLUDES=(
   --include='*.yml' --include='*.yaml' --include='*.sh' --include='*.py' --include='*.go'
   --include='*.java' --include='*.kts' --include='*.ts' --include='*.js' --include='*.json'
+  --include='*.rb' --include='*.gemspec' --include='Gemfile' --include='Rakefile'
   --include='Dockerfile' --include='*_IMAGE'
 )
 SOURCE_EXCLUDES=(
   --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=lib --exclude-dir=build
   --exclude-dir=.venv --exclude-dir=.gradle --exclude-dir=bin --exclude-dir=dist
   --exclude-dir=generated --exclude-dir=__pypackages__
+  --exclude-dir=.gems --exclude-dir=.bundle-path
 )
 for adapter in $(jq -r '.adapters[]' "${ACTIONS}"); do
   example_dir="${REPO_ROOT}/${adapter}/example"

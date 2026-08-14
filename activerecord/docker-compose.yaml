@@ -1,0 +1,52 @@
+# All the components that the suites of the ActiveRecord adapter need. Docker is the only
+# software that you must install on your computer.
+#
+#   ./scripts/test.sh                 # all the suites
+#   ./scripts/test.sh spec/adversarial_conformance_spec.rb
+#
+# The `tests` service mounts the root directory of the repository, because both corpus suites
+# read shared data at ../conformance/ (seeds.json, actions.json, derived-fields.json,
+# wire-fixtures/, CERBOS_VERSION, CERBOS_IMAGE_DIGEST).
+#
+# `tests` depends on the PDP, but only the adversarial harness needs one: scripts/test.sh runs
+# the offline suites with `--no-deps`, so the PDP is not merely unused there, it is absent.
+#
+# The PDP is pinned by tag AND digest. The tag says which release a reader is looking at; the
+# digest says which build a green run actually proved. Both come from conformance/ —
+# CERBOS_VERSION and CERBOS_IMAGE_DIGEST — and scripts/test.sh puts them into the environment.
+# Do not write either value in this file.
+
+services:
+  cerbos:
+    image: ghcr.io/cerbos/cerbos:${CERBOS_VERSION:?set CERBOS_VERSION - run via scripts/test.sh}@${CERBOS_IMAGE_DIGEST:?set CERBOS_IMAGE_DIGEST - run via scripts/test.sh}
+    command: ["server", "--set=storage.disk.directory=/policies", "--set=storage.driver=disk", "--set=telemetry.disabled=true", "--log-level=error"]
+    environment:
+      CERBOS_NO_TELEMETRY: "1"
+    volumes:
+      # conformance/policies/ is the repository's ONLY policy suite for semantics (ADR 0008).
+      # A second suite mounted beside it is the thing that ADR exists to keep out.
+      - ../conformance/policies:/policies:ro
+    healthcheck:
+      test: ["CMD", "/cerbos", "healthcheck", "--insecure"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 3s
+
+  tests:
+    build:
+      context: .
+      args:
+        RUBY_VERSION: ${RUBY_VERSION:-3.4}
+        ACTIVERECORD_VERSION: ${ACTIVERECORD_VERSION:-8.0}
+    depends_on:
+      cerbos:
+        condition: service_healthy
+    environment:
+      CERBOS_HOST: cerbos:3593
+    volumes:
+      # Only the repository is mounted. The gems are at /bundle in the image. A volume at that
+      # position would hide them, and then `bundle exec` would have no gems.
+      - ..:/repo
+    working_dir: /repo/activerecord
+    command: ["bundle", "exec", "rspec"]

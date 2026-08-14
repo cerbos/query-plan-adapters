@@ -94,9 +94,9 @@ oracle establishes that the filter returns the rows the policy allows.
 
 ## Consequences
 
-**Per-adapter expectations must not live under `conformance/`.** Eleven workflows trigger on
-`conformance/**` — every adapter workflow plus `conformance.yaml` — so one adapter re-pinning one
-filter would re-run every other adapter for nothing. This is the same argument `CLAUDE.md` already makes
+**Per-adapter expectations must not live under `conformance/`.** Every adapter workflow triggers on
+`conformance/**`, and so does `conformance.yaml`, so one adapter re-pinning one filter would
+re-run every other adapter for nothing. This is the same argument `CLAUDE.md` already makes
 for keeping per-harness service image pins out of the corpus, and it holds whatever form the
 expectations take.
 

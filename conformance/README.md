@@ -842,9 +842,9 @@ its plans from `wire-fixtures/` and needs no PDP and no store
 not the only one, since that suite also pins the plan kinds, the refusals and the caller-supplied
 contracts a store is not needed to reach (`CLAUDE.md`, "What a translator unit test may pin").
 
-**The expectations are not corpus data and must never live here.** Eleven workflows trigger on
-`conformance/**` — every adapter workflow plus `conformance.yaml` — so one adapter re-pinning one
-filter would re-run every other adapter for nothing. This is the same argument that keeps per-harness
+**The expectations are not corpus data and must never live here.** Every adapter workflow triggers on
+`conformance/**`, and so does `conformance.yaml`, so one adapter re-pinning one filter would
+re-run every other adapter for nothing. This is the same argument that keeps per-harness
 service image pins out of the corpus, and
 [ADR 0007](../docs/adr/0007-adapters-share-data-not-code.md) records it as a rule. What lives here is
 the *format*.
@@ -1204,7 +1204,7 @@ The three classes the adapters fall into determine most of the answers:
 
 | Class | Adapters | What the store applies to the subquery |
 |---|---|---|
-| **1 — bare-table subquery** | drizzle, ent, pgx, prisma | nothing |
+| **1 — bare-table subquery** | drizzle, ent, pgx, prisma, activerecord | nothing |
 | **2 — ORM-association subquery** | spring-data, sqlalchemy | Hibernate applies `@SQLRestriction`/`@Where` — on the entity and on the joined collection — and the single-table discriminator; SQLAlchemy applies `primaryjoin` and the single-table discriminator *only* when the caller's override goes through a mapped `relationship()` |
 | **3 — no subquery** | mongoose, convex, langchain-chromadb, elasticsearch-java | n/a — relations are paths inside the same document |
 
@@ -1215,6 +1215,15 @@ Class 1 adapters expose an **optional** relation predicate the caller attaches t
 declaring nothing emits exactly the filter the adapter emitted before the field existed. Class 2
 adapters deliberately do **not** expose one — a caller who re-declared a filter the ORM already
 applies would have it applied twice, silently removing rows the PDP permits.
+
+activerecord is class 1 by what reaches its subquery — it reads the table with a join predicate and
+nothing else — but it is the one class-1 adapter that **rejects** rather than reproduces, and the
+difference is structural rather than stylistic. It is handed an association *name*, so
+`reflect_on_association` hands it the scope, the `default_scope` on the target, the STI
+discriminator and the composite key directly. Where the hazard is visible, "declared caller-owned"
+is not on the menu, and an optional caller-supplied predicate would be a second place for the same
+truth to live. Those subquery hazards are therefore refusals, each with a message naming the
+reflection that carries it.
 
 The precedent for handling this without a policy action is `nullRepresentationOmitted`: a
 per-adapter contract asserted by each harness rather than a shape in `adversarial.yaml`. If a

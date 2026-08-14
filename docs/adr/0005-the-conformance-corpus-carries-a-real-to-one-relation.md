@@ -74,7 +74,7 @@ the fixture.
 
 ## Consequences
 
-**Ten harnesses change atomically, and that is the point of doing it alone.** The seed-key guard
+**Every harness changes atomically, and that is the point of doing it alone.** The seed-key guard
 makes the corpus edit and the harness edits inseparable; separating the relation from the actions
 that use it means the repo-wide change is a data change, reviewable as one, rather than tangled with
 a translation change per adapter.
