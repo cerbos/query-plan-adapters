@@ -26,7 +26,7 @@ Run from the adapter directory:
 npm install
 npm run build    # tsc --build -> lib/ (published surface only; test files are excluded)
 npm run typecheck # tsc -p tsconfig.typecheck.json — noEmit, covers src/ AND *.test.ts
-npm test         # Jest + Cerbos sidecar
+npm test         # Jest — the translator unit test, offline (no sidecar, no store)
 npm run test:adversarial  # differential suite against the shared conformance corpus
 ```
 
@@ -41,9 +41,9 @@ backend nor `convex/_generated`, which is why the mapper it shares with the harn
 generated API. On langchain-chromadb it needs no ChromaDB container, so that server is started for
 the adversarial leg alone.
 
-On drizzle, convex, langchain-chromadb, sqlalchemy and spring-data the expected filters are **golden
-expectations** — static data in `<adapter>/golden/expectations.json`, rewritten by that adapter's
-`golden:update` command and reviewed as a diff — which is the format
+On drizzle, convex, langchain-chromadb, sqlalchemy, spring-data and elasticsearch-java the expected
+filters are **golden expectations** — static data in `<adapter>/golden/expectations.json`, rewritten
+by that adapter's `golden:update` command and reviewed as a diff — which is the format
 [#379](https://github.com/cerbos/query-plan-adapters/issues/379) piloted
 and the remaining adapters copy; prisma and mongoose keep their inline expectations until they are
 retrofitted. Convex is the case that generalised the format: it emits a *function*, so its entry
@@ -64,11 +64,24 @@ root joins and the `WHERE` clause on H2, PostgreSQL and MySQL, all three of whic
 with criteria literals inlined so the operands are in the asset rather than behind a `?`. The file
 declares `"hibernate": "6.6"` and the suite asserts the running Hibernate matches, but there is no
 second leg and so no divergence list; the header is load-bearing because `hibernate-core` is a
-`compileOnly` dependency and a consumer brings their own renderer. The schema is in
+`compileOnly` dependency and a consumer brings their own renderer. Elasticsearch-java is the second
+adapter, after langchain-chromadb, whose value needs no rendering at all: the Query DSL IS JSON and
+the adapter emits a `Map<String, Object>` of plain JDK values with no client library on the
+classpath, so its entry is the translator's return value verbatim — the plan kind, plus the query
+for a conditional plan — and it declares no generator. Object keys are sorted on the way in, because
+the adapter builds its queries with `Map.of`, whose iteration order is randomised per JVM run; a
+suite assertion pins that no library type ever reaches the asset, which is what keeps "no generator"
+true. 122 of the corpus's 199 shapes carry no entry at all because it refuses them. The schema is in
 `conformance/README.md`, "Golden expectations"; the principle is
-[ADR 0007](docs/adr/0007-adapters-share-data-not-code.md). Elasticsearch-java has not been converted
-yet ([#384](https://github.com/cerbos/query-plan-adapters/issues/384)) and still runs its
-shared-policy suite behind a sidecar.
+[ADR 0007](docs/adr/0007-adapters-share-data-not-code.md).
+
+With elasticsearch-java converted, [#381](https://github.com/cerbos/query-plan-adapters/issues/381)
+through [#384](https://github.com/cerbos/query-plan-adapters/issues/384) are all done and every
+adapter that had a shared-policy suite has a fixture-fed translator unit test instead. Nothing in
+the repository reads `policies/resource.yaml` any more except convex's `npm run test:integration`,
+which unblocks [#385](https://github.com/cerbos/query-plan-adapters/issues/385) — deleting the
+shared policy suite, the contract half of
+[#372](https://github.com/cerbos/query-plan-adapters/issues/372).
 
 Drizzle and Prisma also replay the corpus against a real PostgreSQL server (testcontainers, so
 Docker is required): `npm run test:adversarial:postgres`, and `…:postgres:v6` / `…:postgres:v7` on
@@ -117,30 +130,47 @@ docker run --rm -v "$(pwd)":/repo -v /var/run/docker.sock:/var/run/docker.sock \
   -e TESTCONTAINERS_RYUK_DISABLED=true --network host \
   -w /repo/elasticsearch-java gradle:8.12-jdk17 gradle build --no-daemon
 
-# spring-data only: rewrite golden/expectations.json from what the translator emits today.
+# Both: rewrite golden/expectations.json from what the translator emits today.
 # `gradle test` never regenerates, so a translator change fails CI whatever anyone ran locally.
-#   … -w /repo/spring-data gradle:8.12-jdk17 gradle goldenUpdate --no-daemon
+#   … -w /repo/spring-data        gradle:8.12-jdk17 gradle goldenUpdate --no-daemon
+#   … -w /repo/elasticsearch-java gradle:8.12-jdk17 gradle goldenUpdate --no-daemon
 ```
 
-On spring-data, `SpringDataTranslatorTest` is the **translator unit test**: it reads its plans from
-`conformance/wire-fixtures/`, asserts the emitted SQL against `spring-data/golden/expectations.json`,
-and needs no sidecar and no database — its persistence unit carries no JDBC connection at all, and
-Hibernate is told the dialect rather than discovering it. Only `AdversarialConformanceTest` needs
-Docker. Nothing under `spring-data/` reads `/policies/` any more.
+Both Java adapters have a **translator unit test** that reads its plans from
+`conformance/wire-fixtures/` and asserts the emitted filter against that adapter's
+`golden/expectations.json`, with no sidecar and no store. On spring-data,
+`SpringDataTranslatorTest` needs no database — its persistence unit carries no JDBC connection at
+all, and Hibernate is told the dialect rather than discovering it. On elasticsearch-java,
+`ElasticsearchTranslatorTest` needs no Elasticsearch, and reads as mostly-throws: 122 of the
+corpus's 199 shapes are fail-closed there, each asserted against the message
+`conformance/actions.json` pins.
+
+Two suites on elasticsearch-java need Docker, and they need different things:
+`ElasticsearchAdversarialConformanceTest` starts a pinned PDP and Elasticsearch;
+`ElasticsearchSurfaceTest` starts Elasticsearch alone, to execute an emitted clause against a real
+server and to measure the store facts most of that adapter's `adapterUnsupported` reasons cite — an
+empty array is not indexed, a JSON null is not indexed, an analyzed field is compared per token. A
+harness can only ever see the refusal, never the mechanism. Nothing under `spring-data/` or
+`elasticsearch-java/` reads `/policies/` any more.
 
 ## Testing
 
-Most TypeScript tests run behind a Cerbos sidecar:
+Every adapter that had a shared-policy suite now runs a **translator unit test** in its place: it
+reads its plans from `conformance/wire-fixtures/` and asserts the emitted filter, with no sidecar
+(see above). Ent and pgx never had one — their mirrored `translate_test.go` / `render_test.go`
+suites hand-build their plans and always did, and porting them is not part of
+[#372](https://github.com/cerbos/query-plan-adapters/issues/372).
+
+Every adversarial suite starts a PDP and loads `conformance/policies/`, not `/policies/`. Shared
+policies still live in `/policies/`, and **convex's integration suite is the last thing that reads
+them** — `npm run test:integration`, run behind a locally installed Cerbos CLI:
+
 ```bash
-cerbos run --set=storage.disk.directory=../policies -- jest src/**.test.ts
+cerbos run --set=storage.disk.directory=../policies -- jest --config jest.integration.config.js
 ```
 
-Cerbos CLI must be installed locally. Shared policies live in `/policies/`. Prisma, mongoose,
-drizzle, convex, langchain-chromadb, sqlalchemy and spring-data are the exceptions: their unit suite
-needs no sidecar (see above), and only their adversarial suite starts a PDP — against
-`conformance/policies/`, not `/policies/`. All but convex read `/policies/` nowhere at all any more,
-which is why none of their workflows lists it as a trigger path; convex still does, from
-`npm run test:integration`, so its workflow keeps it.
+That is why convex's workflow keeps `policies/**` in its trigger paths and no other adapter's does.
+Deleting the suite is [#385](https://github.com/cerbos/query-plan-adapters/issues/385).
 
 Some adapters need additional services:
 - Mongoose: `npm run mongo` (Docker MongoDB)
@@ -323,7 +353,7 @@ never recompute them in a harness.
 - `conformance/` affects all adapters too: a change there re-runs every adapter's CI, and adding an action requires classifying it for every adapter
 - `demo/` likewise re-runs every adapter's example job, and adding a usage shape means implementing it in every example — there is no classification bucket to opt out with
 - Adding a seed row means adding its `conformance/derived-fields.json` entry in the same commit; adding a seed *field* also means widening every harness's declared key set — both are enforced, not optional
-- Adapters share data, not code: the corpus loader each adapter carries (`prisma/src/corpus.ts`, `mongoose/src/corpus.ts`, `drizzle/src/corpus.ts`, `convex/src/corpus.ts`, `langchain-chromadb/src/corpus.ts`, `sqlalchemy/tests/corpus.py`, `spring-data/src/test/java/dev/cerbos/queryplan/springdata/Corpus.java`, `ent/corpus_test.go`, `pgx/corpus_test.go`, …) is duplicated **deliberately**, so every adapter stays standalone. Do not extract a shared loader, and do not add a drift check between the copies — they are allowed to differ. That is the opposite of the byte-identical rule on the vendored Go *translator* trees, which keeps its exact current scope. See [ADR 0007](docs/adr/0007-adapters-share-data-not-code.md)
+- Adapters share data, not code: the corpus loader each adapter carries (`prisma/src/corpus.ts`, `mongoose/src/corpus.ts`, `drizzle/src/corpus.ts`, `convex/src/corpus.ts`, `langchain-chromadb/src/corpus.ts`, `sqlalchemy/tests/corpus.py`, `spring-data/src/test/java/dev/cerbos/queryplan/springdata/Corpus.java`, `elasticsearch-java/src/test/java/dev/cerbos/queryplan/elasticsearch/Corpus.java`, `ent/corpus_test.go`, `pgx/corpus_test.go`, …) is duplicated **deliberately**, so every adapter stays standalone. Do not extract a shared loader, and do not add a drift check between the copies — they are allowed to differ. That is the opposite of the byte-identical rule on the vendored Go *translator* trees, which keeps its exact current scope. See [ADR 0007](docs/adr/0007-adapters-share-data-not-code.md)
 - A per-adapter **golden expectation** — the filter one adapter is pinned to emit for one corpus action — lives in that adapter's own `golden/expectations.json`, never under `conformance/`; a throwing action carries no entry, because its message is already pinned in `conformance/actions.json`. Schema and rationale: `conformance/README.md`, "Golden expectations"
 - Write "every adapter" / "every harness" / "every example" wherever prose spans the roster — in docs, test-file comments and JSON `description`s alike. `conformance/actions.json` declares `adapters`, so the phrasing stays true when the roster changes and nothing else has to count them. Genuine counts of something else (corpus actions, seed rows) go in digits. `conformance/scripts/check-docs.sh` enforces it across every tracked file
 - Regenerate build artifacts in the same commit as source changes

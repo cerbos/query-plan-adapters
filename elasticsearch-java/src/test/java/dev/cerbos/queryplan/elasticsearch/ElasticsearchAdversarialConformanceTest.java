@@ -2,7 +2,6 @@ package dev.cerbos.queryplan.elasticsearch;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.cerbos.queryplan.elasticsearch.ElasticsearchQueryPlanAdapter.Result;
@@ -24,10 +23,6 @@ import org.testcontainers.images.builder.Transferable;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -57,60 +52,11 @@ class ElasticsearchAdversarialConformanceTest {
     private static final String INDEX = "adversarial";
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    private static final Map<String, String> FIELD_MAP = Map.ofEntries(
-            // The primary key, reached as `request.resource.id` rather than through `attr` (the
-            // `id-*` actions). It maps onto the indexed `id` keyword field rather than Elasticsearch's
-            // own `_id` metadata field: an adapter that resolves references by stripping a
-            // `request.resource.attr.` prefix never sees this name at all.
-            Map.entry("request.resource.id", "id"),
-            Map.entry("request.resource.attr.aBool", "aBool"),
-            Map.entry("request.resource.attr.aString", "aString"),
-            Map.entry("request.resource.attr.aNumber", "aNumber"),
-            Map.entry("request.resource.attr.aDouble", "aDouble"),
-            Map.entry("request.resource.attr.aOptionalString", "aOptionalString"),
-            Map.entry("request.resource.attr.createdBy", "createdBy"),
-            Map.entry("request.resource.attr.createdAt", "createdAt"),
-            Map.entry("request.resource.attr.owner", "owner"),
-            // `coOwner` is the explicit-null alias of the `scope` field, the second half of
-            // `null-value-f2f`: `scope` itself is omitted when NULL, so the corpus carries the
-            // same field under both conventions (cerbos/query-plan-adapters#308).
-            Map.entry("request.resource.attr.coOwner", "coOwner"),
-            Map.entry("request.resource.attr.scope", "scope"),
-            Map.entry("request.resource.attr.obj.inner", "obj.inner"),
-            Map.entry("request.resource.attr.tags", "tags"),
-            Map.entry("request.resource.attr.tagNames", "tagNames"),
-            // `categories` must be mapped even though every action touching it is fail-closed:
-            // an unmapped field makes those actions throw "Unknown attribute" instead of the
-            // mechanism their actions.json reasons name, so the throw tests pass for the wrong
-            // reason and the claimed limitation is never actually exercised.
-            Map.entry("request.resource.attr.categories", "categories"),
-            Map.entry("request.resource.attr.mainCategory.subCategories", "mainCategory.subCategories"),
-            Map.entry("request.resource.attr.mainCategory.subNames", "mainCategory.subNames"),
-            // The corpus's one REAL to-one chain (the `rel-*` actions), indexed as plain objects
-            // because Elasticsearch has no join. Every level is mapped even where the action is
-            // fail-closed: an unmapped field throws "Unknown attribute" instead of the mechanism
-            // actions.json names, which passes the throw test for the wrong reason (#326).
-            Map.entry("request.resource.attr.parent.aBool", "parent.aBool"),
-            Map.entry("request.resource.attr.parent.aString", "parent.aString"),
-            Map.entry("request.resource.attr.parent.aNumber", "parent.aNumber"),
-            Map.entry("request.resource.attr.parent.aOptionalString", "parent.aOptionalString"),
-            Map.entry("request.resource.attr.parent.inner.aBool", "parent.inner.aBool"),
-            Map.entry("request.resource.attr.parent.inner.aString", "parent.inner.aString"),
-            Map.entry("request.resource.attr.parent.inner.aNumber", "parent.inner.aNumber"),
-            Map.entry("request.resource.attr.parent.inner.aOptionalString", "parent.inner.aOptionalString"));
-
-    /**
-     * The attributes the corpus sends to {@code check()} as EXPLICIT nulls
-     * (cerbos/query-plan-adapters#308). Elasticsearch cannot represent that convention — a JSON
-     * null is not indexed, so an explicitly-null value and a missing field are the same document
-     * — so declaring them here is what turns a narrow answer into a refusal.
-     */
-    private static final Set<String> EXPLICIT_NULL_ATTRIBUTES = Set.of(
-            "request.resource.attr.owner", "request.resource.attr.coOwner");
-
-    private static final Set<String> NESTED_PATHS = Set.of(
-            "tags", "mainCategory.subCategories",
-            "categories", "categories.subCategories", "categories.subCategories.labels");
+    // The three arguments the corpus is translated through live in Corpus, not here, because
+    // ElasticsearchTranslatorTest pins the query this adapter emits for each corpus action and
+    // THIS suite proves the documents that same query returns. Those two statements are only about
+    // one query while both are built from one set of arguments; two copies could drift and each
+    // suite would keep passing.
 
     private static Path conformanceDir() {
         return Path.of(System.getProperty("user.dir"), "..", "conformance").normalize();
@@ -254,8 +200,7 @@ class ElasticsearchAdversarialConformanceTest {
     private static GenericContainer<?> cerbos;
     private static ElasticsearchContainer elasticsearch;
     private static CerbosBlockingClient client;
-    private static HttpClient httpClient;
-    private static String esBaseUrl;
+    private static TestElasticsearch es;
 
     static Stream<String> oracleActions() {
         return oracleActions.stream();
@@ -300,11 +245,10 @@ class ElasticsearchAdversarialConformanceTest {
         elasticsearch = new ElasticsearchContainer(ElasticsearchTestImage.IMAGE)
                 .withEnv("xpack.security.enabled", "false");
         elasticsearch.start();
-        httpClient = HttpClient.newHttpClient();
-        esBaseUrl = "http://" + elasticsearch.getHttpHostAddress();
+        es = new TestElasticsearch(elasticsearch.getHttpHostAddress());
         createIndex();
         seedIndex();
-        esRequest("POST", "/" + INDEX + "/_refresh", null);
+        es.refresh(INDEX);
     }
 
     private static void classifyActions() {
@@ -446,8 +390,7 @@ class ElasticsearchAdversarialConformanceTest {
         parentProperties.put("inner", Map.of("properties", relationLevel));
         properties.put("parent", Map.of("properties", parentProperties));
 
-        esRequest("PUT", "/" + INDEX, MAPPER.writeValueAsString(
-                Map.of("mappings", Map.of("properties", properties))));
+        es.createIndex(INDEX, Map.of("properties", properties));
     }
 
     private static void seedIndex() throws Exception {
@@ -494,8 +437,7 @@ class ElasticsearchAdversarialConformanceTest {
                 if (innerSeed != null) parent.put("inner", relationDocument(innerSeed));
                 document.put("parent", parent);
             }
-            esRequest("PUT", "/" + INDEX + "/_doc/" + seed.id(),
-                    MAPPER.writeValueAsString(document));
+            es.index(INDEX, seed.id(), document);
         }
     }
 
@@ -514,30 +456,14 @@ class ElasticsearchAdversarialConformanceTest {
         return categories;
     }
 
-    private static String esRequest(String method, String path, String body) throws Exception {
-        HttpRequest.Builder builder = HttpRequest.newBuilder()
-                .uri(URI.create(esBaseUrl + path))
-                .header("Content-Type", "application/json");
-        builder.method(method, body == null
-                ? HttpRequest.BodyPublishers.noBody()
-                : HttpRequest.BodyPublishers.ofString(body));
-        HttpResponse<String> response = httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofString());
-        if (response.statusCode() >= 400) {
-            throw new IllegalStateException(
-                    "Elasticsearch request failed (" + response.statusCode() + "): " + response.body());
-        }
-        return response.body();
+    /** The whole seeded index, so a filter is never silently truncated to Elasticsearch's page. */
+    private static String searchPath() {
+        return "/" + INDEX + "/_search?size=" + seeds.size();
     }
 
-    @SuppressWarnings("unchecked")
     private static List<String> search(Map<String, Object> query) throws Exception {
-        String json = esRequest("POST", "/" + INDEX + "/_search?size=" + seeds.size(),
-                MAPPER.writeValueAsString(Map.of("query", Map.of(
-                        "bool", Map.of("filter", List.of(query))))));
-        Map<String, Object> response = MAPPER.readValue(json, new TypeReference<>() {});
-        Map<String, Object> hits = (Map<String, Object>) response.get("hits");
-        return ((List<Map<String, Object>>) hits.get("hits")).stream()
-                .map(hit -> (String) hit.get("_id")).sorted().toList();
+        return es.ids(searchPath(), Map.of("query", Map.of(
+                "bool", Map.of("filter", List.of(query)))));
     }
 
     private static List<String> allIds() {
@@ -714,7 +640,8 @@ class ElasticsearchAdversarialConformanceTest {
         PlanResourcesResult plan = client.plan(
                 principal(), Resource.newInstance(seedsFile.resourceKind()), action);
         Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
-                plan, FIELD_MAP, Map.of(), NESTED_PATHS, EXPLICIT_NULL_ATTRIBUTES);
+                plan, Corpus.FIELD_MAP, Map.of(), Corpus.NESTED_PATHS,
+                Corpus.EXPLICIT_NULL_ATTRIBUTES);
         if (result instanceof Result.AlwaysAllowed) {
             return allIds();
         }
@@ -741,11 +668,12 @@ class ElasticsearchAdversarialConformanceTest {
                 principal(), Resource.newInstance(seedsFile.resourceKind()), action);
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
                 () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
-                plan, FIELD_MAP, Map.of(), NESTED_PATHS, EXPLICIT_NULL_ATTRIBUTES),
+                plan, Corpus.FIELD_MAP, Map.of(), Corpus.NESTED_PATHS,
+                Corpus.EXPLICIT_NULL_ATTRIBUTES),
                 "unsupported action must fail during translation: " + action);
         // The corpus pins the exact mechanism, which subsumes the old "Unknown attribute" guard:
-        // an unmapped FIELD_MAP entry (which once let six actions throw here while never reaching
-        // the mechanism their actions.json reasons claim) now fails this assertion along with
+        // an unmapped Corpus.FIELD_MAP entry (which once let six actions throw here while never
+        // reaching the mechanism their actions.json reasons claim) now fails this assertion with
         // every other wrong-reason rejection (cerbos/query-plan-adapters#326).
         assertTrue(ex.getMessage().contains(throwingMessages.get(action)),
                 "action '" + action + "' was rejected for a reason actions.json does not declare: "
@@ -949,12 +877,9 @@ class ElasticsearchAdversarialConformanceTest {
                     inner == null ? null : inner.aString()));
         }
 
-        String json = esRequest("POST", "/" + INDEX + "/_search?size=" + seeds.size(),
-                MAPPER.writeValueAsString(Map.of("query", Map.of("match_all", Map.of()))));
-        Map<String, Object> response = MAPPER.readValue(json, new TypeReference<>() {});
-        Map<String, Object> hits = (Map<String, Object>) response.get("hits");
         Map<String, List<String>> got = new LinkedHashMap<>();
-        for (Map<String, Object> hit : (List<Map<String, Object>>) hits.get("hits")) {
+        for (Map<String, Object> hit :
+                es.hits(searchPath(), Map.of("query", Map.of("match_all", Map.of())))) {
             Map<String, Object> source = (Map<String, Object>) hit.get("_source");
             Map<String, Object> parent = (Map<String, Object>) source.get("parent");
             Map<String, Object> inner = parent == null

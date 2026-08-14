@@ -1,0 +1,1492 @@
+{
+  "adapter": "elasticsearch-java",
+  "regenerate": "gradle goldenUpdate",
+  "expectations": {
+    "cs-contains": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "wildcard": {
+          "aString": {
+            "value": "*one*"
+          }
+        }
+      }
+    },
+    "cs-endswith": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "wildcard": {
+          "aString": {
+            "value": "*one"
+          }
+        }
+      }
+    },
+    "cs-eq": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "term": {
+          "aString": {
+            "value": "one"
+          }
+        }
+      }
+    },
+    "cs-startswith": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "prefix": {
+          "aString": {
+            "value": "one"
+          }
+        }
+      }
+    },
+    "double-negation": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "term": {
+          "aBool": {
+            "value": true
+          }
+        }
+      }
+    },
+    "double-threshold": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "range": {
+          "aNumber": {
+            "gte": 1.5
+          }
+        }
+      }
+    },
+    "empty-string-eq": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "term": {
+          "aString": {
+            "value": ""
+          }
+        }
+      }
+    },
+    "exists-on-empty": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "nested": {
+          "path": "tags",
+          "query": {
+            "term": {
+              "tags.name": {
+                "value": "public"
+              }
+            }
+          }
+        }
+      }
+    },
+    "gt-bare": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "range": {
+          "aNumber": {
+            "gt": 1
+          }
+        }
+      }
+    },
+    "id-eq-const": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "term": {
+          "id": {
+            "value": "f1"
+          }
+        }
+      }
+    },
+    "in-empty": {
+      "kind": "ALWAYS_DENIED"
+    },
+    "in-null-elem-neg": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "must": [
+            {
+              "exists": {
+                "field": "owner"
+              }
+            },
+            {
+              "bool": {
+                "must_not": [
+                  {
+                    "terms": {
+                      "owner": [
+                        "x",
+                        "one_two"
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "in-null-elem-only-neg": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "exists": {
+          "field": "owner"
+        }
+      }
+    },
+    "in-single": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "term": {
+          "aString": {
+            "value": "one"
+          }
+        }
+      }
+    },
+    "lambda-in-principal": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "nested": {
+          "path": "tags",
+          "query": {
+            "terms": {
+              "tags.name": [
+                "public",
+                "special"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "le-bare": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "range": {
+          "aNumber": {
+            "lte": 2
+          }
+        }
+      }
+    },
+    "like-backslash": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "wildcard": {
+          "aString": {
+            "value": "*\\\\"
+          }
+        }
+      }
+    },
+    "like-bracket": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "prefix": {
+          "aString": {
+            "value": "[SEC]"
+          }
+        }
+      }
+    },
+    "like-percent": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "prefix": {
+          "aString": {
+            "value": "100%"
+          }
+        }
+      }
+    },
+    "like-underscore": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "wildcard": {
+          "aString": {
+            "value": "*a_b*"
+          }
+        }
+      }
+    },
+    "n-not-all-absorb": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "nested": {
+          "path": "tags",
+          "query": {
+            "term": {
+              "tags.name": {
+                "value": "public"
+              }
+            }
+          }
+        }
+      }
+    },
+    "n-not-all-null": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "nested": {
+          "path": "tags",
+          "query": {
+            "bool": {
+              "must": [
+                {
+                  "exists": {
+                    "field": "tags.name"
+                  }
+                },
+                {
+                  "bool": {
+                    "must_not": [
+                      {
+                        "term": {
+                          "tags.name": {
+                            "value": "public"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "nary-and": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "must": [
+            {
+              "term": {
+                "aBool": {
+                  "value": true
+                }
+              }
+            },
+            {
+              "range": {
+                "aNumber": {
+                  "gte": 0
+                }
+              }
+            },
+            {
+              "bool": {
+                "must": [
+                  {
+                    "exists": {
+                      "field": "aString"
+                    }
+                  },
+                  {
+                    "bool": {
+                      "must_not": [
+                        {
+                          "term": {
+                            "aString": {
+                              "value": "one"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "neg-number": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "range": {
+          "aNumber": {
+            "lt": -1
+          }
+        }
+      }
+    },
+    "not-and": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "minimum_should_match": 1,
+          "should": [
+            {
+              "term": {
+                "aBool": {
+                  "value": false
+                }
+              }
+            },
+            {
+              "term": {
+                "aString": {
+                  "value": "one"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "not-empty": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "nested": {
+          "path": "tags",
+          "query": {
+            "match_all": { }
+          }
+        }
+      }
+    },
+    "not-gt": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "range": {
+          "aNumber": {
+            "lte": 1
+          }
+        }
+      }
+    },
+    "not-lt": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "range": {
+          "aNumber": {
+            "gte": 2
+          }
+        }
+      }
+    },
+    "null-ne": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "exists": {
+          "field": "owner"
+        }
+      }
+    },
+    "null-not-eq": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "exists": {
+          "field": "owner"
+        }
+      }
+    },
+    "optional-ne": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "must": [
+            {
+              "exists": {
+                "field": "aOptionalString"
+              }
+            },
+            {
+              "bool": {
+                "must_not": [
+                  {
+                    "term": {
+                      "aOptionalString": {
+                        "value": "x"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "or-eq-exists": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "minimum_should_match": 1,
+          "should": [
+            {
+              "term": {
+                "aBool": {
+                  "value": true
+                }
+              }
+            },
+            {
+              "nested": {
+                "path": "tags",
+                "query": {
+                  "term": {
+                    "tags.name": {
+                      "value": "public"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "or-eq-in": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "minimum_should_match": 1,
+          "should": [
+            {
+              "term": {
+                "aBool": {
+                  "value": true
+                }
+              }
+            },
+            {
+              "terms": {
+                "tagNames": [
+                  "public"
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "p-has": {
+      "kind": "ALWAYS_ALLOWED"
+    },
+    "p-hasintersection-map": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "must": [
+            {
+              "nested": {
+                "path": "tags",
+                "query": {
+                  "terms": {
+                    "tags.name": [
+                      "public",
+                      "héllo🚀",
+                      "100%_x"
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "bool": {
+                "must_not": [
+                  {
+                    "nested": {
+                      "path": "tags",
+                      "query": {
+                        "bool": {
+                          "must_not": [
+                            {
+                              "exists": {
+                                "field": "tags.name"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "p-in-null-multi": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "terms": {
+          "aOptionalString": [
+            "x",
+            "one_two"
+          ]
+        }
+      }
+    },
+    "p-in-null-single": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "term": {
+          "aOptionalString": {
+            "value": "x"
+          }
+        }
+      }
+    },
+    "p-matches": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "prefix": {
+          "aString": {
+            "value": "h"
+          }
+        }
+      }
+    },
+    "p-startswith-concat": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "prefix": {
+          "aString": {
+            "value": "100%"
+          }
+        }
+      }
+    },
+    "p-struct": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "term": {
+          "obj.inner": {
+            "value": "one"
+          }
+        }
+      }
+    },
+    "p-timestamp": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "range": {
+          "createdBy": {
+            "lt": "2025-01-01T00:00:00Z"
+          }
+        }
+      }
+    },
+    "pv-all": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "must": [
+            {
+              "bool": {
+                "must": [
+                  {
+                    "exists": {
+                      "field": "aOptionalString"
+                    }
+                  },
+                  {
+                    "bool": {
+                      "must_not": [
+                        {
+                          "term": {
+                            "aOptionalString": {
+                              "value": "set"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "bool": {
+                "must": [
+                  {
+                    "exists": {
+                      "field": "aOptionalString"
+                    }
+                  },
+                  {
+                    "bool": {
+                      "must_not": [
+                        {
+                          "term": {
+                            "aOptionalString": {
+                              "value": "same"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "bool": {
+                "must": [
+                  {
+                    "exists": {
+                      "field": "aOptionalString"
+                    }
+                  },
+                  {
+                    "bool": {
+                      "must_not": [
+                        {
+                          "term": {
+                            "aOptionalString": {
+                              "value": ""
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "bool": {
+                "must": [
+                  {
+                    "exists": {
+                      "field": "aOptionalString"
+                    }
+                  },
+                  {
+                    "bool": {
+                      "must_not": [
+                        {
+                          "term": {
+                            "aOptionalString": {
+                              "value": "%_o"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "bool": {
+                "must": [
+                  {
+                    "exists": {
+                      "field": "aOptionalString"
+                    }
+                  },
+                  {
+                    "bool": {
+                      "must_not": [
+                        {
+                          "term": {
+                            "aOptionalString": {
+                              "value": "X"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "bool": {
+                "must": [
+                  {
+                    "exists": {
+                      "field": "aOptionalString"
+                    }
+                  },
+                  {
+                    "bool": {
+                      "must_not": [
+                        {
+                          "term": {
+                            "aOptionalString": {
+                              "value": "Y"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "bool": {
+                "must": [
+                  {
+                    "exists": {
+                      "field": "aOptionalString"
+                    }
+                  },
+                  {
+                    "bool": {
+                      "must_not": [
+                        {
+                          "term": {
+                            "aOptionalString": {
+                              "value": "MIRROR"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "bool": {
+                "must": [
+                  {
+                    "exists": {
+                      "field": "aOptionalString"
+                    }
+                  },
+                  {
+                    "bool": {
+                      "must_not": [
+                        {
+                          "term": {
+                            "aOptionalString": {
+                              "value": "filler-1"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "bool": {
+                "must": [
+                  {
+                    "exists": {
+                      "field": "aOptionalString"
+                    }
+                  },
+                  {
+                    "bool": {
+                      "must_not": [
+                        {
+                          "term": {
+                            "aOptionalString": {
+                              "value": "filler-2"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "bool": {
+                "must": [
+                  {
+                    "exists": {
+                      "field": "aOptionalString"
+                    }
+                  },
+                  {
+                    "bool": {
+                      "must_not": [
+                        {
+                          "term": {
+                            "aOptionalString": {
+                              "value": "filler-3"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "bool": {
+                "must": [
+                  {
+                    "exists": {
+                      "field": "aOptionalString"
+                    }
+                  },
+                  {
+                    "bool": {
+                      "must_not": [
+                        {
+                          "term": {
+                            "aOptionalString": {
+                              "value": "filler-4"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pv-all-unrolled": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "must": [
+            {
+              "bool": {
+                "must": [
+                  {
+                    "exists": {
+                      "field": "aOptionalString"
+                    }
+                  },
+                  {
+                    "bool": {
+                      "must_not": [
+                        {
+                          "term": {
+                            "aOptionalString": {
+                              "value": "set"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "bool": {
+                "must": [
+                  {
+                    "bool": {
+                      "must": [
+                        {
+                          "exists": {
+                            "field": "aOptionalString"
+                          }
+                        },
+                        {
+                          "bool": {
+                            "must_not": [
+                              {
+                                "term": {
+                                  "aOptionalString": {
+                                    "value": ""
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "bool": {
+                      "must": [
+                        {
+                          "exists": {
+                            "field": "aOptionalString"
+                          }
+                        },
+                        {
+                          "bool": {
+                            "must_not": [
+                              {
+                                "term": {
+                                  "aOptionalString": {
+                                    "value": "%_o"
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pv-exists": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "minimum_should_match": 1,
+          "should": [
+            {
+              "term": {
+                "aOptionalString": {
+                  "value": "set"
+                }
+              }
+            },
+            {
+              "term": {
+                "aOptionalString": {
+                  "value": "same"
+                }
+              }
+            },
+            {
+              "term": {
+                "aOptionalString": {
+                  "value": ""
+                }
+              }
+            },
+            {
+              "term": {
+                "aOptionalString": {
+                  "value": "%_o"
+                }
+              }
+            },
+            {
+              "term": {
+                "aOptionalString": {
+                  "value": "X"
+                }
+              }
+            },
+            {
+              "term": {
+                "aOptionalString": {
+                  "value": "Y"
+                }
+              }
+            },
+            {
+              "term": {
+                "aOptionalString": {
+                  "value": "MIRROR"
+                }
+              }
+            },
+            {
+              "term": {
+                "aOptionalString": {
+                  "value": "filler-1"
+                }
+              }
+            },
+            {
+              "term": {
+                "aOptionalString": {
+                  "value": "filler-2"
+                }
+              }
+            },
+            {
+              "term": {
+                "aOptionalString": {
+                  "value": "filler-3"
+                }
+              }
+            },
+            {
+              "term": {
+                "aOptionalString": {
+                  "value": "filler-4"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pv-exists-unrolled": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "minimum_should_match": 1,
+          "should": [
+            {
+              "term": {
+                "aOptionalString": {
+                  "value": "set"
+                }
+              }
+            },
+            {
+              "bool": {
+                "minimum_should_match": 1,
+                "should": [
+                  {
+                    "term": {
+                      "aOptionalString": {
+                        "value": ""
+                      }
+                    }
+                  },
+                  {
+                    "term": {
+                      "aOptionalString": {
+                        "value": "%_o"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "rel-bool-hop": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "term": {
+          "parent.aBool": {
+            "value": true
+          }
+        }
+      }
+    },
+    "rel-bool-hop2": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "term": {
+          "parent.inner.aBool": {
+            "value": true
+          }
+        }
+      }
+    },
+    "rel-contains-hop": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "wildcard": {
+          "parent.aString": {
+            "value": "*done*"
+          }
+        }
+      }
+    },
+    "rel-eq-hop": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "term": {
+          "parent.aString": {
+            "value": "One"
+          }
+        }
+      }
+    },
+    "rel-eq-num-hop": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "term": {
+          "parent.aNumber": {
+            "value": 2
+          }
+        }
+      }
+    },
+    "rel-ge-hop": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "range": {
+          "parent.aNumber": {
+            "gte": 2
+          }
+        }
+      }
+    },
+    "rel-gt-hop": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "range": {
+          "parent.aNumber": {
+            "gt": 2
+          }
+        }
+      }
+    },
+    "rel-hop-and-root": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "must": [
+            {
+              "term": {
+                "aBool": {
+                  "value": true
+                }
+              }
+            },
+            {
+              "wildcard": {
+                "parent.aString": {
+                  "value": "*re*"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "rel-hop2-or-exists": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "minimum_should_match": 1,
+          "should": [
+            {
+              "term": {
+                "parent.inner.aBool": {
+                  "value": true
+                }
+              }
+            },
+            {
+              "nested": {
+                "path": "categories",
+                "query": {
+                  "term": {
+                    "categories.name": {
+                      "value": "business"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "rel-le-hop": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "range": {
+          "parent.aNumber": {
+            "lte": 2
+          }
+        }
+      }
+    },
+    "rel-lt-hop": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "range": {
+          "parent.aNumber": {
+            "lt": 2
+          }
+        }
+      }
+    },
+    "rel-ne-null-hop": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "exists": {
+          "field": "parent.aOptionalString"
+        }
+      }
+    },
+    "rel-not-bool-hop": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "term": {
+          "parent.aBool": {
+            "value": false
+          }
+        }
+      }
+    },
+    "rel-range-hop": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "must": [
+            {
+              "range": {
+                "parent.aNumber": {
+                  "gt": 2
+                }
+              }
+            },
+            {
+              "range": {
+                "parent.aNumber": {
+                  "lt": 12
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "rel-startswith-hop2": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "prefix": {
+          "parent.inner.aString": {
+            "value": "100"
+          }
+        }
+      }
+    },
+    "root-bare-bool": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "term": {
+          "aBool": {
+            "value": true
+          }
+        }
+      }
+    },
+    "root-or": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "minimum_should_match": 1,
+          "should": [
+            {
+              "term": {
+                "aBool": {
+                  "value": true
+                }
+              }
+            },
+            {
+              "range": {
+                "aNumber": {
+                  "lt": 0
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "triple-negation": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "term": {
+          "aBool": {
+            "value": false
+          }
+        }
+      }
+    },
+    "ts-eq": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "term": {
+          "createdAt": {
+            "value": "2024-06-01T00:00:00Z"
+          }
+        }
+      }
+    },
+    "ts-eq-offset": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "term": {
+          "createdAt": {
+            "value": "2024-06-01T02:00:00+02:00"
+          }
+        }
+      }
+    },
+    "ts-ne": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "must": [
+            {
+              "exists": {
+                "field": "createdAt"
+              }
+            },
+            {
+              "bool": {
+                "must_not": [
+                  {
+                    "term": {
+                      "createdAt": {
+                        "value": "2024-06-01T00:00:00Z"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "unicode-eq": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "term": {
+          "aString": {
+            "value": "héllo🚀"
+          }
+        }
+      }
+    },
+    "vf-ge": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "range": {
+          "aNumber": {
+            "lte": 2
+          }
+        }
+      }
+    },
+    "vf-hasint": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "terms": {
+          "tagNames": [
+            "public",
+            "other"
+          ]
+        }
+      }
+    },
+    "vf-le": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "range": {
+          "aNumber": {
+            "gte": 3
+          }
+        }
+      }
+    },
+    "vf-lt": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "range": {
+          "aNumber": {
+            "gt": 1
+          }
+        }
+      }
+    },
+    "vf-ne": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "must": [
+            {
+              "exists": {
+                "field": "aString"
+              }
+            },
+            {
+              "bool": {
+                "must_not": [
+                  {
+                    "term": {
+                      "aString": {
+                        "value": "one"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "vf-null-ne": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "exists": {
+          "field": "owner"
+        }
+      }
+    },
+    "vf-size": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "nested": {
+          "path": "tags",
+          "query": {
+            "match_all": { }
+          }
+        }
+      }
+    },
+    "w1-exists-chain": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "nested": {
+          "path": "mainCategory.subCategories",
+          "query": {
+            "term": {
+              "mainCategory.subCategories.name": {
+                "value": "finance"
+              }
+            }
+          }
+        }
+      }
+    },
+    "w1-in-chain": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "terms": {
+          "mainCategory.subNames": [
+            "finance"
+          ]
+        }
+      }
+    },
+    "w1-size-chain": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "nested": {
+          "path": "mainCategory.subCategories",
+          "query": {
+            "match_all": { }
+          }
+        }
+      }
+    }
+  }
+}

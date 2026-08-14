@@ -413,6 +413,31 @@ predicates that require distinguishing an indexed empty array from a missing fie
 
 Every fail-closed shape's error message is pinned in the shared corpus (`conformance/actions.json`) and asserted by this adapter's conformance run, so a classification proves the throw names its declared mechanism rather than merely that something threw.
 
+`ElasticsearchTranslatorTest` asserts the same classification offline, and adds the property the
+per-action assertions cannot state: the **distribution of the refusals over the sites in the walk
+that raise them**. 122 of the corpus's 199 shapes are refused here — the 121 fail-closed actions
+above plus `null-eq-missing` — so it matters whether that happens at one catch-all or at many. It
+is sixteen sites, and one mechanism — an operand slot holding a computed sub-expression, where the
+Query DSL admits only a field and a literal — accounts for 65 of them:
+
+| Rejection site | Actions |
+| --- | --- |
+| computed leaf operand (arithmetic, casts, ternaries, `map()`/`filter()`, hierarchy, nested `size()`, a lambda one scope too deep) | 65 |
+| field-to-field comparison | 15 |
+| count threshold that is not an emptiness check | 8 |
+| explicit null against null, or against a constant | 8 |
+| string operator whose receiver is the constant | 4 |
+| negated `exists` over a collection | 4 |
+| positive `all` over a collection | 4 |
+| `exists_one`, collection emptiness, negated membership, operand arity, sub-millisecond timestamp | 2 each |
+| count over a non-collection, negated `hasIntersection`, null in a document array, null in an intersection | 1 each |
+
+The list is asserted **total** — a shape refused by an accident rather than by a declared
+limitation matches no site and fails — and the counts are pinned, so a translator change that moves
+a shape from one site to another shows up as a diff even though both sites throw and
+`conformance/actions.json` is unchanged. Zero refusals are an unmapped field, which is the accident
+[#326](https://github.com/cerbos/query-plan-adapters/issues/326) was filed for.
+
 Elasticsearch does not index empty arrays. An `exists` or nested query therefore cannot distinguish an attribute explicitly set to `[]` from an attribute omitted entirely. CEL treats the former as an empty collection and the latter as an evaluation error, so polarity matters: positive `exists`, positive non-empty checks, negated `all`, and negated empty checks remain safe; the opposite polarities throw rather than authorizing a document with a missing collection.
 
 **Behaviour change.** A `size()` comparison with the count on the **right** — `0 < size(R.attr.tags)`, which the planner preserves from policy source order — now translates. The operand scan found the `size()` wherever it sat but did not mirror the operator, so `0 < size(c)` was read as `size(c) < 0` and refused as an unsupported threshold rather than recognised as the emptiness check it is. A widening: a shape that threw now returns a query ([#387](https://github.com/cerbos/query-plan-adapters/issues/387)).
@@ -437,7 +462,7 @@ This adapter **builds no subquery.** A collection is a `nested` field on the sam
 
 The adapter is handed a plan, never an index. It has no way to read your mapping, and no way to tell an exactly-compared field from an analyzed one — the plan looks identical either way. So this is a precondition you own, and the failure is silent: `R.attr.aString == "string"` becomes `{"term": {"aString": {"value": "string"}}}`, which on a `text` field also selects a document whose `aString` is `"a string of words"` (one of its tokens is `string`) and one whose `aString` is `"STRING"` (the standard analyzer lowercases). Both are documents `check()` denies.
 
-The size of the gap is pinned by `ElasticsearchIntegrationTest.analyzedMappingWidensEqualityAndKeywordSubFieldRestoresIt` and `…WidensStartsWith`, which index the same four documents under an analyzed mapping and an exact one and compare the two row sets against a real Elasticsearch.
+The size of the gap is pinned by `ElasticsearchSurfaceTest.anAnalyzedMappingWidensEqualityAndTheKeywordSubFieldRestoresIt` and `…WidensStartsWith`, which index the same four documents under an analyzed mapping and an exact one and compare the two result sets against a real Elasticsearch. Both take their plan from the corpus wire fixture for `cs-eq` / `cs-startswith`, so the only thing that differs between the two runs is the mapping.
 
 **The remedy is the mapping, not an operator override.** If a field has to be `text` for full-text search, give it the standard `keyword` sub-field and point `fieldMap` at the sub-field:
 
@@ -508,8 +533,40 @@ gradle build --no-daemon
 
 ## Testing
 
-Unit tests use JUnit 5 with protobuf builders. Integration tests use [Testcontainers](https://testcontainers.com/) to run Elasticsearch 8.x:
+Run everything from the **repository root**, with the whole repo mounted: every suite here reads
+the shared corpus at `../conformance/`.
 
 ```bash
-gradle test --no-daemon
+docker run --rm -v "$(pwd)":/repo -v /var/run/docker.sock:/var/run/docker.sock \
+  -e TESTCONTAINERS_RYUK_DISABLED=true --network host \
+  -w /repo/elasticsearch-java gradle:8.12-jdk17 gradle build --no-daemon
 ```
+
+Four suites, and which of them needs a container is the useful distinction:
+
+| Suite | What it asserts | Needs |
+|---|---|---|
+| `ElasticsearchTranslatorTest` | the Query DSL emitted for every corpus action, against `golden/expectations.json`, and the pinned refusal message for every action `conformance/actions.json` says this adapter must reject | nothing — plans come from `conformance/wire-fixtures/`, so no PDP, no Elasticsearch and no Docker |
+| `ElasticsearchAdversarialConformanceTest` | the documents those queries return, against per-row `check()` | a pinned Cerbos PDP and Elasticsearch (Testcontainers) |
+| `ElasticsearchSurfaceTest` | what a real server does with an emitted clause, and the store facts the corpus reasons cite — an unindexed empty array, an unindexed JSON null, an analyzed field, Lucene regex, date precision | Elasticsearch (Testcontainers) |
+| `ElasticsearchQueryPlanAdapterTest` | the shapes no policy can produce — malformed operands, caller-supplied arguments, literal validation — plus a handful of shapes the corpus does not carry yet, each labelled | nothing |
+
+Nothing here reads the repository's shared `/policies/` suite.
+
+### Regenerating the golden expectations
+
+`golden/expectations.json` holds the Query DSL this adapter is pinned to emit for each corpus
+action. It is **data, reviewed as a diff** — never hand-edited, and never regenerated by CI, so a
+translator change that moves an emitted query fails the build whatever anyone ran locally:
+
+```bash
+docker run --rm -v "$(pwd)":/repo -w /repo/elasticsearch-java \
+  gradle:8.12-jdk17 gradle goldenUpdate --no-daemon
+```
+
+The entry is the translator's return value **verbatim** — the plan kind, plus the query for a
+conditional plan — because the Elasticsearch Query DSL already is JSON and this adapter emits a
+`Map<String, Object>` of plain JDK values. There is no rendering step and no client library
+involved, so unlike the SQL adapters the file declares no generator version. Object keys are sorted
+on the way in, because the adapter builds its queries with `Map.of`, whose iteration order is
+randomised per JVM run. Format and rationale: `conformance/README.md`, "Golden expectations".

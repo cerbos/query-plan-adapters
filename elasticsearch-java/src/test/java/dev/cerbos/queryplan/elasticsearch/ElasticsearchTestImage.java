@@ -5,11 +5,11 @@ import org.testcontainers.utility.DockerImageName;
 /**
  * Single source of truth for the Elasticsearch container image used by this harness.
  *
- * <p><b>Why one constant.</b> {@link ElasticsearchIntegrationTest} and
- * {@code ElasticsearchAdversarialConformanceTest} both start a server, and the adversarial suite
+ * <p><b>Why one constant.</b> {@link ElasticsearchSurfaceTest} and
+ * {@link ElasticsearchAdversarialConformanceTest} both start a server, and the adversarial suite
  * is a differential against the PDP. If the two suites run different Elasticsearch builds, the
- * unit-shaped assertions and the oracle comparison stop describing the same engine, and a
- * version-sensitive divergence surfaces in one suite only.
+ * store facts the surface suite measures and the oracle comparison stop describing the same
+ * engine, and a version-sensitive divergence surfaces in one suite only.
  *
  * <p><b>Why the digest.</b> A tag is mutable — {@code 8.15.3} can be re-pushed — so a tag-only pin
  * records an intent, not a build. {@code conformance/scripts/validate-corpus.sh} asserts every
