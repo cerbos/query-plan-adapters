@@ -7,7 +7,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
-/** Pinned Cerbos image used by Elasticsearch integration tests. */
+/**
+ * Pinned Cerbos image used by {@link ElasticsearchAdversarialConformanceTest}, the one suite here
+ * that starts a PDP.
+ */
 final class CerbosTestImage {
 
     static final String IMAGE =
