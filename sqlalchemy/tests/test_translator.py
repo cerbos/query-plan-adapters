@@ -357,6 +357,20 @@ class TestCorpusShapes:
         )
         assert differing == sorted(RENDERING_DIFFERS_ON_SQLALCHEMY_14)
 
+    def test_every_shape_the_compilers_disagree_on_is_still_proved_by_the_oracle(self):
+        # The reason the divergence list is allowed to be a list rather than a second pinned
+        # asset: an entry on it is a shape whose ROWS the harness proves against `check()` on
+        # both majors, so what the bytes do not cover, the oracle does. An action that left the
+        # oracle set while staying on this list would break that argument silently, which is
+        # why it is asserted rather than asserted in a comment. Runs on both majors, since the
+        # claim is about the list rather than about either compiler.
+        oracle = set(classify_actions_for_adapter(ACTIONS_FILE, ADAPTER).oracle_actions)
+        assert [
+            action
+            for action in RENDERING_DIFFERS_ON_SQLALCHEMY_14
+            if action not in oracle
+        ] == []
+
     def test_the_unconditional_action_is_the_planner_fold_the_corpus_declares(self):
         # `p-has` is the corpus's one `knownDivergences` entry: the planner folds `has()` on a
         # missing attribute to ALWAYS_ALLOWED while `check()` denies those rows. The adapter
