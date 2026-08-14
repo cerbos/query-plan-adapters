@@ -637,3 +637,20 @@ export function mappedMetadataKeys(): string[] {
     .map((entry) => (typeof entry === "string" ? entry : entry.field))
     .sort();
 }
+
+/**
+ * The subset of those keys the mapping asserts is present on every document — the only keys `$ne`
+ * and `$nin` are sound over, since Chroma's inequalities MATCH a document missing the key.
+ *
+ * A bare string carries no presence assertion, so it is optional here exactly as it is in the
+ * adapter: the default lives in one place and both readings of it agree.
+ */
+export function requiredMetadataKeys(): string[] {
+  return Object.values(FIELD_NAME_MAPPER)
+    .filter(
+      (entry): entry is FieldNameMapperConfig =>
+        typeof entry !== "string" && entry.required === true,
+    )
+    .map((entry) => entry.field)
+    .sort();
+}

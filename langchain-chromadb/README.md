@@ -83,6 +83,17 @@ are the `all` half of the same pair, and both throw — the unrolled `$ne` chain
 targets an optional metadata key, which is the over-grant `required: true`
 exists to prevent.
 
+**The membership spelling has no such pair, because it has no boundary to
+straddle.** `P.attr.*` is folded before the adapter sees anything, so
+`R.attr.x in P.attr.xs` reaches the wire as `in(key, [literals])` at every
+collection size — structurally the corpus's `p-in-null-multi`, which is
+oracle-tested — and there is no size at which the planner emits something else.
+What the retired suite pinned by planning at 9, 10, 11 and 40 elements was
+therefore a **planner** property, not a translator one, and a wire fixture
+cannot carry it. A corpus action that spells the recommendation directly is
+tracked in
+[#411](https://github.com/cerbos/query-plan-adapters/issues/411).
+
 ## NULL attribute representation
 
 Other adapters in this repo take a `nullAttributeRepresentation` option, because `R.attr.x == null`
@@ -113,7 +124,7 @@ Chroma metadata filters are limited to flat scalar comparisons and membership. N
 
 The `Where` document each translated action produces is pinned separately, in the translator unit test (`npm test`) — see [Testing](#testing). That is what makes a change to the emitted filter show up as a diff even when it selects the same documents from the corpus seeds, and it is the only place the parts of the mapper contract no policy can reach are asserted at all: function mappers, the `required` and `numericType` declarations, the fallback for an unmapped reference, and malformed input.
 
-That test also pins **where** each of the 164 refusals happens. Five sixths of this corpus is fail-closed here, so the interesting property is not that a shape throws but which of the adapter's nine rejection sites it reaches — and `binaryOperands` refusing a computed operand accounts for 101 of them, because arithmetic, casts, ternaries, projections and above-cap collection macros all arrive at the wire as the same thing: an operand that is neither a bare metadata key nor a literal.
+That test also pins **where** each refusal happens — all 164 of them, which is the `Fail-closed` row's 163 plus the `Representation-independent` row's `null-eq-missing`, since the adapter refuses both alike. Five sixths of this corpus is fail-closed here, so the interesting property is not that a shape throws but which of the adapter's nine rejection sites it reaches — and `binaryOperands` refusing a computed operand accounts for 101 of them, because arithmetic, casts, ternaries, projections and above-cap collection macros all arrive at the wire as the same thing: an operand that is neither a bare metadata key nor a literal.
 
 ## Mapping hazards
 
@@ -267,11 +278,11 @@ const matches = await chroma.similaritySearch("query", 10, filters);
 
 ## Testing
 
-| Command | What it proves | What it needs |
+| Command | What it does | What it needs |
 | --- | --- | --- |
-| `npm test` | **The `Where` filter this adapter emits.** The translator unit test: every corpus action, classified exactly once as a golden expectation or as a throw | Nothing but Node — no Cerbos sidecar, no ChromaDB, no Docker |
-| `npm run test:adversarial` | **The documents that filter returns**, against a real ChromaDB collection with `check()` as the oracle | Cerbos CLI, Docker |
-| `npm run golden:update` | — | Rewrites `golden/expectations.json` from what the translator emits today. Review the diff |
+| `npm test` | Proves **the `Where` filter this adapter emits.** The translator unit test: every corpus action, classified exactly once as a golden expectation or as a throw | Nothing but Node — no Cerbos sidecar, no ChromaDB, no Docker |
+| `npm run test:adversarial` | Proves **the documents that filter returns**, against a real ChromaDB collection with `check()` as the oracle | Cerbos CLI, Docker |
+| `npm run golden:update` | Rewrites `golden/expectations.json` from what the translator emits today, preserving every `note`. Review the diff — CI never regenerates | Nothing but Node |
 
 ### The golden expectations
 

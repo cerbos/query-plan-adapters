@@ -24,6 +24,7 @@ import {
   readCorpusJson,
   readGoldenExpectations,
   requireMessage,
+  requiredMetadataKeys,
   wireFixtureActions,
   writeGoldenExpectations,
 } from "./corpus";
@@ -51,8 +52,8 @@ import type { GoldenExpectation } from "./corpus";
  *
  * **The expectations are data, not literals.** The filters this adapter is pinned to emit live in
  * `golden/expectations.json`, a **golden expectation** file this adapter owns — never under
- * `conformance/`, where eleven workflows trigger and one adapter re-pinning one filter would re-run
- * the other ten. The file is regenerated with `npm run golden:update` and reviewed as a diff,
+ * `conformance/`, where every adapter workflow triggers and one adapter re-pinning one filter would
+ * re-run all the others. The file is regenerated with `npm run golden:update` and reviewed as a diff,
  * exactly like the wire fixtures it is asserted against. See
  * [ADR 0007](../../docs/adr/0007-adapters-share-data-not-code.md) and the "Golden expectations"
  * section of `conformance/README.md`.
@@ -217,6 +218,10 @@ const CONDITIONAL_ACTIONS = RECORDED_ACTIONS.filter(
   (action) => RECORDED.get(action)!.expectation.kind === PlanKind.CONDITIONAL,
 );
 
+/** The `Where` clause the asset pins for one action; `undefined` on an unconditional plan kind. */
+const recordedFilters = (action: string): Where | undefined =>
+  (RECORDED.get(action)!.expectation as { filters?: Where }).filters;
+
 describe("corpus shapes", () => {
   test.each(RECORDED_ACTIONS)("%s emits the golden expectation", (action) => {
     expect(expectationFor(action)).toEqual(RECORDED.get(action)!.expectation);
@@ -362,9 +367,6 @@ describe("the rejection sites the corpus reaches", () => {
  * each carries an anti-vacuity assertion, because every one of them is satisfied by an empty filter.
  */
 describe("what an emitted filter may contain", () => {
-  const recordedFilters = (action: string): Where | undefined =>
-    (RECORDED.get(action)!.expectation as { filters?: Where }).filters;
-
   const ALL_COMPARISONS = CONDITIONAL_ACTIONS.flatMap((action) =>
     literalsOf(recordedFilters(action)).map((comparison) => ({
       action,
@@ -436,14 +438,7 @@ describe("what an emitted filter may contain", () => {
    * authorization bug, not a diff.
    */
   test("an inequality is emitted only over a field declared required", () => {
-    const required = new Set(
-      Object.values(FIELD_NAME_MAPPER)
-        .filter(
-          (entry): entry is FieldNameMapperConfig =>
-            typeof entry !== "string" && entry.required === true,
-        )
-        .map((entry) => entry.field),
-    );
+    const required = new Set(requiredMetadataKeys());
     const unsafe = ALL_COMPARISONS.filter(
       ({ field, operator }) =>
         ["$ne", "$nin"].includes(operator) && !required.has(field),
@@ -555,19 +550,26 @@ describe("mapper forms", () => {
   });
 
   /**
+   * `vf-ne` is the discriminating action for the two tests below: under the corpus mapper, where
+   * `aString` is declared `required: true`, it translates. The pinned filter is read from the asset
+   * rather than restated — expectations are data in this file, including here.
+   */
+  test("the discriminating action translates under the corpus mapper", () => {
+    expect(translate("vf-ne")).toEqual(RECORDED.get("vf-ne")!.expectation);
+    expect(literalsOf(recordedFilters("vf-ne"))).toEqual([
+      { field: "aString", operator: "$ne", value: "one" },
+    ]);
+  });
+
+  /**
    * The default is optional, in both spellings a mapper has. A bare string carries no presence
    * assertion and neither does an absent entry, so `$ne` is refused for both — the adapter never
-   * infers presence from the mere existence of a mapping. `vf-ne` is the discriminating action:
-   * under the corpus mapper, where `aString` is declared `required: true`, it translates.
+   * infers presence from the mere existence of a mapping.
    */
   test.each([
     ["a plain-string mapping", { "request.resource.attr.aString": "aString" }],
     ["an unmapped reference", {}],
   ])("%s is optional, so an inequality over it is refused", (_label, mapper) => {
-    expect(translate("vf-ne")).toEqual({
-      kind: PlanKind.CONDITIONAL,
-      filters: { aString: { $ne: "one" } },
-    });
     expect(() => translate("vf-ne", { fieldNameMapper: mapper })).toThrow(
       /ne is unsafe for optional Chroma metadata because missing fields match the filter/,
     );
@@ -587,6 +589,34 @@ describe("mapper forms", () => {
       filters: { "request.resource.attr.aString": { $eq: "one" } },
     });
   });
+
+  /**
+   * The one operand the wire fixtures cannot pin, and the assertion that it does not matter here.
+   *
+   * `regenerate-wire-fixtures.sh` rewrites `ts-window`'s folded `now() - duration("24h")` literal to
+   * a placeholder, because it differs on every capture — so reading the fixture back means choosing
+   * an instant. On the SQL adapters that choice is load-bearing: the PDP emits nanosecond precision,
+   * which is exactly why they refuse the action, and a tidy millisecond substitution in the loader
+   * would translate cleanly and quietly contradict `actions.json`.
+   *
+   * Here it is inert, because the comparison never reaches a literal — the operand is a computed
+   * expression and `binaryOperands` rejects it first. `corpus.ts` says so; this is what makes it a
+   * fact rather than a claim, and it is why the reader's choice of instant is not a hidden input to
+   * this adapter's classification.
+   */
+  test.each(["ts-window", "ts-vf"])(
+    "%s is refused for the same reason at either instant precision",
+    (action) => {
+      const message = THROWING_ACTIONS.find(
+        ([candidate]) => candidate === action,
+      )![2];
+
+      expect(() => translate(action)).toThrow(message);
+      expect(() =>
+        translate(action, { plannedAt: "2026-08-11T09:13:39.123Z" }),
+      ).toThrow(message);
+    },
+  );
 
   /**
    * The same shape the corpus refuses under the declared `integer` mapping translates once the
@@ -622,7 +652,7 @@ describe("plans the planner cannot produce", () => {
   // an error rather than a filter.
   //
   // A shape CEL *can* express does not belong here, whatever its plan looks like: it belongs in
-  // the corpus, where all ten adapters are asked about it.
+  // the corpus, where every adapter is asked about it.
 
   const plan = (condition: PlanExpressionOperand): PlanResourcesResponse =>
     ({
