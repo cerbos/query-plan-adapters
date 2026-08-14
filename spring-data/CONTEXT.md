@@ -49,3 +49,14 @@ Terms used by this adapter's code, tests, and reviews. Architecture vocabulary
 - **Double space** — all numeric work happens in IEEE doubles, because Cerbos
   attribute numbers are CEL doubles and the wire plan erases `1` vs `1.0`.
   Constants fold in Java; columns get a real `CAST(... AS DOUBLE)`.
+- **Golden expectation** — the SQL this adapter is pinned to emit for one
+  corpus action, in `golden/expectations.json`: the root joins and the `WHERE`
+  clause on each of the three dialects CI executes, with criteria literals
+  inlined. It records what the differential oracle cannot see — two queries can
+  agree on all 21 seeds and disagree on the row a consumer has. Regenerated
+  with `gradle goldenUpdate`, never by CI, and reviewed as a diff.
+- **The renderer as an input** — a golden expectation is the adapter's Criteria
+  tree *plus* Hibernate's rendering of it, so the asset declares the Hibernate
+  minor that wrote it. `hibernate-core` is `compileOnly`, meaning a consumer
+  brings their own; which one produced these bytes has to be answerable from
+  the file rather than from the classpath.

@@ -355,6 +355,8 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `check()` decisio
 | Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute the caller sends as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare it per attribute — `AttributeMapping.field(path, NullAttributeRepresentation.EXPLICIT)` — or the historical rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute rows; this is pinned separately as an upstream divergence |
 
+Two suites read that classification, and they answer different questions. `AdversarialConformanceTest` plans each action against a real PDP and compares the rows the filter returns with `check()`. `SpringDataTranslatorTest` translates the same actions offline from `conformance/wire-fixtures/` and asserts the **SQL** against `golden/expectations.json` — 180 recorded statements and 19 refusals, one per action, with the union asserted to be the corpus exactly. What the second buys over the first is the rows nobody seeded: two different queries can agree on all 21 seeds and disagree on the row a consumer has, so a rewrite that quietly changes the emitted SQL passes the oracle and shows up there as a diff.
+
 The oracle coverage includes value-first and field-to-field comparisons, literal-safe string matching, nested and correlated collection macros, three-valued null/error propagation, arithmetic and ternaries, hierarchy operations, timestamp comparisons on supported absolute-instant columns, and multi-hop relations. Unsupported shapes throw before a predicate can be used — including the two conformance shapes this reference cannot express itself (`cr-div-then-add`, `cr-div-then-add-ne`): CEL carries a NaN through the surrounding arithmetic and SQL has no value that does. Every fail-closed shape's error message is pinned in the shared corpus (`conformance/actions.json`) and asserted by this adapter's conformance run, so a classification proves the throw names its declared mechanism rather than merely that something threw.
 
 **Behaviour change.** A negated string match against a **column** needle — `!R.attr.a.contains(R.attr.b)` — used to return the rows whose needle is NULL. The null guard was spelled `needle IS NOT NULL AND haystack LIKE pattern`, which is definite FALSE for a NULL needle, and `NOT FALSE` is TRUE; CEL raises a missing-attribute error there, which denies. Those rows are now excluded under both polarities, because the guard is nested so the LIKE sees a NULL PATTERN and stays UNKNOWN. This **removes rows from results** that the PDP denies — an over-grant fix, so upgrade rather than pin ([#387](https://github.com/cerbos/query-plan-adapters/issues/387)). The positive form is unaffected: it excluded those rows already.
@@ -686,63 +688,51 @@ docker run --rm -v "$(pwd)/..":/app -v /var/run/docker.sock:/var/run/docker.sock
 gradle build --no-daemon
 ```
 
-## End-to-end testing
+## Testing
 
-Every test runs against a **real Cerbos PDP container** — there is no stubbing of policy
-evaluation. Three suites with distinct roles:
+Four suites, with distinct roles. Only the differential one needs Docker.
 
-| Suite | Role |
-|---|---|
-| `SpringDataQueryPlanAdapterTest` | Unit: protobuf operands built by hand, executed against H2 to catch translation/mapping errors and pin error messages |
-| `SpringDataIntegrationTest` | Integration: the adapter's policy fixture planned by a live PDP, results asserted against seeded rows |
-| `AdversarialConformanceTest` | Differential: hostile policy shapes + hostile seed data (LIKE metacharacters, unicode, empty collections, value-first operand order); the adapter's filtered rows are compared per action against an oracle computed from the PDP's own `check` API — no hand-computed expectations, so any semantic divergence between the generated SQL and Cerbos's evaluation fails mechanically |
-
-Two run modes are supported:
-
-### 1. Self-managed (default)
-
-[Testcontainers](https://testcontainers.com) pulls and starts the source-controlled Cerbos PDP
-0.54.0 pin, loads the adapter's bundled policy fixture, and runs the suite against the gRPC endpoint. The container's
-**audit + decision logs are streamed to the test JVM logger** so you can see every
-`PlanResources` call the test issued.
+| Suite | Role | Needs |
+|---|---|---|
+| `SpringDataTranslatorTest` | **Translator unit test**: every action in the shared [conformance corpus](../conformance) translated from its golden wire fixture, and the SQL asserted against [`golden/expectations.json`](golden/expectations.json) | nothing — no PDP, no database, no JDBC connection |
+| `SpringDataQueryPlanAdapterTest` | The adapter's **call contract**: malformed operands the planner never emits, operator overrides, mapping validation, the macro-depth property, the bulk-delete guard — plus the policy-expressible shapes the corpus does not carry yet | H2 (in-process) |
+| `RepositorySurfaceTest` | The **Spring Data glue**: `findAll` / `count` / `findAll(spec, Pageable)` on one Specification, entity de-duplication over a multi-element collection match, composition with a caller's Specification. Plans read from wire fixtures | H2 (in-process) |
+| `AdversarialConformanceTest` | **Differential**: hostile policy shapes and hostile seed data planned by a real PDP; the adapter's filtered rows compared per action against an oracle computed from the PDP's own `check()` API. No hand-computed expectations, so any semantic divergence between the generated SQL and Cerbos's evaluation fails mechanically | Docker (Testcontainers starts the pinned PDP, and PostgreSQL or MySQL when `ADAPTER_TEST_DB` selects one) |
 
 ```bash
-gradle test
+gradle test           # all four
+gradle goldenUpdate   # rewrite golden/expectations.json from what the translator emits today
 ```
 
-### 2. Externally-managed (Prisma-style sidecar)
+### The golden expectations
 
-Matches what the Prisma adapter does with `cerbos run -- jest`: a long-lived PDP container
-started separately, tests connect to it via `CERBOS_HOST` / `CERBOS_PORT` env vars. Useful for
-debugging the live PDP between test runs.
+`golden/expectations.json` is this adapter's [golden expectation](../conformance/README.md#golden-expectations)
+file: the SQL it is pinned to emit for each corpus action, regenerated with `gradle goldenUpdate`
+and reviewed as a diff. An action the corpus says this adapter must refuse carries no entry —
+its message is already pinned in `conformance/actions.json`.
 
-```bash
-./scripts/run-e2e.sh        # docker compose up -d  →  gradle test  →  audit log summary  →  down
+The adapter emits a JPA `Specification`, so the recorded value is that Specification **rendered**:
+the query the differential harness executes (`select distinct re1_0.id from resources re1_0`),
+minus that preamble, leaving the root joins and the filter.
+
+```jsonc
+"rel-bool-hop": {
+  "joins": { "h2": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id", … },
+  "where": { "h2": "p1_0.a_bool=true", "postgresql": "p1_0.a_bool=true", "mysql": "p1_0.a_bool=1" }
+}
 ```
 
-At the end of `run-e2e.sh` you'll see something like:
+- **Three dialects, because they genuinely differ** — and because CI executes all three. MySQL has
+  no boolean type, doubles the backslashes in a `LIKE` escape, and is the only one where
+  `MySqlDoubleCastFunctionContributor` replaces `decimal(53,20)` with `cast(… as double)`; H2 and
+  PostgreSQL disagree about how many fractional digits a timestamp literal keeps.
+- **`joins` appears only where a shape emits one**, which is a to-one hop through a dotted
+  `jpaPath`. A rule asserts every one of them is a `left join` — an inner join would remove a row
+  whose association is absent from the whole query, which is wrong under a disjunction ([#375](https://github.com/cerbos/query-plan-adapters/issues/375)).
+- **Literals are inlined rather than bound**, so the operands — the half of a filter an
+  authorization bug hides in — are in the asset rather than behind a `?`. A rule asserts no
+  placeholder survives.
+- **The file declares the Hibernate minor that rendered it.** The SQL is the adapter's Criteria
+  tree plus Hibernate's renderer, and `hibernate-core` is a `compileOnly` dependency — a consumer
+  brings their own. See `conformance/README.md`, "When the generator is an input".
 
-```
-==> Cerbos PDP audit summary
-    PlanResources calls served: 122
-    CheckResources calls served: 0
-    Audit log archived at: /tmp/cerbos-audit-XXXX.log
-
-==> Sample decision log entries:
-{"log.logger":"cerbos.audit","log.kind":"decision","callId":"01KRX3A0DFF9F00ZC1F0M8Z1MD",
- "planResources":{"input":{"actions":["equal-nested"], ...},
-                  "output":{"filter":{"condition":{...},"kind":"KIND_CONDITIONAL"}, ...}}, ...}
-```
-
-— this is the PDP's own decision log, proving every assertion in the suite came from a real
-policy evaluation against the adapter's bundled policy fixture.
-
-You can also run the compose stack by hand:
-
-```bash
-docker compose up -d
-CERBOS_HOST=localhost CERBOS_PORT=3593 gradle test
-docker compose down
-```
-
-When `CERBOS_HOST` is unset, the suite falls back to mode (1) automatically.

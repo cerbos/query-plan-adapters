@@ -53,6 +53,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>Runs against plain H2 with hand-built plan operands — no PDP container — so it is
  * cheap enough to stay in the default build.
+ *
+ * <p><strong>Why the plans here are still hand-built</strong>, when
+ * {@link SpringDataTranslatorTest} reads its plans from {@code conformance/wire-fixtures/}
+ * (cerbos/query-plan-adapters#383): the property under test is the multiplier as depth
+ * GROWS, and the corpus stops at {@code macro-depth3-*} — three levels, below the depth
+ * guard's default limit of 5. A fixture cannot supply the depth-4 chain that makes the
+ * curve visible, so a hand-built plan is the only way to reach it. What is measured is a
+ * count of subqueries rather than a filter, so it is also the one place where being wrong
+ * about the exact wire shape would not change the answer.
  */
 class MacroNestingBenchmarkTest {
 

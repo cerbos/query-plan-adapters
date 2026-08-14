@@ -43,11 +43,37 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Unit tests that exercise the adapter without a live Cerbos PDP. They build protobuf operands
- * directly and verify the produced Specification by executing it against an H2 schema —
- * Hibernate translates to SQL, which catches mapping/type errors. Tests whose names promise row
- * semantics seed rows and assert row identities; the remainder run against an empty table and
- * check that translation succeeds (or throws the pinned error).
+ * What is left when the corpus owns the policy shapes: the adapter's CALL contract, and the
+ * shapes a policy can express that the corpus does not carry yet.
+ *
+ * <p>These tests hand-build protobuf operands and execute the resulting Specification against an
+ * H2 schema. A hand-built plan is a BELIEF about what the planner emits, which is exactly why
+ * {@link SpringDataTranslatorTest} reads its plans from {@code conformance/wire-fixtures/}
+ * instead ({@code docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md}),
+ * and why 134 tests whose shapes the corpus now carries were deleted rather than converted:
+ * their belief is a fixture's job to hold, their emitted filter is the golden asset's, and the
+ * rows they returned are {@link AdversarialConformanceTest}'s {@code check()} oracle's.
+ *
+ * <p>What remains hand-built divides in two, and the difference matters when reading a test here:
+ *
+ * <ol>
+ *   <li><strong>No policy can reach it.</strong> A malformed or wrong-arity operand the planner
+ *       never emits, an operator name CEL does not have, a caller-supplied
+ *       {@link OperatorFunction} override, the {@code maxMacroDepth} system property, the
+ *       bulk-delete guard, a mapping the corpus does not use (an {@code OffsetDateTime} or
+ *       {@code LocalDateTime} column, a per-attribute OMITTED declaration), or a defensive copy.
+ *       A fixture cannot supply any of these, so a hand-built plan is the only way to reach
+ *       them, and they stay here permanently.</li>
+ *   <li><strong>A policy CAN reach it and the corpus does not carry it yet.</strong> Value-first
+ *       {@code gt}, the {@code except} macro, {@code eq}/{@code ne} against a list constant, the
+ *       uncovered timestamp operator cells, two-column orderings, and the out-of-int-range
+ *       {@code size()} thresholds are the substantive ones. Each is a corpus GAP wearing a unit
+ *       test — per the root {@code CLAUDE.md}, a per-adapter unit test is not a substitute for a
+ *       corpus action, and only the corpus asks the same question of every other adapter. They
+ *       are kept because deleting them would lose the coverage outright, not because this is
+ *       where they belong: each one is a shape the corpus should carry, and moving it there is
+ *       corpus work rather than a test-file change.</li>
+ * </ol>
  */
 class SpringDataQueryPlanAdapterTest {
 
@@ -246,93 +272,6 @@ class SpringDataQueryPlanAdapterTest {
         }
     }
 
-    @Test
-    void alwaysDeniedSpecificationReturnsDisjunction() {
-        // Symmetric pin: an always-denied plan must produce a non-null predicate.
-        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_ALWAYS_DENIED, null);
-        Specification<ResourceEntity> spec =
-                SpringDataQueryPlanAdapter.toSpecification(resp, MAPPER);
-        EntityManager em = emf.createEntityManager();
-        try {
-            CriteriaBuilder cb = em.getCriteriaBuilder();
-            CriteriaQuery<ResourceEntity> cq = cb.createQuery(ResourceEntity.class);
-            Root<ResourceEntity> root = cq.from(ResourceEntity.class);
-            assertNotNull(spec.toPredicate(root, cq, cb),
-                    "An always-denied plan must emit an explicit predicate, not null");
-        } finally {
-            em.close();
-        }
-    }
-
-    @Test
-    void eqOnString() {
-        assertEquals(0, runCount(exprOp("eq", var("request.resource.attr.aString"), sval("foo"))));
-    }
-
-    @Test
-    void neOnString() {
-        assertEquals(0, runCount(exprOp("ne", var("request.resource.attr.aString"), sval("foo"))));
-    }
-
-    @Test
-    void ltOnNumber() {
-        assertEquals(0, runCount(exprOp("lt", var("request.resource.attr.aNumber"), nval(10))));
-    }
-
-    @Test
-    void gtOnNumber() {
-        assertEquals(0, runCount(exprOp("gt", var("request.resource.attr.aNumber"), nval(0))));
-    }
-
-    @Test
-    void leOnNumber() {
-        assertEquals(0, runCount(exprOp("le", var("request.resource.attr.aNumber"), nval(10))));
-    }
-
-    @Test
-    void geOnNumber() {
-        assertEquals(0, runCount(exprOp("ge", var("request.resource.attr.aNumber"), nval(0))));
-    }
-
-    @Test
-    void inOnString() {
-        assertEquals(0, runCount(exprOp("in", var("request.resource.attr.aString"), listOp("a", "b"))));
-    }
-
-    @Test
-    void containsBuildsLike() {
-        assertEquals(0, runCount(exprOp("contains", var("request.resource.attr.aString"), sval("foo"))));
-    }
-
-    @Test
-    void startsWithBuildsLike() {
-        assertEquals(0, runCount(exprOp("startsWith", var("request.resource.attr.aString"), sval("foo"))));
-    }
-
-    @Test
-    void endsWithBuildsLike() {
-        assertEquals(0, runCount(exprOp("endsWith", var("request.resource.attr.aString"), sval("foo"))));
-    }
-
-    @Test
-    void andOr() {
-        assertEquals(0, runCount(exprOp("and",
-                exprOp("eq", var("request.resource.attr.aBool"), bval(true)),
-                exprOp("or",
-                        exprOp("ne", var("request.resource.attr.aString"), sval("x")),
-                        exprOp("gt", var("request.resource.attr.aNumber"), nval(5))))));
-    }
-
-    @Test
-    void notBareBool() {
-        assertEquals(0, runCount(exprOp("not", var("request.resource.attr.aBool"))));
-    }
-
-    @Test
-    void bareBoolBuildsEquals() {
-        assertEquals(0, runCount(var("request.resource.attr.aBool")));
-    }
-
     /**
      * The planner has no existence operator: {@code isSet} is not a registered CEL function,
      * so a policy naming it fails to compile and it can never reach the wire. The adapter
@@ -347,52 +286,6 @@ class SpringDataQueryPlanAdapterTest {
                         var("request.resource.attr.aOptionalString"), bval(true))));
         assertTrue(e.getMessage().contains("isSet"),
                 "unknown operator must be named in the error, got: " + e.getMessage());
-    }
-
-    /** Value-first: the planner preserves source order, so {@code null != R.attr.x} inverts operands. */
-    @Test
-    void valueFirstNeNullBuildsIsNotNull() {
-        assertEquals(0, runCount(exprOp("ne",
-                nullVal(), var("request.resource.attr.aOptionalString"))));
-    }
-
-    @Test
-    void eqNullBuildsIsNull() {
-        assertEquals(0, runCount(exprOp("eq",
-                var("request.resource.attr.aOptionalString"), nullVal())));
-    }
-
-    @Test
-    void neNullBuildsIsNotNull() {
-        assertEquals(0, runCount(exprOp("ne",
-                var("request.resource.attr.aOptionalString"), nullVal())));
-    }
-
-    @Test
-    void hasIntersectionOnFlatCollection() {
-        assertEquals(0, runCount(exprOp("hasIntersection",
-                var("request.resource.attr.ownedBy"), listOp("user1", "user2"))));
-    }
-
-    @Test
-    void inMembershipOnCollection() {
-        // "public" in tags  (right operand is the collection)
-        assertEquals(0, runCount(exprOp("in",
-                sval("public"), var("request.resource.attr.ownedBy"))));
-    }
-
-    @Test
-    void sizeGtZeroBuildsExists() {
-        assertEquals(0, runCount(exprOp("gt",
-                exprOp("size", var("request.resource.attr.ownedBy")),
-                nval(0))));
-    }
-
-    @Test
-    void sizeEqZeroBuildsNotExists() {
-        assertEquals(0, runCount(exprOp("eq",
-                exprOp("size", var("request.resource.attr.ownedBy")),
-                nval(0))));
     }
 
     // -- size(collection) compared with arbitrary N → correlated (SELECT COUNT(...)) <op> N.
@@ -482,15 +375,6 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         @Test
-        void geFractionalRoundsUp() {
-            // size >= 2.5 ⇔ size >= 3; truncation made it >= 2 (over-inclusive).
-            withResource(seeded(), () -> {
-                assertEquals(0, runCount(sizeCmp("ge", 2.5)));
-                assertEquals(1, runCount(sizeCmp("ge", 1.5)));
-            });
-        }
-
-        @Test
         void gtFractionalRoundsUp() {
             // gt f ⇔ ge ceil(f) for integral counts.
             withResource(seeded(), () -> {
@@ -505,14 +389,6 @@ class SpringDataQueryPlanAdapterTest {
             withResource(seeded(), () -> {
                 assertEquals(1, runCount(sizeCmp("lt", 2.5)));
                 assertEquals(0, runCount(sizeCmp("lt", 1.5)));
-            });
-        }
-
-        @Test
-        void leFractionalRoundsDown() {
-            withResource(seeded(), () -> {
-                assertEquals(0, runCount(sizeCmp("le", 1.5)));
-                assertEquals(1, runCount(sizeCmp("le", 2.5)));
             });
         }
 
@@ -659,32 +535,6 @@ class SpringDataQueryPlanAdapterTest {
         }
     }
 
-    @Test
-    void existsOnNestedRelation() {
-        assertEquals(0, runCount(exprOp("exists",
-                var("request.resource.attr.tags"),
-                lambda("t",
-                        exprOp("eq", var("t.id"), sval("tag1"))))));
-    }
-
-    @Test
-    void existsMultiCondition() {
-        assertEquals(0, runCount(exprOp("exists",
-                var("request.resource.attr.tags"),
-                lambda("t",
-                        exprOp("and",
-                                exprOp("eq", var("t.id"), sval("tag1")),
-                                exprOp("eq", var("t.name"), sval("public")))))));
-    }
-
-    @Test
-    void allOnNestedRelation() {
-        assertEquals(0, runCount(exprOp("all",
-                var("request.resource.attr.tags"),
-                lambda("t",
-                        exprOp("eq", var("t.name"), sval("public"))))));
-    }
-
     // -- except: a two-list function with no JPA translation — every arrival shape throws --
     //
     // PDP-verified wire shapes (Cerbos latest, 2026-07): `size(R.attr.tags.except(["archived"]))
@@ -727,24 +577,6 @@ class SpringDataQueryPlanAdapterTest {
                 exprOp("except",
                         var("request.resource.attr.tags"), listOp("archived")),
                 "except is not supported", "except(list, list)");
-    }
-
-    @Test
-    void hasIntersectionWithMap() {
-        Operand mapExpr = exprOp("map",
-                var("request.resource.attr.tags"),
-                lambda("t", var("t.name")));
-        assertEquals(0, runCount(exprOp("hasIntersection", mapExpr, listOp("public", "private"))));
-    }
-
-    @Test
-    void existsOneOnNestedRelation() {
-        // exists_one → correlated (SELECT COUNT(...)) = 1. Exercises the manual-correlation path
-        // that the other collection operators do not.
-        assertEquals(0, runCount(exprOp("exists_one",
-                var("request.resource.attr.tags"),
-                lambda("t",
-                        exprOp("eq", var("t.name"), sval("public"))))));
     }
 
     @Test
@@ -954,25 +786,6 @@ class SpringDataQueryPlanAdapterTest {
     }
 
     @Test
-    void addSolveStringPrefixStrip() {
-        // eq("projects:123", add("projects:", R.attr.aString))
-        //   → "projects:123".stripPrefix("projects:") == "123"
-        //   → aString == "123"
-        Operand cond = exprOp("eq",
-                sval("projects:123"),
-                exprOp("add", sval("projects:"), var("request.resource.attr.aString")));
-        assertEquals(0, runCount(cond));
-
-        // Concatenation is exact — the solve path must keep working: aString="123" row in,
-        // aString="456" row out.
-        ResourceEntity match = new ResourceEntity("add-str-1");
-        match.setaString("123");
-        ResourceEntity miss = new ResourceEntity("add-str-2");
-        miss.setaString("456");
-        withResource(match, () -> withResource(miss, () -> assertEquals(1, runCount(cond))));
-    }
-
-    @Test
     void addSolveStringSuffixStrip() {
         // eq("foo.bar", add(R.attr.aString, ".bar"))
         //   → "foo.bar".stripSuffix(".bar") == "foo"
@@ -997,48 +810,6 @@ class SpringDataQueryPlanAdapterTest {
         match.setaNumber(7);
         ResourceEntity miss = new ResourceEntity("add-long-2");
         miss.setaNumber(8);
-        withResource(match, () -> withResource(miss, () -> assertEquals(1, runCount(cond))));
-    }
-
-    @Test
-    void addSolveFractionalEqIsIeeeFaithful() {
-        // Policy `R.attr.aDouble + 0.7 == 0.1` arrives as eq(add(variable, 0.7), 0.1) —
-        // wire shape verified against a live PDP. The old algebraic solve computed
-        // 0.1 - 0.7 = exactly -0.6 in Java and emitted `WHERE a_double = -0.6`, but IEEE
-        // subtraction does not invert IEEE addition: check(aDouble=-0.6) DENIES because
-        // -0.6 + 0.7 == 0.09999999999999998 != 0.1 (verified against a live PDP). The row
-        // must be EXCLUDED for eq (over-inclusion = authz bypass) and INCLUDED for ne
-        // (the mirror under-inclusion). The fix lowers the comparison to SQL-side
-        // fl(a_double + 0.7) == 0.1 in double space.
-        Operand eqCond = exprOp("eq",
-                exprOp("add", var("request.resource.attr.aDouble"), nval(0.7)),
-                nval(0.1));
-        Operand neCond = exprOp("ne",
-                exprOp("add", var("request.resource.attr.aDouble"), nval(0.7)),
-                nval(0.1));
-
-        ResourceEntity trap = new ResourceEntity("add-frac-1");
-        trap.setaDouble(-0.6);
-        withResource(trap, () -> {
-            assertEquals(0, runCount(eqCond), "aDouble=-0.6 must be excluded for eq: "
-                    + "-0.6 + 0.7 != 0.1 in IEEE double space, the PDP denies it");
-            assertEquals(1, runCount(neCond), "aDouble=-0.6 must be included for ne: "
-                    + "-0.6 + 0.7 != 0.1 holds, the PDP allows it");
-        });
-    }
-
-    @Test
-    void addSolveFractionalEqKeepsExactlySatisfiedRow() {
-        // 0.25 + 0.5 == 0.75 is EXACT in binary floating point, so the SQL lowering must not
-        // degenerate to always-false: the aDouble=0.25 row stays in (PDP-verified ALLOW).
-        Operand cond = exprOp("eq",
-                exprOp("add", var("request.resource.attr.aDouble"), nval(0.5)),
-                nval(0.75));
-
-        ResourceEntity match = new ResourceEntity("add-frac-2");
-        match.setaDouble(0.25);
-        ResourceEntity miss = new ResourceEntity("add-frac-3");
-        miss.setaDouble(-0.6);
         withResource(match, () -> withResource(miss, () -> assertEquals(1, runCount(cond))));
     }
 
@@ -1093,122 +864,13 @@ class SpringDataQueryPlanAdapterTest {
         }));
     }
 
-    // -- DeMorgan / negated operator wrappers (PR #222) --
-
-    @Nested
-    class DeMorganNegation {
-
-        @Test
-        void notAnd() {
-            // !(aBool == true && aString != "string")
-            assertEquals(0, runCount(exprOp("not",
-                    exprOp("and",
-                            exprOp("eq", var("request.resource.attr.aBool"), bval(true)),
-                            exprOp("ne", var("request.resource.attr.aString"), sval("string"))))));
-        }
-
-        @Test
-        void notOr() {
-            assertEquals(0, runCount(exprOp("not",
-                    exprOp("or",
-                            exprOp("eq", var("request.resource.attr.aBool"), bval(true)),
-                            exprOp("ne", var("request.resource.attr.aString"), sval("string"))))));
-        }
-
-        @Test
-        void notGt() {
-            assertEquals(0, runCount(exprOp("not",
-                    exprOp("gt", var("request.resource.attr.aNumber"), nval(1)))));
-        }
-
-        @Test
-        void notLt() {
-            assertEquals(0, runCount(exprOp("not",
-                    exprOp("lt", var("request.resource.attr.aNumber"), nval(2)))));
-        }
-
-        @Test
-        void notContains() {
-            assertEquals(0, runCount(exprOp("not",
-                    exprOp("contains", var("request.resource.attr.aString"), sval("str")))));
-        }
-
-        @Test
-        void notStartsWith() {
-            assertEquals(0, runCount(exprOp("not",
-                    exprOp("startsWith", var("request.resource.attr.aString"), sval("str")))));
-        }
-    }
-
     // -- CEL primitives (PR #223): only empty-collection is natively supported; the rest throw --
 
     @Nested
     class CelPrimitives {
 
-        @Test
-        void emptyCollectionBuildsNotExists() {
-            // size(R.attr.tags) == 0 — tags mapped as Relation → not-exists subquery.
-            assertEquals(0, runCount(exprOp("eq",
-                    exprOp("size", var("request.resource.attr.tags")),
-                    nval(0))));
-        }
-
         // add/sub/mult/div appearing as a comparison operand are supported (double-space SQL
         // arithmetic) — see ArithmeticComparisons. Only mod remains rejected.
-
-        @Test
-        void arithModThrows() {
-            assertConditionThrows(
-                    exprOp("eq",
-                            exprOp("mod", var("request.resource.attr.aNumber"), nval(2)),
-                            nval(0)),
-                    "mod");
-        }
-
-        @Test
-        void matchesRegexThrows() {
-            assertConditionThrows(
-                    exprOp("matches",
-                            var("request.resource.attr.aString"), sval("^str.*")),
-                    "Unsupported operator", "matches");
-        }
-
-        @Test
-        void indexListThrows() {
-            // ownedBy[0] == "user1" — array indexing not supported.
-            assertConditionThrows(
-                    exprOp("eq",
-                            exprOp("index", var("request.resource.attr.ownedBy"), nval(0)),
-                            sval("user1")),
-                    "index");
-        }
-
-        @Test
-        void convertStringThrows() {
-            assertConditionThrows(
-                    exprOp("eq",
-                            exprOp("string", var("request.resource.attr.aNumber")),
-                            sval("1")),
-                    "string");
-        }
-
-        @Test
-        void convertDoubleThrows() {
-            assertConditionThrows(
-                    exprOp("gt",
-                            exprOp("double", var("request.resource.attr.aNumber")),
-                            nval(1.5)),
-                    "double");
-        }
-
-        @Test
-        void convertIntThrows() {
-            assertConditionThrows(
-                    exprOp("gt",
-                            exprOp("int", var("request.resource.attr.aString")),
-                            nval(0)),
-                    "int");
-        }
 
         @Test
         void stringSizeComparesLength() {
@@ -1265,49 +927,6 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         @Test
-        void omittedRejectsEqAgainstNull() {
-            IllegalArgumentException thrown = assertThrows(
-                    IllegalArgumentException.class,
-                    () -> translate(nullEq(), NullAttributeRepresentation.OMITTED));
-            assertTrue(thrown.getMessage().contains("missing-attribute error"));
-        }
-
-        /**
-         * Conservatively rejected too: {@code ne} alone is aligned under {@code OMITTED}, but
-         * negation wraps the built predicate, so a leaf cannot see whether an enclosing
-         * {@code not} will flip {@code IS NOT NULL} back into {@code IS NULL}.
-         */
-        @Test
-        void omittedRejectsNeAgainstNull() {
-            Operand condition =
-                    exprOp("ne", var("request.resource.attr.aOptionalString"), nullVal());
-            assertThrows(
-                    IllegalArgumentException.class,
-                    () -> translate(condition, NullAttributeRepresentation.OMITTED));
-        }
-
-        @Test
-        void omittedRejectsNullElementInInList() {
-            Operand condition = exprOp("in",
-                    var("request.resource.attr.aOptionalString"),
-                    listOpNullable("x", null));
-            assertThrows(
-                    IllegalArgumentException.class,
-                    () -> translate(condition, NullAttributeRepresentation.OMITTED));
-        }
-
-        /** The scan walks the whole tree, not just the root. */
-        @Test
-        void omittedRejectsNullOperandNestedUnderAnd() {
-            Operand condition = exprOp("and",
-                    exprOp("not", nullEq()),
-                    exprOp("eq", var("request.resource.attr.aString"), sval("x")));
-            assertThrows(
-                    IllegalArgumentException.class,
-                    () -> translate(condition, NullAttributeRepresentation.OMITTED));
-        }
-
-        @Test
         void omittedLeavesNullFreeComparisonsUntouched() {
             Operand condition =
                     exprOp("eq", var("request.resource.attr.aString"), sval("x"));
@@ -1350,30 +969,6 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * A null VALUE is not equal to "x", so CEL returns a definite FALSE and its negation a
-         * definite TRUE. {@code aOptionalString <> 'x'} is UNKNOWN instead, which excludes the
-         * row under BOTH polarities — the row the PDP allows never comes back.
-         */
-        @Test
-        void neAgainstAConstantIncludesANullRow() {
-            withResource(nullOwner(), () -> assertEquals(1, count(
-                    exprOp("ne", var("request.resource.attr.owner"), sval("x")))));
-        }
-
-        @Test
-        void eqAgainstAConstantExcludesANullRow() {
-            withResource(nullOwner(), () -> assertEquals(0, count(
-                    exprOp("eq", var("request.resource.attr.owner"), sval("x")))));
-        }
-
-        /** The negated equality spelling takes the other branch and must agree with {@code ne}. */
-        @Test
-        void negatedEqAgainstAConstantIncludesANullRow() {
-            withResource(nullOwner(), () -> assertEquals(1, count(exprOp("not",
-                    exprOp("eq", var("request.resource.attr.owner"), sval("x"))))));
-        }
-
-        /**
          * The equality family only. An ordering comparison against a null receiver is a
          * no-overload error in CEL, which denies under both polarities — exactly what UNKNOWN
          * already does — so it keeps propagating it.
@@ -1382,29 +977,6 @@ class SpringDataQueryPlanAdapterTest {
         void orderingComparisonsStayUnknown() {
             withResource(nullOwner(), () -> assertEquals(0, count(
                     exprOp("gt", var("request.resource.attr.owner"), sval("x")))));
-        }
-
-        @Test
-        void negatedMembershipWithoutANullElementIncludesANullRow() {
-            withResource(nullOwner(), () -> assertEquals(1, count(exprOp("not",
-                    exprOp("in", var("request.resource.attr.owner"), listOp("x", "y"))))));
-        }
-
-        /** Two explicit nulls are EQUAL in CEL, so the row must come back. */
-        @Test
-        void twoExplicitNullsMatchFieldToField() {
-            withResource(nullOwner(), () -> assertEquals(1, count(exprOp("eq",
-                    var("request.resource.attr.owner"), var("request.resource.attr.coOwner")))));
-        }
-
-        /**
-         * An attribute the mapping does not declare keeps the historical rendering, so declaring
-         * the convention for one cannot change the filter emitted for any other mapping.
-         */
-        @Test
-        void anUndeclaredAttributeIsUntouched() {
-            withResource(nullOwner(), () -> assertEquals(0, count(
-                    exprOp("ne", var("request.resource.attr.plain"), sval("x")))));
         }
 
         /**
@@ -1424,51 +996,12 @@ class SpringDataQueryPlanAdapterTest {
             assertTrue(thrown.getMessage().contains("missing-attribute error"));
         }
 
-        @Test
-        void declaringExplicitTranslatesANullOperandUnderTheOmittedDefault() {
-            PlanResourcesResponse resp = buildResponse(
-                    PlanResourcesFilter.Kind.KIND_CONDITIONAL,
-                    exprOp("eq", var("request.resource.attr.owner"), nullVal()));
-            assertDoesNotThrow(() -> SpringDataQueryPlanAdapter.toSpecification(
-                    resp, mapper, Map.of(), NullAttributeRepresentation.OMITTED));
-        }
     }
 
     // -- Minor operator/comparison shapes (PR #234) --
 
     @Nested
     class MinorOperators {
-
-        @Test
-        void isNotSetBuildsIsNull() {
-            // aOptionalString == null — adapter routes eq(field, null) to cb.isNull.
-            assertEquals(0, runCount(exprOp("eq",
-                    var("request.resource.attr.aOptionalString"), nullVal())));
-        }
-
-        @Test
-        void fieldToFieldEquality() {
-            // eq/ne over two variables compares the two columns directly.
-            // Seeded: aString == createdBy == "same"; aOptionalString differs.
-            ResourceEntity r = new ResourceEntity("f2f-seed-1");
-            r.setaString("same");
-            r.setCreatedBy("same");
-            r.setaOptionalString("different");
-            withResource(r, () -> {
-                assertEquals(1, runCount(exprOp("eq",
-                        var("request.resource.attr.aString"),
-                        var("request.resource.attr.createdBy"))));
-                assertEquals(0, runCount(exprOp("eq",
-                        var("request.resource.attr.aString"),
-                        var("request.resource.attr.aOptionalString"))));
-                assertEquals(0, runCount(exprOp("ne",
-                        var("request.resource.attr.aString"),
-                        var("request.resource.attr.createdBy"))));
-                assertEquals(1, runCount(exprOp("ne",
-                        var("request.resource.attr.aString"),
-                        var("request.resource.attr.aOptionalString"))));
-            });
-        }
 
         @Test
         void fieldToFieldOrderingKeepsOperandDirection() {
@@ -1518,15 +1051,6 @@ class SpringDataQueryPlanAdapterTest {
                     listOpNumbers(1, 2, 3))));
         }
 
-        @Test
-        void orLeafExists() {
-            // aBool == true OR tags.exists(t, t.name == "public")
-            Operand cond = exprOp("or",
-                    exprOp("eq", var("request.resource.attr.aBool"), bval(true)),
-                    exprOp("exists", var("request.resource.attr.tags"),
-                            lambda("t", exprOp("eq", var("t.name"), sval("public")))));
-            assertEquals(0, runCount(cond));
-        }
     }
 
     // -- Collection macro composition (PR #235) --
@@ -1543,17 +1067,6 @@ class SpringDataQueryPlanAdapterTest {
                             exprOp("eq", var("t.name"), sval("public")),
                             exprOp("ne", var("t.id"), sval("tag1")))));
             assertEquals(0, runCount(cond));
-        }
-
-        @Test
-        void mapComparedToLiteralListThrows() {
-            // tags.map(t, t.id) == ["tag1", "tag2"] — adapter only handles map() inside hasIntersection.
-            Operand mapExpr = exprOp("map",
-                    var("request.resource.attr.tags"),
-                    lambda("t", var("t.id")));
-            assertConditionThrows(
-                    exprOp("eq", mapExpr, listOp("tag1", "tag2")),
-                    "map(...)", "hasIntersection");
         }
 
         @Test
@@ -1611,30 +1124,6 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         @Test
-        void existsOverValueListMatchesAnyElement() {
-            ResourceEntity r = new ResourceEntity("kvc-exists");
-            r.setaString("alpha");
-            withResource(r, () -> {
-                assertEquals(1, runCount(exprOp("exists", listOp("alpha", "beta"),
-                        lambda("t", exprOp("eq", var("request.resource.attr.aString"), var("t"))))));
-                assertEquals(0, runCount(exprOp("exists", listOp("x", "y"),
-                        lambda("t", exprOp("eq", var("request.resource.attr.aString"), var("t"))))));
-            });
-        }
-
-        @Test
-        void allOverValueListRequiresEveryElement() {
-            ResourceEntity r = new ResourceEntity("kvc-all");
-            r.setaString("alpha");
-            withResource(r, () -> {
-                assertEquals(1, runCount(exprOp("all", listOp("x", "y"),
-                        lambda("t", exprOp("ne", var("request.resource.attr.aString"), var("t"))))));
-                assertEquals(0, runCount(exprOp("all", listOp("alpha", "y"),
-                        lambda("t", exprOp("ne", var("request.resource.attr.aString"), var("t"))))));
-            });
-        }
-
-        @Test
         void emptyValueListKeepsCelIdentitySemantics() {
             ResourceEntity r = new ResourceEntity("kvc-empty");
             r.setaString("alpha");
@@ -1658,24 +1147,6 @@ class SpringDataQueryPlanAdapterTest {
                 assertEquals(0, runCount(exprOp("exists", structListOp("name", "x"),
                         lambda("t", exprOp("eq",
                                 var("request.resource.attr.aString"), var("t.name"))))));
-            });
-        }
-
-        /**
-         * NULL columns keep their SQL-UNKNOWN exclusion under the fold — parity with how the
-         * equivalent planner-unrolled comparison chain translates.
-         */
-        @Test
-        void nullColumnStaysExcludedUnderFold() {
-            ResourceEntity r = new ResourceEntity("kvc-null");
-            // aOptionalString stays NULL: NULL <> 'x' and NULL = 'x' are both UNKNOWN.
-            withResource(r, () -> {
-                assertEquals(0, runCount(exprOp("all", listOp("x"),
-                        lambda("t", exprOp("ne",
-                                var("request.resource.attr.aOptionalString"), var("t"))))));
-                assertEquals(0, runCount(exprOp("exists", listOp("x"),
-                        lambda("t", exprOp("eq",
-                                var("request.resource.attr.aOptionalString"), var("t"))))));
             });
         }
 
@@ -1832,197 +1303,6 @@ class SpringDataQueryPlanAdapterTest {
         }
     }
 
-    // -- NULL element columns under collection macros (three-valued lambda bodies) --
-    // CEL semantics (cel-spec macro definitions; a NULL element column is a missing attribute,
-    // so touching it is an evaluation error → deny):
-    //   exists     — OR with error absorption: true if ANY element is true; error if no true
-    //                and ≥1 error; false otherwise.
-    //   all        — AND with error absorption: false if ANY element is false; error if no
-    //                false and ≥1 error; true otherwise.
-    //   exists_one — errors if ANY element errors; else true iff exactly one matches.
-    // The SQL translation must map ERROR to UNKNOWN (excluded under BOTH polarities), never
-    // FALSE — NOT(FALSE) = TRUE would leak rows the PDP denies.
-
-    @Nested
-    class CollectionMacroNullElements {
-
-        private Operand existsPublic() {
-            return exprOp("exists", var("request.resource.attr.tags"),
-                    lambda("t", exprOp("eq", var("t.name"), sval("public"))));
-        }
-
-        private Operand allNotX() {
-            return exprOp("all", var("request.resource.attr.tags"),
-                    lambda("t", exprOp("ne", var("t.name"), sval("x"))));
-        }
-
-        private Operand existsOnePublic() {
-            return exprOp("exists_one", var("request.resource.attr.tags"),
-                    lambda("t", exprOp("eq", var("t.name"), sval("public"))));
-        }
-
-        /**
-         * Probe for the UNKNOWN boolean constant the macro translations compose with: the
-         * predicate {@link TriPredicate#unknown()} produces must render as a genuinely UNKNOWN
-         * predicate in Hibernate 6 — matching no rows under EITHER polarity
-         * (NOT(UNKNOWN) = UNKNOWN). Asserted directly against the module seam the adapter
-         * composes through; the full algebra truth tables live in {@link TriPredicateTest}.
-         */
-        @Test
-        void unknownBooleanConstantProbe() {
-            withResource(new ResourceEntity("null-elem-probe"), () -> {
-                EntityManager em = emf.createEntityManager();
-                try {
-                    CriteriaBuilder cb = em.getCriteriaBuilder();
-                    TriPredicate tri = new TriPredicate(cb);
-                    CriteriaQuery<Long> positive = cb.createQuery(Long.class);
-                    positive.select(cb.count(positive.from(ResourceEntity.class)));
-                    positive.where(tri.unknown());
-                    assertEquals(0, em.createQuery(positive).getSingleResult().intValue());
-
-                    // Junction-barriered negation — the module's own not().
-                    CriteriaQuery<Long> negated = cb.createQuery(Long.class);
-                    negated.select(cb.count(negated.from(ResourceEntity.class)));
-                    negated.where(tri.not(tri.unknown()));
-                    assertEquals(0, em.createQuery(negated).getSingleResult().intValue());
-                } finally {
-                    em.close();
-                }
-            });
-        }
-
-        @Test
-        void notExistsWithNullElementExcludesRow() {
-            // Single NULL-name element: exists = error (no true, one error) → deny.
-            // The leak: EXISTS(name = 'public') is FALSE for the NULL element, and
-            // NOT(FALSE) = TRUE would include the row.
-            ResourceEntity r = new ResourceEntity("null-elem-exists-1");
-            r.addTag("ne1", null);
-            withResource(r, () -> {
-                assertEquals(0, runCount(existsPublic()));
-                assertEquals(0, runCount(exprOp("not", existsPublic())));
-            });
-        }
-
-        @Test
-        void existsAbsorbsErrorWhenAnotherElementIsTrue() {
-            // Positive control: CEL exists absorbs errors through a true witness, so the
-            // row IS included even though a sibling element is NULL.
-            ResourceEntity r = new ResourceEntity("null-elem-exists-2");
-            r.addTag("ne2a", null);
-            r.addTag("ne2b", "public");
-            withResource(r, () -> {
-                assertEquals(1, runCount(existsPublic()));
-                assertEquals(0, runCount(exprOp("not", existsPublic())));
-            });
-        }
-
-        @Test
-        void allWithNullElementAndNoFalseExcludesRow() {
-            // No false element, one NULL element: all = error → deny under BOTH polarities.
-            // The leak: NOT EXISTS(NOT(name != 'x')) is TRUE (the UNKNOWN body never matches).
-            ResourceEntity lone = new ResourceEntity("null-elem-all-1");
-            lone.addTag("na1", null);
-            withResource(lone, () -> {
-                assertEquals(0, runCount(allNotX()));
-                assertEquals(0, runCount(exprOp("not", allNotX())));
-            });
-
-            // Mixed collection: a determined-true sibling must not mask the unknown element.
-            ResourceEntity mixed = new ResourceEntity("null-elem-all-2");
-            mixed.addTag("na2a", null);
-            mixed.addTag("na2b", "ok");
-            withResource(mixed, () -> {
-                assertEquals(0, runCount(allNotX()));
-                assertEquals(0, runCount(exprOp("not", allNotX())));
-            });
-        }
-
-        @Test
-        void allFalseElementDominatesEvenWithNullElement() {
-            // CEL all absorbs errors through a false witness: all = false (not error), so
-            // NOT(all) must still include the row.
-            ResourceEntity r = new ResourceEntity("null-elem-all-3");
-            r.addTag("na3a", "x");
-            r.addTag("na3b", null);
-            withResource(r, () -> {
-                assertEquals(0, runCount(allNotX()));
-                assertEquals(1, runCount(exprOp("not", allNotX())));
-            });
-        }
-
-        @Test
-        void existsOneWithNullElementExcludesRow() {
-            // exists_one has NO error absorption: one true + one NULL element still errors.
-            ResourceEntity oneTrueOneNull = new ResourceEntity("null-elem-one-1");
-            oneTrueOneNull.addTag("no1a", "public");
-            oneTrueOneNull.addTag("no1b", null);
-            withResource(oneTrueOneNull, () -> {
-                assertEquals(0, runCount(existsOnePublic()));
-                assertEquals(0, runCount(exprOp("not", existsOnePublic())));
-            });
-
-            // Zero true + one NULL element: COUNT(...) = 1 is FALSE, and NOT would leak.
-            ResourceEntity onlyNull = new ResourceEntity("null-elem-one-2");
-            onlyNull.addTag("no2a", null);
-            withResource(onlyNull, () -> {
-                assertEquals(0, runCount(existsOnePublic()));
-                assertEquals(0, runCount(exprOp("not", existsOnePublic())));
-            });
-
-            // Control: exactly one true, no NULLs — unchanged behaviour.
-            ResourceEntity clean = new ResourceEntity("null-elem-one-3");
-            clean.addTag("no3a", "public");
-            clean.addTag("no3b", "other");
-            withResource(clean, () -> {
-                assertEquals(1, runCount(existsOnePublic()));
-                assertEquals(0, runCount(exprOp("not", existsOnePublic())));
-            });
-        }
-
-        // #313: filter() yields a list, not a boolean, so it has no truth value of its own to
-        // follow the exists family with. Rejected under both polarities.
-        @Test
-        void filterInABooleanPositionFailsClosed() {
-            Operand filterPublic = exprOp("filter", var("request.resource.attr.tags"),
-                    lambda("t", exprOp("eq", var("t.name"), sval("public"))));
-
-            ResourceEntity r = new ResourceEntity("null-elem-fe-1");
-            r.addTag("fe1", null);
-            withResource(r, () -> {
-                assertThrows(IllegalArgumentException.class, () -> runCount(filterPublic));
-                assertThrows(IllegalArgumentException.class,
-                        () -> runCount(exprOp("not", filterPublic)));
-            });
-        }
-
-        @Test
-        void mapIntersectionWithNullProjectionExcludesRow() {
-            // CEL map() has no error absorption: a NULL projected column errors the whole
-            // hasIntersection even when another element would intersect.
-            Operand mapNames = exprOp("hasIntersection",
-                    exprOp("map", var("request.resource.attr.tags"),
-                            lambda("t", var("t.name"))),
-                    listOp("public"));
-
-            ResourceEntity withNull = new ResourceEntity("null-elem-map-1");
-            withNull.addTag("nm1a", "public");
-            withNull.addTag("nm1b", null);
-            withResource(withNull, () -> {
-                assertEquals(0, runCount(mapNames));
-                assertEquals(0, runCount(exprOp("not", mapNames)));
-            });
-
-            // Control: no NULL projections — the plain intersection still matches.
-            ResourceEntity clean = new ResourceEntity("null-elem-map-2");
-            clean.addTag("nm2a", "public");
-            withResource(clean, () -> {
-                assertEquals(1, runCount(mapNames));
-                assertEquals(0, runCount(exprOp("not", mapNames)));
-            });
-        }
-    }
-
     /**
      * {@code in}-lists containing {@code null} — PDP-verified wire facts (Cerbos latest,
      * 2026-07): {@code R.attr.owner in ["a", null]} compiles and the planner emits
@@ -2085,39 +1365,6 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         @Test
-        void inListWithNullElementIncludesNullRow() {
-            // check() verdicts (scratch PDP): "a" ALLOW, null ALLOW, "b" DENY.
-            Operand cond = exprOp("in",
-                    var("request.resource.attr.aOptionalString"), listOpNullable("a", null));
-            withOwnerRows(() ->
-                    assertEquals(Set.of("in-null-a", "in-null-nul"), runIds(cond)));
-        }
-
-        @Test
-        void notInListWithNullElementReturnsOnlyNonMatchingRows() {
-            // check() verdicts: "b" ALLOW; "a" and null DENY. Three-valued trap: over the old
-            // IN ('a', NULL) the negation was UNKNOWN for "b" too — nothing came back.
-            Operand cond = exprOp("not", exprOp("in",
-                    var("request.resource.attr.aOptionalString"), listOpNullable("a", null)));
-            withOwnerRows(() ->
-                    assertEquals(Set.of("in-null-b"), runIds(cond)));
-        }
-
-        @Test
-        void inAllNullListIsPureIsNull() {
-            // The planner folds `x in [null]` to eq(x, null) in real plans; the unfolded
-            // shape must translate identically (pure IS NULL) for hand-built plans.
-            Operand cond = exprOp("in",
-                    var("request.resource.attr.aOptionalString"), listOpNullable((String) null));
-            withOwnerRows(() -> {
-                assertEquals(Set.of("in-null-nul"), runIds(cond));
-                assertEquals(Set.of("in-null-a", "in-null-b"), runIds(exprOp("not", exprOp("in",
-                        var("request.resource.attr.aOptionalString"),
-                        listOpNullable((String) null)))));
-            });
-        }
-
-        @Test
         void nullNeedleAgainstScalarFieldIsIsNull() {
             // `null in R.attr.x` over a Field mapping: scalar membership is equality, and
             // equality against the null constant is IS NULL (mirrors the eq-null leaf).
@@ -2125,42 +1372,6 @@ class SpringDataQueryPlanAdapterTest {
                     nullVal(), var("request.resource.attr.aOptionalString"));
             withOwnerRows(() ->
                     assertEquals(Set.of("in-null-nul"), runIds(cond)));
-        }
-
-        @Test
-        void nullNeedleAgainstRelationMatchesNullMemberRow() {
-            // `null in R.attr.tagNames`: CEL is true iff the collection holds a null element
-            // (PDP-verified: items=["a", null] → ALLOW; ["a"], [] → DENY). A related row with
-            // a NULL member column is exactly such an element → EXISTS(member IS NULL).
-            Operand cond = exprOp("in", nullVal(), var("request.resource.attr.tagNames"));
-            withTagRows(() ->
-                    assertEquals(Set.of("in-null-tag-nul"), runIds(cond)));
-        }
-
-        @Test
-        void notNullNeedleAgainstRelationExcludesNullMemberRow() {
-            // check() verdicts: ["a"] ALLOW, [] ALLOW, ["a", null] DENY.
-            Operand cond = exprOp("not",
-                    exprOp("in", nullVal(), var("request.resource.attr.tagNames")));
-            withTagRows(() ->
-                    assertEquals(Set.of("in-null-tag-x", "in-null-tag-none"), runIds(cond)));
-        }
-
-        @Test
-        void hasIntersectionWithNullElementMatchesNullMemberRow() {
-            // hasIntersection shares collectionContainsAny with `in`, and check() agrees:
-            // hasIntersection(R.attr.xs, ["x", null]) ALLOWS xs=[null] (PDP-verified). A
-            // null element in the constant list intersects exactly the collections holding
-            // a null member.
-            Operand cond = exprOp("hasIntersection",
-                    var("request.resource.attr.tagNames"), listOpNullable("x", null));
-            withTagRows(() -> {
-                assertEquals(Set.of("in-null-tag-x", "in-null-tag-nul"), runIds(cond));
-                assertEquals(Set.of("in-null-tag-none"), runIds(exprOp("not",
-                        exprOp("hasIntersection",
-                                var("request.resource.attr.tagNames"),
-                                listOpNullable("x", null)))));
-            });
         }
 
         @Test
@@ -2202,10 +1413,6 @@ class SpringDataQueryPlanAdapterTest {
 
         private Operand hierarchy(Operand inner) {
             return exprOp("hierarchy", inner);
-        }
-
-        private Operand segList(Operand... segs) {
-            return exprOp("list", segs);
         }
 
         /**
@@ -2283,77 +1490,6 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         @Test
-        void ancestorOfConstantPrefixOfField() {
-            // ancestorOf(hierarchy("a:b", ":"), hierarchy(field, ":")) → field LIKE 'a:b:%' —
-            // strict descendants only: NOT the equal path "a:b", NOT the string-prefix
-            // sibling "a:bb:c" (the trailing delimiter in the pattern excludes it).
-            Operand cond = exprOp("ancestorOf",
-                    hierarchy(sval("a:b"), ":"),
-                    hierarchy(var("request.resource.attr.aString"), ":"));
-            withScopeRows(SCOPES, () ->
-                    assertEquals(Set.of("a:b:c", "a:b:c:d"), runIds(cond)));
-        }
-
-        @Test
-        void ancestorOfFieldPrefixOfConstant() {
-            // ancestorOf(hierarchy(field, ":"), hierarchy("a:b:c", ":")) → field IN ('a', 'a:b')
-            // — the strict-prefix IN list. An off-by-one regression including the full path
-            // would wrongly add the "a:b:c" row (a path is not its own strict ancestor).
-            Operand cond = exprOp("ancestorOf",
-                    hierarchy(var("request.resource.attr.aString"), ":"),
-                    hierarchy(sval("a:b:c"), ":"));
-            withScopeRows(SCOPES, () ->
-                    assertEquals(Set.of("a", "a:b"), runIds(cond)));
-        }
-
-        @Test
-        void descendentOfFieldUnderConstant() {
-            // descendentOf(hierarchy(field, ":"), hierarchy("a:b", ":")) → field LIKE 'a:b:%'.
-            // Same discriminators as ancestorOfConstantPrefixOfField (mirrored operator).
-            Operand cond = exprOp("descendentOf",
-                    hierarchy(var("request.resource.attr.aString"), ":"),
-                    hierarchy(sval("a:b"), ":"));
-            withScopeRows(SCOPES, () ->
-                    assertEquals(Set.of("a:b:c", "a:b:c:d"), runIds(cond)));
-        }
-
-        @Test
-        void descendentOfConstantUnderField() {
-            // Constant-first operand order: descendentOf(hierarchy("a:b:c", ":"),
-            // hierarchy(field, ":")) — the FIELD is the ancestor side, routing to the
-            // strict-prefix IN-list branch: field IN ('a', 'a:b').
-            Operand cond = exprOp("descendentOf",
-                    hierarchy(sval("a:b:c"), ":"),
-                    hierarchy(var("request.resource.attr.aString"), ":"));
-            withScopeRows(SCOPES, () ->
-                    assertEquals(Set.of("a", "a:b"), runIds(cond)));
-        }
-
-        @Test
-        void overlapsFieldHierarchyWithConstant() {
-            // overlaps(hierarchy(field, ":"), hierarchy("a:b", ":"))
-            //   → field IN ('a') OR field = 'a:b' OR field LIKE 'a:b:%' — inclusive in both
-            // directions (ancestors, the equal path, and descendants), but never the
-            // string-prefix sibling "a:bb:c" or the unrelated "x:y".
-            Operand cond = exprOp("overlaps",
-                    hierarchy(var("request.resource.attr.aString"), ":"),
-                    hierarchy(sval("a:b"), ":"));
-            withScopeRows(SCOPES, () ->
-                    assertEquals(Set.of("a", "a:b", "a:b:c", "a:b:c:d"), runIds(cond)));
-        }
-
-        @Test
-        void overlapsConstantHierarchyWithField() {
-            // Constant-first operand order: overlaps is symmetric, so the same union must
-            // come back with the operands mirrored.
-            Operand cond = exprOp("overlaps",
-                    hierarchy(sval("a:b"), ":"),
-                    hierarchy(var("request.resource.attr.aString"), ":"));
-            withScopeRows(SCOPES, () ->
-                    assertEquals(Set.of("a", "a:b", "a:b:c", "a:b:c:d"), runIds(cond)));
-        }
-
-        @Test
         void ancestorOfSingleSegmentConstantMatchesNothing() {
             // ancestorOf(field, "a") — a single-segment path has NO strict ancestors, so the
             // translation is always-false: even the row whose scope is exactly "a" must not
@@ -2375,55 +1511,6 @@ class SpringDataQueryPlanAdapterTest {
                     hierarchy(sval("a"), ":"));
             withScopeRows(SCOPES, () ->
                     assertEquals(Set.of("a:b", "a:b:c", "a:b:c:d", "a:bb:c"), runIds(cond)));
-        }
-
-        @Test
-        void ancestorOfMetacharacterSegments() {
-            // Field-first with LIKE metacharacters in the constant path: the strict-prefix
-            // IN list ('50%', '50%:a_b') compares by equality — no pattern matching, so the
-            // '50x'/'50_' rows must not match.
-            Operand cond = exprOp("ancestorOf",
-                    hierarchy(var("request.resource.attr.aString"), ":"),
-                    hierarchy(sval("50%:a_b:x"), ":"));
-            withScopeRows(List.of("50%", "50%:a_b", "50x", "50_", "50%:a_b:x"), () ->
-                    assertEquals(Set.of("50%", "50%:a_b"), runIds(cond)));
-        }
-
-        @Test
-        void descendentOfMetacharacterPrefixIsEscaped() {
-            // Constant-first LIKE branch: the prefix '50%:a_b:' must be escaped so '%' and
-            // '_' are literals. Unescaped, LIKE '50%:a_b:%' would match the '50x:a_b:y'
-            // (via %) and '50%:aXb:y' (via _) traps; the equal path '50%:a_b' pins strictness.
-            Operand cond = exprOp("descendentOf",
-                    hierarchy(var("request.resource.attr.aString"), ":"),
-                    hierarchy(sval("50%:a_b"), ":"));
-            withScopeRows(List.of("50%:a_b:y", "50x:a_b:y", "50%:aXb:y", "50%:a_b"), () ->
-                    assertEquals(Set.of("50%:a_b:y"), runIds(cond)));
-        }
-
-        @Test
-        void descendentOfBracketPrefixMatchesLiteralBracketPaths() {
-            // '[' in a path segment: the prefix pattern must escape it as '\[' because SQL
-            // Server LIKE treats '[...]' as a character class even under ESCAPE. On H2 the
-            // escaped pattern must keep matching the LITERAL '[env]:prod' descendants and
-            // must never match 'e:prod:eu' — the row an unescaped '[env]' class would match
-            // one character of on SQL Server. The equal path pins strictness.
-            Operand cond = exprOp("descendentOf",
-                    hierarchy(var("request.resource.attr.aString"), ":"),
-                    hierarchy(sval("[env]:prod"), ":"));
-            withScopeRows(List.of("[env]:prod:eu", "e:prod:eu", "[env]:prod"), () ->
-                    assertEquals(Set.of("[env]:prod:eu"), runIds(cond)));
-        }
-
-        @Test
-        void overlapsSegmentedWithField() {
-            // The policy shape: hierarchy("projects:123", ":").overlaps(hierarchy(["projects", R.id]))
-            //   → segment-wise: const "projects" matches, then field == "123".
-            Operand cond = exprOp("overlaps",
-                    hierarchy(sval("projects:123"), ":"),
-                    hierarchy(segList(sval("projects"), var("request.resource.attr.aString"))));
-            withScopeRows(List.of("123", "456", "projects"), () ->
-                    assertEquals(Set.of("123"), runIds(cond)));
         }
 
         @Test
@@ -2514,40 +1601,10 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         @Test
-        void ltValueFirstMeansFieldGreaterThan() {
-            // 3 < aNumber, with aNumber = 5 → must match. The naive (unmirrored) translation
-            // `aNumber < 3` would return 0.
-            withResource(seeded(), () -> {
-                assertEquals(1, runCount(exprOp("lt", nval(3), var("request.resource.attr.aNumber"))));
-                // Control: field-first form keeps its meaning.
-                assertEquals(0, runCount(exprOp("lt", var("request.resource.attr.aNumber"), nval(3))));
-            });
-        }
-
-        @Test
         void gtValueFirstMeansFieldLessThan() {
             // 10 > aNumber, with aNumber = 5 → match.
             withResource(seeded(), () ->
                     assertEquals(1, runCount(exprOp("gt", nval(10), var("request.resource.attr.aNumber")))));
-        }
-
-        @Test
-        void leGeValueFirstAreMirrored() {
-            withResource(seeded(), () -> {
-                // 5 <= aNumber → aNumber >= 5 → match
-                assertEquals(1, runCount(exprOp("le", nval(5), var("request.resource.attr.aNumber"))));
-                // 4 >= aNumber → aNumber <= 4 → no match
-                assertEquals(0, runCount(exprOp("ge", nval(4), var("request.resource.attr.aNumber"))));
-            });
-        }
-
-        @Test
-        void sizeValueFirstNonEmptyCheck() {
-            // 0 < size(ownedBy) → EXISTS; seeded row has one owner.
-            withResource(seeded(), () ->
-                    assertEquals(1, runCount(exprOp("lt",
-                            nval(0),
-                            exprOp("size", var("request.resource.attr.ownedBy"))))));
         }
 
         @Test
@@ -2566,15 +1623,6 @@ class SpringDataQueryPlanAdapterTest {
                     assertEquals(1, runCount(exprOp("lt",
                             exprOp("add", nval(1), nval(2)),
                             var("request.resource.attr.aNumber")))));
-        }
-
-        @Test
-        void hasIntersectionValueFirstIsSymmetric() {
-            // hasIntersection(["user1","other"], R.attr.ownedBy) — value list first.
-            withResource(seeded(), () ->
-                    assertEquals(1, runCount(exprOp("hasIntersection",
-                            listOp("user1", "other"),
-                            var("request.resource.attr.ownedBy")))));
         }
 
         @Test
@@ -2601,71 +1649,6 @@ class SpringDataQueryPlanAdapterTest {
 
     @Nested
     class TernaryIfExpressions {
-
-        /** gt(if(aBool, aNumber, 0), 0) — the canonical `(R.attr.aBool ? R.attr.aNumber : 0) > 0`. */
-        private Operand canonicalPlan() {
-            return exprOp("gt",
-                    exprOp("if",
-                            var("request.resource.attr.aBool"),
-                            var("request.resource.attr.aNumber"),
-                            nval(0)),
-                    nval(0));
-        }
-
-        @Test
-        void comparisonWrappingTernary() {
-            // aBool = true → then-branch compares aNumber > 0.
-            ResourceEntity match = new ResourceEntity("ternary-seed-1");
-            match.setaBool(true);
-            match.setaNumber(10);
-            withResource(match, () -> assertEquals(1, runCount(canonicalPlan())));
-
-            ResourceEntity zeroThen = new ResourceEntity("ternary-seed-2");
-            zeroThen.setaBool(true);
-            zeroThen.setaNumber(0);
-            withResource(zeroThen, () -> assertEquals(0, runCount(canonicalPlan())));
-
-            // aBool = false → else branch folds to gt(0, 0) → always false, whatever aNumber is.
-            ResourceEntity elseBranch = new ResourceEntity("ternary-seed-3");
-            elseBranch.setaBool(false);
-            elseBranch.setaNumber(10);
-            withResource(elseBranch, () -> assertEquals(0, runCount(canonicalPlan())));
-        }
-
-        @Test
-        void bareBooleanTernary() {
-            // aBool ? aString == "x" : aNumber > 5 — the ternary IS the condition, both
-            // branches are boolean expressions.
-            Operand plan = exprOp("if",
-                    var("request.resource.attr.aBool"),
-                    exprOp("eq", var("request.resource.attr.aString"), sval("x")),
-                    exprOp("gt", var("request.resource.attr.aNumber"), nval(5)));
-
-            ResourceEntity thenMatch = new ResourceEntity("ternary-bare-1");
-            thenMatch.setaBool(true);
-            thenMatch.setaString("x");
-            thenMatch.setaNumber(0);
-            withResource(thenMatch, () -> assertEquals(1, runCount(plan)));
-
-            // then-branch active but not satisfied — the else branch must NOT rescue the row.
-            ResourceEntity thenMiss = new ResourceEntity("ternary-bare-2");
-            thenMiss.setaBool(true);
-            thenMiss.setaString("y");
-            thenMiss.setaNumber(10);
-            withResource(thenMiss, () -> assertEquals(0, runCount(plan)));
-
-            ResourceEntity elseMatch = new ResourceEntity("ternary-bare-3");
-            elseMatch.setaBool(false);
-            elseMatch.setaString("x");
-            elseMatch.setaNumber(10);
-            withResource(elseMatch, () -> assertEquals(1, runCount(plan)));
-
-            ResourceEntity elseMiss = new ResourceEntity("ternary-bare-4");
-            elseMiss.setaBool(false);
-            elseMiss.setaString("x");
-            elseMiss.setaNumber(1);
-            withResource(elseMiss, () -> assertEquals(0, runCount(plan)));
-        }
 
         @Test
         void bareBooleanTernaryWithConstantBranch() {
@@ -2694,71 +1677,6 @@ class SpringDataQueryPlanAdapterTest {
             falseThen.setaBool(true);
             falseThen.setaNumber(10);
             withResource(falseThen, () -> assertEquals(0, runCount(planFalse)));
-        }
-
-        @Test
-        void valueFirstComparisonIsMirrored() {
-            // 3 < (aBool ? aNumber : 0) — planner preserves source order, so the constant sits
-            // on the LEFT. Branch substitution keeps positions, and NormalizedBinary mirrors the
-            // recursed comparisons: lt(3, aNumber) → aNumber > 3.
-            Operand plan = exprOp("lt",
-                    nval(3),
-                    exprOp("if",
-                            var("request.resource.attr.aBool"),
-                            var("request.resource.attr.aNumber"),
-                            nval(0)));
-
-            ResourceEntity match = new ResourceEntity("ternary-mirror-1");
-            match.setaBool(true);
-            match.setaNumber(5);
-            withResource(match, () -> assertEquals(1, runCount(plan)));
-
-            // Naive (unmirrored) translation `aNumber < 3` would wrongly match this row.
-            ResourceEntity below = new ResourceEntity("ternary-mirror-2");
-            below.setaBool(true);
-            below.setaNumber(2);
-            withResource(below, () -> assertEquals(0, runCount(plan)));
-
-            // else branch: 3 < 0 folds to always-false — aNumber must not leak in.
-            ResourceEntity elseRow = new ResourceEntity("ternary-mirror-3");
-            elseRow.setaBool(false);
-            elseRow.setaNumber(99);
-            withResource(elseRow, () -> assertEquals(0, runCount(plan)));
-        }
-
-        @Test
-        void nestedTernaryInBranch() {
-            // (aBool ? (aString == "x" ? aNumber : 1) : 0) > 2 — the then-branch is itself a
-            // ternary; substitution recurses until no `if` remains.
-            Operand plan = exprOp("gt",
-                    exprOp("if",
-                            var("request.resource.attr.aBool"),
-                            exprOp("if",
-                                    exprOp("eq", var("request.resource.attr.aString"), sval("x")),
-                                    var("request.resource.attr.aNumber"),
-                                    nval(1)),
-                            nval(0)),
-                    nval(2));
-
-            ResourceEntity innerThen = new ResourceEntity("ternary-nested-1");
-            innerThen.setaBool(true);
-            innerThen.setaString("x");
-            innerThen.setaNumber(5);
-            withResource(innerThen, () -> assertEquals(1, runCount(plan)));
-
-            // Inner else: 1 > 2 → always false, even though aNumber would match.
-            ResourceEntity innerElse = new ResourceEntity("ternary-nested-2");
-            innerElse.setaBool(true);
-            innerElse.setaString("y");
-            innerElse.setaNumber(5);
-            withResource(innerElse, () -> assertEquals(0, runCount(plan)));
-
-            // Outer else: 0 > 2 → always false.
-            ResourceEntity outerElse = new ResourceEntity("ternary-nested-3");
-            outerElse.setaBool(false);
-            outerElse.setaString("x");
-            outerElse.setaNumber(5);
-            withResource(outerElse, () -> assertEquals(0, runCount(plan)));
         }
 
         @Test
@@ -2802,29 +1720,6 @@ class SpringDataQueryPlanAdapterTest {
                 assertEquals(0, runCount(exprOp("or", comparison,
                         exprOp("eq", var("request.resource.attr.aString"), sval("z")))));
             });
-        }
-
-        @Test
-        void ternaryWithExpressionCondition() {
-            // (aNumber > 5 ? aString : "none") == "x" — condition is a boolean EXPRESSION,
-            // not a bare variable.
-            Operand plan = exprOp("eq",
-                    exprOp("if",
-                            exprOp("gt", var("request.resource.attr.aNumber"), nval(5)),
-                            var("request.resource.attr.aString"),
-                            sval("none")),
-                    sval("x"));
-
-            ResourceEntity condTrue = new ResourceEntity("ternary-exprcond-1");
-            condTrue.setaNumber(10);
-            condTrue.setaString("x");
-            withResource(condTrue, () -> assertEquals(1, runCount(plan)));
-
-            // Condition false → eq("none", "x") folds to always-false.
-            ResourceEntity condFalse = new ResourceEntity("ternary-exprcond-2");
-            condFalse.setaNumber(1);
-            condFalse.setaString("x");
-            withResource(condFalse, () -> assertEquals(0, runCount(plan)));
         }
 
         @Test
@@ -2904,46 +1799,6 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         @Test
-        void negatedTernaryWithNullConditionExcludesRow() {
-            // !((aOptionalString != "x" ? aNumber : 0.0) > 1.0) — a NULL condition column is
-            // a CEL evaluation error (deny), so the SQL must be UNKNOWN under BOTH polarities.
-            Operand comparison = exprOp("gt",
-                    exprOp("if",
-                            exprOp("ne", var("request.resource.attr.aOptionalString"), sval("x")),
-                            var("request.resource.attr.aNumber"),
-                            nval(0.0)),
-                    nval(1.0));
-
-            // Both branch comparisons false: (NULL AND FALSE) OR (NULL AND FALSE) must not
-            // collapse to FALSE — NOT(FALSE) = TRUE would leak the row.
-            ResourceEntity bothBranchesFalse = new ResourceEntity("ternary-nullcond-1");
-            bothBranchesFalse.setaOptionalString(null);
-            bothBranchesFalse.setaNumber(0);
-            withResource(bothBranchesFalse, () -> {
-                assertEquals(0, runCount(comparison));
-                assertEquals(0, runCount(exprOp("not", comparison)));
-            });
-
-            // Then-branch true: still UNKNOWN (the PDP denies), excluded either way.
-            ResourceEntity thenBranchTrue = new ResourceEntity("ternary-nullcond-2");
-            thenBranchTrue.setaOptionalString(null);
-            thenBranchTrue.setaNumber(5);
-            withResource(thenBranchTrue, () -> {
-                assertEquals(0, runCount(comparison));
-                assertEquals(0, runCount(exprOp("not", comparison)));
-            });
-
-            // Known-condition control: the UNKNOWN arm must vanish for non-NULL conditions.
-            ResourceEntity knownCondition = new ResourceEntity("ternary-nullcond-3");
-            knownCondition.setaOptionalString("y");
-            knownCondition.setaNumber(5);
-            withResource(knownCondition, () -> {
-                assertEquals(1, runCount(comparison));
-                assertEquals(0, runCount(exprOp("not", comparison)));
-            });
-        }
-
-        @Test
         void negatedBareTernaryWithNullConditionExcludesRow() {
             // aOptionalString != "x" ? aNumber > 1 : aBool — bare boolean-position ternary
             // with a NULL condition column: same UNKNOWN-not-FALSE contract as above.
@@ -2988,41 +1843,6 @@ class SpringDataQueryPlanAdapterTest {
                                     sval("none")),
                             sval("x")),
                     "if()", "contains");
-        }
-    }
-
-    // -- Lambda bodies referencing outer (non-lambda) resource attributes --
-
-    @Nested
-    class OuterReferencesInsideLambda {
-
-        @Test
-        void outerAttributeInsideExistsLambda() {
-            // R.attr.tags.exists(t, t.name == "x" && R.attr.aBool) — the PDP keeps the residual
-            // R.attr.aBool INSIDE the lambda body; it must resolve against the correlated outer
-            // entity, not the joined tag.
-            ResourceEntity r = new ResourceEntity("seed-2");
-            r.setaBool(true);
-            r.setaNumber(1);
-            r.setaString("s");
-            r.addTag("tagX", "x");
-
-            withResource(r, () -> {
-                Operand cond = exprOp("exists",
-                        var("request.resource.attr.tags"),
-                        lambda("t", exprOp("and",
-                                exprOp("eq", var("t.name"), sval("x")),
-                                var("request.resource.attr.aBool"))));
-                assertEquals(1, runCount(cond));
-
-                // Same shape with a non-matching outer comparison → excluded.
-                Operand condNoMatch = exprOp("exists",
-                        var("request.resource.attr.tags"),
-                        lambda("t", exprOp("and",
-                                exprOp("eq", var("t.name"), sval("x")),
-                                exprOp("eq", var("request.resource.attr.aBool"), bval(false)))));
-                assertEquals(0, runCount(condNoMatch));
-            });
         }
     }
 
@@ -3106,57 +1926,6 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         @Test
-        void existsOverTwoHopChainJoinsThroughIntermediateHop() {
-            var fin = new SubCategoryEntity("chain-sub-e1", "finance");
-            var biz = new CategoryEntity("chain-cat-e1", "business");
-            biz.setSubCategories(List.of(fin));
-            ResourceEntity r = new ResourceEntity("chain-r-e1");
-            r.setCategories(List.of(biz));
-
-            withCategoryGraph(r, List.of(biz), List.of(fin), () -> {
-                Operand matching = exprOp("exists", var(CHAIN),
-                        lambda("s", exprOp("eq", var("s.name"), sval("finance"))));
-                assertEquals(1, runChainCount(matching));
-
-                Operand nonMatching = exprOp("exists", var(CHAIN),
-                        lambda("s", exprOp("eq", var("s.name"), sval("nope"))));
-                assertEquals(0, runChainCount(nonMatching));
-            });
-        }
-
-        @Test
-        void inOverTwoHopChainJoinsThroughIntermediateHop() {
-            var fin = new SubCategoryEntity("chain-sub-i1", "finance");
-            var biz = new CategoryEntity("chain-cat-i1", "business");
-            biz.setSubCategories(List.of(fin));
-            ResourceEntity r = new ResourceEntity("chain-r-i1");
-            r.setCategories(List.of(biz));
-
-            withCategoryGraph(r, List.of(biz), List.of(fin), () -> {
-                // "finance" in R.attr.categories.subCategories — value-first, as the planner
-                // preserves source order; membership tests the tail's defaultMemberField (name).
-                assertEquals(1, runChainCount(exprOp("in", sval("finance"), var(CHAIN))));
-                assertEquals(0, runChainCount(exprOp("in", sval("nope"), var(CHAIN))));
-            });
-        }
-
-        @Test
-        void hasIntersectionOverTwoHopChainJoinsThroughIntermediateHop() {
-            var fin = new SubCategoryEntity("chain-sub-h1", "finance");
-            var biz = new CategoryEntity("chain-cat-h1", "business");
-            biz.setSubCategories(List.of(fin));
-            ResourceEntity r = new ResourceEntity("chain-r-h1");
-            r.setCategories(List.of(biz));
-
-            withCategoryGraph(r, List.of(biz), List.of(fin), () -> {
-                assertEquals(1, runChainCount(
-                        exprOp("hasIntersection", var(CHAIN), listOp("finance", "zz"))));
-                assertEquals(0, runChainCount(
-                        exprOp("hasIntersection", var(CHAIN), listOp("zz"))));
-            });
-        }
-
-        @Test
         void sizeOverTwoHopChainCountsFlattenedElements() {
             // Two categories with one sub-category each: the FLATTENED chain count is 2 — a
             // tail join anchored to the wrong parent could never produce it.
@@ -3232,34 +2001,6 @@ class SpringDataQueryPlanAdapterTest {
                     }));
         }
 
-        @Test
-        void rootRelationSubqueryInsideLambdaAnchorsToOwningEntity() {
-            // W2: R.attr.categories.exists(c, c.name == "business" && R.attr.tags.exists(u, ...))
-            // — the inner tags subquery must correlate the ROOT entity (owner of "tags"), not
-            // the category join the lambda scope is rooted at.
-            var fin = new SubCategoryEntity("chain-sub-w1", "finance");
-            var biz = new CategoryEntity("chain-cat-w1", "business");
-            biz.setSubCategories(List.of(fin));
-            ResourceEntity r = new ResourceEntity("chain-r-w1");
-            r.setCategories(List.of(biz));
-            r.addTag("chain-tag-w1", "public");
-
-            withCategoryGraph(r, List.of(biz), List.of(fin), () -> {
-                Operand matching = exprOp("exists", var("request.resource.attr.categories"),
-                        lambda("c", exprOp("and",
-                                exprOp("eq", var("c.name"), sval("business")),
-                                exprOp("exists", var("request.resource.attr.tags"),
-                                        lambda("u", exprOp("eq", var("u.name"), sval("public")))))));
-                assertEquals(1, runChainCount(matching));
-
-                Operand nonMatching = exprOp("exists", var("request.resource.attr.categories"),
-                        lambda("c", exprOp("and",
-                                exprOp("eq", var("c.name"), sval("business")),
-                                exprOp("exists", var("request.resource.attr.tags"),
-                                        lambda("u", exprOp("eq", var("u.name"), sval("private")))))));
-                assertEquals(0, runChainCount(nonMatching));
-            });
-        }
     }
 
     // -- Malformed / hostile operand shapes --
@@ -3302,117 +2043,6 @@ class SpringDataQueryPlanAdapterTest {
         assertEquals(0, runCount(cond, overrides));
     }
 
-    // -- Field-to-field contains/startsWith/endsWith --
-    // The needle is a COLUMN, so LIKE metacharacters it holds must be escaped dynamically
-    // (nested REPLACE) before being wrapped in wildcards. CEL semantics: case-sensitive
-    // literal substring; a NULL needle is a missing attribute → deny (row excluded).
-
-    @Nested
-    class FieldToFieldStringMatch {
-
-        private ResourceEntity row(String id, String aString, String createdBy) {
-            ResourceEntity r = new ResourceEntity(id);
-            r.setaString(aString);
-            r.setCreatedBy(createdBy);
-            return r;
-        }
-
-        private int count(String op) {
-            return runCount(exprOp(op,
-                    var("request.resource.attr.aString"),
-                    var("request.resource.attr.createdBy")));
-        }
-
-        @Test
-        void metacharactersInNeedleColumnAreEscaped() {
-            // "oneXtwo" does NOT literally contain/start-with/end-with "one_two", but an
-            // UNESCAPED pattern ('%one_two%' / 'one_two%' / '%one_two') would match all
-            // three ways because '_' matches the 'X'. All three must be no-match.
-            withResource(row("f2f-like-1", "oneXtwo", "one_two"), () -> {
-                assertEquals(0, count("contains"));
-                assertEquals(0, count("startsWith"));
-                assertEquals(0, count("endsWith"));
-            });
-        }
-
-        @Test
-        void containsColumnLiteralMatch() {
-            withResource(row("f2f-like-2", "a_one_two_b", "one_two"), () ->
-                    assertEquals(1, count("contains")));
-        }
-
-        @Test
-        void startsWithColumn() {
-            withResource(row("f2f-like-3", "one_twoTail", "one_two"), () -> {
-                assertEquals(1, count("startsWith"));
-                assertEquals(1, count("contains"));
-                assertEquals(0, count("endsWith"));
-            });
-        }
-
-        @Test
-        void endsWithColumn() {
-            withResource(row("f2f-like-4", "Headone_two", "one_two"), () -> {
-                assertEquals(1, count("endsWith"));
-                assertEquals(0, count("startsWith"));
-            });
-        }
-
-        @Test
-        void percentAndBackslashInNeedleColumn() {
-            withResource(row("f2f-like-5", "50%_off", "%_o"), () ->
-                    assertEquals(1, count("contains")));
-            withResource(row("f2f-like-6", "back\\slash", "k\\s"), () ->
-                    assertEquals(1, count("contains")));
-            // A literal backslash in the needle must not act as an escape prefix.
-            withResource(row("f2f-like-7", "backXslash", "k\\s"), () ->
-                    assertEquals(0, count("contains")));
-        }
-
-        @Test
-        void bracketInNeedleColumn() {
-            // The REPLACE chain rewrites '[' to '\[' (SQL Server character-class guard);
-            // with ESCAPE '\' declared that must still be a literal '[' on H2 — the literal
-            // match keeps working and 'Secret' (the row an unescaped '[SEC]' class would
-            // match on SQL Server) never matches.
-            withResource(row("f2f-like-10", "x[SEC]y", "[SEC]"), () -> {
-                assertEquals(1, count("contains"));
-                assertEquals(0, count("startsWith"));
-            });
-            withResource(row("f2f-like-11", "[SEC]ret", "[SEC]"), () -> {
-                assertEquals(1, count("startsWith"));
-                assertEquals(1, count("contains"));
-            });
-            withResource(row("f2f-like-12", "Secret", "[SEC]"), () -> {
-                assertEquals(0, count("contains"));
-                assertEquals(0, count("startsWith"));
-                assertEquals(0, count("endsWith"));
-            });
-        }
-
-        @Test
-        void nullNeedleColumnExcludesRow() {
-            // CEL: missing attribute → error → deny. Guarded explicitly because some
-            // dialects' CONCAT treats NULL as '' which would turn the pattern into
-            // match-anything '%%'.
-            withResource(row("f2f-like-8", "anything", null), () -> {
-                assertEquals(0, count("contains"));
-                assertEquals(0, count("startsWith"));
-                assertEquals(0, count("endsWith"));
-            });
-        }
-
-        @Test
-        void emptyNeedleColumnMatchesLikeCel() {
-            // CEL: "x".contains("") / startsWith("") / endsWith("") are all true.
-            withResource(row("f2f-like-9", "x", ""), () -> {
-                assertEquals(1, count("contains"));
-                assertEquals(1, count("startsWith"));
-                assertEquals(1, count("endsWith"));
-            });
-        }
-    }
-
     // -- SQL Server '[' LIKE escaping --
     // T-SQL LIKE treats '[...]' as a character class EVEN WITH an ESCAPE clause declared, so
     // every '[' in a generated pattern must arrive as '\['. On H2 (and PostgreSQL/MySQL —
@@ -3443,36 +2073,6 @@ class SpringDataQueryPlanAdapterTest {
             return r;
         }
 
-        @Test
-        void bracketConstantsMatchLiterallyOnH2() {
-            // '\[' + ESCAPE stays a literal '[': literal-bracket rows keep matching.
-            withResource(row("br-1", "[SEC]ret"), () -> {
-                assertEquals(1, runCount(exprOp("startsWith",
-                        var("request.resource.attr.aString"), sval("[SEC]"))));
-                assertEquals(1, runCount(exprOp("contains",
-                        var("request.resource.attr.aString"), sval("[SEC]"))));
-            });
-            withResource(row("br-2", "a[x]b"), () ->
-                    assertEquals(1, runCount(exprOp("contains",
-                            var("request.resource.attr.aString"), sval("[x]")))));
-            withResource(row("br-3", "tail[end]"), () ->
-                    assertEquals(1, runCount(exprOp("endsWith",
-                            var("request.resource.attr.aString"), sval("[end]")))));
-        }
-
-        @Test
-        void bracketConstantsDoNotMatchClassMembers() {
-            // The SQL Server over-match scenario: 'Secret' starts with a member of the
-            // {S,E,C} class an unescaped '[SEC]' pattern denotes. It must not match on any
-            // dialect (H2 here; PostgreSQL/MySQL via the oracle legs; SQL Server by the
-            // escaped pattern).
-            withResource(row("br-4", "Secret"), () -> {
-                assertEquals(0, runCount(exprOp("startsWith",
-                        var("request.resource.attr.aString"), sval("[SEC]"))));
-                assertEquals(0, runCount(exprOp("contains",
-                        var("request.resource.attr.aString"), sval("[SEC]"))));
-            });
-        }
     }
 
     // -- Constant-receiver string matches: `"a,b".contains(R.attr.x)` --
@@ -3497,71 +2097,12 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         @Test
-        void constantReceiverContains() {
-            // "role1,role2".contains(aString): aString="role1" IS contained → match.
-            // The inverted translation (aString LIKE '%role1,role2%') would return 0.
-            withResource(row("cr-1", "role1"), () -> {
-                assertEquals(1, runCount(plan("contains", "role1,role2")));
-                // Control: the column-receiver form keeps its meaning.
-                assertEquals(0, runCount(exprOp("contains",
-                        var("request.resource.attr.aString"), sval("role1,role2"))));
-            });
-            withResource(row("cr-2", "admin"), () ->
-                    assertEquals(0, runCount(plan("contains", "role1,role2"))));
-        }
-
-        @Test
-        void constantReceiverStartsWith() {
-            // "one_two,three".startsWith(aString): aString="one_two" is a prefix → match.
-            withResource(row("cr-3", "one_two"), () ->
-                    assertEquals(1, runCount(plan("startsWith", "one_two,three"))));
-            withResource(row("cr-4", "three"), () ->
-                    assertEquals(0, runCount(plan("startsWith", "one_two,three"))));
-        }
-
-        @Test
-        void constantReceiverEndsWith() {
-            withResource(row("cr-5", "one_two"), () ->
-                    assertEquals(1, runCount(plan("endsWith", "three,one_two"))));
-            withResource(row("cr-6", "three"), () ->
-                    assertEquals(0, runCount(plan("endsWith", "three,one_two"))));
-        }
-
-        @Test
-        void columnNeedleMetacharactersAreEscaped() {
-            // Column holds "a_b"; the constant "aXb-list" does NOT literally contain it, but
-            // an UNESCAPED needle pattern ('%a_b%') would match the 'X'. Same for the
-            // startsWith/endsWith shapes.
-            withResource(row("cr-7", "a_b"), () -> {
-                assertEquals(0, runCount(plan("contains", "aXb-list")));
-                assertEquals(0, runCount(plan("startsWith", "aXb-list")));
-                assertEquals(0, runCount(plan("endsWith", "list-aXb")));
-            });
-            // Literal metacharacter matches only work when the escape is correct.
-            withResource(row("cr-8", "a_b"), () -> {
-                assertEquals(1, runCount(plan("contains", "xa_by")));
-                assertEquals(1, runCount(plan("startsWith", "a_b-tail")));
-                assertEquals(1, runCount(plan("endsWith", "head-a_b")));
-            });
-        }
-
-        @Test
         void nullColumnNeedleExcludesRow() {
             // A NULL column is a missing attribute → CEL error → deny for all three ops.
             withResource(row("cr-9", null), () -> {
                 assertEquals(0, runCount(plan("contains", "anything")));
                 assertEquals(0, runCount(plan("startsWith", "anything")));
                 assertEquals(0, runCount(plan("endsWith", "anything")));
-            });
-        }
-
-        @Test
-        void emptyColumnNeedleMatchesLikeCel() {
-            // CEL: "x".contains("") / startsWith("") / endsWith("") are all true.
-            withResource(row("cr-10", ""), () -> {
-                assertEquals(1, runCount(plan("contains", "x")));
-                assertEquals(1, runCount(plan("startsWith", "x")));
-                assertEquals(1, runCount(plan("endsWith", "x")));
             });
         }
 
@@ -3588,78 +2129,6 @@ class SpringDataQueryPlanAdapterTest {
      */
     @Nested
     class InVariableVariable {
-
-        private Operand inVarVar() {
-            return exprOp("in",
-                    var("request.resource.attr.createdBy"),
-                    var("request.resource.attr.ownedBy"));
-        }
-
-        @Test
-        void memberMatchingElementIncludesRow() {
-            ResourceEntity r = new ResourceEntity("ivv-1");
-            r.setCreatedBy("alice");
-            r.setOwnedBy(new ArrayList<>(List.of("alice", "bob")));
-            withResource(r, () -> {
-                assertEquals(1, runCount(inVarVar()));
-                assertEquals(0, runCount(exprOp("not", inVarVar())));
-            });
-        }
-
-        @Test
-        void memberNotInCollectionExcludesRowAndNegationIncludesIt() {
-            ResourceEntity r = new ResourceEntity("ivv-2");
-            r.setCreatedBy("carol");
-            r.setOwnedBy(new ArrayList<>(List.of("alice", "bob")));
-            withResource(r, () -> {
-                assertEquals(0, runCount(inVarVar()));
-                assertEquals(1, runCount(exprOp("not", inVarVar())));
-            });
-        }
-
-        @Test
-        void emptyCollectionExcludesRowAndNegationIncludesIt() {
-            // CEL: `x in []` is FALSE (not an error) — check() verified: deny, negation allows.
-            ResourceEntity r = new ResourceEntity("ivv-3");
-            r.setCreatedBy("alice");
-            withResource(r, () -> {
-                assertEquals(0, runCount(inVarVar()));
-                assertEquals(1, runCount(exprOp("not", inVarVar())));
-            });
-        }
-
-        private Operand optInTagNames() {
-            return exprOp("in",
-                    var("request.resource.attr.aOptionalString"),
-                    var("request.resource.attr.tagNames"));
-        }
-
-        @Test
-        void nullScalarMatchesNullElement() {
-            // check() verified: `null in ["a", null]` is TRUE under the explicit-null
-            // conventions the adapter's other null translations already pin.
-            ResourceEntity r = new ResourceEntity("ivv-4");
-            r.setaOptionalString(null);
-            r.addTag("ivv4a", null);
-            r.addTag("ivv4b", "a");
-            withResource(r, () -> {
-                assertEquals(1, runCount(optInTagNames()));
-                assertEquals(0, runCount(exprOp("not", optInTagNames())));
-            });
-        }
-
-        @Test
-        void nullScalarWithoutNullElementExcludesRowAndNegationIncludesIt() {
-            // check() verified: `null in ["a", "b"]` is FALSE (not an error) — deny under
-            // `in`, allow under the negation.
-            ResourceEntity r = new ResourceEntity("ivv-5");
-            r.setaOptionalString(null);
-            r.addTag("ivv5a", "a");
-            withResource(r, () -> {
-                assertEquals(0, runCount(optInTagNames()));
-                assertEquals(1, runCount(exprOp("not", optInTagNames())));
-            });
-        }
 
         @Test
         void scalarSecondOperandThrowsNamedError() {
@@ -3903,16 +2372,6 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         @Test
-        void addInGtComparison() {
-            withResource(seeded(), () -> {
-                assertEquals(1, runCount(exprOp("gt",
-                        exprOp("add", numVar(), nval(1)), nval(2))));
-                assertEquals(0, runCount(exprOp("gt",
-                        exprOp("add", numVar(), nval(1)), nval(6))));
-            });
-        }
-
-        @Test
         void subInLtComparison() {
             withResource(seeded(), () -> {
                 assertEquals(1, runCount(exprOp("lt",
@@ -3922,62 +2381,6 @@ class SpringDataQueryPlanAdapterTest {
                 // Constant-minus-field keeps direction: 10 - 5 = 5 <= 5.
                 assertEquals(1, runCount(exprOp("le",
                         exprOp("sub", nval(10), numVar()), nval(5))));
-            });
-        }
-
-        @Test
-        void multInComparisonIncludingNegativeConstant() {
-            withResource(seeded(), () -> {
-                assertEquals(1, runCount(exprOp("gt",
-                        exprOp("mult", numVar(), nval(2)), nval(9))));
-                assertEquals(0, runCount(exprOp("gt",
-                        exprOp("mult", numVar(), nval(2)), nval(10))));
-                // Negative multiplier: arithmetic is emitted on the SQL side, so no
-                // inequality flipping is needed: 5 * -2 = -10 < 3.
-                assertEquals(1, runCount(exprOp("lt",
-                        exprOp("mult", numVar(), nval(-2)), nval(3))));
-                assertEquals(1, runCount(exprOp("gt",
-                        exprOp("mult", numVar(), nval(-2)), nval(-11))));
-            });
-        }
-
-        @Test
-        void divIsDoubleDivision() {
-            // CEL semantics on attributes are double: 5 / 2.0 == 2.5, NOT 2 (int
-            // truncation is a CEL runtime error on double attrs, verified vs live PDP).
-            withResource(seeded(), () -> {
-                assertEquals(1, runCount(exprOp("eq",
-                        exprOp("div", numVar(), nval(2)), nval(2.5))));
-                assertEquals(0, runCount(exprOp("eq",
-                        exprOp("div", numVar(), nval(2)), nval(2))));
-                assertEquals(1, runCount(exprOp("ge",
-                        exprOp("div", numVar(), nval(2)), nval(2.5))));
-                assertEquals(0, runCount(exprOp("ge",
-                        exprOp("div", numVar(), nval(2)), nval(2.6))));
-            });
-        }
-
-        @Test
-        void valueFirstComparisonIsMirrored() {
-            // 2 < aNumber + 1 → NormalizedBinary mirrors to (aNumber + 1) > 2.
-            withResource(seeded(), () -> {
-                assertEquals(1, runCount(exprOp("lt",
-                        nval(2), exprOp("add", numVar(), nval(1)))));
-                assertEquals(0, runCount(exprOp("lt",
-                        nval(6), exprOp("add", numVar(), nval(1)))));
-            });
-        }
-
-        @Test
-        void arithmeticOnBothSides() {
-            // aNumber + 1 <op> aNumber * 2 → 6 vs 10.
-            withResource(seeded(), () -> {
-                assertEquals(1, runCount(exprOp("lt",
-                        exprOp("add", numVar(), nval(1)),
-                        exprOp("mult", numVar(), nval(2)))));
-                assertEquals(0, runCount(exprOp("gt",
-                        exprOp("add", numVar(), nval(1)),
-                        exprOp("mult", numVar(), nval(2)))));
             });
         }
 
@@ -3995,35 +2398,6 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         @Test
-        void divByZeroColumnDivisorDoesNotAbortQuery() {
-            // gt(div(aNumber, aNumber), 0.5): a zero-valued row makes the divisor 0. SQL
-            // division by zero would abort the WHOLE query; CEL 0.0/0.0 is NaN, whose
-            // comparisons are all false → deny. The divisor is guarded with NULLIF so the
-            // zero-divisor row becomes UNKNOWN → excluded, and the query survives.
-            Operand cond = exprOp("gt",
-                    exprOp("div", numVar(), numVar()),
-                    nval(0.5));
-            ResourceEntity nonZero = new ResourceEntity("div-zero-1");
-            nonZero.setaNumber(5);
-            ResourceEntity zero = new ResourceEntity("div-zero-2");
-            zero.setaNumber(0);
-            withResource(nonZero, () -> withResource(zero, () ->
-                    // 5/5 = 1.0 > 0.5 → only the non-zero-divisor row matches.
-                    assertEquals(1, runCount(cond))));
-        }
-
-        @Test
-        void fractionalMultiplicationComparesInIeeeDoubleSpace() {
-            // IEEE doubles: 3 * 0.1 = 0.30000000000000004 != 0.3, so CEL (and the PDP)
-            // exclude the row. Decimal-exact DB arithmetic would wrongly include it.
-            ResourceEntity r = new ResourceEntity("frac-mult-1");
-            r.setaNumber(3);
-            withResource(r, () -> assertEquals(0, runCount(exprOp("eq",
-                    exprOp("mult", numVar(), nval(0.1)),
-                    nval(0.3)))));
-        }
-
-        @Test
         void overrideAppliesToArithmeticComparison() {
             // OperatorFunction contract: overrides win on EVERY scalar path. The arithmetic
             // expression is passed as the field argument; the plan constant as the value.
@@ -4034,26 +2408,6 @@ class SpringDataQueryPlanAdapterTest {
                     () -> runCount(cond, Map.of("gt", THROWING_OVERRIDE)));
         }
 
-        @Test
-        void modStillThrows() {
-            // CEL `%` has no double overload and attribute values are always doubles, so a
-            // mod comparison can never be satisfied at check time — translating it to SQL
-            // MOD would fabricate rows the PDP denies. It must keep throwing.
-            assertConditionThrows(
-                    exprOp("eq",
-                            exprOp("mod", numVar(), nval(2)), nval(1)),
-                    "mod");
-        }
-
-        @Test
-        void nonNumericOperandThrows() {
-            // lt over string concatenation has no numeric translation.
-            assertConditionThrows(
-                    exprOp("lt",
-                            exprOp("add", var("request.resource.attr.aString"), sval("x")),
-                            sval("z")),
-                    "numeric");
-        }
     }
 
     // -- Constant NaN / ±Infinity ordering --
@@ -4143,24 +2497,6 @@ class SpringDataQueryPlanAdapterTest {
             });
         }
 
-        @Test
-        void ternaryNanElseArmExcludesRows() {
-            // The live-PDP reproduction: `(R.attr.aBool ? 1.0 : 0.0/0.0) > 0.5` arrives
-            // as gt(if(aBool, 1, div(0,0)), 0.5). check() denies every aBool=false
-            // resource (NaN > 0.5 is false), so the rewritten else arm must contribute
-            // exclusion — old code produced (NOT aBool AND 1=1), returning the row.
-            Operand plan = exprOp("gt",
-                    exprOp("if", var("request.resource.attr.aBool"), nval(1), nan()),
-                    nval(0.5));
-
-            ResourceEntity allowed = new ResourceEntity("nan-tern-1");
-            allowed.setaBool(true);
-            withResource(allowed, () -> assertEquals(1, runCount(plan)));
-
-            ResourceEntity denied = new ResourceEntity("nan-tern-2");
-            denied.setaBool(false);
-            withResource(denied, () -> assertEquals(0, runCount(plan)));
-        }
     }
 
     /**
@@ -4401,19 +2737,6 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         @Test
-        void nonUtcOffsetConstantNormalizesToTheSameInstant() {
-            // 2025-01-01T02:00:00+02:00 IS 2025-01-01T00:00:00Z: eq must match the `exact`
-            // row (CEL timestamp equality is instant equality — PDP-verified), and lt must
-            // select the same two older rows as the Z-offset constant.
-            withTimestampRows(() -> {
-                assertEquals(1, runCount(exprOp("eq",
-                        tsVar("createdAt"), tsVal("2025-01-01T02:00:00+02:00"))));
-                assertEquals(2, runCount(exprOp("lt",
-                        tsVar("createdAt"), tsVal("2025-01-01T02:00:00+02:00"))));
-            });
-        }
-
-        @Test
         void subSecondPrecisionConstantDiscriminates() {
             // The folded now()-duration constant carries nanosecond precision on the wire.
             // A threshold BETWEEN old2 (…00.123456Z) and its whole second must split them.
@@ -4422,21 +2745,6 @@ class SpringDataQueryPlanAdapterTest {
                         tsVar("createdAt"), tsVal("2024-06-01T00:00:00.000001Z"))));
                 assertEquals(2, runCount(exprOp("le",
                         tsVar("createdAt"), tsVal("2024-06-01T00:00:00.123456Z"))));
-            });
-        }
-
-        @Test
-        void nullColumnIsExcludedByEveryOperator() {
-            // Only the NULL row seeded: every comparison is UNKNOWN → zero rows, matching
-            // check() denying on the missing attribute (PDP-verified).
-            ResourceEntity nul = new ResourceEntity("ts-only-null");
-            withResource(nul, () -> {
-                for (String op : List.of("lt", "le", "gt", "ge", "eq", "ne")) {
-                    assertEquals(0, runCount(exprOp(op, tsVar("createdAt"), tsVal(CONST))),
-                            "NULL column must be excluded for " + op);
-                    assertEquals(0, runCount(exprOp(op, tsVal(CONST), tsVar("createdAt"))),
-                            "NULL column must be excluded for value-first " + op);
-                }
             });
         }
 
@@ -4460,13 +2768,6 @@ class SpringDataQueryPlanAdapterTest {
             assertConditionThrows(
                     exprOp("lt", tsVar("localCreatedAt"), tsVal(CONST)),
                     "timestamp() comparison", "LocalDateTime", "localCreatedAt");
-        }
-
-        @Test
-        void stringColumnThrowsNamedError() {
-            assertConditionThrows(
-                    exprOp("lt", tsVar("createdBy"), tsVal(CONST)),
-                    "timestamp() comparison", "String", "createdBy");
         }
 
         @Test

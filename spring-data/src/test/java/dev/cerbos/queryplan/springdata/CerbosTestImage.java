@@ -8,8 +8,8 @@ import java.nio.file.Path;
 import java.util.List;
 
 /**
- * Single source of truth for the Cerbos PDP container image used by the Testcontainers
- * suites ({@link SpringDataIntegrationTest} and {@link AdversarialConformanceTest}).
+ * Single source of truth for the Cerbos PDP container image used by the one Testcontainers
+ * suite left ({@link AdversarialConformanceTest}). The other three run offline.
  *
  * <p><b>Why pinned.</b> Several tests pin planner-shape-dependent behavior (exact
  * fail-closed error strings for pass-through shapes, the {@code has()} over-grant

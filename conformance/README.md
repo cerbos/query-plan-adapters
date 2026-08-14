@@ -918,6 +918,16 @@ key, three things follow from it, and an adapter in the same position should cop
    directions, so a shape that stops diverging fails as loudly as one that starts. Skipping instead
    would leave that leg proving nothing about the emitted filter.
 
+spring-data is the second case and it declares `"hibernate": "6.6"`. The adapter emits a JPA
+`Specification`, so the recorded value is Hibernate's rendering of that Criteria tree — the
+renderer is an input for exactly the same reason. Rules 1 and 2 apply unchanged. **Rule 3 has
+nothing to attach to there**, because the build compiles and tests against one Hibernate, so there
+is no second leg to assert a divergence list on; what makes the header load-bearing instead is that
+`hibernate-core` is a `compileOnly` dependency — a consumer brings their own renderer, so which one
+wrote the bytes has to be answerable from the file. An adapter in that position states the version
+it renders under and asserts the running one matches; it does not invent a second CI leg to satisfy
+rule 3.
+
 This is not licence to add a key per environment difference. The test for it is whether the
 difference is *outside* the adapter and *inside* the recorded value; a dialect is neither (it is a
 dimension of the value, so it lives in the entry), and a Node version is neither (it changes

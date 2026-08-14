@@ -67,6 +67,7 @@ dependencies {
     // Parses seeds.json/actions.json from the shared ../conformance/ corpus (see
     // AdversarialConformanceTest and conformance/README.md).
     testImplementation("com.fasterxml.jackson.core:jackson-databind:2.22.1")
+    testImplementation("com.google.protobuf:protobuf-java-util:4.35.1")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     testRuntimeOnly("org.slf4j:slf4j-simple:2.0.18")
 }
@@ -78,38 +79,29 @@ tasks.test {
         showStandardStreams = false
     }
 
-    // The suites read two shared directories from OUTSIDE this project — the conformance corpus
-    // (`AdversarialConformanceTest`, `CerbosTestImage`) and the shared policy suite
-    // (`SpringDataIntegrationTest`) — both resolved from `user.dir` at runtime, which Gradle
-    // cannot infer. Undeclared, they are not inputs: a `gradle build` over a stale `build/`
-    // reports BUILD SUCCESSFUL with `:test` UP-TO-DATE and runs nothing after a corpus edit.
+    // The suites read a shared directory from OUTSIDE this project — the conformance corpus
+    // (`AdversarialConformanceTest`, `SpringDataTranslatorTest`, `CerbosTestImage`), resolved
+    // from `user.dir` at runtime, which Gradle cannot infer. Undeclared, it is not an input: a
+    // `gradle build` over a stale `build/` reports BUILD SUCCESSFUL with `:test` UP-TO-DATE and
+    // runs nothing after a corpus edit.
     //
     // That is a green local validation of a change it never executed, which is the exact failure
     // the corpus exists to prevent. CI never saw it because it always starts from a clean
     // checkout, so the gap only ever bites the maintainer editing the corpus.
     //
     // The whole directory is declared rather than the specific files. The corpus is read by
-    // filename in several places and grows new ones (the wire fixtures are next), and a precise
-    // list would silently stop covering what it names — the same class of bug one level up.
+    // filename in several places and grows new ones, and a precise list would silently stop
+    // covering what it names — the same class of bug one level up.
     inputs.dir(project.file("../conformance"))
         .withPathSensitivity(PathSensitivity.RELATIVE)
         .withPropertyName("conformanceCorpus")
-    // Goes away with the shared policy suite itself (cerbos/query-plan-adapters#385).
-    inputs.dir(project.file("../policies"))
+    // The golden expectations are read by SpringDataTranslatorTest the same way, and they live
+    // inside this project rather than outside it — but not under a source set, so Gradle would
+    // not see an edit to them either.
+    inputs.dir(project.file("golden"))
         .withPathSensitivity(PathSensitivity.RELATIVE)
-        .withPropertyName("sharedPolicies")
+        .withPropertyName("goldenExpectations")
 
-    // Propagate Cerbos PDP connection details to the test JVM so SpringDataIntegrationTest can
-    // choose between the Testcontainers-managed PDP (default) and an externally-managed one
-    // (e.g. spawned by docker-compose for CI / `scripts/run-e2e.sh`).
-    val cerbosHost = System.getenv("CERBOS_HOST")
-    val cerbosPort = System.getenv("CERBOS_PORT")
-    if (cerbosHost != null) {
-        environment("CERBOS_HOST", cerbosHost)
-    }
-    if (cerbosPort != null) {
-        environment("CERBOS_PORT", cerbosPort)
-    }
     // Select the database backing AdversarialConformanceTest: h2 (default), postgres, or
     // mysql. The MySQL leg creates its schema with a case-sensitive collation by default
     // (utf8mb4_0900_as_cs); override adapter.test.mysql.collation to reproduce the
@@ -132,6 +124,33 @@ tasks.test {
         ?: System.getenv("ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS")
     if (mysqlServerPrep != null) {
         systemProperty("adapter.test.mysql.serverPrepStmts", mysqlServerPrep)
+    }
+}
+
+// Rewrites golden/expectations.json from the SQL the translator emits today, then asserts the
+// rewritten file — so the task fails if regeneration produced something the rules reject.
+//
+// Regeneration is a DELIBERATE act and the diff is the review, which is why it is a task of its
+// own rather than a flag on `test`: CI never runs it, so a translator change that moves the
+// emitted SQL fails there whatever anyone ran locally
+// (conformance/README.md, "Golden expectations").
+tasks.register<Test>("goldenUpdate") {
+    group = "verification"
+    description = "Rewrite spring-data/golden/expectations.json from what the translator emits."
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = sourceSets["test"].runtimeClasspath
+    useJUnitPlatform()
+    filter { includeTestsMatching("dev.cerbos.queryplan.springdata.SpringDataTranslatorTest") }
+    systemProperty("golden.update", "true")
+    // The asset this task writes is also an input Gradle tracks for `test`; declaring it as an
+    // output here would make the two tasks fight over it, so the task is simply never up to date.
+    outputs.upToDateWhen { false }
+    inputs.dir(project.file("../conformance"))
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+        .withPropertyName("conformanceCorpus")
+    testLogging {
+        events("failed")
+        showStandardStreams = true
     }
 }
 

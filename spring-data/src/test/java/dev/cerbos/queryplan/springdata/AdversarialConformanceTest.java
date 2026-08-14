@@ -9,6 +9,11 @@ import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter;
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression;
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand;
 import dev.cerbos.api.v1.response.Response.PlanResourcesResponse;
+import dev.cerbos.queryplan.springdata.Corpus.ActionsFile;
+import dev.cerbos.queryplan.springdata.Corpus.AdapterUnsupported;
+import dev.cerbos.queryplan.springdata.Corpus.KnownDivergence;
+import dev.cerbos.queryplan.springdata.Corpus.NullRepresentationOmitted;
+import dev.cerbos.queryplan.springdata.Corpus.UnsupportedShape;
 import dev.cerbos.queryplan.springdata.testmodel.AdversarialInnerEntity;
 import dev.cerbos.queryplan.springdata.testmodel.AdversarialParentEntity;
 import dev.cerbos.queryplan.springdata.testmodel.CategoryEntity;
@@ -89,112 +94,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class AdversarialConformanceTest {
 
-    private static final Map<String, AttributeMapping> MAPPING = Map.ofEntries(
-            // The primary key, reached as `request.resource.id` rather than through `attr` (the
-            // `id-*` actions). An adapter that resolves references by stripping a
-            // `request.resource.attr.` prefix never sees this name.
-            Map.entry("request.resource.id", AttributeMapping.field("id")),
-            Map.entry("request.resource.attr.aBool", AttributeMapping.field("aBool")),
-            Map.entry("request.resource.attr.aString", AttributeMapping.field("aString")),
-            Map.entry("request.resource.attr.aNumber", AttributeMapping.field("aNumber")),
-            Map.entry("request.resource.attr.aDouble", AttributeMapping.field("aDouble")),
-            Map.entry("request.resource.attr.aOptionalString", AttributeMapping.field("aOptionalString")),
-            // ISO-date string column + flattened struct member for the p-* probes
-            Map.entry("request.resource.attr.createdBy", AttributeMapping.field("createdBy")),
-            // Delimited hierarchy path column for the hier-* actions
-            Map.entry("request.resource.attr.scope", AttributeMapping.field("scope")),
-            // Instant column for the ts-* timestamp() comparison actions
-            Map.entry("request.resource.attr.createdAt", AttributeMapping.field("createdAt")),
-            Map.entry("request.resource.attr.obj.inner", AttributeMapping.field("aString")),
-            // The corpus's one REAL to-one chain (the `rel-*` actions). obj.inner above is a flat
-            // column wearing a dotted name; these are a genuine association, and a dotted jpaPath
-            // through a to-ONE association is an implicit INNER JOIN in the Criteria API. That is
-            // what makes the absent parent deny under BOTH polarities without a separate guard:
-            // a row with no parent produces no join row at all, so it is excluded from the query
-            // rather than being readmitted by a negation (cerbos/query-plan-adapters#375).
-            Map.entry("request.resource.attr.parent.aBool", AttributeMapping.field("parent.aBool")),
-            Map.entry("request.resource.attr.parent.aString", AttributeMapping.field("parent.aString")),
-            Map.entry("request.resource.attr.parent.aNumber", AttributeMapping.field("parent.aNumber")),
-            Map.entry("request.resource.attr.parent.aOptionalString",
-                    AttributeMapping.field("parent.aOptionalString")),
-            Map.entry("request.resource.attr.parent.inner.aBool",
-                    AttributeMapping.field("parent.inner.aBool")),
-            Map.entry("request.resource.attr.parent.inner.aString",
-                    AttributeMapping.field("parent.inner.aString")),
-            Map.entry("request.resource.attr.parent.inner.aNumber",
-                    AttributeMapping.field("parent.inner.aNumber")),
-            Map.entry("request.resource.attr.parent.inner.aOptionalString",
-                    AttributeMapping.field("parent.inner.aOptionalString")),
-            // in-null-elem-*: same column as aOptionalString, but the oracle sends an
-            // EXPLICIT null attribute for NULL columns (aOptionalString is OMITTED instead)
-            // — pinning the adapter's convention that a DB NULL is the explicitly-null
-            // attribute (eq-null → IS NULL, and `x in [..., null]` → OR IS NULL).
-            // `owner` and `coOwner` alias columns that `aOptionalString` and `scope` also map,
-            // under the OTHER null convention: the oracle sends a real null attribute for them
-            // rather than omitting it. Declaring that here is what makes the equality family
-            // definite for these two attributes and leaves it untouched for every other
-            // mapping (cerbos/query-plan-adapters#308).
-            Map.entry("request.resource.attr.owner",
-                    AttributeMapping.field("aOptionalString", NullAttributeRepresentation.EXPLICIT)),
-            Map.entry("request.resource.attr.coOwner",
-                    AttributeMapping.field("scope", NullAttributeRepresentation.EXPLICIT)),
-            // Scalar projection of tags (defaultMemberField=name) for `null in R.attr.tagNames`;
-            // NULL name columns become explicit null list elements on the check side.
-            Map.entry("request.resource.attr.tagNames", AttributeMapping.relation("tags", "name")),
-            Map.entry("request.resource.attr.tags", AttributeMapping.relation("tags", Map.of(
-                    "id", AttributeMapping.field("id"),
-                    "name", AttributeMapping.field("name")
-            ))),
-            Map.entry("request.resource.attr.categories", AttributeMapping.relation("categories", Map.of(
-                    "name", AttributeMapping.field("name"),
-                    "subCategories", AttributeMapping.relation("subCategories", Map.of(
-                            "name", AttributeMapping.field("name"),
-                            // Third macro level for the macro-depth3-* actions.
-                            "labels", AttributeMapping.relation("labels", Map.of(
-                                    "name", AttributeMapping.field("name")
-                            ))
-                    ))
-            ))),
-            // Multi-hop chain probe (W1): mainCategory is a SINGLE nested object on the check
-            // side (every seed holds at most one category), so CEL evaluates dotted chains
-            // like R.attr.mainCategory.subCategories naturally — while the ADAPTER maps the
-            // same path through TWO collection hops (categories JOIN subCategories), pinning
-            // that chained variables join through every intermediate hop, never off the root.
-            Map.entry("request.resource.attr.mainCategory", AttributeMapping.relation("categories", Map.of(
-                    "name", AttributeMapping.field("name"),
-                    "subCategories", AttributeMapping.relation("subCategories", Map.of(
-                            "name", AttributeMapping.field("name")
-                    )),
-                    // subNames: the same 2-hop chain but with a defaultMemberField, so plain
-                    // `in` membership compares the flattened tail's name column.
-                    "subNames", AttributeMapping.relation("subCategories", "name")
-            )))
-    );
-
     /**
-     * The same mapping with every per-attribute null convention stripped, so the call-level
-     * option is the only thing governing null operands.
-     *
-     * <p>The #302 completeness guard is a statement about that option: every corpus action
-     * carrying a null literal must be rejected under OMITTED. Declaring {@code owner}/
-     * {@code coOwner} as explicit-null (#308) deliberately overrides the option for those two
-     * attributes — which would otherwise read as the guard going quiet, when in fact it is the
-     * per-attribute declaration doing exactly its job. Stripping the declarations keeps the
-     * guard testing what it was written to test.
+     * The corpus mapped onto the JPA model, and the same mapping with the per-attribute null
+     * conventions stripped. Both live in {@link Corpus} because {@link SpringDataTranslatorTest}
+     * pins the SQL these produce and this suite proves the rows that SQL returns — two statements
+     * about one query, which they only are while both are built from the same mapping.
      */
+    private static final Map<String, AttributeMapping> MAPPING = Corpus.MAPPING;
+
     private static final Map<String, AttributeMapping> MAPPING_WITHOUT_NULL_CONVENTIONS =
-            MAPPING.entrySet().stream().collect(java.util.stream.Collectors.toUnmodifiableMap(
-                    Map.Entry::getKey,
-                    e -> e.getValue() instanceof AttributeMapping.Field f
-                            ? AttributeMapping.field(f.jpaPath())
-                            : e.getValue()));
+            Corpus.MAPPING_WITHOUT_NULL_CONVENTIONS;
 
     // -- shared corpus (../conformance/): policy, seed data, and action list are read from disk
     // rather than duplicated here. See conformance/README.md for the recipe these implement.
-
-    private static Path conformanceDir() {
-        return Path.of(System.getProperty("user.dir"), "..", "conformance").normalize();
-    }
 
     private record Tag(String id, String name) {}
 
@@ -233,51 +145,12 @@ class AdversarialConformanceTest {
     private record DerivedFile(@JsonProperty("$schema") String schema, String description,
                                List<String> fields, Map<String, DerivedEntry> derived) {}
 
-    /**
-     * An {@code expectedUnsupported} entry. {@code messages} carries one entry per adapter that
-     * must reject the shape, keyed by adapter name; {@code validate-corpus.sh} asserts that key
-     * set is exactly the roster minus the adapters that promoted the shape.
-     */
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    private record UnsupportedShape(String action, String shape, Map<String, String> messages) {}
-
-    /**
-     * A {@code nullRepresentationOmitted} entry. Every adapter must reject these — the two NULL
-     * conventions are indistinguishable on the wire — so {@code messages} names the whole roster
-     * with no promotions to subtract.
-     */
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    private record NullRepresentationOmitted(String action, String reason,
-                                             Map<String, String> messages) {}
-
-    /**
-     * An {@code adapterUnsupported} / {@code adapterSupportedExpected} entry. {@code message} is
-     * the substring this adapter's error must contain — present on the first, absent on the
-     * second, which does not throw.
-     */
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    private record AdapterUnsupported(String action, String reason, String message) {}
-
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    private record KnownDivergence(String action, String reason, List<String> adapters) {}
-
-    /**
-     * Every group in actions.json must be named here: Jackson silently drops a field this
-     * record does not declare, and a dropped group makes its actions vanish from every count
-     * and every parameterised case at once — the projection trap conformance/README.md warns
-     * about. The manifest tripwire test below is what makes an undropped group load-bearing.
-     */
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    private record ActionsFile(
-            List<String> conformance,
-            Map<String, List<AdapterUnsupported>> adapterUnsupported,
-            Map<String, List<AdapterUnsupported>> adapterSupportedExpected,
-            List<UnsupportedShape> expectedUnsupported,
-            List<NullRepresentationOmitted> nullRepresentationOmitted,
-            List<KnownDivergence> knownDivergences) {}
+    // The actions.json records, the classification helpers and the wire-fixture reader live in
+    // Corpus: SpringDataTranslatorTest asserts the same classification offline, and one parse of
+    // one file is what keeps the two suites from disagreeing about which shapes must throw.
 
     /** The corpus key for this adapter — its directory name, as every other harness uses. */
-    private static final String ADAPTER = "spring-data";
+    private static final String ADAPTER = Corpus.ADAPTER;
 
     // -- corpus coverage guards -----------------------------------------------------------------
     //
@@ -338,16 +211,12 @@ class AdversarialConformanceTest {
      * throw is a bug report.
      */
     private static List<AdapterUnsupported> adapterUnsupported() {
-        return actionsFile.adapterUnsupported() == null
-                ? List.of()
-                : actionsFile.adapterUnsupported().getOrDefault(ADAPTER, List.of());
+        return actionsFile.adapterUnsupportedFor(ADAPTER);
     }
 
     /** Reference-unsupported shapes this adapter deliberately translates anyway (normally empty). */
     private static List<AdapterUnsupported> adapterSupportedExpected() {
-        return actionsFile.adapterSupportedExpected() == null
-                ? List.of()
-                : actionsFile.adapterSupportedExpected().getOrDefault(ADAPTER, List.of());
+        return actionsFile.adapterSupportedExpectedFor(ADAPTER);
     }
 
     private static Set<String> adapterSupportedExpectedActions() {
@@ -356,41 +225,23 @@ class AdversarialConformanceTest {
     }
 
     static Stream<String> conformanceActions() {
-        Set<String> unsupported = adapterUnsupported().stream()
-                .map(AdapterUnsupported::action).collect(java.util.stream.Collectors.toSet());
-        return Stream.concat(
-                actionsFile.conformance().stream().filter(a -> !unsupported.contains(a)),
-                adapterSupportedExpectedActions().stream().sorted());
+        return Corpus.oracleActions(actionsFile, ADAPTER);
     }
 
     static Stream<Arguments> adapterUnsupportedActions() {
         return adapterUnsupported().stream().map(u -> Arguments.of(
                 u.action(),
                 u.reason(),
-                requireMessage("adapterUnsupported." + ADAPTER + "." + u.action(), u.message())));
+                Corpus.requireMessage("adapterUnsupported." + ADAPTER + "." + u.action(), u.message())));
     }
 
     static Stream<Arguments> unsupportedShapes() {
         Set<String> promoted = adapterSupportedExpectedActions();
         return actionsFile.expectedUnsupported().stream()
                 .filter(u -> !promoted.contains(u.action()))
-                .map(u -> Arguments.of(u.action(), requireMessage(
+                .map(u -> Arguments.of(u.action(), Corpus.requireMessage(
                         "expectedUnsupported." + u.action() + ".messages." + ADAPTER,
                         u.messages() == null ? null : u.messages().get(ADAPTER))));
-    }
-
-    /**
-     * The substring this adapter's error must contain, or a loud failure. The message is what
-     * turns "it threw" into "it threw for the declared reason": without it a mapper typo or an
-     * unrelated validation satisfies the throw suite just as well as the documented limitation
-     * (cerbos/query-plan-adapters#326).
-     */
-    private static String requireMessage(String label, String message) {
-        if (message == null || message.isEmpty()) {
-            throw new IllegalStateException("actions.json pins no throw message for " + label
-                    + ": the throw suite would accept a failure for any reason");
-        }
-        return message;
     }
 
     /**
@@ -405,10 +256,9 @@ class AdversarialConformanceTest {
 
     /** The substring this adapter's rejection under the omitted representation must contain. */
     private static String nullOmittedMessage(NullRepresentationOmitted entry) {
-        return requireMessage(
-                "nullRepresentationOmitted." + entry.action() + ".messages." + ADAPTER,
-                entry.messages() == null ? null : entry.messages().get(ADAPTER));
+        return Corpus.nullOmittedMessage(entry, ADAPTER);
     }
+
     /**
      * Deterministic label names per seed for the {@code macro-depth3-*} actions — the third
      * macro level (categories → subCategories → labels). A {@code null} entry seeds a label
@@ -584,7 +434,7 @@ class AdversarialConformanceTest {
     @BeforeAll
     static void setUp() throws Exception {
         ObjectMapper mapper = new ObjectMapper();
-        Path conformance = conformanceDir();
+        Path conformance = Corpus.conformanceDir();
         seedsFile = mapper.readValue(conformance.resolve("seeds.json").toFile(), SeedsFile.class);
         actionsFile = mapper.readValue(conformance.resolve("actions.json").toFile(), ActionsFile.class);
         derivedFile = mapper.readValue(
@@ -1373,7 +1223,7 @@ class AdversarialConformanceTest {
     void throwingActionWithNoPinnedMessageFailsClassification() {
         for (String absent : new String[] {null, ""}) {
             IllegalStateException ex = assertThrows(IllegalStateException.class,
-                    () -> requireMessage("synthetic-entry", absent));
+                    () -> Corpus.requireMessage("synthetic-entry", absent));
             assertTrue(ex.getMessage().contains("pins no throw message"), ex.getMessage());
         }
     }
@@ -1403,10 +1253,9 @@ class AdversarialConformanceTest {
                 .map(KnownDivergence::action)
                 .collect(java.util.stream.Collectors.toSet());
 
-        Set<String> manifest = new java.util.TreeSet<>(actionsFile.conformance());
-        actionsFile.expectedUnsupported().forEach(u -> manifest.add(u.action()));
-        actionsFile.nullRepresentationOmitted().forEach(n -> manifest.add(n.action()));
-        actionsFile.knownDivergences().forEach(d -> manifest.add(d.action()));
+        // Every group, from the one place that knows them all — so a group added to actions.json
+        // and not to `ActionsFile` fails here rather than vanishing from the count.
+        Set<String> manifest = actionsFile.manifestActions();
 
         List<String> misclassified = manifest.stream()
                 .filter(action -> Stream.of(
