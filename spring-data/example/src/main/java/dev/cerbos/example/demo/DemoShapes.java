@@ -128,7 +128,7 @@ class DemoShapes {
      * against different roots.
      *
      * <p>Reported as page SIZES plus the sorted union of the ids, never as per-page order:
-     * {@code demo/expected.json} is shared by ten stores and several of them have no total order
+     * {@code demo/expected.json} is shared by every store and several of them have no total order
      * to paginate by. The {@code Sort} is still required for the paging itself to be correct —
      * without a total order, successive pages may repeat or omit rows — which is a separate
      * concern from how the result is asserted.

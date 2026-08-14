@@ -21,8 +21,8 @@ each has happened here:
   on describing a wire contract that no longer exists, and the suites asserting against them stay
   green. The drift check protected exactly the plans nobody hand-built, and none of the plans
   everybody hand-built.
-- **The belief drifts between adapters.** Ten adapters each re-deriving the same wire shape is ten
-  chances to derive it differently, which is how one semantic bug has repeatedly shipped
+- **The belief drifts between adapters.** Each adapter re-deriving the same wire shape is one more
+  chance to derive it differently, which is how one semantic bug has repeatedly shipped
   identically to several of them.
 
 Reading from fixtures inverts all three: there is one recorded plan per corpus action, it is the
@@ -63,5 +63,5 @@ picking the tidy value.
 plan kind, a condition with no operator, a ternary of the wrong arity — has no fixture by
 construction, and asserting that the adapter fails loudly on it is input validation on a public
 function, not a shape the corpus should carry. A shape CEL *can* express is the opposite case: it
-belongs in the corpus, where all ten adapters are asked about it. See "Changing how a condition is
+belongs in the corpus, where every adapter is asked about it. See "Changing how a condition is
 translated" in `CLAUDE.md`.

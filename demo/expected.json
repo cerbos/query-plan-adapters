@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "The ONE shared expectations file. All ten example applications emit this exact `shapes` object and demo/scripts/run-example.sh diffs against it. Per-adapter expectation files would be ten files meant to stay identical, and the first divergence would read as an adapter quirk rather than the bug it is. Hardcoded id lists are a deliberate departure from conformance/'s no-hand-written-expectations rule: the corpus proves semantics, where a wrong expectation hides an authorization bug, whereas this proves plumbing, where a frozen list is the better tripwire. demo/scripts/validate-demo.sh is what stops the list rotting.",
+  "description": "The ONE shared expectations file. Every example application emits this exact `shapes` object and demo/scripts/run-example.sh diffs against it. Per-adapter expectation files would be one file per adapter meant to stay identical, and the first divergence would read as an adapter quirk rather than the bug it is. Hardcoded id lists are a deliberate departure from conformance/'s no-hand-written-expectations rule: the corpus proves semantics, where a wrong expectation hides an authorization bug, whereas this proves plumbing, where a frozen list is the better tripwire. demo/scripts/validate-demo.sh is what stops the list rotting.",
 
   "shapes": {
     "filtered": {
@@ -38,7 +38,7 @@
     },
 
     "paginated": {
-      "description": "Usage shape 4 — pagination or a limit applied on top of the filter. Pages are asserted by their SIZES and by the sorted union of their ids, never by per-page order: several of the ten stores have no total order to paginate by, and an order-dependent assertion would need a per-adapter carve-out (ADR 0001). Disjointness still falls out — overlapping pages would shrink the union below the sum of the page sizes.",
+      "description": "Usage shape 4 — pagination or a limit applied on top of the filter. Pages are asserted by their SIZES and by the sorted union of their ids, never by per-page order: several of the stores have no total order to paginate by, and an order-dependent assertion would need a per-adapter carve-out (ADR 0001). Disjointness still falls out — overlapping pages would shrink the union below the sum of the page sizes.",
       "results": {
         "alice/view": {
           "kind": "KIND_CONDITIONAL",

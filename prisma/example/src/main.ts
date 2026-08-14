@@ -163,7 +163,7 @@ async function filtered(
 
 /**
  * Shape 4: pagination applied on top of the filter. Reported as page SIZES plus the sorted union
- * of the ids, never as per-page order — demo/expected.json is shared by ten stores and several
+ * of the ids, never as per-page order — demo/expected.json is shared by every store and several
  * of them have no total order to paginate by.
  */
 async function paginated(

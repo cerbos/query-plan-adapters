@@ -19,8 +19,8 @@ directory is for. See [`CONTEXT.md`](../CONTEXT.md) for the full glossary.
 ## What an example covers that a conformance harness cannot
 
 Every harness already plans against a live PDP over gRPC, translates, runs a real ORM call against
-a real store, and compares ids against per-row `check()`. That chain is covered for all ten
-adapters and nothing here adds to it. Two gaps remain, and they are gaps *because of how the
+a real store, and compares ids against per-row `check()`. That chain is covered for every
+adapter and nothing here adds to it. Two gaps remain, and they are gaps *because of how the
 harnesses are built*:
 
 1. **Packaging.** Every harness imports its adapter from source (`from "."`). The published
@@ -52,7 +52,7 @@ carve-out does not belong here
 | ------------------------ | ------------------------------------------------------------------- |
 | `policies/document.yaml` | One resource kind. `view` is conditional, `admin-view` unconditional, and `publish` is absent so the planner denies it. |
 | `seeds.json`             | Eight rows across three owners, the three principals, and the application's own predicate. |
-| `expected.json`          | The **one shared** expectations file. All ten examples assert against it. |
+| `expected.json`          | The **one shared** expectations file. Every example asserts against it. |
 | `cerbos-config.yaml`     | PDP configuration.                                                  |
 | `docker-compose.yml`     | The PDP itself, pinned to `conformance/CERBOS_VERSION` **and** `conformance/CERBOS_IMAGE_DIGEST`. |
 | `scripts/run-example.sh` | Runs one adapter's example and diffs it against `expected.json`.    |
@@ -60,7 +60,7 @@ carve-out does not belong here
 
 `seeds.json` also declares `applicationFilter` — the predicate the **application** owns
 (`archived == false AND region == 'emea'`). It is never expressed in policy; ANDing it with the
-adapter's filter is shape 5. It lives in the corpus rather than in ten copies inside ten examples
+adapter's filter is shape 5. It lives in the corpus rather than in a copy inside every example
 so `validate-demo.sh` can recompute it.
 
 ## Running an example
@@ -74,14 +74,14 @@ Needs `docker` (with compose) and `jq`. The runner starts the pinned PDP, invoke
 
 The split between the two scripts is deliberate. Everything language-independent — PDP lifecycle,
 output capture, canonicalisation, the diff — lives in the runner. Everything language-specific
-lives in `run.sh`: ten languages means ten packaging stories, and putting all ten in the shared
+lives in `run.sh`: each adapter brings its own packaging story, and putting them all in the shared
 runner would make it a language switch.
 
 ### What an example must do
 
 Each example is a program taking **no arguments** — not an HTTP service, which does not generalise
-past Java and Node and would add a web framework to nine examples for reasons unrelated to the
-adapter. Its `run.sh` must:
+past Java and Node and would add a web framework to every other example for reasons unrelated
+to the adapter. Its `run.sh` must:
 
 - pack the adapter into a real distributable and install **that** (ADR 0002; Go uses `replace` and
   proves usage shapes only)
@@ -117,13 +117,13 @@ The document is:
 ```
 
 `shapes` is diffed against `expected.json`'s `shapes` with each shape's inline `description`
-stripped, so the expectations can carry their own prose without ten examples reproducing it.
+stripped, so the expectations can carry their own prose without every example reproducing it.
 
 Every entry pins the plan `kind` alongside the ids. That is what stops an example returning all
 eight rows for `admin-view` without ever having reached the PDP.
 
 **Ids are always sorted, and pagination is asserted by page sizes plus the sorted union — never
-by per-page order.** Several of the ten stores have no total order to paginate by, and an
+by per-page order.** Several of the stores have no total order to paginate by, and an
 order-dependent assertion would need exactly the per-adapter carve-out ADR 0001 rules out.
 Disjointness still falls out: overlapping pages would shrink the union below the sum of the sizes.
 
@@ -191,12 +191,12 @@ adapter's test workflow.
 - **Adding a seed row or attribute** means updating `expected.json` in the same commit, and every
   example's schema. `validate-demo.sh` catches the first; the exact diff in the runner catches the
   second.
-- **Adding a usage shape** means implementing it in all ten examples. There is no per-adapter
+- **Adding a usage shape** means implementing it in every example. There is no per-adapter
   classification to opt out with, and adding one is what ADR 0001 rules out.
 - **A shape that needs a carve-out for one adapter is wrong for this directory.** The argument
   belongs in `conformance/`, where the classification buckets exist.
 
-The domain is thin by construction — roughly the intersection of ten query languages, one of which
-is a vector store. It is a **floor, not a ceiling**: every example must implement the shared
+The domain is thin by construction — roughly the intersection of every adapter's query language,
+one of which is a vector store. It is a **floor, not a ceiling**: every example must implement the shared
 shapes, and each is then free to add richer adapter-local scenarios that nothing shared asserts.
 `spring-data/example/` keeps its photo/album/workspace domain on exactly that basis.

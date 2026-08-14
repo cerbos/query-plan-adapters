@@ -9,8 +9,8 @@
 # demo/expected.json. Everything language-specific lives in `<adapter>/example/run.sh`, which
 # packs the adapter into a real distributable, installs THAT (never the source directory — see
 # docs/adr/0002-examples-install-the-packed-artifact.md), runs the example, and prints one JSON
-# document to stdout. Ten languages means ten packaging stories; growing a language switch in here
-# instead would put all ten in one file.
+# document to stdout. Each adapter brings its own packaging story; growing a language switch in here
+# instead would put them all in one file.
 #
 # The example's contract:
 #   - takes no arguments, reads no environment except CERBOS_HOST (set below)
@@ -89,7 +89,7 @@ declared="$(jq -r '.adapter // ""' "${WORK_DIR}/stdout.json")"
 
 # expected.json carries its documentation inline, under a `description` sibling of each shape's
 # `results`. Examples emit the results alone, so the comparison strips the prose from the
-# expectation rather than asking ten examples to reproduce it.
+# expectation rather than asking every example to reproduce it.
 jq -S '.shapes | with_entries(.value |= .results)' "${DEMO_DIR}/expected.json" \
   >"${WORK_DIR}/expected.json"
 jq -S '.shapes' "${WORK_DIR}/stdout.json" >"${WORK_DIR}/actual.json"

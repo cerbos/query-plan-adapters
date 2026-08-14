@@ -3824,7 +3824,7 @@ describe("plans the planner cannot produce", () => {
   // an error rather than a filter.
   //
   // A test for a shape CEL *can* express does not belong here, whatever its plan looks like: it
-  // belongs in the corpus, where all ten adapters are asked about it. The shapes the retired suite
+  // belongs in the corpus, where every adapter is asked about it. The shapes the retired suite
   // pinned that way are
   // [#394](https://github.com/cerbos/query-plan-adapters/issues/394) and
   // [#396](https://github.com/cerbos/query-plan-adapters/issues/396).

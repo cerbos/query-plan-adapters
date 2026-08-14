@@ -51,7 +51,7 @@ if ! jq -e '
 fi
 
 # `adapters` is the canonical roster every other per-adapter key is checked against. Without it
-# each check would have to restate "the ten adapters", and an adapter added to one list but not
+# each check would have to restate the roster size in prose, and an adapter added to one list but not
 # another would look consistent.
 if ! jq -e '
   (.adapters | type) == "array"
@@ -291,8 +291,8 @@ if [[ "${version_drift}" -ne 0 ]]; then
 fi
 
 # Every other service image a test or workflow starts is pinned per harness rather than centrally:
-# a shared file would live under conformance/, and conformance/** re-runs all ten adapter
-# workflows, so bumping mongoose's server would cost nine irrelevant CI runs. What is shared is the
+# a shared file would live under conformance/, and conformance/** re-runs every adapter
+# workflow, so bumping mongoose's server would cost nine irrelevant CI runs. What is shared is the
 # RULE, enforced here: a repository named below must appear everywhere as `repo:tag@sha256:<64 hex>`
 # — the tag says which release a reader is looking at, the digest says which build a green run
 # actually proved, and a `repo:tag` may resolve to only one digest across the whole repository, so

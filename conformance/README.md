@@ -5,6 +5,45 @@ spring-data adapter's `AdversarialConformanceTest` (see cerbos/query-plan-adapte
 adapter's differential test should consume this directory rather than maintaining its own copy of
 the policy, seed data, or action list.
 
+## Contents
+
+Long, and meant to be read by section rather than front to back. After adding or renaming a
+heading, regenerate this list with `scripts/check-docs.sh --print-toc` — CI checks it.
+
+- [Why this exists](#why-this-exists)
+- [Layout](#layout)
+- [The oracle recipe](#the-oracle-recipe)
+  - [Case sensitivity is two invariants, not one](#case-sensitivity-is-two-invariants-not-one)
+  - [NULL conventions](#null-conventions)
+    - [`nullRepresentationOmitted`: the two conventions are indistinguishable on the wire](#nullrepresentationomitted-the-two-conventions-are-indistinguishable-on-the-wire)
+    - [The other side of the same option: an explicit null against a non-null constant](#the-other-side-of-the-same-option-an-explicit-null-against-a-non-null-constant)
+    - [The absent to-one parent](#the-absent-to-one-parent)
+  - [The real to-one relation](#the-real-to-one-relation)
+  - [The primary key as a filterable attribute](#the-primary-key-as-a-filterable-attribute)
+  - [Casts and concatenation are store-dependent in opposite directions](#casts-and-concatenation-are-store-dependent-in-opposite-directions)
+    - [A constant is what tells the two `+` overloads apart](#a-constant-is-what-tells-the-two--overloads-apart)
+  - [Root position and bare operand forms](#root-position-and-bare-operand-forms)
+  - [Hazard classes the corpus missed](#hazard-classes-the-corpus-missed)
+  - [The degeneracy guard](#the-degeneracy-guard)
+  - [Pinned throw messages](#pinned-throw-messages)
+  - [Known divergences still need a tripwire](#known-divergences-still-need-a-tripwire)
+  - [Deterministic derived fields](#deterministic-derived-fields)
+  - [Seed, principal and derived-field coverage](#seed-principal-and-derived-field-coverage)
+- [Adding a new hostile shape](#adding-a-new-hostile-shape)
+- [Golden expectations](#golden-expectations)
+  - [The file](#the-file)
+  - [What the entry holds is per adapter, and has to be](#what-the-entry-holds-is-per-adapter-and-has-to-be)
+  - [A throwing action carries no entry](#a-throwing-action-carries-no-entry)
+  - [The completeness guard](#the-completeness-guard)
+  - [Regeneration is a deliberate act, and the diff is the review](#regeneration-is-a-deliberate-act-and-the-diff-is-the-review)
+  - [Language neutrality](#language-neutrality)
+- [Adding a new adapter](#adding-a-new-adapter)
+  - [Pinning service images](#pinning-service-images)
+  - [Vendored code stays byte-identical](#vendored-code-stays-byte-identical)
+  - [Mapping hazards: the rows the subquery sees](#mapping-hazards-the-rows-the-subquery-sees)
+  - [Gotchas worth knowing up front](#gotchas-worth-knowing-up-front)
+- [Regenerating wire fixtures after a Cerbos version bump](#regenerating-wire-fixtures-after-a-cerbos-version-bump)
+
 ## Why this exists
 
 Each adapter re-derives certain properties of the Cerbos planner's wire output by hand: operand
@@ -445,7 +484,7 @@ filter answers three ways: a hard error on PostgreSQL, zero rows on SQLite, and 
 21 seeds against a one-row oracle**, because both text operands coerce to 0 and the string constant
 on the other side coerces to 0 with them.
 
-The corpus does not prescribe a resolution, and the ten adapters split four ways, which is the point
+The corpus does not prescribe a resolution, and the adapters split four ways, which is the point
 of asking:
 
 - **convex** and **sqlalchemy** need nothing. Convex concatenates in JavaScript, which is CEL's own
@@ -484,7 +523,7 @@ mechanism:
 - `not(gt)` exists only over a `size()` or a ternary (`w1-not-size-chain`, `ternary-negated`,
   `p-not-ternary-null`) — never over an operand a store can index.
 
-The expectation going in was that all ten adapters would translate all eight and the classification
+The expectation going in was that every adapter would translate all eight and the classification
 work would be free. That held for eight adapters. It did not for two, and both are the reason the
 group exists rather than a reason to have skipped it:
 
@@ -612,7 +651,7 @@ So every throwing classification carries the substring that adapter's error must
 - `adapterUnsupported[<adapter>][].message` — the entry is already per-adapter, so the message sits
   on it directly.
 - `expectedUnsupported[].messages[<adapter>]` — one entry per adapter that must reject the shape.
-  This generalises the old `springDataMessage`, which pinned the reference and left the other nine
+  This generalises the old `springDataMessage`, which pinned the reference and left every other adapter
   asserting nothing.
 - `nullRepresentationOmitted[].messages[<adapter>]` — the same, for the group every adapter rejects.
 
@@ -630,7 +669,7 @@ inert against a corpus that already satisfies it.
 
 The assertion is `contains`, not equality. That is deliberate and it is a **weakening for
 spring-data**, which previously asserted `assertEquals` on its own `springDataMessage`: one field
-with one meaning across ten harnesses is worth more than byte-exactness in the reference alone, and
+with one meaning across every harness is worth more than byte-exactness in the reference alone, and
 several messages carry a runtime value (`Timestamp value exceeds millisecond precision:
 <now()-24h>`) that equality could never pin. Rewording the mechanism still fails every suite;
 appending to a message no longer fails spring-data's.
@@ -673,7 +712,7 @@ nothing downstream can catch it (#318).
 every entry carries exactly the fields it declares, re-derives `createdBy`, `aDouble` and
 `createdAt` from `seeds.json` using the rules below, and diffs `scope` and `labels` — which have no
 rule to re-derive from — against a restatement of their tables. That check is the only independent
-statement of these values, and it is a checker, never an input to a harness: unlike the ten copies
+statement of these values, and it is a checker, never an input to a harness: unlike the per-adapter copies
 it replaced it can only fail loudly, never make both sides of a differential agree.
 
 The rules the file materialises:
@@ -752,7 +791,7 @@ the acceptance test for these guards; run it before trusting them.
    A seed field that is genuinely new (rather than a new row) has to be added to every harness's
    consumed key set too; the guard described above makes that a loud failure, not a silent drop.
    The same applies to a new **principal attribute**: every harness declares those as well, so
-   adding one fails all ten until each declaration names it.
+   adding one fails every harness until each declaration names it.
 4. Run `scripts/regenerate-wire-fixtures.sh` and commit the new fixture alongside the policy change.
 5. Every adapter harness picks up the new action automatically from `actions.json` on next run;
    triage any divergence into a per-adapter fix issue rather than special-casing it in the harness.
@@ -800,8 +839,8 @@ from `wire-fixtures/` and asserts nothing but the emitted filter
 ([ADR 0006](../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md)).
 
 **The expectations are not corpus data and must never live here.** Eleven workflows trigger on
-`conformance/**` — all ten adapter workflows plus `conformance.yaml` — so one adapter re-pinning one
-filter would re-run the other ten for nothing. This is the same argument that keeps per-harness
+`conformance/**` — every adapter workflow plus `conformance.yaml` — so one adapter re-pinning one
+filter would re-run every other adapter for nothing. This is the same argument that keeps per-harness
 service image pins out of the corpus, and
 [ADR 0007](../docs/adr/0007-adapters-share-data-not-code.md) records it as a rule. What lives here is
 the *format*.
@@ -980,7 +1019,7 @@ unsupported before you have watched it fail is how a translatable shape gets per
    coverage. Pin every service image the harness or the workflow starts, by tag **and** digest —
    see below.
 
-#### Pinning service images
+### Pinning service images
 
 Every container a test or a workflow starts is written as `repository:tag@sha256:<64 hex>`. The
 tag says which release a reader is looking at; the digest says which build a green run actually
@@ -996,8 +1035,8 @@ by tag cannot answer "what did this pass against", and a suite pinned only by di
   ([#322](https://github.com/cerbos/query-plan-adapters/issues/322)).
 - **Everything else** — the databases, the search and vector stores — is pinned *per harness*, in
   one constant that both that adapter's suites read. It deliberately does **not** live under
-  `conformance/`: a change here re-runs all ten adapter workflows, so a shared file would make
-  bumping mongoose's server cost nine irrelevant CI runs. What is shared is the rule.
+  `conformance/`: a change here re-runs every adapter workflow, so a shared file would make
+  bumping mongoose's server cost every other adapter an irrelevant CI run. What is shared is the rule.
   `validate-corpus.sh` holds a list of image repositories, scans the repository for each, requires
   every occurrence to carry a tag and a digest, and requires a given `repo:tag` to resolve to
   exactly one digest repo-wide — so two harnesses cannot claim the same nominal version while
@@ -1011,7 +1050,7 @@ hand, deliberately, alongside whatever re-verification the bump needs. That is t
 trade — reproducibility now, staleness to be watched for — and re-enabling Docker updates is a
 maintainer decision, not a drive-by one.
 
-#### Vendored code stays byte-identical
+### Vendored code stays byte-identical
 
 The ent and pgx modules are standalone: each vendors the translator under its own
 `internal/queryplan` so a consumer pulls in only the one. That means the same source exists twice,
@@ -1109,13 +1148,13 @@ like, and it is the row that makes the difference visible.
 An adapter may append **additional** rows below those six for a hazard only its store has, and must
 say in the prose above the table that it has done so — the six shared rows stay first and in order,
 so the diff against this list still reads cleanly. A hazard is adapter-specific only when no other
-store can reach it; anything two adapters could hit belongs here, in the shared list, so all ten
-have to record a position on it. The one such row today is elasticsearch-java's **analyzed (`text`)
+store can reach it; anything two adapters could hit belongs here, in the shared list, so every adapter
+has to record a position on it. The one such row today is elasticsearch-java's **analyzed (`text`)
 field mapping**: Elasticsearch rewrites a stored string into tokens before comparing it, so a field
 mapped `text` widens every string comparison the adapter emits. No other store in this repository
-transforms a value between write and comparison, so there is nothing for the other nine to answer.
+transforms a value between write and comparison, so there is nothing for the other adapters to answer.
 
-The three classes the ten adapters fall into determine most of the answers:
+The three classes the adapters fall into determine most of the answers:
 
 | Class | Adapters | What the store applies to the subquery |
 |---|---|---|

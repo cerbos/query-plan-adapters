@@ -7,7 +7,7 @@
     { "id": "admin", "roles": ["admin"] }
   ],
   "applicationFilter": {
-    "description": "The application's OWN predicate, never expressed in policy. Usage shape 5 ANDs it with the adapter-produced filter. Kept here rather than hardcoded in ten examples so validate-demo.sh can recompute it and prove shape 5 discriminates: applying this predicate alone, or the adapter's filter alone, must both give the wrong answer.",
+    "description": "The application's OWN predicate, never expressed in policy. Usage shape 5 ANDs it with the adapter-produced filter. Kept here rather than hardcoded in every example so validate-demo.sh can recompute it and prove shape 5 discriminates: applying this predicate alone, or the adapter's filter alone, must both give the wrong answer.",
     "archived": false,
     "region": "emea"
   },

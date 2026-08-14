@@ -2,7 +2,7 @@
 #
 # The demo domain's only resource policy. Realistic shapes, not hostile ones — the hostile ones
 # live in ../../conformance/policies/adversarial.yaml and are what proves SEMANTICS. This file
-# proves PLUMBING, so every shape in it must be expressible by all ten adapters and there is
+# proves PLUMBING, so every shape in it must be expressible by every adapter and there is
 # deliberately no per-adapter classification. See docs/adr/0001-demo-domain-has-no-per-adapter-exceptions.md.
 #
 # Flat scalar attributes only: ownerId, public, region, archived. No relations, no NULLs, no LIKE

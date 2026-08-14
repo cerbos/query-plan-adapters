@@ -33,8 +33,8 @@ jobs:
       # validate-corpus.sh proves every restatement in the repository agrees with CERBOS_VERSION
       # and CERBOS_IMAGE_DIGEST; it cannot prove the PAIR is right, because that needs a registry.
       # This is the job that owns the pinned-PDP contract, and it already has network and Docker,
-      # so the tag/digest correspondence is asserted here — once, rather than in all ten adapter
-      # workflows, which run validate-corpus.sh offline.
+      # so the tag/digest correspondence is asserted here — once, rather than in every adapter
+      # workflow, which runs validate-corpus.sh offline.
       - name: Verify the pinned Cerbos digest matches its tag
         run: conformance/scripts/verify-cerbos-digest.sh
 

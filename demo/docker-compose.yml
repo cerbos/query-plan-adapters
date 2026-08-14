@@ -1,7 +1,7 @@
 # The single PDP every example application plans against, started and stopped by
 # demo/scripts/run-example.sh.
 #
-# There is one compose file for all ten examples rather than one per example: the demo domain is
+# There is one compose file for every example rather than one per example: the demo domain is
 # a single policy suite by construction (ADR 0001), so ten identical compose files would be ten
 # copies of the same PDP pin waiting to drift apart.
 services:

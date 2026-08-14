@@ -197,7 +197,7 @@ const DEGENERACY_GUARD_ACTIONS = [
   "not-lt",
   "root-bare-bool",
   "or-eq-exists",
-  // Hazard classes the corpus missed (#387). Convex translates all eleven of the compared ones,
+  // Hazard classes the corpus missed (#387). Convex translates every compared one,
   // and for three of them it is the ONLY adapter that does — the post-filter reimplements CEL
   // rather than lowering to a query language, so modulo, a positional read of a scalar list and
   // list equality all have exact meanings here. Those three carry the whole corpus's oracle

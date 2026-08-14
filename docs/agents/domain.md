@@ -11,7 +11,7 @@ If any of these files don't exist, **proceed silently**. Don't flag their absenc
 
 ## File structure
 
-This repo is **single-context**: the ten adapters translate one domain — Cerbos query plans — against one shared conformance corpus, so they share a single glossary.
+This repo is **single-context**: the adapters translate one domain — Cerbos query plans — against one shared conformance corpus, so they share a single glossary.
 
 ```
 /

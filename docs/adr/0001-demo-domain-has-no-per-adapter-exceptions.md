@@ -3,7 +3,7 @@
 Example applications need shared policies and seed data, and the obvious move is to reuse the
 conformance corpus. We are not doing that. The demo domain is a separate corpus of realistic
 shapes, and unlike the conformance corpus it carries no per-adapter classification: every shape in
-it must be expressible by all ten adapters, so there is no equivalent of `actions.json`.
+it must be expressible by every adapter, so there is no equivalent of `actions.json`.
 
 ## Why
 
@@ -22,7 +22,7 @@ without its purpose.
 
 ## Consequences
 
-The shared domain is necessarily thin — roughly the intersection of ten query languages, one of
+The shared domain is necessarily thin — roughly the intersection of every adapter's query language, one of
 which is a vector store. That is deliberate, and it is why the demo domain is a **floor rather
 than a ceiling**: every example must implement the shared shapes, and each example is then free to
 add richer adapter-local scenarios that nothing shared asserts. `spring-data/example/` keeps its
