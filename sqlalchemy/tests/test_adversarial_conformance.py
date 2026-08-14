@@ -10,11 +10,16 @@ for each seed row with attributes mirroring that row exactly.
 No hand-computed expectations: if the adapter's filter semantics diverge from
 Cerbos's own evaluation for any row, the mismatch surfaces mechanically. See
 ``conformance/README.md`` for the oracle recipe (NULL-as-missing-attribute, the
-degeneracy guard). This file owns only the SQLAlchemy-specific translation
-configuration: the schema, the attribute map, and the operator overrides that
-express relation traversals as correlated subqueries with CEL-faithful
-three-valued logic (an element whose column is NULL is a CEL missing-attribute
-error — UNKNOWN in SQL — and must stay excluded under BOTH polarities).
+degeneracy guard).
+
+The SQLAlchemy-specific translation configuration — the schema, the attribute map,
+and the operator overrides that express relation traversals as correlated subqueries
+with CEL-faithful three-valued logic (an element whose column is NULL is a CEL
+missing-attribute error — UNKNOWN in SQL — and must stay excluded under BOTH
+polarities) — lives in ``corpus.py``, because ``test_translator.py`` pins the SQL
+this adapter emits for exactly that mapping and the two must not drift. What stays
+here is what only this suite consumes: the seeds, the derived fields, the oracle and
+the coverage guards over all three.
 """
 
 import json
@@ -29,40 +34,33 @@ from cerbos.sdk.client import CerbosClient
 from cerbos.sdk.container import CerbosContainer
 from cerbos.sdk.model import PlanResourcesFilterKind, Principal, Resource, ResourceDesc
 from cerbos_image import CERBOS_IMAGE, CONFORMANCE_DIR
-
-from cerbos_sqlalchemy import get_query, require_hops
-from sqlalchemy import (
-    Boolean,
-    Column,
-    DateTime,
-    Float,
-    ForeignKey,
-    Integer,
-    String,
-    and_,
-    case,
-    create_engine,
-    event,
-    exists,
-    false,
-    func,
-    insert,
-    literal,
-    not_,
-    null,
-    or_,
-    select,
-    true,
+from corpus import (
+    ADAPTER,
+    ATTR_MAP,
+    ATTRIBUTE_NULL_REPRESENTATION,
+    OPERATOR_OVERRIDES,
+    AdvBase,
+    AdvCategory,
+    AdvInner,
+    AdvLabel,
+    AdvParent,
+    AdvResource,
+    AdvSubCategory,
+    AdvTag,
+    classify_actions_for_adapter,
+    null_representation_throws,
+    parse_actions_file,
+    read_corpus_json,
+    require_message,
 )
-from sqlalchemy.dialects import postgresql
-from sqlalchemy.orm import declarative_base
 
-with open(os.path.join(CONFORMANCE_DIR, "seeds.json"), encoding="utf-8") as f:
-    SEEDS_FILE = json.load(f)
-with open(os.path.join(CONFORMANCE_DIR, "actions.json"), encoding="utf-8") as f:
-    ACTIONS_FILE = json.load(f)
-with open(os.path.join(CONFORMANCE_DIR, "derived-fields.json"), encoding="utf-8") as f:
-    DERIVED_FILE = json.load(f)
+from cerbos_sqlalchemy import get_query
+from sqlalchemy import create_engine, event, insert, select
+from sqlalchemy.dialects import postgresql
+
+SEEDS_FILE = read_corpus_json("seeds.json")
+DERIVED_FILE = read_corpus_json("derived-fields.json")
+MANIFEST = parse_actions_file(read_corpus_json("actions.json"))
 
 SEEDS: List[Dict[str, Any]] = SEEDS_FILE["seeds"]
 RESOURCE_KIND: str = SEEDS_FILE["resourceKind"]
@@ -172,68 +170,22 @@ if set(DERIVED) != {seed["id"] for seed in SEEDS}:
 for _id, _entry in DERIVED.items():
     _assert_keys(f'derived-fields.json derived["{_id}"]', set(_entry), DERIVED_KEYS)
 
-# Capability classifications come from the shared manifest. Unsupported
-# conformance actions must throw; globally-unsupported actions promoted for
-# this adapter are instead checked against the PDP oracle.
-SQLALCHEMY_UNSUPPORTED: Dict[str, str] = {
-    item["action"]: item["reason"]
-    for item in ACTIONS_FILE["adapterUnsupported"].get("sqlalchemy", [])
-}
+# Capability classifications come from the shared manifest, derived at runtime
+# rather than copied: unsupported conformance actions must throw, and
+# globally-unsupported actions promoted for this adapter are instead checked
+# against the PDP oracle. `test_translator.py` derives the same classification
+# from the same expressions, which is what lets its completeness guard be total.
+_CLASSIFICATION = classify_actions_for_adapter(MANIFEST, ADAPTER)
+ORACLE_ACTIONS = _CLASSIFICATION.oracle_actions
 
 # Globally expected-unsupported shapes promoted by this adapter. Regex is not
 # promoted because SQL dialect regex engines do not guarantee CEL/RE2 semantics.
-SQLALCHEMY_SUPPORTED_EXPECTED = {
-    item["action"]
-    for item in ACTIONS_FILE.get("adapterSupportedExpected", {}).get("sqlalchemy", [])
-}
-
-ORACLE_ACTIONS = [
-    a for a in ACTIONS_FILE["conformance"] if a not in SQLALCHEMY_UNSUPPORTED
-] + sorted(SQLALCHEMY_SUPPORTED_EXPECTED)
-
-
-def _require_message(label: str, message: Any) -> str:
-    """The substring this adapter's error must contain, or a loud failure.
-
-    The message is what turns "it raised" into "it raised for the declared
-    reason": without it a mapper typo or an unrelated validation satisfies the
-    throw suite just as well as the documented limitation
-    (cerbos/query-plan-adapters#326).
-    """
-    if not isinstance(message, str) or not message:
-        raise AssertionError(
-            f"actions.json pins no throw message for {label}: the throw suite "
-            "would accept a failure for any reason"
-        )
-    return message
-
+SQLALCHEMY_SUPPORTED_EXPECTED = _CLASSIFICATION.supported_expected
 
 # Globally-unsupported planner shapes plus this adapter's own unsupported list:
 # translation (or execution) must fail loudly, never produce a silently-wrong
 # filter. Each carries the substring the raised error must contain.
-THROWING_ACTIONS = sorted(
-    [
-        (
-            item["action"],
-            _require_message(
-                f'adapterUnsupported.sqlalchemy.{item["action"]}',
-                item.get("message"),
-            ),
-        )
-        for item in ACTIONS_FILE["adapterUnsupported"].get("sqlalchemy", [])
-    ]
-    + [
-        (
-            item["action"],
-            _require_message(
-                f'expectedUnsupported.{item["action"]}.messages.sqlalchemy',
-                item.get("messages", {}).get("sqlalchemy"),
-            ),
-        )
-        for item in ACTIONS_FILE["expectedUnsupported"]
-        if item["action"] not in SQLALCHEMY_SUPPORTED_EXPECTED
-    ]
-)
+THROWING_ACTIONS = _CLASSIFICATION.throwing_actions
 THROWING_ACTION_NAMES = {action for action, _ in THROWING_ACTIONS}
 
 # Actions whose `== null` probe targets an attribute the oracle OMITS for NULL
@@ -242,36 +194,17 @@ THROWING_ACTION_NAMES = {action for action, _ in THROWING_ACTIONS}
 # emit a filter (#302).
 # Every adapter must reject these, so the message map names the whole roster and
 # this harness resolves its own entry exactly as it does for a throwing action.
-NULL_REPRESENTATION_OMITTED = [
-    (
-        item["action"],
-        item["reason"],
-        _require_message(
-            f'nullRepresentationOmitted.{item["action"]}.messages.sqlalchemy',
-            item.get("messages", {}).get("sqlalchemy"),
-        ),
-    )
-    for item in ACTIONS_FILE["nullRepresentationOmitted"]
-]
+NULL_REPRESENTATION_OMITTED = null_representation_throws(MANIFEST, ADAPTER)
 # The one message every null-carrying action must be rejected with under
 # ``omitted``.
 NULL_OMITTED_MESSAGE = NULL_REPRESENTATION_OMITTED[0][2]
 
-# Every classified action across all four manifest groups. Read each group
-# explicitly: a group this expression does not name is dropped silently, and a
-# dropped group makes its actions vanish from every count at once (the
+# Every classified action across all four manifest groups. `ActionsFile` reads each
+# group explicitly for the same reason: a group nothing names is dropped silently,
+# and a dropped group makes its actions vanish from every count at once (the
 # projection trap conformance/README.md warns about).
-MANIFEST_ACTIONS = (
-    set(ACTIONS_FILE["conformance"])
-    | {u["action"] for u in ACTIONS_FILE["expectedUnsupported"]}
-    | {n["action"] for n in ACTIONS_FILE["nullRepresentationOmitted"]}
-    | {d["action"] for d in ACTIONS_FILE["knownDivergences"]}
-)
-SQLALCHEMY_SKIPPED_DIVERGENCES = {
-    d["action"]
-    for d in ACTIONS_FILE["knownDivergences"]
-    if "sqlalchemy" in d["adapters"]
-}
+MANIFEST_ACTIONS = MANIFEST.manifest_actions()
+SQLALCHEMY_SKIPPED_DIVERGENCES = MANIFEST.skipped_divergences(ADAPTER)
 
 # -- the degeneracy guard (conformance/README.md, "The degeneracy guard") ----
 #
@@ -463,504 +396,6 @@ def _relation_attr(seed: Dict[str, Any]) -> Dict[str, Any]:
     if seed["aOptionalString"] is not None:
         attr["aOptionalString"] = seed["aOptionalString"]
     return attr
-
-
-# ---------------------------------------------------------------------------
-# Schema: dedicated tables so hostile seeds (NULL element columns, duplicate
-# names, LIKE metacharacters) are all representable.
-# ---------------------------------------------------------------------------
-
-AdvBase = declarative_base()
-
-
-class AdvResource(AdvBase):
-    __tablename__ = "adversarial_resource"
-
-    id = Column(String, primary_key=True)
-    a_bool = Column(Boolean, nullable=False)
-    a_string = Column(String, nullable=False)
-    a_number = Column(Integer, nullable=False)
-    a_double = Column(Float(precision=53), nullable=True)
-    a_optional_string = Column(String, nullable=True)
-    created_by = Column(String, nullable=False)
-    scope = Column(String, nullable=True)
-    created_at = Column(DateTime(timezone=True), nullable=True)
-
-
-class AdvTag(AdvBase):
-    __tablename__ = "adversarial_tag"
-
-    pk = Column(Integer, primary_key=True, autoincrement=True)
-    tag_id = Column(String, nullable=False)
-    name = Column(String, nullable=True)
-    resource_id = Column(String, ForeignKey("adversarial_resource.id"), nullable=False)
-
-
-class AdvCategory(AdvBase):
-    __tablename__ = "adversarial_category"
-
-    id = Column(String, primary_key=True)
-    name = Column(String, nullable=False)
-    resource_id = Column(String, ForeignKey("adversarial_resource.id"), nullable=False)
-
-
-class AdvSubCategory(AdvBase):
-    __tablename__ = "adversarial_sub_category"
-
-    id = Column(String, primary_key=True)
-    name = Column(String, nullable=False)
-    category_id = Column(String, ForeignKey("adversarial_category.id"), nullable=False)
-
-
-class AdvLabel(AdvBase):
-    __tablename__ = "adversarial_label"
-
-    id = Column(String, primary_key=True)
-    name = Column(String, nullable=True)
-    sub_category_id = Column(
-        String, ForeignKey("adversarial_sub_category.id"), nullable=False
-    )
-
-
-# The corpus's one REAL to-one relation (conformance/seeds.json `parentSeedId`).
-# `parent` and `parent.inner` are separate rows reached through a join, unlike
-# `obj.inner`, which is a flat column wearing a dotted name. A resource owns its
-# own parent chain — the unique foreign key is what makes it to-ONE — so a filter
-# that returned the parent instead of the child could not agree with the oracle
-# by accident.
-#
-# ATTR_MAP deliberately carries no entry for these yet. This adapter has no
-# relation model of its own: reaching a scalar through a to-one hop is a
-# correlated subquery the CALLER supplies, so the mapping is designed alongside
-# the actions that need it rather than guessed here. Seeding it now is the expand
-# half of cerbos/query-plan-adapters#372's expand-contract.
-class AdvParent(AdvBase):
-    __tablename__ = "adversarial_parent"
-
-    id = Column(String, primary_key=True)
-    a_bool = Column(Boolean, nullable=False)
-    a_string = Column(String, nullable=False)
-    a_number = Column(Integer, nullable=False)
-    a_optional_string = Column(String, nullable=True)
-    resource_id = Column(
-        String, ForeignKey("adversarial_resource.id"), nullable=False, unique=True
-    )
-
-
-class AdvInner(AdvBase):
-    __tablename__ = "adversarial_inner"
-
-    id = Column(String, primary_key=True)
-    a_bool = Column(Boolean, nullable=False)
-    a_string = Column(String, nullable=False)
-    a_number = Column(Integer, nullable=False)
-    a_optional_string = Column(String, nullable=True)
-    parent_id = Column(
-        String, ForeignKey("adversarial_parent.id"), nullable=False, unique=True
-    )
-
-
-# ---------------------------------------------------------------------------
-# Relation markers + operator overrides: the adapter's attribute map points
-# relation-valued attributes at marker objects; the overrides translate the
-# collection macros over them into correlated subqueries. Three-valued logic:
-# CEL's exists/all absorb an erroring element only through a true/false
-# witness; exists_one/map/filter never do. An erroring element is a row whose
-# lambda body evaluates to SQL UNKNOWN (NULL), detected with `body IS NULL`.
-# ---------------------------------------------------------------------------
-
-
-class _Relation:
-    """Marker standing in for a relation path in the attribute map."""
-
-    def __init__(
-        self,
-        description: str,
-        correlation: List[Any],
-        correlate_targets: List[Any],
-        member_field=None,
-        hop_correlation: Union[List[Any], None] = None,
-    ):
-        self.description = description
-        self.correlation = correlation
-        # Entities the subquery must correlate against explicitly: SQLAlchemy's
-        # auto-correlation only reaches the immediate enclosing SELECT, so an
-        # outer-resource reference inside a depth-2 lambda subquery would
-        # otherwise pull the resource table into the inner FROM as a cartesian
-        # product (silently comparing against EVERY resource row).
-        self.correlate_targets = correlate_targets
-        # For plain `in` membership over a chained string list (w1-in-chain).
-        self.member_field = member_field
-        # Correlation for the INTERMEDIATE hops alone, when the collection is
-        # reached through an optional to-one parent. CEL cannot dot through a
-        # list, so `mainCategory.subCategories` reaches its tail through a to-one
-        # parent: absent, the application sends no `mainCategory` attribute and
-        # CEL raises a missing-path error, which denies. A subquery rooted at the
-        # resource row cannot see that — an absent parent and a childless parent
-        # both return nothing — so `all` reads TRUE, `!exists` reads TRUE and the
-        # count reads 0, each admitting rows the PDP denies
-        # (cerbos/query-plan-adapters#309). Requiring the hop separately restores
-        # the distinction. The requirement itself is `cerbos_sqlalchemy.
-        # require_hops`; what stays in the MAPPING is only which predicates the
-        # hops are, because the SQLAlchemy adapter has no relation model of its
-        # own: collection semantics are entirely caller-supplied through operator
-        # overrides, so the caller owns the invariant that its subquery sees
-        # exactly the rows the application serialised into the resource
-        # attributes.
-        self.hop_correlation = hop_correlation or []
-
-    def __repr__(self) -> str:  # pragma: no cover - diagnostics only
-        return f"_Relation({self.description})"
-
-
-TAGS = _Relation(
-    "tags",
-    [AdvTag.resource_id == AdvResource.id],
-    # The root resource may be any number of lambda scopes up (w2-outer-relation
-    # plans a tags exists INSIDE the categories lambda).
-    correlate_targets=[AdvResource],
-)
-TAG_NAMES = _Relation(
-    "tagNames",
-    [AdvTag.resource_id == AdvResource.id],
-    correlate_targets=[AdvResource],
-    member_field=AdvTag.name,
-)
-CATEGORIES = _Relation(
-    "categories",
-    [AdvCategory.resource_id == AdvResource.id],
-    correlate_targets=[AdvResource],
-)
-# c.subCategories: correlates to the *category* the enclosing lambda is scoped
-# to, never to the root resource — but its lambda body may still reference
-# outer resource columns (outer-attr-depth2), so both entities correlate.
-SUB_OF_CATEGORY = _Relation(
-    "c.subCategories",
-    [AdvSubCategory.category_id == AdvCategory.id],
-    correlate_targets=[AdvCategory, AdvResource],
-)
-LABELS_OF_SUB = _Relation(
-    "s.labels",
-    [AdvLabel.sub_category_id == AdvSubCategory.id],
-    correlate_targets=[AdvSubCategory, AdvCategory, AdvResource],
-)
-# mainCategory.subCategories: the same two-hop chain flattened from the root —
-# the subquery must join THROUGH the intermediate category hop (which stays in
-# the subquery FROM; only the root resource correlates).
-MAIN_SUB = _Relation(
-    "mainCategory.subCategories",
-    [
-        AdvSubCategory.category_id == AdvCategory.id,
-        AdvCategory.resource_id == AdvResource.id,
-    ],
-    correlate_targets=[AdvResource],
-    hop_correlation=[AdvCategory.resource_id == AdvResource.id],
-)
-MAIN_SUBNAMES = _Relation(
-    "mainCategory.subNames",
-    [
-        AdvSubCategory.category_id == AdvCategory.id,
-        AdvCategory.resource_id == AdvResource.id,
-    ],
-    correlate_targets=[AdvResource],
-    member_field=AdvSubCategory.name,
-    hop_correlation=[AdvCategory.resource_id == AdvResource.id],
-)
-
-
-def _exists_where(rel: _Relation, *conds: Any):
-    q = select(literal(1))
-    for pred in rel.correlation:
-        q = q.where(pred)
-    for cond in conds:
-        q = q.where(cond)
-    return exists(q.correlate(*rel.correlate_targets))
-
-
-def _count_subquery(rel: _Relation, *conds: Any):
-    q = select(func.count())
-    for pred in rel.correlation:
-        q = q.where(pred)
-    for cond in conds:
-        q = q.where(cond)
-    return q.correlate(*rel.correlate_targets).scalar_subquery()
-
-
-def _require_hops(rel: _Relation, expr: Any):
-    """Make ``expr`` UNKNOWN unless every intermediate to-one hop exists.
-
-    The invariant lives in the library as ``cerbos_sqlalchemy.require_hops``; this
-    is only the unpacking of the harness's ``_Relation`` marker into its arguments.
-    The harness using the shipped helper rather than a private copy is what proves
-    the helper: every chained corpus action — ``w1-all-chain``,
-    ``w1-not-exists-chain``, ``w1-size-zero-chain``, ``w1-not-in-chain``,
-    ``w1-not-hasint-chain`` and the rest — is an oracle comparison against a real
-    PDP that runs through this call.
-    """
-    return require_hops(expr, rel.hop_correlation, rel.correlate_targets)
-
-
-def _require_relation(op: str, coll: Any) -> _Relation:
-    if not isinstance(coll, _Relation):
-        raise ValueError(f"{op} over unsupported collection operand: {coll!r}")
-    return coll
-
-
-def _exists_fn(coll: Any, body: Any):
-    # CEL exists: true on any true witness (absorbing errors), error if any
-    # element errors without one, false otherwise (incl. empty).
-    rel = _require_relation("exists", coll)
-    return _require_hops(
-        rel,
-        case(
-            (_exists_where(rel, body), true()),
-            (_exists_where(rel, body.is_(None)), null()),
-            else_=false(),
-        ),
-    )
-
-
-def _all_fn(coll: Any, body: Any):
-    # CEL all: false on any false witness (absorbing errors), error if any
-    # element errors without one, true otherwise (incl. empty).
-    rel = _require_relation("all", coll)
-    return _require_hops(
-        rel,
-        case(
-            (_exists_where(rel, not_(body)), false()),
-            (_exists_where(rel, body.is_(None)), null()),
-            else_=true(),
-        ),
-    )
-
-
-def _exists_one_fn(coll: Any, body: Any):
-    # CEL exists_one never absorbs an erroring element, even next to a true
-    # witness; otherwise it's an exact count-of-matches == 1.
-    rel = _require_relation("exists_one", coll)
-    return _require_hops(
-        rel,
-        case(
-            (_exists_where(rel, body.is_(None)), null()),
-            else_=(_count_subquery(rel, body) == 1),
-        ),
-    )
-
-
-def _filter_fn(coll: Any, body: Any):
-    # Deferred: consumed by the `size` override (size(filter(...)) shape).
-    return ("filter", _require_relation("filter", coll), body)
-
-
-def _map_fn(coll: Any, projected: Any):
-    # Deferred: consumed by the `hasIntersection` override.
-    return ("map", _require_relation("map", coll), projected)
-
-
-def _size_fn(target: Any, _: Any):
-    if isinstance(target, _Relation):
-        # size() counts elements without evaluating them, so NULL element
-        # columns still count — no error guard needed. An absent to-one parent
-        # still has to count as UNKNOWN rather than 0 (#309).
-        return _require_hops(target, _count_subquery(target))
-    if isinstance(target, tuple) and target[0] == "filter":
-        # CEL filter never absorbs an erroring element: any UNKNOWN body row
-        # poisons the whole count.
-        _, rel, body = target
-        return _require_hops(
-            rel,
-            case(
-                (_exists_where(rel, body.is_(None)), null()),
-                else_=_count_subquery(rel, body),
-            ),
-        )
-    return func.length(target)
-
-
-def _has_intersection_fn(mapped: Any, values: Any):
-    if isinstance(mapped, _Relation):
-        if mapped.member_field is None:
-            raise ValueError(
-                f"hasIntersection over relation without member field: {mapped!r}"
-            )
-        return _require_hops(
-            mapped,
-            _exists_where(mapped, _scalar_membership(mapped.member_field, values)),
-        )
-
-    # hasIntersection(map(coll, x), list): map errors on any erroring element
-    # (no absorption), so the error guard comes FIRST.
-    if not (isinstance(mapped, tuple) and mapped[0] == "map"):
-        raise ValueError(f"hasIntersection over unsupported operand: {mapped!r}")
-    _, rel, projected = mapped
-    return _require_hops(
-        rel,
-        case(
-            (_exists_where(rel, projected.is_(None)), null()),
-            (_exists_where(rel, _scalar_membership(projected, values)), true()),
-            else_=false(),
-        ),
-    )
-
-
-def _scalar_membership(column: Any, values: Any):
-    members = values if isinstance(values, list) else [values]
-    non_nulls = [member for member in members if member is not None]
-    predicates = []
-    if non_nulls:
-        predicates.append(column.in_(non_nulls))
-    if len(non_nulls) != len(members):
-        predicates.append(column.is_(None))
-    return or_(*predicates) if predicates else false()
-
-
-def _relation_membership(relation: _Relation, value: Any):
-    if relation.member_field is None:
-        raise ValueError(f"in over relation without member field: {relation!r}")
-    member = relation.member_field
-    if value is None:
-        predicate = member.is_(None)
-    elif hasattr(value, "is_"):
-        predicate = or_(
-            member == value,
-            and_(member.is_(None), value.is_(None)),
-        )
-    else:
-        predicate = member == value
-    return _require_hops(relation, _exists_where(relation, predicate))
-
-
-def _in_fn(column: Any, value: Any):
-    if isinstance(column, _Relation):
-        # `value in R.attr.<chain>`: membership against the relation's member
-        # column; rows with an empty chain are simply excluded (CEL
-        # missing-attribute error → deny).
-        return _relation_membership(column, value)
-    if isinstance(value, _Relation):
-        return _relation_membership(value, column)
-    return _scalar_membership(column, value)
-
-
-OPERATOR_OVERRIDES = {
-    # The lambda's first (resolved) operand is its body predicate; the iterator
-    # variable resolves through the attribute map and is discarded.
-    "lambda": lambda body, _var: body,
-    "exists": _exists_fn,
-    "all": _all_fn,
-    "exists_one": _exists_one_fn,
-    "filter": _filter_fn,
-    "map": _map_fn,
-    "size": _size_fn,
-    "hasIntersection": _has_intersection_fn,
-    "in": _in_fn,
-}
-
-# `owner` and `coOwner` alias columns that `aOptionalString` and `scope` also map,
-# under the OTHER null convention: the oracle sends a real null attribute for them
-# rather than omitting it. Declaring that here is what makes the equality family
-# definite for these two attributes and leaves it untouched for every other
-# mapping (cerbos/query-plan-adapters#308).
-ATTRIBUTE_NULL_REPRESENTATION = {
-    "request.resource.attr.owner": "explicit",
-    "request.resource.attr.coOwner": "explicit",
-}
-
-
-def _parent_scalar(column):
-    """One scalar of the to-one `parent`, as a correlated scalar subquery.
-
-    The resource owns at most one parent row (``resource_id`` is UNIQUE), so this
-    yields that row's value, or SQL NULL when the resource has no parent at all.
-    NULL is precisely what the check side means: an absent level sends no
-    attribute, CEL raises a missing-path error, and the PDP denies. Because
-    ``NOT NULL`` is still NULL, the row stays excluded under both polarities
-    without the explicit ``require_hops`` guard the COLLECTION chains need
-    (cerbos/query-plan-adapters#375).
-    """
-    return (
-        select(column)
-        .where(AdvParent.resource_id == AdvResource.id)
-        .correlate(AdvResource)
-        .scalar_subquery()
-    )
-
-
-def _inner_scalar(column):
-    """The same, one level further out: `parent.inner`.
-
-    Nesting the parent's own lookup inside the correlation is what keeps the two
-    levels distinct — reading off the parent, or off the resource, gives a
-    different row set for every action in the group.
-    """
-    return (
-        select(column)
-        .where(
-            AdvInner.parent_id
-            == select(AdvParent.id)
-            .where(AdvParent.resource_id == AdvResource.id)
-            .correlate(AdvResource)
-            .scalar_subquery()
-        )
-        .correlate(AdvResource)
-        .scalar_subquery()
-    )
-
-
-ATTR_MAP = {
-    # The primary key, reached as `request.resource.id` rather than through `attr` (the `id-*`
-    # actions). An adapter that resolves references by stripping a `request.resource.attr.`
-    # prefix never sees this name.
-    "request.resource.id": AdvResource.id,
-    "request.resource.attr.aBool": AdvResource.a_bool,
-    "request.resource.attr.aString": AdvResource.a_string,
-    "request.resource.attr.aNumber": AdvResource.a_number,
-    "request.resource.attr.aDouble": AdvResource.a_double,
-    "request.resource.attr.aOptionalString": AdvResource.a_optional_string,
-    "request.resource.attr.createdBy": AdvResource.created_by,
-    "request.resource.attr.owner": AdvResource.a_optional_string,
-    "request.resource.attr.coOwner": AdvResource.scope,
-    "request.resource.attr.scope": AdvResource.scope,
-    "request.resource.attr.createdAt": AdvResource.created_at,
-    # obj.inner is not a real nested column — mirrors aString, the same trick
-    # the spring-data and prisma reference harnesses use for the p-struct probe.
-    "request.resource.attr.obj.inner": AdvResource.a_string,
-    # The corpus's one REAL to-one chain (the `rel-*` actions). This adapter has no
-    # relation model, so the caller supplies the hop as a correlated scalar
-    # subquery — and that spelling needs no separate hop guard: an absent parent
-    # makes the subquery SQL NULL, which is CEL's missing-path error, and NOT NULL
-    # is still NULL, so the row stays excluded under BOTH polarities.
-    "request.resource.attr.parent.aBool": _parent_scalar(AdvParent.a_bool),
-    "request.resource.attr.parent.aString": _parent_scalar(AdvParent.a_string),
-    "request.resource.attr.parent.aNumber": _parent_scalar(AdvParent.a_number),
-    "request.resource.attr.parent.aOptionalString": _parent_scalar(
-        AdvParent.a_optional_string
-    ),
-    "request.resource.attr.parent.inner.aBool": _inner_scalar(AdvInner.a_bool),
-    "request.resource.attr.parent.inner.aString": _inner_scalar(AdvInner.a_string),
-    "request.resource.attr.parent.inner.aNumber": _inner_scalar(AdvInner.a_number),
-    "request.resource.attr.parent.inner.aOptionalString": _inner_scalar(
-        AdvInner.a_optional_string
-    ),
-    "request.resource.attr.tags": TAGS,
-    "request.resource.attr.tagNames": TAG_NAMES,
-    "t": TAGS,
-    "t.id": AdvTag.tag_id,
-    "t.name": AdvTag.name,
-    "request.resource.attr.categories": CATEGORIES,
-    "c": CATEGORIES,
-    # The category's own name, read inside the categories lambda. Only
-    # rel-hop2-or-exists reaches it — every other categories probe dots straight
-    # through to subCategories — so it is mapped here rather than alongside them.
-    "c.name": AdvCategory.name,
-    "c.subCategories": SUB_OF_CATEGORY,
-    "s": SUB_OF_CATEGORY,
-    "s.name": AdvSubCategory.name,
-    "s.labels": LABELS_OF_SUB,
-    "l": LABELS_OF_SUB,
-    "l.name": AdvLabel.name,
-    "request.resource.attr.mainCategory.subCategories": MAIN_SUB,
-    "request.resource.attr.mainCategory.subNames": MAIN_SUBNAMES,
-}
 
 
 # ---------------------------------------------------------------------------
@@ -1236,7 +671,7 @@ class TestAdversarialConformance:
         # raised" (cerbos/query-plan-adapters#326).
         for absent in (None, "", 42):
             with pytest.raises(AssertionError, match="pins no throw message"):
-                _require_message("synthetic-entry", absent)
+                require_message("synthetic-entry", absent)
 
     def test_manifest_assigns_every_action_exactly_one_outcome(self):
         oracle = set(ORACLE_ACTIONS)
@@ -1263,7 +698,7 @@ class TestAdversarialConformance:
         assert len(THROWING_ACTIONS) == 19
         assert misclassified == []
         assert SQLALCHEMY_SUPPORTED_EXPECTED <= {
-            u["action"] for u in ACTIONS_FILE["expectedUnsupported"]
+            entry["action"] for entry in MANIFEST.expected_unsupported
         }
 
     @pytest.mark.parametrize("action", ORACLE_ACTIONS)

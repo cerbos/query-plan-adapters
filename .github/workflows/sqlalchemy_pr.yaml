@@ -4,10 +4,13 @@ name: SQLAlchemy Pull Request
 # targeting non-main bases (e.g. stacked PRs).
 on:
   pull_request:
+    # `policies/**` is deliberately absent: nothing under sqlalchemy/ reads the shared
+    # policy suite any more. The translator unit test reads conformance/wire-fixtures/ and
+    # this adapter's own golden/expectations.json, and the adversarial suite loads
+    # conformance/policies/.
     paths:
       - "sqlalchemy/**"
       - "conformance/**"
-      - "policies/**"
       - ".github/workflows/sqlalchemy_pr.yaml"
       - ".github/workflows/sqlalchemy_release.yaml"
 

@@ -75,6 +75,50 @@ undeclared side needs UNKNOWN — so the adapter throws rather than picking a di
 [#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
 [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
 
+## How this adapter is tested
+
+Three suites, each answering a different question, and only one of them needs anything running.
+
+| suite | question | needs |
+| --- | --- | --- |
+| `tests/test_translator.py` | what SQL does `get_query` emit for a plan? | nothing — plans come from `conformance/wire-fixtures/`, expectations from `golden/expectations.json` |
+| `tests/test_query.py`, `tests/test_relations.py` | what does `get_query` do with a plan the planner cannot produce, or an option no policy can reach? | nothing |
+| `tests/test_adversarial_conformance.py` | do the rows that query returns match `check()`? | Docker: a pinned Cerbos PDP, plus in-memory SQLite |
+
+```bash
+pdm install
+pdm run test            # all three
+pdm run golden:update   # rewrite golden/expectations.json, then review the diff
+pdm run format          # isort + black
+```
+
+`golden/expectations.json` is a **golden expectation** file: for every one of the corpus's actions
+this adapter translates, the `WHERE` clause it emits on SQLite and on PostgreSQL, plus the
+parameters it binds. It is regenerated with the command above and reviewed as a diff — CI never
+regenerates it, so a change to how a shape is translated fails there and shows up as the list of
+statements it moved. The format is shared across adapters and documented under "Golden
+expectations" in [`conformance/README.md`](../conformance/README.md); what an entry *holds* is this
+adapter's own, and the two rules behind the choice made here are worth knowing:
+
+- **The whole `Select` is compiled, not the bare `WHERE` clause.** Correlation is only observable
+  inside the enclosing SELECT: compiled on its own, a correlated subquery renders the outer table
+  into its own `FROM` and silently compares against every row of it. The recorded value is the part
+  after `WHERE`, and the suite asserts the rest of the statement is the same `SELECT … FROM` every
+  time.
+- **Two dialects, because they genuinely differ.** SQLite is what the conformance harness executes;
+  PostgreSQL is executed by nothing in this repository and is the dialect this adapter's own source
+  reasons about most (NaN ordering, `CAST` rounding, `string()` over a boolean). They are not close
+  to identical — SQLite has no boolean type, so a `CASE` in a `WHERE` needs `= 1` and a negation
+  renders as `= 0`, and the two spell float division differently.
+- **The asset declares which SQLAlchemy major compiled it.** SQL text is the adapter's expression
+  tree *plus* SQLAlchemy's compiler, and 1.4 and 2.x do not render every tree the same way: 2.x
+  parenthesises a concatenation used as a comparison operand and adds SQLite's `+ 0.0`
+  float-division coercion. Neither is a translation decision, so the asset is generated under 2.x
+  and the 1.4 leg asserts a pinned list of exactly which shapes render differently — in both
+  directions, so a shape that starts or stops diverging fails. `pdm run golden:update` refuses to
+  run under the other major rather than rewriting the file with a compiler swap dressed up as a
+  translation change.
+
 ## Conformance contract
 
 The adapter is differentially tested against Cerbos PDP 0.54.0 `check()` decisions using 21 hostile seed rows and executable SQLAlchemy queries. The Spring Data adapter defines the reference semantics for this compatibility snapshot.

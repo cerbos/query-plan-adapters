@@ -1,0 +1,1928 @@
+{
+  "adapter": "sqlalchemy",
+  "sqlalchemy": "2.x",
+  "regenerate": "pdm run golden:update",
+  "expectations": {
+    "all-on-empty": {
+      "where": {
+        "sqlite": "CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name != ?)) THEN 0 WHEN (EXISTS (SELECT ? AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name = ?) IS NULL)) THEN NULL ELSE 1 END",
+        "postgresql": "CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name != %(name_1)s)) THEN false WHEN (EXISTS (SELECT %(param_2)s AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name = %(name_1)s) IS NULL)) THEN NULL ELSE true END"
+      },
+      "params": {
+        "param_1": 1,
+        "name_1": "public",
+        "param_2": 1
+      }
+    },
+    "arith-add": {
+      "where": {
+        "sqlite": "adversarial_resource.a_number + ? > ?",
+        "postgresql": "adversarial_resource.a_number + %(a_number_1)s > %(param_1)s"
+      },
+      "params": {
+        "a_number_1": 1,
+        "param_1": 2
+      }
+    },
+    "arith-add-eq-frac": {
+      "where": {
+        "sqlite": "adversarial_resource.a_double + ? = ?",
+        "postgresql": "adversarial_resource.a_double + %(a_double_1)s = %(param_1)s"
+      },
+      "params": {
+        "a_double_1": 0.7,
+        "param_1": 0.1
+      }
+    },
+    "arith-add-eq-frac-exact": {
+      "where": {
+        "sqlite": "adversarial_resource.a_double + ? = ?",
+        "postgresql": "adversarial_resource.a_double + %(a_double_1)s = %(param_1)s"
+      },
+      "params": {
+        "a_double_1": 0.5,
+        "param_1": 0.75
+      }
+    },
+    "arith-add-ne-frac": {
+      "where": {
+        "sqlite": "adversarial_resource.a_double + ? != ?",
+        "postgresql": "adversarial_resource.a_double + %(a_double_1)s != %(param_1)s"
+      },
+      "params": {
+        "a_double_1": 0.7,
+        "param_1": 0.1
+      }
+    },
+    "arith-both": {
+      "where": {
+        "sqlite": "adversarial_resource.a_number + ? > adversarial_resource.a_number * ?",
+        "postgresql": "adversarial_resource.a_number + %(a_number_1)s > adversarial_resource.a_number * %(a_number_2)s"
+      },
+      "params": {
+        "a_number_1": 1,
+        "a_number_2": 2
+      }
+    },
+    "arith-div": {
+      "where": {
+        "sqlite": "CASE WHEN ? THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = ?) THEN ? WHEN (CAST(adversarial_resource.a_number AS FLOAT) != ?) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) > ?) THEN ? WHEN (CAST(adversarial_resource.a_number AS FLOAT) <= ?) THEN ? END END WHEN ? = 0 THEN CAST(adversarial_resource.a_number AS FLOAT) / (nullif(?, ?) + 0.0) = ? END = 1",
+        "postgresql": "CASE WHEN %(param_1)s THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = %(param_2)s) THEN %(param_3)s WHEN (CAST(adversarial_resource.a_number AS FLOAT) != %(param_2)s) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) > %(param_4)s) THEN %(param_5)s WHEN (CAST(adversarial_resource.a_number AS FLOAT) <= %(param_4)s) THEN %(param_6)s END END WHEN NOT %(param_7)s THEN CAST(adversarial_resource.a_number AS FLOAT) / CAST(nullif(%(nullif_1)s, %(nullif_2)s) AS NUMERIC) = %(param_8)s END"
+      },
+      "params": {
+        "param_1": false,
+        "param_2": 0.0,
+        "param_3": false,
+        "param_4": 0.0,
+        "param_5": false,
+        "param_6": false,
+        "param_7": false,
+        "nullif_1": 2.0,
+        "nullif_2": 0.0,
+        "param_8": 1
+      }
+    },
+    "arith-div-frac": {
+      "where": {
+        "sqlite": "CASE WHEN ? THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = ?) THEN ? WHEN (CAST(adversarial_resource.a_number AS FLOAT) != ?) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) > ?) THEN ? WHEN (CAST(adversarial_resource.a_number AS FLOAT) <= ?) THEN ? END END WHEN ? = 0 THEN CAST(adversarial_resource.a_number AS FLOAT) / (nullif(?, ?) + 0.0) >= ? END = 1",
+        "postgresql": "CASE WHEN %(param_1)s THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = %(param_2)s) THEN %(param_3)s WHEN (CAST(adversarial_resource.a_number AS FLOAT) != %(param_2)s) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) > %(param_4)s) THEN %(param_5)s WHEN (CAST(adversarial_resource.a_number AS FLOAT) <= %(param_4)s) THEN %(param_6)s END END WHEN NOT %(param_7)s THEN CAST(adversarial_resource.a_number AS FLOAT) / CAST(nullif(%(nullif_1)s, %(nullif_2)s) AS NUMERIC) >= %(param_8)s END"
+      },
+      "params": {
+        "param_1": false,
+        "param_2": 0.0,
+        "param_3": false,
+        "param_4": 0.0,
+        "param_5": true,
+        "param_6": false,
+        "param_7": false,
+        "nullif_1": 2.0,
+        "nullif_2": 0.0,
+        "param_8": 1.5
+      }
+    },
+    "arith-mult-neg": {
+      "where": {
+        "sqlite": "adversarial_resource.a_number * ? < ?",
+        "postgresql": "adversarial_resource.a_number * %(a_number_1)s < %(param_1)s"
+      },
+      "params": {
+        "a_number_1": -2,
+        "param_1": 3
+      }
+    },
+    "arith-sub": {
+      "where": {
+        "sqlite": "adversarial_resource.a_number - ? <= ?",
+        "postgresql": "adversarial_resource.a_number - %(a_number_1)s <= %(param_1)s"
+      },
+      "params": {
+        "a_number_1": 3,
+        "param_1": 0
+      }
+    },
+    "arith-vf": {
+      "where": {
+        "sqlite": "adversarial_resource.a_number + ? > ?",
+        "postgresql": "adversarial_resource.a_number + %(a_number_1)s > %(param_1)s"
+      },
+      "params": {
+        "a_number_1": 1,
+        "param_1": 2
+      }
+    },
+    "cast-string-double": {
+      "where": {
+        "sqlite": "CAST(adversarial_resource.a_double AS VARCHAR) = ?",
+        "postgresql": "CAST(adversarial_resource.a_double AS VARCHAR) = %(param_1)s"
+      },
+      "params": {
+        "param_1": "-0.6"
+      }
+    },
+    "concat-f2f": {
+      "where": {
+        "sqlite": "(adversarial_resource.a_string || adversarial_resource.a_optional_string) = ?",
+        "postgresql": "(adversarial_resource.a_string || adversarial_resource.a_optional_string) = %(param_1)s"
+      },
+      "params": {
+        "param_1": "oneset"
+      }
+    },
+    "cr-contains": {
+      "where": {
+        "sqlite": "? LIKE (? || replace(replace(replace(replace(adversarial_resource.a_string, ?, ?), ?, ?), ?, ?), ?, ?) || ?) ESCAPE '\\'",
+        "postgresql": "%(param_1)s LIKE (%(param_2)s || replace(replace(replace(replace(adversarial_resource.a_string, %(replace_1)s, %(replace_2)s), %(replace_3)s, %(replace_4)s), %(replace_5)s, %(replace_6)s), %(replace_7)s, %(replace_8)s) || %(param_3)s) ESCAPE '\\\\'"
+      },
+      "params": {
+        "param_1": "s100Xdone-tail\\one-end",
+        "param_2": "%",
+        "replace_1": "\\",
+        "replace_2": "\\\\",
+        "replace_3": "%",
+        "replace_4": "\\%",
+        "replace_5": "_",
+        "replace_6": "\\_",
+        "replace_7": "[",
+        "replace_8": "\\[",
+        "param_3": "%"
+      }
+    },
+    "cr-div-other-column": {
+      "where": {
+        "sqlite": "CASE WHEN (CAST(adversarial_resource.a_double AS FLOAT) = ?) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = ?) THEN ? WHEN (CAST(adversarial_resource.a_number AS FLOAT) != ?) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) > ?) THEN ? WHEN (CAST(adversarial_resource.a_number AS FLOAT) <= ?) THEN ? END END WHEN (CAST(adversarial_resource.a_double AS FLOAT) != ?) THEN CAST(adversarial_resource.a_number AS FLOAT) / (nullif(CAST(adversarial_resource.a_double AS FLOAT), ?) + 0.0) > ? END = 1",
+        "postgresql": "CASE WHEN (CAST(adversarial_resource.a_double AS FLOAT) = %(param_1)s) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = %(param_2)s) THEN %(param_3)s WHEN (CAST(adversarial_resource.a_number AS FLOAT) != %(param_2)s) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) > %(param_4)s) THEN %(param_5)s WHEN (CAST(adversarial_resource.a_number AS FLOAT) <= %(param_4)s) THEN %(param_6)s END END WHEN (CAST(adversarial_resource.a_double AS FLOAT) != %(param_1)s) THEN CAST(adversarial_resource.a_number AS FLOAT) / CAST(nullif(CAST(adversarial_resource.a_double AS FLOAT), %(nullif_1)s) AS NUMERIC) > %(param_7)s END"
+      },
+      "params": {
+        "param_1": 0.0,
+        "param_2": 0.0,
+        "param_3": false,
+        "param_4": 0.0,
+        "param_5": true,
+        "param_6": false,
+        "nullif_1": 0.0,
+        "param_7": 0
+      }
+    },
+    "cr-div-then-add": {
+      "where": {
+        "sqlite": "CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = ?) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = ?) THEN ? WHEN (CAST(adversarial_resource.a_number AS FLOAT) != ?) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) > ?) THEN ? WHEN (CAST(adversarial_resource.a_number AS FLOAT) <= ?) THEN ? END END WHEN (CAST(adversarial_resource.a_number AS FLOAT) != ?) THEN CAST(adversarial_resource.a_number AS FLOAT) / (nullif(CAST(adversarial_resource.a_number AS FLOAT), ?) + 0.0) + ? > ? END = 1",
+        "postgresql": "CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = %(param_1)s) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = %(param_2)s) THEN %(param_3)s WHEN (CAST(adversarial_resource.a_number AS FLOAT) != %(param_2)s) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) > %(param_4)s) THEN %(param_5)s WHEN (CAST(adversarial_resource.a_number AS FLOAT) <= %(param_4)s) THEN %(param_6)s END END WHEN (CAST(adversarial_resource.a_number AS FLOAT) != %(param_1)s) THEN CAST(adversarial_resource.a_number AS FLOAT) / CAST(nullif(CAST(adversarial_resource.a_number AS FLOAT), %(nullif_1)s) AS NUMERIC) + %(param_7)s > %(param_8)s END"
+      },
+      "params": {
+        "param_1": 0.0,
+        "param_2": 0.0,
+        "param_3": false,
+        "param_4": 0.0,
+        "param_5": true,
+        "param_6": false,
+        "nullif_1": 0.0,
+        "param_7": 1,
+        "param_8": 1
+      }
+    },
+    "cr-div-then-add-ne": {
+      "where": {
+        "sqlite": "CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = ?) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = ?) THEN ? WHEN (CAST(adversarial_resource.a_number AS FLOAT) != ?) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) > ?) THEN ? WHEN (CAST(adversarial_resource.a_number AS FLOAT) <= ?) THEN ? END END WHEN (CAST(adversarial_resource.a_number AS FLOAT) != ?) THEN CAST(adversarial_resource.a_number AS FLOAT) / (nullif(CAST(adversarial_resource.a_number AS FLOAT), ?) + 0.0) + ? != ? END = 1",
+        "postgresql": "CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = %(param_1)s) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = %(param_2)s) THEN %(param_3)s WHEN (CAST(adversarial_resource.a_number AS FLOAT) != %(param_2)s) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) > %(param_4)s) THEN %(param_5)s WHEN (CAST(adversarial_resource.a_number AS FLOAT) <= %(param_4)s) THEN %(param_6)s END END WHEN (CAST(adversarial_resource.a_number AS FLOAT) != %(param_1)s) THEN CAST(adversarial_resource.a_number AS FLOAT) / CAST(nullif(CAST(adversarial_resource.a_number AS FLOAT), %(nullif_1)s) AS NUMERIC) + %(param_7)s != %(param_8)s END"
+      },
+      "params": {
+        "param_1": 0.0,
+        "param_2": 0.0,
+        "param_3": true,
+        "param_4": 0.0,
+        "param_5": true,
+        "param_6": true,
+        "nullif_1": 0.0,
+        "param_7": 1,
+        "param_8": 2
+      }
+    },
+    "cr-div-zero": {
+      "where": {
+        "sqlite": "CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = ?) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = ?) THEN ? WHEN (CAST(adversarial_resource.a_number AS FLOAT) != ?) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) > ?) THEN ? WHEN (CAST(adversarial_resource.a_number AS FLOAT) <= ?) THEN ? END END WHEN (CAST(adversarial_resource.a_number AS FLOAT) != ?) THEN CAST(adversarial_resource.a_number AS FLOAT) / (nullif(CAST(adversarial_resource.a_number AS FLOAT), ?) + 0.0) > ? END = 1",
+        "postgresql": "CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = %(param_1)s) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = %(param_2)s) THEN %(param_3)s WHEN (CAST(adversarial_resource.a_number AS FLOAT) != %(param_2)s) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) > %(param_4)s) THEN %(param_5)s WHEN (CAST(adversarial_resource.a_number AS FLOAT) <= %(param_4)s) THEN %(param_6)s END END WHEN (CAST(adversarial_resource.a_number AS FLOAT) != %(param_1)s) THEN CAST(adversarial_resource.a_number AS FLOAT) / CAST(nullif(CAST(adversarial_resource.a_number AS FLOAT), %(nullif_1)s) AS NUMERIC) > %(param_7)s END"
+      },
+      "params": {
+        "param_1": 0.0,
+        "param_2": 0.0,
+        "param_3": false,
+        "param_4": 0.0,
+        "param_5": true,
+        "param_6": false,
+        "nullif_1": 0.0,
+        "param_7": 0.5
+      }
+    },
+    "cr-div-zero-eq-neg": {
+      "where": {
+        "sqlite": "CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = ?) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = ?) THEN ? WHEN (CAST(adversarial_resource.a_number AS FLOAT) != ?) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) > ?) THEN ? WHEN (CAST(adversarial_resource.a_number AS FLOAT) <= ?) THEN ? END END WHEN (CAST(adversarial_resource.a_number AS FLOAT) != ?) THEN CAST(adversarial_resource.a_number AS FLOAT) / (nullif(CAST(adversarial_resource.a_number AS FLOAT), ?) + 0.0) = ? END = 0",
+        "postgresql": "NOT CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = %(param_1)s) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = %(param_2)s) THEN %(param_3)s WHEN (CAST(adversarial_resource.a_number AS FLOAT) != %(param_2)s) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) > %(param_4)s) THEN %(param_5)s WHEN (CAST(adversarial_resource.a_number AS FLOAT) <= %(param_4)s) THEN %(param_6)s END END WHEN (CAST(adversarial_resource.a_number AS FLOAT) != %(param_1)s) THEN CAST(adversarial_resource.a_number AS FLOAT) / CAST(nullif(CAST(adversarial_resource.a_number AS FLOAT), %(nullif_1)s) AS NUMERIC) = %(param_7)s END"
+      },
+      "params": {
+        "param_1": 0.0,
+        "param_2": 0.0,
+        "param_3": false,
+        "param_4": 0.0,
+        "param_5": false,
+        "param_6": false,
+        "nullif_1": 0.0,
+        "param_7": 1
+      }
+    },
+    "cr-div-zero-ne": {
+      "where": {
+        "sqlite": "CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = ?) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = ?) THEN ? WHEN (CAST(adversarial_resource.a_number AS FLOAT) != ?) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) > ?) THEN ? WHEN (CAST(adversarial_resource.a_number AS FLOAT) <= ?) THEN ? END END WHEN (CAST(adversarial_resource.a_number AS FLOAT) != ?) THEN CAST(adversarial_resource.a_number AS FLOAT) / (nullif(CAST(adversarial_resource.a_number AS FLOAT), ?) + 0.0) != ? END = 1",
+        "postgresql": "CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = %(param_1)s) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = %(param_2)s) THEN %(param_3)s WHEN (CAST(adversarial_resource.a_number AS FLOAT) != %(param_2)s) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) > %(param_4)s) THEN %(param_5)s WHEN (CAST(adversarial_resource.a_number AS FLOAT) <= %(param_4)s) THEN %(param_6)s END END WHEN (CAST(adversarial_resource.a_number AS FLOAT) != %(param_1)s) THEN CAST(adversarial_resource.a_number AS FLOAT) / CAST(nullif(CAST(adversarial_resource.a_number AS FLOAT), %(nullif_1)s) AS NUMERIC) != %(param_7)s END"
+      },
+      "params": {
+        "param_1": 0.0,
+        "param_2": 0.0,
+        "param_3": true,
+        "param_4": 0.0,
+        "param_5": true,
+        "param_6": true,
+        "nullif_1": 0.0,
+        "param_7": 1
+      }
+    },
+    "cr-endswith": {
+      "where": {
+        "sqlite": "? LIKE (? || replace(replace(replace(replace(adversarial_resource.a_string, ?, ?), ?, ?), ?, ?), ?, ?)) ESCAPE '\\'",
+        "postgresql": "%(param_1)s LIKE (%(param_2)s || replace(replace(replace(replace(adversarial_resource.a_string, %(replace_1)s, %(replace_2)s), %(replace_3)s, %(replace_4)s), %(replace_5)s, %(replace_6)s), %(replace_7)s, %(replace_8)s)) ESCAPE '\\\\'"
+      },
+      "params": {
+        "param_1": "prefix-xaXby",
+        "param_2": "%",
+        "replace_1": "\\",
+        "replace_2": "\\\\",
+        "replace_3": "%",
+        "replace_4": "\\%",
+        "replace_5": "_",
+        "replace_6": "\\_",
+        "replace_7": "[",
+        "replace_8": "\\["
+      }
+    },
+    "cr-size-frac-ge": {
+      "where": {
+        "sqlite": "(SELECT count(*) AS count_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id) >= ?",
+        "postgresql": "(SELECT count(*) AS count_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id) >= %(param_1)s"
+      },
+      "params": {
+        "param_1": 1.5
+      }
+    },
+    "cr-startswith": {
+      "where": {
+        "sqlite": "? LIKE (replace(replace(replace(replace(adversarial_resource.a_string, ?, ?), ?, ?), ?, ?), ?, ?) || ?) ESCAPE '\\'",
+        "postgresql": "%(param_1)s LIKE (replace(replace(replace(replace(adversarial_resource.a_string, %(replace_1)s, %(replace_2)s), %(replace_3)s, %(replace_4)s), %(replace_5)s, %(replace_6)s), %(replace_7)s, %(replace_8)s) || %(param_2)s) ESCAPE '\\\\'"
+      },
+      "params": {
+        "param_1": "xaXby-tail",
+        "replace_1": "\\",
+        "replace_2": "\\\\",
+        "replace_3": "%",
+        "replace_4": "\\%",
+        "replace_5": "_",
+        "replace_6": "\\_",
+        "replace_7": "[",
+        "replace_8": "\\[",
+        "param_2": "%"
+      }
+    },
+    "cr-startswith-concat": {
+      "where": {
+        "sqlite": "? LIKE (replace(replace(replace(replace(adversarial_resource.a_string, ?, ?), ?, ?), ?, ?), ?, ?) || ?) ESCAPE '\\'",
+        "postgresql": "%(param_1)s LIKE (replace(replace(replace(replace(adversarial_resource.a_string, %(replace_1)s, %(replace_2)s), %(replace_3)s, %(replace_4)s), %(replace_5)s, %(replace_6)s), %(replace_7)s, %(replace_8)s) || %(param_2)s) ESCAPE '\\\\'"
+      },
+      "params": {
+        "param_1": "xaXby-tail",
+        "replace_1": "\\",
+        "replace_2": "\\\\",
+        "replace_3": "%",
+        "replace_4": "\\%",
+        "replace_5": "_",
+        "replace_6": "\\_",
+        "replace_7": "[",
+        "replace_8": "\\[",
+        "param_2": "%"
+      }
+    },
+    "cs-contains": {
+      "where": {
+        "sqlite": "adversarial_resource.a_string LIKE ? ESCAPE '\\'",
+        "postgresql": "adversarial_resource.a_string LIKE %(a_string_1)s ESCAPE '\\\\'"
+      },
+      "params": {
+        "a_string_1": "%one%"
+      }
+    },
+    "cs-endswith": {
+      "where": {
+        "sqlite": "adversarial_resource.a_string LIKE ? ESCAPE '\\'",
+        "postgresql": "adversarial_resource.a_string LIKE %(a_string_1)s ESCAPE '\\\\'"
+      },
+      "params": {
+        "a_string_1": "%one"
+      }
+    },
+    "cs-eq": {
+      "where": {
+        "sqlite": "adversarial_resource.a_string = ?",
+        "postgresql": "adversarial_resource.a_string = %(a_string_1)s"
+      },
+      "params": {
+        "a_string_1": "one"
+      }
+    },
+    "cs-startswith": {
+      "where": {
+        "sqlite": "adversarial_resource.a_string LIKE ? ESCAPE '\\'",
+        "postgresql": "adversarial_resource.a_string LIKE %(a_string_1)s ESCAPE '\\\\'"
+      },
+      "params": {
+        "a_string_1": "one%"
+      }
+    },
+    "double-negation": {
+      "where": {
+        "sqlite": "adversarial_resource.a_bool = 1",
+        "postgresql": "adversarial_resource.a_bool"
+      },
+      "params": {}
+    },
+    "double-threshold": {
+      "where": {
+        "sqlite": "adversarial_resource.a_number >= ?",
+        "postgresql": "adversarial_resource.a_number >= %(a_number_1)s"
+      },
+      "params": {
+        "a_number_1": 1.5
+      }
+    },
+    "empty-string-eq": {
+      "where": {
+        "sqlite": "adversarial_resource.a_string = ?",
+        "postgresql": "adversarial_resource.a_string = %(a_string_1)s"
+      },
+      "params": {
+        "a_string_1": ""
+      }
+    },
+    "exists-on-empty": {
+      "where": {
+        "sqlite": "CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name = ?)) THEN 1 WHEN (EXISTS (SELECT ? AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name = ?) IS NULL)) THEN NULL ELSE 0 END",
+        "postgresql": "CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name = %(name_1)s)) THEN true WHEN (EXISTS (SELECT %(param_2)s AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name = %(name_1)s) IS NULL)) THEN NULL ELSE false END"
+      },
+      "params": {
+        "param_1": 1,
+        "name_1": "public",
+        "param_2": 1
+      }
+    },
+    "exists-one-multi": {
+      "where": {
+        "sqlite": "CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name = ?) IS NULL)) THEN NULL ELSE (SELECT count(*) AS count_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name = ?) = ? END",
+        "postgresql": "CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name = %(name_1)s) IS NULL)) THEN NULL ELSE (SELECT count(*) AS count_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name = %(name_1)s) = %(param_2)s END"
+      },
+      "params": {
+        "param_1": 1,
+        "name_1": "public",
+        "param_2": 1
+      }
+    },
+    "f2f-contains": {
+      "where": {
+        "sqlite": "adversarial_resource.a_string LIKE (? || replace(replace(replace(replace(adversarial_resource.a_optional_string, ?, ?), ?, ?), ?, ?), ?, ?) || ?) ESCAPE '\\'",
+        "postgresql": "adversarial_resource.a_string LIKE (%(param_1)s || replace(replace(replace(replace(adversarial_resource.a_optional_string, %(replace_1)s, %(replace_2)s), %(replace_3)s, %(replace_4)s), %(replace_5)s, %(replace_6)s), %(replace_7)s, %(replace_8)s) || %(param_2)s) ESCAPE '\\\\'"
+      },
+      "params": {
+        "param_1": "%",
+        "replace_1": "\\",
+        "replace_2": "\\\\",
+        "replace_3": "%",
+        "replace_4": "\\%",
+        "replace_5": "_",
+        "replace_6": "\\_",
+        "replace_7": "[",
+        "replace_8": "\\[",
+        "param_2": "%"
+      }
+    },
+    "f2f-endswith": {
+      "where": {
+        "sqlite": "adversarial_resource.a_string LIKE (? || replace(replace(replace(replace(adversarial_resource.a_optional_string, ?, ?), ?, ?), ?, ?), ?, ?)) ESCAPE '\\'",
+        "postgresql": "adversarial_resource.a_string LIKE (%(param_1)s || replace(replace(replace(replace(adversarial_resource.a_optional_string, %(replace_1)s, %(replace_2)s), %(replace_3)s, %(replace_4)s), %(replace_5)s, %(replace_6)s), %(replace_7)s, %(replace_8)s)) ESCAPE '\\\\'"
+      },
+      "params": {
+        "param_1": "%",
+        "replace_1": "\\",
+        "replace_2": "\\\\",
+        "replace_3": "%",
+        "replace_4": "\\%",
+        "replace_5": "_",
+        "replace_6": "\\_",
+        "replace_7": "[",
+        "replace_8": "\\["
+      }
+    },
+    "f2f-startswith": {
+      "where": {
+        "sqlite": "adversarial_resource.a_string LIKE (replace(replace(replace(replace(adversarial_resource.a_optional_string, ?, ?), ?, ?), ?, ?), ?, ?) || ?) ESCAPE '\\'",
+        "postgresql": "adversarial_resource.a_string LIKE (replace(replace(replace(replace(adversarial_resource.a_optional_string, %(replace_1)s, %(replace_2)s), %(replace_3)s, %(replace_4)s), %(replace_5)s, %(replace_6)s), %(replace_7)s, %(replace_8)s) || %(param_1)s) ESCAPE '\\\\'"
+      },
+      "params": {
+        "replace_1": "\\",
+        "replace_2": "\\\\",
+        "replace_3": "%",
+        "replace_4": "\\%",
+        "replace_5": "_",
+        "replace_6": "\\_",
+        "replace_7": "[",
+        "replace_8": "\\[",
+        "param_1": "%"
+      }
+    },
+    "field-to-field": {
+      "where": {
+        "sqlite": "adversarial_resource.a_string = adversarial_resource.a_optional_string",
+        "postgresql": "adversarial_resource.a_string = adversarial_resource.a_optional_string"
+      },
+      "params": {}
+    },
+    "gt-bare": {
+      "where": {
+        "sqlite": "adversarial_resource.a_number > ?",
+        "postgresql": "adversarial_resource.a_number > %(a_number_1)s"
+      },
+      "params": {
+        "a_number_1": 1
+      }
+    },
+    "hier-ancestor-cf": {
+      "where": {
+        "sqlite": "adversarial_resource.scope LIKE ? ESCAPE '\\'",
+        "postgresql": "adversarial_resource.scope LIKE %(scope_1)s ESCAPE '\\\\'"
+      },
+      "params": {
+        "scope_1": "dept.eng.%"
+      }
+    },
+    "hier-ancestor-ff": {
+      "where": {
+        "sqlite": "adversarial_resource.scope IN (?, ?)",
+        "postgresql": "adversarial_resource.scope IN (%(scope_1_1)s, %(scope_1_2)s)"
+      },
+      "params": {
+        "scope_1_1": "dept",
+        "scope_1_2": "dept.eng"
+      }
+    },
+    "hier-bracket": {
+      "where": {
+        "sqlite": "adversarial_resource.scope LIKE ? ESCAPE '\\'",
+        "postgresql": "adversarial_resource.scope LIKE %(scope_1)s ESCAPE '\\\\'"
+      },
+      "params": {
+        "scope_1": "\\[env]:prod:%"
+      }
+    },
+    "hier-descendent-cf": {
+      "where": {
+        "sqlite": "adversarial_resource.scope IN (?, ?)",
+        "postgresql": "adversarial_resource.scope IN (%(scope_1_1)s, %(scope_1_2)s)"
+      },
+      "params": {
+        "scope_1_1": "dept",
+        "scope_1_2": "dept.eng"
+      }
+    },
+    "hier-descendent-ff": {
+      "where": {
+        "sqlite": "adversarial_resource.scope LIKE ? ESCAPE '\\'",
+        "postgresql": "adversarial_resource.scope LIKE %(scope_1)s ESCAPE '\\\\'"
+      },
+      "params": {
+        "scope_1": "dept.eng.%"
+      }
+    },
+    "hier-meta-in": {
+      "where": {
+        "sqlite": "adversarial_resource.scope IN (?, ?)",
+        "postgresql": "adversarial_resource.scope IN (%(scope_1_1)s, %(scope_1_2)s)"
+      },
+      "params": {
+        "scope_1_1": "50%",
+        "scope_1_2": "50%.a_b"
+      }
+    },
+    "hier-meta-like": {
+      "where": {
+        "sqlite": "adversarial_resource.scope LIKE ? ESCAPE '\\'",
+        "postgresql": "adversarial_resource.scope LIKE %(scope_1)s ESCAPE '\\\\'"
+      },
+      "params": {
+        "scope_1": "50\\%:a\\_b:%"
+      }
+    },
+    "hier-overlaps-cf": {
+      "where": {
+        "sqlite": "adversarial_resource.scope = ? OR adversarial_resource.scope LIKE ? ESCAPE '\\' OR adversarial_resource.scope IN (?)",
+        "postgresql": "adversarial_resource.scope = %(scope_1)s OR adversarial_resource.scope LIKE %(scope_2)s ESCAPE '\\\\' OR adversarial_resource.scope IN (%(scope_3_1)s)"
+      },
+      "params": {
+        "scope_1": "dept.eng",
+        "scope_2": "dept.eng.%",
+        "scope_3_1": "dept"
+      }
+    },
+    "hier-overlaps-ff": {
+      "where": {
+        "sqlite": "adversarial_resource.scope = ? OR adversarial_resource.scope IN (?) OR adversarial_resource.scope LIKE ? ESCAPE '\\'",
+        "postgresql": "adversarial_resource.scope = %(scope_1)s OR adversarial_resource.scope IN (%(scope_2_1)s) OR adversarial_resource.scope LIKE %(scope_3)s ESCAPE '\\\\'"
+      },
+      "params": {
+        "scope_1": "dept.eng",
+        "scope_3": "dept.eng.%",
+        "scope_2_1": "dept"
+      }
+    },
+    "hier-overlaps-meta": {
+      "where": {
+        "sqlite": "adversarial_resource.scope = ? OR adversarial_resource.scope IN (?) OR adversarial_resource.scope LIKE ? ESCAPE '\\'",
+        "postgresql": "adversarial_resource.scope = %(scope_1)s OR adversarial_resource.scope IN (%(scope_2_1)s) OR adversarial_resource.scope LIKE %(scope_3)s ESCAPE '\\\\'"
+      },
+      "params": {
+        "scope_1": "50%:a_b",
+        "scope_3": "50\\%:a\\_b:%",
+        "scope_2_1": "50%"
+      }
+    },
+    "id-concat": {
+      "where": {
+        "sqlite": "adversarial_resource.a_optional_string = (? || adversarial_resource.id)",
+        "postgresql": "adversarial_resource.a_optional_string = (%(id_1)s || adversarial_resource.id)"
+      },
+      "params": {
+        "id_1": "prefix:"
+      }
+    },
+    "id-concat-vf": {
+      "where": {
+        "sqlite": "(? || adversarial_resource.id) = ?",
+        "postgresql": "(%(id_1)s || adversarial_resource.id) = %(param_1)s"
+      },
+      "params": {
+        "id_1": "projects:",
+        "param_1": "projects:f1"
+      }
+    },
+    "id-eq-const": {
+      "where": {
+        "sqlite": "adversarial_resource.id = ?",
+        "postgresql": "adversarial_resource.id = %(id_1)s"
+      },
+      "params": {
+        "id_1": "f1"
+      }
+    },
+    "id-f2f": {
+      "where": {
+        "sqlite": "adversarial_resource.a_string = adversarial_resource.id",
+        "postgresql": "adversarial_resource.a_string = adversarial_resource.id"
+      },
+      "params": {}
+    },
+    "id-f2f-ne": {
+      "where": {
+        "sqlite": "adversarial_resource.a_string != adversarial_resource.id",
+        "postgresql": "adversarial_resource.a_string != adversarial_resource.id"
+      },
+      "params": {}
+    },
+    "in-empty": {
+      "where": {
+        "sqlite": "0 = 1",
+        "postgresql": "false"
+      },
+      "params": {}
+    },
+    "in-null-elem-hasint": {
+      "where": {
+        "sqlite": "EXISTS (SELECT ? AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name IN (?) OR adversarial_tag.name IS NULL))",
+        "postgresql": "EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name IN (%(name_1_1)s) OR adversarial_tag.name IS NULL))"
+      },
+      "params": {
+        "param_1": 1,
+        "name_1_1": "public"
+      }
+    },
+    "in-null-elem-mixed": {
+      "where": {
+        "sqlite": "adversarial_resource.a_optional_string IN (?, ?) OR adversarial_resource.a_optional_string IS NULL",
+        "postgresql": "adversarial_resource.a_optional_string IN (%(a_optional_string_1_1)s, %(a_optional_string_1_2)s) OR adversarial_resource.a_optional_string IS NULL"
+      },
+      "params": {
+        "a_optional_string_1_1": "x",
+        "a_optional_string_1_2": "one_two"
+      }
+    },
+    "in-null-elem-neg": {
+      "where": {
+        "sqlite": "NOT (adversarial_resource.a_optional_string IN (?, ?) OR adversarial_resource.a_optional_string IS NULL)",
+        "postgresql": "NOT (adversarial_resource.a_optional_string IN (%(a_optional_string_1_1)s, %(a_optional_string_1_2)s) OR adversarial_resource.a_optional_string IS NULL)"
+      },
+      "params": {
+        "a_optional_string_1_1": "x",
+        "a_optional_string_1_2": "one_two"
+      }
+    },
+    "in-null-elem-only": {
+      "where": {
+        "sqlite": "adversarial_resource.a_optional_string IS NULL",
+        "postgresql": "adversarial_resource.a_optional_string IS NULL"
+      },
+      "params": {}
+    },
+    "in-null-elem-only-neg": {
+      "where": {
+        "sqlite": "adversarial_resource.a_optional_string IS NOT NULL",
+        "postgresql": "adversarial_resource.a_optional_string IS NOT NULL"
+      },
+      "params": {}
+    },
+    "in-null-elem-rel": {
+      "where": {
+        "sqlite": "EXISTS (SELECT ? AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name IS NULL)",
+        "postgresql": "EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name IS NULL)"
+      },
+      "params": {
+        "param_1": 1
+      }
+    },
+    "in-null-elem-rel-neg": {
+      "where": {
+        "sqlite": "NOT (EXISTS (SELECT ? AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name IS NULL))",
+        "postgresql": "NOT (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name IS NULL))"
+      },
+      "params": {
+        "param_1": 1
+      }
+    },
+    "in-single": {
+      "where": {
+        "sqlite": "adversarial_resource.a_string = ?",
+        "postgresql": "adversarial_resource.a_string = %(a_string_1)s"
+      },
+      "params": {
+        "a_string_1": "one"
+      }
+    },
+    "in-var-var": {
+      "where": {
+        "sqlite": "EXISTS (SELECT ? AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name = adversarial_resource.a_optional_string OR adversarial_tag.name IS NULL AND adversarial_resource.a_optional_string IS NULL))",
+        "postgresql": "EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name = adversarial_resource.a_optional_string OR adversarial_tag.name IS NULL AND adversarial_resource.a_optional_string IS NULL))"
+      },
+      "params": {
+        "param_1": 1
+      }
+    },
+    "in-var-var-neg": {
+      "where": {
+        "sqlite": "NOT (EXISTS (SELECT ? AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name = adversarial_resource.a_optional_string OR adversarial_tag.name IS NULL AND adversarial_resource.a_optional_string IS NULL)))",
+        "postgresql": "NOT (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name = adversarial_resource.a_optional_string OR adversarial_tag.name IS NULL AND adversarial_resource.a_optional_string IS NULL)))"
+      },
+      "params": {
+        "param_1": 1
+      }
+    },
+    "lambda-field-to-field": {
+      "where": {
+        "sqlite": "CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name = adversarial_resource.a_string)) THEN 1 WHEN (EXISTS (SELECT ? AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name = adversarial_resource.a_string) IS NULL)) THEN NULL ELSE 0 END",
+        "postgresql": "CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name = adversarial_resource.a_string)) THEN true WHEN (EXISTS (SELECT %(param_2)s AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name = adversarial_resource.a_string) IS NULL)) THEN NULL ELSE false END"
+      },
+      "params": {
+        "param_1": 1,
+        "param_2": 1
+      }
+    },
+    "lambda-in-principal": {
+      "where": {
+        "sqlite": "CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name IN (?, ?))) THEN 1 WHEN (EXISTS (SELECT ? AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name IN (?, ?)) IS NULL)) THEN NULL ELSE 0 END",
+        "postgresql": "CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name IN (%(name_1_1)s, %(name_1_2)s))) THEN true WHEN (EXISTS (SELECT %(param_2)s AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name IN (%(name_1_1)s, %(name_1_2)s)) IS NULL)) THEN NULL ELSE false END"
+      },
+      "params": {
+        "param_1": 1,
+        "param_2": 1,
+        "name_1_1": "public",
+        "name_1_2": "special"
+      }
+    },
+    "le-bare": {
+      "where": {
+        "sqlite": "adversarial_resource.a_number <= ?",
+        "postgresql": "adversarial_resource.a_number <= %(a_number_1)s"
+      },
+      "params": {
+        "a_number_1": 2
+      }
+    },
+    "like-backslash": {
+      "where": {
+        "sqlite": "adversarial_resource.a_string LIKE ? ESCAPE '\\'",
+        "postgresql": "adversarial_resource.a_string LIKE %(a_string_1)s ESCAPE '\\\\'"
+      },
+      "params": {
+        "a_string_1": "%\\\\"
+      }
+    },
+    "like-bracket": {
+      "where": {
+        "sqlite": "adversarial_resource.a_string LIKE ? ESCAPE '\\'",
+        "postgresql": "adversarial_resource.a_string LIKE %(a_string_1)s ESCAPE '\\\\'"
+      },
+      "params": {
+        "a_string_1": "\\[SEC]%"
+      }
+    },
+    "like-percent": {
+      "where": {
+        "sqlite": "adversarial_resource.a_string LIKE ? ESCAPE '\\'",
+        "postgresql": "adversarial_resource.a_string LIKE %(a_string_1)s ESCAPE '\\\\'"
+      },
+      "params": {
+        "a_string_1": "100\\%%"
+      }
+    },
+    "like-underscore": {
+      "where": {
+        "sqlite": "adversarial_resource.a_string LIKE ? ESCAPE '\\'",
+        "postgresql": "adversarial_resource.a_string LIKE %(a_string_1)s ESCAPE '\\\\'"
+      },
+      "params": {
+        "a_string_1": "%a\\_b%"
+      }
+    },
+    "macro-depth3-all": {
+      "where": {
+        "sqlite": "CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id AND CASE WHEN (EXISTS (SELECT ? AS anon_2 FROM adversarial_sub_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND NOT CASE WHEN (EXISTS (SELECT ? AS anon_3 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND adversarial_label.name = ?)) THEN 1 WHEN (EXISTS (SELECT ? AS anon_4 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND (adversarial_label.name = ?) IS NULL)) THEN NULL ELSE 0 END)) THEN 0 WHEN (EXISTS (SELECT ? AS anon_5 FROM adversarial_sub_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND CASE WHEN (EXISTS (SELECT ? AS anon_3 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND adversarial_label.name = ?)) THEN 1 WHEN (EXISTS (SELECT ? AS anon_4 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND (adversarial_label.name = ?) IS NULL)) THEN NULL ELSE 0 END IS NULL)) THEN NULL ELSE 1 END)) THEN 1 WHEN (EXISTS (SELECT ? AS anon_6 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id AND CASE WHEN (EXISTS (SELECT ? AS anon_2 FROM adversarial_sub_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND NOT CASE WHEN (EXISTS (SELECT ? AS anon_3 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND adversarial_label.name = ?)) THEN 1 WHEN (EXISTS (SELECT ? AS anon_4 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND (adversarial_label.name = ?) IS NULL)) THEN NULL ELSE 0 END)) THEN 0 WHEN (EXISTS (SELECT ? AS anon_5 FROM adversarial_sub_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND CASE WHEN (EXISTS (SELECT ? AS anon_3 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND adversarial_label.name = ?)) THEN 1 WHEN (EXISTS (SELECT ? AS anon_4 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND (adversarial_label.name = ?) IS NULL)) THEN NULL ELSE 0 END IS NULL)) THEN NULL ELSE 1 END IS NULL)) THEN NULL ELSE 0 END",
+        "postgresql": "CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id AND CASE WHEN (EXISTS (SELECT %(param_2)s AS anon_2 FROM adversarial_sub_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND NOT CASE WHEN (EXISTS (SELECT %(param_3)s AS anon_3 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND adversarial_label.name = %(name_1)s)) THEN true WHEN (EXISTS (SELECT %(param_4)s AS anon_4 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND (adversarial_label.name = %(name_1)s) IS NULL)) THEN NULL ELSE false END)) THEN false WHEN (EXISTS (SELECT %(param_5)s AS anon_5 FROM adversarial_sub_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND CASE WHEN (EXISTS (SELECT %(param_3)s AS anon_3 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND adversarial_label.name = %(name_1)s)) THEN true WHEN (EXISTS (SELECT %(param_4)s AS anon_4 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND (adversarial_label.name = %(name_1)s) IS NULL)) THEN NULL ELSE false END IS NULL)) THEN NULL ELSE true END)) THEN true WHEN (EXISTS (SELECT %(param_6)s AS anon_6 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id AND CASE WHEN (EXISTS (SELECT %(param_2)s AS anon_2 FROM adversarial_sub_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND NOT CASE WHEN (EXISTS (SELECT %(param_3)s AS anon_3 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND adversarial_label.name = %(name_1)s)) THEN true WHEN (EXISTS (SELECT %(param_4)s AS anon_4 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND (adversarial_label.name = %(name_1)s) IS NULL)) THEN NULL ELSE false END)) THEN false WHEN (EXISTS (SELECT %(param_5)s AS anon_5 FROM adversarial_sub_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND CASE WHEN (EXISTS (SELECT %(param_3)s AS anon_3 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND adversarial_label.name = %(name_1)s)) THEN true WHEN (EXISTS (SELECT %(param_4)s AS anon_4 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND (adversarial_label.name = %(name_1)s) IS NULL)) THEN NULL ELSE false END IS NULL)) THEN NULL ELSE true END IS NULL)) THEN NULL ELSE false END"
+      },
+      "params": {
+        "param_1": 1,
+        "param_2": 1,
+        "param_3": 1,
+        "name_1": "gold",
+        "param_4": 1,
+        "param_5": 1,
+        "param_6": 1
+      }
+    },
+    "macro-depth3-exists": {
+      "where": {
+        "sqlite": "CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id AND CASE WHEN (EXISTS (SELECT ? AS anon_2 FROM adversarial_sub_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND CASE WHEN (EXISTS (SELECT ? AS anon_3 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND adversarial_label.name = ?)) THEN 1 WHEN (EXISTS (SELECT ? AS anon_4 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND (adversarial_label.name = ?) IS NULL)) THEN NULL ELSE 0 END)) THEN 1 WHEN (EXISTS (SELECT ? AS anon_5 FROM adversarial_sub_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND CASE WHEN (EXISTS (SELECT ? AS anon_3 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND adversarial_label.name = ?)) THEN 1 WHEN (EXISTS (SELECT ? AS anon_4 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND (adversarial_label.name = ?) IS NULL)) THEN NULL ELSE 0 END IS NULL)) THEN NULL ELSE 0 END)) THEN 1 WHEN (EXISTS (SELECT ? AS anon_6 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id AND CASE WHEN (EXISTS (SELECT ? AS anon_2 FROM adversarial_sub_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND CASE WHEN (EXISTS (SELECT ? AS anon_3 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND adversarial_label.name = ?)) THEN 1 WHEN (EXISTS (SELECT ? AS anon_4 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND (adversarial_label.name = ?) IS NULL)) THEN NULL ELSE 0 END)) THEN 1 WHEN (EXISTS (SELECT ? AS anon_5 FROM adversarial_sub_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND CASE WHEN (EXISTS (SELECT ? AS anon_3 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND adversarial_label.name = ?)) THEN 1 WHEN (EXISTS (SELECT ? AS anon_4 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND (adversarial_label.name = ?) IS NULL)) THEN NULL ELSE 0 END IS NULL)) THEN NULL ELSE 0 END IS NULL)) THEN NULL ELSE 0 END",
+        "postgresql": "CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id AND CASE WHEN (EXISTS (SELECT %(param_2)s AS anon_2 FROM adversarial_sub_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND CASE WHEN (EXISTS (SELECT %(param_3)s AS anon_3 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND adversarial_label.name = %(name_1)s)) THEN true WHEN (EXISTS (SELECT %(param_4)s AS anon_4 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND (adversarial_label.name = %(name_1)s) IS NULL)) THEN NULL ELSE false END)) THEN true WHEN (EXISTS (SELECT %(param_5)s AS anon_5 FROM adversarial_sub_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND CASE WHEN (EXISTS (SELECT %(param_3)s AS anon_3 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND adversarial_label.name = %(name_1)s)) THEN true WHEN (EXISTS (SELECT %(param_4)s AS anon_4 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND (adversarial_label.name = %(name_1)s) IS NULL)) THEN NULL ELSE false END IS NULL)) THEN NULL ELSE false END)) THEN true WHEN (EXISTS (SELECT %(param_6)s AS anon_6 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id AND CASE WHEN (EXISTS (SELECT %(param_2)s AS anon_2 FROM adversarial_sub_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND CASE WHEN (EXISTS (SELECT %(param_3)s AS anon_3 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND adversarial_label.name = %(name_1)s)) THEN true WHEN (EXISTS (SELECT %(param_4)s AS anon_4 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND (adversarial_label.name = %(name_1)s) IS NULL)) THEN NULL ELSE false END)) THEN true WHEN (EXISTS (SELECT %(param_5)s AS anon_5 FROM adversarial_sub_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND CASE WHEN (EXISTS (SELECT %(param_3)s AS anon_3 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND adversarial_label.name = %(name_1)s)) THEN true WHEN (EXISTS (SELECT %(param_4)s AS anon_4 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND (adversarial_label.name = %(name_1)s) IS NULL)) THEN NULL ELSE false END IS NULL)) THEN NULL ELSE false END IS NULL)) THEN NULL ELSE false END"
+      },
+      "params": {
+        "param_1": 1,
+        "param_2": 1,
+        "param_3": 1,
+        "name_1": "gold",
+        "param_4": 1,
+        "param_5": 1,
+        "param_6": 1
+      }
+    },
+    "macro-depth3-not-exists": {
+      "where": {
+        "sqlite": "NOT CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id AND CASE WHEN (EXISTS (SELECT ? AS anon_2 FROM adversarial_sub_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND CASE WHEN (EXISTS (SELECT ? AS anon_3 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND adversarial_label.name = ?)) THEN 1 WHEN (EXISTS (SELECT ? AS anon_4 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND (adversarial_label.name = ?) IS NULL)) THEN NULL ELSE 0 END)) THEN 1 WHEN (EXISTS (SELECT ? AS anon_5 FROM adversarial_sub_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND CASE WHEN (EXISTS (SELECT ? AS anon_3 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND adversarial_label.name = ?)) THEN 1 WHEN (EXISTS (SELECT ? AS anon_4 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND (adversarial_label.name = ?) IS NULL)) THEN NULL ELSE 0 END IS NULL)) THEN NULL ELSE 0 END)) THEN 1 WHEN (EXISTS (SELECT ? AS anon_6 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id AND CASE WHEN (EXISTS (SELECT ? AS anon_2 FROM adversarial_sub_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND CASE WHEN (EXISTS (SELECT ? AS anon_3 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND adversarial_label.name = ?)) THEN 1 WHEN (EXISTS (SELECT ? AS anon_4 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND (adversarial_label.name = ?) IS NULL)) THEN NULL ELSE 0 END)) THEN 1 WHEN (EXISTS (SELECT ? AS anon_5 FROM adversarial_sub_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND CASE WHEN (EXISTS (SELECT ? AS anon_3 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND adversarial_label.name = ?)) THEN 1 WHEN (EXISTS (SELECT ? AS anon_4 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND (adversarial_label.name = ?) IS NULL)) THEN NULL ELSE 0 END IS NULL)) THEN NULL ELSE 0 END IS NULL)) THEN NULL ELSE 0 END",
+        "postgresql": "NOT CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id AND CASE WHEN (EXISTS (SELECT %(param_2)s AS anon_2 FROM adversarial_sub_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND CASE WHEN (EXISTS (SELECT %(param_3)s AS anon_3 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND adversarial_label.name = %(name_1)s)) THEN true WHEN (EXISTS (SELECT %(param_4)s AS anon_4 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND (adversarial_label.name = %(name_1)s) IS NULL)) THEN NULL ELSE false END)) THEN true WHEN (EXISTS (SELECT %(param_5)s AS anon_5 FROM adversarial_sub_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND CASE WHEN (EXISTS (SELECT %(param_3)s AS anon_3 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND adversarial_label.name = %(name_1)s)) THEN true WHEN (EXISTS (SELECT %(param_4)s AS anon_4 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND (adversarial_label.name = %(name_1)s) IS NULL)) THEN NULL ELSE false END IS NULL)) THEN NULL ELSE false END)) THEN true WHEN (EXISTS (SELECT %(param_6)s AS anon_6 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id AND CASE WHEN (EXISTS (SELECT %(param_2)s AS anon_2 FROM adversarial_sub_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND CASE WHEN (EXISTS (SELECT %(param_3)s AS anon_3 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND adversarial_label.name = %(name_1)s)) THEN true WHEN (EXISTS (SELECT %(param_4)s AS anon_4 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND (adversarial_label.name = %(name_1)s) IS NULL)) THEN NULL ELSE false END)) THEN true WHEN (EXISTS (SELECT %(param_5)s AS anon_5 FROM adversarial_sub_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND CASE WHEN (EXISTS (SELECT %(param_3)s AS anon_3 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND adversarial_label.name = %(name_1)s)) THEN true WHEN (EXISTS (SELECT %(param_4)s AS anon_4 FROM adversarial_label WHERE adversarial_label.sub_category_id = adversarial_sub_category.id AND (adversarial_label.name = %(name_1)s) IS NULL)) THEN NULL ELSE false END IS NULL)) THEN NULL ELSE false END IS NULL)) THEN NULL ELSE false END"
+      },
+      "params": {
+        "param_1": 1,
+        "param_2": 1,
+        "param_3": 1,
+        "name_1": "gold",
+        "param_4": 1,
+        "param_5": 1,
+        "param_6": 1
+      }
+    },
+    "n-all-mixed-null": {
+      "where": {
+        "sqlite": "CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name = ?)) THEN 0 WHEN (EXISTS (SELECT ? AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name != ?) IS NULL)) THEN NULL ELSE 1 END",
+        "postgresql": "CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name = %(name_1)s)) THEN false WHEN (EXISTS (SELECT %(param_2)s AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name != %(name_1)s) IS NULL)) THEN NULL ELSE true END"
+      },
+      "params": {
+        "param_1": 1,
+        "name_1": "x",
+        "param_2": 1
+      }
+    },
+    "n-not-all-absorb": {
+      "where": {
+        "sqlite": "NOT CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name = ?)) THEN 0 WHEN (EXISTS (SELECT ? AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name != ?) IS NULL)) THEN NULL ELSE 1 END",
+        "postgresql": "NOT CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name = %(name_1)s)) THEN false WHEN (EXISTS (SELECT %(param_2)s AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name != %(name_1)s) IS NULL)) THEN NULL ELSE true END"
+      },
+      "params": {
+        "param_1": 1,
+        "name_1": "public",
+        "param_2": 1
+      }
+    },
+    "n-not-all-null": {
+      "where": {
+        "sqlite": "NOT CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name != ?)) THEN 0 WHEN (EXISTS (SELECT ? AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name = ?) IS NULL)) THEN NULL ELSE 1 END",
+        "postgresql": "NOT CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name != %(name_1)s)) THEN false WHEN (EXISTS (SELECT %(param_2)s AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name = %(name_1)s) IS NULL)) THEN NULL ELSE true END"
+      },
+      "params": {
+        "param_1": 1,
+        "name_1": "public",
+        "param_2": 1
+      }
+    },
+    "n-not-exists-one-null": {
+      "where": {
+        "sqlite": "NOT CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name = ?) IS NULL)) THEN NULL ELSE (SELECT count(*) AS count_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name = ?) = ? END",
+        "postgresql": "NOT CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name = %(name_1)s) IS NULL)) THEN NULL ELSE (SELECT count(*) AS count_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name = %(name_1)s) = %(param_2)s END"
+      },
+      "params": {
+        "param_1": 1,
+        "name_1": "public",
+        "param_2": 1
+      }
+    },
+    "nan-ord-le": {
+      "where": {
+        "sqlite": "CASE WHEN adversarial_resource.a_bool THEN CASE WHEN adversarial_resource.a_bool THEN ? WHEN adversarial_resource.a_bool = 0 THEN ? END <= ? WHEN adversarial_resource.a_bool = 0 THEN CASE WHEN (CASE WHEN adversarial_resource.a_bool THEN ? WHEN adversarial_resource.a_bool = 0 THEN ? END IS NULL) THEN NULL ELSE ? END END",
+        "postgresql": "CASE WHEN adversarial_resource.a_bool THEN CASE WHEN adversarial_resource.a_bool THEN %(param_1)s WHEN NOT adversarial_resource.a_bool THEN %(param_2)s END <= %(param_3)s WHEN NOT adversarial_resource.a_bool THEN CASE WHEN (CASE WHEN adversarial_resource.a_bool THEN %(param_1)s WHEN NOT adversarial_resource.a_bool THEN %(param_2)s END IS NULL) THEN NULL ELSE %(param_4)s END END"
+      },
+      "params": {
+        "param_1": 1.0,
+        "param_2": 0.5,
+        "param_3": 0.5,
+        "param_4": false
+      }
+    },
+    "nan-ord-ternary": {
+      "where": {
+        "sqlite": "CASE WHEN adversarial_resource.a_bool THEN ? WHEN adversarial_resource.a_bool = 0 THEN ? END = 1",
+        "postgresql": "CASE WHEN adversarial_resource.a_bool THEN %(param_1)s WHEN NOT adversarial_resource.a_bool THEN %(param_2)s END"
+      },
+      "params": {
+        "param_1": true,
+        "param_2": false
+      }
+    },
+    "nan-ord-ternary-vf": {
+      "where": {
+        "sqlite": "CASE WHEN adversarial_resource.a_bool THEN ? WHEN adversarial_resource.a_bool = 0 THEN ? END = 1",
+        "postgresql": "CASE WHEN adversarial_resource.a_bool THEN %(param_1)s WHEN NOT adversarial_resource.a_bool THEN %(param_2)s END"
+      },
+      "params": {
+        "param_1": true,
+        "param_2": false
+      }
+    },
+    "nary-and": {
+      "where": {
+        "sqlite": "adversarial_resource.a_bool = 1 AND adversarial_resource.a_number >= ? AND adversarial_resource.a_string != ?",
+        "postgresql": "adversarial_resource.a_bool AND adversarial_resource.a_number >= %(a_number_1)s AND adversarial_resource.a_string != %(a_string_1)s"
+      },
+      "params": {
+        "a_number_1": 0,
+        "a_string_1": "one"
+      }
+    },
+    "neg-number": {
+      "where": {
+        "sqlite": "adversarial_resource.a_number < ?",
+        "postgresql": "adversarial_resource.a_number < %(a_number_1)s"
+      },
+      "params": {
+        "a_number_1": -1
+      }
+    },
+    "not-and": {
+      "where": {
+        "sqlite": "NOT (adversarial_resource.a_bool = 1 AND adversarial_resource.a_string != ?)",
+        "postgresql": "NOT (adversarial_resource.a_bool AND adversarial_resource.a_string != %(a_string_1)s)"
+      },
+      "params": {
+        "a_string_1": "one"
+      }
+    },
+    "not-contains": {
+      "where": {
+        "sqlite": "adversarial_resource.a_string NOT LIKE (? || replace(replace(replace(replace(adversarial_resource.a_optional_string, ?, ?), ?, ?), ?, ?), ?, ?) || ?) ESCAPE '\\'",
+        "postgresql": "adversarial_resource.a_string NOT LIKE (%(param_1)s || replace(replace(replace(replace(adversarial_resource.a_optional_string, %(replace_1)s, %(replace_2)s), %(replace_3)s, %(replace_4)s), %(replace_5)s, %(replace_6)s), %(replace_7)s, %(replace_8)s) || %(param_2)s) ESCAPE '\\\\'"
+      },
+      "params": {
+        "param_1": "%",
+        "replace_1": "\\",
+        "replace_2": "\\\\",
+        "replace_3": "%",
+        "replace_4": "\\%",
+        "replace_5": "_",
+        "replace_6": "\\_",
+        "replace_7": "[",
+        "replace_8": "\\[",
+        "param_2": "%"
+      }
+    },
+    "not-empty": {
+      "where": {
+        "sqlite": "(SELECT count(*) AS count_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id) != ?",
+        "postgresql": "(SELECT count(*) AS count_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id) != %(param_1)s"
+      },
+      "params": {
+        "param_1": 0
+      }
+    },
+    "not-exists": {
+      "where": {
+        "sqlite": "NOT CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name = ?)) THEN 1 WHEN (EXISTS (SELECT ? AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name = ?) IS NULL)) THEN NULL ELSE 0 END",
+        "postgresql": "NOT CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name = %(name_1)s)) THEN true WHEN (EXISTS (SELECT %(param_2)s AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name = %(name_1)s) IS NULL)) THEN NULL ELSE false END"
+      },
+      "params": {
+        "param_1": 1,
+        "name_1": "private",
+        "param_2": 1
+      }
+    },
+    "not-gt": {
+      "where": {
+        "sqlite": "adversarial_resource.a_number <= ?",
+        "postgresql": "adversarial_resource.a_number <= %(a_number_1)s"
+      },
+      "params": {
+        "a_number_1": 1
+      }
+    },
+    "not-lt": {
+      "where": {
+        "sqlite": "adversarial_resource.a_number >= ?",
+        "postgresql": "adversarial_resource.a_number >= %(a_number_1)s"
+      },
+      "params": {
+        "a_number_1": 2
+      }
+    },
+    "not-startswith": {
+      "where": {
+        "sqlite": "adversarial_resource.a_string NOT LIKE (replace(replace(replace(replace(adversarial_resource.a_optional_string, ?, ?), ?, ?), ?, ?), ?, ?) || ?) ESCAPE '\\'",
+        "postgresql": "adversarial_resource.a_string NOT LIKE (replace(replace(replace(replace(adversarial_resource.a_optional_string, %(replace_1)s, %(replace_2)s), %(replace_3)s, %(replace_4)s), %(replace_5)s, %(replace_6)s), %(replace_7)s, %(replace_8)s) || %(param_1)s) ESCAPE '\\\\'"
+      },
+      "params": {
+        "replace_1": "\\",
+        "replace_2": "\\\\",
+        "replace_3": "%",
+        "replace_4": "\\%",
+        "replace_5": "_",
+        "replace_6": "\\_",
+        "replace_7": "[",
+        "replace_8": "\\[",
+        "param_1": "%"
+      }
+    },
+    "null-eq": {
+      "where": {
+        "sqlite": "adversarial_resource.a_optional_string IS NULL",
+        "postgresql": "adversarial_resource.a_optional_string IS NULL"
+      },
+      "params": {}
+    },
+    "null-eq-missing": {
+      "where": {
+        "sqlite": "adversarial_resource.a_optional_string IS NULL",
+        "postgresql": "adversarial_resource.a_optional_string IS NULL"
+      },
+      "params": {}
+    },
+    "null-ne": {
+      "where": {
+        "sqlite": "adversarial_resource.a_optional_string IS NOT NULL",
+        "postgresql": "adversarial_resource.a_optional_string IS NOT NULL"
+      },
+      "params": {}
+    },
+    "null-not-eq": {
+      "where": {
+        "sqlite": "adversarial_resource.a_optional_string IS NOT NULL",
+        "postgresql": "adversarial_resource.a_optional_string IS NOT NULL"
+      },
+      "params": {}
+    },
+    "null-value-f2f": {
+      "where": {
+        "sqlite": "adversarial_resource.a_optional_string IS NULL AND adversarial_resource.scope IS NULL OR adversarial_resource.a_optional_string IS NOT NULL AND adversarial_resource.scope IS NOT NULL AND adversarial_resource.a_optional_string = adversarial_resource.scope",
+        "postgresql": "adversarial_resource.a_optional_string IS NULL AND adversarial_resource.scope IS NULL OR adversarial_resource.a_optional_string IS NOT NULL AND adversarial_resource.scope IS NOT NULL AND adversarial_resource.a_optional_string = adversarial_resource.scope"
+      },
+      "params": {}
+    },
+    "null-value-ne-const": {
+      "where": {
+        "sqlite": "NOT (adversarial_resource.a_optional_string IS NOT NULL AND adversarial_resource.a_optional_string = ?)",
+        "postgresql": "NOT (adversarial_resource.a_optional_string IS NOT NULL AND adversarial_resource.a_optional_string = %(a_optional_string_1)s)"
+      },
+      "params": {
+        "a_optional_string_1": "x"
+      }
+    },
+    "null-value-not-eq-const": {
+      "where": {
+        "sqlite": "NOT (adversarial_resource.a_optional_string IS NOT NULL AND adversarial_resource.a_optional_string = ?)",
+        "postgresql": "NOT (adversarial_resource.a_optional_string IS NOT NULL AND adversarial_resource.a_optional_string = %(a_optional_string_1)s)"
+      },
+      "params": {
+        "a_optional_string_1": "x"
+      }
+    },
+    "null-value-not-in-const": {
+      "where": {
+        "sqlite": "NOT (adversarial_resource.a_optional_string IS NOT NULL AND adversarial_resource.a_optional_string IN (?, ?))",
+        "postgresql": "NOT (adversarial_resource.a_optional_string IS NOT NULL AND adversarial_resource.a_optional_string IN (%(a_optional_string_1_1)s, %(a_optional_string_1_2)s))"
+      },
+      "params": {
+        "a_optional_string_1_1": "x",
+        "a_optional_string_1_2": "one_two"
+      }
+    },
+    "null-value-pv-not-exists": {
+      "where": {
+        "sqlite": "NOT (adversarial_resource.a_optional_string IS NOT NULL AND adversarial_resource.a_optional_string = ? OR adversarial_resource.a_optional_string IS NOT NULL AND adversarial_resource.a_optional_string = ? OR adversarial_resource.a_optional_string IS NOT NULL AND adversarial_resource.a_optional_string = ? OR adversarial_resource.a_optional_string IS NOT NULL AND adversarial_resource.a_optional_string = ? OR adversarial_resource.a_optional_string IS NOT NULL AND adversarial_resource.a_optional_string = ? OR adversarial_resource.a_optional_string IS NOT NULL AND adversarial_resource.a_optional_string = ? OR adversarial_resource.a_optional_string IS NOT NULL AND adversarial_resource.a_optional_string = ? OR adversarial_resource.a_optional_string IS NOT NULL AND adversarial_resource.a_optional_string = ? OR adversarial_resource.a_optional_string IS NOT NULL AND adversarial_resource.a_optional_string = ? OR adversarial_resource.a_optional_string IS NOT NULL AND adversarial_resource.a_optional_string = ? OR adversarial_resource.a_optional_string IS NOT NULL AND adversarial_resource.a_optional_string = ?)",
+        "postgresql": "NOT (adversarial_resource.a_optional_string IS NOT NULL AND adversarial_resource.a_optional_string = %(a_optional_string_1)s OR adversarial_resource.a_optional_string IS NOT NULL AND adversarial_resource.a_optional_string = %(a_optional_string_2)s OR adversarial_resource.a_optional_string IS NOT NULL AND adversarial_resource.a_optional_string = %(a_optional_string_3)s OR adversarial_resource.a_optional_string IS NOT NULL AND adversarial_resource.a_optional_string = %(a_optional_string_4)s OR adversarial_resource.a_optional_string IS NOT NULL AND adversarial_resource.a_optional_string = %(a_optional_string_5)s OR adversarial_resource.a_optional_string IS NOT NULL AND adversarial_resource.a_optional_string = %(a_optional_string_6)s OR adversarial_resource.a_optional_string IS NOT NULL AND adversarial_resource.a_optional_string = %(a_optional_string_7)s OR adversarial_resource.a_optional_string IS NOT NULL AND adversarial_resource.a_optional_string = %(a_optional_string_8)s OR adversarial_resource.a_optional_string IS NOT NULL AND adversarial_resource.a_optional_string = %(a_optional_string_9)s OR adversarial_resource.a_optional_string IS NOT NULL AND adversarial_resource.a_optional_string = %(a_optional_string_10)s OR adversarial_resource.a_optional_string IS NOT NULL AND adversarial_resource.a_optional_string = %(a_optional_string_11)s)"
+      },
+      "params": {
+        "a_optional_string_1": "set",
+        "a_optional_string_2": "same",
+        "a_optional_string_3": "",
+        "a_optional_string_4": "%_o",
+        "a_optional_string_5": "X",
+        "a_optional_string_6": "Y",
+        "a_optional_string_7": "MIRROR",
+        "a_optional_string_8": "filler-1",
+        "a_optional_string_9": "filler-2",
+        "a_optional_string_10": "filler-3",
+        "a_optional_string_11": "filler-4"
+      }
+    },
+    "optional-ne": {
+      "where": {
+        "sqlite": "adversarial_resource.a_optional_string != ?",
+        "postgresql": "adversarial_resource.a_optional_string != %(a_optional_string_1)s"
+      },
+      "params": {
+        "a_optional_string_1": "x"
+      }
+    },
+    "or-eq-exists": {
+      "where": {
+        "sqlite": "adversarial_resource.a_bool = 1 OR CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name = ?)) THEN 1 WHEN (EXISTS (SELECT ? AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name = ?) IS NULL)) THEN NULL ELSE 0 END",
+        "postgresql": "adversarial_resource.a_bool OR CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name = %(name_1)s)) THEN true WHEN (EXISTS (SELECT %(param_2)s AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name = %(name_1)s) IS NULL)) THEN NULL ELSE false END"
+      },
+      "params": {
+        "param_1": 1,
+        "name_1": "public",
+        "param_2": 1
+      }
+    },
+    "or-eq-in": {
+      "where": {
+        "sqlite": "adversarial_resource.a_bool = 1 OR (EXISTS (SELECT ? AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name = ?))",
+        "postgresql": "adversarial_resource.a_bool OR (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name = %(name_1)s))"
+      },
+      "params": {
+        "param_1": 1,
+        "name_1": "public"
+      }
+    },
+    "outer-attr-depth2": {
+      "where": {
+        "sqlite": "CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id AND CASE WHEN (EXISTS (SELECT ? AS anon_2 FROM adversarial_sub_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_sub_category.name = ? AND adversarial_resource.a_bool = 1)) THEN 1 WHEN (EXISTS (SELECT ? AS anon_3 FROM adversarial_sub_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND (adversarial_sub_category.name = ? AND adversarial_resource.a_bool = 1) IS NULL)) THEN NULL ELSE 0 END)) THEN 1 WHEN (EXISTS (SELECT ? AS anon_4 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id AND CASE WHEN (EXISTS (SELECT ? AS anon_2 FROM adversarial_sub_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_sub_category.name = ? AND adversarial_resource.a_bool = 1)) THEN 1 WHEN (EXISTS (SELECT ? AS anon_3 FROM adversarial_sub_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND (adversarial_sub_category.name = ? AND adversarial_resource.a_bool = 1) IS NULL)) THEN NULL ELSE 0 END IS NULL)) THEN NULL ELSE 0 END",
+        "postgresql": "CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id AND CASE WHEN (EXISTS (SELECT %(param_2)s AS anon_2 FROM adversarial_sub_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_sub_category.name = %(name_1)s AND adversarial_resource.a_bool)) THEN true WHEN (EXISTS (SELECT %(param_3)s AS anon_3 FROM adversarial_sub_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND (adversarial_sub_category.name = %(name_1)s AND adversarial_resource.a_bool) IS NULL)) THEN NULL ELSE false END)) THEN true WHEN (EXISTS (SELECT %(param_4)s AS anon_4 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id AND CASE WHEN (EXISTS (SELECT %(param_2)s AS anon_2 FROM adversarial_sub_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_sub_category.name = %(name_1)s AND adversarial_resource.a_bool)) THEN true WHEN (EXISTS (SELECT %(param_3)s AS anon_3 FROM adversarial_sub_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND (adversarial_sub_category.name = %(name_1)s AND adversarial_resource.a_bool) IS NULL)) THEN NULL ELSE false END IS NULL)) THEN NULL ELSE false END"
+      },
+      "params": {
+        "param_1": 1,
+        "param_2": 1,
+        "name_1": "finance",
+        "param_3": 1,
+        "param_4": 1
+      }
+    },
+    "p-arith-in-lambda": {
+      "where": {
+        "sqlite": "CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name = ? AND adversarial_resource.a_number + ? > ?)) THEN 1 WHEN (EXISTS (SELECT ? AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name = ? AND adversarial_resource.a_number + ? > ?) IS NULL)) THEN NULL ELSE 0 END",
+        "postgresql": "CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name = %(name_1)s AND adversarial_resource.a_number + %(a_number_1)s > %(param_2)s)) THEN true WHEN (EXISTS (SELECT %(param_3)s AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name = %(name_1)s AND adversarial_resource.a_number + %(a_number_1)s > %(param_2)s) IS NULL)) THEN NULL ELSE false END"
+      },
+      "params": {
+        "param_1": 1,
+        "name_1": "public",
+        "a_number_1": 1,
+        "param_2": 2,
+        "param_3": 1
+      }
+    },
+    "p-deep-nest": {
+      "where": {
+        "sqlite": "NOT (adversarial_resource.a_bool = 1 AND (adversarial_resource.a_number + ? > ? OR adversarial_resource.a_string LIKE ? ESCAPE '\\') OR adversarial_resource.a_bool = 0 AND CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name = ? OR adversarial_tag.name = adversarial_resource.a_string))) THEN 1 WHEN (EXISTS (SELECT ? AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name = ? OR adversarial_tag.name = adversarial_resource.a_string) IS NULL)) THEN NULL ELSE 0 END)",
+        "postgresql": "NOT (adversarial_resource.a_bool AND (adversarial_resource.a_number + %(a_number_1)s > %(param_1)s OR adversarial_resource.a_string LIKE %(a_string_1)s ESCAPE '\\\\') OR NOT adversarial_resource.a_bool AND CASE WHEN (EXISTS (SELECT %(param_2)s AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name = %(name_1)s OR adversarial_tag.name = adversarial_resource.a_string))) THEN true WHEN (EXISTS (SELECT %(param_3)s AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name = %(name_1)s OR adversarial_tag.name = adversarial_resource.a_string) IS NULL)) THEN NULL ELSE false END)"
+      },
+      "params": {
+        "a_number_1": 1,
+        "param_1": 2,
+        "a_string_1": "100\\%%",
+        "param_2": 1,
+        "name_1": "public",
+        "param_3": 1
+      }
+    },
+    "p-double-frac": {
+      "where": {
+        "sqlite": "adversarial_resource.a_number * ? = ?",
+        "postgresql": "adversarial_resource.a_number * %(a_number_1)s = %(param_1)s"
+      },
+      "params": {
+        "a_number_1": 0.1,
+        "param_1": 0.3
+      }
+    },
+    "p-has": {
+      "where": {
+        "sqlite": null,
+        "postgresql": null
+      },
+      "params": {}
+    },
+    "p-hasintersection-map": {
+      "where": {
+        "sqlite": "CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name IS NULL)) THEN NULL WHEN (EXISTS (SELECT ? AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name IN (?, ?, ?))) THEN 1 ELSE 0 END = 1",
+        "postgresql": "CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name IS NULL)) THEN NULL WHEN (EXISTS (SELECT %(param_2)s AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name IN (%(name_1_1)s, %(name_1_2)s, %(name_1_3)s))) THEN true ELSE false END"
+      },
+      "params": {
+        "param_1": 1,
+        "param_2": 1,
+        "name_1_1": "public",
+        "name_1_2": "h\u00e9llo\ud83d\ude80",
+        "name_1_3": "100%_x"
+      }
+    },
+    "p-in-null-multi": {
+      "where": {
+        "sqlite": "adversarial_resource.a_optional_string IN (?, ?)",
+        "postgresql": "adversarial_resource.a_optional_string IN (%(a_optional_string_1_1)s, %(a_optional_string_1_2)s)"
+      },
+      "params": {
+        "a_optional_string_1_1": "x",
+        "a_optional_string_1_2": "one_two"
+      }
+    },
+    "p-in-null-single": {
+      "where": {
+        "sqlite": "adversarial_resource.a_optional_string = ?",
+        "postgresql": "adversarial_resource.a_optional_string = %(a_optional_string_1)s"
+      },
+      "params": {
+        "a_optional_string_1": "x"
+      }
+    },
+    "p-lambda-f2f-like": {
+      "where": {
+        "sqlite": "CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name LIKE (? || replace(replace(replace(replace(adversarial_resource.a_string, ?, ?), ?, ?), ?, ?), ?, ?) || ?) ESCAPE '\\')) THEN 1 WHEN (EXISTS (SELECT ? AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name LIKE (? || replace(replace(replace(replace(adversarial_resource.a_string, ?, ?), ?, ?), ?, ?), ?, ?) || ?) ESCAPE '\\') IS NULL)) THEN NULL ELSE 0 END",
+        "postgresql": "CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name LIKE (%(param_2)s || replace(replace(replace(replace(adversarial_resource.a_string, %(replace_1)s, %(replace_2)s), %(replace_3)s, %(replace_4)s), %(replace_5)s, %(replace_6)s), %(replace_7)s, %(replace_8)s) || %(param_3)s) ESCAPE '\\\\')) THEN true WHEN (EXISTS (SELECT %(param_4)s AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name LIKE (%(param_2)s || replace(replace(replace(replace(adversarial_resource.a_string, %(replace_1)s, %(replace_2)s), %(replace_3)s, %(replace_4)s), %(replace_5)s, %(replace_6)s), %(replace_7)s, %(replace_8)s) || %(param_3)s) ESCAPE '\\\\') IS NULL)) THEN NULL ELSE false END"
+      },
+      "params": {
+        "param_1": 1,
+        "param_2": "%",
+        "replace_1": "\\",
+        "replace_2": "\\\\",
+        "replace_3": "%",
+        "replace_4": "\\%",
+        "replace_5": "_",
+        "replace_6": "\\_",
+        "replace_7": "[",
+        "replace_8": "\\[",
+        "param_3": "%",
+        "param_4": 1
+      }
+    },
+    "p-lambda-inner-f2f": {
+      "where": {
+        "sqlite": "CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.tag_id = adversarial_tag.name)) THEN 1 WHEN (EXISTS (SELECT ? AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.tag_id = adversarial_tag.name) IS NULL)) THEN NULL ELSE 0 END",
+        "postgresql": "CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.tag_id = adversarial_tag.name)) THEN true WHEN (EXISTS (SELECT %(param_2)s AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.tag_id = adversarial_tag.name) IS NULL)) THEN NULL ELSE false END"
+      },
+      "params": {
+        "param_1": 1,
+        "param_2": 1
+      }
+    },
+    "p-not-exists-empty": {
+      "where": {
+        "sqlite": "NOT CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name = ?)) THEN 1 WHEN (EXISTS (SELECT ? AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name = ?) IS NULL)) THEN NULL ELSE 0 END",
+        "postgresql": "NOT CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name = %(name_1)s)) THEN true WHEN (EXISTS (SELECT %(param_2)s AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name = %(name_1)s) IS NULL)) THEN NULL ELSE false END"
+      },
+      "params": {
+        "param_1": 1,
+        "name_1": "public",
+        "param_2": 1
+      }
+    },
+    "p-not-ternary-null": {
+      "where": {
+        "sqlite": "CASE WHEN (adversarial_resource.a_optional_string != ?) THEN adversarial_resource.a_number WHEN (adversarial_resource.a_optional_string = ?) THEN ? END <= ?",
+        "postgresql": "CASE WHEN (adversarial_resource.a_optional_string != %(a_optional_string_1)s) THEN adversarial_resource.a_number WHEN (adversarial_resource.a_optional_string = %(a_optional_string_1)s) THEN %(param_1)s END <= %(param_2)s"
+      },
+      "params": {
+        "a_optional_string_1": "x",
+        "param_1": 0,
+        "param_2": 1
+      }
+    },
+    "p-size-nested": {
+      "where": {
+        "sqlite": "CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id AND (SELECT count(*) AS count_1 FROM adversarial_sub_category WHERE adversarial_sub_category.category_id = adversarial_category.id) = ?)) THEN 1 WHEN (EXISTS (SELECT ? AS anon_2 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id AND ((SELECT count(*) AS count_1 FROM adversarial_sub_category WHERE adversarial_sub_category.category_id = adversarial_category.id) = ?) IS NULL)) THEN NULL ELSE 0 END",
+        "postgresql": "CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id AND (SELECT count(*) AS count_1 FROM adversarial_sub_category WHERE adversarial_sub_category.category_id = adversarial_category.id) = %(param_2)s)) THEN true WHEN (EXISTS (SELECT %(param_3)s AS anon_2 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id AND ((SELECT count(*) AS count_1 FROM adversarial_sub_category WHERE adversarial_sub_category.category_id = adversarial_category.id) = %(param_2)s) IS NULL)) THEN NULL ELSE false END"
+      },
+      "params": {
+        "param_1": 1,
+        "param_2": 1,
+        "param_3": 1
+      }
+    },
+    "p-startswith-concat": {
+      "where": {
+        "sqlite": "adversarial_resource.a_string LIKE ? ESCAPE '\\'",
+        "postgresql": "adversarial_resource.a_string LIKE %(a_string_1)s ESCAPE '\\\\'"
+      },
+      "params": {
+        "a_string_1": "100\\%%"
+      }
+    },
+    "p-struct": {
+      "where": {
+        "sqlite": "adversarial_resource.a_string = ?",
+        "postgresql": "adversarial_resource.a_string = %(a_string_1)s"
+      },
+      "params": {
+        "a_string_1": "one"
+      }
+    },
+    "p-ternary-in-exists": {
+      "where": {
+        "sqlite": "CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND CASE WHEN adversarial_resource.a_bool THEN adversarial_tag.name WHEN adversarial_resource.a_bool = 0 THEN ? END = ?)) THEN 1 WHEN (EXISTS (SELECT ? AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (CASE WHEN adversarial_resource.a_bool THEN adversarial_tag.name WHEN adversarial_resource.a_bool = 0 THEN ? END = ?) IS NULL)) THEN NULL ELSE 0 END",
+        "postgresql": "CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND CASE WHEN adversarial_resource.a_bool THEN adversarial_tag.name WHEN NOT adversarial_resource.a_bool THEN %(param_2)s END = %(param_3)s)) THEN true WHEN (EXISTS (SELECT %(param_4)s AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (CASE WHEN adversarial_resource.a_bool THEN adversarial_tag.name WHEN NOT adversarial_resource.a_bool THEN %(param_2)s END = %(param_3)s) IS NULL)) THEN NULL ELSE false END"
+      },
+      "params": {
+        "param_1": 1,
+        "param_2": "zz",
+        "param_3": "public",
+        "param_4": 1
+      }
+    },
+    "p-ternary-of-ternaries": {
+      "where": {
+        "sqlite": "CASE WHEN adversarial_resource.a_bool THEN CASE WHEN (adversarial_resource.a_string = ?) THEN ? WHEN (adversarial_resource.a_string != ?) THEN adversarial_resource.a_number END WHEN adversarial_resource.a_bool = 0 THEN CASE WHEN (adversarial_resource.a_number < ?) THEN ? WHEN (adversarial_resource.a_number >= ?) THEN ? END END > ?",
+        "postgresql": "CASE WHEN adversarial_resource.a_bool THEN CASE WHEN (adversarial_resource.a_string = %(a_string_1)s) THEN %(param_1)s WHEN (adversarial_resource.a_string != %(a_string_1)s) THEN adversarial_resource.a_number END WHEN NOT adversarial_resource.a_bool THEN CASE WHEN (adversarial_resource.a_number < %(a_number_1)s) THEN %(param_2)s WHEN (adversarial_resource.a_number >= %(a_number_1)s) THEN %(param_3)s END END > %(param_4)s"
+      },
+      "params": {
+        "a_string_1": "",
+        "param_1": 0,
+        "a_number_1": 0,
+        "param_2": -1,
+        "param_3": 5,
+        "param_4": 1
+      }
+    },
+    "p-ternary-under-all": {
+      "where": {
+        "sqlite": "CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND CASE WHEN adversarial_resource.a_bool THEN adversarial_tag.name WHEN adversarial_resource.a_bool = 0 THEN ? END = ?)) THEN 0 WHEN (EXISTS (SELECT ? AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (CASE WHEN adversarial_resource.a_bool THEN adversarial_tag.name WHEN adversarial_resource.a_bool = 0 THEN ? END != ?) IS NULL)) THEN NULL ELSE 1 END",
+        "postgresql": "CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND CASE WHEN adversarial_resource.a_bool THEN adversarial_tag.name WHEN NOT adversarial_resource.a_bool THEN %(param_2)s END = %(param_3)s)) THEN false WHEN (EXISTS (SELECT %(param_4)s AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (CASE WHEN adversarial_resource.a_bool THEN adversarial_tag.name WHEN NOT adversarial_resource.a_bool THEN %(param_2)s END != %(param_3)s) IS NULL)) THEN NULL ELSE true END"
+      },
+      "params": {
+        "param_1": 1,
+        "param_2": "zz",
+        "param_3": "private",
+        "param_4": 1
+      }
+    },
+    "p-ternary-vs-ternary": {
+      "where": {
+        "sqlite": "CASE WHEN adversarial_resource.a_bool THEN adversarial_resource.a_number WHEN adversarial_resource.a_bool = 0 THEN ? END > CASE WHEN (adversarial_resource.a_string = ?) THEN ? WHEN (adversarial_resource.a_string != ?) THEN ? END",
+        "postgresql": "CASE WHEN adversarial_resource.a_bool THEN adversarial_resource.a_number WHEN NOT adversarial_resource.a_bool THEN %(param_1)s END > CASE WHEN (adversarial_resource.a_string = %(a_string_1)s) THEN %(param_2)s WHEN (adversarial_resource.a_string != %(a_string_1)s) THEN %(param_3)s END"
+      },
+      "params": {
+        "param_1": 0,
+        "a_string_1": "",
+        "param_2": 1,
+        "param_3": 2
+      }
+    },
+    "pv-all": {
+      "where": {
+        "sqlite": "adversarial_resource.a_optional_string != ? AND adversarial_resource.a_optional_string != ? AND adversarial_resource.a_optional_string != ? AND adversarial_resource.a_optional_string != ? AND adversarial_resource.a_optional_string != ? AND adversarial_resource.a_optional_string != ? AND adversarial_resource.a_optional_string != ? AND adversarial_resource.a_optional_string != ? AND adversarial_resource.a_optional_string != ? AND adversarial_resource.a_optional_string != ? AND adversarial_resource.a_optional_string != ?",
+        "postgresql": "adversarial_resource.a_optional_string != %(a_optional_string_1)s AND adversarial_resource.a_optional_string != %(a_optional_string_2)s AND adversarial_resource.a_optional_string != %(a_optional_string_3)s AND adversarial_resource.a_optional_string != %(a_optional_string_4)s AND adversarial_resource.a_optional_string != %(a_optional_string_5)s AND adversarial_resource.a_optional_string != %(a_optional_string_6)s AND adversarial_resource.a_optional_string != %(a_optional_string_7)s AND adversarial_resource.a_optional_string != %(a_optional_string_8)s AND adversarial_resource.a_optional_string != %(a_optional_string_9)s AND adversarial_resource.a_optional_string != %(a_optional_string_10)s AND adversarial_resource.a_optional_string != %(a_optional_string_11)s"
+      },
+      "params": {
+        "a_optional_string_1": "set",
+        "a_optional_string_2": "same",
+        "a_optional_string_3": "",
+        "a_optional_string_4": "%_o",
+        "a_optional_string_5": "X",
+        "a_optional_string_6": "Y",
+        "a_optional_string_7": "MIRROR",
+        "a_optional_string_8": "filler-1",
+        "a_optional_string_9": "filler-2",
+        "a_optional_string_10": "filler-3",
+        "a_optional_string_11": "filler-4"
+      }
+    },
+    "pv-all-unrolled": {
+      "where": {
+        "sqlite": "adversarial_resource.a_optional_string != ? AND adversarial_resource.a_optional_string != ? AND adversarial_resource.a_optional_string != ?",
+        "postgresql": "adversarial_resource.a_optional_string != %(a_optional_string_1)s AND adversarial_resource.a_optional_string != %(a_optional_string_2)s AND adversarial_resource.a_optional_string != %(a_optional_string_3)s"
+      },
+      "params": {
+        "a_optional_string_1": "set",
+        "a_optional_string_2": "",
+        "a_optional_string_3": "%_o"
+      }
+    },
+    "pv-exists": {
+      "where": {
+        "sqlite": "adversarial_resource.a_optional_string = ? OR adversarial_resource.a_optional_string = ? OR adversarial_resource.a_optional_string = ? OR adversarial_resource.a_optional_string = ? OR adversarial_resource.a_optional_string = ? OR adversarial_resource.a_optional_string = ? OR adversarial_resource.a_optional_string = ? OR adversarial_resource.a_optional_string = ? OR adversarial_resource.a_optional_string = ? OR adversarial_resource.a_optional_string = ? OR adversarial_resource.a_optional_string = ?",
+        "postgresql": "adversarial_resource.a_optional_string = %(a_optional_string_1)s OR adversarial_resource.a_optional_string = %(a_optional_string_2)s OR adversarial_resource.a_optional_string = %(a_optional_string_3)s OR adversarial_resource.a_optional_string = %(a_optional_string_4)s OR adversarial_resource.a_optional_string = %(a_optional_string_5)s OR adversarial_resource.a_optional_string = %(a_optional_string_6)s OR adversarial_resource.a_optional_string = %(a_optional_string_7)s OR adversarial_resource.a_optional_string = %(a_optional_string_8)s OR adversarial_resource.a_optional_string = %(a_optional_string_9)s OR adversarial_resource.a_optional_string = %(a_optional_string_10)s OR adversarial_resource.a_optional_string = %(a_optional_string_11)s"
+      },
+      "params": {
+        "a_optional_string_1": "set",
+        "a_optional_string_2": "same",
+        "a_optional_string_3": "",
+        "a_optional_string_4": "%_o",
+        "a_optional_string_5": "X",
+        "a_optional_string_6": "Y",
+        "a_optional_string_7": "MIRROR",
+        "a_optional_string_8": "filler-1",
+        "a_optional_string_9": "filler-2",
+        "a_optional_string_10": "filler-3",
+        "a_optional_string_11": "filler-4"
+      }
+    },
+    "pv-exists-unrolled": {
+      "where": {
+        "sqlite": "adversarial_resource.a_optional_string = ? OR adversarial_resource.a_optional_string = ? OR adversarial_resource.a_optional_string = ?",
+        "postgresql": "adversarial_resource.a_optional_string = %(a_optional_string_1)s OR adversarial_resource.a_optional_string = %(a_optional_string_2)s OR adversarial_resource.a_optional_string = %(a_optional_string_3)s"
+      },
+      "params": {
+        "a_optional_string_1": "set",
+        "a_optional_string_2": "",
+        "a_optional_string_3": "%_o"
+      }
+    },
+    "rel-bool-hop": {
+      "where": {
+        "sqlite": "(SELECT adversarial_parent.a_bool FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id)",
+        "postgresql": "(SELECT adversarial_parent.a_bool FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id)"
+      },
+      "params": {}
+    },
+    "rel-bool-hop2": {
+      "where": {
+        "sqlite": "(SELECT adversarial_inner.a_bool FROM adversarial_inner WHERE adversarial_inner.parent_id = (SELECT adversarial_parent.id FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id)) = 1",
+        "postgresql": "(SELECT adversarial_inner.a_bool FROM adversarial_inner WHERE adversarial_inner.parent_id = (SELECT adversarial_parent.id FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id)) = true"
+      },
+      "params": {}
+    },
+    "rel-contains-hop": {
+      "where": {
+        "sqlite": "(SELECT adversarial_parent.a_string FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id) LIKE ? ESCAPE '\\'",
+        "postgresql": "(SELECT adversarial_parent.a_string FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id) LIKE %(param_1)s ESCAPE '\\\\'"
+      },
+      "params": {
+        "param_1": "%done%"
+      }
+    },
+    "rel-eq-hop": {
+      "where": {
+        "sqlite": "(SELECT adversarial_parent.a_string FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id) = ?",
+        "postgresql": "(SELECT adversarial_parent.a_string FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id) = %(param_1)s"
+      },
+      "params": {
+        "param_1": "One"
+      }
+    },
+    "rel-eq-num-hop": {
+      "where": {
+        "sqlite": "(SELECT adversarial_parent.a_number FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id) = ?",
+        "postgresql": "(SELECT adversarial_parent.a_number FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id) = %(param_1)s"
+      },
+      "params": {
+        "param_1": 2
+      }
+    },
+    "rel-ge-hop": {
+      "where": {
+        "sqlite": "(SELECT adversarial_parent.a_number FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id) >= ?",
+        "postgresql": "(SELECT adversarial_parent.a_number FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id) >= %(param_1)s"
+      },
+      "params": {
+        "param_1": 2
+      }
+    },
+    "rel-gt-hop": {
+      "where": {
+        "sqlite": "(SELECT adversarial_parent.a_number FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id) > ?",
+        "postgresql": "(SELECT adversarial_parent.a_number FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id) > %(param_1)s"
+      },
+      "params": {
+        "param_1": 2
+      }
+    },
+    "rel-hop-and-root": {
+      "where": {
+        "sqlite": "adversarial_resource.a_bool = 1 AND (SELECT adversarial_parent.a_string FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id) LIKE ? ESCAPE '\\'",
+        "postgresql": "adversarial_resource.a_bool = true AND (SELECT adversarial_parent.a_string FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id) LIKE %(param_1)s ESCAPE '\\\\'"
+      },
+      "params": {
+        "param_1": "%re%"
+      }
+    },
+    "rel-hop2-or-exists": {
+      "where": {
+        "sqlite": "(SELECT adversarial_inner.a_bool FROM adversarial_inner WHERE adversarial_inner.parent_id = (SELECT adversarial_parent.id FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id)) = 1 OR CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id AND adversarial_category.name = ?)) THEN 1 WHEN (EXISTS (SELECT ? AS anon_2 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id AND (adversarial_category.name = ?) IS NULL)) THEN NULL ELSE 0 END",
+        "postgresql": "(SELECT adversarial_inner.a_bool FROM adversarial_inner WHERE adversarial_inner.parent_id = (SELECT adversarial_parent.id FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id)) = true OR CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id AND adversarial_category.name = %(name_1)s)) THEN true WHEN (EXISTS (SELECT %(param_2)s AS anon_2 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id AND (adversarial_category.name = %(name_1)s) IS NULL)) THEN NULL ELSE false END"
+      },
+      "params": {
+        "param_1": 1,
+        "name_1": "business",
+        "param_2": 1
+      }
+    },
+    "rel-le-hop": {
+      "where": {
+        "sqlite": "(SELECT adversarial_parent.a_number FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id) <= ?",
+        "postgresql": "(SELECT adversarial_parent.a_number FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id) <= %(param_1)s"
+      },
+      "params": {
+        "param_1": 2
+      }
+    },
+    "rel-lt-hop": {
+      "where": {
+        "sqlite": "(SELECT adversarial_parent.a_number FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id) < ?",
+        "postgresql": "(SELECT adversarial_parent.a_number FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id) < %(param_1)s"
+      },
+      "params": {
+        "param_1": 2
+      }
+    },
+    "rel-ne-null-hop": {
+      "where": {
+        "sqlite": "(SELECT adversarial_parent.a_optional_string FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id) IS NOT NULL",
+        "postgresql": "(SELECT adversarial_parent.a_optional_string FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id) IS NOT NULL"
+      },
+      "params": {}
+    },
+    "rel-not-bool-hop": {
+      "where": {
+        "sqlite": "(SELECT adversarial_parent.a_bool FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id) = 0",
+        "postgresql": "NOT (SELECT adversarial_parent.a_bool FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id)"
+      },
+      "params": {}
+    },
+    "rel-range-hop": {
+      "where": {
+        "sqlite": "(SELECT adversarial_parent.a_number FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id) > ? AND (SELECT adversarial_parent.a_number FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id) < ?",
+        "postgresql": "(SELECT adversarial_parent.a_number FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id) > %(param_1)s AND (SELECT adversarial_parent.a_number FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id) < %(param_2)s"
+      },
+      "params": {
+        "param_1": 2,
+        "param_2": 12
+      }
+    },
+    "rel-startswith-hop2": {
+      "where": {
+        "sqlite": "(SELECT adversarial_inner.a_string FROM adversarial_inner WHERE adversarial_inner.parent_id = (SELECT adversarial_parent.id FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id)) LIKE ? ESCAPE '\\'",
+        "postgresql": "(SELECT adversarial_inner.a_string FROM adversarial_inner WHERE adversarial_inner.parent_id = (SELECT adversarial_parent.id FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id)) LIKE %(param_1)s ESCAPE '\\\\'"
+      },
+      "params": {
+        "param_1": "100%"
+      }
+    },
+    "root-bare-bool": {
+      "where": {
+        "sqlite": "adversarial_resource.a_bool = 1",
+        "postgresql": "adversarial_resource.a_bool"
+      },
+      "params": {}
+    },
+    "root-or": {
+      "where": {
+        "sqlite": "adversarial_resource.a_bool = 1 OR adversarial_resource.a_number < ?",
+        "postgresql": "adversarial_resource.a_bool OR adversarial_resource.a_number < %(a_number_1)s"
+      },
+      "params": {
+        "a_number_1": 0
+      }
+    },
+    "size-filter-count": {
+      "where": {
+        "sqlite": "CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name = ?) IS NULL)) THEN NULL ELSE (SELECT count(*) AS count_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name = ?) END = ?",
+        "postgresql": "CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name = %(name_1)s) IS NULL)) THEN NULL ELSE (SELECT count(*) AS count_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name = %(name_1)s) END = %(param_2)s"
+      },
+      "params": {
+        "param_1": 1,
+        "name_1": "public",
+        "param_2": 1
+      }
+    },
+    "size-huge-gt": {
+      "where": {
+        "sqlite": "length(adversarial_resource.a_string) > ?",
+        "postgresql": "length(adversarial_resource.a_string) > %(length_1)s"
+      },
+      "params": {
+        "length_1": 4294967296
+      }
+    },
+    "size-huge-lt": {
+      "where": {
+        "sqlite": "length(adversarial_resource.a_string) < ?",
+        "postgresql": "length(adversarial_resource.a_string) < %(length_1)s"
+      },
+      "params": {
+        "length_1": 4294967296
+      }
+    },
+    "size-threshold": {
+      "where": {
+        "sqlite": "(SELECT count(*) AS count_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id) > ?",
+        "postgresql": "(SELECT count(*) AS count_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id) > %(param_1)s"
+      },
+      "params": {
+        "param_1": 1
+      }
+    },
+    "string-size": {
+      "where": {
+        "sqlite": "length(adversarial_resource.a_string) > ?",
+        "postgresql": "length(adversarial_resource.a_string) > %(length_1)s"
+      },
+      "params": {
+        "length_1": 4
+      }
+    },
+    "ternary-bare": {
+      "where": {
+        "sqlite": "CASE WHEN adversarial_resource.a_bool THEN adversarial_resource.a_string = ? WHEN adversarial_resource.a_bool = 0 THEN adversarial_resource.a_number < ? END = 1",
+        "postgresql": "CASE WHEN adversarial_resource.a_bool THEN adversarial_resource.a_string = %(a_string_1)s WHEN NOT adversarial_resource.a_bool THEN adversarial_resource.a_number < %(a_number_1)s END"
+      },
+      "params": {
+        "a_string_1": "one",
+        "a_number_1": 0
+      }
+    },
+    "ternary-cmp": {
+      "where": {
+        "sqlite": "CASE WHEN adversarial_resource.a_bool THEN adversarial_resource.a_number WHEN adversarial_resource.a_bool = 0 THEN ? END > ?",
+        "postgresql": "CASE WHEN adversarial_resource.a_bool THEN adversarial_resource.a_number WHEN NOT adversarial_resource.a_bool THEN %(param_1)s END > %(param_2)s"
+      },
+      "params": {
+        "param_1": 0,
+        "param_2": 1
+      }
+    },
+    "ternary-expr-cond": {
+      "where": {
+        "sqlite": "CASE WHEN (adversarial_resource.a_string LIKE ? ESCAPE '\\') THEN adversarial_resource.a_number WHEN (adversarial_resource.a_string NOT LIKE ? ESCAPE '\\') THEN ? END >= ?",
+        "postgresql": "CASE WHEN (adversarial_resource.a_string LIKE %(a_string_1)s ESCAPE '\\\\') THEN adversarial_resource.a_number WHEN (adversarial_resource.a_string NOT LIKE %(a_string_1)s ESCAPE '\\\\') THEN %(param_1)s END >= %(param_2)s"
+      },
+      "params": {
+        "a_string_1": "100%",
+        "param_1": -1,
+        "param_2": 0
+      }
+    },
+    "ternary-negated": {
+      "where": {
+        "sqlite": "CASE WHEN adversarial_resource.a_bool THEN adversarial_resource.a_number WHEN adversarial_resource.a_bool = 0 THEN ? END <= ?",
+        "postgresql": "CASE WHEN adversarial_resource.a_bool THEN adversarial_resource.a_number WHEN NOT adversarial_resource.a_bool THEN %(param_1)s END <= %(param_2)s"
+      },
+      "params": {
+        "param_1": 0,
+        "param_2": 1
+      }
+    },
+    "ternary-nested": {
+      "where": {
+        "sqlite": "CASE WHEN adversarial_resource.a_bool THEN CASE WHEN (adversarial_resource.a_string = ?) THEN ? WHEN (adversarial_resource.a_string != ?) THEN adversarial_resource.a_number END WHEN adversarial_resource.a_bool = 0 THEN ? END >= ?",
+        "postgresql": "CASE WHEN adversarial_resource.a_bool THEN CASE WHEN (adversarial_resource.a_string = %(a_string_1)s) THEN %(param_1)s WHEN (adversarial_resource.a_string != %(a_string_1)s) THEN adversarial_resource.a_number END WHEN NOT adversarial_resource.a_bool THEN %(param_2)s END >= %(param_3)s"
+      },
+      "params": {
+        "a_string_1": "",
+        "param_1": 0,
+        "param_2": -1,
+        "param_3": 2
+      }
+    },
+    "ternary-null-cond": {
+      "where": {
+        "sqlite": "CASE WHEN (adversarial_resource.a_optional_string != ?) THEN adversarial_resource.a_number WHEN (adversarial_resource.a_optional_string = ?) THEN ? END > ?",
+        "postgresql": "CASE WHEN (adversarial_resource.a_optional_string != %(a_optional_string_1)s) THEN adversarial_resource.a_number WHEN (adversarial_resource.a_optional_string = %(a_optional_string_1)s) THEN %(param_1)s END > %(param_2)s"
+      },
+      "params": {
+        "a_optional_string_1": "x",
+        "param_1": 0,
+        "param_2": 1
+      }
+    },
+    "ternary-value-first": {
+      "where": {
+        "sqlite": "CASE WHEN adversarial_resource.a_bool THEN adversarial_resource.a_number WHEN adversarial_resource.a_bool = 0 THEN ? END > ?",
+        "postgresql": "CASE WHEN adversarial_resource.a_bool THEN adversarial_resource.a_number WHEN NOT adversarial_resource.a_bool THEN %(param_1)s END > %(param_2)s"
+      },
+      "params": {
+        "param_1": -1,
+        "param_2": 0
+      }
+    },
+    "triple-negation": {
+      "where": {
+        "sqlite": "adversarial_resource.a_bool = 0",
+        "postgresql": "NOT adversarial_resource.a_bool"
+      },
+      "params": {}
+    },
+    "ts-eq": {
+      "where": {
+        "sqlite": "adversarial_resource.created_at = ?",
+        "postgresql": "adversarial_resource.created_at = %(created_at_1)s"
+      },
+      "params": {
+        "created_at_1": "2024-06-01T00:00:00+00:00"
+      }
+    },
+    "ts-eq-offset": {
+      "where": {
+        "sqlite": "adversarial_resource.created_at = ?",
+        "postgresql": "adversarial_resource.created_at = %(created_at_1)s"
+      },
+      "params": {
+        "created_at_1": "2024-06-01T00:00:00+00:00"
+      }
+    },
+    "ts-ne": {
+      "where": {
+        "sqlite": "adversarial_resource.created_at != ?",
+        "postgresql": "adversarial_resource.created_at != %(created_at_1)s"
+      },
+      "params": {
+        "created_at_1": "2024-06-01T00:00:00+00:00"
+      }
+    },
+    "unicode-eq": {
+      "where": {
+        "sqlite": "adversarial_resource.a_string = ?",
+        "postgresql": "adversarial_resource.a_string = %(a_string_1)s"
+      },
+      "params": {
+        "a_string_1": "h\u00e9llo\ud83d\ude80"
+      }
+    },
+    "vf-ge": {
+      "where": {
+        "sqlite": "adversarial_resource.a_number <= ?",
+        "postgresql": "adversarial_resource.a_number <= %(a_number_1)s"
+      },
+      "params": {
+        "a_number_1": 2
+      }
+    },
+    "vf-hasint": {
+      "where": {
+        "sqlite": "EXISTS (SELECT ? AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name IN (?, ?))",
+        "postgresql": "EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name IN (%(name_1_1)s, %(name_1_2)s))"
+      },
+      "params": {
+        "param_1": 1,
+        "name_1_1": "public",
+        "name_1_2": "other"
+      }
+    },
+    "vf-le": {
+      "where": {
+        "sqlite": "adversarial_resource.a_number >= ?",
+        "postgresql": "adversarial_resource.a_number >= %(a_number_1)s"
+      },
+      "params": {
+        "a_number_1": 3
+      }
+    },
+    "vf-lt": {
+      "where": {
+        "sqlite": "adversarial_resource.a_number > ?",
+        "postgresql": "adversarial_resource.a_number > %(a_number_1)s"
+      },
+      "params": {
+        "a_number_1": 1
+      }
+    },
+    "vf-ne": {
+      "where": {
+        "sqlite": "adversarial_resource.a_string != ?",
+        "postgresql": "adversarial_resource.a_string != %(a_string_1)s"
+      },
+      "params": {
+        "a_string_1": "one"
+      }
+    },
+    "vf-null-ne": {
+      "where": {
+        "sqlite": "adversarial_resource.a_optional_string IS NOT NULL",
+        "postgresql": "adversarial_resource.a_optional_string IS NOT NULL"
+      },
+      "params": {}
+    },
+    "vf-size": {
+      "where": {
+        "sqlite": "(SELECT count(*) AS count_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id) > ?",
+        "postgresql": "(SELECT count(*) AS count_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id) > %(param_1)s"
+      },
+      "params": {
+        "param_1": 0
+      }
+    },
+    "w1-all-chain": {
+      "where": {
+        "sqlite": "CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id)) THEN CASE WHEN (EXISTS (SELECT ? AS anon_2 FROM adversarial_sub_category, adversarial_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_category.resource_id = adversarial_resource.id AND adversarial_sub_category.name != ?)) THEN 0 WHEN (EXISTS (SELECT ? AS anon_3 FROM adversarial_sub_category, adversarial_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_category.resource_id = adversarial_resource.id AND (adversarial_sub_category.name = ?) IS NULL)) THEN NULL ELSE 1 END END",
+        "postgresql": "CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id)) THEN CASE WHEN (EXISTS (SELECT %(param_2)s AS anon_2 FROM adversarial_sub_category, adversarial_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_category.resource_id = adversarial_resource.id AND adversarial_sub_category.name != %(name_1)s)) THEN false WHEN (EXISTS (SELECT %(param_3)s AS anon_3 FROM adversarial_sub_category, adversarial_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_category.resource_id = adversarial_resource.id AND (adversarial_sub_category.name = %(name_1)s) IS NULL)) THEN NULL ELSE true END END"
+      },
+      "params": {
+        "param_1": 1,
+        "param_2": 1,
+        "name_1": "finance",
+        "param_3": 1
+      }
+    },
+    "w1-exists-chain": {
+      "where": {
+        "sqlite": "CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id)) THEN CASE WHEN (EXISTS (SELECT ? AS anon_2 FROM adversarial_sub_category, adversarial_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_category.resource_id = adversarial_resource.id AND adversarial_sub_category.name = ?)) THEN 1 WHEN (EXISTS (SELECT ? AS anon_3 FROM adversarial_sub_category, adversarial_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_category.resource_id = adversarial_resource.id AND (adversarial_sub_category.name = ?) IS NULL)) THEN NULL ELSE 0 END END",
+        "postgresql": "CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id)) THEN CASE WHEN (EXISTS (SELECT %(param_2)s AS anon_2 FROM adversarial_sub_category, adversarial_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_category.resource_id = adversarial_resource.id AND adversarial_sub_category.name = %(name_1)s)) THEN true WHEN (EXISTS (SELECT %(param_3)s AS anon_3 FROM adversarial_sub_category, adversarial_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_category.resource_id = adversarial_resource.id AND (adversarial_sub_category.name = %(name_1)s) IS NULL)) THEN NULL ELSE false END END"
+      },
+      "params": {
+        "param_1": 1,
+        "param_2": 1,
+        "name_1": "finance",
+        "param_3": 1
+      }
+    },
+    "w1-in-chain": {
+      "where": {
+        "sqlite": "CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id)) THEN EXISTS (SELECT ? AS anon_2 FROM adversarial_sub_category, adversarial_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_category.resource_id = adversarial_resource.id AND adversarial_sub_category.name = ?) END = 1",
+        "postgresql": "CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id)) THEN EXISTS (SELECT %(param_2)s AS anon_2 FROM adversarial_sub_category, adversarial_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_category.resource_id = adversarial_resource.id AND adversarial_sub_category.name = %(name_1)s) END"
+      },
+      "params": {
+        "param_1": 1,
+        "param_2": 1,
+        "name_1": "finance"
+      }
+    },
+    "w1-not-exists-chain": {
+      "where": {
+        "sqlite": "NOT CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id)) THEN CASE WHEN (EXISTS (SELECT ? AS anon_2 FROM adversarial_sub_category, adversarial_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_category.resource_id = adversarial_resource.id AND adversarial_sub_category.name = ?)) THEN 1 WHEN (EXISTS (SELECT ? AS anon_3 FROM adversarial_sub_category, adversarial_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_category.resource_id = adversarial_resource.id AND (adversarial_sub_category.name = ?) IS NULL)) THEN NULL ELSE 0 END END",
+        "postgresql": "NOT CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id)) THEN CASE WHEN (EXISTS (SELECT %(param_2)s AS anon_2 FROM adversarial_sub_category, adversarial_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_category.resource_id = adversarial_resource.id AND adversarial_sub_category.name = %(name_1)s)) THEN true WHEN (EXISTS (SELECT %(param_3)s AS anon_3 FROM adversarial_sub_category, adversarial_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_category.resource_id = adversarial_resource.id AND (adversarial_sub_category.name = %(name_1)s) IS NULL)) THEN NULL ELSE false END END"
+      },
+      "params": {
+        "param_1": 1,
+        "param_2": 1,
+        "name_1": "finance",
+        "param_3": 1
+      }
+    },
+    "w1-not-hasint-chain": {
+      "where": {
+        "sqlite": "CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id)) THEN EXISTS (SELECT ? AS anon_2 FROM adversarial_sub_category, adversarial_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_category.resource_id = adversarial_resource.id AND adversarial_sub_category.name IN (?)) END = 0",
+        "postgresql": "NOT CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id)) THEN EXISTS (SELECT %(param_2)s AS anon_2 FROM adversarial_sub_category, adversarial_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_category.resource_id = adversarial_resource.id AND adversarial_sub_category.name IN (%(name_1_1)s)) END"
+      },
+      "params": {
+        "param_1": 1,
+        "param_2": 1,
+        "name_1_1": "finance"
+      }
+    },
+    "w1-not-in-chain": {
+      "where": {
+        "sqlite": "CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id)) THEN EXISTS (SELECT ? AS anon_2 FROM adversarial_sub_category, adversarial_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_category.resource_id = adversarial_resource.id AND adversarial_sub_category.name = ?) END = 0",
+        "postgresql": "NOT CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id)) THEN EXISTS (SELECT %(param_2)s AS anon_2 FROM adversarial_sub_category, adversarial_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_category.resource_id = adversarial_resource.id AND adversarial_sub_category.name = %(name_1)s) END"
+      },
+      "params": {
+        "param_1": 1,
+        "param_2": 1,
+        "name_1": "finance"
+      }
+    },
+    "w1-not-size-chain": {
+      "where": {
+        "sqlite": "CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id)) THEN (SELECT count(*) AS count_1 FROM adversarial_sub_category, adversarial_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_category.resource_id = adversarial_resource.id) END <= ?",
+        "postgresql": "CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id)) THEN (SELECT count(*) AS count_1 FROM adversarial_sub_category, adversarial_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_category.resource_id = adversarial_resource.id) END <= %(param_2)s"
+      },
+      "params": {
+        "param_1": 1,
+        "param_2": 0
+      }
+    },
+    "w1-size-chain": {
+      "where": {
+        "sqlite": "CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id)) THEN (SELECT count(*) AS count_1 FROM adversarial_sub_category, adversarial_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_category.resource_id = adversarial_resource.id) END > ?",
+        "postgresql": "CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id)) THEN (SELECT count(*) AS count_1 FROM adversarial_sub_category, adversarial_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_category.resource_id = adversarial_resource.id) END > %(param_2)s"
+      },
+      "params": {
+        "param_1": 1,
+        "param_2": 0
+      }
+    },
+    "w1-size-frac-chain": {
+      "where": {
+        "sqlite": "CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id)) THEN (SELECT count(*) AS count_1 FROM adversarial_sub_category, adversarial_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_category.resource_id = adversarial_resource.id) END >= ?",
+        "postgresql": "CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id)) THEN (SELECT count(*) AS count_1 FROM adversarial_sub_category, adversarial_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_category.resource_id = adversarial_resource.id) END >= %(param_2)s"
+      },
+      "params": {
+        "param_1": 1,
+        "param_2": 1.5
+      }
+    },
+    "w1-size-frac-le-chain": {
+      "where": {
+        "sqlite": "CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id)) THEN (SELECT count(*) AS count_1 FROM adversarial_sub_category, adversarial_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_category.resource_id = adversarial_resource.id) END <= ?",
+        "postgresql": "CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id)) THEN (SELECT count(*) AS count_1 FROM adversarial_sub_category, adversarial_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_category.resource_id = adversarial_resource.id) END <= %(param_2)s"
+      },
+      "params": {
+        "param_1": 1,
+        "param_2": 1.5
+      }
+    },
+    "w1-size-nonneg-chain": {
+      "where": {
+        "sqlite": "CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id)) THEN (SELECT count(*) AS count_1 FROM adversarial_sub_category, adversarial_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_category.resource_id = adversarial_resource.id) END >= ?",
+        "postgresql": "CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id)) THEN (SELECT count(*) AS count_1 FROM adversarial_sub_category, adversarial_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_category.resource_id = adversarial_resource.id) END >= %(param_2)s"
+      },
+      "params": {
+        "param_1": 1,
+        "param_2": 0
+      }
+    },
+    "w1-size-zero-chain": {
+      "where": {
+        "sqlite": "CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id)) THEN (SELECT count(*) AS count_1 FROM adversarial_sub_category, adversarial_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_category.resource_id = adversarial_resource.id) END = ?",
+        "postgresql": "CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id)) THEN (SELECT count(*) AS count_1 FROM adversarial_sub_category, adversarial_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_category.resource_id = adversarial_resource.id) END = %(param_2)s"
+      },
+      "params": {
+        "param_1": 1,
+        "param_2": 0
+      }
+    },
+    "w1-ternary-chain-cond": {
+      "where": {
+        "sqlite": "CASE WHEN CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id)) THEN EXISTS (SELECT ? AS anon_2 FROM adversarial_sub_category, adversarial_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_category.resource_id = adversarial_resource.id AND adversarial_sub_category.name = ?) END THEN adversarial_resource.a_bool WHEN CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id)) THEN EXISTS (SELECT ? AS anon_2 FROM adversarial_sub_category, adversarial_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_category.resource_id = adversarial_resource.id AND adversarial_sub_category.name = ?) END = 0 THEN adversarial_resource.a_bool = 0 END = 1",
+        "postgresql": "CASE WHEN CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id)) THEN EXISTS (SELECT %(param_2)s AS anon_2 FROM adversarial_sub_category, adversarial_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_category.resource_id = adversarial_resource.id AND adversarial_sub_category.name = %(name_1)s) END THEN adversarial_resource.a_bool WHEN NOT CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id)) THEN EXISTS (SELECT %(param_2)s AS anon_2 FROM adversarial_sub_category, adversarial_category WHERE adversarial_sub_category.category_id = adversarial_category.id AND adversarial_category.resource_id = adversarial_resource.id AND adversarial_sub_category.name = %(name_1)s) END THEN NOT adversarial_resource.a_bool END"
+      },
+      "params": {
+        "param_1": 1,
+        "param_2": 1,
+        "name_1": "finance"
+      }
+    },
+    "w2-outer-relation": {
+      "where": {
+        "sqlite": "CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id AND (SELECT count(*) AS count_1 FROM adversarial_sub_category WHERE adversarial_sub_category.category_id = adversarial_category.id) = ? AND CASE WHEN (EXISTS (SELECT ? AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name = ?)) THEN 1 WHEN (EXISTS (SELECT ? AS anon_3 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name = ?) IS NULL)) THEN NULL ELSE 0 END)) THEN 1 WHEN (EXISTS (SELECT ? AS anon_4 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id AND ((SELECT count(*) AS count_1 FROM adversarial_sub_category WHERE adversarial_sub_category.category_id = adversarial_category.id) = ? AND CASE WHEN (EXISTS (SELECT ? AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name = ?)) THEN 1 WHEN (EXISTS (SELECT ? AS anon_3 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name = ?) IS NULL)) THEN NULL ELSE 0 END) IS NULL)) THEN NULL ELSE 0 END",
+        "postgresql": "CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id AND (SELECT count(*) AS count_1 FROM adversarial_sub_category WHERE adversarial_sub_category.category_id = adversarial_category.id) = %(param_2)s AND CASE WHEN (EXISTS (SELECT %(param_3)s AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name = %(name_1)s)) THEN true WHEN (EXISTS (SELECT %(param_4)s AS anon_3 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name = %(name_1)s) IS NULL)) THEN NULL ELSE false END)) THEN true WHEN (EXISTS (SELECT %(param_5)s AS anon_4 FROM adversarial_category WHERE adversarial_category.resource_id = adversarial_resource.id AND ((SELECT count(*) AS count_1 FROM adversarial_sub_category WHERE adversarial_sub_category.category_id = adversarial_category.id) = %(param_2)s AND CASE WHEN (EXISTS (SELECT %(param_3)s AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name = %(name_1)s)) THEN true WHEN (EXISTS (SELECT %(param_4)s AS anon_3 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name = %(name_1)s) IS NULL)) THEN NULL ELSE false END) IS NULL)) THEN NULL ELSE false END"
+      },
+      "params": {
+        "param_1": 1,
+        "param_2": 1,
+        "param_3": 1,
+        "name_1": "public",
+        "param_4": 1,
+        "param_5": 1
+      }
+    }
+  }
+}

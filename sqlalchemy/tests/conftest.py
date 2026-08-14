@@ -1,18 +1,19 @@
-import os
+"""Fixtures for the offline suites: a throwaway in-memory schema, in both model styles.
+
+No PDP is started anywhere in this file. It used to start one per module, over two
+transports, with the repository's shared ``/policies/`` mounted into it, for a
+shared-policy suite that has been retired — see ``test_query.py`` for what replaced it.
+The suites these fixtures serve now build their plans by hand; the ones that read a real
+planner's output read it from ``conformance/wire-fixtures/``
+(``test_translator.py``), and the one suite that still needs a live PDP starts its own,
+pinned and loaded with ``conformance/policies/``
+(``test_adversarial_conformance.py``).
+"""
+
 import re
-from contextlib import contextmanager
 from importlib.metadata import version
-from typing import Any, Callable, Dict, Generator
 
 import pytest
-from cerbos.engine.v1 import engine_pb2
-from cerbos.sdk.client import CerbosClient
-from cerbos.sdk.container import CerbosContainer
-from cerbos.sdk.grpc.client import CerbosClient as GrpcCerbosClient
-from cerbos.sdk.model import Principal, ResourceDesc
-from cerbos_image import CERBOS_IMAGE
-from google.protobuf.json_format import ParseDict
-from google.protobuf.struct_pb2 import Value
 
 from sqlalchemy import (
     Boolean,
@@ -25,8 +26,6 @@ from sqlalchemy import (
     insert,
 )
 from sqlalchemy.orm import declarative_base, relationship
-
-USER_ROLE = "USER"
 
 Base = declarative_base()
 
@@ -207,72 +206,3 @@ def modern_user_table():
 def modern_resource_table():
     _require_declarative_base()
     return ModernResource
-
-
-@contextmanager
-def cerbos_container_host(client_type: str) -> Generator[str, None, None]:
-    policy_dir = os.path.realpath(
-        os.path.join(os.path.dirname(__file__), "../..", "policies")
-    )
-
-    container = CerbosContainer(image=CERBOS_IMAGE)
-    container.with_volume_mapping(policy_dir, "/policies")
-    container.with_env("CERBOS_NO_TELEMETRY", "1")
-    container.with_command("server --set=schema.enforcement=reject")
-    container.start()
-    container.wait_until_ready()
-
-    yield container.http_host() if client_type == "http" else container.grpc_host()
-
-    container.stop()
-
-
-@pytest.fixture(scope="module", params=["http", "grpc"])
-def cerbos_client(request):
-    client_type = request.param
-    with cerbos_container_host(client_type) as host:
-        client_cls = CerbosClient if client_type == "http" else GrpcCerbosClient
-        with client_cls(host, tls_verify=False) as client:
-            yield client
-
-
-@pytest.fixture
-def principal(cerbos_client):
-    principal_cls = (
-        engine_pb2.Principal
-        if isinstance(cerbos_client, GrpcCerbosClient)
-        else Principal
-    )
-    return principal_cls(id="1", roles={USER_ROLE})
-
-
-@pytest.fixture
-def principal_with_attr(cerbos_client) -> Callable[[Dict[str, Any]], Any]:
-    """Build a principal carrying attributes, for whichever transport is active.
-
-    The gRPC client takes `map<string, google.protobuf.Value>`, so plain Python
-    containers have to be parsed into `Value` first; the HTTP client takes them
-    as-is.
-    """
-    is_grpc = isinstance(cerbos_client, GrpcCerbosClient)
-
-    def build(attr: Dict[str, Any]) -> Any:
-        if is_grpc:
-            return engine_pb2.Principal(
-                id="1",
-                roles={USER_ROLE},
-                attr={k: ParseDict(v, Value()) for k, v in attr.items()},
-            )
-        return Principal(id="1", roles={USER_ROLE}, attr=attr)
-
-    return build
-
-
-@pytest.fixture
-def resource_desc(cerbos_client):
-    desc_cls = (
-        engine_pb2.PlanResourcesInput.Resource
-        if isinstance(cerbos_client, GrpcCerbosClient)
-        else ResourceDesc
-    )
-    return desc_cls(kind="resource")

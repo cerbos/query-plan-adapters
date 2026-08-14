@@ -53,6 +53,11 @@ tools = [
 
 [tool.pdm.scripts]
 test = "pytest"
+# Rewrites golden/expectations.json from what the translator emits today, preserving every
+# `note`. A deliberate act, exactly like conformance/scripts/regenerate-wire-fixtures.sh: the
+# diff is the review. CI never sets GOLDEN_UPDATE, so a translator change that moves the
+# emitted SQL fails there whatever anyone ran locally.
+"golden:update" = {cmd = "pytest tests/test_translator.py", env = {"GOLDEN_UPDATE" = "1"}}
 isort = {cmd = "isort ."}
 black = {cmd = "black ."}
 format = {composite = ["isort", "black"]}
