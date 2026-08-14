@@ -5,7 +5,6 @@ on:
     paths:
       - "pgx/**"
       - "conformance/**"
-      - "policies/**"
       - ".github/workflows/pgx.yaml"
   push:
     tags:

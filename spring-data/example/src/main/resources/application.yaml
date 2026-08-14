@@ -17,7 +17,8 @@ spring:
 #
 # There is deliberately NO DEFAULT. The obvious one — Cerbos's own 3593 — is the port every
 # adapter's `cerbos run` test sidecar binds, so an unset CERBOS_HOST would not fail: it would
-# quietly plan against ../../policies and produce a wrong row set that reads as an adapter bug.
+# quietly plan against the conformance corpus that sidecar serves and produce a wrong row set that
+# reads as an adapter bug.
 # It is also why docker-compose.yml here publishes on 23592/23593 and demo/docker-compose.yml
 # on 13592/13593. demo/scripts/validate-demo.sh fails the build on a hardcoded client address
 # inside any example, because prose did not hold this: two examples shipped that default anyway.

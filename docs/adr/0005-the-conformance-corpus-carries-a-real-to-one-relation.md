@@ -23,7 +23,9 @@ a *collection*, and the hazards a collection reaches are not the hazards a scala
   aggregation-expression form there. Probing it needs a chained **scalar** attribute, which is a
   new seed field."
 - The [#373](https://github.com/cerbos/query-plan-adapters/issues/372#issuecomment-5251053077)
-  triage of `policies/resource.yaml` found the to-one join group to be the single largest thing
+  triage of the shared policy suite (since absorbed and deleted —
+  [ADR 0008](0008-the-shared-policy-suite-is-absorbed-into-the-conformance-corpus.md)) found the
+  to-one join group to be the single largest thing
   that survives absorption: sixteen actions reducing to about six distinct shapes, all of them
   scalar comparisons one or two hops out.
 

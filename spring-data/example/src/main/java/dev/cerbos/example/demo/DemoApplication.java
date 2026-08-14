@@ -110,10 +110,10 @@ public class DemoApplication {
      * The runner sets {@code CERBOS_HOST}, and there is deliberately no fallback anywhere in
      * this example. The obvious default — Cerbos's own 3592/3593 — is what every adapter's
      * {@code cerbos run} test sidecar binds, so an unset {@code CERBOS_HOST} would not fail: it
-     * would quietly plan against {@code ../../policies} and produce a diff against
-     * {@code demo/expected.json} that reads as an adapter bug. Two other examples shipped that
-     * exact default, which is why {@code demo/scripts/validate-demo.sh} now fails the build on a
-     * hardcoded PDP address rather than trusting prose.
+     * would quietly plan against the conformance corpus that sidecar serves, and produce a diff
+     * against {@code demo/expected.json} that reads as an adapter bug. Two other examples shipped
+     * that exact default, which is why {@code demo/scripts/validate-demo.sh} now fails the build
+     * on a hardcoded PDP address rather than trusting prose.
      */
     private static void requireCerbosHost() {
         String host = System.getenv("CERBOS_HOST");

@@ -5,7 +5,6 @@ on:
     paths:
       - "convex/**"
       - "conformance/**"
-      - "policies/**"
       - ".github/workflows/convex.yaml"
       - ".github/workflows/convex-publish.yaml"
   push:
@@ -34,13 +33,20 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
 
-      # `npm run typecheck` is NOT run here: src/integration.test.ts and
-      # src/adversarial.test.ts import convex/_generated/api.js, which is produced by
-      # `npx convex codegen` against a live backend and is gitignored. It runs in the
-      # integration-test job instead, right after codegen.
+      # `npm run typecheck` is NOT run here: src/adversarial.test.ts imports
+      # convex/_generated/api.js, which is produced by `npx convex codegen` against a live
+      # backend and is gitignored. It runs in the integration-test job instead, right after
+      # codegen.
       - run: npm install
       - run: npm run test
 
+  # The backend-dependent leg: corpus validation, Convex codegen, the type-check that needs the
+  # generated API, and the adversarial suite. Convex is the one adapter where that cannot share a
+  # job with `npm test` — the harness imports `convex/_generated`, which only exists after a live
+  # backend has been deployed to, so folding it into `unit-test` would put Docker and a Convex
+  # deploy on every Node leg. The job id is left as `integration-test` deliberately: the suite it
+  # was named for is gone (cerbos/query-plan-adapters#385), and renaming the job would rename the
+  # required check.
   integration-test:
     strategy:
       matrix:
@@ -100,14 +106,9 @@ jobs:
           CONVEX_SELF_HOSTED_ADMIN_KEY: ${{ steps.convex-key.outputs.key }}
         run: npx convex codegen
 
-      # Runs here rather than in unit-test: the harnesses import the generated API above.
-      - name: Type-check (including the backend-dependent harnesses)
+      # Runs here rather than in unit-test: the harness imports the generated API above.
+      - name: Type-check (including the backend-dependent harness)
         run: npm run typecheck
-
-      - name: Run integration tests
-        env:
-          CONVEX_URL: http://127.0.0.1:3210
-        run: npm run test:integration
 
       - name: Run adversarial conformance tests
         env:

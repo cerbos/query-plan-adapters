@@ -19,8 +19,8 @@ This repo is **single-context**: the adapters translate one domain — Cerbos qu
 ├── docs/adr/
 │   ├── 0001-....md
 │   └── 0002-....md
-├── conformance/          ← the shared adversarial corpus
-├── policies/             ← the shared Cerbos policies
+├── conformance/          ← the shared adversarial corpus, and the only policy suite for semantics
+├── demo/                 ← the demo domain, shared by every example application
 └── <adapter>/            ← prisma, mongoose, drizzle, ent, pgx, …
 ```
 

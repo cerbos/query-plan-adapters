@@ -2,9 +2,6 @@ name: Prisma Test
 
 on:
   pull_request:
-    # `policies/**` is deliberately absent: nothing under prisma/ reads the shared policy suite
-    # any more. The unit test reads conformance/wire-fixtures/, the adversarial suite loads
-    # conformance/policies/, and the example runs against demo/.
     paths:
       - "prisma/**"
       - "conformance/**"

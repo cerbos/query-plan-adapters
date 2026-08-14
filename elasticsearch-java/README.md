@@ -551,8 +551,6 @@ Four suites, and which of them needs a container is the useful distinction:
 | `ElasticsearchSurfaceTest` | what a real server does with an emitted clause, and the store facts the corpus reasons cite — an unindexed empty array, an unindexed JSON null, an analyzed field, Lucene regex, date precision | Elasticsearch (Testcontainers) |
 | `ElasticsearchQueryPlanAdapterTest` | the shapes no policy can produce — malformed operands, caller-supplied arguments, literal validation — plus a handful of shapes the corpus does not carry yet, each labelled | nothing |
 
-Nothing here reads the repository's shared `/policies/` suite.
-
 ### Regenerating the golden expectations
 
 `golden/expectations.json` holds the Query DSL this adapter is pinned to emit for each corpus

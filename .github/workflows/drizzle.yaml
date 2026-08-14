@@ -2,10 +2,6 @@ name: Drizzle Test
 
 on:
   pull_request:
-    # `policies/**` is deliberately absent: nothing under drizzle/ reads the shared policy suite
-    # any more. The translator unit test reads conformance/wire-fixtures/ and this adapter's own
-    # golden/expectations.json, the adversarial suite loads conformance/policies/, and the example
-    # runs against demo/.
     paths:
       - "drizzle/**"
       - "conformance/**"

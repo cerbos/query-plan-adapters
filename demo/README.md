@@ -3,13 +3,16 @@
 The single realistic policy suite, seed rows and expected id sets that every **example
 application** shares. One resource kind, four flat scalar attributes, three actions.
 
-This is the second of the repository's three policy directories, and they have distinct jobs:
+This is the second of the repository's two shared policy directories, and they have distinct jobs:
 
 | Directory       | Proves     | Shapes     | Per-adapter exceptions        |
 | --------------- | ---------- | ---------- | ----------------------------- |
-| `policies/`     | —          | assorted   | per-adapter unit-test policy  |
 | `conformance/`  | semantics  | hostile    | five classification buckets   |
 | `demo/`         | plumbing   | realistic  | **none**, by construction     |
+
+There used to be a third — an unnamed shared policy suite at the repository root, absorbed into the
+conformance corpus and deleted
+([ADR 0008](../docs/adr/0008-the-shared-policy-suite-is-absorbed-into-the-conformance-corpus.md)).
 
 **Semantics** is whether a translated filter returns exactly the rows the PDP allows.
 **Plumbing** is whether the adapter can be installed, imported and handed to the ORM's real query
@@ -93,9 +96,9 @@ to the adapter. Its `run.sh` must:
   silently talks to the demo policies instead.
 
   This is a check rather than prose because prose did not hold it: the first two examples both
-  shipped `?? "localhost:3593"`, so an unset `CERBOS_HOST` did not fail — it planned against a
-  sidecar loaded with `policies/` and the mismatch against `expected.json` read as an adapter bug
-  (cerbos/query-plan-adapters#367).
+  shipped `?? "localhost:3593"`, so an unset `CERBOS_HOST` did not fail — it planned against
+  whichever sidecar held those ports, and the mismatch against `expected.json` read as an adapter
+  bug (cerbos/query-plan-adapters#367).
 
 - take its principal from `seeds.json` — look the id up in `principals` and plan with what comes
   back, never write out an `{ id, roles }` of its own. `validate-demo.sh` fails the build on a

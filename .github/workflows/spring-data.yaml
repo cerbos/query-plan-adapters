@@ -3,11 +3,6 @@ name: Spring Data Test
 on:
   pull_request:
     paths:
-      # `policies/**` is deliberately absent: nothing under spring-data/ reads the shared policy
-      # suite any more (cerbos/query-plan-adapters#383). Both corpus suites read
-      # `conformance/` — the harness plans against `conformance/policies/adversarial.yaml`, the
-      # translator unit test reads `conformance/wire-fixtures/` — and the example has policies of
-      # its own.
       - "spring-data/**"
       - "conformance/**"
       - "demo/**"

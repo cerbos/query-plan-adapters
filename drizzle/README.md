@@ -357,7 +357,7 @@ flat query: pagination, and the adapter's filter composed with an application-ow
 
 | Command | What it proves | What it needs |
 | --- | --- | --- |
-| `npm test` | **The SQL this adapter emits.** The translator unit test: every corpus action, classified exactly once as a golden expectation or as a throw | Nothing but Node — no Cerbos sidecar, no database, no Docker |
+| `npm test` | **The SQL this adapter emits.** The translator unit test: every corpus action, classified exactly once as a golden expectation or as a throw — plus what the driver is asked to bind, the rendering on each claimed dialect, the mapper forms and the golden asset's own invariants, none of which needs a store | Nothing but Node — no Cerbos sidecar, no database, no Docker |
 | `npm run test:adversarial` | **The rows that SQL returns**, against real SQLite with `check()` as the oracle | Cerbos CLI |
 | `npm run test:adversarial:postgres` | The same corpus against real PostgreSQL | Cerbos CLI, Docker |
 | `npm run golden:update` | — | Rewrites `golden/expectations.json` from what the translator emits today. Review the diff |

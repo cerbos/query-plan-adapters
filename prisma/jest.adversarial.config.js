@@ -41,6 +41,6 @@ module.exports = {
   globalSetup: "<rootDir>/jest.globalSetup.adversarial.js",
   globalTeardown: "<rootDir>/jest.globalTeardown.adversarial.js",
   // Isolated from the main jest.config.js run: this suite talks to a Cerbos sidecar loaded
-  // with conformance/policies (resource kind "adversarial"), not ../policies.
+  // with conformance/policies (resource kind "adversarial").
   testMatch: ["<rootDir>/src/adversarial.test.ts"],
 };

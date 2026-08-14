@@ -2,10 +2,6 @@ name: ChromaDB Test
 
 on:
   pull_request:
-    # `policies/**` is deliberately absent: nothing under langchain-chromadb/ reads the shared
-    # policy suite any more. The translator unit test reads conformance/wire-fixtures/ and this
-    # adapter's own golden/expectations.json, and the adversarial suite loads
-    # conformance/policies/.
     paths:
       - "langchain-chromadb/**"
       - "conformance/**"
