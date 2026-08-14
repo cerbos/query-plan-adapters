@@ -133,6 +133,7 @@ pdm run test                          # SQLAlchemy (includes the adversarial sui
 gradle test                           # Java adapters (mount the repo root, see above)
 conformance/scripts/validate-corpus.sh          # corpus integrity; runs in every adapter's CI
 conformance/scripts/regenerate-wire-fixtures.sh # after bumping conformance/CERBOS_VERSION
+conformance/scripts/check-docs.sh               # documentation invariants; runs in the Docs workflow
 ```
 
 The PDP is pinned by `conformance/CERBOS_VERSION` (the tag) and `conformance/CERBOS_IMAGE_DIGEST`
@@ -142,9 +143,9 @@ halves; a right tag carrying some other build's digest reads as pinned and is no
 
 Every other service image (the databases, the search and vector stores) is pinned per harness, in
 one constant that adapter's suites share, in the same `repo:tag@sha256:...` form. That is
-deliberately not a corpus file: `conformance/**` re-runs all ten adapter workflows, so a shared
-file would make bumping one adapter's server cost nine irrelevant CI runs. `validate-corpus.sh`
-enforces the *rule* instead — see "Pinning service images" in `conformance/README.md`, including
+deliberately not a corpus file: `conformance/**` re-runs every adapter workflow, so a shared file
+would make bumping one adapter's server cost every other adapter an irrelevant CI run.
+`validate-corpus.sh` enforces the *rule* instead — see "Pinning service images" in `conformance/README.md`, including
 what to do when you add a new service.
 
 **Read [conformance/README.md](conformance/README.md) before changing corpus behaviour.** It covers
@@ -206,7 +207,7 @@ For pull requests: give a concise summary, note the affected adapters, link rela
 
 ## CI
 
-Each adapter has its own GitHub Actions workflow triggered by changes in its directory, `/policies/`, or `/conformance/`. Matrix tests across Node versions (22, 24, 25) and relevant service versions. All ten adapter workflows validate the corpus and run their adversarial suite **inside the same job as the regular tests** — there is no separate `adversarial` job. On the TypeScript adapters the adversarial step is gated to the baseline Node leg (`if: matrix.node-version == '22'`), because the corpus discriminates the translator and the datastore, not the Node runtime; the other matrix dimensions still get their own adversarial run, and those divide into two kinds:
+Each adapter has its own GitHub Actions workflow triggered by changes in its directory, `/policies/`, or `/conformance/`. Matrix tests across Node versions (22, 24, 25) and relevant service versions. Every adapter workflow validates the corpus and runs its adversarial suite **inside the same job as the regular tests** — there is no separate `adversarial` job. On the TypeScript adapters the adversarial step is gated to the baseline Node leg (`if: matrix.node-version == '22'`), because the corpus discriminates the translator and the datastore, not the Node runtime; the other matrix dimensions still get their own adversarial run, and those divide into two kinds:
 
 - **The datastore is one.** Drizzle and Prisma each run the corpus twice on the baseline Node leg, once per `ADAPTER_TEST_DB` store (SQLite, then PostgreSQL) — collation, LIKE escaping and parameter typing are translator behaviour, so a store the workflow does not execute is a store the adapter does not cover. MongoDB server version is the mongoose equivalent, and there the store dimension exists **only** on the baseline Node leg: once `npm test` became an offline translator unit test, a second server crossed with a non-baseline Node version ran byte-identical work, so the workflow `exclude`s those legs rather than paying for them.
 - **The client engine is not, on its own.** Prisma's v6/v7 dimension is an engine matrix; it crosses with the store dimension, giving four adversarial runs per Prisma workflow (2 majors × 2 stores), all on Node 22.
@@ -221,14 +222,15 @@ module tags resolved directly from the repository.
 **Any change to how an operator, condition, or expression shape is translated starts in the
 shared corpus, not in one adapter.** The same semantic bug has repeatedly shipped identically to
 several adapters because each re-derives the planner's wire contract by hand. A fix proven only
-against the adapter you happened to be looking at leaves the identical bug live in the other nine.
+against the adapter you happened to be looking at leaves the identical bug live in every other
+adapter.
 
 So when you add, fix, or change the handling of any shape:
 
 1. **Add the shape to `conformance/policies/adversarial.yaml`** as a new action, with seed data
    that discriminates it (see `conformance/README.md`, "Adding a new hostile shape"). If it needs a
    principal attribute or column that does not exist yet, add it to `conformance/seeds.json`.
-2. **Classify it in `conformance/actions.json` for all ten adapters** — but only *after* running
+2. **Classify it in `conformance/actions.json` for every adapter** — but only *after* running
    the harnesses. The classification is an output of the run, not an input: declaring an action
    unsupported before watching it fail is how a translatable shape gets permanently skipped.
 3. **Regenerate the wire fixtures** (`conformance/scripts/regenerate-wire-fixtures.sh`) and confirm
@@ -270,9 +272,8 @@ two agree and the action passes vacuously. Pass corpus data through verbatim.
 Every harness declares the exact `seeds.json` keys, corpus **principal** keys (`{id, roles, attr}`
 and the attribute names inside `attr`, with the two value shapes those attributes take) and
 `derived-fields.json` fields it consumes and asserts set equality against the corpus, so adding a
-seed field or a principal attribute fails all ten loudly instead of being dropped from both sides at
-once. Adding one means updating those declarations
-deliberately — that is the point of the guard, not an obstacle to route around. The derived fields
+seed field or a principal attribute fails every harness loudly instead of being dropped from both
+sides at once. Adding one means updating those declarations deliberately — that is the point of the guard, not an obstacle to route around. The derived fields
 (`createdBy`, `aDouble`, `createdAt`, `scope`, `labels`) live in `conformance/derived-fields.json`;
 never recompute them in a harness.
 
@@ -280,11 +281,12 @@ never recompute them in a harness.
 
 - Edit only `src/` — never commit `lib/` until tests pass
 - Shared policies in `/policies/` affect all adapters; edit carefully
-- `conformance/` affects all adapters too: a change there re-runs every adapter's CI, and adding an action requires classifying it for all ten
-- `demo/` likewise re-runs every adapter's example job, and adding a usage shape means implementing it in all ten examples — there is no classification bucket to opt out with
+- `conformance/` affects all adapters too: a change there re-runs every adapter's CI, and adding an action requires classifying it for every adapter
+- `demo/` likewise re-runs every adapter's example job, and adding a usage shape means implementing it in every example — there is no classification bucket to opt out with
 - Adding a seed row means adding its `conformance/derived-fields.json` entry in the same commit; adding a seed *field* also means widening every harness's declared key set — both are enforced, not optional
 - Adapters share data, not code: the corpus loader each adapter carries (`prisma/src/corpus.ts`, `mongoose/src/corpus.ts`, `drizzle/src/corpus.ts`, `convex/src/corpus.ts`, `ent/corpus_test.go`, `pgx/corpus_test.go`, …) is duplicated **deliberately**, so every adapter stays standalone. Do not extract a shared loader, and do not add a drift check between the copies — they are allowed to differ. That is the opposite of the byte-identical rule on the vendored Go *translator* trees, which keeps its exact current scope. See [ADR 0007](docs/adr/0007-adapters-share-data-not-code.md)
 - A per-adapter **golden expectation** — the filter one adapter is pinned to emit for one corpus action — lives in that adapter's own `golden/expectations.json`, never under `conformance/`; a throwing action carries no entry, because its message is already pinned in `conformance/actions.json`. Schema and rationale: `conformance/README.md`, "Golden expectations"
+- Write "every adapter" / "every harness" / "every example" wherever prose spans the roster — in docs, test-file comments and JSON `description`s alike. `conformance/actions.json` declares `adapters`, so the phrasing stays true when the roster changes and nothing else has to count them. Genuine counts of something else (corpus actions, seed rows) go in digits. `conformance/scripts/check-docs.sh` enforces it across every tracked file
 - Regenerate build artifacts in the same commit as source changes
 - Changing what an adapter can translate means updating its `conformance/actions.json` entry and its README contract table in the same commit
 - When an adapter cannot express a shape, make it throw with a message naming the real mechanism — never emit a best-effort filter. That message is pinned in `conformance/actions.json` and asserted, so changing it is a deliberate corpus edit

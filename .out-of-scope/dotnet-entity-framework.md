@@ -16,7 +16,7 @@ with it. Every adapter in this repository must:
   guard so no action can pass vacuously;
 - own a publish path and a README `Conformance contract` table kept in sync with the corpus.
 
-The ten adapters live in four toolchains — TypeScript, Python, Go and Java — and each new
+The adapters live in four toolchains — TypeScript, Python, Go and Java — and each new
 adapter in an existing toolchain can copy a working harness. .NET has none of that. It would be
 a fifth toolchain, a fifth CI shape, a fifth publish target (NuGet), and a from-scratch corpus
 harness with no sibling to copy from.

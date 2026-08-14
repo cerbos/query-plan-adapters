@@ -29,7 +29,7 @@ a *collection*, and the hazards a collection reaches are not the hazards a scala
 
 So the corpus needs relational depth it cannot express under the flat-row convention, and it needs
 it before any action can use it: every harness asserts **set equality** on the seed keys it
-declares, so the moment `seeds.json` gains a key all ten fail at once and neither the corpus nor a
+declares, so the moment `seeds.json` gains a key every harness fails at once and neither the corpus nor a
 harness can move first.
 
 ## The decision
@@ -60,21 +60,21 @@ sqlalchemy, spring-data, ent and pgx create two owned tables and join; mongoose,
 Elasticsearch embed two nested objects; langchain-chromadb flattens both levels onto dotted
 metadata keys. How each spells "this level is not there" is its own business — a missing row, a
 missing key, or a stored null under the convention that harness already uses for a NULL column.
-What all ten agree on is the check side: a level that does not exist sends no `parent` (or no
+What every adapter agrees on is the check side: a level that does not exist sends no `parent` (or no
 `parent.inner`) attribute, so CEL raises a missing-path error and `check()` denies.
 
 ## Why this is worth an ADR
 
 It deliberately breaks a convention (`seeds.json` rows are flat and self-contained; this key is the
 only one that resolves against another row), it splits the adapters (a join for six of them, an
-embedded object or a flattened key for the rest), and it is hard to reverse once ten stores carry
+embedded object or a flattened key for the rest), and it is hard to reverse once every store carries
 the fixture.
 
 ## Consequences
 
 **Ten harnesses change atomically, and that is the point of doing it alone.** The seed-key guard
 makes the corpus edit and the harness edits inseparable; separating the relation from the actions
-that use it means the ten-way change is a data change, reviewable as one, rather than tangled with
+that use it means the repo-wide change is a data change, reviewable as one, rather than tangled with
 a translation change per adapter.
 
 **A fixture nothing uses can rot, so each harness pins it directly.** Every harness reads both hops
@@ -88,7 +88,7 @@ that the three depths (no parent, parent without inner, parent with inner) are a
 translators do not have yet — ent and pgx fail it closed today ("attribute maps to a collection and
 cannot be used as a scalar value"), and sqlalchemy has no relation model at all, its collection
 semantics being entirely caller-supplied. A mapping written now would be a declaration no assertion
-holds to anything, in the same files #375 has to revisit. So all ten harnesses stop at schema,
+holds to anything, in the same files #375 has to revisit. So every harness stops at schema,
 fixture and oracle attribute.
 
 **Two levels, not three.** `parent.inner.inner` is not seeded. Two hops is what discriminates

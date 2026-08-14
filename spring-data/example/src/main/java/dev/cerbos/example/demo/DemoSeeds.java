@@ -12,7 +12,7 @@ import java.util.List;
 /**
  * {@code demo/seeds.json}, parsed. The rows every example application persists and the
  * principals every one of them plans for, read from the shared corpus rather than restated here
- * — ten copies of eight rows would be ten things to update when the domain gains one.
+ * — a copy per example would be one more thing to update when the domain gains a row.
  *
  * <p>Corpus files are repository-controlled and structurally checked by
  * {@code demo/scripts/validate-demo.sh} before this program ever runs; this is not untrusted

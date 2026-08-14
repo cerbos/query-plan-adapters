@@ -216,7 +216,7 @@ the PDP. The run fails unless the observed kind set is exactly `album`, `photo`,
 
 The second program in this build, `dev.cerbos.example.demo`, exercises the repository's
 [demo domain](../../demo): one resource kind, four flat scalar attributes, three actions, shared
-verbatim by all ten adapters' examples. It takes no arguments, prints one JSON document to
+verbatim by every adapter's example. It takes no arguments, prints one JSON document to
 stdout, and is run by the shared runner:
 
 ```bash
@@ -250,7 +250,7 @@ is the published package surface (every harness compiles against the adapter's o
 and usage shapes past a single flat query.
 
 Why the photo-sharing application stays: the demo domain is thin by construction — roughly the
-intersection of ten query languages, one of which is a vector store — and
+intersection of every adapter's query language, one of which is a vector store — and
 [ADR 0001](../../docs/adr/0001-demo-domain-has-no-per-adapter-exceptions.md) makes it a floor
 rather than a ceiling. Everything in this README above and below this section is coverage nothing
 shared asserts, including six historical bug fixes pinned by

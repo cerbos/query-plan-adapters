@@ -1,0 +1,27 @@
+name: Docs
+
+# Standalone because this is the one check in the repository that is not about an adapter: it
+# reads the whole tree at once and cannot be attributed to any one of them. The rule in CLAUDE.md
+# that keeps a job inside its adapter's workflow is about the demo examples, where the job has to
+# block a Renovate automerge on that adapter's manifest — nothing a dependency bump does can
+# falsify a table of contents, so that argument does not reach here.
+#
+# No path filter because the roster check scans every tracked file, so any file can break it. The
+# job needs no Docker, no services and no network, and finishes in about a second — cheaper to run
+# always than to maintain a path list that silently stops matching.
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  docs:
+    name: Documentation invariants
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check documentation invariants
+        run: conformance/scripts/check-docs.sh

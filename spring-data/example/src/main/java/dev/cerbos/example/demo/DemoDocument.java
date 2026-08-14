@@ -14,7 +14,7 @@ import jakarta.persistence.Table;
  * adapter-produced Specification is usage shape 5 — see {@link DemoApplication}.
  *
  * <p>Deliberately flat: no relations, no nullable columns, no LIKE metacharacters. Each of those
- * divides the ten adapters, and proving them is the conformance corpus's job
+ * divides the adapters, and proving them is the conformance corpus's job
  * ({@code ../src/test/java/.../AdversarialConformanceTest.java}), not this program's. The
  * photo/album/workspace application next door is where this example's own richer shapes live.
  */

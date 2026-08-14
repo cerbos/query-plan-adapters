@@ -2,8 +2,8 @@
 # Asserts that CERBOS_IMAGE_DIGEST is the digest ghcr.io/cerbos/cerbos:$CERBOS_VERSION actually
 # resolves to.
 #
-# Why this is separate from validate-corpus.sh: that script is offline and runs in all ten adapter
-# workflows and on developer machines with no Docker. This one talks to a registry, so it runs once,
+# Why this is separate from validate-corpus.sh: that script is offline and runs in every adapter
+# workflow and on developer machines with no Docker. This one talks to a registry, so it runs once,
 # from .github/workflows/conformance.yaml — the workflow that already owns the pinned-PDP contract.
 #
 # Why it exists at all: validate-corpus.sh proves every restatement in the repository agrees with

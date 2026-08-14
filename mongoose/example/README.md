@@ -65,8 +65,8 @@ projected between the two.
 ## The store
 
 `run.sh` starts MongoDB itself rather than leaving it to the shared runner.
-`demo/docker-compose.yml` holds the one service all ten examples genuinely share — the PDP — and
-nine of the ten stores belong to somebody else; putting them there would grow it into the language
+`demo/docker-compose.yml` holds the one service every example genuinely shares — the PDP — and
+nearly every store belongs to somebody else; putting them there would grow it into the language
 switch that [split](../../demo/README.md#running-an-example) exists to avoid.
 
 Two things in `run.sh` are deliberate:

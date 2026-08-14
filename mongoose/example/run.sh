@@ -5,7 +5,7 @@
 # $CERBOS_HOST — the shared runner owns it.
 #
 # The MongoDB server is this script's job rather than the runner's. demo/docker-compose.yml holds
-# the one thing all ten examples genuinely share, and nine of the ten stores are somebody else's;
+# the one thing every example genuinely shares, and nearly every store is somebody else's;
 # putting them there would grow it into the language switch the split exists to avoid. Starting it
 # here is also what keeps `demo/scripts/run-example.sh mongoose` a single command on a laptop.
 #

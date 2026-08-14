@@ -95,8 +95,8 @@ oracle establishes that the filter returns the rows the policy allows.
 ## Consequences
 
 **Per-adapter expectations must not live under `conformance/`.** Eleven workflows trigger on
-`conformance/**` — all ten adapter workflows plus `conformance.yaml` — so one adapter re-pinning one
-filter would re-run the other ten for nothing. This is the same argument `CLAUDE.md` already makes
+`conformance/**` — every adapter workflow plus `conformance.yaml` — so one adapter re-pinning one
+filter would re-run every other adapter for nothing. This is the same argument `CLAUDE.md` already makes
 for keeping per-harness service image pins out of the corpus, and it holds whatever form the
 expectations take.
 
@@ -109,7 +109,7 @@ implementation, and not an argument for a drift check.
 guards that make that true: every harness declares the `seeds.json` keys and `derived-fields.json`
 fields it consumes and asserts set equality against the corpus; every wire fixture must be
 classified in every adapter that has a translator unit test; adding an action means classifying it
-for all ten. Duplicated loaders are affordable *because* those guards exist, and they are what a
+for every adapter. Duplicated loaders are affordable *because* those guards exist, and they are what a
 loader change has to be checked against — including `CLAUDE.md`'s warning about a harness
 hand-projecting corpus data into a narrower shape, which is a per-adapter defect that no comparison
 between copies would surface.

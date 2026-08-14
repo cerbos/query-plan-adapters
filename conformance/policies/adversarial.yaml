@@ -2227,8 +2227,8 @@ resourcePolicy:
     # action exists to pin cannot change its answer. `== 1` makes a5 the witness — CEL denies
     # it, a floored lowering allows it — and the failure direction is an OVER-grant.
     #
-    # That witness is LATENT today, and worth saying so: nine adapters refuse this shape at the
-    # int() cast, and the tenth (convex) answers it in JavaScript, whose `%` truncates exactly as
+    # That witness is LATENT today, and worth saying so: every adapter but convex refuses this shape at the
+    # int() cast, and convex answers it in JavaScript, whose `%` truncates exactly as
     # CEL does. So what the action pins right now is that `mod` reaches the wire at all — it never
     # had — and that every rejection is the cast's rather than the operator's. The sign witness is
     # what catches the first adapter to lower `%` into a floored language.

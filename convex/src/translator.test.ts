@@ -56,8 +56,8 @@ import type { FilterNode, GoldenExpectation } from "./corpus";
  *
  * **The expectations are data, not literals.** The filter this adapter is pinned to emit lives in
  * `golden/expectations.json`, a **golden expectation** file this adapter owns — never under
- * `conformance/`, where eleven workflows trigger and one adapter re-pinning one filter would
- * re-run the other ten. The file is regenerated with `npm run golden:update` and reviewed as a
+ * `conformance/`, where every adapter workflow triggers and one adapter re-pinning one filter would
+ * re-run all the others. The file is regenerated with `npm run golden:update` and reviewed as a
  * diff, exactly like the wire fixtures it is asserted against. See
  * [ADR 0007](../../docs/adr/0007-adapters-share-data-not-code.md) and the "Golden expectations"
  * section of `conformance/README.md`.
@@ -622,7 +622,7 @@ describe("plans the planner cannot produce", () => {
   // an error rather than a filter.
   //
   // A shape CEL *can* express does not belong here, whatever its plan looks like: it belongs in
-  // the corpus, where all ten adapters are asked about it.
+  // the corpus, where every adapter is asked about it.
 
   const plan = (condition: unknown): PlanResourcesResponse =>
     ({
@@ -684,7 +684,7 @@ describe("plans the planner cannot produce", () => {
  * A bridge, not a home. Everything below asserts a translator branch that no corpus action drives
  * today, which is exactly the situation `CLAUDE.md` says a per-adapter unit test must not be
  * allowed to settle into: a unit test pins the filter one adapter emits, and only a corpus action
- * asks the same question of the other nine.
+ * asks the same question of every other adapter.
  *
  * Both gaps already have issues, and both of these blocks are to be deleted when they land:
  *
