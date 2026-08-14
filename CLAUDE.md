@@ -30,25 +30,31 @@ npm test         # Jest + Cerbos sidecar
 npm run test:adversarial  # differential suite against the shared conformance corpus
 ```
 
-On prisma, mongoose, drizzle and convex, `npm test` is the **translator unit test**: it reads its
-plans from `conformance/wire-fixtures/`, asserts the emitted filter, and needs no sidecar, no
-database and no generated client ([ADR 0006](docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md)).
+On prisma, mongoose, drizzle, convex and langchain-chromadb, `npm test` is the **translator unit
+test**: it reads its plans from `conformance/wire-fixtures/`, asserts the emitted filter, and needs
+no sidecar, no database and no generated client ([ADR 0006](docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md)).
 On prisma it is engine-agnostic, so it has no v6/v7 split; the Prisma major is still a dimension of
 `npm run typecheck` and of the adversarial legs. On mongoose it never opens a connection, so the
 MongoDB server dimension applies to the adversarial leg alone. On convex it needs neither a Convex
 backend nor `convex/_generated`, which is why the mapper it shares with the harness lives in
 `convex/convex/adversarialMapper.ts` rather than beside the backend functions that import the
-generated API. On drizzle and convex the expected filters are **golden expectations** — static data
-in `<adapter>/golden/expectations.json`, rewritten by `npm run golden:update` and reviewed as a
+generated API. On langchain-chromadb it needs no ChromaDB container, so that server is started for
+the adversarial leg alone.
+
+On drizzle, convex and langchain-chromadb the expected filters are **golden expectations** — static
+data in `<adapter>/golden/expectations.json`, rewritten by `npm run golden:update` and reviewed as a
 diff — which is the format [#379](https://github.com/cerbos/query-plan-adapters/issues/379) piloted
 and the remaining adapters copy; prisma and mongoose keep their inline expectations until they are
 retrofitted. Convex is the case that generalised the format: it emits a *function*, so its entry
 records the calls that function makes against a recording query builder plus which half of the
-output — Convex's filter engine or the adapter's in-memory post-filter — answers the query. The
-schema is in `conformance/README.md`, "Golden expectations"; the principle is
-[ADR 0007](docs/adr/0007-adapters-share-data-not-code.md). The remaining TypeScript adapters have
-not been converted yet ([#381](https://github.com/cerbos/query-plan-adapters/issues/381) onwards)
-and still run their shared-policy suite behind a sidecar.
+output — Convex's filter engine or the adapter's in-memory post-filter — answers the query.
+Langchain-chromadb is the opposite extreme and the cheapest instance: a Chroma `Where` clause is
+already JSON, so its entry is the translator's whole result verbatim, and 164 of the corpus's 199
+shapes carry no entry at all because it refuses them. The schema is in `conformance/README.md`,
+"Golden expectations"; the principle is
+[ADR 0007](docs/adr/0007-adapters-share-data-not-code.md). The remaining adapters have not been
+converted yet ([#382](https://github.com/cerbos/query-plan-adapters/issues/382) onwards) and still
+run their shared-policy suite behind a sidecar.
 
 Drizzle and Prisma also replay the corpus against a real PostgreSQL server (testcontainers, so
 Docker is required): `npm run test:adversarial:postgres`, and `…:postgres:v6` / `…:postgres:v7` on
@@ -98,15 +104,16 @@ cerbos run --set=storage.disk.directory=../policies -- jest src/**.test.ts
 ```
 
 Cerbos CLI must be installed locally. Shared policies live in `/policies/`. Prisma, mongoose,
-drizzle and convex are the exceptions: their `npm test` needs no sidecar (see above), and only their
-adversarial suite starts one — against `conformance/policies/`, not `/policies/`. The first three
-read `/policies/` nowhere at all any more, which is why none of their workflows lists it as a
-trigger path; convex still does, from `npm run test:integration`, so its workflow keeps it.
+drizzle, convex and langchain-chromadb are the exceptions: their `npm test` needs no sidecar (see
+above), and only their adversarial suite starts one — against `conformance/policies/`, not
+`/policies/`. All but convex read `/policies/` nowhere at all any more, which is why none of their
+workflows lists it as a trigger path; convex still does, from `npm run test:integration`, so its
+workflow keeps it.
 
 Some adapters need additional services:
 - Mongoose: `npm run mongo` (Docker MongoDB)
 - Convex: `npm run convex:up` (Docker Convex backend)
-- LangChain/ChromaDB: Docker ChromaDB on port 8234
+- LangChain/ChromaDB, adversarial leg only: Docker ChromaDB on port 8234 (`npm run chroma`)
 - Drizzle and Prisma, PostgreSQL adversarial leg only: Docker (testcontainers starts it)
 
 ## Conformance
@@ -284,7 +291,7 @@ never recompute them in a harness.
 - `conformance/` affects all adapters too: a change there re-runs every adapter's CI, and adding an action requires classifying it for every adapter
 - `demo/` likewise re-runs every adapter's example job, and adding a usage shape means implementing it in every example — there is no classification bucket to opt out with
 - Adding a seed row means adding its `conformance/derived-fields.json` entry in the same commit; adding a seed *field* also means widening every harness's declared key set — both are enforced, not optional
-- Adapters share data, not code: the corpus loader each adapter carries (`prisma/src/corpus.ts`, `mongoose/src/corpus.ts`, `drizzle/src/corpus.ts`, `convex/src/corpus.ts`, `ent/corpus_test.go`, `pgx/corpus_test.go`, …) is duplicated **deliberately**, so every adapter stays standalone. Do not extract a shared loader, and do not add a drift check between the copies — they are allowed to differ. That is the opposite of the byte-identical rule on the vendored Go *translator* trees, which keeps its exact current scope. See [ADR 0007](docs/adr/0007-adapters-share-data-not-code.md)
+- Adapters share data, not code: the corpus loader each adapter carries (`prisma/src/corpus.ts`, `mongoose/src/corpus.ts`, `drizzle/src/corpus.ts`, `convex/src/corpus.ts`, `langchain-chromadb/src/corpus.ts`, `ent/corpus_test.go`, `pgx/corpus_test.go`, …) is duplicated **deliberately**, so every adapter stays standalone. Do not extract a shared loader, and do not add a drift check between the copies — they are allowed to differ. That is the opposite of the byte-identical rule on the vendored Go *translator* trees, which keeps its exact current scope. See [ADR 0007](docs/adr/0007-adapters-share-data-not-code.md)
 - A per-adapter **golden expectation** — the filter one adapter is pinned to emit for one corpus action — lives in that adapter's own `golden/expectations.json`, never under `conformance/`; a throwing action carries no entry, because its message is already pinned in `conformance/actions.json`. Schema and rationale: `conformance/README.md`, "Golden expectations"
 - Write "every adapter" / "every harness" / "every example" wherever prose spans the roster — in docs, test-file comments and JSON `description`s alike. `conformance/actions.json` declares `adapters`, so the phrasing stays true when the roster changes and nothing else has to count them. Genuine counts of something else (corpus actions, seed rows) go in digits. `conformance/scripts/check-docs.sh` enforces it across every tracked file
 - Regenerate build artifacts in the same commit as source changes
