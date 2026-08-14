@@ -41,7 +41,7 @@ backend nor `convex/_generated`, which is why the mapper it shares with the harn
 generated API. On langchain-chromadb it needs no ChromaDB container, so that server is started for
 the adversarial leg alone.
 
-On drizzle, convex, langchain-chromadb and sqlalchemy the expected filters are **golden
+On drizzle, convex, langchain-chromadb, sqlalchemy and spring-data the expected filters are **golden
 expectations** — static data in `<adapter>/golden/expectations.json`, rewritten by that adapter's
 `golden:update` command and reviewed as a diff — which is the format
 [#379](https://github.com/cerbos/query-plan-adapters/issues/379) piloted
@@ -57,11 +57,18 @@ records that object *compiled* — the `WHERE` clause on SQLite and on PostgreSQ
 it binds, which the two dialects are asserted to share. That also makes the ORM version an input to
 the asset rather than only to the tests: SQLAlchemy 1.4 and 2.x render some trees differently, so the
 file declares the major it was generated under, `golden:update` refuses to run under the other one,
-and the other CI leg asserts a pinned list of exactly which shapes diverge. The schema is in `conformance/README.md`,
-"Golden expectations"; the principle is
-[ADR 0007](docs/adr/0007-adapters-share-data-not-code.md). The remaining adapters have not been
-converted yet ([#383](https://github.com/cerbos/query-plan-adapters/issues/383) onwards) and still
-run their shared-policy suite behind a sidecar.
+and the other CI leg asserts a pinned list of exactly which shapes diverge. Spring-data is the same
+case in another language and shows what happens when the build has only ONE version of that
+generator: it emits a JPA `Specification`, so its entry records that Specification rendered — the
+root joins and the `WHERE` clause on H2, PostgreSQL and MySQL, all three of which its CI executes —
+with criteria literals inlined so the operands are in the asset rather than behind a `?`. The file
+declares `"hibernate": "6.6"` and the suite asserts the running Hibernate matches, but there is no
+second leg and so no divergence list; the header is load-bearing because `hibernate-core` is a
+`compileOnly` dependency and a consumer brings their own renderer. The schema is in
+`conformance/README.md`, "Golden expectations"; the principle is
+[ADR 0007](docs/adr/0007-adapters-share-data-not-code.md). Elasticsearch-java has not been converted
+yet ([#384](https://github.com/cerbos/query-plan-adapters/issues/384)) and still runs its
+shared-policy suite behind a sidecar.
 
 Drizzle and Prisma also replay the corpus against a real PostgreSQL server (testcontainers, so
 Docker is required): `npm run test:adversarial:postgres`, and `…:postgres:v6` / `…:postgres:v7` on
@@ -109,7 +116,17 @@ do need Docker (testcontainers) and read the pinned PDP image from `conformance/
 docker run --rm -v "$(pwd)":/repo -v /var/run/docker.sock:/var/run/docker.sock \
   -e TESTCONTAINERS_RYUK_DISABLED=true --network host \
   -w /repo/elasticsearch-java gradle:8.12-jdk17 gradle build --no-daemon
+
+# spring-data only: rewrite golden/expectations.json from what the translator emits today.
+# `gradle test` never regenerates, so a translator change fails CI whatever anyone ran locally.
+#   … -w /repo/spring-data gradle:8.12-jdk17 gradle goldenUpdate --no-daemon
 ```
+
+On spring-data, `SpringDataTranslatorTest` is the **translator unit test**: it reads its plans from
+`conformance/wire-fixtures/`, asserts the emitted SQL against `spring-data/golden/expectations.json`,
+and needs no sidecar and no database — its persistence unit carries no JDBC connection at all, and
+Hibernate is told the dialect rather than discovering it. Only `AdversarialConformanceTest` needs
+Docker. Nothing under `spring-data/` reads `/policies/` any more.
 
 ## Testing
 
@@ -119,11 +136,11 @@ cerbos run --set=storage.disk.directory=../policies -- jest src/**.test.ts
 ```
 
 Cerbos CLI must be installed locally. Shared policies live in `/policies/`. Prisma, mongoose,
-drizzle, convex, langchain-chromadb and sqlalchemy are the exceptions: their unit suite needs no
-sidecar (see above), and only their adversarial suite starts a PDP — against `conformance/policies/`,
-not `/policies/`. All but convex read `/policies/` nowhere at all any more, which is why none of
-their workflows lists it as a trigger path; convex still does, from `npm run test:integration`, so
-its workflow keeps it.
+drizzle, convex, langchain-chromadb, sqlalchemy and spring-data are the exceptions: their unit suite
+needs no sidecar (see above), and only their adversarial suite starts a PDP — against
+`conformance/policies/`, not `/policies/`. All but convex read `/policies/` nowhere at all any more,
+which is why none of their workflows lists it as a trigger path; convex still does, from
+`npm run test:integration`, so its workflow keeps it.
 
 Some adapters need additional services:
 - Mongoose: `npm run mongo` (Docker MongoDB)
@@ -306,7 +323,7 @@ never recompute them in a harness.
 - `conformance/` affects all adapters too: a change there re-runs every adapter's CI, and adding an action requires classifying it for every adapter
 - `demo/` likewise re-runs every adapter's example job, and adding a usage shape means implementing it in every example — there is no classification bucket to opt out with
 - Adding a seed row means adding its `conformance/derived-fields.json` entry in the same commit; adding a seed *field* also means widening every harness's declared key set — both are enforced, not optional
-- Adapters share data, not code: the corpus loader each adapter carries (`prisma/src/corpus.ts`, `mongoose/src/corpus.ts`, `drizzle/src/corpus.ts`, `convex/src/corpus.ts`, `langchain-chromadb/src/corpus.ts`, `sqlalchemy/tests/corpus.py`, `ent/corpus_test.go`, `pgx/corpus_test.go`, …) is duplicated **deliberately**, so every adapter stays standalone. Do not extract a shared loader, and do not add a drift check between the copies — they are allowed to differ. That is the opposite of the byte-identical rule on the vendored Go *translator* trees, which keeps its exact current scope. See [ADR 0007](docs/adr/0007-adapters-share-data-not-code.md)
+- Adapters share data, not code: the corpus loader each adapter carries (`prisma/src/corpus.ts`, `mongoose/src/corpus.ts`, `drizzle/src/corpus.ts`, `convex/src/corpus.ts`, `langchain-chromadb/src/corpus.ts`, `sqlalchemy/tests/corpus.py`, `spring-data/src/test/java/dev/cerbos/queryplan/springdata/Corpus.java`, `ent/corpus_test.go`, `pgx/corpus_test.go`, …) is duplicated **deliberately**, so every adapter stays standalone. Do not extract a shared loader, and do not add a drift check between the copies — they are allowed to differ. That is the opposite of the byte-identical rule on the vendored Go *translator* trees, which keeps its exact current scope. See [ADR 0007](docs/adr/0007-adapters-share-data-not-code.md)
 - A per-adapter **golden expectation** — the filter one adapter is pinned to emit for one corpus action — lives in that adapter's own `golden/expectations.json`, never under `conformance/`; a throwing action carries no entry, because its message is already pinned in `conformance/actions.json`. Schema and rationale: `conformance/README.md`, "Golden expectations"
 - Write "every adapter" / "every harness" / "every example" wherever prose spans the roster — in docs, test-file comments and JSON `description`s alike. `conformance/actions.json` declares `adapters`, so the phrasing stays true when the roster changes and nothing else has to count them. Genuine counts of something else (corpus actions, seed rows) go in digits. `conformance/scripts/check-docs.sh` enforces it across every tracked file
 - Regenerate build artifacts in the same commit as source changes

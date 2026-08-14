@@ -1,0 +1,1356 @@
+{
+  "adapter": "spring-data",
+  "hibernate": "6.6",
+  "regenerate": "gradle goldenUpdate",
+  "expectations": {
+    "all-on-empty": {
+      "note": "Three-valued logic, and the shape every collection macro follows here. The scoring subquery folds each element to 2 (true), 0 (false) or 1 (UNKNOWN — a NULL member column, which is a missing attribute on the check side, so CEL raises and the PDP denies); `nullif(..., 1)` turns UNKNOWN into SQL NULL so the row is excluded under BOTH polarities. Collapsing it to FALSE would return rows the PDP denies under a negation.",
+      "where": {
+        "h2": "(select nullif(coalesce(max(case when t1_0.name='public' then 0 when not(t1_0.name='public') then 2 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=0",
+        "postgresql": "(select nullif(coalesce(max(case when t1_0.name='public' then 0 when not(t1_0.name='public') then 2 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=0",
+        "mysql": "(select nullif(coalesce(max(case when t1_0.name='public' then 0 when not(t1_0.name='public') then 2 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=0"
+      }
+    },
+    "arith-add": {
+      "where": {
+        "h2": "(cast(re1_0.a_number as float(53))+1.0)>2.0",
+        "postgresql": "(cast(re1_0.a_number as float(53))+1.0)>2.0",
+        "mysql": "(cast(re1_0.a_number as double)+1.0)>2.0"
+      }
+    },
+    "arith-add-eq-frac": {
+      "where": {
+        "h2": "(cast(re1_0.a_double as float(53))+0.7)=0.1",
+        "postgresql": "(cast(re1_0.a_double as float(53))+0.7)=0.1",
+        "mysql": "(cast(re1_0.a_double as double)+0.7)=0.1"
+      }
+    },
+    "arith-add-eq-frac-exact": {
+      "where": {
+        "h2": "(cast(re1_0.a_double as float(53))+0.5)=0.75",
+        "postgresql": "(cast(re1_0.a_double as float(53))+0.5)=0.75",
+        "mysql": "(cast(re1_0.a_double as double)+0.5)=0.75"
+      }
+    },
+    "arith-add-ne-frac": {
+      "where": {
+        "h2": "(cast(re1_0.a_double as float(53))+0.7)<>0.1",
+        "postgresql": "(cast(re1_0.a_double as float(53))+0.7)<>0.1",
+        "mysql": "(cast(re1_0.a_double as double)+0.7)<>0.1"
+      }
+    },
+    "arith-both": {
+      "where": {
+        "h2": "(cast(re1_0.a_number as float(53))+1.0)>(cast(re1_0.a_number as float(53))*2.0)",
+        "postgresql": "(cast(re1_0.a_number as float(53))+1.0)>(cast(re1_0.a_number as float(53))*2.0)",
+        "mysql": "(cast(re1_0.a_number as double)+1.0)>(cast(re1_0.a_number as double)*2.0)"
+      }
+    },
+    "arith-div": {
+      "where": {
+        "h2": "(cast(re1_0.a_number as float(53))/2.0)=1.0",
+        "postgresql": "(cast(re1_0.a_number as float(53))/2.0)=1.0",
+        "mysql": "(cast(re1_0.a_number as double)/2.0)=1.0"
+      }
+    },
+    "arith-div-frac": {
+      "where": {
+        "h2": "(cast(re1_0.a_number as float(53))/2.0)>=1.5",
+        "postgresql": "(cast(re1_0.a_number as float(53))/2.0)>=1.5",
+        "mysql": "(cast(re1_0.a_number as double)/2.0)>=1.5"
+      }
+    },
+    "arith-mult-neg": {
+      "where": {
+        "h2": "(cast(re1_0.a_number as float(53))*-2.0)<3.0",
+        "postgresql": "(cast(re1_0.a_number as float(53))*-2.0)<3.0",
+        "mysql": "(cast(re1_0.a_number as double)*-2.0)<3.0"
+      }
+    },
+    "arith-sub": {
+      "where": {
+        "h2": "(cast(re1_0.a_number as float(53))-3.0)<=0.0",
+        "postgresql": "(cast(re1_0.a_number as float(53))-3.0)<=0.0",
+        "mysql": "(cast(re1_0.a_number as double)-3.0)<=0.0"
+      }
+    },
+    "arith-vf": {
+      "where": {
+        "h2": "(cast(re1_0.a_number as float(53))+1.0)>2.0",
+        "postgresql": "(cast(re1_0.a_number as float(53))+1.0)>2.0",
+        "mysql": "(cast(re1_0.a_number as double)+1.0)>2.0"
+      }
+    },
+    "cr-contains": {
+      "where": {
+        "h2": "'s100Xdone-tail\\one-end' like case when re1_0.a_string is null then null else (('%'||replace(replace(replace(replace(re1_0.a_string,'\\','\\\\'),'%','\\%'),'_','\\_'),'[','\\['))||'%') end escape '\\'",
+        "postgresql": "'s100Xdone-tail\\one-end' like case when re1_0.a_string is null then null else (('%'||replace(replace(replace(replace(re1_0.a_string,'\\','\\\\'),'%','\\%'),'_','\\_'),'[','\\['))||'%') end escape '\\'",
+        "mysql": "'s100Xdone-tail\\\\one-end' like case when re1_0.a_string is null then null else concat(concat('%',replace(replace(replace(replace(re1_0.a_string,'\\\\','\\\\\\\\'),'%','\\\\%'),'_','\\\\_'),'[','\\\\[')),'%') end escape '\\\\'"
+      }
+    },
+    "cr-div-neg-zero": {
+      "where": {
+        "h2": "1=1 and (cast(re1_0.a_number as float(53))=0.0 and 1<>1 or not(cast(re1_0.a_number as float(53))=0.0) and (cast(re1_0.a_number as float(53))>0.0 and 1=1 or not(cast(re1_0.a_number as float(53))>0.0) and 1<>1 or not((cast(re1_0.a_number as float(53))>0.0 or not(cast(re1_0.a_number as float(53))>0.0)))) or not((cast(re1_0.a_number as float(53))=0.0 or not(cast(re1_0.a_number as float(53))=0.0)))) or not(1=1) and null>0.0 or not((1=1 or not(1=1)))",
+        "postgresql": "1=1 and (cast(re1_0.a_number as float(53))=0.0 and 1<>1 or not(cast(re1_0.a_number as float(53))=0.0) and (cast(re1_0.a_number as float(53))>0.0 and 1=1 or not(cast(re1_0.a_number as float(53))>0.0) and 1<>1 or not((cast(re1_0.a_number as float(53))>0.0 or not(cast(re1_0.a_number as float(53))>0.0)))) or not((cast(re1_0.a_number as float(53))=0.0 or not(cast(re1_0.a_number as float(53))=0.0)))) or not(1=1) and null>0.0 or not((1=1 or not(1=1)))",
+        "mysql": "1=1 and (cast(re1_0.a_number as double)=0.0 and 1<>1 or not(cast(re1_0.a_number as double)=0.0) and (cast(re1_0.a_number as double)>0.0 and 1=1 or not(cast(re1_0.a_number as double)>0.0) and 1<>1 or not((cast(re1_0.a_number as double)>0.0 or not(cast(re1_0.a_number as double)>0.0)))) or not((cast(re1_0.a_number as double)=0.0 or not(cast(re1_0.a_number as double)=0.0)))) or not(1=1) and null>0.0 or not((1=1 or not(1=1)))"
+      }
+    },
+    "cr-div-other-column": {
+      "where": {
+        "h2": "cast(re1_0.a_double as float(53))=0.0 and (cast(re1_0.a_number as float(53))=0.0 and 1<>1 or not(cast(re1_0.a_number as float(53))=0.0) and (cast(re1_0.a_number as float(53))>0.0 and 1=1 or not(cast(re1_0.a_number as float(53))>0.0) and 1<>1 or not((cast(re1_0.a_number as float(53))>0.0 or not(cast(re1_0.a_number as float(53))>0.0)))) or not((cast(re1_0.a_number as float(53))=0.0 or not(cast(re1_0.a_number as float(53))=0.0)))) or not(cast(re1_0.a_double as float(53))=0.0) and (cast(re1_0.a_number as float(53))/nullif(cast(re1_0.a_double as float(53)),0.0))>0.0 or not((cast(re1_0.a_double as float(53))=0.0 or not(cast(re1_0.a_double as float(53))=0.0)))",
+        "postgresql": "cast(re1_0.a_double as float(53))=0.0 and (cast(re1_0.a_number as float(53))=0.0 and 1<>1 or not(cast(re1_0.a_number as float(53))=0.0) and (cast(re1_0.a_number as float(53))>0.0 and 1=1 or not(cast(re1_0.a_number as float(53))>0.0) and 1<>1 or not((cast(re1_0.a_number as float(53))>0.0 or not(cast(re1_0.a_number as float(53))>0.0)))) or not((cast(re1_0.a_number as float(53))=0.0 or not(cast(re1_0.a_number as float(53))=0.0)))) or not(cast(re1_0.a_double as float(53))=0.0) and (cast(re1_0.a_number as float(53))/nullif(cast(re1_0.a_double as float(53)),0.0))>0.0 or not((cast(re1_0.a_double as float(53))=0.0 or not(cast(re1_0.a_double as float(53))=0.0)))",
+        "mysql": "cast(re1_0.a_double as double)=0.0 and (cast(re1_0.a_number as double)=0.0 and 1<>1 or not(cast(re1_0.a_number as double)=0.0) and (cast(re1_0.a_number as double)>0.0 and 1=1 or not(cast(re1_0.a_number as double)>0.0) and 1<>1 or not((cast(re1_0.a_number as double)>0.0 or not(cast(re1_0.a_number as double)>0.0)))) or not((cast(re1_0.a_number as double)=0.0 or not(cast(re1_0.a_number as double)=0.0)))) or not(cast(re1_0.a_double as double)=0.0) and (cast(re1_0.a_number as double)/nullif(cast(re1_0.a_double as double),0.0))>0.0 or not((cast(re1_0.a_double as double)=0.0 or not(cast(re1_0.a_double as double)=0.0)))"
+      }
+    },
+    "cr-div-zero": {
+      "note": "Division by a column is guarded with NULLIF, so a zero divisor is SQL NULL (UNKNOWN, excluded) rather than an aborted query. The surrounding CASE is the planner's own ternary over the divisor.",
+      "where": {
+        "h2": "cast(re1_0.a_number as float(53))=0.0 and (cast(re1_0.a_number as float(53))=0.0 and 1<>1 or not(cast(re1_0.a_number as float(53))=0.0) and (cast(re1_0.a_number as float(53))>0.0 and 1=1 or not(cast(re1_0.a_number as float(53))>0.0) and 1<>1 or not((cast(re1_0.a_number as float(53))>0.0 or not(cast(re1_0.a_number as float(53))>0.0)))) or not((cast(re1_0.a_number as float(53))=0.0 or not(cast(re1_0.a_number as float(53))=0.0)))) or not(cast(re1_0.a_number as float(53))=0.0) and (cast(re1_0.a_number as float(53))/nullif(cast(re1_0.a_number as float(53)),0.0))>0.5 or not((cast(re1_0.a_number as float(53))=0.0 or not(cast(re1_0.a_number as float(53))=0.0)))",
+        "postgresql": "cast(re1_0.a_number as float(53))=0.0 and (cast(re1_0.a_number as float(53))=0.0 and 1<>1 or not(cast(re1_0.a_number as float(53))=0.0) and (cast(re1_0.a_number as float(53))>0.0 and 1=1 or not(cast(re1_0.a_number as float(53))>0.0) and 1<>1 or not((cast(re1_0.a_number as float(53))>0.0 or not(cast(re1_0.a_number as float(53))>0.0)))) or not((cast(re1_0.a_number as float(53))=0.0 or not(cast(re1_0.a_number as float(53))=0.0)))) or not(cast(re1_0.a_number as float(53))=0.0) and (cast(re1_0.a_number as float(53))/nullif(cast(re1_0.a_number as float(53)),0.0))>0.5 or not((cast(re1_0.a_number as float(53))=0.0 or not(cast(re1_0.a_number as float(53))=0.0)))",
+        "mysql": "cast(re1_0.a_number as double)=0.0 and (cast(re1_0.a_number as double)=0.0 and 1<>1 or not(cast(re1_0.a_number as double)=0.0) and (cast(re1_0.a_number as double)>0.0 and 1=1 or not(cast(re1_0.a_number as double)>0.0) and 1<>1 or not((cast(re1_0.a_number as double)>0.0 or not(cast(re1_0.a_number as double)>0.0)))) or not((cast(re1_0.a_number as double)=0.0 or not(cast(re1_0.a_number as double)=0.0)))) or not(cast(re1_0.a_number as double)=0.0) and (cast(re1_0.a_number as double)/nullif(cast(re1_0.a_number as double),0.0))>0.5 or not((cast(re1_0.a_number as double)=0.0 or not(cast(re1_0.a_number as double)=0.0)))"
+      }
+    },
+    "cr-div-zero-eq-neg": {
+      "where": {
+        "h2": "not((cast(re1_0.a_number as float(53))=0.0 and (cast(re1_0.a_number as float(53))=0.0 and 1<>1 or not(cast(re1_0.a_number as float(53))=0.0) and (cast(re1_0.a_number as float(53))>0.0 and 1<>1 or not(cast(re1_0.a_number as float(53))>0.0) and 1<>1 or not((cast(re1_0.a_number as float(53))>0.0 or not(cast(re1_0.a_number as float(53))>0.0)))) or not((cast(re1_0.a_number as float(53))=0.0 or not(cast(re1_0.a_number as float(53))=0.0)))) or not(cast(re1_0.a_number as float(53))=0.0) and (cast(re1_0.a_number as float(53))/nullif(cast(re1_0.a_number as float(53)),0.0))=1.0 or not((cast(re1_0.a_number as float(53))=0.0 or not(cast(re1_0.a_number as float(53))=0.0)))))",
+        "postgresql": "not((cast(re1_0.a_number as float(53))=0.0 and (cast(re1_0.a_number as float(53))=0.0 and 1<>1 or not(cast(re1_0.a_number as float(53))=0.0) and (cast(re1_0.a_number as float(53))>0.0 and 1<>1 or not(cast(re1_0.a_number as float(53))>0.0) and 1<>1 or not((cast(re1_0.a_number as float(53))>0.0 or not(cast(re1_0.a_number as float(53))>0.0)))) or not((cast(re1_0.a_number as float(53))=0.0 or not(cast(re1_0.a_number as float(53))=0.0)))) or not(cast(re1_0.a_number as float(53))=0.0) and (cast(re1_0.a_number as float(53))/nullif(cast(re1_0.a_number as float(53)),0.0))=1.0 or not((cast(re1_0.a_number as float(53))=0.0 or not(cast(re1_0.a_number as float(53))=0.0)))))",
+        "mysql": "not((cast(re1_0.a_number as double)=0.0 and (cast(re1_0.a_number as double)=0.0 and 1<>1 or not(cast(re1_0.a_number as double)=0.0) and (cast(re1_0.a_number as double)>0.0 and 1<>1 or not(cast(re1_0.a_number as double)>0.0) and 1<>1 or not((cast(re1_0.a_number as double)>0.0 or not(cast(re1_0.a_number as double)>0.0)))) or not((cast(re1_0.a_number as double)=0.0 or not(cast(re1_0.a_number as double)=0.0)))) or not(cast(re1_0.a_number as double)=0.0) and (cast(re1_0.a_number as double)/nullif(cast(re1_0.a_number as double),0.0))=1.0 or not((cast(re1_0.a_number as double)=0.0 or not(cast(re1_0.a_number as double)=0.0)))))"
+      }
+    },
+    "cr-div-zero-ne": {
+      "where": {
+        "h2": "cast(re1_0.a_number as float(53))=0.0 and (cast(re1_0.a_number as float(53))=0.0 and 1=1 or not(cast(re1_0.a_number as float(53))=0.0) and (cast(re1_0.a_number as float(53))>0.0 and 1=1 or not(cast(re1_0.a_number as float(53))>0.0) and 1=1 or not((cast(re1_0.a_number as float(53))>0.0 or not(cast(re1_0.a_number as float(53))>0.0)))) or not((cast(re1_0.a_number as float(53))=0.0 or not(cast(re1_0.a_number as float(53))=0.0)))) or not(cast(re1_0.a_number as float(53))=0.0) and (cast(re1_0.a_number as float(53))/nullif(cast(re1_0.a_number as float(53)),0.0))<>1.0 or not((cast(re1_0.a_number as float(53))=0.0 or not(cast(re1_0.a_number as float(53))=0.0)))",
+        "postgresql": "cast(re1_0.a_number as float(53))=0.0 and (cast(re1_0.a_number as float(53))=0.0 and 1=1 or not(cast(re1_0.a_number as float(53))=0.0) and (cast(re1_0.a_number as float(53))>0.0 and 1=1 or not(cast(re1_0.a_number as float(53))>0.0) and 1=1 or not((cast(re1_0.a_number as float(53))>0.0 or not(cast(re1_0.a_number as float(53))>0.0)))) or not((cast(re1_0.a_number as float(53))=0.0 or not(cast(re1_0.a_number as float(53))=0.0)))) or not(cast(re1_0.a_number as float(53))=0.0) and (cast(re1_0.a_number as float(53))/nullif(cast(re1_0.a_number as float(53)),0.0))<>1.0 or not((cast(re1_0.a_number as float(53))=0.0 or not(cast(re1_0.a_number as float(53))=0.0)))",
+        "mysql": "cast(re1_0.a_number as double)=0.0 and (cast(re1_0.a_number as double)=0.0 and 1=1 or not(cast(re1_0.a_number as double)=0.0) and (cast(re1_0.a_number as double)>0.0 and 1=1 or not(cast(re1_0.a_number as double)>0.0) and 1=1 or not((cast(re1_0.a_number as double)>0.0 or not(cast(re1_0.a_number as double)>0.0)))) or not((cast(re1_0.a_number as double)=0.0 or not(cast(re1_0.a_number as double)=0.0)))) or not(cast(re1_0.a_number as double)=0.0) and (cast(re1_0.a_number as double)/nullif(cast(re1_0.a_number as double),0.0))<>1.0 or not((cast(re1_0.a_number as double)=0.0 or not(cast(re1_0.a_number as double)=0.0)))"
+      }
+    },
+    "cr-endswith": {
+      "where": {
+        "h2": "'prefix-xaXby' like case when re1_0.a_string is null then null else ('%'||replace(replace(replace(replace(re1_0.a_string,'\\','\\\\'),'%','\\%'),'_','\\_'),'[','\\[')) end escape '\\'",
+        "postgresql": "'prefix-xaXby' like case when re1_0.a_string is null then null else ('%'||replace(replace(replace(replace(re1_0.a_string,'\\','\\\\'),'%','\\%'),'_','\\_'),'[','\\[')) end escape '\\'",
+        "mysql": "'prefix-xaXby' like case when re1_0.a_string is null then null else concat('%',replace(replace(replace(replace(re1_0.a_string,'\\\\','\\\\\\\\'),'%','\\\\%'),'_','\\\\_'),'[','\\\\[')) end escape '\\\\'"
+      }
+    },
+    "cr-size-frac-ge": {
+      "where": {
+        "h2": "(select count(t1_0.pk) from tags t1_0 where re1_0.id=t1_0.resource_id)>=2",
+        "postgresql": "(select count(t1_0.pk) from tags t1_0 where re1_0.id=t1_0.resource_id)>=2",
+        "mysql": "(select count(t1_0.pk) from tags t1_0 where re1_0.id=t1_0.resource_id)>=2"
+      }
+    },
+    "cr-startswith": {
+      "where": {
+        "h2": "'xaXby-tail' like case when re1_0.a_string is null then null else (replace(replace(replace(replace(re1_0.a_string,'\\','\\\\'),'%','\\%'),'_','\\_'),'[','\\[')||'%') end escape '\\'",
+        "postgresql": "'xaXby-tail' like case when re1_0.a_string is null then null else (replace(replace(replace(replace(re1_0.a_string,'\\','\\\\'),'%','\\%'),'_','\\_'),'[','\\[')||'%') end escape '\\'",
+        "mysql": "'xaXby-tail' like case when re1_0.a_string is null then null else concat(replace(replace(replace(replace(re1_0.a_string,'\\\\','\\\\\\\\'),'%','\\\\%'),'_','\\\\_'),'[','\\\\['),'%') end escape '\\\\'"
+      }
+    },
+    "cr-startswith-concat": {
+      "where": {
+        "h2": "'xaXby-tail' like case when re1_0.a_string is null then null else (replace(replace(replace(replace(re1_0.a_string,'\\','\\\\'),'%','\\%'),'_','\\_'),'[','\\[')||'%') end escape '\\'",
+        "postgresql": "'xaXby-tail' like case when re1_0.a_string is null then null else (replace(replace(replace(replace(re1_0.a_string,'\\','\\\\'),'%','\\%'),'_','\\_'),'[','\\[')||'%') end escape '\\'",
+        "mysql": "'xaXby-tail' like case when re1_0.a_string is null then null else concat(replace(replace(replace(replace(re1_0.a_string,'\\\\','\\\\\\\\'),'%','\\\\%'),'_','\\\\_'),'[','\\\\['),'%') end escape '\\\\'"
+      }
+    },
+    "cs-contains": {
+      "where": {
+        "h2": "re1_0.a_string like '%one%' escape '\\'",
+        "postgresql": "re1_0.a_string like '%one%' escape '\\'",
+        "mysql": "re1_0.a_string like '%one%' escape '\\\\'"
+      }
+    },
+    "cs-endswith": {
+      "where": {
+        "h2": "re1_0.a_string like '%one' escape '\\'",
+        "postgresql": "re1_0.a_string like '%one' escape '\\'",
+        "mysql": "re1_0.a_string like '%one' escape '\\\\'"
+      }
+    },
+    "cs-eq": {
+      "where": {
+        "h2": "re1_0.a_string='one'",
+        "postgresql": "re1_0.a_string='one'",
+        "mysql": "re1_0.a_string='one'"
+      }
+    },
+    "cs-startswith": {
+      "where": {
+        "h2": "re1_0.a_string like 'one%' escape '\\'",
+        "postgresql": "re1_0.a_string like 'one%' escape '\\'",
+        "mysql": "re1_0.a_string like 'one%' escape '\\\\'"
+      }
+    },
+    "double-negation": {
+      "where": {
+        "h2": "not(not(re1_0.a_bool=true))",
+        "postgresql": "not(not(re1_0.a_bool=true))",
+        "mysql": "not(not(re1_0.a_bool=1))"
+      }
+    },
+    "double-threshold": {
+      "where": {
+        "h2": "re1_0.a_number>=1.5",
+        "postgresql": "re1_0.a_number>=1.5",
+        "mysql": "re1_0.a_number>=1.5"
+      }
+    },
+    "empty-string-eq": {
+      "where": {
+        "h2": "re1_0.a_string=''",
+        "postgresql": "re1_0.a_string=''",
+        "mysql": "re1_0.a_string=''"
+      }
+    },
+    "exists-on-empty": {
+      "where": {
+        "h2": "(select nullif(coalesce(max(case when t1_0.name='public' then 2 when not(t1_0.name='public') then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2",
+        "postgresql": "(select nullif(coalesce(max(case when t1_0.name='public' then 2 when not(t1_0.name='public') then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2",
+        "mysql": "(select nullif(coalesce(max(case when t1_0.name='public' then 2 when not(t1_0.name='public') then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2"
+      }
+    },
+    "exists-one-multi": {
+      "where": {
+        "h2": "(select (coalesce(sum(case when t1_0.name='public' then 1 else 0 end),0)+nullif(coalesce(max(case when t1_0.name='public' then 0 when not(t1_0.name='public') then 0 else 1 end),0),1)) from tags t1_0 where re1_0.id=t1_0.resource_id)=1",
+        "postgresql": "(select (coalesce(sum(case when t1_0.name='public' then 1 else 0 end),0)+nullif(coalesce(max(case when t1_0.name='public' then 0 when not(t1_0.name='public') then 0 else 1 end),0),1)) from tags t1_0 where re1_0.id=t1_0.resource_id)=1",
+        "mysql": "(select (coalesce(sum(case when t1_0.name='public' then 1 else 0 end),0)+nullif(coalesce(max(case when t1_0.name='public' then 0 when not(t1_0.name='public') then 0 else 1 end),0),1)) from tags t1_0 where re1_0.id=t1_0.resource_id)=1"
+      }
+    },
+    "f2f-contains": {
+      "where": {
+        "h2": "re1_0.a_string like case when re1_0.a_optional_string is null then null else (('%'||replace(replace(replace(replace(re1_0.a_optional_string,'\\','\\\\'),'%','\\%'),'_','\\_'),'[','\\['))||'%') end escape '\\'",
+        "postgresql": "re1_0.a_string like case when re1_0.a_optional_string is null then null else (('%'||replace(replace(replace(replace(re1_0.a_optional_string,'\\','\\\\'),'%','\\%'),'_','\\_'),'[','\\['))||'%') end escape '\\'",
+        "mysql": "re1_0.a_string like case when re1_0.a_optional_string is null then null else concat(concat('%',replace(replace(replace(replace(re1_0.a_optional_string,'\\\\','\\\\\\\\'),'%','\\\\%'),'_','\\\\_'),'[','\\\\[')),'%') end escape '\\\\'"
+      }
+    },
+    "f2f-endswith": {
+      "where": {
+        "h2": "re1_0.a_string like case when re1_0.a_optional_string is null then null else ('%'||replace(replace(replace(replace(re1_0.a_optional_string,'\\','\\\\'),'%','\\%'),'_','\\_'),'[','\\[')) end escape '\\'",
+        "postgresql": "re1_0.a_string like case when re1_0.a_optional_string is null then null else ('%'||replace(replace(replace(replace(re1_0.a_optional_string,'\\','\\\\'),'%','\\%'),'_','\\_'),'[','\\[')) end escape '\\'",
+        "mysql": "re1_0.a_string like case when re1_0.a_optional_string is null then null else concat('%',replace(replace(replace(replace(re1_0.a_optional_string,'\\\\','\\\\\\\\'),'%','\\\\%'),'_','\\\\_'),'[','\\\\[')) end escape '\\\\'"
+      }
+    },
+    "f2f-startswith": {
+      "where": {
+        "h2": "re1_0.a_string like case when re1_0.a_optional_string is null then null else (replace(replace(replace(replace(re1_0.a_optional_string,'\\','\\\\'),'%','\\%'),'_','\\_'),'[','\\[')||'%') end escape '\\'",
+        "postgresql": "re1_0.a_string like case when re1_0.a_optional_string is null then null else (replace(replace(replace(replace(re1_0.a_optional_string,'\\','\\\\'),'%','\\%'),'_','\\_'),'[','\\[')||'%') end escape '\\'",
+        "mysql": "re1_0.a_string like case when re1_0.a_optional_string is null then null else concat(replace(replace(replace(replace(re1_0.a_optional_string,'\\\\','\\\\\\\\'),'%','\\\\%'),'_','\\\\_'),'[','\\\\['),'%') end escape '\\\\'"
+      }
+    },
+    "field-to-field": {
+      "where": {
+        "h2": "re1_0.a_string=re1_0.a_optional_string",
+        "postgresql": "re1_0.a_string=re1_0.a_optional_string",
+        "mysql": "re1_0.a_string=re1_0.a_optional_string"
+      }
+    },
+    "gt-bare": {
+      "where": {
+        "h2": "re1_0.a_number>1",
+        "postgresql": "re1_0.a_number>1",
+        "mysql": "re1_0.a_number>1"
+      }
+    },
+    "hier-ancestor-cf": {
+      "where": {
+        "h2": "re1_0.scope like 'dept.eng.%' escape '\\'",
+        "postgresql": "re1_0.scope like 'dept.eng.%' escape '\\'",
+        "mysql": "re1_0.scope like 'dept.eng.%' escape '\\\\'"
+      }
+    },
+    "hier-ancestor-ff": {
+      "where": {
+        "h2": "re1_0.scope in ('dept','dept.eng')",
+        "postgresql": "re1_0.scope in ('dept','dept.eng')",
+        "mysql": "re1_0.scope in ('dept','dept.eng')"
+      }
+    },
+    "hier-bracket": {
+      "where": {
+        "h2": "re1_0.scope like '\\[env]:prod:%' escape '\\'",
+        "postgresql": "re1_0.scope like '\\[env]:prod:%' escape '\\'",
+        "mysql": "re1_0.scope like '\\\\[env]:prod:%' escape '\\\\'"
+      }
+    },
+    "hier-descendent-cf": {
+      "where": {
+        "h2": "re1_0.scope in ('dept','dept.eng')",
+        "postgresql": "re1_0.scope in ('dept','dept.eng')",
+        "mysql": "re1_0.scope in ('dept','dept.eng')"
+      }
+    },
+    "hier-descendent-ff": {
+      "where": {
+        "h2": "re1_0.scope like 'dept.eng.%' escape '\\'",
+        "postgresql": "re1_0.scope like 'dept.eng.%' escape '\\'",
+        "mysql": "re1_0.scope like 'dept.eng.%' escape '\\\\'"
+      }
+    },
+    "hier-list-id": {
+      "where": {
+        "h2": "re1_0.id='f1'",
+        "postgresql": "re1_0.id='f1'",
+        "mysql": "re1_0.id='f1'"
+      }
+    },
+    "hier-meta-in": {
+      "where": {
+        "h2": "re1_0.scope in ('50%','50%.a_b')",
+        "postgresql": "re1_0.scope in ('50%','50%.a_b')",
+        "mysql": "re1_0.scope in ('50%','50%.a_b')"
+      }
+    },
+    "hier-meta-like": {
+      "note": "The hierarchy prefix LIKE escapes metacharacters in the path segments before wrapping them, so a segment holding `%` matches literally rather than as a wildcard.",
+      "where": {
+        "h2": "re1_0.scope like '50\\%:a\\_b:%' escape '\\'",
+        "postgresql": "re1_0.scope like '50\\%:a\\_b:%' escape '\\'",
+        "mysql": "re1_0.scope like '50\\\\%:a\\\\_b:%' escape '\\\\'"
+      }
+    },
+    "hier-overlaps-cf": {
+      "where": {
+        "h2": "re1_0.scope in ('dept') or re1_0.scope='dept.eng' or re1_0.scope like 'dept.eng.%' escape '\\'",
+        "postgresql": "re1_0.scope in ('dept') or re1_0.scope='dept.eng' or re1_0.scope like 'dept.eng.%' escape '\\'",
+        "mysql": "re1_0.scope in ('dept') or re1_0.scope='dept.eng' or re1_0.scope like 'dept.eng.%' escape '\\\\'"
+      }
+    },
+    "hier-overlaps-ff": {
+      "where": {
+        "h2": "re1_0.scope in ('dept') or re1_0.scope='dept.eng' or re1_0.scope like 'dept.eng.%' escape '\\'",
+        "postgresql": "re1_0.scope in ('dept') or re1_0.scope='dept.eng' or re1_0.scope like 'dept.eng.%' escape '\\'",
+        "mysql": "re1_0.scope in ('dept') or re1_0.scope='dept.eng' or re1_0.scope like 'dept.eng.%' escape '\\\\'"
+      }
+    },
+    "hier-overlaps-meta": {
+      "where": {
+        "h2": "re1_0.scope in ('50%') or re1_0.scope='50%:a_b' or re1_0.scope like '50\\%:a\\_b:%' escape '\\'",
+        "postgresql": "re1_0.scope in ('50%') or re1_0.scope='50%:a_b' or re1_0.scope like '50\\%:a\\_b:%' escape '\\'",
+        "mysql": "re1_0.scope in ('50%') or re1_0.scope='50%:a_b' or re1_0.scope like '50\\\\%:a\\\\_b:%' escape '\\\\'"
+      }
+    },
+    "id-concat-vf": {
+      "where": {
+        "h2": "re1_0.id='f1'",
+        "postgresql": "re1_0.id='f1'",
+        "mysql": "re1_0.id='f1'"
+      }
+    },
+    "id-eq-const": {
+      "where": {
+        "h2": "re1_0.id='f1'",
+        "postgresql": "re1_0.id='f1'",
+        "mysql": "re1_0.id='f1'"
+      }
+    },
+    "id-f2f": {
+      "where": {
+        "h2": "re1_0.a_string=re1_0.id",
+        "postgresql": "re1_0.a_string=re1_0.id",
+        "mysql": "re1_0.a_string=re1_0.id"
+      }
+    },
+    "id-f2f-ne": {
+      "where": {
+        "h2": "re1_0.a_string<>re1_0.id",
+        "postgresql": "re1_0.a_string<>re1_0.id",
+        "mysql": "re1_0.a_string<>re1_0.id"
+      }
+    },
+    "in-empty": {
+      "note": "KIND_ALWAYS_DENIED renders as `1<>1` rather than as no predicate at all: a null predicate is what ALWAYS_ALLOWED returns, and Spring Data omits the WHERE clause for it.",
+      "where": {
+        "h2": "1<>1",
+        "postgresql": "1<>1",
+        "mysql": "1<>1"
+      }
+    },
+    "in-null-elem-hasint": {
+      "where": {
+        "h2": "exists(select 1 from tags t1_0 where (t1_0.name='public' or t1_0.name is null) and re1_0.id=t1_0.resource_id)",
+        "postgresql": "exists(select 1 from tags t1_0 where (t1_0.name='public' or t1_0.name is null) and re1_0.id=t1_0.resource_id)",
+        "mysql": "exists(select 1 from tags t1_0 where (t1_0.name='public' or t1_0.name is null) and re1_0.id=t1_0.resource_id)"
+      }
+    },
+    "in-null-elem-mixed": {
+      "where": {
+        "h2": "re1_0.a_optional_string in ('x','one_two') or re1_0.a_optional_string is null",
+        "postgresql": "re1_0.a_optional_string in ('x','one_two') or re1_0.a_optional_string is null",
+        "mysql": "re1_0.a_optional_string in ('x','one_two') or re1_0.a_optional_string is null"
+      }
+    },
+    "in-null-elem-neg": {
+      "where": {
+        "h2": "not((re1_0.a_optional_string in ('x','one_two') or re1_0.a_optional_string is null))",
+        "postgresql": "not((re1_0.a_optional_string in ('x','one_two') or re1_0.a_optional_string is null))",
+        "mysql": "not((re1_0.a_optional_string in ('x','one_two') or re1_0.a_optional_string is null))"
+      }
+    },
+    "in-null-elem-only": {
+      "where": {
+        "h2": "re1_0.a_optional_string is null",
+        "postgresql": "re1_0.a_optional_string is null",
+        "mysql": "re1_0.a_optional_string is null"
+      }
+    },
+    "in-null-elem-only-neg": {
+      "where": {
+        "h2": "not(re1_0.a_optional_string is null)",
+        "postgresql": "not(re1_0.a_optional_string is null)",
+        "mysql": "not(re1_0.a_optional_string is null)"
+      }
+    },
+    "in-null-elem-rel": {
+      "where": {
+        "h2": "exists(select 1 from tags t1_0 where t1_0.name is null and re1_0.id=t1_0.resource_id)",
+        "postgresql": "exists(select 1 from tags t1_0 where t1_0.name is null and re1_0.id=t1_0.resource_id)",
+        "mysql": "exists(select 1 from tags t1_0 where t1_0.name is null and re1_0.id=t1_0.resource_id)"
+      }
+    },
+    "in-null-elem-rel-neg": {
+      "where": {
+        "h2": "not(exists(select 1 from tags t1_0 where t1_0.name is null and re1_0.id=t1_0.resource_id))",
+        "postgresql": "not(exists(select 1 from tags t1_0 where t1_0.name is null and re1_0.id=t1_0.resource_id))",
+        "mysql": "not(exists(select 1 from tags t1_0 where t1_0.name is null and re1_0.id=t1_0.resource_id))"
+      }
+    },
+    "in-single": {
+      "where": {
+        "h2": "re1_0.a_string='one'",
+        "postgresql": "re1_0.a_string='one'",
+        "mysql": "re1_0.a_string='one'"
+      }
+    },
+    "in-var-var": {
+      "where": {
+        "h2": "exists(select 1 from tags t1_0 where (t1_0.name=re1_0.a_optional_string or t1_0.name is null and re1_0.a_optional_string is null) and re1_0.id=t1_0.resource_id)",
+        "postgresql": "exists(select 1 from tags t1_0 where (t1_0.name=re1_0.a_optional_string or t1_0.name is null and re1_0.a_optional_string is null) and re1_0.id=t1_0.resource_id)",
+        "mysql": "exists(select 1 from tags t1_0 where (t1_0.name=re1_0.a_optional_string or t1_0.name is null and re1_0.a_optional_string is null) and re1_0.id=t1_0.resource_id)"
+      }
+    },
+    "in-var-var-neg": {
+      "where": {
+        "h2": "not(exists(select 1 from tags t1_0 where (t1_0.name=re1_0.a_optional_string or t1_0.name is null and re1_0.a_optional_string is null) and re1_0.id=t1_0.resource_id))",
+        "postgresql": "not(exists(select 1 from tags t1_0 where (t1_0.name=re1_0.a_optional_string or t1_0.name is null and re1_0.a_optional_string is null) and re1_0.id=t1_0.resource_id))",
+        "mysql": "not(exists(select 1 from tags t1_0 where (t1_0.name=re1_0.a_optional_string or t1_0.name is null and re1_0.a_optional_string is null) and re1_0.id=t1_0.resource_id))"
+      }
+    },
+    "lambda-field-to-field": {
+      "where": {
+        "h2": "(select nullif(coalesce(max(case when t1_0.name=re1_0.a_string then 2 when not(t1_0.name=re1_0.a_string) then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2",
+        "postgresql": "(select nullif(coalesce(max(case when t1_0.name=re1_0.a_string then 2 when not(t1_0.name=re1_0.a_string) then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2",
+        "mysql": "(select nullif(coalesce(max(case when t1_0.name=re1_0.a_string then 2 when not(t1_0.name=re1_0.a_string) then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2"
+      }
+    },
+    "lambda-in-principal": {
+      "where": {
+        "h2": "(select nullif(coalesce(max(case when t1_0.name in ('public','special') then 2 when not(t1_0.name in ('public','special')) then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2",
+        "postgresql": "(select nullif(coalesce(max(case when t1_0.name in ('public','special') then 2 when not(t1_0.name in ('public','special')) then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2",
+        "mysql": "(select nullif(coalesce(max(case when t1_0.name in ('public','special') then 2 when not(t1_0.name in ('public','special')) then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2"
+      }
+    },
+    "le-bare": {
+      "where": {
+        "h2": "re1_0.a_number<=2",
+        "postgresql": "re1_0.a_number<=2",
+        "mysql": "re1_0.a_number<=2"
+      }
+    },
+    "like-backslash": {
+      "where": {
+        "h2": "re1_0.a_string like '%\\\\' escape '\\'",
+        "postgresql": "re1_0.a_string like '%\\\\' escape '\\'",
+        "mysql": "re1_0.a_string like '%\\\\\\\\' escape '\\\\'"
+      }
+    },
+    "like-bracket": {
+      "note": "`[` is escaped even though H2, PostgreSQL and MySQL treat it as inert: on SQL Server a `[...]` is a character class EVEN WITH an ESCAPE clause, so an unescaped one would match a single character from the set. No oracle leg in this repository can see this escape; these bytes are the only place it is pinned.",
+      "where": {
+        "h2": "re1_0.a_string like '\\[SEC]%' escape '\\'",
+        "postgresql": "re1_0.a_string like '\\[SEC]%' escape '\\'",
+        "mysql": "re1_0.a_string like '\\\\[SEC]%' escape '\\\\'"
+      }
+    },
+    "like-percent": {
+      "note": "LIKE metacharacter escaping (#258/#259). The `%` in the value is escaped and the escape character declared, so the pattern matches a literal `100%` prefix rather than everything starting with `100`. MySQL doubles the backslashes because it also treats `\\` as an escape inside the string literal — see the README's \"MySQL / MariaDB LIKE backslash escaping\".",
+      "where": {
+        "h2": "re1_0.a_string like '100\\%%' escape '\\'",
+        "postgresql": "re1_0.a_string like '100\\%%' escape '\\'",
+        "mysql": "re1_0.a_string like '100\\\\%%' escape '\\\\'"
+      }
+    },
+    "like-underscore": {
+      "where": {
+        "h2": "re1_0.a_string like '%a\\_b%' escape '\\'",
+        "postgresql": "re1_0.a_string like '%a\\_b%' escape '\\'",
+        "mysql": "re1_0.a_string like '%a\\\\_b%' escape '\\\\'"
+      }
+    },
+    "macro-depth3-all": {
+      "where": {
+        "h2": "(select nullif(coalesce(max(case when (select nullif(coalesce(max(case when (select nullif(coalesce(max(case when l1_1.name='gold' then 2 when not(l1_1.name='gold') then 0 else 1 end),0),1) from subcategory_label l1_0 join labels l1_1 on l1_1.id=l1_0.label_id where sc1_1.id=l1_0.subcategory_id)=2 then 0 when not((select nullif(coalesce(max(case when l2_1.name='gold' then 2 when not(l2_1.name='gold') then 0 else 1 end),0),1) from subcategory_label l2_0 join labels l2_1 on l2_1.id=l2_0.label_id where sc1_1.id=l2_0.subcategory_id)=2) then 2 else 1 end),0),1) from category_subcategory sc1_0 join subcategories sc1_1 on sc1_1.id=sc1_0.subcategory_id where c1_1.id=sc1_0.category_id)=0 then 2 when not((select nullif(coalesce(max(case when (select nullif(coalesce(max(case when l3_1.name='gold' then 2 when not(l3_1.name='gold') then 0 else 1 end),0),1) from subcategory_label l3_0 join labels l3_1 on l3_1.id=l3_0.label_id where sc2_1.id=l3_0.subcategory_id)=2 then 0 when not((select nullif(coalesce(max(case when l4_1.name='gold' then 2 when not(l4_1.name='gold') then 0 else 1 end),0),1) from subcategory_label l4_0 join labels l4_1 on l4_1.id=l4_0.label_id where sc2_1.id=l4_0.subcategory_id)=2) then 2 else 1 end),0),1) from category_subcategory sc2_0 join subcategories sc2_1 on sc2_1.id=sc2_0.subcategory_id where c1_1.id=sc2_0.category_id)=0) then 0 else 1 end),0),1) from resource_category c1_0 join categories c1_1 on c1_1.id=c1_0.category_id where re1_0.id=c1_0.resource_id)=2",
+        "postgresql": "(select nullif(coalesce(max(case when (select nullif(coalesce(max(case when (select nullif(coalesce(max(case when l1_1.name='gold' then 2 when not(l1_1.name='gold') then 0 else 1 end),0),1) from subcategory_label l1_0 join labels l1_1 on l1_1.id=l1_0.label_id where sc1_1.id=l1_0.subcategory_id)=2 then 0 when not((select nullif(coalesce(max(case when l2_1.name='gold' then 2 when not(l2_1.name='gold') then 0 else 1 end),0),1) from subcategory_label l2_0 join labels l2_1 on l2_1.id=l2_0.label_id where sc1_1.id=l2_0.subcategory_id)=2) then 2 else 1 end),0),1) from category_subcategory sc1_0 join subcategories sc1_1 on sc1_1.id=sc1_0.subcategory_id where c1_1.id=sc1_0.category_id)=0 then 2 when not((select nullif(coalesce(max(case when (select nullif(coalesce(max(case when l3_1.name='gold' then 2 when not(l3_1.name='gold') then 0 else 1 end),0),1) from subcategory_label l3_0 join labels l3_1 on l3_1.id=l3_0.label_id where sc2_1.id=l3_0.subcategory_id)=2 then 0 when not((select nullif(coalesce(max(case when l4_1.name='gold' then 2 when not(l4_1.name='gold') then 0 else 1 end),0),1) from subcategory_label l4_0 join labels l4_1 on l4_1.id=l4_0.label_id where sc2_1.id=l4_0.subcategory_id)=2) then 2 else 1 end),0),1) from category_subcategory sc2_0 join subcategories sc2_1 on sc2_1.id=sc2_0.subcategory_id where c1_1.id=sc2_0.category_id)=0) then 0 else 1 end),0),1) from resource_category c1_0 join categories c1_1 on c1_1.id=c1_0.category_id where re1_0.id=c1_0.resource_id)=2",
+        "mysql": "(select nullif(coalesce(max(case when (select nullif(coalesce(max(case when (select nullif(coalesce(max(case when l1_1.name='gold' then 2 when not(l1_1.name='gold') then 0 else 1 end),0),1) from subcategory_label l1_0 join labels l1_1 on l1_1.id=l1_0.label_id where sc1_1.id=l1_0.subcategory_id)=2 then 0 when not((select nullif(coalesce(max(case when l2_1.name='gold' then 2 when not(l2_1.name='gold') then 0 else 1 end),0),1) from subcategory_label l2_0 join labels l2_1 on l2_1.id=l2_0.label_id where sc1_1.id=l2_0.subcategory_id)=2) then 2 else 1 end),0),1) from category_subcategory sc1_0 join subcategories sc1_1 on sc1_1.id=sc1_0.subcategory_id where c1_1.id=sc1_0.category_id)=0 then 2 when not((select nullif(coalesce(max(case when (select nullif(coalesce(max(case when l3_1.name='gold' then 2 when not(l3_1.name='gold') then 0 else 1 end),0),1) from subcategory_label l3_0 join labels l3_1 on l3_1.id=l3_0.label_id where sc2_1.id=l3_0.subcategory_id)=2 then 0 when not((select nullif(coalesce(max(case when l4_1.name='gold' then 2 when not(l4_1.name='gold') then 0 else 1 end),0),1) from subcategory_label l4_0 join labels l4_1 on l4_1.id=l4_0.label_id where sc2_1.id=l4_0.subcategory_id)=2) then 2 else 1 end),0),1) from category_subcategory sc2_0 join subcategories sc2_1 on sc2_1.id=sc2_0.subcategory_id where c1_1.id=sc2_0.category_id)=0) then 0 else 1 end),0),1) from resource_category c1_0 join categories c1_1 on c1_1.id=c1_0.category_id where re1_0.id=c1_0.resource_id)=2"
+      }
+    },
+    "macro-depth3-exists": {
+      "where": {
+        "h2": "(select nullif(coalesce(max(case when (select nullif(coalesce(max(case when (select nullif(coalesce(max(case when l1_1.name='gold' then 2 when not(l1_1.name='gold') then 0 else 1 end),0),1) from subcategory_label l1_0 join labels l1_1 on l1_1.id=l1_0.label_id where sc1_1.id=l1_0.subcategory_id)=2 then 2 when not((select nullif(coalesce(max(case when l2_1.name='gold' then 2 when not(l2_1.name='gold') then 0 else 1 end),0),1) from subcategory_label l2_0 join labels l2_1 on l2_1.id=l2_0.label_id where sc1_1.id=l2_0.subcategory_id)=2) then 0 else 1 end),0),1) from category_subcategory sc1_0 join subcategories sc1_1 on sc1_1.id=sc1_0.subcategory_id where c1_1.id=sc1_0.category_id)=2 then 2 when not((select nullif(coalesce(max(case when (select nullif(coalesce(max(case when l3_1.name='gold' then 2 when not(l3_1.name='gold') then 0 else 1 end),0),1) from subcategory_label l3_0 join labels l3_1 on l3_1.id=l3_0.label_id where sc2_1.id=l3_0.subcategory_id)=2 then 2 when not((select nullif(coalesce(max(case when l4_1.name='gold' then 2 when not(l4_1.name='gold') then 0 else 1 end),0),1) from subcategory_label l4_0 join labels l4_1 on l4_1.id=l4_0.label_id where sc2_1.id=l4_0.subcategory_id)=2) then 0 else 1 end),0),1) from category_subcategory sc2_0 join subcategories sc2_1 on sc2_1.id=sc2_0.subcategory_id where c1_1.id=sc2_0.category_id)=2) then 0 else 1 end),0),1) from resource_category c1_0 join categories c1_1 on c1_1.id=c1_0.category_id where re1_0.id=c1_0.resource_id)=2",
+        "postgresql": "(select nullif(coalesce(max(case when (select nullif(coalesce(max(case when (select nullif(coalesce(max(case when l1_1.name='gold' then 2 when not(l1_1.name='gold') then 0 else 1 end),0),1) from subcategory_label l1_0 join labels l1_1 on l1_1.id=l1_0.label_id where sc1_1.id=l1_0.subcategory_id)=2 then 2 when not((select nullif(coalesce(max(case when l2_1.name='gold' then 2 when not(l2_1.name='gold') then 0 else 1 end),0),1) from subcategory_label l2_0 join labels l2_1 on l2_1.id=l2_0.label_id where sc1_1.id=l2_0.subcategory_id)=2) then 0 else 1 end),0),1) from category_subcategory sc1_0 join subcategories sc1_1 on sc1_1.id=sc1_0.subcategory_id where c1_1.id=sc1_0.category_id)=2 then 2 when not((select nullif(coalesce(max(case when (select nullif(coalesce(max(case when l3_1.name='gold' then 2 when not(l3_1.name='gold') then 0 else 1 end),0),1) from subcategory_label l3_0 join labels l3_1 on l3_1.id=l3_0.label_id where sc2_1.id=l3_0.subcategory_id)=2 then 2 when not((select nullif(coalesce(max(case when l4_1.name='gold' then 2 when not(l4_1.name='gold') then 0 else 1 end),0),1) from subcategory_label l4_0 join labels l4_1 on l4_1.id=l4_0.label_id where sc2_1.id=l4_0.subcategory_id)=2) then 0 else 1 end),0),1) from category_subcategory sc2_0 join subcategories sc2_1 on sc2_1.id=sc2_0.subcategory_id where c1_1.id=sc2_0.category_id)=2) then 0 else 1 end),0),1) from resource_category c1_0 join categories c1_1 on c1_1.id=c1_0.category_id where re1_0.id=c1_0.resource_id)=2",
+        "mysql": "(select nullif(coalesce(max(case when (select nullif(coalesce(max(case when (select nullif(coalesce(max(case when l1_1.name='gold' then 2 when not(l1_1.name='gold') then 0 else 1 end),0),1) from subcategory_label l1_0 join labels l1_1 on l1_1.id=l1_0.label_id where sc1_1.id=l1_0.subcategory_id)=2 then 2 when not((select nullif(coalesce(max(case when l2_1.name='gold' then 2 when not(l2_1.name='gold') then 0 else 1 end),0),1) from subcategory_label l2_0 join labels l2_1 on l2_1.id=l2_0.label_id where sc1_1.id=l2_0.subcategory_id)=2) then 0 else 1 end),0),1) from category_subcategory sc1_0 join subcategories sc1_1 on sc1_1.id=sc1_0.subcategory_id where c1_1.id=sc1_0.category_id)=2 then 2 when not((select nullif(coalesce(max(case when (select nullif(coalesce(max(case when l3_1.name='gold' then 2 when not(l3_1.name='gold') then 0 else 1 end),0),1) from subcategory_label l3_0 join labels l3_1 on l3_1.id=l3_0.label_id where sc2_1.id=l3_0.subcategory_id)=2 then 2 when not((select nullif(coalesce(max(case when l4_1.name='gold' then 2 when not(l4_1.name='gold') then 0 else 1 end),0),1) from subcategory_label l4_0 join labels l4_1 on l4_1.id=l4_0.label_id where sc2_1.id=l4_0.subcategory_id)=2) then 0 else 1 end),0),1) from category_subcategory sc2_0 join subcategories sc2_1 on sc2_1.id=sc2_0.subcategory_id where c1_1.id=sc2_0.category_id)=2) then 0 else 1 end),0),1) from resource_category c1_0 join categories c1_1 on c1_1.id=c1_0.category_id where re1_0.id=c1_0.resource_id)=2"
+      }
+    },
+    "macro-depth3-not-exists": {
+      "where": {
+        "h2": "not((select nullif(coalesce(max(case when (select nullif(coalesce(max(case when (select nullif(coalesce(max(case when l1_1.name='gold' then 2 when not(l1_1.name='gold') then 0 else 1 end),0),1) from subcategory_label l1_0 join labels l1_1 on l1_1.id=l1_0.label_id where sc1_1.id=l1_0.subcategory_id)=2 then 2 when not((select nullif(coalesce(max(case when l2_1.name='gold' then 2 when not(l2_1.name='gold') then 0 else 1 end),0),1) from subcategory_label l2_0 join labels l2_1 on l2_1.id=l2_0.label_id where sc1_1.id=l2_0.subcategory_id)=2) then 0 else 1 end),0),1) from category_subcategory sc1_0 join subcategories sc1_1 on sc1_1.id=sc1_0.subcategory_id where c1_1.id=sc1_0.category_id)=2 then 2 when not((select nullif(coalesce(max(case when (select nullif(coalesce(max(case when l3_1.name='gold' then 2 when not(l3_1.name='gold') then 0 else 1 end),0),1) from subcategory_label l3_0 join labels l3_1 on l3_1.id=l3_0.label_id where sc2_1.id=l3_0.subcategory_id)=2 then 2 when not((select nullif(coalesce(max(case when l4_1.name='gold' then 2 when not(l4_1.name='gold') then 0 else 1 end),0),1) from subcategory_label l4_0 join labels l4_1 on l4_1.id=l4_0.label_id where sc2_1.id=l4_0.subcategory_id)=2) then 0 else 1 end),0),1) from category_subcategory sc2_0 join subcategories sc2_1 on sc2_1.id=sc2_0.subcategory_id where c1_1.id=sc2_0.category_id)=2) then 0 else 1 end),0),1) from resource_category c1_0 join categories c1_1 on c1_1.id=c1_0.category_id where re1_0.id=c1_0.resource_id)=2)",
+        "postgresql": "not((select nullif(coalesce(max(case when (select nullif(coalesce(max(case when (select nullif(coalesce(max(case when l1_1.name='gold' then 2 when not(l1_1.name='gold') then 0 else 1 end),0),1) from subcategory_label l1_0 join labels l1_1 on l1_1.id=l1_0.label_id where sc1_1.id=l1_0.subcategory_id)=2 then 2 when not((select nullif(coalesce(max(case when l2_1.name='gold' then 2 when not(l2_1.name='gold') then 0 else 1 end),0),1) from subcategory_label l2_0 join labels l2_1 on l2_1.id=l2_0.label_id where sc1_1.id=l2_0.subcategory_id)=2) then 0 else 1 end),0),1) from category_subcategory sc1_0 join subcategories sc1_1 on sc1_1.id=sc1_0.subcategory_id where c1_1.id=sc1_0.category_id)=2 then 2 when not((select nullif(coalesce(max(case when (select nullif(coalesce(max(case when l3_1.name='gold' then 2 when not(l3_1.name='gold') then 0 else 1 end),0),1) from subcategory_label l3_0 join labels l3_1 on l3_1.id=l3_0.label_id where sc2_1.id=l3_0.subcategory_id)=2 then 2 when not((select nullif(coalesce(max(case when l4_1.name='gold' then 2 when not(l4_1.name='gold') then 0 else 1 end),0),1) from subcategory_label l4_0 join labels l4_1 on l4_1.id=l4_0.label_id where sc2_1.id=l4_0.subcategory_id)=2) then 0 else 1 end),0),1) from category_subcategory sc2_0 join subcategories sc2_1 on sc2_1.id=sc2_0.subcategory_id where c1_1.id=sc2_0.category_id)=2) then 0 else 1 end),0),1) from resource_category c1_0 join categories c1_1 on c1_1.id=c1_0.category_id where re1_0.id=c1_0.resource_id)=2)",
+        "mysql": "not((select nullif(coalesce(max(case when (select nullif(coalesce(max(case when (select nullif(coalesce(max(case when l1_1.name='gold' then 2 when not(l1_1.name='gold') then 0 else 1 end),0),1) from subcategory_label l1_0 join labels l1_1 on l1_1.id=l1_0.label_id where sc1_1.id=l1_0.subcategory_id)=2 then 2 when not((select nullif(coalesce(max(case when l2_1.name='gold' then 2 when not(l2_1.name='gold') then 0 else 1 end),0),1) from subcategory_label l2_0 join labels l2_1 on l2_1.id=l2_0.label_id where sc1_1.id=l2_0.subcategory_id)=2) then 0 else 1 end),0),1) from category_subcategory sc1_0 join subcategories sc1_1 on sc1_1.id=sc1_0.subcategory_id where c1_1.id=sc1_0.category_id)=2 then 2 when not((select nullif(coalesce(max(case when (select nullif(coalesce(max(case when l3_1.name='gold' then 2 when not(l3_1.name='gold') then 0 else 1 end),0),1) from subcategory_label l3_0 join labels l3_1 on l3_1.id=l3_0.label_id where sc2_1.id=l3_0.subcategory_id)=2 then 2 when not((select nullif(coalesce(max(case when l4_1.name='gold' then 2 when not(l4_1.name='gold') then 0 else 1 end),0),1) from subcategory_label l4_0 join labels l4_1 on l4_1.id=l4_0.label_id where sc2_1.id=l4_0.subcategory_id)=2) then 0 else 1 end),0),1) from category_subcategory sc2_0 join subcategories sc2_1 on sc2_1.id=sc2_0.subcategory_id where c1_1.id=sc2_0.category_id)=2) then 0 else 1 end),0),1) from resource_category c1_0 join categories c1_1 on c1_1.id=c1_0.category_id where re1_0.id=c1_0.resource_id)=2)"
+      }
+    },
+    "n-all-mixed-null": {
+      "where": {
+        "h2": "(select nullif(coalesce(max(case when t1_0.name<>'x' then 0 when not(t1_0.name<>'x') then 2 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=0",
+        "postgresql": "(select nullif(coalesce(max(case when t1_0.name<>'x' then 0 when not(t1_0.name<>'x') then 2 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=0",
+        "mysql": "(select nullif(coalesce(max(case when t1_0.name<>'x' then 0 when not(t1_0.name<>'x') then 2 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=0"
+      }
+    },
+    "n-not-all-absorb": {
+      "where": {
+        "h2": "not((select nullif(coalesce(max(case when t1_0.name<>'public' then 0 when not(t1_0.name<>'public') then 2 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=0)",
+        "postgresql": "not((select nullif(coalesce(max(case when t1_0.name<>'public' then 0 when not(t1_0.name<>'public') then 2 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=0)",
+        "mysql": "not((select nullif(coalesce(max(case when t1_0.name<>'public' then 0 when not(t1_0.name<>'public') then 2 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=0)"
+      }
+    },
+    "n-not-all-null": {
+      "where": {
+        "h2": "not((select nullif(coalesce(max(case when t1_0.name='public' then 0 when not(t1_0.name='public') then 2 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=0)",
+        "postgresql": "not((select nullif(coalesce(max(case when t1_0.name='public' then 0 when not(t1_0.name='public') then 2 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=0)",
+        "mysql": "not((select nullif(coalesce(max(case when t1_0.name='public' then 0 when not(t1_0.name='public') then 2 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=0)"
+      }
+    },
+    "n-not-exists-one-null": {
+      "where": {
+        "h2": "not((select (coalesce(sum(case when t1_0.name='public' then 1 else 0 end),0)+nullif(coalesce(max(case when t1_0.name='public' then 0 when not(t1_0.name='public') then 0 else 1 end),0),1)) from tags t1_0 where re1_0.id=t1_0.resource_id)=1)",
+        "postgresql": "not((select (coalesce(sum(case when t1_0.name='public' then 1 else 0 end),0)+nullif(coalesce(max(case when t1_0.name='public' then 0 when not(t1_0.name='public') then 0 else 1 end),0),1)) from tags t1_0 where re1_0.id=t1_0.resource_id)=1)",
+        "mysql": "not((select (coalesce(sum(case when t1_0.name='public' then 1 else 0 end),0)+nullif(coalesce(max(case when t1_0.name='public' then 0 when not(t1_0.name='public') then 0 else 1 end),0),1)) from tags t1_0 where re1_0.id=t1_0.resource_id)=1)"
+      }
+    },
+    "nan-ord-inf": {
+      "where": {
+        "h2": "re1_0.a_bool=true and 1=1 or not(re1_0.a_bool=true) and 1<>1 or not((re1_0.a_bool=true or not(re1_0.a_bool=true)))",
+        "postgresql": "re1_0.a_bool=true and 1=1 or not(re1_0.a_bool=true) and 1<>1 or not((re1_0.a_bool=true or not(re1_0.a_bool=true)))",
+        "mysql": "re1_0.a_bool=1 and 1=1 or not(re1_0.a_bool=1) and 1<>1 or not((re1_0.a_bool=1 or not(re1_0.a_bool=1)))"
+      }
+    },
+    "nan-ord-le": {
+      "where": {
+        "h2": "re1_0.a_bool=true and (re1_0.a_bool=true and 1<>1 or not(re1_0.a_bool=true) and 1<>1 or not((re1_0.a_bool=true or not(re1_0.a_bool=true)))) or not(re1_0.a_bool=true) and (re1_0.a_bool=true and 1=1 or not(re1_0.a_bool=true) and 1<>1 or not((re1_0.a_bool=true or not(re1_0.a_bool=true)))) or not((re1_0.a_bool=true or not(re1_0.a_bool=true)))",
+        "postgresql": "re1_0.a_bool=true and (re1_0.a_bool=true and 1<>1 or not(re1_0.a_bool=true) and 1<>1 or not((re1_0.a_bool=true or not(re1_0.a_bool=true)))) or not(re1_0.a_bool=true) and (re1_0.a_bool=true and 1=1 or not(re1_0.a_bool=true) and 1<>1 or not((re1_0.a_bool=true or not(re1_0.a_bool=true)))) or not((re1_0.a_bool=true or not(re1_0.a_bool=true)))",
+        "mysql": "re1_0.a_bool=1 and (re1_0.a_bool=1 and 1<>1 or not(re1_0.a_bool=1) and 1<>1 or not((re1_0.a_bool=1 or not(re1_0.a_bool=1)))) or not(re1_0.a_bool=1) and (re1_0.a_bool=1 and 1=1 or not(re1_0.a_bool=1) and 1<>1 or not((re1_0.a_bool=1 or not(re1_0.a_bool=1)))) or not((re1_0.a_bool=1 or not(re1_0.a_bool=1)))"
+      }
+    },
+    "nan-ord-ternary": {
+      "where": {
+        "h2": "re1_0.a_bool=true and 1=1 or not(re1_0.a_bool=true) and 1<>1 or not((re1_0.a_bool=true or not(re1_0.a_bool=true)))",
+        "postgresql": "re1_0.a_bool=true and 1=1 or not(re1_0.a_bool=true) and 1<>1 or not((re1_0.a_bool=true or not(re1_0.a_bool=true)))",
+        "mysql": "re1_0.a_bool=1 and 1=1 or not(re1_0.a_bool=1) and 1<>1 or not((re1_0.a_bool=1 or not(re1_0.a_bool=1)))"
+      }
+    },
+    "nan-ord-ternary-vf": {
+      "where": {
+        "h2": "re1_0.a_bool=true and 1=1 or not(re1_0.a_bool=true) and 1<>1 or not((re1_0.a_bool=true or not(re1_0.a_bool=true)))",
+        "postgresql": "re1_0.a_bool=true and 1=1 or not(re1_0.a_bool=true) and 1<>1 or not((re1_0.a_bool=true or not(re1_0.a_bool=true)))",
+        "mysql": "re1_0.a_bool=1 and 1=1 or not(re1_0.a_bool=1) and 1<>1 or not((re1_0.a_bool=1 or not(re1_0.a_bool=1)))"
+      }
+    },
+    "nary-and": {
+      "where": {
+        "h2": "re1_0.a_bool=true and re1_0.a_number>=0 and re1_0.a_string<>'one'",
+        "postgresql": "re1_0.a_bool=true and re1_0.a_number>=0 and re1_0.a_string<>'one'",
+        "mysql": "re1_0.a_bool=1 and re1_0.a_number>=0 and re1_0.a_string<>'one'"
+      }
+    },
+    "neg-number": {
+      "where": {
+        "h2": "re1_0.a_number<-1",
+        "postgresql": "re1_0.a_number<-1",
+        "mysql": "re1_0.a_number<-1"
+      }
+    },
+    "not-and": {
+      "where": {
+        "h2": "not(re1_0.a_bool=true and re1_0.a_string<>'one')",
+        "postgresql": "not(re1_0.a_bool=true and re1_0.a_string<>'one')",
+        "mysql": "not(re1_0.a_bool=1 and re1_0.a_string<>'one')"
+      }
+    },
+    "not-contains": {
+      "note": "The negated string match against a COLUMN needle. The null guard is nested inside the pattern rather than conjoined with the LIKE: `needle IS NOT NULL AND haystack LIKE ...` is definite FALSE for a NULL needle, and NOT FALSE is TRUE, which readmitted every row the PDP denies (#387).",
+      "where": {
+        "h2": "not(re1_0.a_string like case when re1_0.a_optional_string is null then null else (('%'||replace(replace(replace(replace(re1_0.a_optional_string,'\\','\\\\'),'%','\\%'),'_','\\_'),'[','\\['))||'%') end escape '\\')",
+        "postgresql": "not(re1_0.a_string like case when re1_0.a_optional_string is null then null else (('%'||replace(replace(replace(replace(re1_0.a_optional_string,'\\','\\\\'),'%','\\%'),'_','\\_'),'[','\\['))||'%') end escape '\\')",
+        "mysql": "not(re1_0.a_string like case when re1_0.a_optional_string is null then null else concat(concat('%',replace(replace(replace(replace(re1_0.a_optional_string,'\\\\','\\\\\\\\'),'%','\\\\%'),'_','\\\\_'),'[','\\\\[')),'%') end escape '\\\\')"
+      }
+    },
+    "not-empty": {
+      "where": {
+        "h2": "not(not(exists(select 1 from tags t1_0 where 1=1 and re1_0.id=t1_0.resource_id)))",
+        "postgresql": "not(not(exists(select 1 from tags t1_0 where 1=1 and re1_0.id=t1_0.resource_id)))",
+        "mysql": "not(not(exists(select 1 from tags t1_0 where 1=1 and re1_0.id=t1_0.resource_id)))"
+      }
+    },
+    "not-exists": {
+      "where": {
+        "h2": "not((select nullif(coalesce(max(case when t1_0.name='private' then 2 when not(t1_0.name='private') then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2)",
+        "postgresql": "not((select nullif(coalesce(max(case when t1_0.name='private' then 2 when not(t1_0.name='private') then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2)",
+        "mysql": "not((select nullif(coalesce(max(case when t1_0.name='private' then 2 when not(t1_0.name='private') then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2)"
+      }
+    },
+    "not-gt": {
+      "where": {
+        "h2": "not(re1_0.a_number>1)",
+        "postgresql": "not(re1_0.a_number>1)",
+        "mysql": "not(re1_0.a_number>1)"
+      }
+    },
+    "not-lt": {
+      "where": {
+        "h2": "not(re1_0.a_number<2)",
+        "postgresql": "not(re1_0.a_number<2)",
+        "mysql": "not(re1_0.a_number<2)"
+      }
+    },
+    "not-startswith": {
+      "where": {
+        "h2": "not(re1_0.a_string like case when re1_0.a_optional_string is null then null else (replace(replace(replace(replace(re1_0.a_optional_string,'\\','\\\\'),'%','\\%'),'_','\\_'),'[','\\[')||'%') end escape '\\')",
+        "postgresql": "not(re1_0.a_string like case when re1_0.a_optional_string is null then null else (replace(replace(replace(replace(re1_0.a_optional_string,'\\','\\\\'),'%','\\%'),'_','\\_'),'[','\\[')||'%') end escape '\\')",
+        "mysql": "not(re1_0.a_string like case when re1_0.a_optional_string is null then null else concat(replace(replace(replace(replace(re1_0.a_optional_string,'\\\\','\\\\\\\\'),'%','\\\\%'),'_','\\\\_'),'[','\\\\['),'%') end escape '\\\\')"
+      }
+    },
+    "null-eq": {
+      "note": "`owner` declares NullAttributeRepresentation.EXPLICIT, so a null operand renders definitely as IS NULL (#308). Under the OMITTED convention the same wire node has to be REFUSED instead — `null-eq-missing` is that probe, and the two are indistinguishable on the wire, which is why the caller has to declare it.",
+      "where": {
+        "h2": "re1_0.a_optional_string is null",
+        "postgresql": "re1_0.a_optional_string is null",
+        "mysql": "re1_0.a_optional_string is null"
+      }
+    },
+    "null-eq-missing": {
+      "where": {
+        "h2": "re1_0.a_optional_string is null",
+        "postgresql": "re1_0.a_optional_string is null",
+        "mysql": "re1_0.a_optional_string is null"
+      }
+    },
+    "null-ne": {
+      "where": {
+        "h2": "re1_0.a_optional_string is not null",
+        "postgresql": "re1_0.a_optional_string is not null",
+        "mysql": "re1_0.a_optional_string is not null"
+      }
+    },
+    "null-not-eq": {
+      "where": {
+        "h2": "not(re1_0.a_optional_string is null)",
+        "postgresql": "not(re1_0.a_optional_string is null)",
+        "mysql": "not(re1_0.a_optional_string is null)"
+      }
+    },
+    "null-value-f2f": {
+      "where": {
+        "h2": "re1_0.a_optional_string is null and re1_0.scope is null or re1_0.a_optional_string is not null and re1_0.scope is not null and re1_0.a_optional_string=re1_0.scope",
+        "postgresql": "re1_0.a_optional_string is null and re1_0.scope is null or re1_0.a_optional_string is not null and re1_0.scope is not null and re1_0.a_optional_string=re1_0.scope",
+        "mysql": "re1_0.a_optional_string is null and re1_0.scope is null or re1_0.a_optional_string is not null and re1_0.scope is not null and re1_0.a_optional_string=re1_0.scope"
+      }
+    },
+    "null-value-ne-const": {
+      "where": {
+        "h2": "not(re1_0.a_optional_string is not null and re1_0.a_optional_string='x')",
+        "postgresql": "not(re1_0.a_optional_string is not null and re1_0.a_optional_string='x')",
+        "mysql": "not(re1_0.a_optional_string is not null and re1_0.a_optional_string='x')"
+      }
+    },
+    "null-value-not-eq-const": {
+      "where": {
+        "h2": "not(re1_0.a_optional_string is not null and re1_0.a_optional_string='x')",
+        "postgresql": "not(re1_0.a_optional_string is not null and re1_0.a_optional_string='x')",
+        "mysql": "not(re1_0.a_optional_string is not null and re1_0.a_optional_string='x')"
+      }
+    },
+    "null-value-not-in-const": {
+      "where": {
+        "h2": "not(re1_0.a_optional_string is not null and re1_0.a_optional_string in ('x','one_two'))",
+        "postgresql": "not(re1_0.a_optional_string is not null and re1_0.a_optional_string in ('x','one_two'))",
+        "mysql": "not(re1_0.a_optional_string is not null and re1_0.a_optional_string in ('x','one_two'))"
+      }
+    },
+    "null-value-pv-not-exists": {
+      "where": {
+        "h2": "not((re1_0.a_optional_string is not null and re1_0.a_optional_string='set' or re1_0.a_optional_string is not null and re1_0.a_optional_string='same' or re1_0.a_optional_string is not null and re1_0.a_optional_string='' or re1_0.a_optional_string is not null and re1_0.a_optional_string='%_o' or re1_0.a_optional_string is not null and re1_0.a_optional_string='X' or re1_0.a_optional_string is not null and re1_0.a_optional_string='Y' or re1_0.a_optional_string is not null and re1_0.a_optional_string='MIRROR' or re1_0.a_optional_string is not null and re1_0.a_optional_string='filler-1' or re1_0.a_optional_string is not null and re1_0.a_optional_string='filler-2' or re1_0.a_optional_string is not null and re1_0.a_optional_string='filler-3' or re1_0.a_optional_string is not null and re1_0.a_optional_string='filler-4'))",
+        "postgresql": "not((re1_0.a_optional_string is not null and re1_0.a_optional_string='set' or re1_0.a_optional_string is not null and re1_0.a_optional_string='same' or re1_0.a_optional_string is not null and re1_0.a_optional_string='' or re1_0.a_optional_string is not null and re1_0.a_optional_string='%_o' or re1_0.a_optional_string is not null and re1_0.a_optional_string='X' or re1_0.a_optional_string is not null and re1_0.a_optional_string='Y' or re1_0.a_optional_string is not null and re1_0.a_optional_string='MIRROR' or re1_0.a_optional_string is not null and re1_0.a_optional_string='filler-1' or re1_0.a_optional_string is not null and re1_0.a_optional_string='filler-2' or re1_0.a_optional_string is not null and re1_0.a_optional_string='filler-3' or re1_0.a_optional_string is not null and re1_0.a_optional_string='filler-4'))",
+        "mysql": "not((re1_0.a_optional_string is not null and re1_0.a_optional_string='set' or re1_0.a_optional_string is not null and re1_0.a_optional_string='same' or re1_0.a_optional_string is not null and re1_0.a_optional_string='' or re1_0.a_optional_string is not null and re1_0.a_optional_string='%_o' or re1_0.a_optional_string is not null and re1_0.a_optional_string='X' or re1_0.a_optional_string is not null and re1_0.a_optional_string='Y' or re1_0.a_optional_string is not null and re1_0.a_optional_string='MIRROR' or re1_0.a_optional_string is not null and re1_0.a_optional_string='filler-1' or re1_0.a_optional_string is not null and re1_0.a_optional_string='filler-2' or re1_0.a_optional_string is not null and re1_0.a_optional_string='filler-3' or re1_0.a_optional_string is not null and re1_0.a_optional_string='filler-4'))"
+      }
+    },
+    "optional-ne": {
+      "where": {
+        "h2": "re1_0.a_optional_string<>'x'",
+        "postgresql": "re1_0.a_optional_string<>'x'",
+        "mysql": "re1_0.a_optional_string<>'x'"
+      }
+    },
+    "or-eq-exists": {
+      "where": {
+        "h2": "re1_0.a_bool=true or (select nullif(coalesce(max(case when t1_0.name='public' then 2 when not(t1_0.name='public') then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2",
+        "postgresql": "re1_0.a_bool=true or (select nullif(coalesce(max(case when t1_0.name='public' then 2 when not(t1_0.name='public') then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2",
+        "mysql": "re1_0.a_bool=1 or (select nullif(coalesce(max(case when t1_0.name='public' then 2 when not(t1_0.name='public') then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2"
+      }
+    },
+    "or-eq-in": {
+      "where": {
+        "h2": "re1_0.a_bool=true or exists(select 1 from tags t1_0 where t1_0.name='public' and re1_0.id=t1_0.resource_id)",
+        "postgresql": "re1_0.a_bool=true or exists(select 1 from tags t1_0 where t1_0.name='public' and re1_0.id=t1_0.resource_id)",
+        "mysql": "re1_0.a_bool=1 or exists(select 1 from tags t1_0 where t1_0.name='public' and re1_0.id=t1_0.resource_id)"
+      }
+    },
+    "outer-attr-depth2": {
+      "where": {
+        "h2": "(select nullif(coalesce(max(case when (select nullif(coalesce(max(case when sc1_1.name='finance' and re1_0.a_bool=true then 2 when not(sc1_1.name='finance' and re1_0.a_bool=true) then 0 else 1 end),0),1) from category_subcategory sc1_0 join subcategories sc1_1 on sc1_1.id=sc1_0.subcategory_id where c1_1.id=sc1_0.category_id)=2 then 2 when not((select nullif(coalesce(max(case when sc2_1.name='finance' and re1_0.a_bool=true then 2 when not(sc2_1.name='finance' and re1_0.a_bool=true) then 0 else 1 end),0),1) from category_subcategory sc2_0 join subcategories sc2_1 on sc2_1.id=sc2_0.subcategory_id where c1_1.id=sc2_0.category_id)=2) then 0 else 1 end),0),1) from resource_category c1_0 join categories c1_1 on c1_1.id=c1_0.category_id where re1_0.id=c1_0.resource_id)=2",
+        "postgresql": "(select nullif(coalesce(max(case when (select nullif(coalesce(max(case when sc1_1.name='finance' and re1_0.a_bool=true then 2 when not(sc1_1.name='finance' and re1_0.a_bool=true) then 0 else 1 end),0),1) from category_subcategory sc1_0 join subcategories sc1_1 on sc1_1.id=sc1_0.subcategory_id where c1_1.id=sc1_0.category_id)=2 then 2 when not((select nullif(coalesce(max(case when sc2_1.name='finance' and re1_0.a_bool=true then 2 when not(sc2_1.name='finance' and re1_0.a_bool=true) then 0 else 1 end),0),1) from category_subcategory sc2_0 join subcategories sc2_1 on sc2_1.id=sc2_0.subcategory_id where c1_1.id=sc2_0.category_id)=2) then 0 else 1 end),0),1) from resource_category c1_0 join categories c1_1 on c1_1.id=c1_0.category_id where re1_0.id=c1_0.resource_id)=2",
+        "mysql": "(select nullif(coalesce(max(case when (select nullif(coalesce(max(case when sc1_1.name='finance' and re1_0.a_bool=1 then 2 when not(sc1_1.name='finance' and re1_0.a_bool=1) then 0 else 1 end),0),1) from category_subcategory sc1_0 join subcategories sc1_1 on sc1_1.id=sc1_0.subcategory_id where c1_1.id=sc1_0.category_id)=2 then 2 when not((select nullif(coalesce(max(case when sc2_1.name='finance' and re1_0.a_bool=1 then 2 when not(sc2_1.name='finance' and re1_0.a_bool=1) then 0 else 1 end),0),1) from category_subcategory sc2_0 join subcategories sc2_1 on sc2_1.id=sc2_0.subcategory_id where c1_1.id=sc2_0.category_id)=2) then 0 else 1 end),0),1) from resource_category c1_0 join categories c1_1 on c1_1.id=c1_0.category_id where re1_0.id=c1_0.resource_id)=2"
+      }
+    },
+    "p-arith-in-lambda": {
+      "where": {
+        "h2": "(select nullif(coalesce(max(case when t1_0.name='public' and (cast(re1_0.a_number as float(53))+1.0)>2.0 then 2 when not(t1_0.name='public' and (cast(re1_0.a_number as float(53))+1.0)>2.0) then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2",
+        "postgresql": "(select nullif(coalesce(max(case when t1_0.name='public' and (cast(re1_0.a_number as float(53))+1.0)>2.0 then 2 when not(t1_0.name='public' and (cast(re1_0.a_number as float(53))+1.0)>2.0) then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2",
+        "mysql": "(select nullif(coalesce(max(case when t1_0.name='public' and (cast(re1_0.a_number as double)+1.0)>2.0 then 2 when not(t1_0.name='public' and (cast(re1_0.a_number as double)+1.0)>2.0) then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2"
+      }
+    },
+    "p-deep-nest": {
+      "where": {
+        "h2": "not((re1_0.a_bool=true and ((cast(re1_0.a_number as float(53))+1.0)>2.0 or re1_0.a_string like '100\\%%' escape '\\') or not(re1_0.a_bool=true) and (select nullif(coalesce(max(case when t1_0.name='public' or t1_0.name=re1_0.a_string then 2 when not((t1_0.name='public' or t1_0.name=re1_0.a_string)) then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2))",
+        "postgresql": "not((re1_0.a_bool=true and ((cast(re1_0.a_number as float(53))+1.0)>2.0 or re1_0.a_string like '100\\%%' escape '\\') or not(re1_0.a_bool=true) and (select nullif(coalesce(max(case when t1_0.name='public' or t1_0.name=re1_0.a_string then 2 when not((t1_0.name='public' or t1_0.name=re1_0.a_string)) then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2))",
+        "mysql": "not((re1_0.a_bool=1 and ((cast(re1_0.a_number as double)+1.0)>2.0 or re1_0.a_string like '100\\\\%%' escape '\\\\') or not(re1_0.a_bool=1) and (select nullif(coalesce(max(case when t1_0.name='public' or t1_0.name=re1_0.a_string then 2 when not((t1_0.name='public' or t1_0.name=re1_0.a_string)) then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2))"
+      }
+    },
+    "p-double-frac": {
+      "note": "The MySQL IEEE double cast. MySQLDialect renders a to-double cast as `decimal(53,20)`, which evaluates CEL's double arithmetic in EXACT decimal — `3 * 0.1 = 0.3` becomes TRUE, and the filter returns a row check() denies. MySqlDoubleCastFunctionContributor replaces it with `cast(... as double)` on 8.0.17+, which is what the `mysql` clause here records.",
+      "where": {
+        "h2": "(cast(re1_0.a_number as float(53))*0.1)=0.3",
+        "postgresql": "(cast(re1_0.a_number as float(53))*0.1)=0.3",
+        "mysql": "(cast(re1_0.a_number as double)*0.1)=0.3"
+      }
+    },
+    "p-has": {
+      "note": "The corpus's one knownDivergences entry: the planner folds `has()` on a missing attribute to ALWAYS_ALLOWED while check() denies those rows. The adapter translates that faithfully — Specification.unrestricted(), so no WHERE clause at all. The null here is the fold, not a translation that stopped emitting a filter.",
+      "where": {
+        "h2": null,
+        "postgresql": null,
+        "mysql": null
+      }
+    },
+    "p-hasintersection-map": {
+      "where": {
+        "h2": "exists(select 1 from tags t1_0 where t1_0.name in ('public','héllo🚀','100%_x') and re1_0.id=t1_0.resource_id) and not(exists(select 1 from tags t2_0 where t2_0.name is null and re1_0.id=t2_0.resource_id)) or exists(select 1 from tags t3_0 where t3_0.name is null and re1_0.id=t3_0.resource_id) and 1=null",
+        "postgresql": "exists(select 1 from tags t1_0 where t1_0.name in ('public','héllo🚀','100%_x') and re1_0.id=t1_0.resource_id) and not(exists(select 1 from tags t2_0 where t2_0.name is null and re1_0.id=t2_0.resource_id)) or exists(select 1 from tags t3_0 where t3_0.name is null and re1_0.id=t3_0.resource_id) and 1=null",
+        "mysql": "exists(select 1 from tags t1_0 where t1_0.name in ('public','héllo🚀','100%_x') and re1_0.id=t1_0.resource_id) and not(exists(select 1 from tags t2_0 where t2_0.name is null and re1_0.id=t2_0.resource_id)) or exists(select 1 from tags t3_0 where t3_0.name is null and re1_0.id=t3_0.resource_id) and 1=null"
+      }
+    },
+    "p-in-null-multi": {
+      "where": {
+        "h2": "re1_0.a_optional_string in ('x','one_two')",
+        "postgresql": "re1_0.a_optional_string in ('x','one_two')",
+        "mysql": "re1_0.a_optional_string in ('x','one_two')"
+      }
+    },
+    "p-in-null-single": {
+      "where": {
+        "h2": "re1_0.a_optional_string='x'",
+        "postgresql": "re1_0.a_optional_string='x'",
+        "mysql": "re1_0.a_optional_string='x'"
+      }
+    },
+    "p-lambda-f2f-like": {
+      "where": {
+        "h2": "(select nullif(coalesce(max(case when t1_0.name like case when re1_0.a_string is null then null else (('%'||replace(replace(replace(replace(re1_0.a_string,'\\','\\\\'),'%','\\%'),'_','\\_'),'[','\\['))||'%') end escape '\\' then 2 when not(t1_0.name like case when re1_0.a_string is null then null else (('%'||replace(replace(replace(replace(re1_0.a_string,'\\','\\\\'),'%','\\%'),'_','\\_'),'[','\\['))||'%') end escape '\\') then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2",
+        "postgresql": "(select nullif(coalesce(max(case when t1_0.name like case when re1_0.a_string is null then null else (('%'||replace(replace(replace(replace(re1_0.a_string,'\\','\\\\'),'%','\\%'),'_','\\_'),'[','\\['))||'%') end escape '\\' then 2 when not(t1_0.name like case when re1_0.a_string is null then null else (('%'||replace(replace(replace(replace(re1_0.a_string,'\\','\\\\'),'%','\\%'),'_','\\_'),'[','\\['))||'%') end escape '\\') then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2",
+        "mysql": "(select nullif(coalesce(max(case when t1_0.name like case when re1_0.a_string is null then null else concat(concat('%',replace(replace(replace(replace(re1_0.a_string,'\\\\','\\\\\\\\'),'%','\\\\%'),'_','\\\\_'),'[','\\\\[')),'%') end escape '\\\\' then 2 when not(t1_0.name like case when re1_0.a_string is null then null else concat(concat('%',replace(replace(replace(replace(re1_0.a_string,'\\\\','\\\\\\\\'),'%','\\\\%'),'_','\\\\_'),'[','\\\\[')),'%') end escape '\\\\') then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2"
+      }
+    },
+    "p-lambda-inner-f2f": {
+      "where": {
+        "h2": "(select nullif(coalesce(max(case when t1_0.tag_id=t1_0.name then 2 when not(t1_0.tag_id=t1_0.name) then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2",
+        "postgresql": "(select nullif(coalesce(max(case when t1_0.tag_id=t1_0.name then 2 when not(t1_0.tag_id=t1_0.name) then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2",
+        "mysql": "(select nullif(coalesce(max(case when t1_0.tag_id=t1_0.name then 2 when not(t1_0.tag_id=t1_0.name) then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2"
+      }
+    },
+    "p-not-exists-empty": {
+      "where": {
+        "h2": "not((select nullif(coalesce(max(case when t1_0.name='public' then 2 when not(t1_0.name='public') then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2)",
+        "postgresql": "not((select nullif(coalesce(max(case when t1_0.name='public' then 2 when not(t1_0.name='public') then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2)",
+        "mysql": "not((select nullif(coalesce(max(case when t1_0.name='public' then 2 when not(t1_0.name='public') then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2)"
+      }
+    },
+    "p-not-ternary-null": {
+      "where": {
+        "h2": "not((re1_0.a_optional_string<>'x' and re1_0.a_number>1 or not(re1_0.a_optional_string<>'x') and 1<>1 or not((re1_0.a_optional_string<>'x' or not(re1_0.a_optional_string<>'x')))))",
+        "postgresql": "not((re1_0.a_optional_string<>'x' and re1_0.a_number>1 or not(re1_0.a_optional_string<>'x') and 1<>1 or not((re1_0.a_optional_string<>'x' or not(re1_0.a_optional_string<>'x')))))",
+        "mysql": "not((re1_0.a_optional_string<>'x' and re1_0.a_number>1 or not(re1_0.a_optional_string<>'x') and 1<>1 or not((re1_0.a_optional_string<>'x' or not(re1_0.a_optional_string<>'x')))))"
+      }
+    },
+    "p-size-nested": {
+      "where": {
+        "h2": "(select nullif(coalesce(max(case when (select count(sc1_0.subcategory_id) from category_subcategory sc1_0 where c1_1.id=sc1_0.category_id)=1 then 2 when not((select count(sc2_0.subcategory_id) from category_subcategory sc2_0 where c1_1.id=sc2_0.category_id)=1) then 0 else 1 end),0),1) from resource_category c1_0 join categories c1_1 on c1_1.id=c1_0.category_id where re1_0.id=c1_0.resource_id)=2",
+        "postgresql": "(select nullif(coalesce(max(case when (select count(sc1_0.subcategory_id) from category_subcategory sc1_0 where c1_1.id=sc1_0.category_id)=1 then 2 when not((select count(sc2_0.subcategory_id) from category_subcategory sc2_0 where c1_1.id=sc2_0.category_id)=1) then 0 else 1 end),0),1) from resource_category c1_0 join categories c1_1 on c1_1.id=c1_0.category_id where re1_0.id=c1_0.resource_id)=2",
+        "mysql": "(select nullif(coalesce(max(case when (select count(sc1_0.subcategory_id) from category_subcategory sc1_0 where c1_1.id=sc1_0.category_id)=1 then 2 when not((select count(sc2_0.subcategory_id) from category_subcategory sc2_0 where c1_1.id=sc2_0.category_id)=1) then 0 else 1 end),0),1) from resource_category c1_0 join categories c1_1 on c1_1.id=c1_0.category_id where re1_0.id=c1_0.resource_id)=2"
+      }
+    },
+    "p-startswith-concat": {
+      "where": {
+        "h2": "re1_0.a_string like '100\\%%' escape '\\'",
+        "postgresql": "re1_0.a_string like '100\\%%' escape '\\'",
+        "mysql": "re1_0.a_string like '100\\\\%%' escape '\\\\'"
+      }
+    },
+    "p-struct": {
+      "where": {
+        "h2": "re1_0.a_string='one'",
+        "postgresql": "re1_0.a_string='one'",
+        "mysql": "re1_0.a_string='one'"
+      }
+    },
+    "p-ternary-in-exists": {
+      "where": {
+        "h2": "(select nullif(coalesce(max(case when re1_0.a_bool=true and t1_0.name='public' or not(re1_0.a_bool=true) and 1<>1 or not((re1_0.a_bool=true or not(re1_0.a_bool=true))) then 2 when not((re1_0.a_bool=true and t1_0.name='public' or not(re1_0.a_bool=true) and 1<>1 or not((re1_0.a_bool=true or not(re1_0.a_bool=true))))) then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2",
+        "postgresql": "(select nullif(coalesce(max(case when re1_0.a_bool=true and t1_0.name='public' or not(re1_0.a_bool=true) and 1<>1 or not((re1_0.a_bool=true or not(re1_0.a_bool=true))) then 2 when not((re1_0.a_bool=true and t1_0.name='public' or not(re1_0.a_bool=true) and 1<>1 or not((re1_0.a_bool=true or not(re1_0.a_bool=true))))) then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2",
+        "mysql": "(select nullif(coalesce(max(case when re1_0.a_bool=1 and t1_0.name='public' or not(re1_0.a_bool=1) and 1<>1 or not((re1_0.a_bool=1 or not(re1_0.a_bool=1))) then 2 when not((re1_0.a_bool=1 and t1_0.name='public' or not(re1_0.a_bool=1) and 1<>1 or not((re1_0.a_bool=1 or not(re1_0.a_bool=1))))) then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2"
+      }
+    },
+    "p-ternary-of-ternaries": {
+      "where": {
+        "h2": "re1_0.a_bool=true and (re1_0.a_string='' and 1<>1 or not(re1_0.a_string='') and re1_0.a_number>1 or not((re1_0.a_string='' or not(re1_0.a_string='')))) or not(re1_0.a_bool=true) and (re1_0.a_number<0 and 1<>1 or not(re1_0.a_number<0) and 1=1 or not((re1_0.a_number<0 or not(re1_0.a_number<0)))) or not((re1_0.a_bool=true or not(re1_0.a_bool=true)))",
+        "postgresql": "re1_0.a_bool=true and (re1_0.a_string='' and 1<>1 or not(re1_0.a_string='') and re1_0.a_number>1 or not((re1_0.a_string='' or not(re1_0.a_string='')))) or not(re1_0.a_bool=true) and (re1_0.a_number<0 and 1<>1 or not(re1_0.a_number<0) and 1=1 or not((re1_0.a_number<0 or not(re1_0.a_number<0)))) or not((re1_0.a_bool=true or not(re1_0.a_bool=true)))",
+        "mysql": "re1_0.a_bool=1 and (re1_0.a_string='' and 1<>1 or not(re1_0.a_string='') and re1_0.a_number>1 or not((re1_0.a_string='' or not(re1_0.a_string='')))) or not(re1_0.a_bool=1) and (re1_0.a_number<0 and 1<>1 or not(re1_0.a_number<0) and 1=1 or not((re1_0.a_number<0 or not(re1_0.a_number<0)))) or not((re1_0.a_bool=1 or not(re1_0.a_bool=1)))"
+      }
+    },
+    "p-ternary-under-all": {
+      "where": {
+        "h2": "(select nullif(coalesce(max(case when re1_0.a_bool=true and t1_0.name<>'private' or not(re1_0.a_bool=true) and 1=1 or not((re1_0.a_bool=true or not(re1_0.a_bool=true))) then 0 when not((re1_0.a_bool=true and t1_0.name<>'private' or not(re1_0.a_bool=true) and 1=1 or not((re1_0.a_bool=true or not(re1_0.a_bool=true))))) then 2 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=0",
+        "postgresql": "(select nullif(coalesce(max(case when re1_0.a_bool=true and t1_0.name<>'private' or not(re1_0.a_bool=true) and 1=1 or not((re1_0.a_bool=true or not(re1_0.a_bool=true))) then 0 when not((re1_0.a_bool=true and t1_0.name<>'private' or not(re1_0.a_bool=true) and 1=1 or not((re1_0.a_bool=true or not(re1_0.a_bool=true))))) then 2 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=0",
+        "mysql": "(select nullif(coalesce(max(case when re1_0.a_bool=1 and t1_0.name<>'private' or not(re1_0.a_bool=1) and 1=1 or not((re1_0.a_bool=1 or not(re1_0.a_bool=1))) then 0 when not((re1_0.a_bool=1 and t1_0.name<>'private' or not(re1_0.a_bool=1) and 1=1 or not((re1_0.a_bool=1 or not(re1_0.a_bool=1))))) then 2 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=0"
+      }
+    },
+    "p-ternary-vs-ternary": {
+      "where": {
+        "h2": "re1_0.a_bool=true and (re1_0.a_string='' and re1_0.a_number>1 or not(re1_0.a_string='') and re1_0.a_number>2 or not((re1_0.a_string='' or not(re1_0.a_string='')))) or not(re1_0.a_bool=true) and (re1_0.a_string='' and 1<>1 or not(re1_0.a_string='') and 1<>1 or not((re1_0.a_string='' or not(re1_0.a_string='')))) or not((re1_0.a_bool=true or not(re1_0.a_bool=true)))",
+        "postgresql": "re1_0.a_bool=true and (re1_0.a_string='' and re1_0.a_number>1 or not(re1_0.a_string='') and re1_0.a_number>2 or not((re1_0.a_string='' or not(re1_0.a_string='')))) or not(re1_0.a_bool=true) and (re1_0.a_string='' and 1<>1 or not(re1_0.a_string='') and 1<>1 or not((re1_0.a_string='' or not(re1_0.a_string='')))) or not((re1_0.a_bool=true or not(re1_0.a_bool=true)))",
+        "mysql": "re1_0.a_bool=1 and (re1_0.a_string='' and re1_0.a_number>1 or not(re1_0.a_string='') and re1_0.a_number>2 or not((re1_0.a_string='' or not(re1_0.a_string='')))) or not(re1_0.a_bool=1) and (re1_0.a_string='' and 1<>1 or not(re1_0.a_string='') and 1<>1 or not((re1_0.a_string='' or not(re1_0.a_string='')))) or not((re1_0.a_bool=1 or not(re1_0.a_bool=1)))"
+      }
+    },
+    "pv-all": {
+      "where": {
+        "h2": "re1_0.a_optional_string<>'set' and re1_0.a_optional_string<>'same' and re1_0.a_optional_string<>'' and re1_0.a_optional_string<>'%_o' and re1_0.a_optional_string<>'X' and re1_0.a_optional_string<>'Y' and re1_0.a_optional_string<>'MIRROR' and re1_0.a_optional_string<>'filler-1' and re1_0.a_optional_string<>'filler-2' and re1_0.a_optional_string<>'filler-3' and re1_0.a_optional_string<>'filler-4'",
+        "postgresql": "re1_0.a_optional_string<>'set' and re1_0.a_optional_string<>'same' and re1_0.a_optional_string<>'' and re1_0.a_optional_string<>'%_o' and re1_0.a_optional_string<>'X' and re1_0.a_optional_string<>'Y' and re1_0.a_optional_string<>'MIRROR' and re1_0.a_optional_string<>'filler-1' and re1_0.a_optional_string<>'filler-2' and re1_0.a_optional_string<>'filler-3' and re1_0.a_optional_string<>'filler-4'",
+        "mysql": "re1_0.a_optional_string<>'set' and re1_0.a_optional_string<>'same' and re1_0.a_optional_string<>'' and re1_0.a_optional_string<>'%_o' and re1_0.a_optional_string<>'X' and re1_0.a_optional_string<>'Y' and re1_0.a_optional_string<>'MIRROR' and re1_0.a_optional_string<>'filler-1' and re1_0.a_optional_string<>'filler-2' and re1_0.a_optional_string<>'filler-3' and re1_0.a_optional_string<>'filler-4'"
+      }
+    },
+    "pv-all-unrolled": {
+      "where": {
+        "h2": "re1_0.a_optional_string<>'set' and re1_0.a_optional_string<>'' and re1_0.a_optional_string<>'%_o'",
+        "postgresql": "re1_0.a_optional_string<>'set' and re1_0.a_optional_string<>'' and re1_0.a_optional_string<>'%_o'",
+        "mysql": "re1_0.a_optional_string<>'set' and re1_0.a_optional_string<>'' and re1_0.a_optional_string<>'%_o'"
+      }
+    },
+    "pv-exists": {
+      "where": {
+        "h2": "re1_0.a_optional_string='set' or re1_0.a_optional_string='same' or re1_0.a_optional_string='' or re1_0.a_optional_string='%_o' or re1_0.a_optional_string='X' or re1_0.a_optional_string='Y' or re1_0.a_optional_string='MIRROR' or re1_0.a_optional_string='filler-1' or re1_0.a_optional_string='filler-2' or re1_0.a_optional_string='filler-3' or re1_0.a_optional_string='filler-4'",
+        "postgresql": "re1_0.a_optional_string='set' or re1_0.a_optional_string='same' or re1_0.a_optional_string='' or re1_0.a_optional_string='%_o' or re1_0.a_optional_string='X' or re1_0.a_optional_string='Y' or re1_0.a_optional_string='MIRROR' or re1_0.a_optional_string='filler-1' or re1_0.a_optional_string='filler-2' or re1_0.a_optional_string='filler-3' or re1_0.a_optional_string='filler-4'",
+        "mysql": "re1_0.a_optional_string='set' or re1_0.a_optional_string='same' or re1_0.a_optional_string='' or re1_0.a_optional_string='%_o' or re1_0.a_optional_string='X' or re1_0.a_optional_string='Y' or re1_0.a_optional_string='MIRROR' or re1_0.a_optional_string='filler-1' or re1_0.a_optional_string='filler-2' or re1_0.a_optional_string='filler-3' or re1_0.a_optional_string='filler-4'"
+      }
+    },
+    "pv-exists-unrolled": {
+      "where": {
+        "h2": "re1_0.a_optional_string='set' or re1_0.a_optional_string='' or re1_0.a_optional_string='%_o'",
+        "postgresql": "re1_0.a_optional_string='set' or re1_0.a_optional_string='' or re1_0.a_optional_string='%_o'",
+        "mysql": "re1_0.a_optional_string='set' or re1_0.a_optional_string='' or re1_0.a_optional_string='%_o'"
+      }
+    },
+    "rel-bool-hop": {
+      "note": "The real to-one relation (#375). A dotted jpaPath through a to-one association is a ROOT join, and it is a LEFT one deliberately: an INNER join removes a row whose parent is absent from the whole query, which is right for a standalone predicate and wrong under a disjunction.",
+      "joins": {
+        "h2": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id",
+        "postgresql": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id",
+        "mysql": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id"
+      },
+      "where": {
+        "h2": "p1_0.a_bool=true",
+        "postgresql": "p1_0.a_bool=true",
+        "mysql": "p1_0.a_bool=1"
+      }
+    },
+    "rel-bool-hop2": {
+      "joins": {
+        "h2": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id left join adversarial_inner i1_0 on p1_0.id=i1_0.parent_id left join adversarial_parent p2_0 on re1_0.id=p2_0.resource_id",
+        "postgresql": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id left join adversarial_inner i1_0 on p1_0.id=i1_0.parent_id left join adversarial_parent p2_0 on re1_0.id=p2_0.resource_id",
+        "mysql": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id left join adversarial_inner i1_0 on p1_0.id=i1_0.parent_id left join adversarial_parent p2_0 on re1_0.id=p2_0.resource_id"
+      },
+      "where": {
+        "h2": "i1_0.a_bool=true",
+        "postgresql": "i1_0.a_bool=true",
+        "mysql": "i1_0.a_bool=1"
+      }
+    },
+    "rel-contains-hop": {
+      "joins": {
+        "h2": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id",
+        "postgresql": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id",
+        "mysql": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id"
+      },
+      "where": {
+        "h2": "p1_0.a_string like '%done%' escape '\\'",
+        "postgresql": "p1_0.a_string like '%done%' escape '\\'",
+        "mysql": "p1_0.a_string like '%done%' escape '\\\\'"
+      }
+    },
+    "rel-eq-hop": {
+      "joins": {
+        "h2": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id",
+        "postgresql": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id",
+        "mysql": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id"
+      },
+      "where": {
+        "h2": "p1_0.a_string='One'",
+        "postgresql": "p1_0.a_string='One'",
+        "mysql": "p1_0.a_string='One'"
+      }
+    },
+    "rel-eq-num-hop": {
+      "joins": {
+        "h2": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id",
+        "postgresql": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id",
+        "mysql": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id"
+      },
+      "where": {
+        "h2": "p1_0.a_number=2",
+        "postgresql": "p1_0.a_number=2",
+        "mysql": "p1_0.a_number=2"
+      }
+    },
+    "rel-ge-hop": {
+      "joins": {
+        "h2": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id",
+        "postgresql": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id",
+        "mysql": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id"
+      },
+      "where": {
+        "h2": "p1_0.a_number>=2",
+        "postgresql": "p1_0.a_number>=2",
+        "mysql": "p1_0.a_number>=2"
+      }
+    },
+    "rel-gt-hop": {
+      "joins": {
+        "h2": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id",
+        "postgresql": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id",
+        "mysql": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id"
+      },
+      "where": {
+        "h2": "p1_0.a_number>2",
+        "postgresql": "p1_0.a_number>2",
+        "mysql": "p1_0.a_number>2"
+      }
+    },
+    "rel-hop-and-root": {
+      "joins": {
+        "h2": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id",
+        "postgresql": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id",
+        "mysql": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id"
+      },
+      "where": {
+        "h2": "re1_0.a_bool=true and p1_0.a_string like '%re%' escape '\\'",
+        "postgresql": "re1_0.a_bool=true and p1_0.a_string like '%re%' escape '\\'",
+        "mysql": "re1_0.a_bool=1 and p1_0.a_string like '%re%' escape '\\\\'"
+      }
+    },
+    "rel-hop2-or-exists": {
+      "joins": {
+        "h2": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id left join adversarial_inner i1_0 on p1_0.id=i1_0.parent_id left join adversarial_parent p2_0 on re1_0.id=p2_0.resource_id",
+        "postgresql": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id left join adversarial_inner i1_0 on p1_0.id=i1_0.parent_id left join adversarial_parent p2_0 on re1_0.id=p2_0.resource_id",
+        "mysql": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id left join adversarial_inner i1_0 on p1_0.id=i1_0.parent_id left join adversarial_parent p2_0 on re1_0.id=p2_0.resource_id"
+      },
+      "where": {
+        "h2": "i1_0.a_bool=true or (select nullif(coalesce(max(case when c1_1.name='business' then 2 when not(c1_1.name='business') then 0 else 1 end),0),1) from resource_category c1_0 join categories c1_1 on c1_1.id=c1_0.category_id where re1_0.id=c1_0.resource_id)=2",
+        "postgresql": "i1_0.a_bool=true or (select nullif(coalesce(max(case when c1_1.name='business' then 2 when not(c1_1.name='business') then 0 else 1 end),0),1) from resource_category c1_0 join categories c1_1 on c1_1.id=c1_0.category_id where re1_0.id=c1_0.resource_id)=2",
+        "mysql": "i1_0.a_bool=1 or (select nullif(coalesce(max(case when c1_1.name='business' then 2 when not(c1_1.name='business') then 0 else 1 end),0),1) from resource_category c1_0 join categories c1_1 on c1_1.id=c1_0.category_id where re1_0.id=c1_0.resource_id)=2"
+      }
+    },
+    "rel-le-hop": {
+      "joins": {
+        "h2": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id",
+        "postgresql": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id",
+        "mysql": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id"
+      },
+      "where": {
+        "h2": "p1_0.a_number<=2",
+        "postgresql": "p1_0.a_number<=2",
+        "mysql": "p1_0.a_number<=2"
+      }
+    },
+    "rel-lt-hop": {
+      "joins": {
+        "h2": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id",
+        "postgresql": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id",
+        "mysql": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id"
+      },
+      "where": {
+        "h2": "p1_0.a_number<2",
+        "postgresql": "p1_0.a_number<2",
+        "mysql": "p1_0.a_number<2"
+      }
+    },
+    "rel-ne-null-hop": {
+      "joins": {
+        "h2": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id",
+        "postgresql": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id",
+        "mysql": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id"
+      },
+      "where": {
+        "h2": "p1_0.a_optional_string is not null",
+        "postgresql": "p1_0.a_optional_string is not null",
+        "mysql": "p1_0.a_optional_string is not null"
+      }
+    },
+    "rel-not-bool-hop": {
+      "joins": {
+        "h2": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id",
+        "postgresql": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id",
+        "mysql": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id"
+      },
+      "where": {
+        "h2": "not(p1_0.a_bool=true)",
+        "postgresql": "not(p1_0.a_bool=true)",
+        "mysql": "not(p1_0.a_bool=1)"
+      }
+    },
+    "rel-range-hop": {
+      "joins": {
+        "h2": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id left join adversarial_parent p2_0 on re1_0.id=p2_0.resource_id",
+        "postgresql": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id left join adversarial_parent p2_0 on re1_0.id=p2_0.resource_id",
+        "mysql": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id left join adversarial_parent p2_0 on re1_0.id=p2_0.resource_id"
+      },
+      "where": {
+        "h2": "p1_0.a_number>2 and p2_0.a_number<12",
+        "postgresql": "p1_0.a_number>2 and p2_0.a_number<12",
+        "mysql": "p1_0.a_number>2 and p2_0.a_number<12"
+      }
+    },
+    "rel-startswith-hop2": {
+      "joins": {
+        "h2": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id left join adversarial_inner i1_0 on p1_0.id=i1_0.parent_id",
+        "postgresql": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id left join adversarial_inner i1_0 on p1_0.id=i1_0.parent_id",
+        "mysql": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id left join adversarial_inner i1_0 on p1_0.id=i1_0.parent_id"
+      },
+      "where": {
+        "h2": "i1_0.a_string like '100%' escape '\\'",
+        "postgresql": "i1_0.a_string like '100%' escape '\\'",
+        "mysql": "i1_0.a_string like '100%' escape '\\\\'"
+      }
+    },
+    "root-bare-bool": {
+      "where": {
+        "h2": "re1_0.a_bool=true",
+        "postgresql": "re1_0.a_bool=true",
+        "mysql": "re1_0.a_bool=1"
+      }
+    },
+    "root-or": {
+      "where": {
+        "h2": "re1_0.a_bool=true or re1_0.a_number<0",
+        "postgresql": "re1_0.a_bool=true or re1_0.a_number<0",
+        "mysql": "re1_0.a_bool=1 or re1_0.a_number<0"
+      }
+    },
+    "size-filter-count": {
+      "where": {
+        "h2": "(select (coalesce(sum(case when t1_0.name='public' then 1 else 0 end),0)+nullif(coalesce(max(case when t1_0.name='public' then 0 when not(t1_0.name='public') then 0 else 1 end),0),1)) from tags t1_0 where re1_0.id=t1_0.resource_id)=1",
+        "postgresql": "(select (coalesce(sum(case when t1_0.name='public' then 1 else 0 end),0)+nullif(coalesce(max(case when t1_0.name='public' then 0 when not(t1_0.name='public') then 0 else 1 end),0),1)) from tags t1_0 where re1_0.id=t1_0.resource_id)=1",
+        "mysql": "(select (coalesce(sum(case when t1_0.name='public' then 1 else 0 end),0)+nullif(coalesce(max(case when t1_0.name='public' then 0 when not(t1_0.name='public') then 0 else 1 end),0),1)) from tags t1_0 where re1_0.id=t1_0.resource_id)=1"
+      }
+    },
+    "size-huge-gt": {
+      "where": {
+        "h2": "1<>1",
+        "postgresql": "1<>1",
+        "mysql": "1<>1"
+      }
+    },
+    "size-huge-lt": {
+      "where": {
+        "h2": "re1_0.a_string is not null",
+        "postgresql": "re1_0.a_string is not null",
+        "mysql": "re1_0.a_string is not null"
+      }
+    },
+    "size-threshold": {
+      "where": {
+        "h2": "(select count(t1_0.pk) from tags t1_0 where re1_0.id=t1_0.resource_id)>1",
+        "postgresql": "(select count(t1_0.pk) from tags t1_0 where re1_0.id=t1_0.resource_id)>1",
+        "mysql": "(select count(t1_0.pk) from tags t1_0 where re1_0.id=t1_0.resource_id)>1"
+      }
+    },
+    "string-size": {
+      "where": {
+        "h2": "character_length(re1_0.a_string)>4",
+        "postgresql": "character_length(re1_0.a_string)>4",
+        "mysql": "character_length(re1_0.a_string)>4"
+      }
+    },
+    "ternary-bare": {
+      "where": {
+        "h2": "re1_0.a_bool=true and re1_0.a_string='one' or not(re1_0.a_bool=true) and re1_0.a_number<0 or not((re1_0.a_bool=true or not(re1_0.a_bool=true)))",
+        "postgresql": "re1_0.a_bool=true and re1_0.a_string='one' or not(re1_0.a_bool=true) and re1_0.a_number<0 or not((re1_0.a_bool=true or not(re1_0.a_bool=true)))",
+        "mysql": "re1_0.a_bool=1 and re1_0.a_string='one' or not(re1_0.a_bool=1) and re1_0.a_number<0 or not((re1_0.a_bool=1 or not(re1_0.a_bool=1)))"
+      }
+    },
+    "ternary-cmp": {
+      "where": {
+        "h2": "re1_0.a_bool=true and re1_0.a_number>1 or not(re1_0.a_bool=true) and 1<>1 or not((re1_0.a_bool=true or not(re1_0.a_bool=true)))",
+        "postgresql": "re1_0.a_bool=true and re1_0.a_number>1 or not(re1_0.a_bool=true) and 1<>1 or not((re1_0.a_bool=true or not(re1_0.a_bool=true)))",
+        "mysql": "re1_0.a_bool=1 and re1_0.a_number>1 or not(re1_0.a_bool=1) and 1<>1 or not((re1_0.a_bool=1 or not(re1_0.a_bool=1)))"
+      }
+    },
+    "ternary-expr-cond": {
+      "where": {
+        "h2": "re1_0.a_string like '100%' escape '\\' and re1_0.a_number>=0 or not(re1_0.a_string like '100%' escape '\\') and 1<>1 or not((re1_0.a_string like '100%' escape '\\' or not(re1_0.a_string like '100%' escape '\\')))",
+        "postgresql": "re1_0.a_string like '100%' escape '\\' and re1_0.a_number>=0 or not(re1_0.a_string like '100%' escape '\\') and 1<>1 or not((re1_0.a_string like '100%' escape '\\' or not(re1_0.a_string like '100%' escape '\\')))",
+        "mysql": "re1_0.a_string like '100%' escape '\\\\' and re1_0.a_number>=0 or not(re1_0.a_string like '100%' escape '\\\\') and 1<>1 or not((re1_0.a_string like '100%' escape '\\\\' or not(re1_0.a_string like '100%' escape '\\\\')))"
+      }
+    },
+    "ternary-negated": {
+      "where": {
+        "h2": "not((re1_0.a_bool=true and re1_0.a_number>1 or not(re1_0.a_bool=true) and 1<>1 or not((re1_0.a_bool=true or not(re1_0.a_bool=true)))))",
+        "postgresql": "not((re1_0.a_bool=true and re1_0.a_number>1 or not(re1_0.a_bool=true) and 1<>1 or not((re1_0.a_bool=true or not(re1_0.a_bool=true)))))",
+        "mysql": "not((re1_0.a_bool=1 and re1_0.a_number>1 or not(re1_0.a_bool=1) and 1<>1 or not((re1_0.a_bool=1 or not(re1_0.a_bool=1)))))"
+      }
+    },
+    "ternary-nested": {
+      "where": {
+        "h2": "re1_0.a_bool=true and (re1_0.a_string='' and 1<>1 or not(re1_0.a_string='') and re1_0.a_number>=2 or not((re1_0.a_string='' or not(re1_0.a_string='')))) or not(re1_0.a_bool=true) and 1<>1 or not((re1_0.a_bool=true or not(re1_0.a_bool=true)))",
+        "postgresql": "re1_0.a_bool=true and (re1_0.a_string='' and 1<>1 or not(re1_0.a_string='') and re1_0.a_number>=2 or not((re1_0.a_string='' or not(re1_0.a_string='')))) or not(re1_0.a_bool=true) and 1<>1 or not((re1_0.a_bool=true or not(re1_0.a_bool=true)))",
+        "mysql": "re1_0.a_bool=1 and (re1_0.a_string='' and 1<>1 or not(re1_0.a_string='') and re1_0.a_number>=2 or not((re1_0.a_string='' or not(re1_0.a_string='')))) or not(re1_0.a_bool=1) and 1<>1 or not((re1_0.a_bool=1 or not(re1_0.a_bool=1)))"
+      }
+    },
+    "ternary-null-cond": {
+      "where": {
+        "h2": "re1_0.a_optional_string<>'x' and re1_0.a_number>1 or not(re1_0.a_optional_string<>'x') and 1<>1 or not((re1_0.a_optional_string<>'x' or not(re1_0.a_optional_string<>'x')))",
+        "postgresql": "re1_0.a_optional_string<>'x' and re1_0.a_number>1 or not(re1_0.a_optional_string<>'x') and 1<>1 or not((re1_0.a_optional_string<>'x' or not(re1_0.a_optional_string<>'x')))",
+        "mysql": "re1_0.a_optional_string<>'x' and re1_0.a_number>1 or not(re1_0.a_optional_string<>'x') and 1<>1 or not((re1_0.a_optional_string<>'x' or not(re1_0.a_optional_string<>'x')))"
+      }
+    },
+    "ternary-value-first": {
+      "where": {
+        "h2": "re1_0.a_bool=true and re1_0.a_number>0 or not(re1_0.a_bool=true) and 1<>1 or not((re1_0.a_bool=true or not(re1_0.a_bool=true)))",
+        "postgresql": "re1_0.a_bool=true and re1_0.a_number>0 or not(re1_0.a_bool=true) and 1<>1 or not((re1_0.a_bool=true or not(re1_0.a_bool=true)))",
+        "mysql": "re1_0.a_bool=1 and re1_0.a_number>0 or not(re1_0.a_bool=1) and 1<>1 or not((re1_0.a_bool=1 or not(re1_0.a_bool=1)))"
+      }
+    },
+    "triple-negation": {
+      "where": {
+        "h2": "not(not(not(re1_0.a_bool=true)))",
+        "postgresql": "not(not(not(re1_0.a_bool=true)))",
+        "mysql": "not(not(not(re1_0.a_bool=1)))"
+      }
+    },
+    "ts-eq": {
+      "where": {
+        "h2": "re1_0.created_at=timestamp '2024-06-01 00:00:00.000000000'",
+        "postgresql": "re1_0.created_at=timestamp '2024-06-01 00:00:00.000000'",
+        "mysql": "re1_0.created_at=timestamp '2024-06-01 00:00:00.000000+00:00'"
+      }
+    },
+    "ts-eq-offset": {
+      "where": {
+        "h2": "re1_0.created_at=timestamp '2024-06-01 00:00:00.000000000'",
+        "postgresql": "re1_0.created_at=timestamp '2024-06-01 00:00:00.000000'",
+        "mysql": "re1_0.created_at=timestamp '2024-06-01 00:00:00.000000+00:00'"
+      }
+    },
+    "ts-ne": {
+      "where": {
+        "h2": "re1_0.created_at<>timestamp '2024-06-01 00:00:00.000000000'",
+        "postgresql": "re1_0.created_at<>timestamp '2024-06-01 00:00:00.000000'",
+        "mysql": "re1_0.created_at<>timestamp '2024-06-01 00:00:00.000000+00:00'"
+      }
+    },
+    "ts-vf": {
+      "where": {
+        "h2": "re1_0.created_at<timestamp '2026-08-11 09:13:39.123456789'",
+        "postgresql": "re1_0.created_at<timestamp '2026-08-11 09:13:39.123456'",
+        "mysql": "re1_0.created_at<timestamp '2026-08-11 09:13:39.123456+00:00'"
+      }
+    },
+    "ts-window": {
+      "note": "`now() - duration(\"24h\")` is folded by the planner, so the wire fixture carries a placeholder and the loader substitutes Corpus.PLANNED_AT. The NANOSECOND precision is the point — the PDP emits nanoseconds and the column carries them; the dialects that cannot truncate rather than round.",
+      "where": {
+        "h2": "re1_0.created_at<timestamp '2026-08-11 09:13:39.123456789'",
+        "postgresql": "re1_0.created_at<timestamp '2026-08-11 09:13:39.123456'",
+        "mysql": "re1_0.created_at<timestamp '2026-08-11 09:13:39.123456+00:00'"
+      }
+    },
+    "unicode-eq": {
+      "where": {
+        "h2": "re1_0.a_string='héllo🚀'",
+        "postgresql": "re1_0.a_string='héllo🚀'",
+        "mysql": "re1_0.a_string='héllo🚀'"
+      }
+    },
+    "vf-ge": {
+      "where": {
+        "h2": "re1_0.a_number<=2",
+        "postgresql": "re1_0.a_number<=2",
+        "mysql": "re1_0.a_number<=2"
+      }
+    },
+    "vf-hasint": {
+      "where": {
+        "h2": "exists(select 1 from tags t1_0 where t1_0.name in ('public','other') and re1_0.id=t1_0.resource_id)",
+        "postgresql": "exists(select 1 from tags t1_0 where t1_0.name in ('public','other') and re1_0.id=t1_0.resource_id)",
+        "mysql": "exists(select 1 from tags t1_0 where t1_0.name in ('public','other') and re1_0.id=t1_0.resource_id)"
+      }
+    },
+    "vf-le": {
+      "note": "Value-first: the plan reads `3 <= R.attr.aNumber`, and the emitted operator is the MIRRORED one (>=), not the inverted one. Operand inversion is this repository's founding bug class.",
+      "where": {
+        "h2": "re1_0.a_number>=3",
+        "postgresql": "re1_0.a_number>=3",
+        "mysql": "re1_0.a_number>=3"
+      }
+    },
+    "vf-lt": {
+      "where": {
+        "h2": "re1_0.a_number>1",
+        "postgresql": "re1_0.a_number>1",
+        "mysql": "re1_0.a_number>1"
+      }
+    },
+    "vf-ne": {
+      "where": {
+        "h2": "re1_0.a_string<>'one'",
+        "postgresql": "re1_0.a_string<>'one'",
+        "mysql": "re1_0.a_string<>'one'"
+      }
+    },
+    "vf-null-ne": {
+      "where": {
+        "h2": "re1_0.a_optional_string is not null",
+        "postgresql": "re1_0.a_optional_string is not null",
+        "mysql": "re1_0.a_optional_string is not null"
+      }
+    },
+    "vf-size": {
+      "where": {
+        "h2": "exists(select 1 from tags t1_0 where 1=1 and re1_0.id=t1_0.resource_id)",
+        "postgresql": "exists(select 1 from tags t1_0 where 1=1 and re1_0.id=t1_0.resource_id)",
+        "mysql": "exists(select 1 from tags t1_0 where 1=1 and re1_0.id=t1_0.resource_id)"
+      }
+    },
+    "w1-all-chain": {
+      "note": "The two-hop chain joins through the intermediate hop rather than off the root, and the count is over the FLATTENED tail. A seed with no parent produces no join row, so it is excluded under both polarities without a separate guard.",
+      "where": {
+        "h2": "case when exists(select 1 from resource_category c1_0 where 1=1 and re1_0.id=c1_0.resource_id) then (select nullif(coalesce(max(case when sc1_1.name='finance' then 0 when not(sc1_1.name='finance') then 2 else 1 end),0),1) from resource_category c2_0 join categories c2_1 on c2_1.id=c2_0.category_id join category_subcategory sc1_0 on c2_1.id=sc1_0.category_id join subcategories sc1_1 on sc1_1.id=sc1_0.subcategory_id where re1_0.id=c2_0.resource_id) else null end=0",
+        "postgresql": "case when exists(select 1 from resource_category c1_0 where 1=1 and re1_0.id=c1_0.resource_id) then (select nullif(coalesce(max(case when sc1_1.name='finance' then 0 when not(sc1_1.name='finance') then 2 else 1 end),0),1) from resource_category c2_0 join categories c2_1 on c2_1.id=c2_0.category_id join category_subcategory sc1_0 on c2_1.id=sc1_0.category_id join subcategories sc1_1 on sc1_1.id=sc1_0.subcategory_id where re1_0.id=c2_0.resource_id) else null end=0",
+        "mysql": "case when exists(select 1 from resource_category c1_0 where 1=1 and re1_0.id=c1_0.resource_id) then (select nullif(coalesce(max(case when sc1_1.name='finance' then 0 when not(sc1_1.name='finance') then 2 else 1 end),0),1) from resource_category c2_0 join categories c2_1 on c2_1.id=c2_0.category_id join category_subcategory sc1_0 on c2_1.id=sc1_0.category_id join subcategories sc1_1 on sc1_1.id=sc1_0.subcategory_id where re1_0.id=c2_0.resource_id) else null end=0"
+      }
+    },
+    "w1-exists-chain": {
+      "where": {
+        "h2": "case when exists(select 1 from resource_category c1_0 where 1=1 and re1_0.id=c1_0.resource_id) then (select nullif(coalesce(max(case when sc1_1.name='finance' then 2 when not(sc1_1.name='finance') then 0 else 1 end),0),1) from resource_category c2_0 join categories c2_1 on c2_1.id=c2_0.category_id join category_subcategory sc1_0 on c2_1.id=sc1_0.category_id join subcategories sc1_1 on sc1_1.id=sc1_0.subcategory_id where re1_0.id=c2_0.resource_id) else null end=2",
+        "postgresql": "case when exists(select 1 from resource_category c1_0 where 1=1 and re1_0.id=c1_0.resource_id) then (select nullif(coalesce(max(case when sc1_1.name='finance' then 2 when not(sc1_1.name='finance') then 0 else 1 end),0),1) from resource_category c2_0 join categories c2_1 on c2_1.id=c2_0.category_id join category_subcategory sc1_0 on c2_1.id=sc1_0.category_id join subcategories sc1_1 on sc1_1.id=sc1_0.subcategory_id where re1_0.id=c2_0.resource_id) else null end=2",
+        "mysql": "case when exists(select 1 from resource_category c1_0 where 1=1 and re1_0.id=c1_0.resource_id) then (select nullif(coalesce(max(case when sc1_1.name='finance' then 2 when not(sc1_1.name='finance') then 0 else 1 end),0),1) from resource_category c2_0 join categories c2_1 on c2_1.id=c2_0.category_id join category_subcategory sc1_0 on c2_1.id=sc1_0.category_id join subcategories sc1_1 on sc1_1.id=sc1_0.subcategory_id where re1_0.id=c2_0.resource_id) else null end=2"
+      }
+    },
+    "w1-in-chain": {
+      "where": {
+        "h2": "case when exists(select 1 from resource_category c1_0 where 1=1 and re1_0.id=c1_0.resource_id) then (select count(sc1_0.subcategory_id) from resource_category c2_0 join categories c2_1 on c2_1.id=c2_0.category_id join category_subcategory sc1_0 on c2_1.id=sc1_0.category_id join subcategories sc1_1 on sc1_1.id=sc1_0.subcategory_id where sc1_1.name='finance' and re1_0.id=c2_0.resource_id) else null end>0",
+        "postgresql": "case when exists(select 1 from resource_category c1_0 where 1=1 and re1_0.id=c1_0.resource_id) then (select count(sc1_0.subcategory_id) from resource_category c2_0 join categories c2_1 on c2_1.id=c2_0.category_id join category_subcategory sc1_0 on c2_1.id=sc1_0.category_id join subcategories sc1_1 on sc1_1.id=sc1_0.subcategory_id where sc1_1.name='finance' and re1_0.id=c2_0.resource_id) else null end>0",
+        "mysql": "case when exists(select 1 from resource_category c1_0 where 1=1 and re1_0.id=c1_0.resource_id) then (select count(sc1_0.subcategory_id) from resource_category c2_0 join categories c2_1 on c2_1.id=c2_0.category_id join category_subcategory sc1_0 on c2_1.id=sc1_0.category_id join subcategories sc1_1 on sc1_1.id=sc1_0.subcategory_id where sc1_1.name='finance' and re1_0.id=c2_0.resource_id) else null end>0"
+      }
+    },
+    "w1-not-exists-chain": {
+      "where": {
+        "h2": "not(case when exists(select 1 from resource_category c1_0 where 1=1 and re1_0.id=c1_0.resource_id) then (select nullif(coalesce(max(case when sc1_1.name='finance' then 2 when not(sc1_1.name='finance') then 0 else 1 end),0),1) from resource_category c2_0 join categories c2_1 on c2_1.id=c2_0.category_id join category_subcategory sc1_0 on c2_1.id=sc1_0.category_id join subcategories sc1_1 on sc1_1.id=sc1_0.subcategory_id where re1_0.id=c2_0.resource_id) else null end=2)",
+        "postgresql": "not(case when exists(select 1 from resource_category c1_0 where 1=1 and re1_0.id=c1_0.resource_id) then (select nullif(coalesce(max(case when sc1_1.name='finance' then 2 when not(sc1_1.name='finance') then 0 else 1 end),0),1) from resource_category c2_0 join categories c2_1 on c2_1.id=c2_0.category_id join category_subcategory sc1_0 on c2_1.id=sc1_0.category_id join subcategories sc1_1 on sc1_1.id=sc1_0.subcategory_id where re1_0.id=c2_0.resource_id) else null end=2)",
+        "mysql": "not(case when exists(select 1 from resource_category c1_0 where 1=1 and re1_0.id=c1_0.resource_id) then (select nullif(coalesce(max(case when sc1_1.name='finance' then 2 when not(sc1_1.name='finance') then 0 else 1 end),0),1) from resource_category c2_0 join categories c2_1 on c2_1.id=c2_0.category_id join category_subcategory sc1_0 on c2_1.id=sc1_0.category_id join subcategories sc1_1 on sc1_1.id=sc1_0.subcategory_id where re1_0.id=c2_0.resource_id) else null end=2)"
+      }
+    },
+    "w1-not-hasint-chain": {
+      "where": {
+        "h2": "not(case when exists(select 1 from resource_category c1_0 where 1=1 and re1_0.id=c1_0.resource_id) then (select count(sc1_0.subcategory_id) from resource_category c2_0 join categories c2_1 on c2_1.id=c2_0.category_id join category_subcategory sc1_0 on c2_1.id=sc1_0.category_id join subcategories sc1_1 on sc1_1.id=sc1_0.subcategory_id where sc1_1.name='finance' and re1_0.id=c2_0.resource_id) else null end>0)",
+        "postgresql": "not(case when exists(select 1 from resource_category c1_0 where 1=1 and re1_0.id=c1_0.resource_id) then (select count(sc1_0.subcategory_id) from resource_category c2_0 join categories c2_1 on c2_1.id=c2_0.category_id join category_subcategory sc1_0 on c2_1.id=sc1_0.category_id join subcategories sc1_1 on sc1_1.id=sc1_0.subcategory_id where sc1_1.name='finance' and re1_0.id=c2_0.resource_id) else null end>0)",
+        "mysql": "not(case when exists(select 1 from resource_category c1_0 where 1=1 and re1_0.id=c1_0.resource_id) then (select count(sc1_0.subcategory_id) from resource_category c2_0 join categories c2_1 on c2_1.id=c2_0.category_id join category_subcategory sc1_0 on c2_1.id=sc1_0.category_id join subcategories sc1_1 on sc1_1.id=sc1_0.subcategory_id where sc1_1.name='finance' and re1_0.id=c2_0.resource_id) else null end>0)"
+      }
+    },
+    "w1-not-in-chain": {
+      "where": {
+        "h2": "not(case when exists(select 1 from resource_category c1_0 where 1=1 and re1_0.id=c1_0.resource_id) then (select count(sc1_0.subcategory_id) from resource_category c2_0 join categories c2_1 on c2_1.id=c2_0.category_id join category_subcategory sc1_0 on c2_1.id=sc1_0.category_id join subcategories sc1_1 on sc1_1.id=sc1_0.subcategory_id where sc1_1.name='finance' and re1_0.id=c2_0.resource_id) else null end>0)",
+        "postgresql": "not(case when exists(select 1 from resource_category c1_0 where 1=1 and re1_0.id=c1_0.resource_id) then (select count(sc1_0.subcategory_id) from resource_category c2_0 join categories c2_1 on c2_1.id=c2_0.category_id join category_subcategory sc1_0 on c2_1.id=sc1_0.category_id join subcategories sc1_1 on sc1_1.id=sc1_0.subcategory_id where sc1_1.name='finance' and re1_0.id=c2_0.resource_id) else null end>0)",
+        "mysql": "not(case when exists(select 1 from resource_category c1_0 where 1=1 and re1_0.id=c1_0.resource_id) then (select count(sc1_0.subcategory_id) from resource_category c2_0 join categories c2_1 on c2_1.id=c2_0.category_id join category_subcategory sc1_0 on c2_1.id=sc1_0.category_id join subcategories sc1_1 on sc1_1.id=sc1_0.subcategory_id where sc1_1.name='finance' and re1_0.id=c2_0.resource_id) else null end>0)"
+      }
+    },
+    "w1-not-size-chain": {
+      "where": {
+        "h2": "not(case when exists(select 1 from resource_category c1_0 where 1=1 and re1_0.id=c1_0.resource_id) then (select count(sc1_0.subcategory_id) from resource_category c2_0 join categories c2_1 on c2_1.id=c2_0.category_id join category_subcategory sc1_0 on c2_1.id=sc1_0.category_id where re1_0.id=c2_0.resource_id) else null end>0)",
+        "postgresql": "not(case when exists(select 1 from resource_category c1_0 where 1=1 and re1_0.id=c1_0.resource_id) then (select count(sc1_0.subcategory_id) from resource_category c2_0 join categories c2_1 on c2_1.id=c2_0.category_id join category_subcategory sc1_0 on c2_1.id=sc1_0.category_id where re1_0.id=c2_0.resource_id) else null end>0)",
+        "mysql": "not(case when exists(select 1 from resource_category c1_0 where 1=1 and re1_0.id=c1_0.resource_id) then (select count(sc1_0.subcategory_id) from resource_category c2_0 join categories c2_1 on c2_1.id=c2_0.category_id join category_subcategory sc1_0 on c2_1.id=sc1_0.category_id where re1_0.id=c2_0.resource_id) else null end>0)"
+      }
+    },
+    "w1-size-chain": {
+      "where": {
+        "h2": "case when exists(select 1 from resource_category c1_0 where 1=1 and re1_0.id=c1_0.resource_id) then (select count(sc1_0.subcategory_id) from resource_category c2_0 join categories c2_1 on c2_1.id=c2_0.category_id join category_subcategory sc1_0 on c2_1.id=sc1_0.category_id where re1_0.id=c2_0.resource_id) else null end>0",
+        "postgresql": "case when exists(select 1 from resource_category c1_0 where 1=1 and re1_0.id=c1_0.resource_id) then (select count(sc1_0.subcategory_id) from resource_category c2_0 join categories c2_1 on c2_1.id=c2_0.category_id join category_subcategory sc1_0 on c2_1.id=sc1_0.category_id where re1_0.id=c2_0.resource_id) else null end>0",
+        "mysql": "case when exists(select 1 from resource_category c1_0 where 1=1 and re1_0.id=c1_0.resource_id) then (select count(sc1_0.subcategory_id) from resource_category c2_0 join categories c2_1 on c2_1.id=c2_0.category_id join category_subcategory sc1_0 on c2_1.id=sc1_0.category_id where re1_0.id=c2_0.resource_id) else null end>0"
+      }
+    },
+    "w1-size-frac-chain": {
+      "where": {
+        "h2": "case when exists(select 1 from resource_category c1_0 where 1=1 and re1_0.id=c1_0.resource_id) then (select count(sc1_0.subcategory_id) from resource_category c2_0 join categories c2_1 on c2_1.id=c2_0.category_id join category_subcategory sc1_0 on c2_1.id=sc1_0.category_id where re1_0.id=c2_0.resource_id) else null end>=2",
+        "postgresql": "case when exists(select 1 from resource_category c1_0 where 1=1 and re1_0.id=c1_0.resource_id) then (select count(sc1_0.subcategory_id) from resource_category c2_0 join categories c2_1 on c2_1.id=c2_0.category_id join category_subcategory sc1_0 on c2_1.id=sc1_0.category_id where re1_0.id=c2_0.resource_id) else null end>=2",
+        "mysql": "case when exists(select 1 from resource_category c1_0 where 1=1 and re1_0.id=c1_0.resource_id) then (select count(sc1_0.subcategory_id) from resource_category c2_0 join categories c2_1 on c2_1.id=c2_0.category_id join category_subcategory sc1_0 on c2_1.id=sc1_0.category_id where re1_0.id=c2_0.resource_id) else null end>=2"
+      }
+    },
+    "w1-size-frac-le-chain": {
+      "where": {
+        "h2": "case when exists(select 1 from resource_category c1_0 where 1=1 and re1_0.id=c1_0.resource_id) then (select count(sc1_0.subcategory_id) from resource_category c2_0 join categories c2_1 on c2_1.id=c2_0.category_id join category_subcategory sc1_0 on c2_1.id=sc1_0.category_id where re1_0.id=c2_0.resource_id) else null end<=1",
+        "postgresql": "case when exists(select 1 from resource_category c1_0 where 1=1 and re1_0.id=c1_0.resource_id) then (select count(sc1_0.subcategory_id) from resource_category c2_0 join categories c2_1 on c2_1.id=c2_0.category_id join category_subcategory sc1_0 on c2_1.id=sc1_0.category_id where re1_0.id=c2_0.resource_id) else null end<=1",
+        "mysql": "case when exists(select 1 from resource_category c1_0 where 1=1 and re1_0.id=c1_0.resource_id) then (select count(sc1_0.subcategory_id) from resource_category c2_0 join categories c2_1 on c2_1.id=c2_0.category_id join category_subcategory sc1_0 on c2_1.id=sc1_0.category_id where re1_0.id=c2_0.resource_id) else null end<=1"
+      }
+    },
+    "w1-size-nonneg-chain": {
+      "where": {
+        "h2": "case when exists(select 1 from resource_category c1_0 where 1=1 and re1_0.id=c1_0.resource_id) then (select count(sc1_0.subcategory_id) from resource_category c2_0 join categories c2_1 on c2_1.id=c2_0.category_id join category_subcategory sc1_0 on c2_1.id=sc1_0.category_id where re1_0.id=c2_0.resource_id) else null end>=0",
+        "postgresql": "case when exists(select 1 from resource_category c1_0 where 1=1 and re1_0.id=c1_0.resource_id) then (select count(sc1_0.subcategory_id) from resource_category c2_0 join categories c2_1 on c2_1.id=c2_0.category_id join category_subcategory sc1_0 on c2_1.id=sc1_0.category_id where re1_0.id=c2_0.resource_id) else null end>=0",
+        "mysql": "case when exists(select 1 from resource_category c1_0 where 1=1 and re1_0.id=c1_0.resource_id) then (select count(sc1_0.subcategory_id) from resource_category c2_0 join categories c2_1 on c2_1.id=c2_0.category_id join category_subcategory sc1_0 on c2_1.id=sc1_0.category_id where re1_0.id=c2_0.resource_id) else null end>=0"
+      }
+    },
+    "w1-size-zero-chain": {
+      "where": {
+        "h2": "case when exists(select 1 from resource_category c1_0 where 1=1 and re1_0.id=c1_0.resource_id) then (select count(sc1_0.subcategory_id) from resource_category c2_0 join categories c2_1 on c2_1.id=c2_0.category_id join category_subcategory sc1_0 on c2_1.id=sc1_0.category_id where re1_0.id=c2_0.resource_id) else null end=0",
+        "postgresql": "case when exists(select 1 from resource_category c1_0 where 1=1 and re1_0.id=c1_0.resource_id) then (select count(sc1_0.subcategory_id) from resource_category c2_0 join categories c2_1 on c2_1.id=c2_0.category_id join category_subcategory sc1_0 on c2_1.id=sc1_0.category_id where re1_0.id=c2_0.resource_id) else null end=0",
+        "mysql": "case when exists(select 1 from resource_category c1_0 where 1=1 and re1_0.id=c1_0.resource_id) then (select count(sc1_0.subcategory_id) from resource_category c2_0 join categories c2_1 on c2_1.id=c2_0.category_id join category_subcategory sc1_0 on c2_1.id=sc1_0.category_id where re1_0.id=c2_0.resource_id) else null end=0"
+      }
+    },
+    "w1-ternary-chain-cond": {
+      "where": {
+        "h2": "case when exists(select 1 from resource_category c1_0 where 1=1 and re1_0.id=c1_0.resource_id) then (select count(sc1_0.subcategory_id) from resource_category c2_0 join categories c2_1 on c2_1.id=c2_0.category_id join category_subcategory sc1_0 on c2_1.id=sc1_0.category_id join subcategories sc1_1 on sc1_1.id=sc1_0.subcategory_id where sc1_1.name='finance' and re1_0.id=c2_0.resource_id) else null end>0 and re1_0.a_bool=true or not(case when exists(select 1 from resource_category c3_0 where 1=1 and re1_0.id=c3_0.resource_id) then (select count(sc2_0.subcategory_id) from resource_category c4_0 join categories c4_1 on c4_1.id=c4_0.category_id join category_subcategory sc2_0 on c4_1.id=sc2_0.category_id join subcategories sc2_1 on sc2_1.id=sc2_0.subcategory_id where sc2_1.name='finance' and re1_0.id=c4_0.resource_id) else null end>0) and not(re1_0.a_bool=true) or not((case when exists(select 1 from resource_category c5_0 where 1=1 and re1_0.id=c5_0.resource_id) then (select count(sc3_0.subcategory_id) from resource_category c6_0 join categories c6_1 on c6_1.id=c6_0.category_id join category_subcategory sc3_0 on c6_1.id=sc3_0.category_id join subcategories sc3_1 on sc3_1.id=sc3_0.subcategory_id where sc3_1.name='finance' and re1_0.id=c6_0.resource_id) else null end>0 or not(case when exists(select 1 from resource_category c7_0 where 1=1 and re1_0.id=c7_0.resource_id) then (select count(sc4_0.subcategory_id) from resource_category c8_0 join categories c8_1 on c8_1.id=c8_0.category_id join category_subcategory sc4_0 on c8_1.id=sc4_0.category_id join subcategories sc4_1 on sc4_1.id=sc4_0.subcategory_id where sc4_1.name='finance' and re1_0.id=c8_0.resource_id) else null end>0)))",
+        "postgresql": "case when exists(select 1 from resource_category c1_0 where 1=1 and re1_0.id=c1_0.resource_id) then (select count(sc1_0.subcategory_id) from resource_category c2_0 join categories c2_1 on c2_1.id=c2_0.category_id join category_subcategory sc1_0 on c2_1.id=sc1_0.category_id join subcategories sc1_1 on sc1_1.id=sc1_0.subcategory_id where sc1_1.name='finance' and re1_0.id=c2_0.resource_id) else null end>0 and re1_0.a_bool=true or not(case when exists(select 1 from resource_category c3_0 where 1=1 and re1_0.id=c3_0.resource_id) then (select count(sc2_0.subcategory_id) from resource_category c4_0 join categories c4_1 on c4_1.id=c4_0.category_id join category_subcategory sc2_0 on c4_1.id=sc2_0.category_id join subcategories sc2_1 on sc2_1.id=sc2_0.subcategory_id where sc2_1.name='finance' and re1_0.id=c4_0.resource_id) else null end>0) and not(re1_0.a_bool=true) or not((case when exists(select 1 from resource_category c5_0 where 1=1 and re1_0.id=c5_0.resource_id) then (select count(sc3_0.subcategory_id) from resource_category c6_0 join categories c6_1 on c6_1.id=c6_0.category_id join category_subcategory sc3_0 on c6_1.id=sc3_0.category_id join subcategories sc3_1 on sc3_1.id=sc3_0.subcategory_id where sc3_1.name='finance' and re1_0.id=c6_0.resource_id) else null end>0 or not(case when exists(select 1 from resource_category c7_0 where 1=1 and re1_0.id=c7_0.resource_id) then (select count(sc4_0.subcategory_id) from resource_category c8_0 join categories c8_1 on c8_1.id=c8_0.category_id join category_subcategory sc4_0 on c8_1.id=sc4_0.category_id join subcategories sc4_1 on sc4_1.id=sc4_0.subcategory_id where sc4_1.name='finance' and re1_0.id=c8_0.resource_id) else null end>0)))",
+        "mysql": "case when exists(select 1 from resource_category c1_0 where 1=1 and re1_0.id=c1_0.resource_id) then (select count(sc1_0.subcategory_id) from resource_category c2_0 join categories c2_1 on c2_1.id=c2_0.category_id join category_subcategory sc1_0 on c2_1.id=sc1_0.category_id join subcategories sc1_1 on sc1_1.id=sc1_0.subcategory_id where sc1_1.name='finance' and re1_0.id=c2_0.resource_id) else null end>0 and re1_0.a_bool=1 or not(case when exists(select 1 from resource_category c3_0 where 1=1 and re1_0.id=c3_0.resource_id) then (select count(sc2_0.subcategory_id) from resource_category c4_0 join categories c4_1 on c4_1.id=c4_0.category_id join category_subcategory sc2_0 on c4_1.id=sc2_0.category_id join subcategories sc2_1 on sc2_1.id=sc2_0.subcategory_id where sc2_1.name='finance' and re1_0.id=c4_0.resource_id) else null end>0) and not(re1_0.a_bool=1) or not((case when exists(select 1 from resource_category c5_0 where 1=1 and re1_0.id=c5_0.resource_id) then (select count(sc3_0.subcategory_id) from resource_category c6_0 join categories c6_1 on c6_1.id=c6_0.category_id join category_subcategory sc3_0 on c6_1.id=sc3_0.category_id join subcategories sc3_1 on sc3_1.id=sc3_0.subcategory_id where sc3_1.name='finance' and re1_0.id=c6_0.resource_id) else null end>0 or not(case when exists(select 1 from resource_category c7_0 where 1=1 and re1_0.id=c7_0.resource_id) then (select count(sc4_0.subcategory_id) from resource_category c8_0 join categories c8_1 on c8_1.id=c8_0.category_id join category_subcategory sc4_0 on c8_1.id=sc4_0.category_id join subcategories sc4_1 on sc4_1.id=sc4_0.subcategory_id where sc4_1.name='finance' and re1_0.id=c8_0.resource_id) else null end>0)))"
+      }
+    },
+    "w2-outer-relation": {
+      "where": {
+        "h2": "(select nullif(coalesce(max(case when (select count(sc1_0.subcategory_id) from category_subcategory sc1_0 where c1_1.id=sc1_0.category_id)=1 and (select nullif(coalesce(max(case when t1_0.name='public' then 2 when not(t1_0.name='public') then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2 then 2 when not((select count(sc2_0.subcategory_id) from category_subcategory sc2_0 where c1_1.id=sc2_0.category_id)=1 and (select nullif(coalesce(max(case when t2_0.name='public' then 2 when not(t2_0.name='public') then 0 else 1 end),0),1) from tags t2_0 where re1_0.id=t2_0.resource_id)=2) then 0 else 1 end),0),1) from resource_category c1_0 join categories c1_1 on c1_1.id=c1_0.category_id where re1_0.id=c1_0.resource_id)=2",
+        "postgresql": "(select nullif(coalesce(max(case when (select count(sc1_0.subcategory_id) from category_subcategory sc1_0 where c1_1.id=sc1_0.category_id)=1 and (select nullif(coalesce(max(case when t1_0.name='public' then 2 when not(t1_0.name='public') then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2 then 2 when not((select count(sc2_0.subcategory_id) from category_subcategory sc2_0 where c1_1.id=sc2_0.category_id)=1 and (select nullif(coalesce(max(case when t2_0.name='public' then 2 when not(t2_0.name='public') then 0 else 1 end),0),1) from tags t2_0 where re1_0.id=t2_0.resource_id)=2) then 0 else 1 end),0),1) from resource_category c1_0 join categories c1_1 on c1_1.id=c1_0.category_id where re1_0.id=c1_0.resource_id)=2",
+        "mysql": "(select nullif(coalesce(max(case when (select count(sc1_0.subcategory_id) from category_subcategory sc1_0 where c1_1.id=sc1_0.category_id)=1 and (select nullif(coalesce(max(case when t1_0.name='public' then 2 when not(t1_0.name='public') then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2 then 2 when not((select count(sc2_0.subcategory_id) from category_subcategory sc2_0 where c1_1.id=sc2_0.category_id)=1 and (select nullif(coalesce(max(case when t2_0.name='public' then 2 when not(t2_0.name='public') then 0 else 1 end),0),1) from tags t2_0 where re1_0.id=t2_0.resource_id)=2) then 0 else 1 end),0),1) from resource_category c1_0 join categories c1_1 on c1_1.id=c1_0.category_id where re1_0.id=c1_0.resource_id)=2"
+      }
+    }
+  }
+}
