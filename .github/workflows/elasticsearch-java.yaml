@@ -3,11 +3,6 @@ name: Elasticsearch Java Test
 on:
   pull_request:
     paths:
-      # `policies/**` is deliberately absent: nothing under elasticsearch-java/ reads the shared
-      # policy suite any more (cerbos/query-plan-adapters#384). Both corpus suites read
-      # `conformance/` — the harness plans against `conformance/policies/adversarial.yaml`, the
-      # translator unit test reads `conformance/wire-fixtures/` — and the surface suite reads the
-      # same fixtures.
       - "elasticsearch-java/**"
       - "conformance/**"
       - ".github/workflows/elasticsearch-java.yaml"

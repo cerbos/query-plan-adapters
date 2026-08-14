@@ -31,8 +31,9 @@ npm run test:adversarial  # differential suite against the shared conformance co
 ```
 
 On prisma, mongoose, drizzle, convex and langchain-chromadb, `npm test` is the **translator unit
-test**: it reads its plans from `conformance/wire-fixtures/`, asserts the emitted filter, and needs
-no sidecar, no database and no generated client ([ADR 0006](docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md)).
+test**: it reads its plans from `conformance/wire-fixtures/`, asserts the emitted filter and the
+rest of what an adapter can be asked offline ("What a translator unit test may pin", below), and
+needs no sidecar, no database and no generated client ([ADR 0006](docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md)).
 On prisma it is engine-agnostic, so it has no v6/v7 split; the Prisma major is still a dimension of
 `npm run typecheck` and of the adversarial legs. On mongoose it never opens a connection, so the
 MongoDB server dimension applies to the adversarial leg alone. On convex it needs neither a Convex
@@ -75,14 +76,6 @@ true. 122 of the corpus's 199 shapes carry no entry at all because it refuses th
 `conformance/README.md`, "Golden expectations"; the principle is
 [ADR 0007](docs/adr/0007-adapters-share-data-not-code.md).
 
-With elasticsearch-java converted, [#381](https://github.com/cerbos/query-plan-adapters/issues/381)
-through [#384](https://github.com/cerbos/query-plan-adapters/issues/384) are all done and every
-adapter that had a shared-policy suite has a fixture-fed translator unit test instead. Nothing in
-the repository reads `policies/resource.yaml` any more except convex's `npm run test:integration`,
-which unblocks [#385](https://github.com/cerbos/query-plan-adapters/issues/385) — deleting the
-shared policy suite, the contract half of
-[#372](https://github.com/cerbos/query-plan-adapters/issues/372).
-
 Drizzle and Prisma also replay the corpus against a real PostgreSQL server (testcontainers, so
 Docker is required): `npm run test:adversarial:postgres`, and `…:postgres:v6` / `…:postgres:v7` on
 Prisma. The store is chosen with `ADAPTER_TEST_DB` (`sqlite` by default); an unknown value fails
@@ -100,8 +93,7 @@ pdm run format         # isort + black
 `tests/test_query.py` / `tests/test_relations.py` are `get_query`'s contract for plans the planner
 cannot produce; none of the three starts anything, so `pdm run pytest tests/test_translator.py`
 needs no PDP and no database. Only `tests/test_adversarial_conformance.py` needs Docker, and it
-starts its own pinned PDP against `conformance/policies/`. Nothing under `sqlalchemy/` reads
-`/policies/` any more.
+starts its own pinned PDP against `conformance/policies/`.
 
 ### Go (Ent, pgx)
 ```bash
@@ -138,7 +130,8 @@ docker run --rm -v "$(pwd)":/repo -v /var/run/docker.sock:/var/run/docker.sock \
 
 Both Java adapters have a **translator unit test** that reads its plans from
 `conformance/wire-fixtures/` and asserts the emitted filter against that adapter's
-`golden/expectations.json`, with no sidecar and no store. On spring-data,
+`golden/expectations.json` — and, as everywhere, the rest of what an adapter can be asked offline
+("What a translator unit test may pin", below) — with no sidecar and no store. On spring-data,
 `SpringDataTranslatorTest` needs no database — its persistence unit carries no JDBC connection at
 all, and Hibernate is told the dialect rather than discovering it. On elasticsearch-java,
 `ElasticsearchTranslatorTest` needs no Elasticsearch, and reads as mostly-throws: 122 of the
@@ -150,27 +143,25 @@ Two suites on elasticsearch-java need Docker, and they need different things:
 `ElasticsearchSurfaceTest` starts Elasticsearch alone, to execute an emitted clause against a real
 server and to measure the store facts most of that adapter's `adapterUnsupported` reasons cite — an
 empty array is not indexed, a JSON null is not indexed, an analyzed field is compared per token. A
-harness can only ever see the refusal, never the mechanism. Nothing under `spring-data/` or
-`elasticsearch-java/` reads `/policies/` any more.
+harness can only ever see the refusal, never the mechanism.
 
 ## Testing
 
 Every adapter that had a shared-policy suite now runs a **translator unit test** in its place: it
-reads its plans from `conformance/wire-fixtures/` and asserts the emitted filter, with no sidecar
-(see above). Ent and pgx never had one — their mirrored `translate_test.go` / `render_test.go`
-suites hand-build their plans and always did, and porting them is not part of
+reads its plans from `conformance/wire-fixtures/` and needs no sidecar and no store (see above, and
+"What a translator unit test may pin" below for what it is allowed to assert). Ent and pgx never had
+one — their mirrored `translate_test.go` / `render_test.go` suites hand-build their plans and always
+did, and porting them is not part of
 [#372](https://github.com/cerbos/query-plan-adapters/issues/372).
 
-Every adversarial suite starts a PDP and loads `conformance/policies/`, not `/policies/`. Shared
-policies still live in `/policies/`, and **convex's integration suite is the last thing that reads
-them** — `npm run test:integration`, run behind a locally installed Cerbos CLI:
-
-```bash
-cerbos run --set=storage.disk.directory=../policies -- jest --config jest.integration.config.js
-```
-
-That is why convex's workflow keeps `policies/**` in its trigger paths and no other adapter's does.
-Deleting the suite is [#385](https://github.com/cerbos/query-plan-adapters/issues/385).
+**`conformance/policies/` is the repository's only policy suite for semantics**, and every
+adversarial suite starts a PDP loaded with it. The shared policy suite that used to sit at the
+repository root is gone: nothing plans against it, and no workflow gates on it
+([ADR 0008](docs/adr/0008-the-shared-policy-suite-is-absorbed-into-the-conformance-corpus.md)).
+The other policy suites in the repository prove **plumbing**, not semantics, and neither is a place
+to put a new shape: `demo/policies/` feeds every example application, and
+`spring-data/example/policies/` is that adapter's onboarding artifact. A shape worth proving is a
+corpus action.
 
 Some adapters need additional services:
 - Mongoose: `npm run mongo` (Docker MongoDB)
@@ -276,7 +267,7 @@ For pull requests: give a concise summary, note the affected adapters, link rela
 
 ## CI
 
-Each adapter has its own GitHub Actions workflow triggered by changes in its directory, `/policies/`, or `/conformance/`. Matrix tests across Node versions (22, 24, 25) and relevant service versions. Every adapter workflow validates the corpus and runs its adversarial suite **inside the same job as the regular tests** — there is no separate `adversarial` job. On the TypeScript adapters the adversarial step is gated to the baseline Node leg (`if: matrix.node-version == '22'`), because the corpus discriminates the translator and the datastore, not the Node runtime; the other matrix dimensions still get their own adversarial run, and those divide into two kinds:
+Each adapter has its own GitHub Actions workflow triggered by changes in its directory or `/conformance/` — plus `/demo/` where that adapter has an example. Matrix tests across Node versions (22, 24, 25) and relevant service versions. Every adapter workflow validates the corpus and runs its adversarial suite **inside the same job as the regular tests** — there is no separate `adversarial` job. Convex is the one exception, and not by choice: its harness imports `convex/_generated`, which only exists once a live backend has been deployed to, so the corpus leg lives in the job that does the deploy and the codegen rather than putting Docker on every Node leg. On the TypeScript adapters the adversarial step is gated to the baseline Node leg (`if: matrix.node-version == '22'`), because the corpus discriminates the translator and the datastore, not the Node runtime; the other matrix dimensions still get their own adversarial run, and those divide into two kinds:
 
 - **The datastore is one.** Drizzle and Prisma each run the corpus twice on the baseline Node leg, once per `ADAPTER_TEST_DB` store (SQLite, then PostgreSQL) — collation, LIKE escaping and parameter typing are translator behaviour, so a store the workflow does not execute is a store the adapter does not cover. MongoDB server version is the mongoose equivalent, and there the store dimension exists **only** on the baseline Node leg: once `npm test` became an offline translator unit test, a second server crossed with a non-baseline Node version ran byte-identical work, so the workflow `exclude`s those legs rather than paying for them.
 - **The client engine is not, on its own.** Prisma's v6/v7 dimension is an engine matrix; it crosses with the store dimension, giving four adversarial runs per Prisma workflow (2 majors × 2 stores), all on Node 22.
@@ -325,13 +316,47 @@ So when you add, fix, or change the handling of any shape:
    not merely that a rejection happens. See `conformance/README.md`.
 6. **Update the affected READMEs' `Conformance contract` tables** in the same commit.
 
-A per-adapter unit test is not a substitute for a corpus action. Unit tests pin the filter an
-adapter emits; only the corpus proves that filter returns the rows the PDP actually allows, and
-only the corpus asks the same question of every other adapter. The one exception is a branch **CEL
-itself cannot reach** — a fractional `size()` equality is a type error, so no policy can drive it
-and there is no corpus action to substitute for. Prove the branch cannot be planned (compile the
-shape and quote the type error), then pin it with a unit test and say so in
-`conformance/README.md`; do not infer unreachability from the adapter's own code.
+### What a translator unit test may pin
+
+**The load-bearing rule is unchanged: for a shape a policy can reach, a per-adapter unit test is
+not a substitute for a corpus action.** Only a corpus action proves the emitted filter returns the
+rows the PDP actually allows, and only the corpus asks the same question of every other adapter. A
+unit test that pins a filter proves the adapter still emits what it emitted yesterday; it says
+nothing about whether that filter was ever right.
+
+What a unit test *pins*, though, is broader than the filter. A translator unit test pins whatever
+the adapter can be asked **without a store**, and that is a real
+list: the emitted filter, the plan kind the planner folds to, the refusal message
+`conformance/actions.json` pins *and where in the walk it is raised*, the distribution of those
+refusal sites, which half of a split output answers a query, the caller-supplied contracts
+(mapper forms, operator overrides, `allowPostFilter`), and the golden asset's own invariants — the
+generator it declares, the command that rewrites it, that no library type ever reached it. Some of
+those are properties **no corpus action can state at all**: a corpus action asks which rows come
+back, and "every refusal in this adapter is raised at one of these sites, in these proportions" is
+not a question about rows. Do not delete such an assertion on the grounds that the corpus covers
+the shape — it does not cover the property.
+
+Three kinds of material legitimately live only in a unit test, and they are not equal:
+
+1. **A branch CEL itself cannot reach.** A fractional `size()` equality is a type error, so no
+   policy can drive it and there is no corpus action to substitute for. Prove the branch cannot be
+   planned (compile the shape and quote the type error), then pin it and say so in
+   `conformance/README.md`; do not infer unreachability from the adapter's own code. Permanent.
+2. **A caller-supplied argument the corpus structurally cannot vary.** `actions.json` classifies
+   each action against *one* mapping per adapter, so an `OperatorFunction` override, a second mapper
+   form, `allowPostFilter`, a per-call `nullAttributeRepresentation`, or `maxMacroDepth` has no
+   corpus spelling — the corpus asks what a policy produces, not what a caller passes. Permanent.
+3. **A corpus gap wearing a unit test** — policy-reachable, and the corpus simply does not carry it
+   yet. This one is a **bridge, not a home**. It is a concession, not a licence: a shape parked here
+   is pinned in exactly one adapter and asked of none of the others, which is the condition every
+   bug this repository exists to stop was living in. One of the shapes currently parked this way is
+   a suspected live over-grant. Each instance must say at the test that it is a corpus gap, name the
+   issue tracking the port, and be deleted when the corpus action lands
+   ([#414](https://github.com/cerbos/query-plan-adapters/issues/414) is the open port).
+   `ElasticsearchQueryPlanAdapterTest` is the worked example: a `KIND 2 — a policy can reach these,
+   and the corpus does not carry them yet` banner over the block, and a `Corpus gap.` lead on every
+   test under it. Not every adapter meets that bar yet — spring-data labels at the class rather
+   than per test — so a shape parked there today is not necessarily findable.
 
 Watch for harnesses that hand-project corpus data into a narrower local shape (a principal
 attribute allowlist, a fixed column list). A projection silently drops anything a new action
@@ -349,8 +374,8 @@ never recompute them in a harness.
 ## Working with Adapters
 
 - Edit only `src/` — never commit `lib/` until tests pass
-- Shared policies in `/policies/` affect all adapters; edit carefully
-- `conformance/` affects all adapters too: a change there re-runs every adapter's CI, and adding an action requires classifying it for every adapter
+- There is **one policy suite for semantics**, `conformance/policies/`. A new shape is a corpus action; a second suite of easier shapes beside it is what [ADR 0008](docs/adr/0008-the-shared-policy-suite-is-absorbed-into-the-conformance-corpus.md) exists to keep out
+- `conformance/` affects all adapters: a change there re-runs every adapter's CI, and adding an action requires classifying it for every adapter
 - `demo/` likewise re-runs every adapter's example job, and adding a usage shape means implementing it in every example — there is no classification bucket to opt out with
 - Adding a seed row means adding its `conformance/derived-fields.json` entry in the same commit; adding a seed *field* also means widening every harness's declared key set — both are enforced, not optional
 - Adapters share data, not code: the corpus loader each adapter carries (`prisma/src/corpus.ts`, `mongoose/src/corpus.ts`, `drizzle/src/corpus.ts`, `convex/src/corpus.ts`, `langchain-chromadb/src/corpus.ts`, `sqlalchemy/tests/corpus.py`, `spring-data/src/test/java/dev/cerbos/queryplan/springdata/Corpus.java`, `elasticsearch-java/src/test/java/dev/cerbos/queryplan/elasticsearch/Corpus.java`, `ent/corpus_test.go`, `pgx/corpus_test.go`, …) is duplicated **deliberately**, so every adapter stays standalone. Do not extract a shared loader, and do not add a drift check between the copies — they are allowed to differ. That is the opposite of the byte-identical rule on the vendored Go *translator* trees, which keeps its exact current scope. See [ADR 0007](docs/adr/0007-adapters-share-data-not-code.md)

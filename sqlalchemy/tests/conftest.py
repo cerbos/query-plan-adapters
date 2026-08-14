@@ -1,8 +1,8 @@
 """Fixtures for the offline suites: a throwaway in-memory schema, in both model styles.
 
 No PDP is started anywhere in this file. It used to start one per module, over two
-transports, with the repository's shared ``/policies/`` mounted into it, for a
-shared-policy suite that has been retired — see ``test_query.py`` for what replaced it.
+transports, loaded with the repository's shared policy suite, for a per-adapter suite
+that has been retired along with that suite — see ``test_query.py`` for what replaced it.
 The suites these fixtures serve now build their plans by hand; the ones that read a real
 planner's output read it from ``conformance/wire-fixtures/``
 (``test_translator.py``), and the one suite that still needs a live PDP starts its own,
@@ -52,7 +52,7 @@ class Resource(Base):
 
     id = Column(Integer, primary_key=True)
     name = Column(String(30))
-    # Camel case, as we're being consistent with the attributes created in the base policy files for the shared repo
+    # Camel case, matching the resource attribute names the corpus policies use
     aBool = Column(Boolean)
     aString = Column(String)
     aNumber = Column(Integer)

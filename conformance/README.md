@@ -337,9 +337,10 @@ seed field.
 and the ordering spellings the corpus does pin (`>= 1.5`, `<= 1.5`) round to an integer threshold
 and travel the ordinary count path. An adapter that folds the fractional equality to a constant
 must still guard it — `hops AND constant` is two-valued and readmits parentless rows under a
-negation — but only that adapter's unit tests can prove it (#333). This is the documented exception
-to "a per-adapter unit test is not a substitute for a corpus action": there is no corpus action to
-substitute for.
+negation — but only that adapter's unit tests can prove it (#333). This is the first of the cases
+`CLAUDE.md` ("What a translator unit test may pin") admits against "a per-adapter unit test is not
+a substitute for a corpus action": there is no corpus action to substitute for, and there never can
+be.
 
 ### The real to-one relation
 
@@ -835,9 +836,11 @@ the acceptance test for these guards; run it before trusting them.
 ## Golden expectations
 
 A **golden expectation** is the database-native filter one adapter is pinned to emit for one corpus
-action. It is the assertion a *translator unit test* makes — the offline suite that reads its plans
-from `wire-fixtures/` and asserts nothing but the emitted filter
-([ADR 0006](../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md)).
+action. It is the central assertion a *translator unit test* makes — the offline suite that reads
+its plans from `wire-fixtures/` and needs no PDP and no store
+([ADR 0006](../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md)) — though
+not the only one, since that suite also pins the plan kinds, the refusals and the caller-supplied
+contracts a store is not needed to reach (`CLAUDE.md`, "What a translator unit test may pin").
 
 **The expectations are not corpus data and must never live here.** Eleven workflows trigger on
 `conformance/**` — every adapter workflow plus `conformance.yaml` — so one adapter re-pinning one

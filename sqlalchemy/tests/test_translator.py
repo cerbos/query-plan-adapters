@@ -2,7 +2,7 @@
 this adapter emits. Offline — no Cerbos sidecar, no container, no database.
 
 This adapter had no test of this kind at all. Its per-adapter suite planned every shape
-against a live PDP loaded with ``/policies/``, executed the query against three seeded rows
+against a live PDP loaded with the shared policy suite, executed the query against three seeded rows
 and compared the result with a hardcoded count — the weakest oracle any adapter had, and one
 that never asserted the emitted filter anywhere. Three of the four assertions that suite
 braided together are somebody else's job now, and this file makes only the fourth:

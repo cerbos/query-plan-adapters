@@ -25,9 +25,9 @@ independent of any adapter or database.
 _Avoid_: plan fixture, recorded response
 
 **Translator unit test**:
-An adapter's offline test that a plan produces the expected database-native filter. Takes its
-plans from wire fixtures, runs without a PDP and without a store, and asserts the emitted filter
-and nothing else — see
+An adapter's offline test of what a plan produces. Takes its plans from wire fixtures, runs without
+a PDP and without a store, and asserts what the adapter can be asked without one — the emitted
+filter above all, but not only that (`CLAUDE.md`, "What a translator unit test may pin"). See
 [ADR 0006](docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md). Distinct
 from the conformance harness, which proves the rows that filter returns.
 _Avoid_: unit test, filter test, shape test
@@ -81,3 +81,17 @@ A way a consumer calls the ORM with an adapter-produced filter — a plain filte
 paginated page, a count, a sort, a relation traversal. The unit of coverage an example application
 adds over a conformance harness.
 _Avoid_: query pattern, call pattern, scenario
+
+### Retired language
+
+Named here so the concept is recognisable when it is proposed again, not so it can be used.
+
+**Shared policy suite**:
+*Retired.* The Cerbos policy file that used to sit at the repository root, which most adapters read
+a different subset of and each proved a different way. Absorbed into the conformance corpus and
+deleted — see
+[ADR 0008](docs/adr/0008-the-shared-policy-suite-is-absorbed-into-the-conformance-corpus.md). It is
+the one thing here that never had a name in this glossary, which is much of why it drifted.
+_Avoid_: shared policies, the root policies, the friendly corpus, the non-hostile suite — and the
+term itself outside a statement about the past. The live term is **conformance corpus**, and a
+second, friendlier suite beside it is this idea returning.

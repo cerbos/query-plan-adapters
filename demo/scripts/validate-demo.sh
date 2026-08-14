@@ -319,9 +319,9 @@ for adapter in $(jq -r '.adapters[]' "${ACTIONS}"); do
   # existed when this check was written had shipped `?? "localhost:3593"`, which is not a harmless
   # default: 3592/3593 are the ports every adapter's `cerbos run` test sidecar binds, and it is
   # why demo/docker-compose.yml publishes the demo PDP on 13592/13593 instead. An unset
-  # CERBOS_HOST therefore did not fail — the example planned against a sidecar loaded with
-  # `policies/` rather than `demo/policies/`, and the mismatch against expected.json read as an
-  # adapter bug. The rule was already in demo/README.md's "What an example must do" and both
+  # CERBOS_HOST therefore did not fail — the example planned against whichever sidecar held those
+  # ports rather than the one loaded with `demo/policies/`, and the mismatch against expected.json
+  # read as an adapter bug. The rule was already in demo/README.md's "What an example must do" and both
   # examples broke it anyway, which is what makes it a check rather than prose.
   #
   # A CLIENT address specifically. `demo/docker-compose.yml` maps "13592:3592", and the

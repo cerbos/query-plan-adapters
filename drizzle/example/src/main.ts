@@ -81,9 +81,10 @@ const APPLICATION_FILTER = and(
 /**
  * The runner sets this, and there is deliberately no fallback. The obvious default — Cerbos's own
  * 3592/3593 — is the address every adapter's `cerbos run` test sidecar binds, so an unset
- * CERBOS_HOST would not fail: it would quietly plan against `../policies` and produce a diff
- * against demo/expected.json that reads as an adapter bug. demo/README.md requires reaching the
- * PDP at $CERBOS_HOST, "never a hardcoded address", for exactly that reason.
+ * CERBOS_HOST would not fail: it would quietly plan against the conformance corpus that sidecar
+ * serves, and produce a diff against demo/expected.json that reads as an adapter bug.
+ * demo/README.md requires reaching the PDP at $CERBOS_HOST, "never a hardcoded address", for
+ * exactly that reason.
  *
  * Checked before anything is opened or deleted, so a misinvocation costs nothing.
  */

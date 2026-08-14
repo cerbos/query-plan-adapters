@@ -17,6 +17,6 @@ module.exports = {
   },
   // Isolated from the main jest.config.js run: this suite talks to a Cerbos sidecar loaded
   // with conformance/policies (resource kind "adversarial") on dedicated ports (gRPC 3621),
-  // not the ../policies sidecar on the default ports.
+  // rather than a sidecar on the default ports.
   testMatch: ["<rootDir>/src/adversarial.test.ts"],
 };

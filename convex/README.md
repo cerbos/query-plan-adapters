@@ -183,9 +183,8 @@ This adapter **builds no subquery.** Convex has no joins, so the mapper resolves
 
 | Command | What it proves | What it needs |
 | --- | --- | --- |
-| `npm test` | **The filter this adapter emits.** The translator unit test: every corpus action, classified exactly once as a golden expectation or as a throw | Nothing but Node — no Cerbos sidecar, no Convex backend, no Docker |
-| `npm run test:integration` | That Convex's real filter engine evaluates a pushed-down filter the way the adapter assumes | Cerbos CLI, Docker |
-| `npm run test:adversarial` | **The documents that filter returns**, inside a real Convex backend with `check()` as the oracle | Cerbos CLI, Docker |
+| `npm test` | **The filter this adapter emits.** The translator unit test: every corpus action, classified exactly once as a golden expectation or as a throw — plus the execution-path distribution over the whole corpus, the rules every pushed-down filter obeys, and the `allowPostFilter` gate, none of which needs a backend | Nothing but Node — no Cerbos sidecar, no Convex backend, no Docker |
+| `npm run test:adversarial` | **The documents that filter returns**, inside a real Convex backend with `check()` as the oracle — and, per action, which half of the output selected them, so a pushed-down filter is proved against Convex's real filter engine rather than against a recorder | Cerbos CLI, Docker |
 | `npm run golden:update` | — | Rewrites `golden/expectations.json` from what the translator emits today. Review the diff |
 
 ### The golden expectations

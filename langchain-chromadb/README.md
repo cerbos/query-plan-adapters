@@ -280,7 +280,7 @@ const matches = await chroma.similaritySearch("query", 10, filters);
 
 | Command | What it does | What it needs |
 | --- | --- | --- |
-| `npm test` | Proves **the `Where` filter this adapter emits.** The translator unit test: every corpus action, classified exactly once as a golden expectation or as a throw | Nothing but Node — no Cerbos sidecar, no ChromaDB, no Docker |
+| `npm test` | Proves **the `Where` filter this adapter emits.** The translator unit test: every corpus action, classified exactly once as a golden expectation or as a throw — plus the set of logical operators the emitted clauses ever use, and the golden asset's own invariants, neither of which needs a store | Nothing but Node — no Cerbos sidecar, no ChromaDB, no Docker |
 | `npm run test:adversarial` | Proves **the documents that filter returns**, against a real ChromaDB collection with `check()` as the oracle | Cerbos CLI, Docker |
 | `npm run golden:update` | Rewrites `golden/expectations.json` from what the translator emits today, preserving every `note`. Review the diff — CI never regenerates | Nothing but Node |
 

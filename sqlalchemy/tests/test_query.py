@@ -9,8 +9,8 @@ the SQLAlchemy 2.0 declarative style. Neither can come from a wire fixture, beca
 neither corresponds to a policy.
 
 What used to sit above all of this was 48 tests that planned corpus-adjacent shapes
-against a live PDP loaded with ``/policies/``, executed the query against three seeded
-rows and compared the result with a hardcoded count. Those are retired: the shapes are
+against a live PDP loaded with the shared policy suite, executed the query against three
+seeded rows and compared the result with a hardcoded count. Those are retired: the shapes are
 all corpus actions now, ``test_translator.py`` pins the SQL each one emits and
 ``test_adversarial_conformance.py`` proves the rows against ``check()`` over 21 hostile
 seeds instead of 3 friendly ones. A shape CEL *can* express belongs there, not here,

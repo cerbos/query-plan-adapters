@@ -52,8 +52,8 @@ Rules:
   `prisma` reads as "a corpus change whose open work is in the Prisma adapter". Adding a shape
   requires classifying it for every adapter, so only tag the adapters with outstanding work, and say in
   the body that the rest are already classified.
-- **A change to `policies/` is also repo-wide** — the shared policies feed every adapter's tests —
-  but it isn't corpus work, so it takes no scope label unless a specific adapter is implicated.
+- **A change to `demo/` is also repo-wide** — the demo domain feeds every example application — but
+  it isn't corpus work, so it takes no scope label unless a specific adapter is implicated.
 - **No scope label** means the issue is repo-level: tooling, CI, docs, dependencies.
 
 Adding an adapter to the repo means adding its label here and on GitHub in the same change.
