@@ -49,6 +49,21 @@ type ResolvedField = {
 
 type FieldResolver = (key: string) => ResolvedField;
 
+// Operands are classified by shape, never with `instanceof`. `instanceof` is nominal, so it
+// answers "was this built by MY copy of @cerbos/core?" rather than "what kind of operand is
+// this?" — and a consumer whose Cerbos client resolves a different copy of core than this
+// adapter does is an ordinary npm outcome, not a misconfiguration. No dependency declaration
+// prevents it: npm resolves a peer to the highest version satisfying it, not the one that
+// dedupes with the rest of the tree, so every range leaves some consumer with two copies
+// (cerbos/query-plan-adapters#419). The three operand types have disjoint shapes, so matching
+// on them is exact and survives however many copies exist. Same trio as every other adapter.
+const isExpression = (e: PlanExpressionOperand): e is PlanExpression =>
+  "operator" in e;
+const isValue = (e: PlanExpressionOperand): e is PlanExpressionValue =>
+  "value" in e;
+const isVariable = (e: PlanExpressionOperand): e is PlanExpressionVariable =>
+  "name" in e;
+
 const NEGATED_OPERATOR: Readonly<Record<string, string>> = {
   eq: "ne",
   ne: "eq",
@@ -124,7 +139,7 @@ function binaryOperands(operands: PlanExpressionOperand[]): BinaryOperands {
   let value: PlanExpressionValue | undefined;
 
   for (const [index, operand] of operands.entries()) {
-    if (operand instanceof PlanExpressionVariable) {
+    if (isVariable(operand)) {
       if (variable) {
         throw Error(
           "Variable-to-variable comparisons are not supported by ChromaDB filters",
@@ -132,7 +147,7 @@ function binaryOperands(operands: PlanExpressionOperand[]): BinaryOperands {
       }
       variable = operand;
       variableIndex = index;
-    } else if (operand instanceof PlanExpressionValue) {
+    } else if (isValue(operand)) {
       if (value) {
         throw Error("Value-to-value comparisons are not supported by ChromaDB filters");
       }
@@ -294,10 +309,10 @@ function negateOperand(
   operand: PlanExpressionOperand,
   resolveField: FieldResolver,
 ): Where {
-  if (operand instanceof PlanExpressionVariable) {
+  if (isVariable(operand)) {
     return mapBooleanVariable(operand, resolveField, true);
   }
-  if (!(operand instanceof PlanExpression)) {
+  if (!isExpression(operand)) {
     throw Error(
       `Query plan did not contain an expression for operand ${String(operand)}`,
     );
@@ -335,10 +350,10 @@ function mapOperand(
   operand: PlanExpressionOperand,
   resolveField: FieldResolver,
 ): Where {
-  if (operand instanceof PlanExpressionVariable) {
+  if (isVariable(operand)) {
     return mapBooleanVariable(operand, resolveField, false);
   }
-  if (!(operand instanceof PlanExpression)) {
+  if (!isExpression(operand)) {
     throw Error(
       `Query plan did not contain an expression for operand ${String(operand)}`,
     );
