@@ -75,6 +75,23 @@ undeclared side needs UNKNOWN — so the adapter throws rather than picking a di
 [#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
 [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
 
+## Example application
+
+This repository carries a runnable [`example/`](example/), which installs the adapter from the
+distribution `pdm publish` would upload and exercises it against a live PDP over the shared
+[demo domain](../demo/README.md):
+
+```bash
+# from the repository root
+demo/scripts/run-example.sh sqlalchemy
+```
+
+Unlike the suites below, it resolves `cerbos_sqlalchemy` through the **published** surface — the
+modules the wheel actually carries, and its `Requires-Dist` resolved against a consumer's own
+pinned SQLAlchemy and Cerbos SDK — and covers usage shapes past a single flat query: `.limit()` and
+`.offset()` on top of the query, and the adapter's `Select` composed with an application-owned
+`.where()` clause across all three plan kinds.
+
 ## How this adapter is tested
 
 Three suites, each answering a different question, and only one of them needs anything running.

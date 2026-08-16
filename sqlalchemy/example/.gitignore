@@ -1,0 +1,10 @@
+# The environment `run.sh` builds with `pdm install`, and PDM's record of the interpreter it
+# chose. Both are per-machine; pdm.lock is the committed half.
+.venv
+.pdm-python
+
+__pycache__/
+
+# Scratch state main.py deletes and recreates on every run.
+demo.db
+demo.db-journal

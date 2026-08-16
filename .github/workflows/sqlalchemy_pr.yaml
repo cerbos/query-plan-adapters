@@ -7,6 +7,7 @@ on:
     paths:
       - "sqlalchemy/**"
       - "conformance/**"
+      - "demo/**"
       - ".github/workflows/sqlalchemy_pr.yaml"
       - ".github/workflows/sqlalchemy_release.yaml"
 
@@ -83,3 +84,46 @@ jobs:
         run: npx -y pyright@1.1.411
 
       - run: pdm run test
+
+  # The example application: the published distribution, installed from the wheel `pdm build`
+  # produced and used the way a consumer uses it, against the shared demo domain. It covers the
+  # two things the suite above structurally cannot — the packaging surface (which modules the
+  # distribution carries, and its `Requires-Dist` resolved against a consumer's pinned tree),
+  # which every suite bypasses by importing from `../src`, and the usage shapes past a single flat
+  # query (pagination, and composing the adapter's `Select` with the application's own predicate).
+  # See cerbos/query-plan-adapters#349 and
+  # docs/adr/0002-examples-install-the-packed-artifact.md.
+  #
+  # THIS JOB MUST STAY IN THIS WORKFLOW. `renovate.json` sets `automerge: true` for every
+  # non-major bump, and that is the path an ORM regression takes into `main` today. Because the
+  # example's lockfile is committed and Renovate manages it, a SQLAlchemy bump arrives as ONE PR
+  # touching both sqlalchemy/pyproject.toml and sqlalchemy/example/ — and this job, being a check
+  # on that PR, is what blocks the automerge when the new version breaks real usage. Moving it to
+  # a nightly run or a workflow of its own silently restores that gap.
+  #
+  # One Python leg only, and one SQLAlchemy major: the demo domain discriminates the distribution
+  # and the ORM's real query methods, not the interpreter — and the 1.4/2.x split is a semantics
+  # dimension, already run twice above by the job this one sits beside.
+  example:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate conformance corpus
+        run: ../conformance/scripts/validate-corpus.sh
+
+      - name: Validate demo domain
+        run: ../demo/scripts/validate-demo.sh
+
+      - uses: pdm-project/setup-pdm@973541a5febeafcfdadf8a51211435be6ecfd90f # v4.5
+        name: Setup PDM
+        with:
+          python-version: "3.10"
+
+      # No `pdm install` here: the example builds the adapter and installs its own pinned tree
+      # from sqlalchemy/example/pdm.lock, in its own environment. The PDP is a container started
+      # by the runner from demo/docker-compose.yml, pinned to conformance/CERBOS_VERSION and
+      # conformance/CERBOS_IMAGE_DIGEST — no cerbos-setup-action here, because an example must
+      # reach the PDP the way a deployed application does.
+      - name: Run the example against the demo domain
+        run: ../demo/scripts/run-example.sh sqlalchemy
