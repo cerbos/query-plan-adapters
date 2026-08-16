@@ -1,0 +1,9 @@
+node_modules
+lib
+tsconfig.tsbuildinfo
+# Written by `npx convex deploy`, from the schema and functions in convex/. Generated output, like
+# a Prisma client: never committed, and run.sh regenerates it on every run.
+convex/_generated/
+.env.local
+# The adapter tarball `run.sh` builds and installs. Regenerated on every run; never committed.
+cerbos-orm-convex-*.tgz
