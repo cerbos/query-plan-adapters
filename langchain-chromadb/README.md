@@ -179,6 +179,9 @@ if (result.kind === PlanKind.CONDITIONAL) {
 }
 ```
 
+`QueryPlanToChromaDBArgs` and `QueryPlanToChromaDBResult` are exported alongside the function, so a
+caller passing either one to a function of its own has a name to write.
+
 `PlanKind` is re-exported from `@cerbos/core`:
 
 ```ts
@@ -285,6 +288,24 @@ const matches = await chroma.similaritySearch("query", 10, filters);
 - A filter literal is null, nested, non-finite, or otherwise invalid for Chroma metadata.
 - `$ne` or `$nin` targets a field that is not declared `required: true`.
 - A fractional ordered comparison targets a field that is not configured with `numericType: "float"`.
+
+## Example application
+
+This repository carries a runnable [`example/`](example/), which installs the adapter from the
+artifact `npm publish` would upload and exercises it against a live PDP and a real ChromaDB server
+over the shared [demo domain](../demo/README.md):
+
+```bash
+# from the repository root
+demo/scripts/run-example.sh langchain-chromadb
+```
+
+Unlike the test suites, it resolves the adapter through its **published** surface — the `exports`
+map, `types`, the `files` allowlist, and the `@cerbos/core` peer range — and covers usage shapes
+past a single flat query: a limit walked to the end of the result set through `collection.get`, and
+the adapter's `Where` clause composed with an application-owned one under `$and`. It is also where
+the empty clause an `ALWAYS_ALLOWED` plan returns meets Chroma's own validator, which rejects `{}`
+— so a caller omits `where` rather than forwarding it.
 
 ## Testing
 

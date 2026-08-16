@@ -5,6 +5,7 @@ on:
     paths:
       - "langchain-chromadb/**"
       - "conformance/**"
+      - "demo/**"
       - ".github/workflows/chromadb.yaml"
       - ".github/workflows/chromadb-publish.yaml"
   push:
@@ -86,3 +87,48 @@ jobs:
       - name: Stop ChromaDB
         if: always() && matrix.node-version == '22'
         run: docker rm -f chromadb
+
+  # The example application: the published package, installed from `npm pack`'s tarball and used
+  # the way a consumer uses it, against the shared demo domain. It covers the two things the job
+  # above structurally cannot — the packaging surface (`exports`, `types`, the `files` allowlist,
+  # the `@cerbos/core` peer range), which both suites bypass by importing from `"."`, and the usage
+  # shapes past a single flat query (a limit walked to the end of the result set, and composing the
+  # adapter's filter with the application's own). See cerbos/query-plan-adapters#349 and
+  # docs/adr/0002-examples-install-the-packed-artifact.md.
+  #
+  # THIS JOB MUST STAY IN THIS WORKFLOW. `renovate.json` sets `automerge: true` for every
+  # non-major bump, and that is the path a ChromaDB client regression takes into `main` today.
+  # Because the example's lockfile is committed and Renovate manages it, a `chromadb` bump arrives
+  # as ONE PR touching both langchain-chromadb/package.json and
+  # langchain-chromadb/example/package.json — and this job, being a check on that PR, is what
+  # blocks the automerge when the new client breaks real usage. Moving it to a nightly run or a
+  # workflow of its own silently restores that gap.
+  #
+  # One Node leg only: the demo domain discriminates the package and the client, not the runtime —
+  # the same reasoning that gates the adversarial step above to Node 22.
+  #
+  # No ChromaDB is started here, unlike the job above: the example's own run.sh starts one, on
+  # 18234 rather than 8234, because bringing the store up is part of what a consumer does.
+  example:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate conformance corpus
+        run: ../conformance/scripts/validate-corpus.sh
+
+      - name: Validate demo domain
+        run: ../demo/scripts/validate-demo.sh
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
+      - run: npm install
+
+      # The PDP is a container started by the runner from demo/docker-compose.yml, pinned to
+      # conformance/CERBOS_VERSION and conformance/CERBOS_IMAGE_DIGEST — no cerbos-setup-action
+      # here, because an example must reach the PDP the way a deployed application does.
+      - name: Run the example against the demo domain
+        run: ../demo/scripts/run-example.sh langchain-chromadb

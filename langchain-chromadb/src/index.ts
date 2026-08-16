@@ -23,12 +23,18 @@ export type FieldMapper =
   | Record<string, FieldNameMapperValue>
   | ((key: string) => FieldNameMapperValue);
 
-interface QueryPlanToChromaDBArgs {
+export interface QueryPlanToChromaDBArgs {
   queryPlan: PlanResourcesResponse;
   fieldNameMapper: FieldMapper;
 }
 
-interface QueryPlanToChromaDBResult {
+// Exported so a consumer can name what it is handed, as prisma and drizzle already do for theirs.
+// A caller that passes the result to a function of its own — which is what composing the clause
+// with an application-owned one looks like — otherwise has to write it out or reach for
+// `ReturnType<typeof queryPlanToChromaDB>`. Found by `example/`, which is the only thing here that
+// resolves this package through its published surface
+// (docs/adr/0002-examples-install-the-packed-artifact.md).
+export interface QueryPlanToChromaDBResult {
   kind: PlanKind;
   filters?: Where;
 }

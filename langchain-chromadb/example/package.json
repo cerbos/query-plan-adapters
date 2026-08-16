@@ -1,0 +1,25 @@
+{
+  "name": "cerbos-langchain-chromadb-example",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Example application for @cerbos/langchain-chromadb, run against the shared demo domain",
+  "license": "Apache-2.0",
+  "scripts": {
+    "build": "tsc --build",
+    "start": "node lib/main.js"
+  },
+  "//": "@cerbos/langchain-chromadb is deliberately ABSENT from these dependencies. run.sh installs it from `npm pack`'s tarball, whose integrity hash changes on every build and would make a committed lockfile unusable with `npm ci`. The vector store client and the SDK ARE pinned here, which is the half Renovate manages: a chromadb bump lands as one PR touching both langchain-chromadb/package.json and this file, and the example job on that PR is what blocks automerge if the new client broke real usage.",
+  "//peer": "@cerbos/core is declared because the adapter declares it as a PEER dependency, not because this example imports it directly — it is the copy of the query-plan types the Cerbos client and the adapter have to share, and the adapter's README tells a consumer to `npm install @cerbos/langchain-chromadb @cerbos/core` for exactly that reason. npm 7+ would install the missing peer on its own; pnpm and Yarn would not, so a consumer declares it and so does this. @cerbos/grpc pulls core ^0.33.0, so one copy resolves rather than two.",
+  "dependencies": {
+    "@cerbos/core": "^0.33.0",
+    "@cerbos/grpc": "^0.29.0",
+    "chromadb": "^3.2.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^6.0.0"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
