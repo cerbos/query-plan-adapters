@@ -1,0 +1,26 @@
+{
+  // The BACKEND half: the functions `npx convex deploy` bundles and pushes. Convex reads this when
+  // it type-checks the push, which is where a broken `exports` map on @cerbos/orm-convex would
+  // surface — `Bundler` resolution reads `exports` just as the `nodenext` in ../tsconfig.json does.
+  //
+  // Kept exactly as Convex generates it for a new project, and identical to the adapter's own
+  // ../../convex/tsconfig.json. `jsx`, the `dom` lib and `allowJs` are unused by these two files;
+  // trimming them would make this the one Convex project in the repository whose compiler options
+  // someone has to reason about, to save nothing.
+  "compilerOptions": {
+    "allowJs": true,
+    "strict": true,
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "skipLibCheck": true,
+    "allowSyntheticDefaultImports": true,
+    "target": "ESNext",
+    "lib": ["ES2023", "dom"],
+    "forceConsistentCasingInFileNames": true,
+    "module": "ESNext",
+    "isolatedModules": true,
+    "noEmit": true
+  },
+  "include": ["./**/*"],
+  "exclude": ["./_generated"]
+}

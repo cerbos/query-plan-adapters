@@ -179,6 +179,23 @@ This adapter **builds no subquery.** Convex has no joins, so the mapper resolves
 | Composite association key | Not applicable — no join, so no key to compose | — |
 | Absent to-one parent | **Reproduced**, and proved by the corpus (`w1-all-chain`, `rel-not-bool-hop` and siblings) | None — the post-filter evaluates a missing path as a CEL error, which denies, so an absent parent is excluded under both polarities rather than reading as an empty collection ([#309](https://github.com/cerbos/query-plan-adapters/issues/309), [#375](https://github.com/cerbos/query-plan-adapters/issues/375)). **Behaviour change in #375:** a BARE variable in boolean position was pushed to Convex's filter engine regardless of `nullable`, and the engine cannot tell an absent path from a false one, so a negation over one readmitted every row missing that path. A `nullable` bare variable is now answered by the adapter's own evaluator instead — correct rows, and one more shape scanned rather than indexed |
 
+## Example application
+
+This repository carries a runnable [`example/`](example/), which installs the adapter from the
+artifact `npm publish` would upload and exercises it against a live PDP over the shared
+[demo domain](../demo/README.md):
+
+```bash
+# from the repository root
+demo/scripts/run-example.sh convex
+```
+
+Unlike the test suites, it resolves the adapter through its **published** surface — the `exports`
+map, `types`, the `files` allowlist, and the `@cerbos/core` peer range — and covers usage shapes
+past a single flat query: `.paginate()` on top of the filter, and the adapter's filter composed
+with an application-owned filter. It is also the one place a plan makes the round trip a Convex
+consumer's plan actually makes, JSON-encoded into the backend and back out again.
+
 ## Testing
 
 | Command | What it proves | What it needs |

@@ -1,0 +1,23 @@
+{
+  // The CLIENT half of the example — src/main.ts, which runs in Node. The Convex functions under
+  // convex/ are compiled by Convex's own bundler and have a tsconfig of their own.
+  //
+  // `nodenext` resolution is load-bearing, not a style choice: it is what makes TypeScript read
+  // the adapter's `exports` map. The legacy `node10` resolver ignores `exports` entirely and
+  // falls back to `main`/`types`, so a broken `exports` map would compile clean here and only
+  // fail for a consumer.
+  "compilerOptions": {
+    "target": "es2023",
+    "lib": ["es2023"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "outDir": "lib",
+    "rootDir": "src",
+    "types": ["node"]
+  },
+  "include": ["src"]
+}
