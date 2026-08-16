@@ -113,8 +113,18 @@ This adapter **builds no subquery.** A relation is a path inside the same docume
 ## Installation
 
 ```bash
-npm install @cerbos/orm-mongoose
+npm install @cerbos/orm-mongoose @cerbos/core
 ```
+
+`@cerbos/core` is a peer dependency: it carries the query plan types, and your application and
+this adapter have to share one copy of them. Installing it yourself is what keeps that true — with
+a second copy in the tree an operand built by your Cerbos client is not the same object the adapter
+inspects. npm 7+ installs missing peers automatically; pnpm and Yarn expect it to be declared.
+
+You also need a Cerbos client to obtain a query plan in the first place — [`@cerbos/grpc`](https://www.npmjs.com/package/@cerbos/grpc)
+or [`@cerbos/http`](https://www.npmjs.com/package/@cerbos/http). Install whichever your deployment
+uses; this adapter deliberately depends on neither, so it does not pull a gRPC stack into an
+application that talks HTTP.
 
 ## API
 
