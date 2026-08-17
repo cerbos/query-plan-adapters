@@ -97,6 +97,172 @@
         }
       }
     },
+    "hier-ancestor-cf": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "prefix": {
+          "scope": {
+            "value": "dept.eng."
+          }
+        }
+      }
+    },
+    "hier-ancestor-ff": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "terms": {
+          "scope": [
+            "dept",
+            "dept.eng"
+          ]
+        }
+      }
+    },
+    "hier-bracket": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "prefix": {
+          "scope": {
+            "value": "[env]:prod:"
+          }
+        }
+      }
+    },
+    "hier-descendent-cf": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "terms": {
+          "scope": [
+            "dept",
+            "dept.eng"
+          ]
+        }
+      }
+    },
+    "hier-descendent-ff": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "prefix": {
+          "scope": {
+            "value": "dept.eng."
+          }
+        }
+      }
+    },
+    "hier-meta-in": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "terms": {
+          "scope": [
+            "50%",
+            "50%.a_b"
+          ]
+        }
+      }
+    },
+    "hier-meta-like": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "prefix": {
+          "scope": {
+            "value": "50%:a_b:"
+          }
+        }
+      }
+    },
+    "hier-overlaps-cf": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "minimum_should_match": 1,
+          "should": [
+            {
+              "terms": {
+                "scope": [
+                  "dept"
+                ]
+              }
+            },
+            {
+              "term": {
+                "scope": {
+                  "value": "dept.eng"
+                }
+              }
+            },
+            {
+              "prefix": {
+                "scope": {
+                  "value": "dept.eng."
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "hier-overlaps-ff": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "minimum_should_match": 1,
+          "should": [
+            {
+              "terms": {
+                "scope": [
+                  "dept"
+                ]
+              }
+            },
+            {
+              "term": {
+                "scope": {
+                  "value": "dept.eng"
+                }
+              }
+            },
+            {
+              "prefix": {
+                "scope": {
+                  "value": "dept.eng."
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "hier-overlaps-meta": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "minimum_should_match": 1,
+          "should": [
+            {
+              "terms": {
+                "scope": [
+                  "50%"
+                ]
+              }
+            },
+            {
+              "term": {
+                "scope": {
+                  "value": "50%:a_b"
+                }
+              }
+            },
+            {
+              "prefix": {
+                "scope": {
+                  "value": "50%:a_b:"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
     "id-eq-const": {
       "kind": "CONDITIONAL",
       "query": {

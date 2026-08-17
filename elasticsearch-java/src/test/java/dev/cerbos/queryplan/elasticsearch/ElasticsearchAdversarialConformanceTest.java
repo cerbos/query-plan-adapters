@@ -283,7 +283,7 @@ class ElasticsearchAdversarialConformanceTest {
                 "adapterUnsupported.elasticsearch-java contains non-conformance actions");
         assertTrue(expected.containsAll(supportedExpected),
                 "adapterSupportedExpected.elasticsearch-java contains non-expected actions");
-        assertEquals(113, unsupported.size(),
+        assertEquals(103, unsupported.size(),
                 "Elasticsearch unsupported coverage changed without updating the ledger assertion");
         assertEquals(2, supportedExpected.size(),
                 "Elasticsearch supported-expected coverage changed without updating the ledger assertion");
@@ -327,8 +327,8 @@ class ElasticsearchAdversarialConformanceTest {
         manifest.addAll(expected);
         manifest.addAll(nullRepresentationOmittedActions);
         manifest.addAll(divergences);
-        assertEquals(76, oracleActions.size());
-        assertEquals(121, throwingActions.size());
+        assertEquals(86, oracleActions.size());
+        assertEquals(111, throwingActions.size());
         assertEquals(1, nullRepresentationOmittedActions.size());
         assertEquals(199, classified.size());
         assertEquals(manifest, classified, "every manifest action must be classified locally");
@@ -786,7 +786,20 @@ class ElasticsearchAdversarialConformanceTest {
             // unsupported threshold because it scanned for the size operand without mirroring the
             // operator; the value-first hasIntersection; and the BELOW-cliff unroll of a principal
             // collection, the shape a principal with three teams produces.
-            "not-and", "vf-size", "vf-hasint", "pv-exists-unrolled");
+            "not-and", "vf-size", "vf-hasint", "pv-exists-unrolled",
+            // The hierarchy relations (#332), which lower to term-level queries over the field's
+            // whole stored path. Every hier-* action it translates is listed rather than a few, because
+            // three lowerings and the two path spellings cross: `prefix` on the constant plus its
+            // delimiter, `terms` over the constant's proper prefixes, and the `bool.should` union
+            // of both plus a `term` — each reachable from either operand order, and each again
+            // under a custom delimiter over path segments carrying SQL metacharacters. A prefix
+            // query is term-level, so those segments are matched literally here and the escaping
+            // the SQL adapters need has no analogue; the guard is what proves the seeds still
+            // discriminate that rather than agreeing vacuously.
+            "hier-ancestor-ff", "hier-ancestor-cf",
+            "hier-descendent-ff", "hier-descendent-cf",
+            "hier-overlaps-ff", "hier-overlaps-cf",
+            "hier-meta-like", "hier-meta-in", "hier-overlaps-meta", "hier-bracket");
 
     /**
      * Shapes this adapter refuses to translate: they have no oracle comparison to guard, and stay
@@ -829,7 +842,13 @@ class ElasticsearchAdversarialConformanceTest {
             "not-contains",
             "arith-mod",
             "index-scalar-list",
-            "map-eq-list");
+            "map-eq-list",
+            // The one hierarchy shape that stays fail-closed once the rest of the group translates (#332):
+            // its descendant path is CONSTRUCTED by list() from a constant segment and the primary
+            // key, so there is no stored path for a prefix or terms query to run against. It sits
+            // here rather than in the guard proper, and the complement assertion below is what
+            // makes that split a statement rather than an omission.
+            "hier-list-id");
 
     @Test
     void oracleIsNotDegenerate() {
