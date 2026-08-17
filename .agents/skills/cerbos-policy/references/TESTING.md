@@ -5,7 +5,7 @@ Two layers of testing:
 1. **`cerbosctl repl`** — interactive CEL evaluation. Use this when debugging a single condition, exploring attribute shapes, or figuring out why a rule isn't matching.
 2. **`*_test.yaml` suites** — declarative regression tests compiled and run by `cerbos compile`. Every REPL finding should be codified here.
 
-Rule of thumb: reach for the REPL the moment a condition behaves unexpectedly. Do not patch blindly.
+Rule of thumb: reach for the REPL the moment a condition behaves unexpectedly, and let what it shows drive the edit.
 
 ## Running the REPL
 
@@ -78,11 +78,16 @@ If a derived role depends on `P.attr.context.*`, the test principal fixture MUST
 -> R.attr.expires_at > now
 ```
 
-Codify the expected behaviour in a `*_test.yaml` with an explicit fixture timestamp — never rely on wall clock in tests.
+Codify the expected behaviour in a `*_test.yaml` by pinning the clock with `options.now` — never rely on wall clock in tests:
+
+```yaml
+options:
+  now: "2026-01-15T10:00:00Z"
+```
 
 ### `R.attr` reference errors
 
-`R.attr.owner` on a resource fixture without an `attr.owner` field is a runtime error, not `false`. Confirm the fixture before blaming the expression.
+`R.attr.owner` on a resource fixture without an `attr.owner` field is a runtime error. Under default evaluation that error is swallowed and the condition is treated as false, so the rule quietly does not match — on a DENY rule that means the action gets allowed. Confirm the fixture before blaming the expression, and use `--strict-evaluation` to surface these instead of guessing.
 
 ### `match.all` vs `match.all.of`
 
@@ -110,10 +115,22 @@ docker run --rm -v "$(pwd):/policies" \
 
 If no `*_test.yaml` files exist, "0 tests executed" is expected — not an error. Only diagnose it if you expected tests to run.
 
+Useful flags:
+
+| Flag | Purpose |
+|---|---|
+| `--strict-evaluation` | Run tests with runtime CEL errors treated as terminal denials ([CEL.md](CEL.md#strict-evaluation-v055)) |
+| `--verbose` | Full detail on test failure |
+| `--test-filter='suite=X;test=Y;principal=Z;resource=W;action=A'` | Narrow to specific tests while iterating on one failure |
+| `--skip-tests` | Compile only, no tests |
+| `-o json` / `--test-output=json` | Machine-readable results (pair with `--color=never`) |
+
+When chasing a single failure, combine `--test-filter` with `--verbose` rather than re-running the whole suite.
+
 ## When a Test Fails
 
 1. Read the failure line: it names the test case, principal, resource, and action.
 2. Reproduce the exact principal/resource in the REPL.
 3. Evaluate the condition that should have matched.
-4. Fix the policy OR the fixture — whichever is wrong. Never delete a test to make validation pass.
-5. Re-run `compile`. Do not batch multiple fixes before re-validating.
+4. Fix the policy OR the fixture — whichever is wrong.
+5. Re-run `compile` after that single fix.
