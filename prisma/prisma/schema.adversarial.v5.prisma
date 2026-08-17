@@ -1,0 +1,84 @@
+// Prisma 5 client for the shared adversarial differential harness. Keep the data model in
+// lockstep with schema.adversarial.prisma; only the generator and datasource configuration
+// differ so each matrix leg executes through a genuinely version-matched client.
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma-adversarial-v5"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev-adversarial.db"
+}
+
+model AdversarialResource {
+  id              String                @id
+  aBool           Boolean
+  aString         String
+  aNumber         Int
+  aDouble         Float?
+  aOptionalString String?
+  createdBy       String
+  scope           String?
+  createdAt       DateTime?
+  tags            AdversarialTag[]
+  categories      AdversarialCategory[]
+  parent          AdversarialParent?
+}
+
+model AdversarialTag {
+  id         String              @id @default(cuid())
+  tagId      String
+  name       String?
+  resource   AdversarialResource @relation(fields: [resourceId], references: [id])
+  resourceId String
+}
+
+model AdversarialCategory {
+  id            String                   @id @default(cuid())
+  name          String
+  resource      AdversarialResource      @relation(fields: [resourceId], references: [id])
+  resourceId    String
+  subCategories AdversarialSubCategory[]
+}
+
+model AdversarialSubCategory {
+  id         String              @id @default(cuid())
+  name       String
+  category   AdversarialCategory @relation(fields: [categoryId], references: [id])
+  categoryId String
+  labels     AdversarialLabel[]
+}
+
+model AdversarialLabel {
+  id            String                 @id @default(cuid())
+  name          String?
+  subCategory   AdversarialSubCategory @relation(fields: [subCategoryId], references: [id])
+  subCategoryId String
+}
+
+// The corpus's one REAL to-one relation (conformance/seeds.json `parentSeedId`). `parent` and
+// `parent.inner` are separate rows reached through a join, unlike `obj.inner`, which is a flat
+// column wearing a dotted name. A resource owns its own parent chain — no two resources share a
+// parent row — so a filter that returned the parent instead of the child could not agree with the
+// oracle by accident.
+model AdversarialParent {
+  id              String              @id @default(cuid())
+  aBool           Boolean
+  aString         String
+  aNumber         Int
+  aOptionalString String?
+  resource        AdversarialResource @relation(fields: [resourceId], references: [id])
+  resourceId      String              @unique
+  inner           AdversarialInner?
+}
+
+model AdversarialInner {
+  id              String            @id @default(cuid())
+  aBool           Boolean
+  aString         String
+  aNumber         Int
+  aOptionalString String?
+  parent          AdversarialParent @relation(fields: [parentId], references: [id])
+  parentId        String            @unique
+}

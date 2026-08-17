@@ -46,8 +46,8 @@ import { prisma } from "./test-setup.adversarial";
  * The whole corpus is replayed against every store this adapter is proved on, one store per run,
  * selected with `ADAPTER_TEST_DB` (`sqlite` by default, `postgres` and `mysql` for the
  * container-backed legs — see `jest.globalSetup.adversarial.js`). The Prisma major and the store
- * are independent dimensions: v6/v7 is an ENGINE matrix, and an engine matrix says nothing about
- * how a provider coerces a fractional threshold against an `Int` column, escapes a LIKE
+ * are independent dimensions: v5/v6/v7 is an ENGINE matrix, and an engine matrix says nothing
+ * about how a provider coerces a fractional threshold against an `Int` column, escapes a LIKE
  * metacharacter, compares a real `timestamp` rather than milliseconds since the epoch
  * (cerbos/query-plan-adapters#320), or decides with its COLLATION whether `=` is case-sensitive at
  * all (#340).
@@ -89,30 +89,33 @@ function selectedStoreName(): StoreName {
 const STORE_NAME = selectedStoreName();
 
 /**
- * The six adversarial schemas, which must hold one data model between them.
+ * The nine adversarial schemas, which must hold one data model between them.
  *
  * A generated Prisma client bakes in its provider and its major, so proving the corpus on
- * (Prisma 6, Prisma 7) x (SQLite, PostgreSQL, MySQL) needs six schema files. They are only a
- * matrix over the same models — a column that drifts in one of them would seed a different row
- * shape on that leg while every assertion in this file stayed identical, which is the projection
- * trap conformance/README.md describes applied to the schema instead of the seeds.
+ * (Prisma 5, Prisma 6, Prisma 7) x (SQLite, PostgreSQL, MySQL) needs nine schema files. They form
+ * only a matrix over the same models — a column that drifts in one of them would seed a different
+ * row shape on that leg while every assertion in this file stayed identical, which is the
+ * projection trap conformance/README.md describes applied to the schema instead of the seeds.
  *
- * It is `STORE_NAMES.length * 2`, and asserted to be: adding a store means adding two schemas, and
- * a store whose schemas were never written would otherwise arrive as a resolution failure inside
- * one leg rather than as a gap in the matrix.
+ * It is `STORE_NAMES.length * 3`, and asserted to be: adding a store means adding three schemas,
+ * and a store whose schemas were never written would otherwise arrive as a resolution failure
+ * inside one leg rather than as a gap in the matrix.
  */
 const ADVERSARIAL_SCHEMAS = [
   "schema.adversarial.prisma",
+  "schema.adversarial.v5.prisma",
   "schema.adversarial.v6.prisma",
   "schema.adversarial.pg.prisma",
+  "schema.adversarial.pg.v5.prisma",
   "schema.adversarial.pg.v6.prisma",
   "schema.adversarial.mysql.prisma",
+  "schema.adversarial.mysql.v5.prisma",
   "schema.adversarial.mysql.v6.prisma",
 ] as const;
 
 /**
  * A schema's `model` blocks, with comments, the generator/datasource blocks and all incidental
- * whitespace removed — everything that legitimately differs between the six.
+ * whitespace removed — everything that legitimately differs between the nine.
  */
 function modelBlocks(schema: string): string {
   const withoutComments = schema
@@ -867,9 +870,9 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       throw new Error("ADVERSARIAL_SCHEMAS is empty");
     }
     // Guard the guard: a regex that stopped matching would make every schema compare equal on an
-    // empty string, and a store added without its two schemas would leave the matrix short.
+    // empty string, and a store added without its three schemas would leave the matrix short.
     expect(reference.models).toContain(`model ${MODEL}`);
-    expect(ADVERSARIAL_SCHEMAS).toHaveLength(STORE_NAMES.length * 2);
+    expect(ADVERSARIAL_SCHEMAS).toHaveLength(STORE_NAMES.length * 3);
     for (const schema of rest) {
       expect({ name: schema.name, models: schema.models }).toEqual({
         name: schema.name,

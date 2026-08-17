@@ -1,0 +1,7 @@
+{
+  "//": "Same as tsconfig.typecheck.json, but resolves the `./test-setup*` imports to the Prisma v5 fixtures so the suites are type-checked against every supported client major. Requires `npm run prisma:generate` first.",
+  "extends": "./tsconfig.typecheck.json",
+  "compilerOptions": {
+    "moduleSuffixes": [".v5", ""]
+  }
+}

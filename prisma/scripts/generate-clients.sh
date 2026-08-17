@@ -13,42 +13,52 @@ generate_v7_clients() {
   node node_modules/prisma/build/index.js generate --schema=prisma/schema.adversarial.mysql.prisma
 }
 
-restore_v7_client_package() {
+active_legacy_major=""
+
+restore_client_packages() {
   if [[ -d node_modules/@prisma/client ]]; then
-    mv node_modules/@prisma/client node_modules/@prisma/client-v6
+    mv node_modules/@prisma/client "node_modules/@prisma/client-v${active_legacy_major}"
   fi
   if [[ -d node_modules/@prisma/client-v7-temp ]]; then
     mv node_modules/@prisma/client-v7-temp node_modules/@prisma/client
   fi
 }
 
-generate_v6_clients() {
-  echo "Generating Prisma v6 clients..."
+generate_legacy_clients() {
+  active_legacy_major="$1"
+  echo "Generating Prisma v${active_legacy_major} clients..."
   mv node_modules/@prisma/client node_modules/@prisma/client-v7-temp
-  trap restore_v7_client_package EXIT
-  mv node_modules/@prisma/client-v6 node_modules/@prisma/client
+  trap restore_client_packages EXIT
+  mv "node_modules/@prisma/client-v${active_legacy_major}" node_modules/@prisma/client
 
-  node node_modules/prisma-v6/build/index.js generate --schema=prisma/schema.adversarial.v6.prisma
-  node node_modules/prisma-v6/build/index.js generate --schema=prisma/schema.adversarial.pg.v6.prisma
-  node node_modules/prisma-v6/build/index.js generate --schema=prisma/schema.adversarial.mysql.v6.prisma
+  node "node_modules/prisma-v${active_legacy_major}/build/index.js" generate \
+    --schema="prisma/schema.adversarial.v${active_legacy_major}.prisma"
+  node "node_modules/prisma-v${active_legacy_major}/build/index.js" generate \
+    --schema="prisma/schema.adversarial.pg.v${active_legacy_major}.prisma"
+  node "node_modules/prisma-v${active_legacy_major}/build/index.js" generate \
+    --schema="prisma/schema.adversarial.mysql.v${active_legacy_major}.prisma"
 
-  restore_v7_client_package
+  restore_client_packages
   trap - EXIT
 }
 
 case "${1:-all}" in
+  5)
+    generate_legacy_clients 5
+    ;;
   6)
-    generate_v6_clients
+    generate_legacy_clients 6
     ;;
   7)
     generate_v7_clients
     ;;
   all)
     generate_v7_clients
-    generate_v6_clients
+    generate_legacy_clients 6
+    generate_legacy_clients 5
     ;;
   *)
-    echo "Usage: $0 [6|7|all]" >&2
+    echo "Usage: $0 [5|6|7|all]" >&2
     exit 2
     ;;
 esac
