@@ -1,5 +1,5 @@
 {
-  "extends": ["@tsconfig/node22", "@tsconfig/strictest"],
+  "extends": ["@tsconfig/node24", "@tsconfig/strictest"],
   "include": ["src"],
   "//exclude": "Test-only sources. `corpus.ts` is not a test file but is read by both suites and by neither consumer, so it is excluded for the same reason: nothing here may reach lib/.",
   "exclude": ["src/**/*.test.ts", "src/corpus.ts"],
