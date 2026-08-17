@@ -1,0 +1,5 @@
+# `go build` with no -o writes the binary into the module directory, named after it. run.sh builds
+# into a scratch directory instead — a stale binary in here must never be the thing that runs, and a
+# 40MB executable must never be the thing that gets committed — but `go build ./...` by hand still
+# leaves one, so it is ignored rather than left to be noticed.
+/example

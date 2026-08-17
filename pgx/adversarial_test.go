@@ -6,7 +6,9 @@ package cerbospgx_test
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,12 +36,29 @@ import (
 // own evaluation for any row, the mismatch surfaces mechanically. This file owns only the
 // PostgreSQL-specific half: the schema, the seeding, and the attribute mapping.
 
-// Database container images, pinned by tag AND digest. A tag is mutable, so a tag-only pin
+// The database container image, pinned by tag AND digest. A tag is mutable, so a tag-only pin
 // records an intent rather than a build; the adversarial suite is a differential whose
 // divergences are dialect behaviour, so "which build was this proved against" has to be
 // answerable from the repository alone. conformance/scripts/validate-corpus.sh asserts every
 // service image reference in the repository carries both halves.
-const postgresImage = "postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193"
+//
+// It lives in a file rather than in this constant because example/run.sh needs the same reference
+// and cannot read a Go constant, which is the same argument as langchain-chromadb/CHROMA_IMAGE and
+// mongoose/MONGO_IMAGE. A literal in each would be two copies, and validate-corpus.sh can only hold
+// one digest per TAG — nothing holds two tags equal, so moving this suite off 17-alpine would leave
+// the example behind, still pinned to a real build and still green. The `_IMAGE` suffix is what that
+// script's file scan looks for.
+const postgresImageFile = "POSTGRES_IMAGE"
+
+func postgresImage(tb testing.TB) string {
+	tb.Helper()
+
+	ref, err := os.ReadFile(postgresImageFile)
+	if err != nil {
+		tb.Fatalf("reading %s: %v", postgresImageFile, err)
+	}
+	return strings.TrimSpace(string(ref))
+}
 
 const (
 	adapterName = "pgx"
@@ -252,7 +271,7 @@ func setup(t *testing.T) *harness {
 	ctx := t.Context()
 
 	pgContainer, err := postgres.Run(ctx,
-		postgresImage,
+		postgresImage(t),
 		postgres.WithDatabase("conformance"),
 		postgres.WithUsername("conformance"),
 		postgres.WithPassword("conformance"),
