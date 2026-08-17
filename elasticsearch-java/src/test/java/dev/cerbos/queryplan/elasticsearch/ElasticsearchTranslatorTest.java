@@ -76,8 +76,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p><strong>This file reads as mostly-throws, and that is the adapter.</strong> The Elasticsearch
  * Query DSL compares a FIELD against a literal: it has no arithmetic, no casts, no conditional
- * values, no field-to-field comparison, no hierarchy relation, no count threshold, and no way to
- * index an explicit null or an empty array. Most of the corpus is therefore fail-closed here, and
+ * values, no field-to-field comparison, no count threshold, and no way to index an explicit null or
+ * an empty array. Most of the corpus is therefore fail-closed here, and
  * every refusal is asserted against the message {@code actions.json} pins rather than a bare "it
  * threw" — which for an adapter with this ratio is the difference between a suite and a formality
  * (cerbos/query-plan-adapters#326). {@link WhereTheRefusalsHappen} states the property the
@@ -302,7 +302,7 @@ class ElasticsearchTranslatorTest {
         // Tripwires. Bump them deliberately: a count that moves without anyone noticing is how a
         // shape gets dropped from an asset nobody reads end to end.
         assertEquals(
-                Map.of("conditional", 75, "unconditional", 2, "throwing", 122),
+                Map.of("conditional", 85, "unconditional", 2, "throwing", 112),
                 Map.of("conditional", actionsOfKind("CONDITIONAL").size(),
                         "unconditional", unconditionalActions().size(),
                         "throwing", THROWING.size()));
@@ -484,10 +484,16 @@ class ElasticsearchTranslatorTest {
          */
         private final Map<String, String> sites = Map.ofEntries(
                 // resolveLeafOperand's default: the operand slot holds a computed sub-expression —
-                // arithmetic, a cast, a ternary, an index, a projection, a hierarchy relation, a
-                // count, a lambda. A term or range query compares a FIELD against a literal, and
-                // there is nowhere to evaluate anything on the way.
+                // arithmetic, a cast, a ternary, an index, a projection, a count, a lambda. A term
+                // or range query compares a FIELD against a literal, and there is nowhere to
+                // evaluate anything on the way.
                 Map.entry("computed leaf operand", " expression in leaf operand"),
+                // The hierarchy relations lower to term-level queries over the field's whole
+                // stored path (#332), so the only one still refused is the one whose path is
+                // CONSTRUCTED by list() from a document field — a concatenation the Query DSL has
+                // no more form for than it has for arithmetic.
+                Map.entry("hierarchy path built from a field",
+                        "hierarchy path constructed by list() from a document field"),
                 // applyResolvedLeaf: both operands resolve to document fields.
                 Map.entry("field-to-field", "cannot compare two document fields without scripts"),
                 // normalizeLeafOperator: a string operator whose RECEIVER is the constant, so the
@@ -548,7 +554,7 @@ class ElasticsearchTranslatorTest {
             }
 
             assertEquals(new TreeMap<>(Map.ofEntries(
-                            Map.entry("computed leaf operand", 65),
+                            Map.entry("computed leaf operand", 54),
                             Map.entry("field-to-field", 15),
                             Map.entry("count threshold", 8),
                             Map.entry("explicit null", 8),
@@ -561,6 +567,7 @@ class ElasticsearchTranslatorTest {
                             Map.entry("operand arity", 2),
                             Map.entry("sub-millisecond timestamp", 2),
                             Map.entry("count over a non-collection", 1),
+                            Map.entry("hierarchy path built from a field", 1),
                             Map.entry("negated hasIntersection over a collection", 1),
                             Map.entry("null in a document array", 1),
                             Map.entry("null in an intersection", 1))),

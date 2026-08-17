@@ -9,6 +9,8 @@ An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanRe
 - Supports string operators: `contains`, `startsWith`, `endsWith`, and the safe
   `matches` subset described below
 - Supports `hasIntersection` for array overlap checks
+- Supports the hierarchy relations `ancestorOf`, `descendentOf` and `overlaps` between a
+  document field and a constant path, lowered to `prefix` / `terms` / `term` queries
 - Supports field existence checks via `eq`/`ne` against a null value (the planner emits no
   existence operator)
 - Supports polarity-safe `size` checks for array emptiness
@@ -292,6 +294,9 @@ The `OperatorFunction` interface takes a field name and value, and returns a `Ma
 | `matches` | `prefix` for `^literal`; `regexp` with Lucene optional flags disabled for fully anchored patterns in the validated common subset |
 | `timestamp` in comparisons | `term` / `range` against a mapped Elasticsearch `date` field, for millisecond-exact values |
 | `hasIntersection` | `terms` (array overlap) |
+| `descendentOf` with the field on the descendant side | `prefix` on `<constant-path><delimiter>` |
+| `ancestorOf` with the field on the ancestor side | `terms` over the constant path's proper prefixes, or `match_none` when it has none |
+| `overlaps` | `bool.should` of both of the above plus a `term` on the whole constant path |
 | `ne`/`eq` against `null` | `exists` (ne) / `bool.must_not` + `exists` (eq) |
 | Positive non-empty `size` checks; negated empty checks | `exists` or `nested` + `match_all` |
 | Positive `exists` (collection) | `nested` + inner query |
@@ -337,6 +342,42 @@ emits `match_none` and `all` emits `match_all`, each flipping under negation.
 `exists_one`, `filter`, `map` and `except` have no flat equivalent and throw over a literal value
 list, as does a `t.path` reference that the element does not carry.
 
+### Hierarchy relations
+
+A Cerbos hierarchy is a delimited path, and `ancestorOf` / `descendentOf` / `overlaps` are
+statements about **segment** prefixes. Map the field holding the path as `keyword` and the adapter
+lowers each relation to term-level queries over the whole stored value:
+
+| Relation | Query |
+|---|---|
+| the field is a strict **descendant** of the constant | `prefix` on `<constant-path><delimiter>` |
+| the field is a strict **ancestor** of the constant | `terms` over the constant path's proper prefixes |
+| **overlaps** (inclusive) | `bool.should` of both, plus a `term` on the whole constant path |
+
+`ancestorOf(A, B)` holds when A's segments are a strict prefix of B's, and `descendentOf` is the
+same relation with the operands swapped — so which of the two rows above applies depends on the
+operand order, not on the operator name. A strict-ancestor test against a single-segment constant
+is unsatisfiable (nothing is a proper prefix of one segment), and emits `match_none` rather than an
+empty `terms`. Two constant operands are decided at translation time: satisfied means `match_all`,
+and unsatisfied is a plan the Cerbos planner should have folded away, so it throws rather than
+guessing a filter.
+
+Because `prefix`, `terms` and `term` are term-level queries, path segments containing `%`, `_` or
+`[` match literally and need none of the `LIKE ... ESCAPE` machinery the SQL adapters do. The
+delimiter is taken from the plan (`hierarchy(R.attr.scope, ":")`), and the constant is the only
+side the adapter splits and rejoins — the field's stored value is compared as a raw string.
+
+**Negated hierarchy relations fail closed.** A SQL adapter gets the exclusion free from
+three-valued logic (`NULL LIKE 'x%'` is UNKNOWN, so the row drops), but a `bool.must_not` around a
+`prefix`, `terms` or `term` query *matches* a document that has no value for the field — which is
+the CEL missing-attribute error the PDP denies on. An `exists`-guarded negation would express it,
+exactly as `eq`, `in`, `contains` and `startsWith` already are, and adding one is a change worth
+proving against the corpus first.
+
+A hierarchy path **built by `list()` from a document field** also throws: matching it would mean
+concatenating a stored value into a path before comparing, and the Query DSL has no computed
+operand to do that with — the same missing evaluation step that refuses arithmetic and casts here.
+
 ### Unsupported query-plan shapes
 
 The adapter fails closed with `IllegalArgumentException` for shapes that Elasticsearch Query DSL
@@ -344,7 +385,8 @@ cannot express safely without scripts, including field-to-field comparisons, a c
 receiver with a document-field argument, arithmetic over document fields, conditional values,
 arbitrary collection counts, string lengths, ordered array indexing, positive `all` and negated
 `exists` over a document collection, negated membership in a document collection, negated
-intersection, collection-empty checks, and membership tests that need to distinguish an explicit
+intersection, negated hierarchy relations, hierarchy paths assembled from a document field,
+collection-empty checks, and membership tests that need to distinguish an explicit
 null value or array element from a missing field. Unsupported regex
 syntax and sub-millisecond timestamp literals also fail closed. Painless scripts are not generated
 by this adapter because they would change the security and performance profile of every
@@ -404,16 +446,17 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `check()` decisio
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 74 reference conformance actions plus regex and timestamp probes (76 actions) |
-| Fail-closed | 113 reference actions plus ordered list indexing/`get-field`, `int()`/`double()` casts and `filter()`/`map()` used as a condition or a conjunct (121 actions total) |
+| Oracle-tested | 84 reference conformance actions plus regex and timestamp probes (86 actions) |
+| Fail-closed | 103 reference actions plus ordered list indexing/`get-field`, `int()`/`double()` casts and `filter()`/`map()` used as a condition or a conjunct (111 actions total) |
 | Representation-independent | `null-eq-missing` — rejected like every other null-selecting comparison, so no NULL-representation option is required |
 | Attribute NULL convention | Declared, in order to REFUSE. Elasticsearch does not index a JSON null, so an explicitly-null value and a missing field are the same document to every query the DSL can express. Pass the attributes you send as explicit nulls in `explicitNullAttributes`, and the equality family over them throws instead of answering narrowly — every spelling of `!= "x"` either requires the field to exist (dropping the row CEL allows) or matches every document missing it (cerbos/query-plan-adapters#308) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute documents. Until the planner is fixed, use `R.attr.x != null` for indexed attributes instead of `has(R.attr.x)` |
 
 The oracle-tested set covers value-first comparisons, literal-safe wildcard matching, safe
 null/missing polarities, positive `exists` and non-empty collection checks, negated `all`,
-millisecond-exact timestamp ordering, and chained nested paths. The fail-closed set comprises the
-unexpressible categories above plus hierarchy expressions, positive explicit-null comparisons,
+millisecond-exact timestamp ordering, chained nested paths, and the hierarchy relations against a
+constant path. The fail-closed set comprises the
+unexpressible categories above plus positive explicit-null comparisons,
 null-sensitive variable membership, positive `all`, negated `exists`, and collection-emptiness
 predicates that require distinguishing an indexed empty array from a missing field.
 
@@ -421,14 +464,14 @@ Every fail-closed shape's error message is pinned in the shared corpus (`conform
 
 `ElasticsearchTranslatorTest` asserts the same classification offline, and adds the property the
 per-action assertions cannot state: the **distribution of the refusals over the sites in the walk
-that raise them**. 122 of the corpus's 199 shapes are refused here — the 121 fail-closed actions
+that raise them**. 112 of the corpus's 199 shapes are refused here — the 111 fail-closed actions
 above plus `null-eq-missing` — so it matters whether that happens at one catch-all or at many. It
-is sixteen sites, and one mechanism — an operand slot holding a computed sub-expression, where the
-Query DSL admits only a field and a literal — accounts for 65 of them:
+is seventeen sites, and one mechanism — an operand slot holding a computed sub-expression, where
+the Query DSL admits only a field and a literal — accounts for 54 of them:
 
 | Rejection site | Actions |
 | --- | --- |
-| computed leaf operand (arithmetic, casts, ternaries, `map()`/`filter()`, hierarchy, nested `size()`, a lambda one scope too deep) | 65 |
+| computed leaf operand (arithmetic, casts, ternaries, `map()`/`filter()`, nested `size()`, a lambda one scope too deep) | 54 |
 | field-to-field comparison | 15 |
 | count threshold that is not an emptiness check | 8 |
 | explicit null against null, or against a constant | 8 |
@@ -436,7 +479,7 @@ Query DSL admits only a field and a literal — accounts for 65 of them:
 | negated `exists` over a collection | 4 |
 | positive `all` over a collection | 4 |
 | `exists_one`, collection emptiness, negated membership, operand arity, sub-millisecond timestamp | 2 each |
-| count over a non-collection, negated `hasIntersection`, null in a document array, null in an intersection | 1 each |
+| count over a non-collection, negated `hasIntersection`, null in a document array, null in an intersection, hierarchy path built from a document field | 1 each |
 
 The list is asserted **total** — a shape refused by an accident rather than by a declared
 limitation matches no site and fails — and the counts are pinned, so a translator change that moves
@@ -445,6 +488,14 @@ a shape from one site to another shows up as a diff even though both sites throw
 [#326](https://github.com/cerbos/query-plan-adapters/issues/326) was filed for.
 
 Elasticsearch does not index empty arrays. An `exists` or nested query therefore cannot distinguish an attribute explicitly set to `[]` from an attribute omitted entirely. CEL treats the former as an empty collection and the latter as an evaluation error, so polarity matters: positive `exists`, positive non-empty checks, negated `all`, and negated empty checks remain safe; the opposite polarities throw rather than authorizing a document with a missing collection.
+
+**Behaviour change.** The hierarchy relations `ancestorOf`, `descendentOf` and `overlaps` between a
+document field and a constant path now translate. Ten corpus shapes that used to throw
+`Unexpected hierarchy expression in leaf operand` return a query, so a caller who was catching that
+refusal — or relying on it to route a request elsewhere — now gets a filter instead. A widening
+([#332](https://github.com/cerbos/query-plan-adapters/issues/332)). The negated direction and a
+path assembled by `list()` from a document field still fail closed; the message for the latter
+changed to name its own mechanism rather than the leaf-operand default.
 
 **Behaviour change.** A `size()` comparison with the count on the **right** — `0 < size(R.attr.tags)`, which the planner preserves from policy source order — now translates. The operand scan found the `size()` wherever it sat but did not mirror the operator, so `0 < size(c)` was read as `size(c) < 0` and refused as an unsupported threshold rather than recognised as the emptiness check it is. A widening: a shape that threw now returns a query ([#387](https://github.com/cerbos/query-plan-adapters/issues/387)).
 
