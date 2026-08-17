@@ -27,10 +27,15 @@ jobs:
       - name: Validate conformance corpus
         run: ../conformance/scripts/validate-corpus.sh
 
+      # cache-dependency-path is not optional here: every Go module in this repository lives in a
+      # subdirectory, and setup-go resolves the default dependency file against the repository root
+      # rather than `defaults.run.working-directory`, which applies to `run` steps alone. Left off,
+      # it finds no go.sum, warns, and silently disables the module cache for the whole job.
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: ent/go.mod
+          cache-dependency-path: ent/go.sum
 
       - name: Lint
         uses: golangci/golangci-lint-action@d583c34f0599d37dbac4a198b9c83201be380893 # v9.3.0
@@ -49,8 +54,13 @@ jobs:
       # and running it with the adversarial test skipped is what keeps "these tests need no Docker"
       # a checked claim. Under `./...` a unit test that grew a container dependency would be
       # invisible, because the suite that follows starts Docker anyway.
+      # -count=1 on both suites: the Setup Go cache above covers GOCACHE as well as GOMODCACHE,
+      # and GOCACHE holds Go's test *result* cache — so without it, a re-run of an unchanged commit
+      # prints `ok ... (cached)` in zero seconds and neither the PDP nor the databases are ever
+      # started. A green run has to mean the suite ran. The compiled-package half of that cache is
+      # untouched and is where the time is actually saved.
       - name: Unit suite (no Docker)
-        run: go test -race -skip TestAdversarialConformance ./...
+        run: go test -race -count=1 -skip TestAdversarialConformance ./...
 
       # The harness starts its own Cerbos PDP with testcontainers, reading the pinned version from
       # conformance/CERBOS_VERSION — there is no separate sidecar to set up, and the version is
@@ -59,7 +69,7 @@ jobs:
       # WithDialect is actually exercised. Three dialect legs share one PDP and one plan pass;
       # the timeout allows for the extra container start.
       - name: Adversarial conformance suite
-        run: go test -race -timeout 30m ./...
+        run: go test -race -count=1 -timeout 30m ./...
 
   # The example application: the adapter used the way a consumer uses it, against the shared demo
   # domain. It covers the one thing the job above structurally cannot — the usage shapes. That
@@ -92,10 +102,13 @@ jobs:
       - name: Validate demo domain
         run: ../demo/scripts/validate-demo.sh
 
+      # The example is its own module, so it caches against its own go.sum — see the note on the
+      # test job's Setup Go for why the path has to be spelled out at all.
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: ent/example/go.mod
+          cache-dependency-path: ent/example/go.sum
 
       # The example is a nested module, so `./...` in the job above stops at its directory and
       # nothing there is linted by it. Held to the adapter's own configuration rather than a
