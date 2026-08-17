@@ -297,6 +297,27 @@ On MySQL's **default** `utf8mb4_0900_ai_ci` — which is both case- and accent-i
 `_CI_` SQL Server collation, string predicates will match strings CEL would reject: an over-grant
 the adapter cannot detect. Treat collation as part of your policy contract.
 
+## Example application
+
+This repository carries a runnable [`example/`](example/), which uses the adapter against a live PDP
+over the shared [demo domain](../demo/README.md):
+
+```bash
+# from the repository root
+demo/scripts/run-example.sh ent
+```
+
+It is the only place in this repository where a **generated** ent client is involved: the suites
+below build their queries from a hand-written `entsql.Selector` against `database/sql`, so what
+[Usage](#usage) shows — `Result.Predicate` handed to a generated query's
+`Where(func(*sql.Selector))`, and on top of that ent's own `Limit`/`Offset` and generated predicates
+the application owns — is executed there and nowhere else.
+
+Unlike the examples for the other adapters it proves **usage shapes only, not packaging**: Go has no
+packaging step, so `example/` resolves this module through a `replace` directive rather than
+installing a built artifact. See [`example/README.md`](example/README.md) and
+[ADR 0002](../docs/adr/0002-examples-install-the-packed-artifact.md).
+
 ## Development
 
 ```bash

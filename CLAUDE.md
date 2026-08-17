@@ -111,6 +111,13 @@ reason and need no Docker: `go test -skip TestAdversarialConformance ./...`. The
 do need Docker (testcontainers) and read the pinned PDP image from `conformance/CERBOS_VERSION` and
 `conformance/CERBOS_IMAGE_DIGEST`.
 
+The commands above are the two *published* modules, and `./...` stops at a nested `go.mod`, so
+neither reaches `ent/example/` — a third Go module, and deliberately so: a directory holding a
+`go.mod` is excluded from its parent's zip, which is what keeps the example's generator and driver
+dependencies out of a consumer's build. Lint it from its own directory with the adapter's config,
+`golangci-lint run --config=../.golangci.yaml ./...`, and run it with
+`demo/scripts/run-example.sh ent`. Both happen in that adapter's `example` job.
+
 ### Java (Elasticsearch, Spring Data)
 ```bash
 # Run from the REPOSITORY ROOT, not the adapter directory: the Java harnesses read the
@@ -229,6 +236,15 @@ Each adapter's `example/` installs the packed artifact
 ([ADR 0002](docs/adr/0002-examples-install-the-packed-artifact.md)) and exercises five usage
 shapes, of which the load-bearing one is the adapter's filter composed with an application-owned
 filter.
+
+The Go adapters are the one exception, and ADR 0002 states it: there is no packaging step, so
+`ent/example/` resolves the adapter with a `replace` directive and proves **usage shapes only, not
+packaging**. Its README says so rather than implying coverage it does not have, and what it gets
+in exchange is a shape no Go suite here reaches — the adapter's predicate handed to a *generated*
+ent client, which `ent/adversarial_test.go` never builds. Being a nested module is also what keeps
+the example's generator and driver dependencies out of a consumer's build: a directory holding a
+`go.mod` is excluded from its parent's module zip, which is the mechanism behind "both Go modules
+are standalone" above.
 
 ```bash
 demo/scripts/run-example.sh <adapter>   # pack, install, run, diff against demo/expected.json

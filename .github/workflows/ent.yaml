@@ -5,6 +5,7 @@ on:
     paths:
       - "ent/**"
       - "conformance/**"
+      - "demo/**"
       - ".github/workflows/ent.yaml"
   push:
     tags:
@@ -59,3 +60,60 @@ jobs:
       # the timeout allows for the extra container start.
       - name: Adversarial conformance suite
         run: go test -race -timeout 30m ./...
+
+  # The example application: the adapter used the way a consumer uses it, against the shared demo
+  # domain. It covers the one thing the job above structurally cannot — the usage shapes. That
+  # harness runs a single flat filtered query through a hand-built entsql.Selector against
+  # database/sql, so no GENERATED ent client appears anywhere in `ent/`; handing Result.Predicate to
+  # a generated query's Where(func(*sql.Selector)) escape hatch, paging it, and composing it with
+  # generated predicates the application owns happens here and nowhere else.
+  #
+  # It does NOT cover packaging, the other half of cerbos/query-plan-adapters#349: Go has no
+  # packaging step, so ent/example resolves the adapter with a `replace` directive. ent/example/README.md
+  # says so, and docs/adr/0002-examples-install-the-packed-artifact.md is where the exception lives.
+  #
+  # THIS JOB MUST STAY IN THIS WORKFLOW. `renovate.json` sets `automerge: true` for every non-major
+  # bump, and that is the path an ORM regression takes into `main` today. Because the example's
+  # go.mod and go.sum are committed and Renovate manages them, an ent bump arrives as ONE PR
+  # touching both ent/go.mod and ent/example/ — and this job, being a check on that PR, is what
+  # blocks the automerge when the new version breaks real usage. Moving it to a nightly run or a
+  # workflow of its own silently restores that gap.
+  #
+  # One Go leg only, from the example module's own `go` directive: the demo domain discriminates the
+  # ORM's real query methods, not the toolchain.
+  example:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate conformance corpus
+        run: ../conformance/scripts/validate-corpus.sh
+
+      - name: Validate demo domain
+        run: ../demo/scripts/validate-demo.sh
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: ent/example/go.mod
+
+      # The example is a nested module, so `./...` in the job above stops at its directory and
+      # nothing there is linted by it. Held to the adapter's own configuration rather than a
+      # weaker one of its own: an example a consumer reads is the code most likely to be copied.
+      - name: Lint the example
+        uses: golangci/golangci-lint-action@d583c34f0599d37dbac4a198b9c83201be380893 # v9.3.0
+        with:
+          working-directory: ent/example
+          args: --config=../.golangci.yaml
+
+      - name: Check the example's formatting
+        working-directory: ent/example
+        run: |
+          golangci-lint fmt --config=../.golangci.yaml ./...
+          git diff --exit-code
+
+      # The PDP is a container the runner starts from demo/docker-compose.yml, pinned to
+      # conformance/CERBOS_VERSION and conformance/CERBOS_IMAGE_DIGEST — no cerbos-setup-action
+      # here, because an example must reach the PDP the way a deployed application does.
+      - name: Run the example against the demo domain
+        run: ../demo/scripts/run-example.sh ent

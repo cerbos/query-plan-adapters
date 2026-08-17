@@ -103,6 +103,18 @@ linters:
           - mnd
         path: _test\.go
 
+      # example/ is a nested module and is linted with this same configuration, so that the example
+      # a consumer reads holds to the standard the adapter does. Its go.mod replaces the adapter with
+      # the directory above it, which is how a Go example resolves the change under review: there is
+      # no packaging step to install instead
+      # (../docs/adr/0002-examples-install-the-packed-artifact.md).
+      #
+      # Scoped to that one file rather than turned off with `replace-local: true`, so a local
+      # replacement in the ADAPTER's go.mod — which would reach every consumer — is still reported.
+      - linters:
+          - gomoddirectives
+        path: ^example/go\.mod$
+
 issues:
   max-same-issues: 30
 
