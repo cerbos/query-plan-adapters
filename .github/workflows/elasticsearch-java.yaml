@@ -5,6 +5,7 @@ on:
     paths:
       - "elasticsearch-java/**"
       - "conformance/**"
+      - "demo/**"
       - ".github/workflows/elasticsearch-java.yaml"
   push:
     tags:
@@ -37,3 +38,78 @@ jobs:
 
       - name: Build and test
         run: gradle build --no-daemon
+
+  # The example application, against the shared demo domain in demo/. It proves what the job above
+  # structurally cannot, and for this adapter the two halves are unusually separable:
+  #
+  #   1. The PUBLISHED package surface. Every suite in `test` compiles against the adapter's own
+  #      source set, so its POM and Gradle module metadata — dependency scopes included — are
+  #      executed nowhere. The example resolves `dev.cerbos:cerbos-elasticsearch` from mavenLocal as
+  #      a real Maven coordinate instead, which is why the step below publishes it first. NOT a
+  #      Gradle composite build: that substitutes the local source tree for the coordinate and
+  #      resolves neither file. See docs/adr/0002-examples-install-the-packed-artifact.md;
+  #      cerbos-sdk-java declaring protobuf at runtime-only scope is the shape of bug this exists for,
+  #      and elasticsearch-java/example/README.md records the break-tests that prove the arrangement
+  #      is load-bearing rather than decorative.
+  #   2. The Elasticsearch Java CLIENT. This adapter hands back a `Map<String, Object>` of plain JDK
+  #      values with no client type in its signature, so nothing in `test` ever asks the client
+  #      library to parse what it emits — the translator suite compares the map to a golden asset and
+  #      the conformance harness posts it as raw JSON over a bare HttpClient. The example is the only
+  #      place a generated `Query` is built from an emitted clause, paginated with `from`/`size`, and
+  #      composed with a `bool` clause the application owns.
+  #
+  # THIS JOB MUST STAY IN THIS WORKFLOW. renovate.json sets `automerge: true` for every non-major
+  # bump, and that is the path an Elasticsearch-client or Cerbos-SDK regression takes into `main`
+  # today: the bump arrives as one PR touching this adapter's manifest and the example's, and this
+  # job, being a check on that PR, is what blocks the automerge when the new version breaks real
+  # usage. Moved to a nightly run or a workflow of its own it would still pass or fail eventually,
+  # but not before the merge, which silently restores the gap it exists to close.
+  #
+  # What makes that bite is that every version the example resolves is an exact literal in a file
+  # under elasticsearch-java/, and example/build.gradle.kts calls `failOnDynamicVersions()` so it
+  # stays that way. There is deliberately no gradle.lockfile: Renovate can only maintain one by
+  # executing `./gradlew`, which this repository has no wrapper for and which the hosted app will not
+  # run without `allowedUnsafeExecutions`, so a committed lockfile would go stale on the first bump
+  # and fail this job for a reason that is not the bump. example/README.md has the full argument.
+  #
+  # One language-version leg on purpose: the demo domain discriminates the adapter's packaging and
+  # usage shapes, not the JDK. It runs on 17, the floor the adapter declares, which is the leg where a
+  # post-17 API reference in either the adapter or the example would surface.
+  example:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The example reaches a pinned PDP through demo/docker-compose.yml and a pinned Elasticsearch
+      # through elasticsearch-java/ELASTICSEARCH_IMAGE, and these two scripts are what assert those
+      # pins still agree with conformance/CERBOS_VERSION and conformance/CERBOS_IMAGE_DIGEST. Without
+      # them the run below would happily execute the whole end-to-end flow against a drifted PDP.
+      - name: Validate conformance corpus
+        run: ../conformance/scripts/validate-corpus.sh
+
+      - name: Validate demo domain
+        run: ../demo/scripts/validate-demo.sh
+
+      - name: Setup JDK
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+        with:
+          # Pinned rather than taking the runner's floating preinstall, which is what the `test` job
+          # above does: this job's assertions are about resolution and publication, the two things a
+          # Gradle major is most likely to change the behaviour of. The version matches the Gradle
+          # container image the adapter's README documents building in.
+          gradle-version: "8.12"
+
+      # The PDP is a container the runner starts from demo/docker-compose.yml, pinned to
+      # conformance/CERBOS_VERSION and conformance/CERBOS_IMAGE_DIGEST — no cerbos-setup-action here,
+      # because an example must reach the PDP the way a deployed application does. Elasticsearch is
+      # example/run.sh's own, from elasticsearch-java/ELASTICSEARCH_IMAGE, and run.sh also publishes
+      # the adapter to mavenLocal for itself so that this is one command on a laptop too.
+      - name: Run the example against the demo domain
+        run: ../demo/scripts/run-example.sh elasticsearch-java
