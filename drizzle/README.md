@@ -78,12 +78,12 @@ undeclared side needs UNKNOWN — so the adapter throws rather than picking a di
 
 ## Conformance contract
 
-The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 21 hostile seed rows and real Drizzle queries, executed on both SQLite and PostgreSQL. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
+The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 21 hostile seed rows and real Drizzle queries, executed on SQLite, PostgreSQL and MySQL. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 177 reference conformance actions |
-| Fail-closed corpus shapes | Sub-millisecond `now()` thresholds, regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an untyped string field, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero) `filter()`/`map()` used as a condition (both return a list, not a boolean), `string()` over a boolean column (SQLite and MySQL store 1/0 and render `"1"` where CEL and PostgreSQL render `"true"`), CEL's `+` over strings (`||` concatenates on SQLite and PostgreSQL but is logical OR on MySQL, and the numeric `+` this adapter emits coerces the operands to 0 rather than failing), a hierarchy path constructed by `list()` rather than read from a column, `mod` (reached through the `int()` cast that gives `%` an integer operand), a positional read of a scalar list (row order in a SQL relation is not defined), and list equality over a `map()` projection (20 actions) |
+| Oracle-tested | 176 reference conformance actions |
+| Fail-closed corpus shapes | Sub-millisecond `now()` thresholds, regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an untyped string field, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero) `filter()`/`map()` used as a condition (both return a list, not a boolean), `string()` over any column (no SQL `CAST` target spells it on all three stores: `TEXT` and `VARCHAR` are syntax errors on MySQL, which spells it `CHAR`, while `CHAR` is `character(1)` on PostgreSQL — and over a boolean it is wrong rather than merely unspellable, since SQLite and MySQL store 1/0 and render `"1"` where CEL and PostgreSQL render `"true"`), CEL's `+` over strings (`||` concatenates on SQLite and PostgreSQL but is logical OR on MySQL, and the numeric `+` this adapter emits coerces the operands to 0 rather than failing), a hierarchy path constructed by `list()` rather than read from a column, `mod` (reached through the `int()` cast that gives `%` an integer operand), a positional read of a scalar list (row order in a SQL relation is not defined), and list equality over a `map()` projection (21 actions) |
 | Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute the caller sends as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare it per attribute — `nullAttributeRepresentation: "explicit"` on the mapper entry — or the historical rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
@@ -94,14 +94,21 @@ The SQL each of these actions produces is pinned separately, in the translator u
 
 ### Dialects the contract is proved on
 
-The classification above holds where the corpus is **executed**, not where the emitted SQL merely looks plausible. Until [#320](https://github.com/cerbos/query-plan-adapters/issues/320) the corpus ran on SQLite only and PostgreSQL support was pinned at the rendered-string level; it now runs end to end on both:
+The classification above holds where the corpus is **executed**, not where the emitted SQL merely looks plausible. Until [#320](https://github.com/cerbos/query-plan-adapters/issues/320) the corpus ran on SQLite only, and until [#340](https://github.com/cerbos/query-plan-adapters/issues/340) MySQL support was pinned at the rendered-string level. All three now run end to end:
 
 ```bash
 npm run test:adversarial            # SQLite
 npm run test:adversarial:postgres   # PostgreSQL, via testcontainers
+npm run test:adversarial:mysql      # MySQL, via testcontainers
 ```
 
-The PostgreSQL leg is what proves the typed paths SQLite cannot reach — a real `boolean` where SQLite stores an integer, a real `timestamptz` where SQLite compares text, a hard error on division by zero where SQLite returns NULL, and a parameter typed from the column it is compared with rather than from the value. **MySQL and PlanetScale are not executed anywhere.** The translator unit test (`npm test`) renders every corpus action through `MySqlDialect` as well and holds it to the dialect rules — no SQLite-only string function, no single-precision cast, no integer `CASE` arm outside a counting aggregate, no fold that collapses a NULL operand to FALSE. That is renderability, not evaluation, and it is why the golden expectations pin bytes for the two executed stores and rules for the third.
+The PostgreSQL leg is what proves the typed paths SQLite cannot reach — a real `boolean` where SQLite stores an integer, a real `timestamptz` where SQLite compares text, a hard error on division by zero where SQLite returns NULL, and a parameter typed from the column it is compared with rather than from the value.
+
+The MySQL leg disagrees with both of the others, which is why it found something neither could: **`CAST(… AS TEXT)` is a syntax error on MySQL**, which spells the same conversion `CAST(… AS CHAR)` — and `CHAR` on PostgreSQL is `character(1)`. `string()` used to translate here on the strength of a rendering measured on two stores out of three; it now fails closed (see the behaviour change below). The leg also runs under a pinned case- and accent-sensitive collation, for the reason the [collation requirement](#database-collation-requirement) sets out.
+
+**PlanetScale is still not executed anywhere.** It is MySQL-compatible and the emitted SQL is the same, but a store the corpus does not run against is a store this contract does not cover.
+> [!WARNING]
+> **Breaking change.** `string()` over a mapped column — `string(R.attr.aDouble) == "-0.6"` and every other spelling — now **throws** instead of returning a filter. Previously only a boolean column was refused. The filter it returned for the other column types was `CAST(… AS TEXT)`, which is correct on SQLite and PostgreSQL and a **syntax error** on MySQL, a store this adapter's peer range and README both claim. A shape that used to return a filter and now throws is a consumer-visible break; emitting SQL that only runs on two of three supported stores is the thing the shared corpus exists to stop ([#340](https://github.com/cerbos/query-plan-adapters/issues/340)). If you need it on one provider, compare the underlying column instead, or pre-render the text into a column of its own.
 
 **Behaviour change.** `hasIntersection` now normalizes its operand order, so the value-first spelling — `hasIntersection(["a","b"], R.attr.list)`, which the planner preserves from policy source order — translates instead of silently becoming `FALSE`. The same change makes an operand pair with **no** literal list throw rather than emit that `FALSE`: a shape that returned a filter now raises, which is a consumer-visible break, but the filter it returned selected no rows and the corpus forbids emitting one for a shape the adapter cannot express ([#387](https://github.com/cerbos/query-plan-adapters/issues/387)).
 
@@ -231,11 +238,16 @@ Cerbos plans reference both resources (`request.resource.attr.*`) and principals
 > return `"Finance"` for a policy that allowed only `"finance"`, silently over-granting
 > access compared with the PDP's `check()` decision.
 
-On MySQL use a collation such as `utf8mb4_bin` or `utf8mb4_0900_as_cs`. PostgreSQL is
-case-sensitive by default, but nondeterministic ICU collations and `citext` are not safe
-for mapped policy attributes. On SQLite, do not apply `COLLATE NOCASE` to mapped columns.
-This requirement covers equality and ordering, `in`, intersections, string matching, and
-hierarchy prefix/ancestor comparisons.
+On MySQL use `utf8mb4_0900_as_cs`, which is case-sensitive, accent-sensitive and NO PAD, or
+`utf8mb4_bin`; prefer the former, because `utf8mb4_bin` is PAD SPACE, so `'a' = 'a '` is TRUE
+under it. **The default `utf8mb4_0900_ai_ci` is not a theoretical hazard here**: replaying this
+adapter's own conformance corpus under it, against `mysql:8.4`, makes **45 of the 176 oracle-tested
+actions disagree with the PDP** — `cs-eq` returns the `"One"` row for a policy that allowed
+`"one"`, and every collection macro over a tag name follows. PostgreSQL is case-sensitive by
+default, but nondeterministic ICU collations and `citext` are not safe for mapped policy
+attributes. On SQLite, do not apply `COLLATE NOCASE` to mapped columns. This requirement covers
+equality and ordering, `in`, intersections, string matching, and hierarchy prefix/ancestor
+comparisons.
 
 **`contains`/`startsWith`/`endsWith` are the exception, and in your favour.** This adapter
 lowers them to `REPLACE` rather than `LIKE` — chosen so a column-valued needle cannot be
@@ -245,7 +257,8 @@ SQLite's `LIKE` is case-insensitive for ASCII *regardless of collation*, so noth
 `PRAGMA case_sensitive_like = ON` makes it exact. Here the collation requirement above is
 about equality, ordering, membership and the hierarchy operators; the string operators are
 correct without it. The corpus proves both halves — `cs-eq` for equality, and `cs-contains`,
-`cs-startswith` and `cs-endswith` for string matching, on both the SQLite and PostgreSQL legs.
+`cs-startswith` and `cs-endswith` for string matching, on the SQLite, PostgreSQL and MySQL legs
+alike.
 
 ### Mapper options
 
@@ -370,6 +383,7 @@ flat query: pagination, and the adapter's filter composed with an application-ow
 | `npm test` | **The SQL this adapter emits.** The translator unit test: every corpus action, classified exactly once as a golden expectation or as a throw — plus what the driver is asked to bind, the rendering on each claimed dialect, the mapper forms and the golden asset's own invariants, none of which needs a store | Nothing but Node — no Cerbos sidecar, no database, no Docker |
 | `npm run test:adversarial` | **The rows that SQL returns**, against real SQLite with `check()` as the oracle | Cerbos CLI |
 | `npm run test:adversarial:postgres` | The same corpus against real PostgreSQL | Cerbos CLI, Docker |
+| `npm run test:adversarial:mysql` | The same corpus against real MySQL, under a case- and accent-sensitive collation. `ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_ai_ci` replays it under MySQL's default to see what that costs | Cerbos CLI, Docker |
 | `npm run golden:update` | — | Rewrites `golden/expectations.json` from what the translator emits today. Review the diff |
 
 ### The golden expectations
@@ -391,7 +405,8 @@ action, keyed by action name:
         // One per store the adversarial suite executes, because what the driver is asked to bind
         // depends on the column type: a PostgreSQL `boolean` binds `true`, a SQLite one binds 1.
         "postgresql": { "sql": "\"adversarial_resources\".\"a_number\" + $1 > $2", "params": [1, 2] },
-        "sqlite":     { "sql": "\"adversarial_resources\".\"a_number\" + ? > ?",   "params": [1, 2] }
+        "sqlite":     { "sql": "\"adversarial_resources\".\"a_number\" + ? > ?",   "params": [1, 2] },
+        "mysql":      { "sql": "`adversarial_resources`.`a_number` + ? > ?",     "params": [1, 2] }
       }
     }
   }
@@ -407,4 +422,5 @@ makes a new corpus action land as a failure rather than as silence
 of [conformance/README.md](../conformance/README.md)).
 
 Whether those filters return the rows the PDP allows is a separate question, answered by the
-adversarial suite, which does need a Cerbos sidecar and (for the PostgreSQL leg) Docker.
+adversarial suite, which does need a Cerbos sidecar and (for the PostgreSQL and MySQL legs)
+Docker.

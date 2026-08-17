@@ -18,9 +18,14 @@ import Database from "better-sqlite3";
 import { eq, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle as drizzleSqlite } from "drizzle-orm/better-sqlite3";
+import { drizzle as drizzleMysql } from "drizzle-orm/mysql2";
+import type { MySql2Database } from "drizzle-orm/mysql2";
 import { drizzle as drizzlePostgres } from "drizzle-orm/node-postgres";
+import { MySqlContainer } from "@testcontainers/mysql";
+import type { StartedMySqlContainer } from "@testcontainers/mysql";
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import mysql from "mysql2/promise";
 import { Pool } from "pg";
 
 import { queryPlanToDrizzle, PlanKind } from ".";
@@ -30,6 +35,7 @@ import {
   CONFORMANCE_DIR,
   buildMapper,
   classifyActionsForAdapter,
+  mysqlSchema,
   postgresSchema,
   requireMessage,
   sqliteSchema,
@@ -49,12 +55,12 @@ import type { ActionsFile, ThrowingAction } from "./corpus";
  * Drizzle-specific translation (schema, seeding, field mapping, executing the query).
  *
  * The whole corpus is replayed against every store this adapter claims to support, one store per
- * run, selected with `ADAPTER_TEST_DB` (`sqlite` by default, `postgres` for the container-backed
- * leg). Drizzle's dialect objects own quoting and placeholders, but the adapter still makes
- * dialect-sensitive choices of its own — `float(53)` casts, `substr`/`replace` string matching,
- * boolean-versus-integer CASE arms, timestamp binding, division by zero — and a store the harness
- * does not execute against is a store this adapter does not actually cover
- * (cerbos/query-plan-adapters#320).
+ * run, selected with `ADAPTER_TEST_DB` (`sqlite` by default, `postgres` and `mysql` for the
+ * container-backed legs). Drizzle's dialect objects own quoting and placeholders, but the adapter
+ * still makes dialect-sensitive choices of its own — `float(53)` casts, `substr`/`replace` string
+ * matching, boolean-versus-integer CASE arms, timestamp binding, division by zero — and a store
+ * the harness does not execute against is a store this adapter does not actually cover
+ * (cerbos/query-plan-adapters#320 for PostgreSQL, #340 for MySQL).
  */
 
 // Dedicated ports (gRPC 3621) so this suite can run alongside other adapters' sidecars.
@@ -298,9 +304,9 @@ const MANIFEST_ACTIONS = new Set([
 // -- the degeneracy guard (conformance/README.md, "The degeneracy guard") -----------------------
 //
 // A representative sample of the actions this adapter ORACLE-COMPARES, one per hostile group.
-// Drizzle translates every shape in the sample, so it has no liveness-only probes: each entry is
-// asserted to be in `ORACLE_ACTIONS` (cerbos/query-plan-adapters#324), which turns moving one
-// into `adapterUnsupported` into a failure here rather than a silent no-op.
+// Each entry is asserted to be in `ORACLE_ACTIONS` (cerbos/query-plan-adapters#324), which turns
+// moving one into `adapterUnsupported` into a failure here rather than a silent no-op — and the
+// refused shapes carry the complementary assertion in `DEGENERACY_LIVENESS_PROBES` below.
 //
 // w1-size-zero-chain, w1-not-size-chain and w1-size-frac-chain are deliberately absent: their
 // oracles are empty by CONSTRUCTION (no seed holds a to-one parent with zero children, nor one
@@ -351,10 +357,6 @@ const DEGENERACY_GUARD_ACTIONS = [
   // column under negation. Both stores must agree, so these also cover the id column's typing.
   "id-eq-const",
   "id-f2f-ne",
-  // string() over a NUMERIC column, the half this adapter lowers. Its boolean sibling is refused
-  // instead, because CAST(... AS TEXT) is store-dependent there — the two are deliberately
-  // classified apart, so this entry proves the supported half still compares.
-  "cast-string-double",
   // Root position and bare operand forms (#388): one per hazard — the negation over a bare
   // ordering (every other negated ordering in the corpus wraps a size() or a ternary), the bare
   // boolean at the ROOT of the condition, and the collection subquery disjoined with a scalar
@@ -372,6 +374,19 @@ const DEGENERACY_GUARD_ACTIONS = [
   "vf-hasint",
   "pv-exists-unrolled",
 ] as const;
+
+/**
+ * Shapes this adapter refuses to translate: there is no oracle comparison behind them, so they
+ * stay here as PDP/policy liveness probes for a group the compared list cannot cover. See
+ * cerbos/query-plan-adapters#324.
+ *
+ * The list exists as of #340. Before the MySQL leg executed, this adapter translated every shape
+ * in the sample and the guard was one-sided; `cast-string-double` was in the COMPARED list, on the
+ * belief that `CAST(... AS TEXT)` rendered a double identically on every store. It is a syntax
+ * error on MySQL. `cast-string-double` rather than its boolean sibling because its oracle is a
+ * single row out of 21 — a non-empty, non-total set, which is what the guard asserts.
+ */
+const DEGENERACY_LIVENESS_PROBES = ["cast-string-double"] as const;
 
 // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") --------
 //
@@ -609,8 +624,19 @@ function seedRows(): SeedRows {
 
 // -- store targets ------------------------------------------------------------------------------
 
-const STORE_NAMES = ["sqlite", "postgres"] as const;
+const STORE_NAMES = ["sqlite", "postgres", "mysql"] as const;
 type StoreName = (typeof STORE_NAMES)[number];
+
+/**
+ * The engine each leg must find itself talking to, in the spelling that engine's own banner
+ * query produces. Each spelling is rejected by the other two engines, so the anti-vacuity test
+ * below fails in both directions rather than only when a container is missing.
+ */
+const STORE_ENGINES: Record<StoreName, string> = {
+  sqlite: "SQLite",
+  postgres: "PostgreSQL",
+  mysql: "MySQL",
+};
 
 /**
  * One database the whole corpus is replayed against. `start` creates the schema and seeds it;
@@ -896,7 +922,254 @@ function postgresStore(): AdversarialStore {
   };
 }
 
-/** Container start dominates the PostgreSQL leg's setup; the SQLite leg finishes instantly. */
+/**
+ * Mirrors the ent and spring-data harnesses' MySQL target so all three adapters prove the same
+ * server, pinned by tag AND digest for the same reason the PostgreSQL image is.
+ */
+const MYSQL_IMAGE =
+  "mysql:8.4@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb";
+
+/**
+ * The collation this leg runs the whole corpus under, set on the SERVER so that the database the
+ * container creates, and every table in it, inherits it.
+ *
+ * **This is a correctness requirement, not a preference.** CEL string equality is byte-exact.
+ * MySQL's default `utf8mb4_0900_ai_ci` is case- AND accent-insensitive, and its `LIKE` follows the
+ * column's collation, so under the default the following are all TRUE on MySQL 8.4 — measured,
+ * not inferred:
+ *
+ * | probe | `utf8mb4_0900_ai_ci` (default) | `utf8mb4_0900_as_cs` |
+ * |---|---|---|
+ * | `'One' = 'one'` | TRUE — over-grants `cs-eq` | FALSE |
+ * | `'héllo' = 'hello'` | TRUE — over-grants `unicode-eq` | FALSE |
+ * | `'one' LIKE 'ON%'` | TRUE — over-grants every `hier-*` prefix probe | FALSE |
+ *
+ * A collation that makes `=` case-insensitive is a **store misconfiguration**, not a limitation of
+ * this adapter: no filter it could emit would restore byte-exact equality, and classifying `cs-eq`
+ * as `adapterUnsupported` on that basis would blame the translator for the DDL. So the leg pins a
+ * case- and accent-sensitive collation and states the requirement, exactly as `ent` pins
+ * `COLLATE utf8mb4_bin` per column and `spring-data` passes `--collation-server`.
+ *
+ * `utf8mb4_0900_as_cs` rather than ent's `utf8mb4_bin` because the two differ on a third axis:
+ * `utf8mb4_bin` is PAD SPACE, so `'a' = 'a '` is TRUE under it, while both `utf8mb4_0900_as_cs`
+ * and the default are NO PAD. No corpus seed carries a trailing space today, so nothing here
+ * discriminates them — this picks the one that matches CEL on all three axes rather than two, and
+ * it is the collation `spring-data`'s MySQL leg already runs, so the two adapters prove one server
+ * configuration between them.
+ *
+ * Overridable so the over-grant can be reproduced rather than taken on trust —
+ * `ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_ai_ci npm run test:adversarial:mysql` fails on the
+ * case and accent probes and nothing else. Same escape hatch as spring-data's
+ * `-Dadapter.test.mysql.collation`.
+ */
+const MYSQL_COLLATION =
+  process.env["ADAPTER_TEST_MYSQL_COLLATION"] ?? "utf8mb4_0900_as_cs";
+
+/**
+ * The MySQL leg (cerbos/query-plan-adapters#340).
+ *
+ * What it discriminates that neither other store can:
+ *
+ * - **Collation.** See `MYSQL_COLLATION` above. SQLite has `PRAGMA case_sensitive_like` and
+ *   nothing else; PostgreSQL's collations are deterministic; only MySQL ships a default under
+ *   which `=` itself over-grants.
+ * - **Division.** MySQL returns NULL for `x / 0` where PostgreSQL raises, and `5 / 2` is `2.5`
+ *   where PostgreSQL's integer division truncates to `2`. The adapter's guarded CASE arms and its
+ *   `float(53)` cast on the numerator are what make the two agree; a translation that leaned on
+ *   either engine's behaviour shows up here as a divergence rather than as a passing leg.
+ * - **`CAST(… AS FLOAT(53))`.** Supported only from MySQL 8.0.17. Every other rendering the
+ *   adapter emits is portable by construction; this one is the single version-gated construct in
+ *   it, and nothing but executing it says whether the server accepts it.
+ * - **`CAST(… AS TEXT)`.** Which is not a MySQL cast target at all — the divergence this leg
+ *   actually found, and the reason `string()` is now refused (`UNSUPPORTED_CONVERSIONS` in
+ *   `index.ts`). Both other stores accept it.
+ *
+ * The DDL is written here rather than derived from the drizzle schema because a store owns its own
+ * schema in this harness — but it deliberately names NO collation per column, unlike `ent`'s. The
+ * server is started with the collation as its default and every table inherits it, so the
+ * requirement lives in one constant rather than repeated on nine columns.
+ */
+function mysqlStore(): AdversarialStore {
+  const schema = mysqlSchema();
+  const { resources, parents, inners, tags, categories, subCategories, labels } =
+    schema;
+
+  let container: StartedMySqlContainer | undefined;
+  let pool: mysql.Pool | undefined;
+  // The promise-flavoured `mysql2/promise` pool, which is what `await`ing a query needs; the
+  // driver's default generic names the callback-flavoured one, so the type is spelled out here.
+  let db: MySql2Database | undefined;
+
+  const connected = (): NonNullable<typeof db> => {
+    if (!db) {
+      throw new Error("MySQL store used before start()");
+    }
+    return db;
+  };
+
+  // MySQL rejects several statements in one `execute()`, so the schema is a list rather than a
+  // script. `int` and `datetime(6)` mirror the drizzle column types in `mysqlSchema()`, which is
+  // where the reasoning for each choice lives.
+  const DDL = [
+    `CREATE TABLE adversarial_resources (
+       id                 varchar(64) PRIMARY KEY,
+       a_bool             boolean NOT NULL,
+       a_string           varchar(255) NOT NULL,
+       a_number           int NOT NULL,
+       a_double           double,
+       a_optional_string  varchar(255),
+       created_by         varchar(64) NOT NULL,
+       scope              varchar(255),
+       created_at         datetime(6)
+     )`,
+    `CREATE TABLE adversarial_parents (
+       id                 varchar(64) PRIMARY KEY,
+       a_bool             boolean NOT NULL,
+       a_string           varchar(255) NOT NULL,
+       a_number           int NOT NULL,
+       a_optional_string  varchar(255),
+       resource_id        varchar(64) NOT NULL UNIQUE REFERENCES adversarial_resources(id)
+     )`,
+    `CREATE TABLE adversarial_inners (
+       id                 varchar(64) PRIMARY KEY,
+       a_bool             boolean NOT NULL,
+       a_string           varchar(255) NOT NULL,
+       a_number           int NOT NULL,
+       a_optional_string  varchar(255),
+       parent_id          varchar(64) NOT NULL UNIQUE REFERENCES adversarial_parents(id)
+     )`,
+    `CREATE TABLE adversarial_tags (
+       tag_id       varchar(64) PRIMARY KEY,
+       name         varchar(255),
+       resource_id  varchar(64) NOT NULL REFERENCES adversarial_resources(id)
+     )`,
+    `CREATE TABLE adversarial_categories (
+       id           varchar(64) PRIMARY KEY,
+       name         varchar(255) NOT NULL,
+       resource_id  varchar(64) NOT NULL REFERENCES adversarial_resources(id)
+     )`,
+    `CREATE TABLE adversarial_sub_categories (
+       id           varchar(64) PRIMARY KEY,
+       name         varchar(255) NOT NULL,
+       category_id  varchar(64) NOT NULL REFERENCES adversarial_categories(id)
+     )`,
+    `CREATE TABLE adversarial_labels (
+       id               varchar(64) PRIMARY KEY,
+       name             varchar(255),
+       sub_category_id  varchar(64) NOT NULL REFERENCES adversarial_sub_categories(id)
+     )`,
+  ];
+
+  return {
+    name: "mysql",
+    mapper: buildMapper(schema),
+
+    async start(): Promise<void> {
+      // The image's entrypoint prepends `mysqld` to arguments that begin with a dash, which is
+      // how spring-data's MySQL leg passes the same two flags.
+      container = await new MySqlContainer(MYSQL_IMAGE)
+        .withCommand([
+          "--character-set-server=utf8mb4",
+          `--collation-server=${MYSQL_COLLATION}`,
+        ])
+        .start();
+      pool = mysql.createPool({
+        uri: container.getConnectionUri(),
+        // The corpus's instants are UTC and `datetime` stores what it is handed, so nothing here
+        // should be converting between zones. Saying so is what keeps a runner's local time zone
+        // out of the comparison.
+        timezone: "Z",
+      });
+      db = drizzleMysql(pool, { mode: "default" });
+
+      for (const statement of DDL) {
+        await db.execute(sql.raw(statement));
+      }
+
+      const rows = seedRows();
+      await db.insert(resources).values(rows.resources.map(toMysqlResourceRow));
+      await db.insert(parents).values(rows.parents);
+      await db.insert(inners).values(rows.inners);
+      await db.insert(tags).values(rows.tags);
+      await db.insert(categories).values(rows.categories);
+      await db.insert(subCategories).values(rows.subCategories);
+      await db.insert(labels).values(rows.labels);
+    },
+
+    async stop(): Promise<void> {
+      await pool?.end();
+      await container?.stop();
+    },
+
+    async selectIds(filter: SQL | undefined): Promise<string[]> {
+      const selected = await connected()
+        .select({ id: resources.id })
+        .from(resources)
+        .where(filter);
+      return selected.map((row) => row.id).sort();
+    },
+
+    async parentChain(): Promise<
+      Record<string, [string | null, string | null]>
+    > {
+      const rows = await connected()
+        .select({
+          id: resources.id,
+          parent: parents.aString,
+          inner: inners.aString,
+        })
+        .from(resources)
+        .leftJoin(parents, eq(parents.resourceId, resources.id))
+        .leftJoin(inners, eq(inners.parentId, parents.id));
+      return Object.fromEntries(
+        rows.map((row) => [row.id, [row.parent, row.inner]]),
+      );
+    },
+
+    // `@@version_comment` rather than `version()`: the latter answers `8.4.x` on MySQL and would
+    // make the banner assertion a version check, while this one names the engine and is a syntax
+    // error on both other stores.
+    async serverBanner(): Promise<string> {
+      // drizzle types every mysql2 `execute` as an INSERT-style result header; a SELECT hands
+      // back `[rows, fields]`, which is what this reads.
+      const result = (await connected().execute(
+        sql`select @@version_comment as version`,
+      )) as unknown as [{ version: string }[]];
+      return result[0][0]?.version ?? "";
+    },
+  };
+}
+
+/**
+ * The one row shape MySQL will not take as the other two stores hand it over.
+ *
+ * `created_at` is a real `DATETIME`, and the corpus's instants are RFC-3339 (`2024-06-01T00:00:00Z`
+ * — the same strings PostgreSQL's `timestamptz` and SQLite's `text` column store verbatim).
+ * MySQL's strict mode REJECTS that spelling on INSERT, so the instant is rewritten into MySQL's
+ * own `YYYY-MM-DD HH:MM:SS.ffffff` here, preserving every digit including the a5 seed's
+ * microseconds.
+ *
+ * Only the INSERT is rewritten. What the adapter BINDS in a filter is still the RFC-3339 string,
+ * which MySQL parses leniently on comparison (warning 1292, and it lands on the right instant) —
+ * and whether it does land there is not taken on trust: `ts-eq`, `ts-eq-offset` and `ts-ne` are
+ * oracle-compared on this leg like every other action.
+ */
+function toMysqlResourceRow(row: ResourceRow): ResourceRow {
+  if (row.createdAt === null) {
+    return row;
+  }
+  const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2}(?:\.\d+)?)Z$/.exec(
+    row.createdAt,
+  );
+  if (!match) {
+    throw new Error(
+      `derived-fields.json createdAt "${row.createdAt}" is not the RFC-3339 UTC instant this store rewrites`,
+    );
+  }
+  return { ...row, createdAt: `${match[1]} ${match[2]}` };
+}
+
+/** Container start dominates the PostgreSQL and MySQL legs' setup; SQLite finishes instantly. */
 const STORE_STARTUP_TIMEOUT_MS = 180_000;
 
 function selectedStoreName(): StoreName {
@@ -912,8 +1185,12 @@ function selectedStoreName(): StoreName {
 }
 
 const STORE_NAME = selectedStoreName();
-const store: AdversarialStore =
-  STORE_NAME === "postgres" ? postgresStore() : sqliteStore();
+const STORE_FACTORIES: Record<StoreName, () => AdversarialStore> = {
+  sqlite: sqliteStore,
+  postgres: postgresStore,
+  mysql: mysqlStore,
+};
+const store: AdversarialStore = STORE_FACTORIES[STORE_NAME]();
 const MAPPER = store.mapper;
 
 /**
@@ -1100,17 +1377,45 @@ function planCarriesNullLiteral(operand: unknown): boolean {
 }
 
 describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
-  // Anti-vacuity for the store split: every other assertion in this file is identical on both
-  // legs, so a PostgreSQL leg that silently fell back to SQLite would pass the entire suite while
+  // Anti-vacuity for the store split: every other assertion in this file is identical on every
+  // leg, so a PostgreSQL leg that silently fell back to SQLite would pass the entire suite while
   // proving nothing about PostgreSQL — the exact gap #320 reports. Ask the connection the suite
   // actually queries through which engine it is.
   test("executes against the store ADAPTER_TEST_DB selects", async () => {
     const banner = await store.serverBanner();
     expect({ store: store.name, engine: banner.split(" ")[0] }).toEqual({
       store: STORE_NAME,
-      engine: STORE_NAME === "postgres" ? "PostgreSQL" : "SQLite",
+      engine: STORE_ENGINES[STORE_NAME],
     });
   });
+
+  // The MySQL leg's other precondition, and the one no banner reports: the collation the server
+  // was started with. Under MySQL's default `utf8mb4_0900_ai_ci` these three queries return the
+  // case variant, the accent variant and the wrong-case prefix respectively, which is a live
+  // authorization over-grant — `cs-eq`, `unicode-eq` and every `hier-*` action would then return
+  // rows the PDP denies. The corpus catches that through the oracle; this catches it by NAME, so
+  // a failure reads as "the store is misconfigured" rather than as a translation bug.
+  //
+  // Executed against the seeded rows rather than asked of `@@collation_database`, because the
+  // requirement is what the comparison DOES, not what the setting is called.
+  (STORE_NAME === "mysql" ? test : test.skip)(
+    "the MySQL leg runs under a case- and accent-sensitive collation",
+    async () => {
+      expect({
+        // "one" is seed a1; "One" is seed c1. Bound, not interpolated, so the comparison is the
+        // one the adapter's own filters make.
+        caseVariant: await store.selectIds(sql`a_string = ${"one"}`),
+        // "héllo🚀" is seed a6; the accent-folded spelling matches nothing.
+        accentFolded: await store.selectIds(sql`a_string = ${"hello🚀"}`),
+        // `hier-*` reaches the same collation through LIKE rather than through `=`.
+        wrongCasePrefix: await store.selectIds(sql`a_string like ${"ON%"}`),
+      }).toEqual({
+        caseVariant: ["a1"],
+        accentFolded: [],
+        wrongCasePrefix: [],
+      });
+    },
+  );
 
   // Adding a throwing action without pinning its message must fail this harness rather than
   // silently degrade the throw suite to a bare "it threw" (cerbos/query-plan-adapters#326).
@@ -1142,7 +1447,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
     expect(NULL_REPRESENTATION_OMITTED).toHaveLength(1);
     // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
     // gained or lost has to be re-triaged here rather than joining the suite unnoticed.
-    expect(THROWING_ACTIONS).toHaveLength(20);
+    expect(THROWING_ACTIONS).toHaveLength(21);
     expect(misclassified).toEqual([]);
     expect(
       [...DRIZZLE_SUPPORTED_EXPECTED].filter(
@@ -1410,6 +1715,13 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
     // otherwise the differential comparison could pass vacuously (e.g. PDP denying all).
     for (const action of DEGENERACY_GUARD_ACTIONS) {
       expect(ORACLE_ACTIONS).toContain(action);
+      await expectNonDegenerateOracle(action);
+    }
+    // Shapes this adapter refuses, so there is no comparison behind them: these carry PDP/policy
+    // liveness for their group only. Asserting the complement keeps the split honest — an action
+    // the adapter gains support for must move up into the guard proper.
+    for (const action of DEGENERACY_LIVENESS_PROBES) {
+      expect(ORACLE_ACTIONS).not.toContain(action);
       await expectNonDegenerateOracle(action);
     }
   });

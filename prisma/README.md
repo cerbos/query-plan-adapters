@@ -92,7 +92,22 @@ mapped authorization columns as part of the policy contract:
 - PostgreSQL: use a deterministic, case-sensitive collation and avoid `citext` or an
   insensitive Prisma query mode for mapped fields.
 - MySQL/MariaDB: choose a case-sensitive (`_cs`) or binary collation rather than the common
-  case-insensitive (`_ci`) defaults.
+  case-insensitive (`_ci`) defaults — `utf8mb4_0900_as_cs` is the one this adapter's own MySQL
+  conformance leg runs under. **On MySQL this is not something you can leave to the server.**
+  Prisma's migration engine writes `DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`
+  into every `CREATE TABLE` and ignores the server's configured default, and Prisma's schema
+  language has no collation attribute to override it — so a Prisma-managed MySQL database is
+  case- AND accent-insensitive out of the box, whatever `--collation-server` says. Convert the
+  tables after migrating:
+
+  ```sql
+  ALTER TABLE `YourModel` CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+  ```
+
+  Measured, not theoretical: replaying this adapter's conformance corpus under
+  `utf8mb4_unicode_ci` on `mysql:8.4` makes **42 of the 136 oracle-tested actions disagree with
+  the PDP** — `cs-eq` returns the `"One"` row for a policy that allowed `"one"`, and every
+  collection macro over a tag name follows.
 - SQL Server: use a case-sensitive (`_CS_`) collation rather than a case-insensitive (`_CI_`)
   collation.
 - SQLite: do not apply `COLLATE NOCASE` to mapped fields, and **also set
@@ -180,7 +195,7 @@ undeclared side needs UNKNOWN — so the adapter throws rather than picking a di
 
 ### Conformance contract
 
-The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 21 hostile seed rows, both Prisma 6 and 7, and both SQLite and PostgreSQL. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
+The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 21 hostile seed rows, both Prisma 6 and 7, and each of SQLite, PostgreSQL and MySQL. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
 
 | Classification | Coverage |
 | --- | --- |
@@ -196,18 +211,22 @@ The `where` input each of these actions produces is pinned separately, in the tr
 
 #### Providers the contract is proved on
 
-The classification above holds where the corpus is **executed**, not where the emitted filter merely looks plausible. Until [#320](https://github.com/cerbos/query-plan-adapters/issues/320) it was executed on SQLite only, and the Prisma 6/7 matrix is an *engine* matrix, not a provider one — it says nothing about how a provider coerces a value or reads a `LIKE` pattern. The suite now runs on SQLite and PostgreSQL:
+The classification above holds where the corpus is **executed**, not where the emitted filter merely looks plausible. Until [#320](https://github.com/cerbos/query-plan-adapters/issues/320) it was executed on SQLite only, and until [#340](https://github.com/cerbos/query-plan-adapters/issues/340) MySQL was unexecuted too. The Prisma 6/7 matrix is an *engine* matrix, not a provider one — it says nothing about how a provider coerces a value, reads a `LIKE` pattern, or collates a string.
 
-The store and the Prisma major are independent dimensions, so there are four runs and CI does all four:
+The store and the Prisma major are independent dimensions, so there are six runs and CI does all six:
 
 ```bash
 npm run test:adversarial:v7            # SQLite,     Prisma 7
 npm run test:adversarial:v6            # SQLite,     Prisma 6
 npm run test:adversarial:postgres:v7   # PostgreSQL, Prisma 7  (testcontainers)
 npm run test:adversarial:postgres:v6   # PostgreSQL, Prisma 6  (testcontainers)
+npm run test:adversarial:mysql:v7      # MySQL,      Prisma 7  (testcontainers)
+npm run test:adversarial:mysql:v6      # MySQL,      Prisma 6  (testcontainers)
 ```
 
-MySQL, SQL Server and CockroachDB are **not** executed. Where a fail-closed reason names one of them, it is reasoned from that provider's documented `LIKE` and escaping behaviour rather than observed.
+The MySQL legs run under `utf8mb4_0900_as_cs`, applied to the tables after `prisma db push` for the reason the [collation section](#database-collation-is-an-authorization-invariant) gives. `ADAPTER_TEST_MYSQL_COLLATION` replays them under any other collation, which is how the 42-action figure quoted there was measured. Every corpus action that translates on SQLite and PostgreSQL translates and agrees on MySQL too, so the classification is unchanged by this leg: it added no fail-closed shape and moved none.
+
+SQL Server and CockroachDB are still **not** executed. Where a fail-closed reason names one of them, it is reasoned from that provider's documented `LIKE` and escaping behaviour rather than observed.
 
 > **Breaking change in this release.** `endsWith`/`contains`/`startsWith` with a needle containing a **backslash**, and hierarchy prefixes containing one, now throw instead of returning a filter. A backslash is the default `LIKE` escape character on PostgreSQL and MySQL and has no meaning at all on SQLite, so one needle meant two different things: `contains("a\\b")` matched `"ab"` on PostgreSQL — a row the PDP denies — and `endsWith("\\")` failed the query outright with `SQLSTATE 22025`. There is no needle spelling that is correct on every provider without an `ESCAPE` clause Prisma does not emit, so the shape is refused. If you match on backslashes, compare the whole value with `==` or move the predicate out of the policy.
 
@@ -614,7 +633,7 @@ This is the **translator unit test**: for every action in the shared conformance
 
 Every wire fixture must be classified there exactly once, so adding a corpus action fails this suite until someone records the filter it produces. See [ADR 0006](../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md).
 
-Whether those filters return the rows the PDP allows is a separate question, answered by the adversarial suite — see [Conformance contract](#conformance-contract) above, which lists the four runs and what each one covers. That suite does need a Cerbos sidecar, and resets `prisma/dev-adversarial.db` with `prisma db push --force-reset`, so run it only against disposable development databases.
+Whether those filters return the rows the PDP allows is a separate question, answered by the adversarial suite — see [Conformance contract](#conformance-contract) above, which lists the six runs and what each one covers. That suite does need a Cerbos sidecar, Docker for the PostgreSQL and MySQL legs, and it resets `prisma/dev-adversarial.db` with `prisma db push --force-reset`, so run it only against disposable development databases.
 
 ## Types
 

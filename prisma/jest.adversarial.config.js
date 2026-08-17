@@ -1,19 +1,27 @@
 const prismaVersion = process.env.PRISMA_VERSION || "7";
 const store = process.env.ADAPTER_TEST_DB || "sqlite";
 
-const STORES = ["sqlite", "postgres"];
-if (!STORES.includes(store)) {
+// `./test-setup.adversarial` resolves to the (store x Prisma major) fixture: each combination has
+// its own generated client, because the provider is baked into a generated Prisma client and the
+// two majors generate incompatible ones. SQLite carries no infix, being the default the file
+// names were written around.
+const STORE_SUFFIXES = {
+  sqlite: "",
+  postgres: ".pg",
+  mysql: ".mysql",
+};
+if (!Object.hasOwn(STORE_SUFFIXES, store)) {
   // A typo must fail rather than silently fall back to SQLite: a CI leg that believes it is
-  // proving PostgreSQL while replaying SQLite is exactly the coverage gap #320 closes.
+  // proving PostgreSQL or MySQL while replaying SQLite is exactly the coverage gap #320 and #340
+  // close.
   throw new Error(
-    `Unknown ADAPTER_TEST_DB "${store}": expected one of ${STORES.join(", ")}`
+    `Unknown ADAPTER_TEST_DB "${store}": expected one of ${Object.keys(
+      STORE_SUFFIXES
+    ).join(", ")}`
   );
 }
 
-// `./test-setup.adversarial` resolves to the (store x Prisma major) fixture: each combination has
-// its own generated client, because the provider is baked into a generated Prisma client and the
-// two majors generate incompatible ones.
-const setupSuffix = store === "postgres" ? ".pg" : "";
+const setupSuffix = STORE_SUFFIXES[store];
 
 /** @type {import("ts-jest").JestConfigWithTsJest} */
 module.exports = {
@@ -35,8 +43,8 @@ module.exports = {
     "^(.*)/test-setup\\.adversarial$":
       `$1/test-setup.adversarial${setupSuffix}.v${prismaVersion}`,
   },
-  // The PostgreSQL leg's container has to exist before any test module builds a client, and its
-  // connection string only exists once it does — so it is started here rather than by the npm
+  // A container-backed leg's container has to exist before any test module builds a client, and
+  // its connection string only exists once it does — so it is started here rather than by the npm
   // script. The SQLite leg's setup is a no-op.
   globalSetup: "<rootDir>/jest.globalSetup.adversarial.js",
   globalTeardown: "<rootDir>/jest.globalTeardown.adversarial.js",
