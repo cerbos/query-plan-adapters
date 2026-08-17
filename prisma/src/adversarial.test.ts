@@ -44,20 +44,35 @@ import { prisma } from "./test-setup.adversarial";
  * right rows.
  *
  * The whole corpus is replayed against every store this adapter is proved on, one store per run,
- * selected with `ADAPTER_TEST_DB` (`sqlite` by default, `postgres` for the container-backed leg —
- * see `jest.globalSetup.adversarial.js`). The Prisma major and the store are independent
- * dimensions: v6/v7 is an ENGINE matrix, and an engine matrix says nothing about how a provider
- * coerces a fractional threshold against an `Int` column, escapes a LIKE metacharacter, or
- * compares a real `timestamp` rather than milliseconds since the epoch
- * (cerbos/query-plan-adapters#320).
+ * selected with `ADAPTER_TEST_DB` (`sqlite` by default, `postgres` and `mysql` for the
+ * container-backed legs — see `jest.globalSetup.adversarial.js`). The Prisma major and the store
+ * are independent dimensions: v6/v7 is an ENGINE matrix, and an engine matrix says nothing about
+ * how a provider coerces a fractional threshold against an `Int` column, escapes a LIKE
+ * metacharacter, compares a real `timestamp` rather than milliseconds since the epoch
+ * (cerbos/query-plan-adapters#320), or decides with its COLLATION whether `=` is case-sensitive at
+ * all (#340).
  */
 
 const cerbos = new Cerbos("127.0.0.1:3593", { tls: false });
 
 const SCHEMA_DIR = path.join(__dirname, "..", "prisma");
 
-const STORE_NAMES = ["sqlite", "postgres"] as const;
+const STORE_NAMES = ["sqlite", "postgres", "mysql"] as const;
 type StoreName = (typeof STORE_NAMES)[number];
+
+/**
+ * How each leg asks its own connection which engine answered, and the first word of the answer.
+ *
+ * Each spelling is a syntax error on the other two engines, so the anti-vacuity test below fails
+ * in every direction rather than only when a container is missing. MySQL's `version()` answers a
+ * bare `8.4.x`, which would make the assertion a version check; `@@version_comment` names the
+ * engine.
+ */
+const STORE_BANNERS: Record<StoreName, { query: string; engine: string }> = {
+  sqlite: { query: "select 'SQLite ' || sqlite_version() as banner", engine: "SQLite" },
+  postgres: { query: "select version() as banner", engine: "PostgreSQL" },
+  mysql: { query: "select @@version_comment as banner", engine: "MySQL" },
+};
 
 function selectedStoreName(): StoreName {
   const requested = process.env["ADAPTER_TEST_DB"] ?? "sqlite";
@@ -74,24 +89,30 @@ function selectedStoreName(): StoreName {
 const STORE_NAME = selectedStoreName();
 
 /**
- * The four adversarial schemas, which must hold one data model between them.
+ * The six adversarial schemas, which must hold one data model between them.
  *
  * A generated Prisma client bakes in its provider and its major, so proving the corpus on
- * (Prisma 6, Prisma 7) x (SQLite, PostgreSQL) needs four schema files. They are only a matrix
- * over the same models — a column that drifts in one of them would seed a different row shape on
- * that leg while every assertion in this file stayed identical, which is the projection trap
- * conformance/README.md describes applied to the schema instead of the seeds.
+ * (Prisma 6, Prisma 7) x (SQLite, PostgreSQL, MySQL) needs six schema files. They are only a
+ * matrix over the same models — a column that drifts in one of them would seed a different row
+ * shape on that leg while every assertion in this file stayed identical, which is the projection
+ * trap conformance/README.md describes applied to the schema instead of the seeds.
+ *
+ * It is `STORE_NAMES.length * 2`, and asserted to be: adding a store means adding two schemas, and
+ * a store whose schemas were never written would otherwise arrive as a resolution failure inside
+ * one leg rather than as a gap in the matrix.
  */
 const ADVERSARIAL_SCHEMAS = [
   "schema.adversarial.prisma",
   "schema.adversarial.v6.prisma",
   "schema.adversarial.pg.prisma",
   "schema.adversarial.pg.v6.prisma",
+  "schema.adversarial.mysql.prisma",
+  "schema.adversarial.mysql.v6.prisma",
 ] as const;
 
 /**
  * A schema's `model` blocks, with comments, the generator/datasource blocks and all incidental
- * whitespace removed — everything that legitimately differs between the four.
+ * whitespace removed — everything that legitimately differs between the six.
  */
 function modelBlocks(schema: string): string {
   const withoutComments = schema
@@ -784,21 +805,56 @@ function planCarriesNullLiteral(operand: unknown): boolean {
 }
 
 describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
-  // Anti-vacuity for the store split: every other assertion in this file is identical on both
-  // legs, so a PostgreSQL leg that silently fell back to SQLite would pass the entire suite while
+  // Anti-vacuity for the store split: every other assertion in this file is identical on every
+  // leg, so a PostgreSQL leg that silently fell back to SQLite would pass the entire suite while
   // proving nothing about PostgreSQL — the exact gap #320 reports. Ask the connection the suite
-  // actually queries through which engine it is. Each spelling is rejected by the other engine, so
-  // this fails in both directions rather than only when the container is missing.
+  // actually queries through which engine it is; each spelling is a syntax error on the others, so
+  // this fails in every direction rather than only when a container is missing.
   test("executes against the store ADAPTER_TEST_DB selects", async () => {
     const rows = await prisma.$queryRawUnsafe<{ banner: string }[]>(
-      STORE_NAME === "postgres"
-        ? "select version() as banner"
-        : "select 'SQLite ' || sqlite_version() as banner"
+      STORE_BANNERS[STORE_NAME].query
     );
-    expect(rows[0]?.banner?.split(" ")[0]).toBe(
-      STORE_NAME === "postgres" ? "PostgreSQL" : "SQLite"
-    );
+    expect(rows[0]?.banner?.split(" ")[0]).toBe(STORE_BANNERS[STORE_NAME].engine);
   });
+
+  // The MySQL leg's other precondition, and the one no banner reports: the collation the tables
+  // were converted to after `prisma db push` wrote them (jest.globalSetup.adversarial.js). Under
+  // the `utf8mb4_unicode_ci` Prisma's migration engine hardcodes — or MySQL's own
+  // `utf8mb4_0900_ai_ci` default — these three queries return the case variant, the accent variant
+  // and the wrong-case prefix respectively, which is a live authorization over-grant: `cs-eq`,
+  // `unicode-eq` and every `hier-*` action would then return rows the PDP denies. The corpus
+  // catches that through the oracle; this catches it by NAME, so a failure reads as "the store is
+  // misconfigured" rather than as a translation bug.
+  //
+  // Executed against the seeded rows rather than asked of `@@collation_database`, because the
+  // requirement is what the comparison DOES, not what the setting is called.
+  (STORE_NAME === "mysql" ? test : test.skip)(
+    "the MySQL leg runs under a case- and accent-sensitive collation",
+    async () => {
+      const ids = async (where: object): Promise<string[]> =>
+        (
+          await prisma.adversarialResource.findMany({
+            where,
+            select: { id: true },
+          })
+        )
+          .map((row) => row.id)
+          .sort();
+
+      expect({
+        // "one" is seed a1; "One" is seed c1.
+        caseVariant: await ids({ aString: "one" }),
+        // "héllo🚀" is seed a6; the accent-folded spelling matches nothing.
+        accentFolded: await ids({ aString: "hello🚀" }),
+        // `hier-*` reaches the same collation through LIKE rather than through `=`.
+        wrongCasePrefix: await ids({ aString: { startsWith: "ON" } }),
+      }).toEqual({
+        caseVariant: ["a1"],
+        accentFolded: [],
+        wrongCasePrefix: [],
+      });
+    }
+  );
 
   test("every adversarial schema declares the same data model", () => {
     const [reference, ...rest] = ADVERSARIAL_SCHEMAS.map((name) => ({
@@ -811,8 +867,9 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       throw new Error("ADVERSARIAL_SCHEMAS is empty");
     }
     // Guard the guard: a regex that stopped matching would make every schema compare equal on an
-    // empty string.
+    // empty string, and a store added without its two schemas would leave the matrix short.
     expect(reference.models).toContain(`model ${MODEL}`);
+    expect(ADVERSARIAL_SCHEMAS).toHaveLength(STORE_NAMES.length * 2);
     for (const schema of rest) {
       expect({ name: schema.name, models: schema.models }).toEqual({
         name: schema.name,

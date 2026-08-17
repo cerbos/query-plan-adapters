@@ -984,41 +984,48 @@ const buildHierarchyFilter = (
     : filter;
 };
 
-const CONVERSION_TARGETS: Record<string, string> = {
-  string: "TEXT",
+/**
+ * Every CEL conversion, and why SQL `CAST` cannot reproduce it here. Nothing is lowered: the
+ * adapter renders through whichever Drizzle dialect the CALLER hands its query to, which is what
+ * lets one translation serve SQLite, PostgreSQL and MySQL — and a conversion is exactly the place
+ * where those three disagree.
+ *
+ * `int()` / `double()` (cerbos/query-plan-adapters#311): CEL reads a WHOLE string or raises an
+ * error, and an error denies the row. SQL reads whatever prefix parses — `CAST('100%_done' AS
+ * INTEGER)` is `100` on SQLite, `0` on MySQL and a hard error on PostgreSQL — so a direct lowering
+ * returns rows the PDP denies. The numeric direction is no safer: CEL's `int()` truncates toward
+ * zero, SQLite's CAST truncates, but PostgreSQL and MySQL round to nearest, so `int(-0.6)` is `0`
+ * to CEL and `-1` to those engines. Nothing in the plan says what type the column holds, so the
+ * adapter cannot pick a faithful lowering per row.
+ *
+ * `string()` (cerbos/query-plan-adapters#340): there is no cast TARGET the three stores share.
+ * This one used to be lowered to `CAST(... AS TEXT)` for numeric and text columns, on the stated
+ * grounds that the rendering was "measured against the pinned images" — it was measured against
+ * two of them. `TEXT` is not a MySQL cast target at all: `CAST(-0.6 AS TEXT)` is `ERROR 1064` on
+ * MySQL 8.4, which spells the same conversion `CAST(-0.6 AS CHAR)`. Nor is `VARCHAR`. And `CHAR`
+ * is `character(1)` on PostgreSQL, where `CAST(-0.6 AS CHAR)` is `'-'` — a filter that silently
+ * matches nothing rather than failing. The BOOLEAN case was already refused, for the separate
+ * reason that SQLite and MySQL hold a boolean as 1/0 and render `"1"` where CEL renders `"true"`;
+ * that reason still holds and is now subsumed.
+ *
+ * `ent` translates `string()` and is not a counter-example: its `render.go` branches on a dialect
+ * the caller declares through `WithDialect`, so it emits `CHAR` on MySQL and `TEXT` elsewhere. The
+ * limitation here is the absent dialect, not the absent cast.
+ */
+const NUMERIC_CONVERSION_REFUSAL =
+  "SQL CAST does not reproduce CEL conversion semantics — it reads a numeric prefix where CEL " +
+  "requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL " +
+  "truncates toward zero. The adapter rejects the shape instead of returning rows the PDP denies";
+
+const UNSUPPORTED_CONVERSIONS: Record<string, string> = {
+  int: NUMERIC_CONVERSION_REFUSAL,
+  double: NUMERIC_CONVERSION_REFUSAL,
+  string:
+    "no SQL CAST target spells it on every store this adapter supports — TEXT and VARCHAR are " +
+    "syntax errors on MySQL, which spells it CHAR, and CHAR is character(1) on PostgreSQL, where " +
+    "the cast would silently match nothing. The adapter does not know its dialect by design, so " +
+    "it rejects the shape instead of emitting a filter that is correct on one store only",
 };
-
-/**
- * The column types whose `CAST(... AS TEXT)` reproduces CEL's `string()` on every store this
- * adapter targets.
- *
- * Numeric columns do: CEL formats the shortest round-trip representation, and so do SQLite,
- * PostgreSQL (12+, where shortest round-trip became the default) and MySQL — `CAST((-0.6) AS
- * TEXT)` is `-0.6` everywhere, measured against the pinned images rather than assumed.
- *
- * A BOOLEAN column does not, and it is the one type where lowering the cast is wrong rather than
- * merely unproven. SQLite and MySQL have no boolean type and store 1/0, so `CAST(a_bool AS TEXT)`
- * is `"1"` where CEL's `string(true)` is `"true"`: the same plan, the same adapter, and a filter
- * that matches every row on PostgreSQL and none on SQLite. One rendering cannot be both, so the
- * shape is refused rather than silently store-dependent (cerbos/query-plan-adapters#376).
- */
-const STRING_CAST_SAFE_DATA_TYPES = new Set(["number", "bigint", "string"]);
-
-/**
- * `int()` / `double()` over a plan operand, which SQL `CAST` cannot reproduce.
- *
- * CEL reads a WHOLE string or raises an error, and an error denies the row. SQL reads
- * whatever prefix parses: `CAST('100%_done' AS INTEGER)` is `100` on SQLite, `0` on MySQL
- * and a hard error on PostgreSQL, so a direct lowering returns rows the PDP denies.
- *
- * The numeric direction is no safer: CEL's `int()` truncates toward zero, SQLite's CAST
- * truncates, but PostgreSQL and MySQL round to nearest — `int(-0.6)` is `0` to CEL and
- * `-1` to those engines.
- *
- * Nothing in the plan says what type the column holds, so the adapter cannot pick a
- * faithful lowering per row. Fail closed instead (cerbos/query-plan-adapters#311).
- */
-const UNSUPPORTED_CONVERSIONS = new Set(["int", "double"]);
 
 /** The widest exact integer every numeric SQL type a driver might infer can carry. */
 const INT32_MIN = -2147483648;
@@ -1271,40 +1278,6 @@ const isStringConcatenation = (
     return columnForOperand(operand, mapper)?.dataType === "string";
   });
 
-/**
- * Refuse `string()` over a column whose text rendering is store-dependent.
- *
- * Checked for a DIRECT column operand only. A plan constant is rendered by this adapter rather
- * than by the store, so it cannot diverge; a nested expression is not inspected, and no corpus
- * shape produces one — `string()` arrives over a bare attribute.
- */
-const assertStringCastIsStoreIndependent = (
-  operand: PlanExpressionOperand,
-  mapper: Mapper,
-): void => {
-  if (!isNameOperand(operand)) {
-    return;
-  }
-  const column = columnForOperand(operand, mapper);
-  if (column === undefined) {
-    return;
-  }
-  if (!STRING_CAST_SAFE_DATA_TYPES.has(column.dataType)) {
-    // The boolean case is the measured one and names its own mechanism; every other type is
-    // refused because nothing has proved the rendering is the same on all three stores, and an
-    // allowlist keeps a newly-supported column type fail-closed rather than silently lowered.
-    const mechanism =
-      column.dataType === "boolean"
-        ? `SQLite and MySQL hold a boolean as 1/0 and render "1", while CEL and PostgreSQL render "true"`
-        : `no rendering of a '${column.dataType}' column is proved to match CEL's on SQLite, PostgreSQL and MySQL alike`;
-    throw new Error(
-      `Cannot translate string() over '${operand.name}': CAST(... AS TEXT) reproduces CEL's ` +
-        `string() only for numeric and text columns, and this column is '${column.dataType}' — ` +
-        `${mechanism}, so one filter cannot be correct on every store the adapter supports`,
-    );
-  }
-};
-
 const buildValueExpression = (
   operand: PlanExpressionOperand,
   mapper: Mapper,
@@ -1385,28 +1358,9 @@ const buildValueExpression = (
     return sql`(${left} ${sql.raw(op)} ${right})`;
   }
 
-  if (UNSUPPORTED_CONVERSIONS.has(operator)) {
-    throw new Error(
-      `Cannot translate ${operator}(): SQL CAST does not reproduce ` +
-        `CEL conversion semantics — it reads a numeric prefix where CEL requires the whole ` +
-        `string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates ` +
-        `toward zero. The adapter rejects the shape instead of returning rows the PDP denies`,
-    );
-  }
-
-  if (operator in CONVERSION_TARGETS) {
-    if (operands.length !== 1) {
-      throw new Error(
-        `Conversion operator '${operator}' requires exactly one operand`,
-      );
-    }
-    const castOperand = operands[0]!;
-    if (operator === "string") {
-      assertStringCastIsStoreIndependent(castOperand, mapper);
-    }
-    const inner = buildValueExpression(castOperand, mapper, options);
-    const target = CONVERSION_TARGETS[operator]!;
-    return sql`cast(${inner} as ${sql.raw(target)})`;
+  const unsupportedConversion = UNSUPPORTED_CONVERSIONS[operator];
+  if (unsupportedConversion !== undefined) {
+    throw new Error(`Cannot translate ${operator}(): ${unsupportedConversion}`);
   }
 
   if (operator === "if") {

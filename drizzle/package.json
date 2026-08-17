@@ -45,7 +45,8 @@
     "test": "jest",
     "golden:update": "GOLDEN_UPDATE=1 jest src/translator.test.ts",
     "test:adversarial": "cerbos run --log-level=error --set=server.grpcListenAddr=:3621 --set=server.httpListenAddr=:3620 --set=storage.disk.directory=../conformance/policies --set=telemetry.disabled=true -- jest --config jest.adversarial.config.js",
-    "test:adversarial:postgres": "ADAPTER_TEST_DB=postgres npm run test:adversarial"
+    "test:adversarial:postgres": "ADAPTER_TEST_DB=postgres npm run test:adversarial",
+    "test:adversarial:mysql": "ADAPTER_TEST_DB=mysql npm run test:adversarial"
   },
   "engines": {
     "node": ">=22.0.0"
@@ -53,6 +54,7 @@
   "devDependencies": {
     "@cerbos/core": "^0.33.0",
     "@cerbos/grpc": "^0.29.0",
+    "@testcontainers/mysql": "^12.1.0",
     "@testcontainers/postgresql": "^12.1.0",
     "@types/better-sqlite3": "^7.6.8",
     "@types/jest": "^30.0.0",
@@ -61,6 +63,7 @@
     "better-sqlite3": "^12.0.0",
     "drizzle-orm": "^0.45.0",
     "jest": "^30.0.0",
+    "mysql2": "^3.23.3",
     "pg": "^8.22.0",
     "rimraf": "^6.0.0",
     "ts-jest": "^29.4.6",

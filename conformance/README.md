@@ -1279,12 +1279,13 @@ the policy suite and classify it like anything else.
   the classification.
 - **A dialect the harness does not exercise is not covered.** Collation, LIKE metacharacter
   handling and parameter typing all differ per dialect, and the READMEs treat them as part of the
-  policy contract for exactly this reason. `ent` and `spring-data` run three dialects each;
-  `drizzle` and `prisma` run SQLite and PostgreSQL, chosen with `ADAPTER_TEST_DB`
-  ([#320](https://github.com/cerbos/query-plan-adapters/issues/320)); the remaining TypeScript
-  harnesses are still single-store. That leg is not a formality. Adding it turned up three live
-  mechanisms SQLite could not see, none of them visible in `actions.json` afterwards because two
-  were fixed in the translator:
+  policy contract for exactly this reason. `ent` and `spring-data` run three dialects each, and so
+  do `drizzle` and `prisma` — SQLite, PostgreSQL and MySQL, chosen with `ADAPTER_TEST_DB`
+  ([#320](https://github.com/cerbos/query-plan-adapters/issues/320) for PostgreSQL,
+  [#340](https://github.com/cerbos/query-plan-adapters/issues/340) for MySQL); the remaining
+  TypeScript harnesses are still single-store. Those legs are not a formality. Adding them turned
+  up four live mechanisms SQLite could not see, only two of them visible in `actions.json`
+  afterwards because the other two were fixed in the translator:
   - `drizzle`, `$1 IS NULL` over a bound constant — untypeable on PostgreSQL, so a hard error
     rather than the redundancy it is on SQLite (`cr-contains`, `like-underscore`, and the five
     `cr-div-*` shapes).
@@ -1297,6 +1298,19 @@ the policy suite and classify it like anything else.
   - `prisma`, `like-backslash` — `\` is the default `LIKE` escape character on PostgreSQL and
     MySQL and literal on SQLite, so one needle meant two things. Not expressible without an
     `ESCAPE` clause Prisma does not emit, so it is now `adapterUnsupported` and throws.
+  - `drizzle`, `cast-string-double` — the cast TARGET, not the value. `CAST(… AS TEXT)` is a
+    syntax error on MySQL, which spells it `CHAR`, and `CHAR` on PostgreSQL is `character(1)`.
+    An adapter that does not know its dialect has no portable spelling, so `string()` is now
+    `adapterUnsupported` there and throws; `ent` keeps translating it because `WithDialect` tells
+    its renderer which target to emit.
+
+  The MySQL legs also measured what the collation costs, which is a store fact no classification
+  records: replayed under MySQL's default `utf8mb4_0900_ai_ci`, **45 of drizzle's 176 and 42 of
+  prisma's 136 oracle-tested actions disagree with the PDP**, `cs-eq` among them. Both legs pin
+  `utf8mb4_0900_as_cs` instead and both READMEs state the requirement. On prisma the requirement
+  is sharper than a server setting: its migration engine writes `COLLATE utf8mb4_unicode_ci` into
+  every `CREATE TABLE` and ignores the server default, so the tables have to be converted after
+  `db push`.
 
   The same caution applies to a *hosted* store the harness substitutes a local build for: `convex`
   runs against a pinned self-hosted `convex-backend` container, never Convex Cloud, and most of its

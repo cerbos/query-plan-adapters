@@ -20,6 +20,14 @@ import {
   text as pgText,
   timestamp,
 } from "drizzle-orm/pg-core";
+import {
+  boolean as mysqlBoolean,
+  datetime,
+  double,
+  int as mysqlInt,
+  mysqlTable,
+  varchar,
+} from "drizzle-orm/mysql-core";
 import { integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 import { PlanKind } from ".";
@@ -329,14 +337,23 @@ export type GoldenExpectation =
        * One entry per store the adversarial harness executes. Keyed by store rather than by
        * dialect on purpose: the parameters depend on the column types the mapper points at (a
        * SQLite boolean binds `1`, a PostgreSQL boolean binds `true`), so a rendering that no
-       * harness executes would pin bytes nothing proves. MySQL is claimed by the peer range and
-       * executed nowhere, which is why `translator.test.ts` holds it to dialect *rules* over the
-       * whole corpus instead of pinning its bytes here.
+       * harness executes would pin bytes nothing proves.
+       *
+       * MySQL joined the list when its leg started executing
+       * (cerbos/query-plan-adapters#340). Until then it was claimed by the peer range and run
+       * nowhere, so `translator.test.ts` held it to dialect *rules* over the whole corpus rather
+       * than pinning bytes no oracle compared. Those rules are still there — a rule holds for a
+       * corpus action nobody has added yet, and "never renders `instr(`" is not a statement any
+       * one pinned filter makes — but the bytes are pinned now too, because they are proved now.
        */
       rendered: Record<GoldenStore, RenderedFilter>;
     };
 
-export const GOLDEN_STORES = ["sqlite", "postgresql"] as const;
+/**
+ * Appended to rather than reordered: the rendering of an existing store keeps its position in
+ * the regenerated file, so adding a store shows up as added lines instead of a rewrite.
+ */
+export const GOLDEN_STORES = ["sqlite", "postgresql", "mysql"] as const;
 export type GoldenStore = (typeof GOLDEN_STORES)[number];
 
 /** The reserved key an entry may carry alongside its expectation; never compared. */
@@ -605,6 +622,91 @@ export function postgresSchema() {
       id: pgText("id").primaryKey(),
       name: pgText("name"),
       subCategoryId: pgText("sub_category_id").notNull(),
+    }),
+  };
+}
+
+/**
+ * The MySQL tables the `mysql` store seeds and the `mysql` golden rendering is taken from
+ * (cerbos/query-plan-adapters#340).
+ *
+ * MySQL is not a third spelling of the PostgreSQL schema. Three column choices are load-bearing
+ * and each is a hazard the other two stores cannot reach:
+ *
+ * - **`varchar`, not `text`.** MySQL cannot put a `TEXT` column in a primary key or a unique
+ *   constraint without a prefix length, and a prefix-indexed key compares a *truncated* value.
+ *   The corpus's `id-eq-const` and `id-f2f-ne` filter on the primary key directly.
+ * - **`int`, mirroring PostgreSQL's `integer`.** The width is what makes `size(aString) >
+ *   4294967296` and `aNumber >= 1.5` interesting: a constant typed from the column rather than
+ *   from the value overflows or truncates, which is the second of the two bugs the PostgreSQL leg
+ *   found (#320). A `bigint` here would hide half of it.
+ * - **`datetime(6)`, not `timestamp`.** MySQL's `TIMESTAMP` is converted between the session time
+ *   zone and UTC on every read and write, so the instant a filter compares against would depend
+ *   on a connection setting rather than on the stored row; `DATETIME` stores what it is given.
+ *   The `(6)` is the corpus's own precision — the a5 seed carries microseconds.
+ *
+ * The COLLATION is deliberately absent from every string column, unlike `ent`'s hand-written MySQL
+ * DDL: the harness starts the server with a case- and accent-sensitive default and the tables
+ * inherit it, which keeps the requirement in ONE place rather than repeated on nine columns. It is
+ * a requirement either way — see `adversarial.test.ts`, `MYSQL_COLLATION`.
+ */
+export function mysqlSchema() {
+  return {
+    resources: mysqlTable("adversarial_resources", {
+      id: varchar("id", { length: 64 }).primaryKey(),
+      aBool: mysqlBoolean("a_bool").notNull(),
+      aString: varchar("a_string", { length: 255 }).notNull(),
+      aNumber: mysqlInt("a_number").notNull(),
+      aDouble: double("a_double"),
+      aOptionalString: varchar("a_optional_string", { length: 255 }),
+      createdBy: varchar("created_by", { length: 64 }).notNull(),
+      scope: varchar("scope", { length: 255 }),
+      createdAt: datetime("created_at", { mode: "string", fsp: 6 }),
+    }),
+
+    // The corpus's one real to-one chain, one owned row per level and per resource.
+    parents: mysqlTable("adversarial_parents", {
+      id: varchar("id", { length: 64 }).primaryKey(),
+      aBool: mysqlBoolean("a_bool").notNull(),
+      aString: varchar("a_string", { length: 255 }).notNull(),
+      aNumber: mysqlInt("a_number").notNull(),
+      aOptionalString: varchar("a_optional_string", { length: 255 }),
+      resourceId: varchar("resource_id", { length: 64 }).notNull().unique(),
+    }),
+
+    inners: mysqlTable("adversarial_inners", {
+      id: varchar("id", { length: 64 }).primaryKey(),
+      aBool: mysqlBoolean("a_bool").notNull(),
+      aString: varchar("a_string", { length: 255 }).notNull(),
+      aNumber: mysqlInt("a_number").notNull(),
+      aOptionalString: varchar("a_optional_string", { length: 255 }),
+      parentId: varchar("parent_id", { length: 64 }).notNull().unique(),
+    }),
+
+    tags: mysqlTable("adversarial_tags", {
+      tagId: varchar("tag_id", { length: 64 }).primaryKey(),
+      // NULLABLE on purpose: a NULL tag name is a missing element attribute on the check
+      // side (a CEL error → deny) and must stay UNKNOWN — never FALSE — in SQL.
+      name: varchar("name", { length: 255 }),
+      resourceId: varchar("resource_id", { length: 64 }).notNull(),
+    }),
+
+    categories: mysqlTable("adversarial_categories", {
+      id: varchar("id", { length: 64 }).primaryKey(),
+      name: varchar("name", { length: 255 }).notNull(),
+      resourceId: varchar("resource_id", { length: 64 }).notNull(),
+    }),
+
+    subCategories: mysqlTable("adversarial_sub_categories", {
+      id: varchar("id", { length: 64 }).primaryKey(),
+      name: varchar("name", { length: 255 }).notNull(),
+      categoryId: varchar("category_id", { length: 64 }).notNull(),
+    }),
+
+    labels: mysqlTable("adversarial_labels", {
+      id: varchar("id", { length: 64 }).primaryKey(),
+      name: varchar("name", { length: 255 }),
+      subCategoryId: varchar("sub_category_id", { length: 64 }).notNull(),
     }),
   };
 }

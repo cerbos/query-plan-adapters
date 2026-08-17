@@ -84,6 +84,17 @@ jobs:
         if: matrix.node-version == '22'
         run: npm run test:adversarial:postgres:v${{ matrix.prisma-version }}
 
+      # The third provider (cerbos/query-plan-adapters#340), and the one whose STORE CONFIGURATION
+      # is part of the contract: Prisma's MySQL migration engine writes
+      # `COLLATE utf8mb4_unicode_ci` into every CREATE TABLE, which is case- and
+      # accent-insensitive, so a Prisma-managed MySQL database over-grants `cs-eq`, `unicode-eq`
+      # and every `hier-*` prefix probe until someone converts the tables. This leg proves the
+      # corpus against the collation README.md tells consumers to use. Gated to the baseline Node
+      # leg like the other two, giving 2 majors x 3 stores = 6 adversarial runs, all on Node 22.
+      - name: Run adversarial differential suite (MySQL)
+        if: matrix.node-version == '22'
+        run: npm run test:adversarial:mysql:v${{ matrix.prisma-version }}
+
   # The example application: the published package, installed from `npm pack`'s tarball and used
   # the way a consumer uses it, against the shared demo domain. It covers the two things the
   # suites above structurally cannot — the packaging surface (`exports`, `types`, the `files`

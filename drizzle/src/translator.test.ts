@@ -22,6 +22,7 @@ import {
   GOLDEN_STORES,
   buildMapper,
   classifyActionsForAdapter,
+  mysqlSchema,
   planFromWireFixture,
   postgresSchema,
   readCorpusJson,
@@ -108,16 +109,21 @@ const THROWING = new Set(THROWING_ACTIONS.map(([action]) => action));
 const MAPPERS: Record<GoldenStore, Record<string, MapperEntry>> = {
   sqlite: buildMapper(sqliteSchema()),
   postgresql: buildMapper(postgresSchema()),
+  mysql: buildMapper(mysqlSchema()),
 };
 
-const DIALECTS = {
+/**
+ * The dialect object each store renders through. One entry per `GOLDEN_STORES` member, which is
+ * also every dialect the README and the `drizzle-orm` peer range claim — since #340 those are the
+ * same set, so there is no second roster here to fall out of step with the first.
+ */
+type ClaimedDialect = PgDialect | SQLiteSyncDialect | MySqlDialect;
+
+const DIALECTS: Record<GoldenStore, ClaimedDialect> = {
   postgresql: new PgDialect(),
   sqlite: new SQLiteSyncDialect(),
   mysql: new MySqlDialect(),
 };
-
-/** Every dialect the README and the `drizzle-orm` peer range claim. */
-const CLAIMED_DIALECTS = ["postgresql", "mysql", "sqlite"] as const;
 
 function translate(
   store: GoldenStore,
@@ -297,43 +303,56 @@ describe("corpus shapes", () => {
       conditional: CONDITIONAL_ACTIONS.length,
       unconditional: RECORDED_ACTIONS.length - CONDITIONAL_ACTIONS.length,
       throwing: throwing.length,
-    }).toEqual({ conditional: 177, unconditional: 2, throwing: 20 });
+    }).toEqual({ conditional: 176, unconditional: 2, throwing: 21 });
   });
 
   /**
-   * The two stores share one translation and differ only in what the column types tell Drizzle to
-   * bind. The one difference that exists is the boolean: PostgreSQL has a real `boolean`, SQLite
-   * stores 1/0. Stating that as a rule rather than as a list of actions means a NEW divergence —
-   * a timestamp bound as a `Date` on one store and a string on the other, say — fails here instead
-   * of arriving as an unexplained diff in the asset.
+   * The stores share one translation and differ only in what the column types tell Drizzle to
+   * bind. The one difference that exists is the boolean: PostgreSQL and MySQL bind a real
+   * `boolean`, SQLite binds 1/0. Stating that as a rule rather than as a list of actions means a
+   * NEW divergence — a timestamp bound as a `Date` on one store and a string on the other, say —
+   * fails here instead of arriving as an unexplained diff in the asset.
+   *
+   * PostgreSQL is the reference each store is compared against, so adding a store adds one
+   * comparison rather than rewriting the rule.
    */
   test("the stores differ only in how a boolean binds", () => {
-    const unexplained: { action: string; index: number }[] = [];
-    let booleanDifferences = 0;
+    const unexplained: { action: string; store: GoldenStore; index: number }[] =
+      [];
+    const booleanDifferences: Partial<Record<GoldenStore, number>> = {};
 
     for (const action of CONDITIONAL_ACTIONS) {
       const expectation = RECORDED.get(action)!.expectation;
       if (expectation.kind !== PlanKind.CONDITIONAL) continue;
-      const { sqlite, postgresql } = expectation.rendered;
-      expect({ action, length: sqlite.params.length }).toEqual({
-        action,
-        length: postgresql.params.length,
-      });
-      postgresql.params.forEach((expected, index) => {
-        const actual = sqlite.params[index];
-        if (Object.is(actual, expected)) return;
-        if (typeof expected === "boolean" && actual === Number(expected)) {
-          booleanDifferences += 1;
-          return;
-        }
-        unexplained.push({ action, index });
-      });
+      const { postgresql } = expectation.rendered;
+      for (const store of GOLDEN_STORES) {
+        if (store === "postgresql") continue;
+        const rendered = expectation.rendered[store];
+        expect({ action, store, length: rendered.params.length }).toEqual({
+          action,
+          store,
+          length: postgresql.params.length,
+        });
+        postgresql.params.forEach((expected, index) => {
+          const actual = rendered.params[index];
+          if (Object.is(actual, expected)) return;
+          if (typeof expected === "boolean" && actual === Number(expected)) {
+            booleanDifferences[store] = (booleanDifferences[store] ?? 0) + 1;
+            return;
+          }
+          unexplained.push({ action, store, index });
+        });
+      }
     }
 
     expect(unexplained).toEqual([]);
-    // Anti-vacuity: the rule above is satisfied by two stores that never differ at all, which
-    // would mean the SQLite mapper had quietly stopped using a boolean column.
-    expect(booleanDifferences).toBeGreaterThan(0);
+    // Anti-vacuity: the rule above is satisfied by stores that never differ at all, which would
+    // mean the SQLite mapper had quietly stopped using a boolean column — and it names the store,
+    // so a MySQL mapper that started binding 1/0 shows up as a change here rather than as silence.
+    expect({
+      sqlite: (booleanDifferences.sqlite ?? 0) > 0,
+      mysql: booleanDifferences.mysql ?? 0,
+    }).toEqual({ sqlite: true, mysql: 0 });
   });
 
   /**
@@ -353,28 +372,32 @@ describe("corpus shapes", () => {
   });
 });
 
-// -- the dialects this adapter claims but nothing executes -------------------------------------
+// -- rules that hold across every claimed dialect ------------------------------------------------
 
 describe("rendering across the claimed dialects", () => {
   /**
-   * MySQL is claimed by the README and by the `drizzle-orm` peer range, and no MySQL server runs
-   * anywhere in this repository. Rendering the whole corpus through `MySqlDialect` is the only
-   * coverage it has. It proves the adapter emits no dialect-exclusive construct — not that MySQL
-   * evaluates the result the way CEL does.
+   * Each store's bytes are pinned in `golden/expectations.json`, and each store's rows are proved
+   * by the adversarial harness. These are neither: they are **properties of the whole corpus**,
+   * which is a different question from any one pinned filter.
    *
-   * These are rules rather than pinned bytes on purpose. A rule holds for a corpus action nobody
-   * has added yet; a third pinned rendering would triple the asset for a dialect no oracle
-   * compares, and a reviewer would read the same change three times.
+   * "This adapter never renders `instr(`" is not a statement the pinned SQL for `cs-contains`
+   * makes, and a regeneration that introduced one would rewrite the asset and stay green. A rule
+   * also holds for a corpus action nobody has added yet, which is the case the pinned bytes
+   * structurally cannot cover.
+   *
+   * They are spelled through MySQL because that is where the tri-state hazard is SILENT: MySQL
+   * accepts an integer where a boolean belongs and returns the wrong rows, while PostgreSQL
+   * rejects it outright and SQLite has no boolean to reject.
    */
   const mysqlRendered = (action: string): string =>
-    render("mysql", action, filterFor("postgresql", action)).sql;
+    render("mysql", action, filterFor("mysql", action)).sql;
 
   test.each(CONDITIONAL_ACTIONS)("%s uses no SQLite-only string function", (action) => {
     // instr() exists on SQLite and MySQL but not PostgreSQL; replace/substr/length are common to
     // all three. PostgreSQL's own evaluation of the string operators is proved by the corpus's
     // cr-contains, cs-*, f2f-* and hier-* actions on the executed PostgreSQL leg.
-    for (const dialect of CLAIMED_DIALECTS) {
-      const rendered = render(dialect, action, filterFor("postgresql", action));
+    for (const dialect of GOLDEN_STORES) {
+      const rendered = render(dialect, action, filterFor(dialect, action));
       expect({ dialect, usesInstr: rendered.sql.includes("instr(") }).toEqual({
         dialect,
         usesInstr: false,

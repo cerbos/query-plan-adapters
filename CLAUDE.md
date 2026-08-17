@@ -77,10 +77,14 @@ true. 122 of the corpus's 199 shapes carry no entry at all because it refuses th
 `conformance/README.md`, "Golden expectations"; the principle is
 [ADR 0007](docs/adr/0007-adapters-share-data-not-code.md).
 
-Drizzle and Prisma also replay the corpus against a real PostgreSQL server (testcontainers, so
-Docker is required): `npm run test:adversarial:postgres`, and `…:postgres:v6` / `…:postgres:v7` on
-Prisma. The store is chosen with `ADAPTER_TEST_DB` (`sqlite` by default); an unknown value fails
-rather than falling back.
+Drizzle and Prisma also replay the corpus against real PostgreSQL and real MySQL servers
+(testcontainers, so Docker is required): `npm run test:adversarial:postgres` and
+`…:adversarial:mysql`, each with a `…:v6` / `…:v7` split on Prisma. The store is chosen with
+`ADAPTER_TEST_DB` (`sqlite` by default); an unknown value fails rather than falling back. The
+MySQL legs pin a case- and accent-sensitive collation, because MySQL's default makes `=` itself
+case-insensitive and CEL's is byte-exact — a store misconfiguration, not an adapter limitation.
+`ADAPTER_TEST_MYSQL_COLLATION` replays either leg under another collation to measure what the
+default costs.
 
 ### Python (SQLAlchemy)
 ```bash
@@ -232,6 +236,7 @@ so there are no hand-written expectations.
 ```bash
 npm run test:adversarial              # TypeScript adapters
 npm run test:adversarial:postgres     # drizzle and prisma: the same corpus on real PostgreSQL
+npm run test:adversarial:mysql        # drizzle and prisma: the same corpus on real MySQL
 pdm run test                          # SQLAlchemy (includes the adversarial suite)
 gradle test                           # Java adapters (mount the repo root, see above)
 conformance/scripts/validate-corpus.sh          # corpus integrity; runs in every adapter's CI
@@ -326,8 +331,8 @@ For pull requests: give a concise summary, note the affected adapters, link rela
 
 Each adapter has its own GitHub Actions workflow triggered by changes in its directory or `/conformance/` — plus `/demo/` where that adapter has an example. Matrix tests across Node versions (22, 24, 25) and relevant service versions. Every adapter workflow validates the corpus and runs its adversarial suite **inside the same job as the regular tests** — there is no separate `adversarial` job. Convex is the one exception, and not by choice: its harness imports `convex/_generated`, which only exists once a live backend has been deployed to, so the corpus leg lives in the job that does the deploy and the codegen rather than putting Docker on every Node leg. On the TypeScript adapters the adversarial step is gated to the baseline Node leg (`if: matrix.node-version == '22'`), because the corpus discriminates the translator and the datastore, not the Node runtime; the other matrix dimensions still get their own adversarial run, and those divide into two kinds:
 
-- **The datastore is one.** Drizzle and Prisma each run the corpus twice on the baseline Node leg, once per `ADAPTER_TEST_DB` store (SQLite, then PostgreSQL) — collation, LIKE escaping and parameter typing are translator behaviour, so a store the workflow does not execute is a store the adapter does not cover. MongoDB server version is the mongoose equivalent, and there the store dimension exists **only** on the baseline Node leg: once `npm test` became an offline translator unit test, a second server crossed with a non-baseline Node version ran byte-identical work, so the workflow `exclude`s those legs rather than paying for them.
-- **The client engine is not, on its own.** Prisma's v6/v7 dimension is an engine matrix; it crosses with the store dimension, giving four adversarial runs per Prisma workflow (2 majors × 2 stores), all on Node 22.
+- **The datastore is one.** Drizzle and Prisma each run the corpus once per `ADAPTER_TEST_DB` store on the baseline Node leg (SQLite, PostgreSQL, MySQL) — collation, LIKE escaping, cast targets and parameter typing are translator behaviour, so a store the workflow does not execute is a store the adapter does not cover. MongoDB server version is the mongoose equivalent, and there the store dimension exists **only** on the baseline Node leg: once `npm test` became an offline translator unit test, a second server crossed with a non-baseline Node version ran byte-identical work, so the workflow `exclude`s those legs rather than paying for them.
+- **The client engine is not, on its own.** Prisma's v6/v7 dimension is an engine matrix; it crosses with the store dimension, giving six adversarial runs per Prisma workflow (2 majors × 3 stores), all on Node 22.
 
 Adding a new adversarial job — or dropping the Node gate so the corpus replays on every Node leg — multiplies runner minutes for no extra coverage. Adding a *store* leg does buy coverage; adding a Node leg does not. `conformance.yaml` additionally replans the golden wire fixtures against the pinned PDP and fails on drift.
 

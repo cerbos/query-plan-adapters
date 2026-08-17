@@ -73,6 +73,16 @@ jobs:
         if: matrix.node-version == '22'
         run: npm run test:adversarial:postgres
 
+      # The third store, and the one that disagrees with the other two on the most
+      # (cerbos/query-plan-adapters#340): its default collation makes `=` case- AND
+      # accent-insensitive, `CAST(... AS TEXT)` is a syntax error rather than a portable cast,
+      # `x / 0` is NULL where PostgreSQL raises, and `CAST(... AS FLOAT(53))` exists only from
+      # MySQL 8.0.17. Same baseline-Node gate as the two legs above, for the same reason: the
+      # store is a translator property, the Node runtime is not.
+      - name: Run adversarial differential suite (MySQL)
+        if: matrix.node-version == '22'
+        run: npm run test:adversarial:mysql
+
   # The example application: the published package, installed from `npm pack`'s tarball and used
   # the way a consumer uses it, against the shared demo domain. It covers the two things the
   # suites above structurally cannot — the packaging surface (`exports`, `types`, the `files`
