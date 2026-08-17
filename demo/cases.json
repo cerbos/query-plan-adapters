@@ -1,0 +1,179 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "id": "filtered/alice/view",
+      "operation": "filtered",
+      "principal": "alice",
+      "action": "view",
+      "pagination": null,
+      "expected": {
+        "kind": "KIND_CONDITIONAL",
+        "ids": [
+          "d1",
+          "d2",
+          "d3",
+          "d4",
+          "d7"
+        ]
+      }
+    },
+    {
+      "id": "filtered/bob/view",
+      "operation": "filtered",
+      "principal": "bob",
+      "action": "view",
+      "pagination": null,
+      "expected": {
+        "kind": "KIND_CONDITIONAL",
+        "ids": [
+          "d1",
+          "d3",
+          "d4",
+          "d5",
+          "d6",
+          "d7"
+        ]
+      }
+    },
+    {
+      "id": "alwaysAllowed/admin/admin-view",
+      "operation": "alwaysAllowed",
+      "principal": "admin",
+      "action": "admin-view",
+      "pagination": null,
+      "expected": {
+        "kind": "KIND_ALWAYS_ALLOWED",
+        "ids": [
+          "d1",
+          "d2",
+          "d3",
+          "d4",
+          "d5",
+          "d6",
+          "d7",
+          "d8"
+        ]
+      }
+    },
+    {
+      "id": "alwaysDenied/alice/publish",
+      "operation": "alwaysDenied",
+      "principal": "alice",
+      "action": "publish",
+      "pagination": null,
+      "expected": {
+        "kind": "KIND_ALWAYS_DENIED",
+        "ids": []
+      }
+    },
+    {
+      "id": "paginated/alice/view",
+      "operation": "paginated",
+      "principal": "alice",
+      "action": "view",
+      "pagination": {
+        "pageSize": 2,
+        "pageSizes": [
+          2,
+          2,
+          1
+        ]
+      },
+      "expected": {
+        "kind": "KIND_CONDITIONAL",
+        "ids": [
+          "d1",
+          "d2",
+          "d3",
+          "d4",
+          "d7"
+        ]
+      }
+    },
+    {
+      "id": "paginated/admin/admin-view",
+      "operation": "paginated",
+      "principal": "admin",
+      "action": "admin-view",
+      "pagination": {
+        "pageSize": 3,
+        "pageSizes": [
+          3,
+          3,
+          2
+        ]
+      },
+      "expected": {
+        "kind": "KIND_ALWAYS_ALLOWED",
+        "ids": [
+          "d1",
+          "d2",
+          "d3",
+          "d4",
+          "d5",
+          "d6",
+          "d7",
+          "d8"
+        ]
+      }
+    },
+    {
+      "id": "composed/alice/view",
+      "operation": "composed",
+      "principal": "alice",
+      "action": "view",
+      "pagination": null,
+      "expected": {
+        "kind": "KIND_CONDITIONAL",
+        "ids": [
+          "d1",
+          "d2",
+          "d4"
+        ]
+      }
+    },
+    {
+      "id": "composed/bob/view",
+      "operation": "composed",
+      "principal": "bob",
+      "action": "view",
+      "pagination": null,
+      "expected": {
+        "kind": "KIND_CONDITIONAL",
+        "ids": [
+          "d1",
+          "d4",
+          "d6"
+        ]
+      }
+    },
+    {
+      "id": "composed/admin/admin-view",
+      "operation": "composed",
+      "principal": "admin",
+      "action": "admin-view",
+      "pagination": null,
+      "expected": {
+        "kind": "KIND_ALWAYS_ALLOWED",
+        "ids": [
+          "d1",
+          "d2",
+          "d4",
+          "d6"
+        ]
+      }
+    },
+    {
+      "id": "composed/alice/publish",
+      "operation": "composed",
+      "principal": "alice",
+      "action": "publish",
+      "pagination": null,
+      "expected": {
+        "kind": "KIND_ALWAYS_DENIED",
+        "ids": []
+      }
+    }
+  ]
+}

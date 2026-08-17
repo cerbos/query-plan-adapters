@@ -1,0 +1,714 @@
+{
+  "schemaVersion": 1,
+  "adapter": "spring-data",
+  "package": {
+    "ecosystem": "maven",
+    "name": "dev.cerbos:cerbos-spring-data"
+  },
+  "workflow": ".github/workflows/spring-data.yaml",
+  "commands": {
+    "test": [
+      "gradle",
+      "build",
+      "--no-daemon"
+    ],
+    "typecheck": null,
+    "golden": [
+      "gradle",
+      "goldenUpdate",
+      "--no-daemon"
+    ],
+    "consumer": [
+      "../demo/scripts/run-example.sh",
+      "spring-data"
+    ]
+  },
+  "semanticEnvironments": [
+    {
+      "name": "h2",
+      "command": [
+        "gradle",
+        "build",
+        "--no-daemon"
+      ],
+      "env": {}
+    },
+    {
+      "name": "postgresql",
+      "command": [
+        "gradle",
+        "build",
+        "--no-daemon"
+      ],
+      "env": {
+        "ADAPTER_TEST_DB": "postgres"
+      }
+    },
+    {
+      "name": "mysql-client-prepared-statements",
+      "command": [
+        "gradle",
+        "build",
+        "--no-daemon"
+      ],
+      "env": {
+        "ADAPTER_TEST_DB": "mysql"
+      }
+    },
+    {
+      "name": "mysql-server-prepared-statements",
+      "command": [
+        "gradle",
+        "build",
+        "--no-daemon"
+      ],
+      "env": {
+        "ADAPTER_TEST_DB": "mysql",
+        "ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS": "true"
+      }
+    }
+  ],
+  "consumer": {
+    "coverage": "artifact-install"
+  },
+  "outcomes": {
+    "all-on-empty": {
+      "status": "matched"
+    },
+    "arith-add": {
+      "status": "matched"
+    },
+    "arith-add-eq-frac": {
+      "status": "matched"
+    },
+    "arith-add-eq-frac-exact": {
+      "status": "matched"
+    },
+    "arith-add-ne-frac": {
+      "status": "matched"
+    },
+    "arith-both": {
+      "status": "matched"
+    },
+    "arith-div": {
+      "status": "matched"
+    },
+    "arith-div-frac": {
+      "status": "matched"
+    },
+    "arith-mod": {
+      "status": "rejected",
+      "reason": "CEL `%` is integer-only while attribute values are doubles, so a satisfiable policy has to cast with int() first — and int() has no faithful SQL lowering, CAST rounding where CEL truncates toward zero. The same limitation refuses cast-int-double",
+      "message": "mod is not supported in comparisons: CEL % is integer-only while attribute values are always doubles at check time, so a satisfiable policy must cast with int() first"
+    },
+    "arith-mult-neg": {
+      "status": "matched"
+    },
+    "arith-sub": {
+      "status": "matched"
+    },
+    "arith-vf": {
+      "status": "matched"
+    },
+    "cast-double-string": {
+      "status": "rejected",
+      "reason": "double() cast over a string column — same whole-string-versus-leading-digits divergence as cast-int-string",
+      "message": "Unexpected double() expression in leaf operand of gt"
+    },
+    "cast-int-double": {
+      "status": "rejected",
+      "reason": "int() cast over a numeric column — CEL truncates toward zero, PostgreSQL and MySQL CAST round to nearest",
+      "message": "Unexpected int() expression in leaf operand of eq"
+    },
+    "cast-int-string": {
+      "status": "rejected",
+      "reason": "int() cast over a string column — CEL reads a whole string or raises, SQL reads the leading digits",
+      "message": "Unexpected int() expression in leaf operand of gt"
+    },
+    "cast-string-bool": {
+      "status": "rejected",
+      "reason": "Same missing cast as cast-string-double, and the one where lowering it would be wrong rather than merely absent: the dialects Spring Data JPA targets disagree on a boolean's text rendering — H2 and PostgreSQL say 'true', MySQL says '1'",
+      "message": "Unexpected string() expression in leaf operand of eq"
+    },
+    "cast-string-double": {
+      "status": "rejected",
+      "reason": "The Criteria API has no cast expression: a predicate compares a path against a literal or another path, and the reference's leaf resolver has no form that applies string() to the path first",
+      "message": "Unexpected string() expression in leaf operand of eq"
+    },
+    "concat-f2f": {
+      "status": "rejected",
+      "reason": "The same arithmetic-only lowering of `+`, reached with both operands columns instead of one being a constant. The reference refuses every string `+`, so it needs no type information to reject the two-column form",
+      "message": "Arithmetic comparison requires numeric operands, got String"
+    },
+    "cr-contains": {
+      "status": "matched"
+    },
+    "cr-div-neg-zero": {
+      "status": "matched"
+    },
+    "cr-div-other-column": {
+      "status": "matched"
+    },
+    "cr-div-then-add": {
+      "status": "rejected",
+      "reason": "CEL carries a NaN or signed infinity through the arithmetic composed on top of a division, and SQL has no value that does — the NULLIF divide-by-zero guard turns the whole sum into NULL. The reference's non-finite rewrite only reaches a division that IS the comparison operand, so a division nested inside further arithmetic fails closed rather than emitting the under-granting filter",
+      "message": "arithmetic composed on a division whose denominator may be zero is not supported: CEL carries the resulting NaN or infinity through the surrounding arithmetic and SQL has no value that does"
+    },
+    "cr-div-then-add-ne": {
+      "status": "rejected",
+      "reason": "Same nested-division limitation as cr-div-then-add. This is the arm that proves it matters: `NaN != 2.0` is TRUE and the PDP allows the zero row, while `NULL + 1 <> 2` is UNKNOWN and drops it",
+      "message": "arithmetic composed on a division whose denominator may be zero is not supported: CEL carries the resulting NaN or infinity through the surrounding arithmetic and SQL has no value that does"
+    },
+    "cr-div-zero": {
+      "status": "matched"
+    },
+    "cr-div-zero-eq-neg": {
+      "status": "matched"
+    },
+    "cr-div-zero-ne": {
+      "status": "matched"
+    },
+    "cr-endswith": {
+      "status": "matched"
+    },
+    "cr-size-frac-ge": {
+      "status": "matched"
+    },
+    "cr-startswith": {
+      "status": "matched"
+    },
+    "cr-startswith-concat": {
+      "status": "matched"
+    },
+    "cs-contains": {
+      "status": "matched"
+    },
+    "cs-endswith": {
+      "status": "matched"
+    },
+    "cs-eq": {
+      "status": "matched"
+    },
+    "cs-startswith": {
+      "status": "matched"
+    },
+    "double-negation": {
+      "status": "matched"
+    },
+    "double-threshold": {
+      "status": "matched"
+    },
+    "empty-string-eq": {
+      "status": "matched"
+    },
+    "exists-on-empty": {
+      "status": "matched"
+    },
+    "exists-one-multi": {
+      "status": "matched"
+    },
+    "f2f-contains": {
+      "status": "matched"
+    },
+    "f2f-endswith": {
+      "status": "matched"
+    },
+    "f2f-startswith": {
+      "status": "matched"
+    },
+    "field-to-field": {
+      "status": "matched"
+    },
+    "filter-as-condition": {
+      "status": "rejected",
+      "reason": "filter() used as the whole condition — it returns a list, not a boolean",
+      "message": "filter() returns a list, not a boolean, so it cannot be a condition on its own; only size(filter(...)) has a boolean meaning"
+    },
+    "filter-as-conjunct": {
+      "status": "rejected",
+      "reason": "filter() as a CONJUNCT rather than the whole condition — the same non-boolean, one level down",
+      "message": "filter() returns a list, not a boolean, so it cannot be a condition on its own; only size(filter(...)) has a boolean meaning"
+    },
+    "gt-bare": {
+      "status": "matched"
+    },
+    "hier-ancestor-cf": {
+      "status": "matched"
+    },
+    "hier-ancestor-ff": {
+      "status": "matched"
+    },
+    "hier-bracket": {
+      "status": "matched"
+    },
+    "hier-descendent-cf": {
+      "status": "matched"
+    },
+    "hier-descendent-ff": {
+      "status": "matched"
+    },
+    "hier-list-id": {
+      "status": "matched"
+    },
+    "hier-meta-in": {
+      "status": "matched"
+    },
+    "hier-meta-like": {
+      "status": "matched"
+    },
+    "hier-overlaps-cf": {
+      "status": "matched"
+    },
+    "hier-overlaps-ff": {
+      "status": "matched"
+    },
+    "hier-overlaps-meta": {
+      "status": "matched"
+    },
+    "id-concat": {
+      "status": "rejected",
+      "reason": "The comparison is a_optional_string against a concatenation of a constant with the primary key. The reference lowers CEL's `+` as arithmetic, which requires numeric operands; CEL's string overload has no arithmetic meaning and is refused rather than rendered as a numeric addition",
+      "message": "Arithmetic comparison requires numeric operands, got String"
+    },
+    "id-concat-vf": {
+      "status": "matched"
+    },
+    "id-eq-const": {
+      "status": "matched"
+    },
+    "id-f2f": {
+      "status": "matched"
+    },
+    "id-f2f-ne": {
+      "status": "matched"
+    },
+    "in-empty": {
+      "status": "matched"
+    },
+    "in-null-elem-hasint": {
+      "status": "matched"
+    },
+    "in-null-elem-mixed": {
+      "status": "matched"
+    },
+    "in-null-elem-neg": {
+      "status": "matched"
+    },
+    "in-null-elem-only": {
+      "status": "matched"
+    },
+    "in-null-elem-only-neg": {
+      "status": "matched"
+    },
+    "in-null-elem-rel": {
+      "status": "matched"
+    },
+    "in-null-elem-rel-neg": {
+      "status": "matched"
+    },
+    "in-single": {
+      "status": "matched"
+    },
+    "in-var-var": {
+      "status": "matched"
+    },
+    "in-var-var-neg": {
+      "status": "matched"
+    },
+    "index-scalar-list": {
+      "status": "rejected",
+      "reason": "Positional access into a scalar list. tagNames is a JPA collection and row order in a SQL relation is not defined, so index() has no Criteria form and is refused in the leaf operand",
+      "message": "Unexpected index() expression in leaf operand of eq"
+    },
+    "lambda-field-to-field": {
+      "status": "matched"
+    },
+    "lambda-in-principal": {
+      "status": "matched"
+    },
+    "le-bare": {
+      "status": "matched"
+    },
+    "like-backslash": {
+      "status": "matched"
+    },
+    "like-bracket": {
+      "status": "matched"
+    },
+    "like-percent": {
+      "status": "matched"
+    },
+    "like-underscore": {
+      "status": "matched"
+    },
+    "macro-depth3-all": {
+      "status": "matched"
+    },
+    "macro-depth3-exists": {
+      "status": "matched"
+    },
+    "macro-depth3-not-exists": {
+      "status": "matched"
+    },
+    "map-as-condition": {
+      "status": "rejected",
+      "reason": "map() used as the whole condition — it returns a list, not a boolean",
+      "message": "Unexpected lambda() expression in leaf operand of map"
+    },
+    "map-eq-list": {
+      "status": "rejected",
+      "reason": "map() translates only as the collection operand of hasIntersection, where the projection becomes the inner select of an EXISTS. Comparing the ordered projection itself to a literal list has no Criteria form",
+      "message": "Direct comparison of map(...) to a value is not supported (operator: eq). Wrap the map() expression in hasIntersection(map(...), [...]) instead."
+    },
+    "n-all-mixed-null": {
+      "status": "matched"
+    },
+    "n-not-all-absorb": {
+      "status": "matched"
+    },
+    "n-not-all-null": {
+      "status": "matched"
+    },
+    "n-not-exists-one-null": {
+      "status": "matched"
+    },
+    "nan-ord-inf": {
+      "status": "matched"
+    },
+    "nan-ord-le": {
+      "status": "matched"
+    },
+    "nan-ord-ternary": {
+      "status": "matched"
+    },
+    "nan-ord-ternary-vf": {
+      "status": "matched"
+    },
+    "nary-and": {
+      "status": "matched"
+    },
+    "neg-number": {
+      "status": "matched"
+    },
+    "not-and": {
+      "status": "matched"
+    },
+    "not-contains": {
+      "status": "matched"
+    },
+    "not-empty": {
+      "status": "matched"
+    },
+    "not-exists": {
+      "status": "matched"
+    },
+    "not-gt": {
+      "status": "matched"
+    },
+    "not-lt": {
+      "status": "matched"
+    },
+    "not-startswith": {
+      "status": "matched"
+    },
+    "null-eq": {
+      "status": "matched"
+    },
+    "null-eq-missing": {
+      "status": "rejected",
+      "reason": "`aOptionalString` follows the corpus default: a NULL column sends NO attribute, so `R.attr.aOptionalString == null` is a CEL missing-attribute error and check() denies all 21 seeds. The planner emits the same `eq(var, null)` node as `null-eq` (explicit null, 5 rows allowed), so the wire cannot tell the two conventions apart. Every adapter must be told which one the caller uses. Harnesses translate this action with the adapter's null representation set to `omitted` and assert a throw; under the default `explicit` the adapter would emit IS NULL and return the 5 rows the PDP denies (#302).",
+      "message": "missing-attribute error"
+    },
+    "null-ne": {
+      "status": "matched"
+    },
+    "null-not-eq": {
+      "status": "matched"
+    },
+    "null-value-f2f": {
+      "status": "matched"
+    },
+    "null-value-f2f-mixed": {
+      "status": "rejected",
+      "reason": "The declared side needs a definite answer for its NULL — CEL holds a null VALUE there. The undeclared side needs UNKNOWN for its NULL — that is a missing attribute, which CEL denies under BOTH polarities. A definite predicate returns rows the PDP refuses (e1, both columns NULL); a plain one drops rows the PDP allows (a2/a4/a8/c2). No single predicate is both, so every adapter refuses the shape rather than picking a direction. Declaring the convention on both attributes, or on neither, is expressible; mixing them across one comparison is not (cerbos/query-plan-adapters#308)",
+      "message": "between two columns under mixed null conventions"
+    },
+    "null-value-ne-const": {
+      "status": "matched"
+    },
+    "null-value-not-eq-const": {
+      "status": "matched"
+    },
+    "null-value-not-in-const": {
+      "status": "matched"
+    },
+    "null-value-pv-not-exists": {
+      "status": "matched"
+    },
+    "optional-ne": {
+      "status": "matched"
+    },
+    "or-eq-exists": {
+      "status": "matched"
+    },
+    "or-eq-in": {
+      "status": "matched"
+    },
+    "outer-attr-depth2": {
+      "status": "matched"
+    },
+    "p-arith-in-lambda": {
+      "status": "matched"
+    },
+    "p-deep-nest": {
+      "status": "matched"
+    },
+    "p-double-frac": {
+      "status": "matched"
+    },
+    "p-has": {
+      "status": "upstream-blocked",
+      "reason": "The planner folds has(unknown attr) to KIND_ALWAYS_ALLOWED (a Cerbos planner bug, not an adapter bug), so the adapter returns all rows while check() denies rows where the attribute is missing. Excluded from the oracle run rather than asserted against."
+    },
+    "p-hasintersection-map": {
+      "status": "matched"
+    },
+    "p-in-null-multi": {
+      "status": "matched"
+    },
+    "p-in-null-single": {
+      "status": "matched"
+    },
+    "p-index": {
+      "status": "rejected",
+      "reason": "list indexing (tags[0].name)",
+      "message": "Unexpected get-field() expression in leaf operand of eq"
+    },
+    "p-lambda-f2f-like": {
+      "status": "matched"
+    },
+    "p-lambda-inner-f2f": {
+      "status": "matched"
+    },
+    "p-matches": {
+      "status": "rejected",
+      "reason": "matches() regex",
+      "message": "Unsupported operator: matches"
+    },
+    "p-not-exists-empty": {
+      "status": "matched"
+    },
+    "p-not-ternary-null": {
+      "status": "matched"
+    },
+    "p-size-nested": {
+      "status": "matched"
+    },
+    "p-startswith-concat": {
+      "status": "matched"
+    },
+    "p-struct": {
+      "status": "matched"
+    },
+    "p-ternary-in-exists": {
+      "status": "matched"
+    },
+    "p-ternary-of-ternaries": {
+      "status": "matched"
+    },
+    "p-ternary-under-all": {
+      "status": "matched"
+    },
+    "p-ternary-vs-ternary": {
+      "status": "matched"
+    },
+    "p-timestamp": {
+      "status": "rejected",
+      "reason": "timestamp() comparison over an ISO-date string column",
+      "message": "timestamp() comparison requires a column mapped to java.time.Instant or java.time.OffsetDateTime, but 'request.resource.attr.createdBy' maps to String. Other temporal representations (LocalDateTime, java.util.Date, String) are ambiguous about the absolute instant they store; remap the column or register an OperatorFunction override for 'lt'."
+    },
+    "pv-all": {
+      "status": "matched"
+    },
+    "pv-all-unrolled": {
+      "status": "matched"
+    },
+    "pv-exists": {
+      "status": "matched"
+    },
+    "pv-exists-unrolled": {
+      "status": "matched"
+    },
+    "rel-bool-hop": {
+      "status": "matched"
+    },
+    "rel-bool-hop2": {
+      "status": "matched"
+    },
+    "rel-contains-hop": {
+      "status": "matched"
+    },
+    "rel-eq-hop": {
+      "status": "matched"
+    },
+    "rel-eq-num-hop": {
+      "status": "matched"
+    },
+    "rel-ge-hop": {
+      "status": "matched"
+    },
+    "rel-gt-hop": {
+      "status": "matched"
+    },
+    "rel-hop-and-root": {
+      "status": "matched"
+    },
+    "rel-hop2-or-exists": {
+      "status": "matched"
+    },
+    "rel-le-hop": {
+      "status": "matched"
+    },
+    "rel-lt-hop": {
+      "status": "matched"
+    },
+    "rel-ne-null-hop": {
+      "status": "matched"
+    },
+    "rel-not-bool-hop": {
+      "status": "matched"
+    },
+    "rel-range-hop": {
+      "status": "matched"
+    },
+    "rel-startswith-hop2": {
+      "status": "matched"
+    },
+    "root-bare-bool": {
+      "status": "matched"
+    },
+    "root-or": {
+      "status": "matched"
+    },
+    "size-filter-count": {
+      "status": "matched"
+    },
+    "size-huge-gt": {
+      "status": "matched"
+    },
+    "size-huge-lt": {
+      "status": "matched"
+    },
+    "size-threshold": {
+      "status": "matched"
+    },
+    "string-size": {
+      "status": "matched"
+    },
+    "ternary-bare": {
+      "status": "matched"
+    },
+    "ternary-cmp": {
+      "status": "matched"
+    },
+    "ternary-expr-cond": {
+      "status": "matched"
+    },
+    "ternary-negated": {
+      "status": "matched"
+    },
+    "ternary-nested": {
+      "status": "matched"
+    },
+    "ternary-null-cond": {
+      "status": "matched"
+    },
+    "ternary-value-first": {
+      "status": "matched"
+    },
+    "triple-negation": {
+      "status": "matched"
+    },
+    "ts-eq": {
+      "status": "matched"
+    },
+    "ts-eq-offset": {
+      "status": "matched"
+    },
+    "ts-ne": {
+      "status": "matched"
+    },
+    "ts-vf": {
+      "status": "matched"
+    },
+    "ts-window": {
+      "status": "matched"
+    },
+    "unicode-eq": {
+      "status": "matched"
+    },
+    "vf-ge": {
+      "status": "matched"
+    },
+    "vf-hasint": {
+      "status": "matched"
+    },
+    "vf-le": {
+      "status": "matched"
+    },
+    "vf-lt": {
+      "status": "matched"
+    },
+    "vf-ne": {
+      "status": "matched"
+    },
+    "vf-null-ne": {
+      "status": "matched"
+    },
+    "vf-size": {
+      "status": "matched"
+    },
+    "w1-all-chain": {
+      "status": "matched"
+    },
+    "w1-exists-chain": {
+      "status": "matched"
+    },
+    "w1-in-chain": {
+      "status": "matched"
+    },
+    "w1-not-exists-chain": {
+      "status": "matched"
+    },
+    "w1-not-hasint-chain": {
+      "status": "matched"
+    },
+    "w1-not-in-chain": {
+      "status": "matched"
+    },
+    "w1-not-size-chain": {
+      "status": "matched"
+    },
+    "w1-size-chain": {
+      "status": "matched"
+    },
+    "w1-size-frac-chain": {
+      "status": "matched"
+    },
+    "w1-size-frac-le-chain": {
+      "status": "matched"
+    },
+    "w1-size-nonneg-chain": {
+      "status": "matched"
+    },
+    "w1-size-zero-chain": {
+      "status": "matched"
+    },
+    "w1-ternary-chain-cond": {
+      "status": "matched"
+    },
+    "w2-outer-relation": {
+      "status": "matched"
+    }
+  }
+}

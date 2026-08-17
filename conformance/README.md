@@ -71,6 +71,11 @@ rows, and one oracle recipe that every adapter's harness implements against its 
   `createdAt`, `scope`, `labels`), materialised once per seed id. Every harness reads this file
   instead of restating the rules; `scripts/validate-corpus.sh` re-derives the rule-based fields
   from `seeds.json` and fails on drift. See "Deterministic derived fields" below.
+- `catalog.json` — the versioned, adapter-neutral action catalog. Each policy action appears once
+  with its global oracle-cardinality expectation (`empty`, `total`, or `proper-subset`).
+- `check-resources.json` — canonical PDP check resources materialised independently from every
+  adapter's stored-row mapping. `adapterctl validate` checks them against `seeds.json` and
+  `derived-fields.json` before a harness can use them as an oracle input.
 - `actions.json` — every action in `policies/adversarial.yaml`, grouped into `adapters` (the
   canonical adapter roster, which every other per-adapter key is checked against), `conformance`
   (must match the check() oracle exactly), `adapterUnsupported` (per-adapter lists of conformance
@@ -86,6 +91,8 @@ rows, and one oracle recipe that every adapter's harness implements against its 
   conventions" below), and `knownDivergences` (an action plus the affected adapters intentionally
   excluded from the oracle run, with a reason — currently only `p-has`, excluded because of a
   planner bug, not an adapter bug).
+  This is the migration-era legacy projection: direct outcomes and refusal details now also live
+  in each `<adapter>/adapterctl.json`, and `adapterctl validate` rejects any cell that disagrees.
 - `wire-fixtures/*.json` — one golden `PlanResources` response per action, captured against the
   pinned Cerbos version in `CERBOS_VERSION`. These pin planner *wire shape* independent of any
   adapter or database — a `diff` against a freshly-regenerated fixture after bumping

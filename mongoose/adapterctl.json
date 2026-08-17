@@ -1,0 +1,750 @@
+{
+  "schemaVersion": 1,
+  "adapter": "mongoose",
+  "package": {
+    "ecosystem": "npm",
+    "name": "@cerbos/orm-mongoose"
+  },
+  "workflow": ".github/workflows/mongoose.yaml",
+  "commands": {
+    "test": [
+      "npm",
+      "test"
+    ],
+    "typecheck": [
+      "npm",
+      "run",
+      "typecheck"
+    ],
+    "golden": null,
+    "consumer": [
+      "../demo/scripts/run-example.sh",
+      "mongoose"
+    ]
+  },
+  "semanticEnvironments": [
+    {
+      "name": "mongodb-7.0",
+      "command": [
+        "bash",
+        "scripts/test-adversarial.sh",
+        "MONGO_IMAGE"
+      ],
+      "env": {}
+    },
+    {
+      "name": "mongodb-8.0",
+      "command": [
+        "bash",
+        "scripts/test-adversarial.sh",
+        "MONGO_NEXT_IMAGE"
+      ],
+      "env": {}
+    }
+  ],
+  "consumer": {
+    "coverage": "artifact-install"
+  },
+  "outcomes": {
+    "all-on-empty": {
+      "status": "matched"
+    },
+    "arith-add": {
+      "status": "matched"
+    },
+    "arith-add-eq-frac": {
+      "status": "matched"
+    },
+    "arith-add-eq-frac-exact": {
+      "status": "matched"
+    },
+    "arith-add-ne-frac": {
+      "status": "matched"
+    },
+    "arith-both": {
+      "status": "matched"
+    },
+    "arith-div": {
+      "status": "matched"
+    },
+    "arith-div-frac": {
+      "status": "matched"
+    },
+    "arith-mod": {
+      "status": "rejected",
+      "reason": "int() over a numeric column, needed to give `%` an integer operand, has no faithful $convert lowering — the same limitation that makes cast-int-double unsupported. The cast is refused before the modulo is reached",
+      "message": "'int()' cannot be translated: $convert parses a numeric prefix where CEL requires the whole string and raises otherwise, and rounds where CEL truncates toward zero"
+    },
+    "arith-mult-neg": {
+      "status": "matched"
+    },
+    "arith-sub": {
+      "status": "matched"
+    },
+    "arith-vf": {
+      "status": "matched"
+    },
+    "cast-double-string": {
+      "status": "rejected",
+      "reason": "double() cast over a string column — same whole-string-versus-leading-digits divergence as cast-int-string",
+      "message": "'double()' cannot be translated: $convert parses a numeric prefix where CEL requires the whole string and raises otherwise, and rounds where CEL truncates toward zero"
+    },
+    "cast-int-double": {
+      "status": "rejected",
+      "reason": "int() cast over a numeric column — CEL truncates toward zero, PostgreSQL and MySQL CAST round to nearest",
+      "message": "'int()' cannot be translated: $convert parses a numeric prefix where CEL requires the whole string and raises otherwise, and rounds where CEL truncates toward zero"
+    },
+    "cast-int-string": {
+      "status": "rejected",
+      "reason": "int() cast over a string column — CEL reads a whole string or raises, SQL reads the leading digits",
+      "message": "'int()' cannot be translated: $convert parses a numeric prefix where CEL requires the whole string and raises otherwise, and rounds where CEL truncates toward zero"
+    },
+    "cast-string-bool": {
+      "status": "matched"
+    },
+    "cast-string-double": {
+      "status": "matched"
+    },
+    "concat-f2f": {
+      "status": "rejected",
+      "reason": "a CONSTANT is what tells CEL's two `+` overloads apart, and between two field paths there is none. MongoDB spells the two differently — $add accepts numeric and date types only, $concat strings — and the mapper carries no field types, so neither can be chosen. Sending $add anyway is what the server aborts the whole query on, so the shape is refused at translation instead",
+      "message": "Cannot tell numeric addition from string concatenation in '+' between two fields"
+    },
+    "cr-contains": {
+      "status": "matched"
+    },
+    "cr-div-neg-zero": {
+      "status": "rejected",
+      "reason": "$divide aborts the whole query on a zero denominator instead of producing CEL's signed infinity for that document, so the adapter requires a non-zero constant denominator and rejects a literal zero",
+      "message": "div operator requires a non-zero constant denominator"
+    },
+    "cr-div-other-column": {
+      "status": "rejected",
+      "reason": "A denominator that is a second field can be zero for some documents, and $divide aborts the query rather than denying just those; the adapter requires a non-zero constant denominator",
+      "message": "div operator requires a non-zero constant denominator"
+    },
+    "cr-div-then-add": {
+      "status": "rejected",
+      "reason": "Same zero-denominator abort as cr-div-zero, reached through arithmetic composed on the division",
+      "message": "div operator requires a non-zero constant denominator"
+    },
+    "cr-div-then-add-ne": {
+      "status": "rejected",
+      "reason": "Same zero-denominator abort as cr-div-then-add, reached through an inequality",
+      "message": "div operator requires a non-zero constant denominator"
+    },
+    "cr-div-zero": {
+      "status": "rejected",
+      "reason": "a row-dependent zero denominator aborts a Mongo query instead of denying that row",
+      "message": "div operator requires a non-zero constant denominator"
+    },
+    "cr-div-zero-eq-neg": {
+      "status": "rejected",
+      "reason": "Same zero-denominator abort as cr-div-zero, reached through a negated equality",
+      "message": "div operator requires a non-zero constant denominator"
+    },
+    "cr-div-zero-ne": {
+      "status": "rejected",
+      "reason": "Same zero-denominator abort as cr-div-zero, reached through an inequality",
+      "message": "div operator requires a non-zero constant denominator"
+    },
+    "cr-endswith": {
+      "status": "matched"
+    },
+    "cr-size-frac-ge": {
+      "status": "matched"
+    },
+    "cr-startswith": {
+      "status": "matched"
+    },
+    "cr-startswith-concat": {
+      "status": "matched"
+    },
+    "cs-contains": {
+      "status": "matched"
+    },
+    "cs-endswith": {
+      "status": "matched"
+    },
+    "cs-eq": {
+      "status": "matched"
+    },
+    "cs-startswith": {
+      "status": "matched"
+    },
+    "double-negation": {
+      "status": "matched"
+    },
+    "double-threshold": {
+      "status": "matched"
+    },
+    "empty-string-eq": {
+      "status": "matched"
+    },
+    "exists-on-empty": {
+      "status": "matched"
+    },
+    "exists-one-multi": {
+      "status": "rejected",
+      "reason": "exactly-one collection cardinality is not expressible by the current match-filter translator",
+      "message": "exists_one requires exact match cardinality and is unsupported"
+    },
+    "f2f-contains": {
+      "status": "matched"
+    },
+    "f2f-endswith": {
+      "status": "matched"
+    },
+    "f2f-startswith": {
+      "status": "matched"
+    },
+    "field-to-field": {
+      "status": "matched"
+    },
+    "filter-as-condition": {
+      "status": "rejected",
+      "reason": "filter() used as the whole condition — it returns a list, not a boolean",
+      "message": "filter() returns a list, not a boolean, so it cannot be a condition on its own; only size(filter(...)) has a boolean meaning"
+    },
+    "filter-as-conjunct": {
+      "status": "rejected",
+      "reason": "filter() as a CONJUNCT rather than the whole condition — the same non-boolean, one level down",
+      "message": "filter() returns a list, not a boolean, so it cannot be a condition on its own; only size(filter(...)) has a boolean meaning"
+    },
+    "gt-bare": {
+      "status": "matched"
+    },
+    "hier-ancestor-cf": {
+      "status": "matched"
+    },
+    "hier-ancestor-ff": {
+      "status": "matched"
+    },
+    "hier-bracket": {
+      "status": "matched"
+    },
+    "hier-descendent-cf": {
+      "status": "matched"
+    },
+    "hier-descendent-ff": {
+      "status": "matched"
+    },
+    "hier-list-id": {
+      "status": "rejected",
+      "reason": "the descendant path is CONSTRUCTED by list() from a constant segment and the primary key rather than read from a field, and the adapter resolves a hierarchy operand only from a mapped field or a string constant — it has no form for a path assembled at query time",
+      "message": "hierarchy path must be a field or string value"
+    },
+    "hier-meta-in": {
+      "status": "matched"
+    },
+    "hier-meta-like": {
+      "status": "matched"
+    },
+    "hier-overlaps-cf": {
+      "status": "matched"
+    },
+    "hier-overlaps-ff": {
+      "status": "matched"
+    },
+    "hier-overlaps-meta": {
+      "status": "matched"
+    },
+    "id-concat": {
+      "status": "matched"
+    },
+    "id-concat-vf": {
+      "status": "matched"
+    },
+    "id-eq-const": {
+      "status": "matched"
+    },
+    "id-f2f": {
+      "status": "matched"
+    },
+    "id-f2f-ne": {
+      "status": "matched"
+    },
+    "in-empty": {
+      "status": "matched"
+    },
+    "in-null-elem-hasint": {
+      "status": "matched"
+    },
+    "in-null-elem-mixed": {
+      "status": "matched"
+    },
+    "in-null-elem-neg": {
+      "status": "matched"
+    },
+    "in-null-elem-only": {
+      "status": "matched"
+    },
+    "in-null-elem-only-neg": {
+      "status": "matched"
+    },
+    "in-null-elem-rel": {
+      "status": "matched"
+    },
+    "in-null-elem-rel-neg": {
+      "status": "matched"
+    },
+    "in-single": {
+      "status": "matched"
+    },
+    "in-var-var": {
+      "status": "rejected",
+      "reason": "variable-in-variable membership requires correlated aggregation scoping",
+      "message": "in supports only field-in-value-list or value-in-mapped-collection shapes"
+    },
+    "in-var-var-neg": {
+      "status": "rejected",
+      "reason": "same variable-in-variable limitation under negation",
+      "message": "in supports only field-in-value-list or value-in-mapped-collection shapes"
+    },
+    "index-scalar-list": {
+      "status": "matched"
+    },
+    "lambda-field-to-field": {
+      "status": "rejected",
+      "reason": "MongoDB $expr cannot be safely scoped inside the adapter's $elemMatch predicates",
+      "message": "eq aggregation expressions inside collection predicates are unsupported"
+    },
+    "lambda-in-principal": {
+      "status": "matched"
+    },
+    "le-bare": {
+      "status": "matched"
+    },
+    "like-backslash": {
+      "status": "matched"
+    },
+    "like-bracket": {
+      "status": "matched"
+    },
+    "like-percent": {
+      "status": "matched"
+    },
+    "like-underscore": {
+      "status": "matched"
+    },
+    "macro-depth3-all": {
+      "status": "matched"
+    },
+    "macro-depth3-exists": {
+      "status": "matched"
+    },
+    "macro-depth3-not-exists": {
+      "status": "rejected",
+      "reason": "same nullable macro-negation limitation across three collection levels",
+      "message": "not over nullable fields or collection macros cannot preserve Cerbos error semantics"
+    },
+    "map-as-condition": {
+      "status": "rejected",
+      "reason": "map() used as the whole condition — it returns a list, not a boolean",
+      "message": "map() returns a list, not a boolean, so it cannot be a condition on its own; only hasIntersection(map(...), [...]) gives the projection a boolean meaning"
+    },
+    "map-eq-list": {
+      "status": "rejected",
+      "reason": "Mongoose handles map() only as the collection operand of hasIntersection, where it becomes an $elemMatch. Comparing the projection itself to a literal list would need $map inside an aggregation expression, which the adapter's expression builder has no case for",
+      "message": "Unsupported operator inside aggregation expression: map"
+    },
+    "n-all-mixed-null": {
+      "status": "matched"
+    },
+    "n-not-all-absorb": {
+      "status": "rejected",
+      "reason": "same nullable all-negation limitation with an absorbing false witness",
+      "message": "not over nullable fields or collection macros cannot preserve Cerbos error semantics"
+    },
+    "n-not-all-null": {
+      "status": "rejected",
+      "reason": "negated all over nullable element members needs explicit three-valued logic",
+      "message": "not over nullable fields or collection macros cannot preserve Cerbos error semantics"
+    },
+    "n-not-exists-one-null": {
+      "status": "rejected",
+      "reason": "The negation over a collection macro whose elements are nullable is rejected first, for the same three-valued reason as not-exists: a $nor would turn a CEL element error into a match. The exists_one cardinality of exists-one-multi is inexpressible underneath it either way",
+      "message": "not over nullable fields or collection macros cannot preserve Cerbos error semantics"
+    },
+    "nan-ord-inf": {
+      "status": "rejected",
+      "reason": "$divide by a zero denominator fails when MongoDB optimizes the query ('can't $divide by zero'), aborting it before any document is read rather than yielding CEL's +Inf/-Inf; constant folding means even a $cond arm no document takes still aborts, so the adapter rejects the literal 1.0/0.0 and -1.0/0.0 branches",
+      "message": "div operator requires a non-zero constant denominator"
+    },
+    "nan-ord-le": {
+      "status": "rejected",
+      "reason": "Both sides are conditionals, so the Mongoose $expr caster fails to build the comparison for the same reason as p-ternary-vs-ternary; independently, the 0.0/0.0 branch is rejected because $divide by zero fails at query-optimization time ('can't $divide by zero'), aborting the whole query even though no document takes that branch",
+      "message": "Mongoose cannot cast comparisons between two conditional expressions"
+    },
+    "nan-ord-ternary": {
+      "status": "rejected",
+      "reason": "MongoDB division by zero aborts rather than producing CEL non-finite values",
+      "message": "div operator requires a non-zero constant denominator"
+    },
+    "nan-ord-ternary-vf": {
+      "status": "rejected",
+      "reason": "same non-finite arithmetic limitation in value-first form",
+      "message": "div operator requires a non-zero constant denominator"
+    },
+    "nary-and": {
+      "status": "matched"
+    },
+    "neg-number": {
+      "status": "matched"
+    },
+    "not-and": {
+      "status": "matched"
+    },
+    "not-contains": {
+      "status": "rejected",
+      "reason": "The needle is a nullable COLUMN. Mongoose's guard refuses `not` over a nullable field outright, because a missing field matches a negated aggregation predicate and the row the PDP denies would be returned — the same rejection that protects the other negated nullable shapes",
+      "message": "not over nullable fields or collection macros cannot preserve Cerbos error semantics"
+    },
+    "not-empty": {
+      "status": "matched"
+    },
+    "not-exists": {
+      "status": "rejected",
+      "reason": "negating a nullable collection macro would turn CEL errors into matches",
+      "message": "not over nullable fields or collection macros cannot preserve Cerbos error semantics"
+    },
+    "not-gt": {
+      "status": "matched"
+    },
+    "not-lt": {
+      "status": "matched"
+    },
+    "not-startswith": {
+      "status": "rejected",
+      "reason": "Same nullable-needle refusal as not-contains: the operator differs, the guard is the field's nullability under a negation",
+      "message": "not over nullable fields or collection macros cannot preserve Cerbos error semantics"
+    },
+    "null-eq": {
+      "status": "matched"
+    },
+    "null-eq-missing": {
+      "status": "rejected",
+      "reason": "`aOptionalString` follows the corpus default: a NULL column sends NO attribute, so `R.attr.aOptionalString == null` is a CEL missing-attribute error and check() denies all 21 seeds. The planner emits the same `eq(var, null)` node as `null-eq` (explicit null, 5 rows allowed), so the wire cannot tell the two conventions apart. Every adapter must be told which one the caller uses. Harnesses translate this action with the adapter's null representation set to `omitted` and assert a throw; under the default `explicit` the adapter would emit IS NULL and return the 5 rows the PDP denies (#302).",
+      "message": "missing-attribute error"
+    },
+    "null-ne": {
+      "status": "matched"
+    },
+    "null-not-eq": {
+      "status": "matched"
+    },
+    "null-value-f2f": {
+      "status": "matched"
+    },
+    "null-value-f2f-mixed": {
+      "status": "matched"
+    },
+    "null-value-ne-const": {
+      "status": "matched"
+    },
+    "null-value-not-eq-const": {
+      "status": "matched"
+    },
+    "null-value-not-in-const": {
+      "status": "matched"
+    },
+    "null-value-pv-not-exists": {
+      "status": "rejected",
+      "reason": "The value-list fold produces a collection macro under a negation, which Mongoose refuses before it ever reaches the comparison leaves: $nor over an exists would turn a CEL element error into a match. The explicit-null convention this action probes is expressible in Mongoose (its four siblings are oracle-compared) — the negated macro above it is not",
+      "message": "not over nullable fields or collection macros cannot preserve Cerbos error semantics"
+    },
+    "optional-ne": {
+      "status": "matched"
+    },
+    "or-eq-exists": {
+      "status": "matched"
+    },
+    "or-eq-in": {
+      "status": "matched"
+    },
+    "outer-attr-depth2": {
+      "status": "rejected",
+      "reason": "outer resource references inside nested element predicates require aggregation pipeline scoping",
+      "message": "Outer reference request.resource.attr.aBool inside a collection predicate is unsupported"
+    },
+    "p-arith-in-lambda": {
+      "status": "rejected",
+      "reason": "MongoDB rejects $expr below the top level of a query ('$expr can only be applied to the top-level document'), and field arithmetic exists only as an aggregation expression inside $expr; the per-element scope this needs comes from $elemMatch, so no find filter is both element-scoped and expression-valued. It would take an aggregation pipeline ($map/$filter plus $anyElementTrue), which a Mongoose Query filter is not",
+      "message": "gt aggregation expressions inside collection predicates are unsupported"
+    },
+    "p-deep-nest": {
+      "status": "rejected",
+      "reason": "The tags.exists lambda compares an element's name with the root document's aString. $elemMatch rebases every field path onto the array element, and the only route back to a root field is a $-anchored path inside $expr, which MongoDB rejects below the top level ('$expr can only be applied to the top-level document')",
+      "message": "eq aggregation expressions inside collection predicates are unsupported"
+    },
+    "p-double-frac": {
+      "status": "matched"
+    },
+    "p-has": {
+      "status": "upstream-blocked",
+      "reason": "The planner folds has(unknown attr) to KIND_ALWAYS_ALLOWED (a Cerbos planner bug, not an adapter bug), so the adapter returns all rows while check() denies rows where the attribute is missing. Excluded from the oracle run rather than asserted against."
+    },
+    "p-hasintersection-map": {
+      "status": "matched"
+    },
+    "p-in-null-multi": {
+      "status": "matched"
+    },
+    "p-in-null-single": {
+      "status": "matched"
+    },
+    "p-index": {
+      "status": "matched"
+    },
+    "p-lambda-f2f-like": {
+      "status": "rejected",
+      "reason": "Using an outer document field as the needle of a string search over an array element needs an aggregation expression over a $-anchored path, and MongoDB rejects $expr below the top level ('$expr can only be applied to the top-level document'), so it cannot sit inside the $elemMatch that scopes the element",
+      "message": "contains aggregation expressions inside collection predicates are unsupported"
+    },
+    "p-lambda-inner-f2f": {
+      "status": "rejected",
+      "reason": "Comparing two fields of the same array element is only expressible as an aggregation expression, and MongoDB rejects $expr below the top level ('$expr can only be applied to the top-level document'), so it cannot be placed inside the $elemMatch that establishes the element scope",
+      "message": "eq aggregation expressions inside collection predicates are unsupported"
+    },
+    "p-matches": {
+      "status": "matched"
+    },
+    "p-not-exists-empty": {
+      "status": "rejected",
+      "reason": "negated exists over nullable element members needs explicit three-valued logic",
+      "message": "not over nullable fields or collection macros cannot preserve Cerbos error semantics"
+    },
+    "p-not-ternary-null": {
+      "status": "rejected",
+      "reason": "negating a ternary over a nullable field cannot preserve CEL error semantics",
+      "message": "not over nullable fields or collection macros cannot preserve Cerbos error semantics"
+    },
+    "p-size-nested": {
+      "status": "rejected",
+      "reason": "nested collection size requires aggregation pipeline scoping",
+      "message": "eq aggregation expressions inside collection predicates are unsupported"
+    },
+    "p-startswith-concat": {
+      "status": "matched"
+    },
+    "p-struct": {
+      "status": "matched"
+    },
+    "p-ternary-in-exists": {
+      "status": "rejected",
+      "reason": "$cond exists only as an aggregation expression, and MongoDB rejects $expr below the top level ('$expr can only be applied to the top-level document'), so a conditional cannot be evaluated inside the $elemMatch that establishes the element scope",
+      "message": "eq aggregation expressions inside collection predicates are unsupported"
+    },
+    "p-ternary-of-ternaries": {
+      "status": "matched"
+    },
+    "p-ternary-under-all": {
+      "status": "rejected",
+      "reason": "Same top-level-only $expr restriction as p-ternary-in-exists, reached through all(): the negated $elemMatch that expresses all() still cannot contain the $cond aggregation expression the conditional needs",
+      "message": "ne aggregation expressions inside collection predicates are unsupported"
+    },
+    "p-ternary-vs-ternary": {
+      "status": "rejected",
+      "reason": "Mongoose's $expr caster drops the schema when it recurses into a non-literal right-hand operand (cast$expr.js castComparison calls _castExpression(val[1]) with no schema argument), so a comparison whose right side is another $cond containing a path/literal comparison throws TypeError: Cannot read properties of undefined (reading 'path') while the query is built. MongoDB itself evaluates $cond against $cond correctly, so a Mongoose fix would change this answer",
+      "message": "Mongoose cannot cast comparisons between two conditional expressions"
+    },
+    "p-timestamp": {
+      "status": "matched"
+    },
+    "pv-all": {
+      "status": "matched"
+    },
+    "pv-all-unrolled": {
+      "status": "matched"
+    },
+    "pv-exists": {
+      "status": "matched"
+    },
+    "pv-exists-unrolled": {
+      "status": "matched"
+    },
+    "rel-bool-hop": {
+      "status": "matched"
+    },
+    "rel-bool-hop2": {
+      "status": "matched"
+    },
+    "rel-contains-hop": {
+      "status": "matched"
+    },
+    "rel-eq-hop": {
+      "status": "matched"
+    },
+    "rel-eq-num-hop": {
+      "status": "matched"
+    },
+    "rel-ge-hop": {
+      "status": "matched"
+    },
+    "rel-gt-hop": {
+      "status": "matched"
+    },
+    "rel-hop-and-root": {
+      "status": "matched"
+    },
+    "rel-hop2-or-exists": {
+      "status": "matched"
+    },
+    "rel-le-hop": {
+      "status": "matched"
+    },
+    "rel-lt-hop": {
+      "status": "matched"
+    },
+    "rel-ne-null-hop": {
+      "status": "matched"
+    },
+    "rel-not-bool-hop": {
+      "status": "matched"
+    },
+    "rel-range-hop": {
+      "status": "matched"
+    },
+    "rel-startswith-hop2": {
+      "status": "matched"
+    },
+    "root-bare-bool": {
+      "status": "matched"
+    },
+    "root-or": {
+      "status": "matched"
+    },
+    "size-filter-count": {
+      "status": "rejected",
+      "reason": "size(filter(...)) requires an aggregation pipeline expression",
+      "message": "Unsupported operator inside aggregation expression: filter"
+    },
+    "size-huge-gt": {
+      "status": "matched"
+    },
+    "size-huge-lt": {
+      "status": "matched"
+    },
+    "size-threshold": {
+      "status": "matched"
+    },
+    "string-size": {
+      "status": "matched"
+    },
+    "ternary-bare": {
+      "status": "matched"
+    },
+    "ternary-cmp": {
+      "status": "matched"
+    },
+    "ternary-expr-cond": {
+      "status": "matched"
+    },
+    "ternary-negated": {
+      "status": "matched"
+    },
+    "ternary-nested": {
+      "status": "matched"
+    },
+    "ternary-null-cond": {
+      "status": "matched"
+    },
+    "ternary-value-first": {
+      "status": "matched"
+    },
+    "triple-negation": {
+      "status": "matched"
+    },
+    "ts-eq": {
+      "status": "matched"
+    },
+    "ts-eq-offset": {
+      "status": "matched"
+    },
+    "ts-ne": {
+      "status": "matched"
+    },
+    "ts-vf": {
+      "status": "rejected",
+      "reason": "same nanosecond-precision now() limitation in value-first form",
+      "message": "timestamp value must be a millisecond-exact RFC 3339 instant in the CEL range"
+    },
+    "ts-window": {
+      "status": "rejected",
+      "reason": "the planner emits a nanosecond-precision now() literal that BSON Date cannot represent without changing the CEL instant",
+      "message": "timestamp value must be a millisecond-exact RFC 3339 instant in the CEL range"
+    },
+    "unicode-eq": {
+      "status": "matched"
+    },
+    "vf-ge": {
+      "status": "matched"
+    },
+    "vf-hasint": {
+      "status": "matched"
+    },
+    "vf-le": {
+      "status": "matched"
+    },
+    "vf-lt": {
+      "status": "matched"
+    },
+    "vf-ne": {
+      "status": "matched"
+    },
+    "vf-null-ne": {
+      "status": "matched"
+    },
+    "vf-size": {
+      "status": "matched"
+    },
+    "w1-all-chain": {
+      "status": "matched"
+    },
+    "w1-exists-chain": {
+      "status": "matched"
+    },
+    "w1-in-chain": {
+      "status": "matched"
+    },
+    "w1-not-exists-chain": {
+      "status": "rejected",
+      "reason": "Negating a collection macro over nullable element members would turn CEL errors into matches, the same three-valued limitation as not-exists — and the chain adds an absent to-one parent, which a Mongo filter has no UNKNOWN to represent",
+      "message": "not over nullable fields or collection macros cannot preserve Cerbos error semantics"
+    },
+    "w1-not-hasint-chain": {
+      "status": "matched"
+    },
+    "w1-not-in-chain": {
+      "status": "matched"
+    },
+    "w1-not-size-chain": {
+      "status": "matched"
+    },
+    "w1-size-chain": {
+      "status": "matched"
+    },
+    "w1-size-frac-chain": {
+      "status": "matched"
+    },
+    "w1-size-frac-le-chain": {
+      "status": "matched"
+    },
+    "w1-size-nonneg-chain": {
+      "status": "matched"
+    },
+    "w1-size-zero-chain": {
+      "status": "matched"
+    },
+    "w1-ternary-chain-cond": {
+      "status": "rejected",
+      "reason": "A bare ternary is planned as $expr/$cond, and an aggregation expression has no membership form here: MongoDB's $in aggregation operator raises a runtime error when its array operand is missing, which is exactly the absent-to-one-parent case this action probes, so lowering it would fail the whole query rather than deny the row",
+      "message": "Unsupported operator inside aggregation expression: in"
+    },
+    "w2-outer-relation": {
+      "status": "rejected",
+      "reason": "The categories.exists lambda reads the root document's tags collection from inside the element scope. $elemMatch rebases every field path onto the array element, and the only route back to a root field is a $-anchored path inside $expr, which MongoDB rejects below the top level ('$expr can only be applied to the top-level document')",
+      "message": "eq aggregation expressions inside collection predicates are unsupported"
+    }
+  }
+}

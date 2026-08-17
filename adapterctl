@@ -1,0 +1,6 @@
+#!/bin/sh
+
+set -eu
+
+ADAPTERCTL_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exec node "$ADAPTERCTL_DIR/tools/adapterctl/src/main.ts" "$@"

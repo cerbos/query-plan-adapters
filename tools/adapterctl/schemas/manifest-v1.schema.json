@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cerbos.dev/query-plan-adapters/adapterctl/manifest-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "adapter", "package", "workflow", "commands", "semanticEnvironments", "consumer", "outcomes"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "adapter": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+    "package": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ecosystem", "name"],
+      "properties": {
+        "ecosystem": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 }
+      }
+    },
+    "workflow": { "type": "string", "minLength": 1 },
+    "commands": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["test", "typecheck", "golden", "consumer"],
+      "properties": {
+        "test": { "$ref": "#/$defs/nullableCommand" },
+        "typecheck": { "$ref": "#/$defs/nullableCommand" },
+        "golden": { "$ref": "#/$defs/nullableCommand" },
+        "consumer": { "$ref": "#/$defs/nullableCommand" }
+      }
+    },
+    "semanticEnvironments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "command", "env"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "command": { "$ref": "#/$defs/command" },
+          "env": {
+            "type": "object",
+            "additionalProperties": { "type": "string" }
+          }
+        }
+      }
+    },
+    "consumer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["coverage"],
+      "properties": {
+        "coverage": { "enum": ["artifact-install", "usage-only"] }
+      }
+    },
+    "outcomes": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/outcome" }
+    }
+  },
+  "$defs": {
+    "command": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "nullableCommand": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/command" }
+      ]
+    },
+    "outcome": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status"],
+          "properties": { "status": { "const": "matched" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "reason", "message"],
+          "properties": {
+            "status": { "const": "rejected" },
+            "reason": { "type": "string", "minLength": 1 },
+            "message": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "reason"],
+          "properties": {
+            "status": { "const": "upstream-blocked" },
+            "reason": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status"],
+          "properties": { "status": { "const": "unassessed" } }
+        }
+      ]
+    }
+  }
+}

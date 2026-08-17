@@ -68,6 +68,11 @@ so `validate-demo.sh` can recompute it.
 
 ## Running an example
 
+`cases.json` is the versioned consumer-case catalog: operation, principal, action, pagination
+input, plan kind, and expected ids in one record. During migration, `adapterctl validate` checks
+that it projects exactly to `expected.json`, which remains the input consumed by the existing
+example runner.
+
 ```bash
 demo/scripts/run-example.sh prisma
 ```

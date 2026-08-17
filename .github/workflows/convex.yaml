@@ -75,50 +75,12 @@ jobs:
 
       - run: npm install
 
-      - name: Start Convex backend
-        run: docker compose up -d
-
-      - name: Wait for Convex backend
-        run: |
-          for i in $(seq 1 30); do
-            if curl -sf http://127.0.0.1:3210/version > /dev/null 2>&1; then
-              echo "Convex backend is ready"
-              break
-            fi
-            echo "Waiting for Convex backend... ($i/30)"
-            sleep 2
-          done
-
-      - name: Generate Convex admin key
-        id: convex-key
-        run: |
-          ADMIN_KEY=$(docker compose exec -T backend ./generate_admin_key.sh 2>/dev/null | tail -1)
-          echo "key=$ADMIN_KEY" >> "$GITHUB_OUTPUT"
-
-      - name: Deploy Convex functions
-        env:
-          CONVEX_SELF_HOSTED_URL: http://127.0.0.1:3210
-          CONVEX_SELF_HOSTED_ADMIN_KEY: ${{ steps.convex-key.outputs.key }}
-        run: npx convex deploy -y
-
-      - name: Generate Convex types
-        env:
-          CONVEX_SELF_HOSTED_URL: http://127.0.0.1:3210
-          CONVEX_SELF_HOSTED_ADMIN_KEY: ${{ steps.convex-key.outputs.key }}
-        run: npx convex codegen
-
-      # Runs here rather than in unit-test: the harness imports the generated API above.
-      - name: Type-check (including the backend-dependent harness)
-        run: npm run typecheck
-
-      - name: Run adversarial conformance tests
-        env:
-          CONVEX_URL: http://127.0.0.1:3210
-        run: npm run test:adversarial
-
-      - name: Stop Convex backend
-        if: always()
-        run: docker compose down -v
+      # One native lifecycle shared with adapterctl: start the pinned backend, wait, generate an
+      # admin key, deploy, codegen, then run both consumers of the generated API before cleanup.
+      # Keeping typecheck inside test:integration preserves the workflow's previous coverage
+      # without paying for a second backend deployment.
+      - name: Type-check and run adversarial conformance tests
+        run: bash scripts/with-self-hosted-backend.sh npm run test:integration
 
   # The example application: the published package, installed from `npm pack`'s tarball and used
   # the way a consumer uses it, against the shared demo domain. It covers the two things the jobs

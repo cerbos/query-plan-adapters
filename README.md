@@ -28,3 +28,7 @@ Every adapter is proved against two shared corpora at the root of this repositor
   returns exactly the rows the PDP allows.
 - [`demo/`](demo/) — one realistic domain, proving each adapter's **published package** installs,
   imports, and composes with its ORM's real query methods.
+
+Repository maintainers use [`adapterctl`](docs/adapterctl.md) to discover adapters, validate their
+local certification manifests, explain action outcomes, run native test profiles, and generate the
+coverage report that CI checks.
