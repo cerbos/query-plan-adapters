@@ -35,7 +35,7 @@ On prisma, mongoose, drizzle, convex and langchain-chromadb, `npm test` is the *
 test**: it reads its plans from `conformance/wire-fixtures/`, asserts the emitted filter and the
 rest of what an adapter can be asked offline ("What a translator unit test may pin", below), and
 needs no sidecar, no database and no generated client ([ADR 0006](docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md)).
-On prisma it is engine-agnostic, so it has no v6/v7 split; the Prisma major is still a dimension of
+On prisma it is engine-agnostic, so it has no v5/v6/v7 split; the Prisma major is still a dimension of
 `npm run typecheck` and of the adversarial legs. On mongoose it never opens a connection, so the
 MongoDB server dimension applies to the adversarial leg alone. On convex it needs neither a Convex
 backend nor `convex/_generated`, which is why the mapper it shares with the harness lives in
@@ -52,8 +52,8 @@ retrofitted. Convex is the case that generalised the format: it emits a *functio
 records the calls that function makes against a recording query builder plus which half of the
 output — Convex's filter engine or the adapter's in-memory post-filter — answers the query.
 Langchain-chromadb is the opposite extreme and the cheapest instance: a Chroma `Where` clause is
-already JSON, so its entry is the translator's whole result verbatim, and 164 of the corpus's 199
-shapes carry no entry at all because it refuses them. Sqlalchemy is the case that showed the value
+already JSON, so its entry is the translator's whole result verbatim, and most corpus shapes carry
+no entry because it refuses them. Sqlalchemy is the case that showed the value
 need not be the translator's return type at all: it emits a Python expression object, so its entry
 records that object *compiled* — the `WHERE` clause on SQLite and on PostgreSQL, plus the parameters
 it binds, which the two dialects are asserted to share. That also makes the ORM version an input to
@@ -73,7 +73,7 @@ classpath, so its entry is the translator's return value verbatim — the plan k
 for a conditional plan — and it declares no generator. Object keys are sorted on the way in, because
 the adapter builds its queries with `Map.of`, whose iteration order is randomised per JVM run; a
 suite assertion pins that no library type ever reaches the asset, which is what keeps "no generator"
-true. 122 of the corpus's 199 shapes carry no entry at all because it refuses them. The schema is in
+true. Most corpus shapes carry no entry because it refuses them. The schema is in
 `conformance/README.md`, "Golden expectations"; the principle is
 [ADR 0007](docs/adr/0007-adapters-share-data-not-code.md).
 
@@ -161,7 +161,7 @@ and stay green.
 ### Java (Elasticsearch, Spring Data)
 ```bash
 # Run from the REPOSITORY ROOT, not the adapter directory: the Java harnesses read the
-# shared corpus at ../conformance/ (seeds.json, actions.json, CERBOS_VERSION,
+# shared corpus at ../conformance/ (seeds.json, catalog.json, check-resources.json, CERBOS_VERSION,
 # CERBOS_IMAGE_DIGEST), so the whole
 # repo must be mounted or they fail with FileNotFoundException.
 # The docker socket mount is for the testcontainers-backed tests (cerbos PDP + DBs).
@@ -181,14 +181,13 @@ Both Java adapters have a **translator unit test** that reads its plans from
 ("What a translator unit test may pin", below) — with no sidecar and no store. On spring-data,
 `SpringDataTranslatorTest` needs no database — its persistence unit carries no JDBC connection at
 all, and Hibernate is told the dialect rather than discovering it. On elasticsearch-java,
-`ElasticsearchTranslatorTest` needs no Elasticsearch, and reads as mostly-throws: 122 of the
-corpus's 199 shapes are fail-closed there, each asserted against the message
-`conformance/actions.json` pins.
+`ElasticsearchTranslatorTest` needs no Elasticsearch, and reads as mostly-throws: each fail-closed
+shape is asserted against the message in `elasticsearch-java/adapterctl.json`.
 
 Two suites on elasticsearch-java need Docker, and they need different things:
 `ElasticsearchAdversarialConformanceTest` starts a pinned PDP and Elasticsearch;
 `ElasticsearchSurfaceTest` starts Elasticsearch alone, to execute an emitted clause against a real
-server and to measure the store facts most of that adapter's `adapterUnsupported` reasons cite — an
+server and to measure the store facts most of that adapter's rejected outcome reasons cite — an
 empty array is not indexed, a JSON null is not indexed, an analyzed field is compared per token. A
 harness can only ever see the refusal, never the mechanism.
 
@@ -219,15 +218,15 @@ Some adapters need additional services:
 ## Conformance
 
 `conformance/` is the shared adversarial corpus every adapter is proved against: one hostile policy
-suite, one set of hostile seed rows, one derived-field table, one classification ledger, and golden
-planner wire fixtures.
+suite, one set of hostile seed rows, one derived-field table, one action catalog, adapter-local
+direct outcomes, canonical check resources, and golden planner wire fixtures.
 It exists because the same semantic bug — value-first operand inversion, LIKE metacharacter leaks,
 three-valued logic under negation — has historically shipped identically to more than one adapter.
 
 **The invariant: a shape an adapter cannot express must throw, never emit a filter.** A wrong
 filter is an authorization bug that returns rows the PDP denies; a throw is a bug report. Every
-per-adapter limitation is declared in `conformance/actions.json` and asserted as a throw by that
-adapter's harness.
+per-adapter limitation is declared as a `rejected` outcome in that adapter's `adapterctl.json` and
+asserted as a throw by its harness.
 
 Each harness plans against a real PDP, executes the translated query against its real store, and
 compares the returned ids with per-row `check()` decisions — the PDP is the oracle for both sides,
@@ -257,7 +256,7 @@ would make bumping one adapter's server cost every other adapter an irrelevant C
 what to do when you add a new service.
 
 **Read [conformance/README.md](conformance/README.md) before changing corpus behaviour.** It covers
-the oracle recipe, the NULL conventions, the degeneracy guard, the corpus's one real to-one
+the oracle recipe, the NULL conventions, catalog cardinality expectations, the corpus's one real to-one
 relation ([ADR 0005](docs/adr/0005-the-conformance-corpus-carries-a-real-to-one-relation.md)), how
 to add a hostile shape, and how to add or onboard an adapter.
 
@@ -293,7 +292,7 @@ modules are standalone" above, and each example's README records the packing exp
 verified it rather than assuming it.
 
 ```bash
-demo/scripts/run-example.sh <adapter>   # pack, install, run, diff against demo/expected.json
+demo/scripts/run-example.sh <adapter>   # pack, install, run, diff against demo/cases.json
 demo/scripts/validate-demo.sh           # corpus integrity; runs in every adapter's example job
 ```
 
@@ -302,9 +301,8 @@ The demo domain reuses `conformance/CERBOS_VERSION` and `conformance/CERBOS_IMAG
 
 Two rules that are easy to get wrong:
 
-- **A shape needing a carve-out for one adapter is wrong for `demo/`.** There is no `actions.json`
-  equivalent here and adding one is exactly what ADR 0001 rules out; the argument belongs in
-  `conformance/`, where the classification buckets already exist.
+- **A shape needing a carve-out for one adapter is wrong for `demo/`.** The argument belongs in
+  `conformance/`, where direct adapter outcomes already express support and rejection.
 - **Each example's job must stay inside that adapter's own workflow.** `renovate.json` automerges
   non-major bumps, so an ORM bump arrives as one PR touching both the adapter manifest and the
   example's committed lockfile — the example job on that PR is what blocks the automerge when the
@@ -312,7 +310,7 @@ Two rules that are easy to get wrong:
 
 **Read [demo/README.md](demo/README.md) before changing the demo domain.** It covers the five
 usage shapes, the emitted JSON contract, why the expectations are hardcoded here but banned in
-`conformance/`, and what each of `validate-demo.sh`'s five checks stops.
+`conformance/`, and what each of `validate-demo.sh`'s four checks stops.
 
 ## Code Style
 
@@ -332,7 +330,7 @@ For pull requests: give a concise summary, note the affected adapters, link rela
 Each adapter has its own GitHub Actions workflow triggered by changes in its directory or `/conformance/` — plus `/demo/` where that adapter has an example. Matrix tests across Node versions (22, 24, 25) and relevant service versions. Every adapter workflow validates the corpus and runs its adversarial suite **inside the same job as the regular tests** — there is no separate `adversarial` job. Convex is the one exception, and not by choice: its harness imports `convex/_generated`, which only exists once a live backend has been deployed to, so the corpus leg lives in the job that does the deploy and the codegen rather than putting Docker on every Node leg. On the TypeScript adapters the adversarial step is gated to the baseline Node leg (`if: matrix.node-version == '22'`), because the corpus discriminates the translator and the datastore, not the Node runtime; the other matrix dimensions still get their own adversarial run, and those divide into two kinds:
 
 - **The datastore is one.** Drizzle and Prisma each run the corpus once per `ADAPTER_TEST_DB` store on the baseline Node leg (SQLite, PostgreSQL, MySQL) — collation, LIKE escaping, cast targets and parameter typing are translator behaviour, so a store the workflow does not execute is a store the adapter does not cover. MongoDB server version is the mongoose equivalent, and there the store dimension exists **only** on the baseline Node leg: once `npm test` became an offline translator unit test, a second server crossed with a non-baseline Node version ran byte-identical work, so the workflow `exclude`s those legs rather than paying for them.
-- **The client engine is not, on its own.** Prisma's v6/v7 dimension is an engine matrix; it crosses with the store dimension, giving six adversarial runs per Prisma workflow (2 majors × 3 stores), all on Node 22.
+- **The client engine is not, on its own.** Prisma's v5/v6/v7 dimension is an engine matrix; it crosses with the store dimension, giving 9 adversarial runs per Prisma workflow (3 majors × 3 stores), all on Node 22.
 
 Adding a new adversarial job — or dropping the Node gate so the corpus replays on every Node leg — multiplies runner minutes for no extra coverage. Adding a *store* leg does buy coverage; adding a Node leg does not. `conformance.yaml` additionally replans the golden wire fixtures against the pinned PDP and fails on drift.
 
@@ -352,30 +350,22 @@ So when you add, fix, or change the handling of any shape:
 1. **Add the shape to `conformance/policies/adversarial.yaml`** as a new action, with seed data
    that discriminates it (see `conformance/README.md`, "Adding a new hostile shape"). If it needs a
    principal attribute or column that does not exist yet, add it to `conformance/seeds.json`.
-2. **Classify it in `conformance/actions.json` for every adapter** — but only *after* running
-   the harnesses. The classification is an output of the run, not an input: declaring an action
-   unsupported before watching it fail is how a translatable shape gets permanently skipped.
+2. **Add it once to `conformance/catalog.json`** with its oracle cardinality. Run
+   `./adapterctl validate --discovery`; every missing adapter outcome is explicitly `unassessed`.
 3. **Regenerate the wire fixtures** (`conformance/scripts/regenerate-wire-fixtures.sh`) and confirm
    the diff adds only the new action. An unrelated fixture changing means the corpus edit
    perturbed an existing shape.
 4. **Run every adapter's adversarial suite and triage each divergence** into exactly one of: a
-   translation bug (fix it), a shape that adapter's query language genuinely cannot express (add
-   to `adapterUnsupported` with a reason naming the real mechanism, and make it throw), or an
-   upstream planner bug (`knownDivergences`). A fail-closed classification also needs the message
-   that adapter actually raises pinned next to it — `message` on an `adapterUnsupported` entry,
-   `messages.<adapter>` on an `expectedUnsupported` one. Every harness refuses to run with one
-   missing, and `validate-corpus.sh` checks the key sets. Pin what the adapter says, then check it
+   translation bug (fix it), a shape that adapter's query language genuinely cannot express (mark
+   it `rejected` in that adapter's manifest with the real mechanism and make it throw), or an
+   upstream planner bug (`upstream-blocked`). A rejection also needs the error substring the
+   adapter actually raises pinned on the same manifest outcome. Every harness refuses one with a
+   missing message, and `adapterctl validate` checks the complete matrix. Pin what the adapter says, then check it
    names the mechanism the `reason` declares; when the two disagree, the reason is usually naming a
    limitation the walk never reaches.
-5. **Bump the per-harness tripwires deliberately** — corpus size, oracle/throwing counts, and the
-   degeneracy-guard action lists. Add the new action to each guard so it cannot pass vacuously,
-   choosing the right list per adapter: the *compared* list where that adapter translates the
-   shape, the *liveness-only* list where it throws. Every entry asserts its own side of that split,
-   so a guard list copied from another harness fails instead of quietly guarding nothing.
-   The exception is an action whose oracle is empty *by construction* (a `nullRepresentationOmitted`
-   probe): the guard asserts a non-empty, non-total oracle, so such an action must stay out of both
-   lists and carry a different anti-vacuity assertion — one pinning *why* its rejection is required,
-   not merely that a rejection happens. See `conformance/README.md`.
+5. **Resolve every direct outcome and run strict validation.** Native harnesses derive action
+   accounting from catalog/manifest key equality and assert each catalog cardinality, including
+   empty or total oracles. No repeated counts or per-adapter liveness lists are updated.
 6. **Update the affected READMEs' `Conformance contract` tables** in the same commit.
 
 ### What a translator unit test may pin
@@ -388,8 +378,8 @@ nothing about whether that filter was ever right.
 
 What a unit test *pins*, though, is broader than the filter. A translator unit test pins whatever
 the adapter can be asked **without a store**, and that is a real
-list: the emitted filter, the plan kind the planner folds to, the refusal message
-`conformance/actions.json` pins *and where in the walk it is raised*, the distribution of those
+list: the emitted filter, the plan kind the planner folds to, the refusal message the adapter
+manifest pins *and where in the walk it is raised*, the distribution of those
 refusal sites, which half of a split output answers a query, the caller-supplied contracts
 (mapper forms, operator overrides, `allowPostFilter`), and the golden asset's own invariants — the
 generator it declares, the command that rewrites it, that no library type ever reached it. Some of
@@ -404,8 +394,8 @@ Three kinds of material legitimately live only in a unit test, and they are not 
    policy can drive it and there is no corpus action to substitute for. Prove the branch cannot be
    planned (compile the shape and quote the type error), then pin it and say so in
    `conformance/README.md`; do not infer unreachability from the adapter's own code. Permanent.
-2. **A caller-supplied argument the corpus structurally cannot vary.** `actions.json` classifies
-   each action against *one* mapping per adapter, so an `OperatorFunction` override, a second mapper
+2. **A caller-supplied argument the corpus structurally cannot vary.** Each direct outcome certifies
+   one mapping per adapter, so an `OperatorFunction` override, a second mapper
    form, `allowPostFilter`, a per-call `nullAttributeRepresentation`, or `maxMacroDepth` has no
    corpus spelling — the corpus asks what a policy produces, not what a caller passes. Permanent.
 3. **A corpus gap wearing a unit test** — policy-reachable, and the corpus simply does not carry it
@@ -437,15 +427,15 @@ never recompute them in a harness.
 
 - Edit only `src/` — never commit `lib/` until tests pass
 - There is **one policy suite for semantics**, `conformance/policies/`. A new shape is a corpus action; a second suite of easier shapes beside it is what [ADR 0008](docs/adr/0008-the-shared-policy-suite-is-absorbed-into-the-conformance-corpus.md) exists to keep out
-- `conformance/` affects all adapters: a change there re-runs every adapter's CI, and adding an action requires classifying it for every adapter
+- `conformance/` affects all adapters: a change there re-runs every adapter's CI, and adding an action leaves every adapter explicitly unassessed until its manifest outcome is resolved
 - `demo/` likewise re-runs every adapter's example job, and adding a usage shape means implementing it in every example — there is no classification bucket to opt out with
 - Adding a seed row means adding its `conformance/derived-fields.json` entry in the same commit; adding a seed *field* also means widening every harness's declared key set — both are enforced, not optional
 - Adapters share data, not code: the corpus loader each adapter carries (`prisma/src/corpus.ts`, `mongoose/src/corpus.ts`, `drizzle/src/corpus.ts`, `convex/src/corpus.ts`, `langchain-chromadb/src/corpus.ts`, `sqlalchemy/tests/corpus.py`, `activerecord/spec/support/conformance_corpus.rb`, `spring-data/src/test/java/dev/cerbos/queryplan/springdata/Corpus.java`, `elasticsearch-java/src/test/java/dev/cerbos/queryplan/elasticsearch/Corpus.java`, `ent/corpus_test.go`, `pgx/corpus_test.go`, …) is duplicated **deliberately**, so every adapter stays standalone. Do not extract a shared loader, and do not add a drift check between the copies — they are allowed to differ. That is the opposite of the byte-identical rule on the vendored Go *translator* trees, which keeps its exact current scope. See [ADR 0007](docs/adr/0007-adapters-share-data-not-code.md)
-- A per-adapter **golden expectation** — the filter one adapter is pinned to emit for one corpus action — lives in that adapter's own `golden/expectations.json`, never under `conformance/`; a throwing action carries no entry, because its message is already pinned in `conformance/actions.json`. Schema and rationale: `conformance/README.md`, "Golden expectations"
-- Write "every adapter" / "every harness" / "every example" wherever prose spans the roster — in docs, test-file comments and JSON `description`s alike. `conformance/actions.json` declares `adapters`, so the phrasing stays true when the roster changes and nothing else has to count them. Genuine counts of something else (corpus actions, seed rows) go in digits. `conformance/scripts/check-docs.sh` enforces it across every tracked file
+- A per-adapter **golden expectation** — the filter one adapter is pinned to emit for one corpus action — lives in that adapter's own `golden/expectations.json`, never under `conformance/`; a throwing action carries no entry, because its message is already pinned in that adapter's `adapterctl.json`. Schema and rationale: `conformance/README.md`, "Golden expectations"
+- Write "every adapter" / "every harness" / "every example" wherever prose spans the roster — in docs, test-file comments and JSON `description`s alike. Adapter manifests are the discovered roster, so the phrasing stays true when one is added and nothing else has to count them. Generated certification docs own numeric coverage claims
 - Regenerate build artifacts in the same commit as source changes
-- Changing what an adapter can translate means updating its `conformance/actions.json` entry and its README contract table in the same commit
-- When an adapter cannot express a shape, make it throw with a message naming the real mechanism — never emit a best-effort filter. That message is pinned in `conformance/actions.json` and asserted, so changing it is a deliberate corpus edit
+- Changing what an adapter can translate means updating its direct outcome in `adapterctl.json` and its README contract table in the same commit
+- When an adapter cannot express a shape, make it throw with a message naming the real mechanism — never emit a best-effort filter. Pin that message beside the `rejected` outcome so changing it is a deliberate adapter certification edit
 
 ## Agent skills
 

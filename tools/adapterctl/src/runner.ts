@@ -15,24 +15,36 @@ export type RunOptions = {
   dryRun: boolean;
 };
 
-type Execution = {
+export type Execution = {
   adapter: string;
   environment: string | null;
   command: Extract<Command, { kind: "command" }>;
   env: Record<string, string>;
 };
 
-export function planRun(controlPlane: ControlPlane, options: RunOptions): Execution[] {
+export type RunProgress =
+  | { kind: "execution-started"; execution: Execution }
+  | { kind: "golden-unchanged"; adapter: string }
+  | { kind: "golden-changed"; adapter: string; changes: string };
+
+export function planRun(args: { controlPlane: ControlPlane; options: RunOptions }): Execution[] {
+  const { controlPlane, options } = args;
   if (options.action !== null && options.profile !== "conformance") {
-    throw new CliError("--action is only valid with --profile conformance", 64);
+    throw new CliError({
+      message: "--action is only valid with --profile conformance",
+      exitCode: 64,
+    });
   }
   if (options.environment !== null && options.profile !== "conformance") {
-    throw new CliError("--environment is only valid with --profile conformance", 64);
+    throw new CliError({
+      message: "--environment is only valid with --profile conformance",
+      exitCode: 64,
+    });
   }
   if (options.action !== null && !controlPlane.catalog.actions.some(
     (action) => action.name === options.action,
   )) {
-    throw new CliError(`unknown action: ${options.action}`, 64);
+    throw new CliError({ message: `unknown action: ${options.action}`, exitCode: 64 });
   }
   const executions: Execution[] = [];
   for (const manifest of controlPlane.manifests) {
@@ -40,13 +52,16 @@ export function planRun(controlPlane: ControlPlane, options: RunOptions): Execut
       const environments = options.environment === null ? manifest.semanticEnvironments :
         manifest.semanticEnvironments.filter((environment) => environment.name === options.environment);
       if (options.adapter !== null && environments.length === 0 && options.environment === null) {
-        throw new CliError(`${manifest.adapter}: conformance command is unavailable`, 64);
+        throw new CliError({
+          message: `${manifest.adapter}: conformance command is unavailable`,
+          exitCode: 64,
+        });
       }
       if (options.environment !== null && environments.length === 0) {
-        throw new CliError(
-          `${manifest.adapter}: unknown semantic environment ${options.environment}`,
-          64,
-        );
+        throw new CliError({
+          message: `${manifest.adapter}: unknown semantic environment ${options.environment}`,
+          exitCode: 64,
+        });
       }
       for (const environment of environments) {
         const env = { ...environment.env };
@@ -63,7 +78,10 @@ export function planRun(controlPlane: ControlPlane, options: RunOptions): Execut
     const command = commandForProfile(manifest, options.profile);
     if (command.kind === "unavailable") {
       if (options.adapter !== null) {
-        throw new CliError(`${manifest.adapter}: ${options.profile} command is unavailable`, 64);
+        throw new CliError({
+          message: `${manifest.adapter}: ${options.profile} command is unavailable`,
+          exitCode: 64,
+        });
       }
       continue;
     }
@@ -77,27 +95,17 @@ export function planRun(controlPlane: ControlPlane, options: RunOptions): Execut
   return executions;
 }
 
-export function describeExecution(execution: Execution): string {
-  const label = execution.environment === null ? execution.adapter :
-    `${execution.adapter}/${execution.environment}`;
-  const env = Object.entries(execution.env)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, value]) => `${key}=${value}`)
-    .join(" ");
-  const prefix = env.length === 0 ? "" : `${env} -- `;
-  return `${label}: ${prefix}${execution.command.arguments.join(" ")}`;
-}
-
 export async function executeRun(args: {
   root: string;
   executions: Execution[];
   profile: RunProfile;
   stdout: Writable;
   stderr: Writable;
-  progress: (line: string) => void;
+  progress: (event: RunProgress) => void;
 }): Promise<void> {
+  const failures: string[] = [];
   for (const execution of args.executions) {
-    args.progress(`running ${describeExecution(execution)}`);
+    args.progress({ kind: "execution-started", execution });
     const code = await spawnCommand({
       command: execution.command,
       cwd: join(args.root, execution.adapter),
@@ -106,7 +114,8 @@ export async function executeRun(args: {
       stderr: args.stderr,
     });
     if (code !== 0) {
-      throw new CliError(`${execution.adapter}: command exited with status ${code}`);
+      failures.push(`${executionLabel(execution)}: command exited with status ${code}`);
+      continue;
     }
     if (args.profile === "golden") {
       const changed = await captureCommand({
@@ -116,10 +125,25 @@ export async function executeRun(args: {
         },
         cwd: args.root,
       });
-      if (changed.trim().length === 0) args.progress(`${execution.adapter}: no golden changes`);
-      else args.progress(`${execution.adapter} golden changes:\n${changed.trimEnd()}`);
+      if (changed.trim().length === 0) {
+        args.progress({ kind: "golden-unchanged", adapter: execution.adapter });
+      } else {
+        args.progress({
+          kind: "golden-changed",
+          adapter: execution.adapter,
+          changes: changed.trimEnd(),
+        });
+      }
     }
   }
+  if (failures.length > 0) {
+    throw new CliError({ message: `run failed:\n${failures.join("\n")}` });
+  }
+}
+
+function executionLabel(execution: Execution): string {
+  return execution.environment === null ? execution.adapter :
+    `${execution.adapter}/${execution.environment}`;
 }
 
 function commandForProfile(manifest: Manifest, profile: Exclude<RunProfile, "conformance">): Command {
@@ -183,7 +207,7 @@ async function captureCommand(args: {
     child.once("error", reject);
     child.once("close", (code) => {
       if (code === 0) resolveOutput(stdout);
-      else reject(new CliError(`git status failed: ${stderr.trim()}`));
+      else reject(new CliError({ message: `git status failed: ${stderr.trim()}` }));
     });
   });
 }

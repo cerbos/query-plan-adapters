@@ -3,7 +3,7 @@
 Example applications need shared policies and seed data, and the obvious move is to reuse the
 conformance corpus. We are not doing that. The demo domain is a separate corpus of realistic
 shapes, and unlike the conformance corpus it carries no per-adapter classification: every shape in
-it must be expressible by every adapter, so there is no equivalent of `actions.json`.
+it must be expressible by every adapter, so there are no per-adapter outcomes in the demo catalog.
 
 ## Why
 

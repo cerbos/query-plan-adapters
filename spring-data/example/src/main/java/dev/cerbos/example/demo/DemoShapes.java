@@ -14,6 +14,7 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -41,7 +42,7 @@ import java.util.Map;
  * than an omission: every {@code toSpecification} overload returns a Specification covering all
  * three kinds — {@code Specification.unrestricted()}, an always-false predicate, or the
  * translated tree — so composition in shape 5 is the same line of code for all of them. The
- * kind is reported alongside the ids because {@code demo/expected.json} pins it: that is what
+ * kind is reported alongside the ids because {@code demo/cases.json} pins it: that is what
  * stops this program returning all eight rows for {@code admin-view} without ever having
  * reached the PDP.
  *
@@ -71,7 +72,7 @@ class DemoShapes {
             "request.resource.attr.public", AttributeMapping.field("isPublic"));
 
     /**
-     * One shape's answer, as {@code demo/expected.json} spells it: the plan kind, and the ids the
+     * One shape's answer, as {@code demo/cases.json} spells it: the plan kind, and the ids the
      * query returned. Typed rather than a {@code Map<String, Object>} so a mistyped key is a
      * compile error here instead of a diff in the shared runner.
      */
@@ -92,25 +93,25 @@ class DemoShapes {
     }
 
     /** Seeds the store, runs every shape, and returns the {@code shapes} object to emit. */
-    Map<String, Object> run() {
+    Map<String, Object> run(List<DemoCases.DemoCase> cases) {
         seed();
-
-        return Map.of(
-                "filtered", Map.of(
-                        "alice/view", filtered("alice", "view"),
-                        "bob/view", filtered("bob", "view")),
-                "alwaysAllowed", Map.of(
-                        "admin/admin-view", filtered("admin", "admin-view")),
-                "alwaysDenied", Map.of(
-                        "alice/publish", filtered("alice", "publish")),
-                "paginated", Map.of(
-                        "alice/view", paginated("alice", "view", 2),
-                        "admin/admin-view", paginated("admin", "admin-view", 3)),
-                "composed", Map.of(
-                        "alice/view", composed("alice", "view"),
-                        "bob/view", composed("bob", "view"),
-                        "admin/admin-view", composed("admin", "admin-view"),
-                        "alice/publish", composed("alice", "publish")));
+        Map<String, Map<String, Object>> shapes = new LinkedHashMap<>();
+        for (DemoCases.DemoCase demoCase : cases) {
+            Object result = switch (demoCase.operation()) {
+                case "filtered", "alwaysAllowed", "alwaysDenied" ->
+                        filtered(demoCase.principal(), demoCase.action());
+                case "paginated" -> paginated(
+                        demoCase.principal(), demoCase.action(), demoCase.pagination().pageSize());
+                case "composed" -> composed(demoCase.principal(), demoCase.action());
+                default -> throw new IllegalStateException(
+                        "unknown demo operation " + demoCase.operation());
+            };
+            shapes.computeIfAbsent(demoCase.operation(), ignored -> new LinkedHashMap<>())
+                    .put(demoCase.principal() + "/" + demoCase.action(), result);
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        shapes.forEach(result::put);
+        return result;
     }
 
     // -- the five usage shapes --
@@ -128,7 +129,7 @@ class DemoShapes {
      * against different roots.
      *
      * <p>Reported as page SIZES plus the sorted union of the ids, never as per-page order:
-     * {@code demo/expected.json} is shared by every store and several of them have no total order
+     * {@code demo/cases.json} is shared by every store and several of them have no total order
      * to paginate by. The {@code Sort} is still required for the paging itself to be correct —
      * without a total order, successive pages may repeat or omit rows — which is a separate
      * concern from how the result is asserted.
@@ -214,7 +215,7 @@ class DemoShapes {
     }
 
     /**
-     * The plan kind as {@code demo/expected.json} spells it, derived from the SDK's own
+     * The plan kind as {@code demo/cases.json} spells it, derived from the SDK's own
      * predicates rather than from {@code getRaw()}. Reading the protobuf would make this example
      * compile against protobuf types a consumer of the adapter never has to name.
      */

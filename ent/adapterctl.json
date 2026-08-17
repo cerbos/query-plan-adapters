@@ -25,33 +25,7 @@
   },
   "semanticEnvironments": [
     {
-      "name": "sqlite",
-      "command": [
-        "go",
-        "test",
-        "-race",
-        "-count=1",
-        "-timeout",
-        "30m",
-        "./..."
-      ],
-      "env": {}
-    },
-    {
-      "name": "postgresql-17",
-      "command": [
-        "go",
-        "test",
-        "-race",
-        "-count=1",
-        "-timeout",
-        "30m",
-        "./..."
-      ],
-      "env": {}
-    },
-    {
-      "name": "mysql-8.4",
+      "name": "sqlite+postgresql-17+mysql-8.4",
       "command": [
         "go",
         "test",

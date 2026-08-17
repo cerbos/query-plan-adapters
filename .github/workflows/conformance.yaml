@@ -38,7 +38,7 @@ jobs:
       - name: Verify the pinned Cerbos digest matches its tag
         run: conformance/scripts/verify-cerbos-digest.sh
 
-      # Mutates conformance/wire-fixtures/ in place, replanning every action in actions.json
+      # Mutates conformance/wire-fixtures/ in place, replanning every action in catalog.json
       # against the PDP version pinned in conformance/CERBOS_VERSION.
       - name: Regenerate golden wire fixtures
         run: conformance/scripts/regenerate-wire-fixtures.sh

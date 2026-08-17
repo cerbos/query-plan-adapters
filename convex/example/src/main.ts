@@ -21,9 +21,8 @@
  * reports, and ../convex/documents.ts translates and queries.
  *
  * Prints one JSON document to stdout; everything a human might want to read goes to stderr.
- * demo/scripts/run-example.sh diffs that document against demo/expected.json.
+ * The cases and expected results are read from demo/cases.json, and the program validates the document before emitting it.
  */
-import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { PlanKind } from "@cerbos/orm-convex";
@@ -31,28 +30,18 @@ import { GRPC as Cerbos } from "@cerbos/grpc";
 import { ConvexHttpClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
 
+import {
+  loadConsumerCases,
+  loadDemoSeeds,
+  runConsumerCases,
+  type DemoSeeds,
+} from "./cases";
+
 const DEMO_DIR = resolve(__dirname, "../../../demo");
 const RESOURCE_KIND = "document";
-
-interface SeedDocument {
-  id: string;
-  ownerId: string;
-  public: boolean;
-  region: string;
-  archived: boolean;
-}
-
-interface Seeds {
-  principals: { id: string; roles: string[] }[];
-  applicationFilter: { description: string; archived: boolean; region: string };
-  documents: SeedDocument[];
-}
-
-// demo/seeds.json is a repository-controlled corpus file, checked structurally by
-// demo/scripts/validate-demo.sh before this ever runs — not untrusted input.
-const seeds = JSON.parse(
-  readFileSync(resolve(DEMO_DIR, "seeds.json"), "utf8")
-) as Seeds;
+const consumerCases = loadConsumerCases(DEMO_DIR);
+const seeds = loadDemoSeeds(DEMO_DIR);
+type SeedDocument = DemoSeeds["documents"][number];
 
 /**
  * The application's OWN predicate, never expressed in policy. Rebuilt field by field rather than
@@ -68,14 +57,14 @@ const APPLICATION_FILTER = {
  * The runner sets this, and there is deliberately no fallback. The obvious default — Cerbos's own
  * 3592/3593 — is the address every adapter's `cerbos run` test sidecar binds, so an unset
  * CERBOS_HOST would not fail: it would quietly plan against the conformance corpus that sidecar
- * serves, and produce a diff against demo/expected.json that reads as an adapter bug.
+ * serves, and fail a demo/cases.json case in a way that reads as an adapter bug.
  * demo/README.md requires reaching the PDP at $CERBOS_HOST, "never a hardcoded address", for
  * exactly that reason.
  */
 const cerbosHost = process.env["CERBOS_HOST"];
 if (!cerbosHost) {
   throw new Error(
-    "CERBOS_HOST is not set — run this example through demo/scripts/run-example.sh convex"
+    "CERBOS_HOST is not set — run this example through demo/scripts/run-example.sh convex",
   );
 }
 
@@ -93,7 +82,7 @@ if (!cerbosHost) {
 const convexUrl = process.env["CONVEX_URL"];
 if (!convexUrl) {
   throw new Error(
-    "CONVEX_URL is not set — run this example through demo/scripts/run-example.sh convex"
+    "CONVEX_URL is not set — run this example through demo/scripts/run-example.sh convex",
   );
 }
 
@@ -102,6 +91,25 @@ const convex = new ConvexHttpClient(convexUrl);
 
 /** Exactly `PlanResourcesResponse`, without depending on a package this example never imports. */
 type QueryPlan = Awaited<ReturnType<Cerbos["planResources"]>>;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isQueryPlan(value: unknown): value is QueryPlan {
+  if (!isRecord(value)) {
+    return false;
+  }
+  switch (value["kind"]) {
+    case PlanKind.CONDITIONAL:
+      return isRecord(value["condition"]);
+    case PlanKind.ALWAYS_ALLOWED:
+    case PlanKind.ALWAYS_DENIED:
+      return true;
+    default:
+      return false;
+  }
+}
 
 interface ListResult {
   kind: string;
@@ -167,7 +175,11 @@ async function plan(principalId: string, action: string): Promise<QueryPlan> {
     resource: { kind: RESOURCE_KIND },
     action,
   });
-  return JSON.parse(JSON.stringify(queryPlan)) as QueryPlan;
+  const serialized: unknown = JSON.parse(JSON.stringify(queryPlan));
+  if (!isQueryPlan(serialized)) {
+    throw new Error("Cerbos returned an invalid query plan");
+  }
+  return serialized;
 }
 
 const PLAN_KINDS: PlanKind[] = [
@@ -181,7 +193,7 @@ const PLAN_KINDS: PlanKind[] = [
  * data, so the enum the adapter reported arrives with nothing left of its type. Re-narrowing it
  * against the adapter's own re-exported `PlanKind` is the same crossing the plan itself makes on
  * the way in, where the class instances @cerbos/core built arrive as plain objects — and it fails
- * the run rather than emitting a kind demo/expected.json has never heard of.
+ * the run rather than emitting a kind demo/cases.json has never heard of.
  */
 function asPlanKind(reported: string): PlanKind {
   const kind = PLAN_KINDS.find((candidate) => candidate === reported);
@@ -211,7 +223,7 @@ interface PaginatedShapeResult extends ShapeResult {
 async function listed(
   principalId: string,
   action: string,
-  applicationFilter?: typeof APPLICATION_FILTER
+  applicationFilter?: typeof APPLICATION_FILTER,
 ): Promise<ShapeResult> {
   const queryPlan = await plan(principalId, action);
   const result = await convex.query(listDocuments, {
@@ -223,7 +235,7 @@ async function listed(
 
 /**
  * Shape 4: pagination applied on top of the filter, walked with Convex's cursor. Reported as page
- * SIZES plus the sorted union of the ids, never as per-page order — demo/expected.json is shared
+ * SIZES plus the sorted union of the ids, never as per-page order — demo/cases.json is shared
  * by every store and several of them have no total order to paginate by.
  *
  * Convex has no filtered count, which is why count is not one of the five shapes.
@@ -231,7 +243,7 @@ async function listed(
 async function paginated(
   principalId: string,
   action: string,
-  pageSize: number
+  pageSize: number,
 ): Promise<PaginatedShapeResult> {
   const queryPlan = await plan(principalId, action);
 
@@ -271,7 +283,7 @@ async function paginated(
 
   throw new Error(
     `paginating ${principalId}/${action} did not reach the end of the table in ` +
-      `${seeds.documents.length + 1} pages`
+      `${seeds.documents.length + 1} pages`,
   );
 }
 
@@ -279,35 +291,32 @@ async function main(): Promise<void> {
   await convex.mutation(seedDocuments, { documents: seeds.documents });
   console.error(`seeded ${seeds.documents.length} documents`);
 
-  const shapes = {
-    filtered: {
-      "alice/view": await listed("alice", "view"),
-      "bob/view": await listed("bob", "view"),
+  const shapes = await runConsumerCases({
+    cases: consumerCases,
+    execute: (testCase) => {
+      switch (testCase.operation) {
+        case "paginated":
+          return paginated(
+            testCase.principal,
+            testCase.action,
+            testCase.pagination.pageSize,
+          );
+        case "composed":
+          return listed(
+            testCase.principal,
+            testCase.action,
+            APPLICATION_FILTER,
+          );
+        case "filtered":
+        case "alwaysAllowed":
+        case "alwaysDenied":
+          return listed(testCase.principal, testCase.action);
+      }
     },
-    alwaysAllowed: {
-      "admin/admin-view": await listed("admin", "admin-view"),
-    },
-    alwaysDenied: {
-      "alice/publish": await listed("alice", "publish"),
-    },
-    paginated: {
-      "alice/view": await paginated("alice", "view", 2),
-      "admin/admin-view": await paginated("admin", "admin-view", 3),
-    },
-    composed: {
-      "alice/view": await listed("alice", "view", APPLICATION_FILTER),
-      "bob/view": await listed("bob", "view", APPLICATION_FILTER),
-      "admin/admin-view": await listed(
-        "admin",
-        "admin-view",
-        APPLICATION_FILTER
-      ),
-      "alice/publish": await listed("alice", "publish", APPLICATION_FILTER),
-    },
-  };
+  });
 
   process.stdout.write(
-    `${JSON.stringify({ adapter: "convex", shapes }, null, 2)}\n`
+    `${JSON.stringify({ adapter: "convex", shapes }, null, 2)}\n`,
   );
 }
 

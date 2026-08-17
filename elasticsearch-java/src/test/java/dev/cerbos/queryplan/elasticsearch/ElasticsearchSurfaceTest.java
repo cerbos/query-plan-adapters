@@ -40,14 +40,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *       {@code bool.filter} beside its own query. That composition, and the scoring behaviour that
  *       makes {@code filter} the right place for it, is a fact about Elasticsearch.
  *   <li><strong>The mechanisms the corpus reasons name.</strong> Most of
- *       {@code conformance/actions.json}'s {@code elasticsearch-java} entries cite one of three
+ *       {@code adapterctl.json}'s {@code elasticsearch-java} entries cite one of three
  *       store facts — an empty array is not indexed, a JSON null is not indexed, and an analyzed
  *       field is compared per token. A harness cannot demonstrate any of them: it only ever sees
  *       the refusal. These execute them against a real server, so the reasons are measured rather
  *       than asserted.
  * </ul>
  *
- * <p><strong>Why this is not a third classification bucket.</strong> #372's binary triage — every
+ * <p><strong>Why this is not a third outcome.</strong> #372's binary triage — every
  * surviving shape becomes a corpus action, there is no "unit-test-only" shape — is about SHAPES:
  * what the planner can emit and what the adapter translates. Almost nothing here is a shape. "An
  * explicitly-null field and a missing field are the same document" is a fact about Elasticsearch,
@@ -274,7 +274,7 @@ class ElasticsearchSurfaceTest {
      * tells them apart — an empty collection is a value, a missing attribute is an evaluation error
      * — which is why the polarities that would read a missing collection as an allow are refused.
      *
-     * <p>This is the store fact behind more of {@code actions.json}'s {@code elasticsearch-java}
+     * <p>This is the store fact behind more of {@code adapterctl.json}'s {@code elasticsearch-java}
      * reasons than any other, and the harness cannot show it: it only ever sees the refusal.
      */
     @Test

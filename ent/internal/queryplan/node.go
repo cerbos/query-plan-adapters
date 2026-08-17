@@ -22,7 +22,7 @@ import (
 )
 
 // node is a neutral view of a plan operand. The protobuf oneof is awkward to traverse
-// repeatedly, and the reference adapters all work against a decoded tree (sqlalchemy uses
+// repeatedly, and the other adapters all work against a decoded tree (sqlalchemy uses
 // MessageToDict), so decode once up front and keep the traversal readable.
 type node struct {
 	value    any

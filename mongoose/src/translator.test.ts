@@ -12,14 +12,8 @@ import type {
   NullAttributeRepresentation,
   QueryPlanToMongooseResult,
 } from ".";
-import {
-  MAPPER,
-  classifyActionsForAdapter,
-  parseActionsFile,
-  planFromWireFixture,
-  readJson,
-  wireFixtureActions,
-} from "./corpus";
+import { MAPPER, planFromWireFixture, wireFixtureActions } from "./corpus";
+import { loadActionControlPlane, requireOutcomeMessage } from "./controlPlane";
 
 /**
  * Translator unit test: for every action in the shared `../conformance/` corpus, the filter this
@@ -31,7 +25,7 @@ import {
  * | assertion | who owns it |
  * | --- | --- |
  * | the plan the PDP produces for a policy | `conformance/wire-fixtures/`, replanned and diffed by the `Conformance Corpus` workflow |
- * | which shapes this adapter must refuse, and with what message | `conformance/actions.json` — read below, not restated |
+ * | which shapes this adapter must refuse, and with what message | `mongoose/adapterctl.json` — read below, not restated |
  * | the documents a filter returns | `adversarial.test.ts`, against a real MongoDB with `check()` as the oracle |
  * | **the filter this adapter emits for a plan** | **here** |
  *
@@ -43,7 +37,7 @@ import {
  * [ADR 0006](../../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md).
  *
  * **What a pinned filter buys over the harness.** The harness proves the filter returns the right
- * documents *against the 21 it seeds*. Two different filters can agree on all of them and disagree
+ * documents *against the canonical check resources*. Two different filters can agree on all of them and disagree
  * on the document a consumer has, so a rewrite that quietly changes the emitted query passes there
  * and shows up here as a diff a reviewer reads. It is also the only place a
  * `nullAttributeRepresentation` boundary, a timestamp literal, or a caller-supplied `valueParser`
@@ -54,17 +48,41 @@ import {
  * what makes a new action land as a failure rather than as silence.
  */
 
-const actionsFile = parseActionsFile(readJson("actions.json"));
+const controlPlane = loadActionControlPlane({
+  adapter: "mongoose",
+  selectedAction: undefined,
+});
+
+test("ADAPTERCTL_ACTION selects one direct outcome", () => {
+  const previous = process.env["ADAPTERCTL_ACTION"];
+  process.env["ADAPTERCTL_ACTION"] = "vf-le";
+  try {
+    const focused = loadActionControlPlane({
+      adapter: "mongoose",
+      selectedAction: process.env["ADAPTERCTL_ACTION"],
+    });
+    expect(focused.selectedActions).toEqual(["vf-le"]);
+    expect(focused.oracleActions).toEqual(["vf-le"]);
+    expect(focused.throwingActions).toEqual([]);
+    expect(focused.upstreamBlockedActions).toEqual([]);
+    expect(focused.unassessedActions).toEqual([]);
+  } finally {
+    if (previous === undefined) {
+      delete process.env["ADAPTERCTL_ACTION"];
+    } else {
+      process.env["ADAPTERCTL_ACTION"] = previous;
+    }
+  }
+});
 
 /**
- * The shapes `actions.json` says this adapter must refuse, each with the message it must refuse
- * them with. Identical to the classification `adversarial.test.ts` asserts against a live PDP;
+ * The shapes `adapterctl.json` says this adapter must refuse, each with the message it must refuse
+ * them with. Identical to the direct outcomes `adversarial.test.ts` asserts against a live PDP;
  * asserting it here as well is what lets the completeness guard below be total, and it costs a
  * millisecond rather than a container.
  */
-const { throwingActions: THROWING_ACTIONS } = classifyActionsForAdapter(
-  actionsFile,
-  "mongoose",
+const THROWING_ACTIONS = controlPlane.throwingActions.filter(
+  ({ action }) => action !== "null-eq-missing",
 );
 
 function translate(
@@ -86,7 +104,7 @@ function translate(
 /**
  * The plan kind for the two corpus actions the planner resolves without a condition.
  *
- * `p-has` is `knownDivergences` for every adapter — the planner folds `has(unknown attr)` to
+ * `p-has` is `upstream-blocked` direct outcomes for every adapter — the planner folds `has(unknown attr)` to
  * ALWAYS_ALLOWED, so the harness cannot compare it against the oracle. Translation is still
  * defined, and pinning it here is the only assertion the corpus makes about the action.
  */
@@ -3542,7 +3560,7 @@ describe("corpus shapes", () => {
   // same assertion against a live PDP; here it costs a millisecond and covers the whole roster,
   // which is what lets the completeness guard below be total.
   test.each(THROWING_ACTIONS)(
-    "$action is refused with the message actions.json pins ($reason)",
+    "$action is refused with the message adapterctl.json pins ($reason)",
     ({ action, message }) => {
       expect(() => translate(action)).toThrow(message);
     },
@@ -3564,13 +3582,7 @@ describe("corpus shapes", () => {
     // The table is alphabetical, so a translator change reads as the list of shapes it moved.
     expect(filters).toEqual([...filters].sort());
 
-    // Tripwires. Bump them deliberately: a count that moves without anyone noticing is how a
-    // shape gets dropped from a table nobody reads end to end.
-    expect({
-      filters: filters.length,
-      kinds: kinds.length,
-      throwing: throwing.length,
-    }).toEqual({ filters: 147, kinds: 2, throwing: 50 });
+    expect(classified).toEqual(controlPlane.allActions);
   });
 
   // The mapping-hazard contract in README.md rests on one structural fact: this adapter builds no
@@ -3593,7 +3605,7 @@ describe("corpus shapes", () => {
 });
 
 describe("nullAttributeRepresentation", () => {
-  // `null-eq-missing` is the corpus's `nullRepresentationOmitted` probe: `== null` against an
+  // `null-eq-missing` is the corpus's omitted-NULL probe: `== null` against an
   // attribute the caller OMITS when the field is NULL. The two conventions are indistinguishable
   // on the wire — the planner emits the same `eq(attr, null)` either way — so the adapter has to
   // be told, and the whole behaviour is a translator property with no store in it.
@@ -3612,7 +3624,9 @@ describe("nullAttributeRepresentation", () => {
     // null-selecting filter would return exactly those documents (#302).
     expect(() =>
       translate("null-eq-missing", { nullAttributeRepresentation: "omitted" }),
-    ).toThrow("missing-attribute error");
+    ).toThrow(
+      requireOutcomeMessage({ controlPlane, action: "null-eq-missing" }),
+    );
   });
 
   // The rejection keys off the null OPERAND, not off a list of operators, so a value list carrying
@@ -3648,9 +3662,9 @@ describe("timestamp literals", () => {
     });
 
   test("a nanosecond instant — what the PDP actually folds — is refused", () => {
-    // This, and nothing else, is why `ts-window` and `ts-vf` are `adapterUnsupported`. A tidy
+    // This, and nothing else, is why `ts-window` and `ts-vf` have `rejected` direct outcomes. A tidy
     // millisecond substitution in the loader would translate cleanly and quietly contradict
-    // actions.json.
+    // adapterctl.json.
     expect(() => translate("ts-window")).toThrow(
       "timestamp value must be a millisecond-exact RFC 3339 instant in the CEL range",
     );

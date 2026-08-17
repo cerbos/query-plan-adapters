@@ -2,7 +2,10 @@ import * as fs from "fs";
 import * as path from "path";
 
 import { describe, expect, test } from "@jest/globals";
-import type { PlanExpressionOperand, PlanResourcesResponse } from "@cerbos/core";
+import type {
+  PlanExpressionOperand,
+  PlanResourcesResponse,
+} from "@cerbos/core";
 
 // The mapper the adversarial harness and the Convex backend both read, so the filters pinned here
 // describe a mapping that is actually executed against seeded documents somewhere.
@@ -22,17 +25,13 @@ import type {
 import {
   ADAPTER,
   GOLDEN_REGENERATE_COMMAND,
-  classifyActionsForAdapter,
-  nullRepresentationOmittedFor,
-  parseActionsFile,
   planFromWireFixture,
-  readCorpusJson,
   readGoldenExpectations,
-  requireMessage,
   wireFixtureActions,
   writeGoldenExpectations,
 } from "./corpus";
 import type { FilterNode, GoldenExpectation } from "./corpus";
+import { loadActionControlPlane, requireOutcomeMessage } from "./controlPlane";
 
 /**
  * Translator unit test: for every action in the shared `../conformance/` corpus, the filter this
@@ -44,7 +43,7 @@ import type { FilterNode, GoldenExpectation } from "./corpus";
  * | assertion | who owns it |
  * | --- | --- |
  * | the plan the PDP produces for a policy | `conformance/wire-fixtures/`, replanned and diffed by the `Conformance Corpus` workflow |
- * | which shapes this adapter must refuse, and with what message | `conformance/actions.json` — read below, not restated |
+ * | which shapes this adapter must refuse, and with what message | `convex/adapterctl.json` — read below, not restated |
  * | the documents a filter returns | `adversarial.test.ts`, inside a real Convex backend with `check()` as the oracle |
  * | **the filter this adapter emits for a plan** | **here** |
  *
@@ -81,25 +80,49 @@ import type { FilterNode, GoldenExpectation } from "./corpus";
  *
  * **Adding a corpus action fails this file.** Every wire fixture must be accounted for here
  * exactly once — a golden expectation (a recorded filter, a routing decision, or an unconditional
- * plan kind) or a throw carrying the message `actions.json` pins — and the completeness guard
+ * plan kind) or a throw carrying the message `adapterctl.json` pins — and the completeness guard
  * below is what makes a new action land as a failure rather than as silence.
  */
 
-const actionsFile = parseActionsFile(readCorpusJson("actions.json"));
+const controlPlane = loadActionControlPlane({
+  adapter: ADAPTER,
+  selectedAction: undefined,
+});
+
+test("ADAPTERCTL_ACTION selects one direct outcome", () => {
+  const previous = process.env["ADAPTERCTL_ACTION"];
+  process.env["ADAPTERCTL_ACTION"] = "vf-le";
+  try {
+    const focused = loadActionControlPlane({
+      adapter: ADAPTER,
+      selectedAction: process.env["ADAPTERCTL_ACTION"],
+    });
+    expect(focused.selectedActions).toEqual(["vf-le"]);
+    expect(focused.oracleActions).toEqual(["vf-le"]);
+    expect(focused.throwingActions).toEqual([]);
+    expect(focused.upstreamBlockedActions).toEqual([]);
+    expect(focused.unassessedActions).toEqual([]);
+  } finally {
+    if (previous === undefined) {
+      delete process.env["ADAPTERCTL_ACTION"];
+    } else {
+      process.env["ADAPTERCTL_ACTION"] = previous;
+    }
+  }
+});
 
 /**
- * The shapes `actions.json` says this adapter must refuse, each with the message it must refuse
- * them with. Identical to the classification `adversarial.test.ts` asserts against a live PDP;
+ * The shapes `adapterctl.json` says this adapter must refuse, each with the message it must refuse
+ * them with. Identical to the direct outcomes `adversarial.test.ts` asserts against a live PDP;
  * asserting it here as well is what lets the completeness guard below be total, and it costs a
  * millisecond rather than a container.
  *
  * A throwing action needs no golden expectation of its own: the message is already corpus data,
- * pinned once in `actions.json` and read by every adapter. Writing it into this adapter's asset
+ * pinned once in `adapterctl.json` and read by every adapter. Writing it into this adapter's asset
  * too would create two places to change one string with nothing to say which is authoritative.
  */
-const { throwingActions: THROWING_ACTIONS } = classifyActionsForAdapter(
-  actionsFile,
-  ADAPTER,
+const THROWING_ACTIONS = controlPlane.throwingActions.filter(
+  ({ action }) => action !== "null-eq-missing",
 );
 const THROWING = new Set(THROWING_ACTIONS.map(({ action }) => action));
 
@@ -148,7 +171,7 @@ type Recorder = typeof RECORDER;
  * which is JSON, so a value this rejects is a value the deployed adapter could not carry either.
  *
  * `-0` and the non-finite doubles are exactly why `cr-div-neg-zero` and `nan-ord-inf` are
- * `adapterUnsupported` for this adapter. Stating the boundary as a rule over every recorded
+ * assigned `rejected` direct outcomes for this adapter. Stating the boundary as a rule over every recorded
  * literal, rather than as those two action names, means a THIRD shape that reached it fails here
  * instead of arriving as an unexplained diff.
  */
@@ -278,8 +301,8 @@ if (process.env["GOLDEN_UPDATE"] === "1") {
   const regenerated = new Map<string, GoldenExpectation>();
   for (const action of wireFixtureActions()) {
     // A throwing action gets no entry: its message is corpus data. Skipping it here is also what
-    // keeps regeneration from papering over a misclassification — an action moved into
-    // `adapterUnsupported` that this adapter still translates fails the throw suite, and one moved
+    // keeps regeneration from papering over a misclassification — an action assigned a
+    // `rejected` direct outcome that this adapter still translates fails the throw suite, and one moved
     // out of it that this adapter still refuses fails regeneration itself.
     if (THROWING.has(action)) {
       continue;
@@ -296,7 +319,9 @@ const RECORDED_ACTIONS = [...RECORDED.keys()];
 const byPath = (want: string): string[] =>
   RECORDED_ACTIONS.filter((action) => {
     const expectation = RECORDED.get(action)!.expectation;
-    return expectation.kind === PlanKind.CONDITIONAL && expectation.path === want;
+    return (
+      expectation.kind === PlanKind.CONDITIONAL && expectation.path === want
+    );
   });
 
 /** The actions Convex's own filter engine sees at all — `db` in full, `split` in part. */
@@ -316,22 +341,11 @@ describe("corpus shapes", () => {
   // same assertion against a live PDP; here it costs a millisecond and covers the whole roster,
   // which is what lets the completeness guard below be total.
   test.each(THROWING_ACTIONS)(
-    "$action is refused with the message actions.json pins ($reason)",
+    "$action is refused with the message adapterctl.json pins ($reason)",
     ({ action, message }) => {
       expect(() => translate(action)).toThrow(message);
     },
   );
-
-  // Adding a throwing action without pinning its message must fail this suite rather than
-  // silently degrade the throw assertions to a bare "it threw" (#326).
-  test("a throwing action with no pinned message fails classification", () => {
-    expect(() => requireMessage("synthetic-entry", undefined)).toThrow(
-      /pins no throw message/,
-    );
-    expect(() => requireMessage("synthetic-entry", "")).toThrow(
-      /pins no throw message/,
-    );
-  });
 
   test("every corpus action is accounted for here exactly once", () => {
     const throwing = THROWING_ACTIONS.map(({ action }) => action);
@@ -348,16 +362,7 @@ describe("corpus shapes", () => {
     // The asset is written sorted, so a translator change reads as the list of shapes it moved.
     expect(RECORDED_ACTIONS).toEqual([...RECORDED_ACTIONS].sort());
 
-    // Tripwires. Bump them deliberately: a count that moves without anyone noticing is how a
-    // shape gets dropped from an asset nobody reads end to end. `pushed` moving is the one worth
-    // arguing about — it is the size of the corpus Convex's query engine decides rather than the
-    // adapter's own evaluator, quoted in the README.
-    expect({
-      pushed: PUSHED_ACTIONS.length,
-      post: POST_ACTIONS.length,
-      unconditional: UNCONDITIONAL_ACTIONS.length,
-      throwing: throwing.length,
-    }).toEqual({ pushed: 23, post: 168, unconditional: 2, throwing: 6 });
+    expect(classified).toEqual(controlPlane.allActions);
   });
 });
 
@@ -459,8 +464,9 @@ describe("what the adapter asks Convex to do", () => {
         before: "post",
       });
     }
-    expect(PUSHDOWN_DEMOTED_FIELDS.every((field) => nullableFields.has(field)))
-      .toBe(true);
+    expect(
+      PUSHDOWN_DEMOTED_FIELDS.every((field) => nullableFields.has(field)),
+    ).toBe(true);
   });
 });
 
@@ -530,7 +536,8 @@ describe("mapper forms", () => {
    */
   test("an unmapped reference falls back to the plan path verbatim", () => {
     const { filter } = translate("cs-eq", { mapper: {} });
-    if (!filter) throw new Error("cs-eq emitted no filter under an empty mapper");
+    if (!filter)
+      throw new Error("cs-eq emitted no filter under an empty mapper");
     expect(recordFilter("cs-eq (empty mapper)", filter)).toEqual({
       op: "eq",
       args: [{ op: "field", args: ["request.resource.attr.aString"] }, "one"],
@@ -539,16 +546,14 @@ describe("mapper forms", () => {
 });
 
 describe("nullAttributeRepresentation", () => {
-  // `null-eq-missing` is the corpus's `nullRepresentationOmitted` probe: `== null` against an
+  // `null-eq-missing` is the corpus's omitted-NULL probe: `== null` against an
   // attribute the caller OMITS when the field is NULL. The two conventions are indistinguishable
   // on the wire — the planner emits the same `eq(attr, null)` either way — so the adapter has to
   // be told, and the whole behaviour is a translator property with no store in it.
-  const OMITTED_MESSAGE = requireMessage(
-    "nullRepresentationOmitted.null-eq-missing.messages.convex",
-    nullRepresentationOmittedFor(actionsFile, ADAPTER).find(
-      (entry) => entry.action === "null-eq-missing",
-    )?.message,
-  );
+  const OMITTED_MESSAGE = requireOutcomeMessage({
+    controlPlane,
+    action: "null-eq-missing",
+  });
 
   test("explicit is the default, and keeps the null-matching translation", () => {
     expect(
@@ -581,9 +586,7 @@ describe("nullAttributeRepresentation", () => {
       const node = operand as Record<string, unknown>;
       if ("value" in node) {
         const value = node["value"];
-        return (
-          value === null || (Array.isArray(value) && value.includes(null))
-        );
+        return value === null || (Array.isArray(value) && value.includes(null));
       }
       const operands = node["operands"];
       return Array.isArray(operands) && operands.some(carriesNull);
@@ -778,12 +781,20 @@ describe("shapes the corpus does not reach yet", () => {
 
     test("an empty collection keeps CEL's identity elements", () => {
       expect(
-        macroPostFilter("exists", [], compare("eq", { name: "t" }))({
+        macroPostFilter(
+          "exists",
+          [],
+          compare("eq", { name: "t" }),
+        )({
           aString: "alpha",
         }),
       ).toBe(false);
       expect(
-        macroPostFilter("all", [], compare("ne", { name: "t" }))({
+        macroPostFilter(
+          "all",
+          [],
+          compare("ne", { name: "t" }),
+        )({
           aString: "alpha",
         }),
       ).toBe(true);

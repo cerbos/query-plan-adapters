@@ -1,4 +1,4 @@
-import type { ControlPlane, Manifest, Outcome } from "./model.ts";
+import type { CatalogAction, ControlPlane, Manifest, Outcome } from "./model.ts";
 
 export type AdapterReport = {
   adapter: string;
@@ -16,6 +16,19 @@ export type CertificationReport = {
   schemaVersion: 1;
   actions: number;
   adapters: AdapterReport[];
+};
+
+export type AdapterExplanation = {
+  package: Manifest["package"];
+  workflow: string;
+  commands: Manifest["commands"];
+  semanticEnvironments: Manifest["semanticEnvironments"];
+  summary: AdapterReport;
+};
+
+export type ActionExplanation = {
+  action: CatalogAction;
+  outcomes: Array<{ adapter: string; outcome: Outcome }>;
 };
 
 export function buildReport(controlPlane: ControlPlane): CertificationReport {
@@ -97,52 +110,38 @@ export function reportMarkdown(controlPlane: ControlPlane): string {
   return `${lines.join("\n")}\n`;
 }
 
-export function explainAdapter(controlPlane: ControlPlane, name: string): string[] {
-  const manifest = controlPlane.manifests.find((candidate) => candidate.adapter === name);
-  if (manifest === undefined) return [];
+export function explainAdapter(args: {
+  controlPlane: ControlPlane;
+  name: string;
+}): AdapterExplanation | null {
+  const manifest = args.controlPlane.manifests.find((candidate) => candidate.adapter === args.name);
+  if (manifest === undefined) return null;
   const summary = summarizeAdapter(
     manifest,
-    controlPlane.catalog.actions.map((action) => action.name),
+    args.controlPlane.catalog.actions.map((action) => action.name),
   );
-  return [
-    `Adapter: ${manifest.adapter}`,
-    `Package: ${manifest.package.ecosystem}:${manifest.package.name}`,
-    `Workflow: ${manifest.workflow}`,
-    `Consumer coverage: ${manifest.consumer.coverage}`,
-    `Outcomes: ${summary.matched} matched, ${summary.rejected} rejected, ${summary.upstreamBlocked} upstream-blocked, ${summary.unassessed} unassessed`,
-    `Environments: ${summary.environments.join(", ") || "none"}`,
-  ];
+  return {
+    package: manifest.package,
+    workflow: manifest.workflow,
+    commands: manifest.commands,
+    semanticEnvironments: manifest.semanticEnvironments,
+    summary,
+  };
 }
 
-export function explainAction(controlPlane: ControlPlane, name: string): string[] {
-  const action = controlPlane.catalog.actions.find((candidate) => candidate.name === name);
-  if (action === undefined) return [];
-  const lines = [
-    `Action: ${action.name}`,
-    `Oracle expectation: ${action.oracleExpectation.kind}${"reason" in action.oracleExpectation ? ` — ${action.oracleExpectation.reason}` : ""}`,
-    "Adapter outcomes:",
-  ];
-  for (const manifest of controlPlane.manifests) {
-    const outcome = manifest.outcomes.get(name) ?? { kind: "unassessed" };
-    lines.push(`- ${manifest.adapter}: ${formatOutcome(outcome)}`);
-  }
-  return lines;
-}
-
-function formatOutcome(outcome: Outcome): string {
-  switch (outcome.kind) {
-    case "matched":
-    case "unassessed":
-      return outcome.kind;
-    case "rejected":
-      return `rejected — ${outcome.reason} (message: ${outcome.message})`;
-    case "upstream-blocked":
-      return `upstream-blocked — ${outcome.reason}`;
-    default: {
-      const exhaustive: never = outcome;
-      return exhaustive;
-    }
-  }
+export function explainAction(args: {
+  controlPlane: ControlPlane;
+  name: string;
+}): ActionExplanation | null {
+  const action = args.controlPlane.catalog.actions.find((candidate) => candidate.name === args.name);
+  if (action === undefined) return null;
+  return {
+    action,
+    outcomes: args.controlPlane.manifests.map((manifest) => ({
+      adapter: manifest.adapter,
+      outcome: manifest.outcomes.get(args.name) ?? { kind: "unassessed" },
+    })),
+  };
 }
 
 function formatCommand(command: Manifest["commands"]["test"]): string {

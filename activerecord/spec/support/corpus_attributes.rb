@@ -4,7 +4,7 @@
 #
 # Both corpus suites read it: the conformance harness, which plans against a real PDP and
 # compares rows, and the translator unit test, which replays conformance/wire-fixtures/ offline.
-# conformance/actions.json classifies each action against ONE mapping per adapter, so the two
+# adapterctl.json classifies each action against ONE mapping per adapter, so the two
 # suites disagreeing about the mapping would make the classification true of neither.
 #
 # This is sharing WITHIN one adapter, which is what ADR 0007 asks for. The thing that must not

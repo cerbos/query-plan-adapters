@@ -25,7 +25,7 @@ type Document struct {
 func (Document) Fields() []ent.Field {
 	return []ent.Field{
 		// A string id rather than ent's default int, because demo/seeds.json names its rows
-		// "d1".."d8" and demo/expected.json asserts those ids.
+		// "d1".."d8" and demo/cases.json asserts those ids.
 		field.String("id").Immutable(),
 		field.String("owner_id").Immutable(),
 		field.Bool("is_public"),

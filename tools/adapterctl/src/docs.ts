@@ -1,9 +1,9 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-import { isRecord } from "./decode.ts";
 import { CliError } from "./errors.ts";
 import type { ControlPlane } from "./model.ts";
+import { isRecord } from "./records.ts";
 import { reportMarkdown } from "./reporter.ts";
 
 const relativeTarget = "docs/generated/adapter-certification.md";
@@ -16,24 +16,28 @@ export function generatedDocs(controlPlane: ControlPlane): string {
   ].join("\n");
 }
 
-export async function writeDocs(root: string, controlPlane: ControlPlane): Promise<string> {
-  const target = join(root, relativeTarget);
+export async function writeDocs(args: { root: string; controlPlane: ControlPlane }): Promise<string> {
+  const target = join(args.root, relativeTarget);
   await mkdir(dirname(target), { recursive: true });
-  await writeFile(target, generatedDocs(controlPlane));
+  await writeFile(target, generatedDocs(args.controlPlane));
   return relativeTarget;
 }
 
-export async function checkDocs(root: string, controlPlane: ControlPlane): Promise<void> {
+export async function checkDocs(args: { root: string; controlPlane: ControlPlane }): Promise<void> {
   let actual: string;
   try {
-    actual = await readFile(join(root, relativeTarget), "utf8");
+    actual = await readFile(join(args.root, relativeTarget), "utf8");
   } catch (error: unknown) {
     if (isRecord(error) && error["code"] === "ENOENT") {
-      throw new CliError("adapter certification documentation is missing; run ./adapterctl docs --write");
+      throw new CliError({
+        message: "adapter certification documentation is missing; run ./adapterctl docs --write",
+      });
     }
     throw error;
   }
-  if (actual !== generatedDocs(controlPlane)) {
-    throw new CliError("adapter certification documentation is out of date; run ./adapterctl docs --write");
+  if (actual !== generatedDocs(args.controlPlane)) {
+    throw new CliError({
+      message: "adapter certification documentation is out of date; run ./adapterctl docs --write",
+    });
   }
 }

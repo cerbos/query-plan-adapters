@@ -7,7 +7,10 @@ import {
   PlanExpressionValue,
   PlanExpressionVariable,
 } from "@cerbos/core";
-import type { PlanExpressionOperand, PlanResourcesResponse } from "@cerbos/core";
+import type {
+  PlanExpressionOperand,
+  PlanResourcesResponse,
+} from "@cerbos/core";
 import type { Where } from "chromadb";
 
 import { PlanKind, queryPlanToChromaDB } from ".";
@@ -16,19 +19,15 @@ import {
   ADAPTER,
   FIELD_NAME_MAPPER,
   GOLDEN_REGENERATE_COMMAND,
-  classifyActionsForAdapter,
   mappedMetadataKeys,
-  nullRepresentationThrows,
-  parseActionsFile,
   planFromWireFixture,
-  readCorpusJson,
   readGoldenExpectations,
-  requireMessage,
   requiredMetadataKeys,
   wireFixtureActions,
   writeGoldenExpectations,
 } from "./corpus";
 import type { GoldenExpectation } from "./corpus";
+import { loadActionControlPlane } from "./controlPlane";
 
 /**
  * Translator unit test: for every action in the shared `../conformance/` corpus, the Chroma `Where`
@@ -40,7 +39,7 @@ import type { GoldenExpectation } from "./corpus";
  * | assertion | who owns it |
  * | --- | --- |
  * | the plan the PDP produces for a policy | `conformance/wire-fixtures/`, replanned and diffed by the `Conformance Corpus` workflow |
- * | which shapes this adapter must refuse, and with what message | `conformance/actions.json` — read below, not restated |
+ * | which shapes this adapter must refuse, and with what message | `langchain-chromadb/adapterctl.json` — read below, not restated |
  * | the documents a filter returns | `adversarial.test.ts`, against a real ChromaDB collection with `check()` as the oracle |
  * | **the filter this adapter emits for a plan** | **here** |
  *
@@ -60,40 +59,58 @@ import type { GoldenExpectation } from "./corpus";
  *
  * **This file reads as mostly-throws, and that is the adapter.** Chroma's `where` clause compares
  * flat scalar metadata on the document being matched: no joins, no collections, no arithmetic, no
- * pattern matching, no null. 164 of the corpus's 199 shapes are therefore fail-closed here, and
- * every one of them is asserted against the message `actions.json` pins rather than a bare "it
+ * pattern matching, no null. Most catalog shapes are therefore fail-closed here, and every one is
+ * asserted against the message `adapterctl.json` pins rather than a bare "it
  * threw" — which for an adapter with this ratio is the difference between a suite and a formality
  * (cerbos/query-plan-adapters#326).
  *
  * **Adding a corpus action fails this file.** Every wire fixture must be accounted for here exactly
  * once — a golden expectation (an emitted filter or an unconditional plan kind) or a throw carrying
- * the message `actions.json` pins — and the completeness guard below is what makes a new action land
+ * the message `adapterctl.json` pins — and the completeness guard below is what makes a new action land
  * as a failure rather than as silence.
  */
 
-const actionsFile = parseActionsFile(readCorpusJson("actions.json"));
+const controlPlane = loadActionControlPlane({
+  adapter: ADAPTER,
+  selectedAction: undefined,
+});
+
+test("ADAPTERCTL_ACTION selects one direct outcome", () => {
+  const previous = process.env["ADAPTERCTL_ACTION"];
+  process.env["ADAPTERCTL_ACTION"] = "vf-le";
+  try {
+    const focused = loadActionControlPlane({
+      adapter: ADAPTER,
+      selectedAction: process.env["ADAPTERCTL_ACTION"],
+    });
+    expect(focused.selectedActions).toEqual(["vf-le"]);
+    expect(focused.oracleActions).toEqual(["vf-le"]);
+    expect(focused.throwingActions).toEqual([]);
+    expect(focused.upstreamBlockedActions).toEqual([]);
+    expect(focused.unassessedActions).toEqual([]);
+  } finally {
+    if (previous === undefined) {
+      delete process.env["ADAPTERCTL_ACTION"];
+    } else {
+      process.env["ADAPTERCTL_ACTION"] = previous;
+    }
+  }
+});
 
 /**
- * The shapes `actions.json` says this adapter must refuse, each with the message it must refuse
- * them with. Identical to the classification `adversarial.test.ts` asserts against a live PDP;
+ * The shapes `adapterctl.json` says this adapter must refuse, each with the message it must refuse
+ * them with. Identical to the direct outcomes `adversarial.test.ts` asserts against a live PDP;
  * asserting it here as well is what lets the completeness guard below be total, and it costs a
  * millisecond rather than a PDP and a vector store.
  *
  * A throwing action needs no golden expectation of its own: the message is already corpus data,
- * pinned once in `actions.json` and read by every adapter. Writing it into this adapter's asset too
+ * pinned once in `adapterctl.json` and read by every adapter. Writing it into this adapter's asset too
  * would create two places to change one string with nothing to say which is authoritative — and on
  * an adapter that refuses five sixths of the corpus, the asset would be almost entirely restatement
  * of shared data.
  */
-const THROWING_ACTIONS = [
-  ...classifyActionsForAdapter(actionsFile, ADAPTER).throwingActions,
-  // The `nullRepresentationOmitted` group belongs here on this adapter and only on this adapter's
-  // terms: elsewhere it is a refusal under one convention, here it is unconditional, because Chroma
-  // metadata cannot hold a null distinguishably from an absent key (#302). It is a separate corpus
-  // classification, so the harness keeps it separate; the throw suite does not need to.
-  ...nullRepresentationThrows(actionsFile, ADAPTER),
-].sort(([left], [right]) => left.localeCompare(right));
-const THROWING = new Set(THROWING_ACTIONS.map(([action]) => action));
+const THROWING_ACTIONS = controlPlane.throwingActions;
+const THROWING = new Set(THROWING_ACTIONS.map(({ action }) => action));
 
 function translate(
   action: string,
@@ -199,8 +216,8 @@ if (process.env["GOLDEN_UPDATE"] === "1") {
   const regenerated = new Map<string, GoldenExpectation>();
   for (const action of wireFixtureActions()) {
     // A throwing action gets no entry: its message is corpus data. Skipping it here is also what
-    // keeps regeneration from papering over a misclassification — an action moved into
-    // `adapterUnsupported` that this adapter still translates fails the throw suite, and one moved
+    // keeps regeneration from papering over a misclassification — an action assigned a
+    // `rejected` direct outcome that this adapter still translates fails the throw suite, and one moved
     // out of it that this adapter still refuses fails regeneration itself.
     if (THROWING.has(action)) {
       continue;
@@ -232,25 +249,14 @@ describe("corpus shapes", () => {
   // same assertion against a live PDP; here it costs a millisecond and covers the whole roster,
   // which is what lets the completeness guard below be total.
   test.each(THROWING_ACTIONS)(
-    "%s is refused with the message actions.json pins (%s)",
-    (action, _reason, message) => {
+    "$action is refused with the message adapterctl.json pins ($reason)",
+    ({ action, message }) => {
       expect(() => translate(action)).toThrow(message);
     },
   );
 
-  // Adding a throwing action without pinning its message must fail this suite rather than
-  // silently degrade the throw assertions to a bare "it threw" (#326).
-  test("a throwing action with no pinned message fails classification", () => {
-    expect(() => requireMessage("synthetic-entry", undefined)).toThrow(
-      /pins no throw message/,
-    );
-    expect(() => requireMessage("synthetic-entry", "")).toThrow(
-      /pins no throw message/,
-    );
-  });
-
   test("every corpus action is accounted for here exactly once", () => {
-    const throwing = THROWING_ACTIONS.map(([action]) => action);
+    const throwing = THROWING_ACTIONS.map(({ action }) => action);
     const classified = [...RECORDED_ACTIONS, ...throwing].sort();
 
     // Total: a corpus action with no golden expectation and no pinned throw lands as a failure
@@ -264,22 +270,16 @@ describe("corpus shapes", () => {
     // The asset is written sorted, so a translator change reads as the list of shapes it moved.
     expect(RECORDED_ACTIONS).toEqual([...RECORDED_ACTIONS].sort());
 
-    // Tripwires. Bump them deliberately: a count that moves without anyone noticing is how a
-    // shape gets dropped from an asset nobody reads end to end.
-    expect({
-      conditional: CONDITIONAL_ACTIONS.length,
-      unconditional: RECORDED_ACTIONS.length - CONDITIONAL_ACTIONS.length,
-      throwing: throwing.length,
-    }).toEqual({ conditional: 33, unconditional: 2, throwing: 164 });
+    expect(classified).toEqual(controlPlane.allActions);
   });
 });
 
 /**
  * Where in the walk each rejection happens, and how many corpus shapes reach each site.
  *
- * `actions.json` pins a substring of the message per action, so the throw suite above proves every
+ * `adapterctl.json` pins a substring of the message per action, so the throw suite above proves every
  * refusal is the declared one. It cannot say anything about the *shape* of the refusals taken
- * together, and on an adapter that refuses 164 of 199 shapes that is the more interesting property:
+ * together, and on an adapter that refuses most catalog shapes that is the more interesting property:
  * five sixths of this corpus is rejected, and it matters whether that happens at five sites or at
  * one catch-all.
  *
@@ -287,9 +287,9 @@ describe("corpus shapes", () => {
  * shape rejected by an accident — a `TypeError`, a mapper lookup that happened to fail — cannot pass
  * as a declared limitation, which is the #326 trap at corpus scale. **Pinned counts**: a translator
  * change that moves a shape from one site to another shows up as a diff even though both sites throw
- * and `actions.json` is unchanged. The distribution below is the honest summary of this adapter:
+ * and `adapterctl.json` is unchanged. The distribution below is the honest summary of this adapter:
  * `binaryOperands` rejecting a computed operand is the single mechanism behind 101 of the 164, and
- * every reason in `actions.json` for those shapes — arithmetic, casts, ternaries, projections,
+ * every reason in `adapterctl.json` for those shapes — arithmetic, casts, ternaries, projections,
  * macros above the unroll cap — reduces to the same thing at the wire level, an operand that is not
  * a bare metadata key or a literal.
  */
@@ -300,7 +300,10 @@ describe("the rejection sites the corpus reaches", () => {
     // `binaryOperands`: both sides are metadata keys, and a Where clause compares one to a literal.
     ["field-to-field", /^Variable-to-variable comparisons are not supported/],
     // `mapComparison` / `mapBooleanVariable`: $ne and $nin match a document missing the key.
-    ["inequality over an optional key", / is unsafe for optional Chroma metadata/],
+    [
+      "inequality over an optional key",
+      / is unsafe for optional Chroma metadata/,
+    ],
     // `whereFor`: the operator has no Chroma equivalent at all.
     ["no such operator", /^Unsupported operator /],
     // `negateOperand`: the operator is not in NEGATED_OPERATOR, so there is nothing to invert.
@@ -337,7 +340,7 @@ describe("the rejection sites the corpus reaches", () => {
 
   test("every refused shape lands on exactly one of them, in these numbers", () => {
     const counts: Record<string, number> = {};
-    for (const [action] of THROWING_ACTIONS) {
+    for (const { action } of THROWING_ACTIONS) {
       const site = siteOf(action);
       counts[site] = (counts[site] ?? 0) + 1;
     }
@@ -544,9 +547,9 @@ describe("mapper forms", () => {
     const asFunction: FieldMapper = (reference) =>
       FIELD_NAME_MAPPER[reference] ?? reference;
 
-    expect(
-      translate(RECORD_ACTION, { fieldNameMapper: asFunction }),
-    ).toEqual(translate(RECORD_ACTION));
+    expect(translate(RECORD_ACTION, { fieldNameMapper: asFunction })).toEqual(
+      translate(RECORD_ACTION),
+    );
   });
 
   /**
@@ -569,11 +572,14 @@ describe("mapper forms", () => {
   test.each([
     ["a plain-string mapping", { "request.resource.attr.aString": "aString" }],
     ["an unmapped reference", {}],
-  ])("%s is optional, so an inequality over it is refused", (_label, mapper) => {
-    expect(() => translate("vf-ne", { fieldNameMapper: mapper })).toThrow(
-      /ne is unsafe for optional Chroma metadata because missing fields match the filter/,
-    );
-  });
+  ])(
+    "%s is optional, so an inequality over it is refused",
+    (_label, mapper) => {
+      expect(() => translate("vf-ne", { fieldNameMapper: mapper })).toThrow(
+        /ne is unsafe for optional Chroma metadata because missing fields match the filter/,
+      );
+    },
+  );
 
   /**
    * An unmapped reference is used verbatim as the metadata key. It is documented behaviour rather
@@ -597,7 +603,7 @@ describe("mapper forms", () => {
    * a placeholder, because it differs on every capture — so reading the fixture back means choosing
    * an instant. On the SQL adapters that choice is load-bearing: the PDP emits nanosecond precision,
    * which is exactly why they refuse the action, and a tidy millisecond substitution in the loader
-   * would translate cleanly and quietly contradict `actions.json`.
+   * would translate cleanly and quietly contradict `adapterctl.json`.
    *
    * Here it is inert, because the comparison never reaches a literal — the operand is a computed
    * expression and `binaryOperands` rejects it first. `corpus.ts` says so; this is what makes it a
@@ -608,8 +614,10 @@ describe("mapper forms", () => {
     "%s is refused for the same reason at either instant precision",
     (action) => {
       const message = THROWING_ACTIONS.find(
-        ([candidate]) => candidate === action,
-      )![2];
+        ({ action: candidate }) => candidate === action,
+      )?.message;
+      if (message === undefined)
+        throw new Error(`no rejected outcome for ${action}`);
 
       expect(() => translate(action)).toThrow(message);
       expect(() =>

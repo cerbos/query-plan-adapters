@@ -1,3 +1,10 @@
+import type {
+  CatalogDocument,
+  CheckResourcesDocument,
+  ConsumerCasesDocument,
+  ManifestDocument,
+} from "./schemas.ts";
+
 export type Command =
   | { kind: "unavailable" }
   | { kind: "command"; arguments: [string, ...string[]] };
@@ -8,17 +15,11 @@ export type Outcome =
   | { kind: "upstream-blocked"; reason: string }
   | { kind: "unassessed" };
 
-export type SemanticEnvironment = {
-  name: string;
+export type SemanticEnvironment = Omit<ManifestDocument["semanticEnvironments"][number], "command"> & {
   command: Extract<Command, { kind: "command" }>;
-  env: Record<string, string>;
 };
 
-export type Manifest = {
-  schemaVersion: 1;
-  adapter: string;
-  package: { ecosystem: string; name: string };
-  workflow: string;
+export type Manifest = Omit<ManifestDocument, "commands" | "semanticEnvironments" | "outcomes"> & {
   commands: {
     test: Command;
     typecheck: Command;
@@ -26,37 +27,17 @@ export type Manifest = {
     consumer: Command;
   };
   semanticEnvironments: SemanticEnvironment[];
-  consumer: { coverage: "artifact-install" | "usage-only" };
   outcomes: Map<string, Outcome>;
 };
 
-export type OracleExpectation =
-  | { kind: "proper-subset" }
-  | { kind: "empty"; reason: string }
-  | { kind: "total"; reason: string };
+export type OracleExpectation = CatalogDocument["actions"][number]["oracleExpectation"];
+export type CatalogAction = CatalogDocument["actions"][number];
+export type Catalog = CatalogDocument;
 
-export type CatalogAction = { name: string; oracleExpectation: OracleExpectation };
-export type Catalog = { schemaVersion: 1; actions: CatalogAction[] };
-
-export type ConsumerCase = {
-  id: string;
-  operation: "filtered" | "alwaysAllowed" | "alwaysDenied" | "paginated" | "composed";
-  principal: string;
-  action: string;
-  pagination: null | { pageSize: number; pageSizes: number[] };
-  expected: {
-    kind: "KIND_CONDITIONAL" | "KIND_ALWAYS_ALLOWED" | "KIND_ALWAYS_DENIED";
-    ids: string[];
-  };
-};
-
-export type ConsumerCases = { schemaVersion: 1; cases: ConsumerCase[] };
-export type CheckResource = { kind: string; id: string; attr: Record<string, unknown> };
-export type CheckResources = {
-  schemaVersion: 1;
-  principal: Record<string, unknown>;
-  resources: CheckResource[];
-};
+export type ConsumerCase = ConsumerCasesDocument["cases"][number];
+export type ConsumerCases = ConsumerCasesDocument;
+export type CheckResource = CheckResourcesDocument["resources"][number];
+export type CheckResources = CheckResourcesDocument;
 
 export type ControlPlane = {
   catalog: Catalog;

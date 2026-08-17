@@ -11,7 +11,7 @@ demo/scripts/run-example.sh langchain-chromadb
 Needs `docker` (with compose), `jq` and Node 22+. The runner starts the pinned Cerbos PDP; this
 directory's `run.sh` starts ChromaDB, packs the adapter, installs the tarball, builds, and runs.
 
-It follows [`prisma/example/`](../../prisma/example/), which is the reference implementation.
+It consumes the shared runtime contract in [`demo/cases.json`](../../demo/cases.json).
 
 ## What it proves
 
@@ -135,7 +135,7 @@ Chroma's metadata-only retrieval path, which takes the same `where` clause plus 
 whichever of the two a consumer reaches for.
 
 Pages are asserted by their sizes and by the sorted union of their ids, never by per-page order —
-`demo/expected.json` is shared by every store and several have no total order to paginate by.
+`demo/cases.json` is shared by every store and several have no total order to paginate by.
 
 ## Scope
 

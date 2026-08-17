@@ -18,9 +18,9 @@ module AdversarialOracle
   end
 
   def allowed_ids(action)
-    ConformanceCorpus::SEEDS.select { |seed|
-      client.allow?(principal: principal, resource: check_resource(seed), action: action)
-    }.map { |seed| seed.fetch("id") }.sort
+    ConformanceCorpus::CHECK_RESOURCES.select { |resource|
+      client.allow?(principal: principal, resource: canonical_resource(resource), action: action)
+    }.map { |resource| resource.fetch("id") }.sort
   end
 
   def plan(action)
@@ -29,6 +29,14 @@ module AdversarialOracle
       resource: {kind: ConformanceCorpus::RESOURCE_KIND},
       action: action
     )
+  end
+
+  def canonical_resource(resource)
+    {
+      kind: resource.fetch("kind"),
+      id: resource.fetch("id"),
+      attr: resource.fetch("attr")
+    }
   end
 
   # A NULL in the database is a missing attribute for the check call. If a condition uses a

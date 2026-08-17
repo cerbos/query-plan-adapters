@@ -55,10 +55,10 @@ carve-out does not belong here
 | ------------------------ | ------------------------------------------------------------------- |
 | `policies/document.yaml` | One resource kind. `view` is conditional, `admin-view` unconditional, and `publish` is absent so the planner denies it. |
 | `seeds.json`             | Eight rows across three owners, the three principals, and the application's own predicate. |
-| `expected.json`          | The **one shared** expectations file. Every example asserts against it. |
+| `cases.json`             | The versioned shared input and expected-output contract every example executes. |
 | `cerbos-config.yaml`     | PDP configuration.                                                  |
 | `docker-compose.yml`     | The PDP itself, pinned to `conformance/CERBOS_VERSION` **and** `conformance/CERBOS_IMAGE_DIGEST`. |
-| `scripts/run-example.sh` | Runs one adapter's example and diffs it against `expected.json`.    |
+| `scripts/run-example.sh` | Runs one adapter's example and diffs it against `cases.json`.       |
 | `scripts/validate-demo.sh` | Integrity checks. Needs no PDP, database or network.              |
 
 `seeds.json` also declares `applicationFilter` — the predicate the **application** owns
@@ -69,16 +69,15 @@ so `validate-demo.sh` can recompute it.
 ## Running an example
 
 `cases.json` is the versioned consumer-case catalog: operation, principal, action, pagination
-input, plan kind, and expected ids in one record. During migration, `adapterctl validate` checks
-that it projects exactly to `expected.json`, which remains the input consumed by the existing
-example runner.
+input, plan kind, and expected ids in one record. Every native example reads this catalog and
+executes the same cases through its own ORM operations.
 
 ```bash
 demo/scripts/run-example.sh prisma
 ```
 
 Needs `docker` (with compose) and `jq`. The runner starts the pinned PDP, invokes
-`<adapter>/example/run.sh`, and diffs its stdout against `expected.json`.
+`<adapter>/example/run.sh`, and diffs its stdout against `cases.json`.
 
 The split between the two scripts is deliberate. Everything language-independent — PDP lifecycle,
 output capture, canonicalisation, the diff — lives in the runner. Everything language-specific
@@ -94,20 +93,21 @@ to the adapter. Its `run.sh` must:
 - pack the adapter into a real distributable and install **that** (ADR 0002; Go uses `replace` and
   proves usage shapes only)
 - print exactly one JSON document to stdout, with everything else on stderr
-- reach the PDP at `$CERBOS_HOST`, which the runner sets — never a hardcoded address, and
-  `validate-demo.sh` fails the build on one. The demo PDP is published on `13592`/`13593` rather
+- reach the PDP at `$CERBOS_HOST`, which the runner sets — never a hardcoded address. The runner
+  injects a non-default address, so the live example fails if it ignores that contract. The demo
+  PDP is published on `13592`/`13593` rather
   than the default `3592`/`3593` on purpose: those are the ports every adapter's `cerbos run` test
   sidecar binds, and a demo PDP still holding them makes that sidecar fail to bind while the suite
   silently talks to the demo policies instead.
 
   This is a check rather than prose because prose did not hold it: the first two examples both
   shipped `?? "localhost:3593"`, so an unset `CERBOS_HOST` did not fail — it planned against
-  whichever sidecar held those ports, and the mismatch against `expected.json` read as an adapter
+  whichever sidecar held those ports, and the mismatch against `cases.json` read as an adapter
   bug (cerbos/query-plan-adapters#367).
 
-- take its principal from `seeds.json` — look the id up in `principals` and plan with what comes
-  back, never write out an `{ id, roles }` of its own. `validate-demo.sh` fails the build on a
-  restated one. The id itself is fine to name; its **roles** are the half that exists nowhere else.
+- take its principal from `seeds.json` — look the case's id up in `principals` and plan with what
+  comes back, never write out an `{ id, roles }` of its own. Because examples dispatch the case
+  catalog at runtime, every principal flows through this lookup.
 
 The document is:
 
@@ -124,8 +124,8 @@ The document is:
 }
 ```
 
-`shapes` is diffed against `expected.json`'s `shapes` with each shape's inline `description`
-stripped, so the expectations can carry their own prose without every example reproducing it.
+`shapes` is diffed against a deterministic projection of `cases.json`. The projection only adapts
+the flat catalog to the grouped display shape; it does not introduce another expectation source.
 
 Every entry pins the plan `kind` alongside the ids. That is what stops an example returning all
 eight rows for `admin-view` without ever having reached the PDP.
@@ -144,46 +144,25 @@ tripwire and reads as documentation.
 
 The rot risk is real, and `validate-demo.sh` is what answers it:
 
-1. **Structural.** `expected.json` declares exactly the five shapes and every entry is well-formed
-   for its shape — an `alwaysAllowed` entry carrying a conditional kind would leave that kind
-   untested while still looking covered. The runner diffs the whole document exactly, so this is
-   what makes that diff mean "all five shapes".
+1. **Structural.** `cases.json` declares all five operations and every entry is well-formed for its
+   operation — an `alwaysAllowed` case carrying a conditional kind would leave that kind untested
+   while still looking covered. The runner diffs the complete projection exactly.
 2. **Non-degeneracy.** The lists still discriminate. Shape 5 is recomputed from shape 1 and
    `seeds.json`, and must differ from *both* filters it composes: equal to the adapter's filter
    and the example could drop the application predicate; equal to the application predicate's own
    result and the example could drop **the adapter** — an authorization hole that reads as a green
    build.
-3. **Pin reuse and reachability.** The demo domain has no `CERBOS_VERSION` of its own. One PDP pin
-   in the repository, reused, and every example reaches it — *at `$CERBOS_HOST`*. No example may
-   name a PDP client address of its own, because the obvious one to reach for is the port the test
-   sidecar binds, and that failure is silent rather than loud. The scan is for a client address
-   specifically: `docker-compose.yml`'s `"13592:3592"` names the PDP's own listen port on the
-   container side, which is correct.
-4. **Example coverage.** Every adapter has a runnable `example/run.sh`. The roster it reads is
-   `adapters` in `conformance/actions.json`; there is deliberately no second list, so registering
-   an adapter in the corpus is what demands an example of it, and adding one without an example
+3. **Pin reuse.** The demo domain has no `CERBOS_VERSION` of its own, and its compose file uses the
+   repository's single pinned tag and digest. The live runner separately injects a non-default
+   `$CERBOS_HOST`; an example that ignores it cannot reach the demo PDP.
+4. **Example coverage.** Every discovered adapter manifest has a runnable `example/run.sh`.
+   Manifest discovery is the roster, so registering an adapter is what demands an example, and
+   adding one without an example
    fails the build rather than quietly shipping an adapter nothing has ever installed. There is no
    opt-out and no environment variable to switch it off — an adapter that cannot implement the five
    shared shapes has a packaging or ergonomics problem worth finding before release rather than
    after, which is the argument of cerbos/query-plan-adapters#349, and it is the same reason
    ADR 0001 gives this directory no classification buckets.
-5. **Principal provenance.** An example looks its principal up in `seeds.json` rather than writing
-   one out. Unlike the hardcoded PDP address check 3 catches, a restated principal does **not** fail
-   quietly — it matches the corpus until someone edits `seeds.json`, and then that example's frozen
-   id lists mismatch and it fails loudly, as an adapter bug rather than as the misinvocation it is.
-   So this is a latency problem, and it earned a check only because six more examples were queued
-   behind it (cerbos/query-plan-adapters#349): a rule constraining examples being *written* is worth
-   more than one added after they exist. Those examples have since landed and check 4 now holds the
-   roster complete, so what this guards from here on is the next adapter to join it.
-
-   The signal is an id **next to a role**: naming `alice` is unavoidable (it is the lookup key, the
-   `expected.json` entry key, and the word a printed line uses), but naming `alice` alongside `user`
-   restates the record, because roles come from nowhere else. Comments are skipped and literals are
-   matched whole, so an id in prose, in a Javadoc block, or inside a printed message is fine —
-   `spring-data/example/`'s photo domain documents `?user=alice&role=user` and passes untouched. An
-   example's **own Cerbos policies are skipped**, identified by their `apiVersion`: a policy is the
-   one file where writing a role out is the point, and two rules four lines apart granting `user`
-   and `admin` would otherwise pair exactly like a restated principal.
 
    Three limits, stated rather than hidden. A role that is **also a principal id** is dropped from
    the role side — `admin` is both here, so restating *only* the admin principal is not caught (it
@@ -200,13 +179,13 @@ The rot risk is real, and `validate-demo.sh` is what answers it:
 A change here re-runs every adapter's example job, the same way `conformance/` re-runs every
 adapter's test workflow.
 
-- **Adding a seed row or attribute** means updating `expected.json` in the same commit, and every
+- **Adding a seed row or attribute** means updating `cases.json` in the same commit, and every
   example's schema. `validate-demo.sh` catches the first; the exact diff in the runner catches the
   second.
 - **Adding a usage shape** means implementing it in every example. There is no per-adapter
   classification to opt out with, and adding one is what ADR 0001 rules out.
-- **Adding an adapter** means adding an example for it, in the same sequence that registers it in
-  `conformance/actions.json` — that roster is what check 4 reads, so the two land together or CI
+- **Adding an adapter** means adding an example with its `adapterctl.json` manifest — discovery is
+  what check 4 reads, so the two land together or CI
   stays red. The step-by-step is in
   [conformance/README.md](../conformance/README.md#adding-a-new-adapter).
 - **A shape that needs a carve-out for one adapter is wrong for this directory.** The argument

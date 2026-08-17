@@ -505,7 +505,7 @@
     },
     "null-eq-missing": {
       "status": "rejected",
-      "reason": "`aOptionalString` follows the corpus default: a NULL column sends NO attribute, so `R.attr.aOptionalString == null` is a CEL missing-attribute error and check() denies all 21 seeds. The planner emits the same `eq(var, null)` node as `null-eq` (explicit null, 5 rows allowed), so the wire cannot tell the two conventions apart. Every adapter must be told which one the caller uses. Harnesses translate this action with the adapter's null representation set to `omitted` and assert a throw; under the default `explicit` the adapter would emit IS NULL and return the 5 rows the PDP denies (#302).",
+      "reason": "`aOptionalString` follows the corpus default: a NULL column sends NO attribute, so `R.attr.aOptionalString == null` is a CEL missing-attribute error and check() denies every canonical check resource. The planner emits the same `eq(var, null)` node as `null-eq` (explicit null, a proper subset allowed), so the wire cannot tell the two conventions apart. Every adapter must be told which one the caller uses. Harnesses translate this action with the adapter's null representation set to `omitted` and assert a throw; under the default `explicit` the adapter would emit IS NULL and return the rows the PDP denies (#302).",
       "message": "missing-attribute error"
     },
     "null-ne": {

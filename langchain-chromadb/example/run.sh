@@ -17,7 +17,7 @@
 # it at all.
 #
 # Everything this script prints for a human goes to stderr. stdout carries exactly one JSON
-# document, which the shared runner diffs against demo/expected.json.
+# document whose cases and expected results come from demo/cases.json.
 
 set -euo pipefail
 

@@ -786,9 +786,8 @@ public class ElasticsearchQueryPlanAdapter {
     //   overlaps                                  -> bool.should of both, plus a term on the
     //                                                whole constant path
     //
-    // The operand model, the strict-prefix enumeration and the two edge cases below mirror the
-    // Spring Data adapter's HierarchyTranslator, which is this repository's reference lowering:
-    // same wire contract, same raw-string comparison of the field value, same refusal to guess.
+    // The operand model, strict-prefix enumeration and edge cases below follow the shared wire
+    // contract: raw-string comparison of the field value and no guessed representation.
     // Only the emitted form differs, because a prefix query is term-level where a SQL LIKE is not
     // — which is also why none of the corpus's metacharacter traps need escaping here.
 

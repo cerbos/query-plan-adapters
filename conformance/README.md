@@ -1,9 +1,8 @@
 # Conformance corpus
 
-Shared hostile-shape corpus for the adversarial differential harness pattern, extracted from the
-spring-data adapter's `AdversarialConformanceTest` (see cerbos/query-plan-adapters#263). Every
-adapter's differential test should consume this directory rather than maintaining its own copy of
-the policy, seed data, or action list.
+Shared hostile-shape corpus for the adversarial differential harness pattern. Every adapter's
+differential test consumes this directory rather than maintaining its own copy of the policy,
+seed data, action catalog, or semantic oracle inputs.
 
 ## Contents
 
@@ -15,7 +14,7 @@ heading, regenerate this list with `scripts/check-docs.sh --print-toc` — CI ch
 - [The oracle recipe](#the-oracle-recipe)
   - [Case sensitivity is two invariants, not one](#case-sensitivity-is-two-invariants-not-one)
   - [NULL conventions](#null-conventions)
-    - [`nullRepresentationOmitted`: the two conventions are indistinguishable on the wire](#nullrepresentationomitted-the-two-conventions-are-indistinguishable-on-the-wire)
+    - [`null-eq-missing`: the two conventions are indistinguishable on the wire](#null-eq-missing-the-two-conventions-are-indistinguishable-on-the-wire)
     - [The other side of the same option: an explicit null against a non-null constant](#the-other-side-of-the-same-option-an-explicit-null-against-a-non-null-constant)
     - [The absent to-one parent](#the-absent-to-one-parent)
   - [The real to-one relation](#the-real-to-one-relation)
@@ -26,7 +25,7 @@ heading, regenerate this list with `scripts/check-docs.sh --print-toc` — CI ch
   - [Hazard classes the corpus missed](#hazard-classes-the-corpus-missed)
   - [The degeneracy guard](#the-degeneracy-guard)
   - [Pinned throw messages](#pinned-throw-messages)
-  - [Known divergences still need a tripwire](#known-divergences-still-need-a-tripwire)
+  - [Upstream-blocked outcomes still need a tripwire](#upstream-blocked-outcomes-still-need-a-tripwire)
   - [Deterministic derived fields](#deterministic-derived-fields)
   - [Seed, principal and derived-field coverage](#seed-principal-and-derived-field-coverage)
 - [Adding a new hostile shape](#adding-a-new-hostile-shape)
@@ -76,23 +75,9 @@ rows, and one oracle recipe that every adapter's harness implements against its 
 - `check-resources.json` — canonical PDP check resources materialised independently from every
   adapter's stored-row mapping. `adapterctl validate` checks them against `seeds.json` and
   `derived-fields.json` before a harness can use them as an oracle input.
-- `actions.json` — every action in `policies/adversarial.yaml`, grouped into `adapters` (the
-  canonical adapter roster, which every other per-adapter key is checked against), `conformance`
-  (must match the check() oracle exactly), `adapterUnsupported` (per-adapter lists of conformance
-  actions that adapter's query language genuinely cannot express — LIKE-wildcard escaping,
-  relation-count thresholds, cross-model column comparisons; the adapter must THROW for these,
-  never emit a silently-wrong filter, and its harness asserts the throw instead of the oracle
-  match), `expectedUnsupported` (planner shapes rejected by the Spring reference adapter; other
-  adapters must also fail loudly unless listed in `adapterSupportedExpected`),
-  `adapterSupportedExpected` (per-adapter exceptions that intentionally translate a
-  reference-unsupported shape through a documented database capability), `nullRepresentationOmitted`
-  (actions probing `== null` against an attribute the oracle OMITS for NULL columns; every adapter
-  must translate these with its NULL representation set to omitted and reject them — see "NULL
-  conventions" below), and `knownDivergences` (an action plus the affected adapters intentionally
-  excluded from the oracle run, with a reason — currently only `p-has`, excluded because of a
-  planner bug, not an adapter bug).
-  This is the migration-era legacy projection: direct outcomes and refusal details now also live
-  in each `<adapter>/adapterctl.json`, and `adapterctl validate` rejects any cell that disagrees.
+- `<adapter>/adapterctl.json` — the discovered adapter roster and each adapter's direct outcome for
+  every catalog action: `matched`, `rejected`, `upstream-blocked`, or `unassessed`. Rejections keep
+  their mechanism and pinned error substring together. Strict validation rejects `unassessed`.
 - `wire-fixtures/*.json` — one golden `PlanResources` response per action, captured against the
   pinned Cerbos version in `CERBOS_VERSION`. These pin planner *wire shape* independent of any
   adapter or database — a `diff` against a freshly-regenerated fixture after bumping
@@ -119,17 +104,15 @@ are necessarily language/ORM-specific):
 
 1. **Seed** the adapter's own schema from `seeds.json`, in whatever native shape the ORM needs
    (rows, documents, whatever `tags`/`subCategoryNames` map onto for that adapter).
-2. **Plan**: call `PlanResources` against a real PDP for each `conformance` action in
-   `actions.json`, translate the response through the adapter under test, execute the resulting
-   native query, and collect the returned id set (`adapterFilteredIds`).
+2. **Plan**: call `PlanResources` against a real PDP for each action whose adapter outcome is
+   `matched`, translate the response through the adapter under test, execute the resulting native
+   query, and collect the returned id set (`adapterFilteredIds`).
 3. **Oracle**: for each seed row, call `check()` against the *same* PDP and action, with Cerbos
    attributes built to mirror that row exactly (`oracleAllowedIds`). No hand-computed
    expectations — the PDP is the oracle for both sides.
-4. **Compare**: `adapterFilteredIds(action)` must equal `oracleAllowedIds(action)` for every
-   `conformance` action. Translation must throw for every `expectedUnsupported` action unless the
-   adapter is listed for that action in `adapterSupportedExpected`; declared exceptions must run
-   through the same oracle comparison as conformance actions. A throw must carry the message the
-   corpus pins for that adapter — see "Pinned throw messages" below.
+4. **Resolve** from the adapter manifest: `matched` compares both id sets; `rejected` requires a
+   throw containing the manifest's pinned message; `upstream-blocked` is planned and checked for
+   liveness but excluded from adapter correctness; `unassessed` is allowed only in discovery mode.
 
 ### Case sensitivity is two invariants, not one
 
@@ -168,7 +151,7 @@ null list elements. This pins `null in [null]`, `null in tagNames`, and variable
 membership. Object-valued `tags` still omit a NULL `name`, so collection lambda bodies continue to
 exercise missing-attribute errors. Each harness must implement both representations exactly.
 
-#### `nullRepresentationOmitted`: the two conventions are indistinguishable on the wire
+#### `null-eq-missing`: the two conventions are indistinguishable on the wire
 
 The planner emits the same `eq(attr, null)` node under both conventions — `null-eq` (against the
 explicit-null `owner`) and `null-eq-missing` (against the default-convention `aOptionalString`)
@@ -185,9 +168,9 @@ the caller's convention from the plan, so it has to be told: every adapter that 
 NULL-selecting predicate takes a `nullAttributeRepresentation` option, defaulting to `explicit`
 (the historical translation). See cerbos/query-plan-adapters#302.
 
-`null-eq-missing` lives in its own `actions.json` group rather than in `conformance`, because a
-rejected shape has no filter to compare against the oracle. Each harness translates the group's
-actions with its adapter's representation set to omitted and asserts the rejection — and asserts
+`null-eq-missing` declares an `empty` oracle expectation in `catalog.json` and every adapter marks
+it `rejected`, because no filter can recover the caller's convention from the plan. Each harness
+translates it with its adapter's representation set to omitted and asserts the rejection — and asserts
 the *reason* the rejection is needed, so the test cannot pass by throwing for an unrelated cause.
 What that second assertion looks like depends on where the adapter's NULL lives:
 
@@ -210,9 +193,8 @@ What that second assertion looks like depends on where the adapter's NULL lives:
   fails closed under both conventions. Their harnesses assert the rejection happens regardless,
   which is also the tripwire for a future null sentinel introducing a representation dependency.
 
-Because the oracle for these actions is empty by construction, they must **not** join the
-degeneracy guard below — that guard asserts a non-empty, non-total oracle, which is exactly what
-this shape cannot have.
+Because the oracle for these actions is empty by construction, the catalog declares `empty` and
+every harness asserts exactly that rather than treating the action as a liveness sample.
 
 #### The other side of the same option: an explicit null against a non-null constant
 
@@ -248,7 +230,7 @@ break them.
 
 `coOwner` is the second explicit-null attribute the corpus carries, added for `null-value-f2f`. It
 aliases the **`scope`** column rather than `aOptionalString`, because comparing a column with itself
-is TRUE for all 21 seeds and the degeneracy guard forbids a total oracle. Against `scope` the only
+is TRUE for all 21 seeds and would not discriminate the emitted filter. Against `scope` the only
 row where both sides are NULL is `e1`, so the oracle is exactly one row — thin, but non-degenerate,
 and it is precisely the row the naive translation loses.
 
@@ -308,10 +290,9 @@ The fix is in the translation, not in the classification: **a chained collection
 intermediate hop to exist**, so an absent parent stays excluded under both polarities instead of
 collapsing onto the empty-collection case. `w1-size-zero-chain`, `w1-not-size-chain` and
 `w1-size-frac-chain` have empty oracles by construction (no seed holds a parent with zero children,
-nor one with two or more) and therefore stay out of the degeneracy guard; `w1-all-chain`,
+nor one with two or more), so the catalog declares `empty`; `w1-all-chain`,
 `w1-not-exists-chain`, `w1-size-nonneg-chain`, `w1-not-in-chain`, `w1-not-hasint-chain`,
-`w1-ternary-chain-cond` and `w1-size-frac-le-chain` all have non-degenerate oracles and carry the
-anti-vacuity assertion for the group.
+`w1-ternary-chain-cond` and `w1-size-frac-le-chain` all declare `proper-subset`.
 
 **Put the guard in the shared relation-scope construction, not in each operator.** The #309 round
 guarded the collection macros, which left every sibling operator reached through the same chain
@@ -552,8 +533,8 @@ only inside a shape some adapters throw on is not proven for those adapters.
 
 `root-or`'s second disjunct is `R.attr.aNumber < 0` rather than the `aString != "one"` it was
 specified with: `aString` is never NULL and only one seed holds `"one"`, whose `aBool` is true, so
-that spelling allows all 21 seeds. A total oracle is exactly what the degeneracy guard below exists
-to catch, and it would have passed against any filter whatsoever.
+that spelling allows all 21 seeds. A total oracle would not discriminate the emitted filter, so the
+corpus uses the proper-subset spelling and the catalog pins that cardinality.
 
 ### Hazard classes the corpus missed
 
@@ -616,35 +597,15 @@ denies. The assertion pins that, not merely that a rejection happens.
 
 ### The degeneracy guard
 
-The comparison in step 4 can pass vacuously if the oracle itself is trivial (e.g. the PDP denies
-every row, or allows every row, regardless of what the adapter does). Every harness must assert,
-for at least a handful of representative actions, that the oracle result is neither empty nor the
-full seed set (`!ids.isEmpty() && ids.size() < seeds.size()`). This guards the guard: without it, a
-harness whose PDP connection or policy load silently failed would still pass every comparison.
+An oracle comparison can pass vacuously when the PDP denies every row or allows every row. The
+catalog therefore assigns every action one explicit cardinality expectation: `empty`, `total`, or
+`proper-subset`. Every harness computes the check oracle for every selected action — including
+rejected and upstream-blocked actions — and asserts that expectation before applying its adapter
+outcome.
 
-**Derive the list per adapter; never copy another harness's.** The guard protects an oracle
-*comparison*, so an entry naming a shape that adapter never compares — because it sits in that
-adapter's `adapterUnsupported` set, or in the global `expectedUnsupported` — protects nothing. A
-copied list drifts into exactly that as classifications diverge, and the drift is invisible:
-nothing fails, the list simply stops meaning what it says (cerbos/query-plan-adapters#324). Each
-harness therefore keeps two lists and asserts they are complements of its own oracle set:
-
-- **the guard proper** — a representative sample of the actions the adapter *does* oracle-compare,
-  one per hostile group it can express. Each entry is asserted to be in the adapter's oracle set,
-  so moving an action into `adapterUnsupported` fails the guard instead of quietly emptying it.
-- **liveness-only probes** — shapes the adapter refuses to translate, kept because the group has no
-  compared member for that adapter and the non-degenerate oracle still proves the PDP and policy
-  are live. Each entry is asserted *not* to be in the oracle set, so a shape the adapter later
-  gains support for has to be promoted into the guard proper rather than staying a weaker probe.
-
-Both lists still assert the non-empty, non-total oracle. The exclusion for an action whose oracle
-is empty *by construction* is unchanged: it belongs in neither list (see
-`nullRepresentationOmitted` above, and
-`w1-size-zero-chain`/`w1-not-size-chain`/`w1-size-frac-chain`/`in-empty`/the string casts).
-
-Adapters differ widely in what they can express — `langchain-chromadb` compares 34 of the 187
-conformance actions where `ent` and `pgx` compare all but five — so the lists are expected to look
-different per harness. That is the point.
+This replaces per-harness sample and liveness lists. Adding an action requires one global
+expectation, and a rejected action still proves that its policy branch is live. A wrong
+cardinality is a corpus/PDP failure, never an adapter-specific exception.
 
 ### Pinned throw messages
 
@@ -655,26 +616,12 @@ its `reason` names. The elasticsearch-java harness found this the expensive way:
 `categories` field had six of its actions throwing "Unknown attribute" — a harness gap — while
 never reaching the mechanism their `reason` claimed (cerbos/query-plan-adapters#326).
 
-So every throwing classification carries the substring that adapter's error must contain:
+Every `rejected` outcome in `<adapter>/adapterctl.json` therefore carries both a non-empty `reason`
+and the error `message` substring that adapter must raise. Keeping them on one adapter-local record
+prevents a mechanism claim from drifting away from the observed failure.
 
-- `adapterUnsupported[<adapter>][].message` — the entry is already per-adapter, so the message sits
-  on it directly.
-- `expectedUnsupported[].messages[<adapter>]` — one entry per adapter that must reject the shape.
-  This generalises the old `springDataMessage`, which pinned the reference and left every other adapter
-  asserting nothing.
-- `nullRepresentationOmitted[].messages[<adapter>]` — the same, for the group every adapter rejects.
-
-`scripts/validate-corpus.sh` enforces all three: every `adapterUnsupported` entry has a non-empty
-`message`; every `expectedUnsupported` entry's `messages` key set is *exactly* the `adapters` roster
-minus the adapters that promoted the shape into `adapterSupportedExpected`; and every
-`nullRepresentationOmitted` entry's key set is the whole roster, since no adapter can translate one.
-A missing key is an adapter whose harness would have nothing to assert; a stray one is a message
-nothing reads.
-
-Each harness resolves its own message when it derives the classification and **fails the run if one
-is absent**, so adding a throwing action without pinning its message is a loud failure rather than a
-silent downgrade to a bare throw. Every harness also unit-tests that guard directly, so it cannot go
-inert against a corpus that already satisfies it.
+Each harness resolves its own direct outcome and fails before execution if a rejection has no
+pinned message. `adapterctl validate` enforces the same invariant across every discovered manifest.
 
 The assertion is `contains`, not equality. That is deliberate and it is a **weakening for
 spring-data**, which previously asserted `assertEquals` on its own `springDataMessage`: one field
@@ -699,11 +646,11 @@ reaches (prisma's `p-deep-nest` reaches the LIKE-metacharacter needle before the
 comparison; elasticsearch-java's `p-ternary-under-all` rejects the positive `all` before it ever
 looks at the conditional inside it), and pinning the messages is what surfaced them.
 
-### Known divergences still need a tripwire
+### Upstream-blocked outcomes still need a tripwire
 
-An action in `knownDivergences` is excluded from the oracle run, which leaves it exercised on
-neither side unless the harness says something about it explicitly. Every harness therefore pins
-the `p-has` planner over-grant directly: the plan folds to `KIND_ALWAYS_ALLOWED`, the check()
+An `upstream-blocked` action is excluded from adapter correctness, but it still runs its catalog
+cardinality assertion. Every harness also pins the `p-has` planner over-grant directly: the plan
+folds to `KIND_ALWAYS_ALLOWED`, the check()
 oracle is non-empty and non-total (it denies the seeds whose attribute is missing), and the adapter
 consequently returns every row. When the upstream fold is fixed the assertion fails, which is the
 prompt to move the action back into the oracle run.
@@ -744,7 +691,7 @@ not recompute them in a harness — read `derived-fields.json`.
 
 ### Seed, principal and derived-field coverage
 
-The projection trap this README documents for `actions.json` applies to the seeds too, and it is
+The boundary projection trap applies to the seeds too, and it is
 worse there: a seed key a harness does not consume is dropped from the stored row **and** the
 check() oracle simultaneously, so the differential still agrees and the new field tests nothing.
 Every harness therefore declares the exact seed key set it consumes and asserts equality against
@@ -790,10 +737,8 @@ the acceptance test for these guards; run it before trusting them.
 ## Adding a new hostile shape
 
 1. Add the action + condition to `policies/adversarial.yaml`.
-2. Add the action name to `actions.json` — `conformance` or `expectedUnsupported`, or
-   `nullRepresentationOmitted` if it probes `== null` against an attribute the oracle omits for
-   NULL columns — with a comment in the policy explaining what it probes and which seed rows
-   discriminate it (follow the existing comment style).
+2. Add the action once to `catalog.json`, with the cardinality the live check oracle must produce.
+   Keep a policy comment explaining what it probes and which seed rows discriminate it.
 3. If the shape needs new seed data to be non-degenerate, add a seed to `seeds.json` with a `note`
    explaining what it witnesses (see `a9`, `b1`-`b6` for examples), and add its `derived-fields.json`
    entry in the same commit — `scripts/validate-corpus.sh` names the expected values when it fails.
@@ -802,26 +747,15 @@ the acceptance test for these guards; run it before trusting them.
    The same applies to a new **principal attribute**: every harness declares those as well, so
    adding one fails every harness until each declaration names it.
 4. Run `scripts/regenerate-wire-fixtures.sh` and commit the new fixture alongside the policy change.
-5. Every adapter harness picks up the new action automatically from `actions.json` on next run;
-   triage any divergence into a per-adapter fix issue rather than special-casing it in the harness.
-   An action that ends up fail-closed for an adapter needs that adapter's throw message pinned
-   alongside the classification — see "Pinned throw messages" above. Run the adapter first and pin
-   what it actually says; the harness refuses to run with a message missing, so there is no way to
-   forget one.
-6. Each harness pins the corpus size AND its throwing-action count as tripwires (e.g.
-   `expect(MANIFEST_ACTIONS.size).toBe(199)` and `expect(THROWING_ACTIONS).toHaveLength(61)` in
-   `prisma/src/adversarial.test.ts`; the oracle counts too in the convex, langchain-chromadb and
-   elasticsearch-java harnesses). Bump them deliberately — those assertions exist so a new action
-   cannot slip past an adapter unnoticed. The convex harness additionally pins WHICH actions its
-   filter engine decides on its own, under each of its two mappers, because its README quotes those
-   counts as the coverage the differential actually buys
-   ([#327](https://github.com/cerbos/query-plan-adapters/issues/327)) — a new action lands in one
-   of those buckets and has to be named.
-7. Add the action to each harness's degeneracy-guard list so it cannot pass vacuously — to that
-   harness's *compared* list where the adapter translates the shape, and to its liveness-only list
-   where it does not, per "The degeneracy guard" above. Adding it to the compared list of an
-   adapter that throws on it fails immediately, which is the intended feedback rather than an
-   obstacle. Also check that no harness projects the corpus into a narrower local shape.
+5. Run `./adapterctl validate --discovery`, then
+   `./adapterctl run --profile conformance --action <action>`. The new action is `unassessed` for
+   every adapter until its native run is observed. Record each result directly in that adapter's
+   manifest as `matched`, `rejected`, or `upstream-blocked`; pin the observed throw message beside
+   every rejection.
+6. Run strict `./adapterctl validate`. Direct outcome completeness replaces every repeated corpus
+   size and throwing-count tripwire; the catalog cardinality replaces every per-harness liveness
+   list. A missing cell or an unassessed cell keeps CI red.
+7. Check that no harness projects the corpus into a narrower local shape.
    `langchain-chromadb` used to
    rebuild the principal from a hardcoded attribute allowlist; when `pv-exists` added
    `principal.attr.manyTeams`, the projection dropped it, the plan folded to `ALWAYS_DENIED`, and
@@ -830,12 +764,8 @@ the acceptance test for these guards; run it before trusting them.
    principal keys it consumes and asserts them, so that particular projection fails loudly — see
    "Seed, principal and derived-field coverage" above.
 
-   The one exception is a `nullRepresentationOmitted` action: its oracle is empty *by
-   construction*, which the degeneracy guard asserts against, so it must stay out of that list.
-   It needs a different anti-vacuity assertion instead — assert why the rejection is required,
-   not merely that one happens. See the `nullRepresentationOmitted` section above for the form
-   that takes in each adapter. It pins a message like any other rejection (see "Pinned throw
-   messages"), so a new one needs a `messages` entry per adapter.
+   An action whose oracle is empty by construction declares `empty`; it remains exercised and its
+   rejection message is still pinned per adapter.
 8. Regenerate the **golden expectations** of every adapter that has a translator unit test, and read
    the added entry. Those suites fail until the new action is accounted for, which is the point —
    see "Golden expectations" below.
@@ -945,12 +875,9 @@ nothing).
 
 ### A throwing action carries no entry
 
-If `actions.json` says the adapter must refuse an action, its pinned message is **already corpus
-data**. The translator unit test reads `adapterUnsupported[adapter]`, `expectedUnsupported` and
-`nullRepresentationOmitted` the same way the harness does and asserts the throw against the message
-pinned there. Writing that message into the adapter's asset too would create two places to change one
-string with nothing to say which is authoritative — and it would make an adapter that rejects most of
-the corpus (langchain-chromadb, elasticsearch-java) carry a file that is almost entirely restatement.
+If an adapter manifest marks an action `rejected`, its pinned message is already adapter-local
+certification data. The translator unit test reads the same direct outcome as the live harness and
+asserts the throw against that message. A throwing action carries no golden filter entry.
 
 ### The completeness guard
 
@@ -958,12 +885,12 @@ ADR 0006 requires every wire fixture to be accounted for **exactly once** in eve
 this test. With the expectations as data that becomes one set equation the suite asserts:
 
 ```
-keys(golden/expectations.json)  ∪  throwing actions from actions.json  ==  wire-fixtures/*.json
+keys(golden/expectations.json) ∪ rejected outcomes from adapterctl.json == wire-fixtures/*.json
 ```
 
 Total, so a fixture with neither lands as a failure; disjoint, so an action that has both is caught
-rather than silently satisfying the union. Add per-bucket count tripwires next to it, for the same
-reason the harnesses carry them.
+rather than silently satisfying the union. The manifest/catalog key-set check supplies the count
+tripwire without a repeated literal.
 
 ### Regeneration is a deliberate act, and the diff is the review
 
@@ -988,38 +915,16 @@ is free to make it idiomatic.
 ## Adding a new adapter
 
 The corpus is the contract; a new adapter joins by proving itself against it. Work in this order —
-the classification is an *output* of the harness, not an input to it. Declaring an action
-unsupported before you have watched it fail is how a translatable shape gets permanently skipped.
+an outcome is an *output* of the harness, not an input to it. Declaring an action rejected before
+you have watched it fail is how a translatable shape gets permanently skipped.
 
-1. **Implement translation.** Follow the closest existing adapter. Spring Data is the reference
-   implementation: when a shape is ambiguous, its behaviour defines the answer, and whether it
-   translates a shape at all decides `conformance` vs `expectedUnsupported`.
+1. **Implement translation.** Follow the closest existing adapter, but treat the policy, planner
+   wire contract, and CEL semantics as authoritative. No adapter defines the capability baseline.
 
 2. **Write the differential harness**, implementing the oracle recipe above against the adapter's
-   own store. Never hand-write expected id sets — the PDP is the oracle for both sides. Derive
-   the classification from `actions.json` at runtime rather than copying it:
-
-   ```
-   oracleActions   = conformance - adapterUnsupported[me] + adapterSupportedExpected[me]
-   throwingActions = adapterUnsupported[me] + (expectedUnsupported - adapterSupportedExpected[me])
-   nullOmitted     = nullRepresentationOmitted            (translated with the option flipped)
-   skipped         = knownDivergences where adapters contains me
-   ```
-
-   Each throwing action also carries the message the throw must contain — `.message` on an
-   `adapterUnsupported` entry, `.messages[me]` on an `expectedUnsupported` one. Resolve it while
-   deriving the classification and fail the run when it is absent, so a shape cannot join the throw
-   suite with nothing but a bare throw behind it (see "Pinned throw messages" above).
-
-   `drizzle/src/adversarial.test.ts` is the cleanest example of this wiring. Every adapter's key
-   in `actions.json` is its **directory name** (`langchain-chromadb`, `elasticsearch-java`).
-
-   **Read every group, and derive the manifest from the same expressions.** The manifest assertion
-   ("each action classified exactly once") is what catches a group you forgot — but only if the
-   group feeds both sides. Harnesses that re-validate `actions.json` into a local record
-   (mongoose, langchain-chromadb) must parse each group explicitly: a field the parser does not
-   name is dropped silently, and a dropped group makes its actions vanish from every count and
-   every parameterised case at once. That is the projection trap, and it passes vacuously.
+   own store. Never hand-write expected id sets — the PDP is the oracle for both sides. Read every
+   action and cardinality from `catalog.json`, and read the adapter's direct outcome from its own
+   `adapterctl.json`. Resolve rejected messages before execution and fail when one is absent.
 
 3. **Persist the seeds exactly**, including the NULL conventions, and read the derived fields from
    `derived-fields.json` rather than recomputing them. `aOptionalString` is NULL for several seeds
@@ -1032,38 +937,29 @@ unsupported before you have watched it fail is how a translatable shape gets per
    harness without those guards silently drops the next corpus field from both sides of its own
    differential.
 
-4. **Assert the degeneracy guard** (see above) and pin the corpus size, so a silently broken PDP
-   connection or a newly added action cannot pass vacuously. Derive the guard's compared list from
-   the adapter's own oracle set and assert per-entry membership — a list lifted from the nearest
-   existing harness will name shapes this adapter does not translate, and those entries guard
-   nothing. Pin every `knownDivergences` action the same way (see above): excluded from the oracle
-   run means exercised nowhere unless the harness says so explicitly.
+4. **Assert every catalog cardinality** (see above). Manifest key equality supplies complete action
+   accounting; no corpus-size literal or per-adapter guard list is required.
 
 5. **Run it and let it fail.** Triage every divergence into exactly one of:
    - a translation bug in the adapter — fix it;
-   - a shape the query language genuinely cannot express — add it to
-     `adapterUnsupported[<adapter>]` with a **specific** reason naming the real mechanism, and
-     make the adapter throw. "Cannot express this shape faithfully" is not a reason; "emits LIKE
+   - a shape the query language genuinely cannot express — mark it `rejected` in the adapter
+     manifest with a **specific** reason naming the real mechanism, and make the adapter throw.
+     "Cannot express this shape faithfully" is not a reason; "emits LIKE
      without an ESCAPE clause, so `%` cannot be matched literally" is. Pin the message the adapter
      actually raises on the same entry, and check it names the mechanism the reason declares;
-   - an upstream planner bug — add to `knownDivergences` with the affected adapters and a reason.
+   - an upstream planner bug — mark it `upstream-blocked` with the reason.
 
    The invariant is absolute: **an inexpressible shape must throw before its filter can be used.**
    A wrong filter is an authorization bug that returns rows the PDP denies. A throw is a bug
    report. Never degrade one operator into a weaker one (`exists_one` into `exists`) to make a
    test pass.
 
-6. **Register in `actions.json`** — add the adapter to the `adapters` roster, and give every
-   `expectedUnsupported` entry it does not promote a `messages` key. Run
-   `scripts/validate-corpus.sh`: it enforces that every `adapterUnsupported` entry names a real
-   `conformance` action and carries a message, that every `adapterSupportedExpected` entry names a
-   real `expectedUnsupported` one, and that each `messages` key set is exactly the roster minus the
-   promotions — so onboarding an adapter without pinning its messages fails there rather than in
-   the new harness alone.
+6. **Add `adapterctl.json`** beside the adapter package. Manifest discovery registers the adapter;
+   strict validation requires one resolved outcome for every catalog action and a message for every
+   rejection.
 
-7. **Write the example application.** Registering in the roster is what demands one:
-   `demo/scripts/validate-demo.sh` reads that same `adapters` key — there is deliberately no
-   second list — and fails the build for any adapter on it without a runnable
+7. **Write the example application.** Manifest discovery is what demands one:
+   `demo/scripts/validate-demo.sh` fails the build for any discovered adapter without a runnable
    `<adapter>/example/run.sh`. So step 6 and this step land together or CI stays red.
 
    An example implements the demo domain's five usage shapes against the adapter installed as a
@@ -1212,7 +1108,7 @@ hazard, caller-owned is not available and the position must be reproduced or rej
 
 The second guard is a positive obligation: **a caller-owned row must name the exact ORM feature the
 caller must check.** A row that only says "caller-owned" does not pass review, for the same reason
-"cannot express this shape faithfully" is not an acceptable `adapterUnsupported` reason.
+"cannot express this shape faithfully" is not an acceptable `rejected` outcome reason.
 
 **2. Say so in the adapter's README**, next to the `Conformance contract` table, as a table with one
 row per hazard above — six rows, in the same order:
@@ -1261,10 +1157,10 @@ is not on the menu, and an optional caller-supplied predicate would be a second 
 truth to live. Those subquery hazards are therefore refusals, each with a message naming the
 reflection that carries it.
 
-The precedent for handling this without a policy action is `nullRepresentationOmitted`: a
-per-adapter contract asserted by each harness rather than a shape in `adversarial.yaml`. If a
-hazard turns out to be expressible as a plan shape — as the absent to-one parent was — move it into
-the policy suite and classify it like anything else.
+The representation precedent is `null-eq-missing`: one catalog action whose adapter-local direct
+outcome records whether that native query language must reject the shape. If a hazard is
+expressible as a plan shape — as the absent to-one parent was — put it in the policy suite and
+record its direct outcome like anything else.
 
 ### Gotchas worth knowing up front
 
@@ -1282,8 +1178,8 @@ the policy suite and classify it like anything else.
   ([ADR 0006](../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md);
   `prisma/src/translator.test.ts` is the reference). Those tests classify every fixture exactly
   once, so **adding a corpus action fails every adapter that has one** until someone records the
-  filter it emits. That is deliberate: it is the same forcing function `actions.json` applies to
-  the classification.
+  filter it emits. That is deliberate: it is the same forcing function direct manifest outcome
+  completeness applies to certification.
 - **A dialect the harness does not exercise is not covered.** Collation, LIKE metacharacter
   handling and parameter typing all differ per dialect, and the READMEs treat them as part of the
   policy contract for exactly this reason. `ent` and `spring-data` run three dialects each, and so
@@ -1291,7 +1187,7 @@ the policy suite and classify it like anything else.
   ([#320](https://github.com/cerbos/query-plan-adapters/issues/320) for PostgreSQL,
   [#340](https://github.com/cerbos/query-plan-adapters/issues/340) for MySQL); the remaining
   TypeScript harnesses are still single-store. Those legs are not a formality. Adding them turned
-  up four live mechanisms SQLite could not see, only two of them visible in `actions.json`
+  up four live mechanisms SQLite could not see, only two of them visible as rejected outcomes
   afterwards because the other two were fixed in the translator:
   - `drizzle`, `$1 IS NULL` over a bound constant — untypeable on PostgreSQL, so a hard error
     rather than the redundancy it is on SQLite (`cr-contains`, `like-underscore`, and the five
@@ -1304,11 +1200,11 @@ the policy suite and classify it like anything else.
     a row CEL's binary floating point denies.
   - `prisma`, `like-backslash` — `\` is the default `LIKE` escape character on PostgreSQL and
     MySQL and literal on SQLite, so one needle meant two things. Not expressible without an
-    `ESCAPE` clause Prisma does not emit, so it is now `adapterUnsupported` and throws.
+    `ESCAPE` clause Prisma does not emit, so it is now `rejected` and throws.
   - `drizzle`, `cast-string-double` — the cast TARGET, not the value. `CAST(… AS TEXT)` is a
     syntax error on MySQL, which spells it `CHAR`, and `CHAR` on PostgreSQL is `character(1)`.
     An adapter that does not know its dialect has no portable spelling, so `string()` is now
-    `adapterUnsupported` there and throws; `ent` keeps translating it because `WithDialect` tells
+    `rejected` there and throws; `ent` keeps translating it because `WithDialect` tells
     its renderer which target to emit.
 
   The MySQL legs also measured what the collation costs, which is a store fact no classification

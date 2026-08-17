@@ -1,6 +1,3 @@
-import * as fs from "fs";
-import * as path from "path";
-
 import { describe, expect, test } from "@jest/globals";
 import type {
   PlanExpressionOperand,
@@ -15,14 +12,12 @@ import type {
   QueryPlanToPrismaResult,
 } from ".";
 import {
-  CONFORMANCE_DIR,
   MAPPER,
   MODEL,
-  classifyActionsForAdapter,
   planFromWireFixture,
   wireFixtureActions,
 } from "./corpus";
-import type { ActionsFile } from "./corpus";
+import { loadActionControlPlane, requireOutcomeMessage } from "./controlPlane";
 
 /**
  * Translator unit test: for every action in the shared `../conformance/` corpus, the filter this
@@ -34,7 +29,7 @@ import type { ActionsFile } from "./corpus";
  * | assertion | who owns it |
  * | --- | --- |
  * | the plan the PDP produces for a policy | `conformance/wire-fixtures/`, replanned and diffed by the `Conformance Corpus` workflow |
- * | which shapes this adapter must refuse, and with what message | `conformance/actions.json` — read below, not restated |
+ * | which shapes this adapter must refuse, and with what message | `prisma/adapterctl.json` — read below, not restated |
  * | the rows a filter returns | `adversarial.test.ts`, against a real store with `check()` as the oracle |
  * | **the filter this adapter emits for a plan** | **here** |
  *
@@ -46,7 +41,7 @@ import type { ActionsFile } from "./corpus";
  * [ADR 0006](../../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md).
  *
  * **What a pinned filter buys over the harness.** The harness proves the filter returns the right
- * rows *against the 21 rows it seeds*. Two different filters can agree on all of them and
+ * rows *against the canonical check resources*. Two different filters can agree on all of them and
  * disagree on the row a consumer has, so a rewrite that quietly changes the emitted SQL passes
  * there and shows up here as a diff a reviewer reads. It is also the only place a
  * `nullAttributeRepresentation` boundary, a timestamp literal, or a mapping the corpus cannot
@@ -57,19 +52,42 @@ import type { ActionsFile } from "./corpus";
  * what makes a new action land as a failure rather than as silence.
  */
 
-const actionsFile: ActionsFile = JSON.parse(
-  fs.readFileSync(path.join(CONFORMANCE_DIR, "actions.json"), "utf8")
-);
+const controlPlane = loadActionControlPlane({
+  adapter: "prisma",
+  selectedAction: undefined,
+});
+
+test("ADAPTERCTL_ACTION selects one direct outcome", () => {
+  const previous = process.env["ADAPTERCTL_ACTION"];
+  process.env["ADAPTERCTL_ACTION"] = "vf-le";
+  try {
+    const focused = loadActionControlPlane({
+      adapter: "prisma",
+      selectedAction: process.env["ADAPTERCTL_ACTION"],
+    });
+    expect(focused.selectedActions).toEqual(["vf-le"]);
+    expect(focused.oracleActions).toEqual(["vf-le"]);
+    expect(focused.throwingActions).toEqual([]);
+    expect(focused.upstreamBlockedActions).toEqual([]);
+    expect(focused.unassessedActions).toEqual([]);
+  } finally {
+    if (previous === undefined) {
+      delete process.env["ADAPTERCTL_ACTION"];
+    } else {
+      process.env["ADAPTERCTL_ACTION"] = previous;
+    }
+  }
+});
 
 /**
- * The shapes `actions.json` says this adapter must refuse, each with the message it must refuse
- * them with. Identical to the classification `adversarial.test.ts` asserts against a live PDP;
+ * The direct outcomes in `adapterctl.json` say which shapes this adapter must refuse and include
+ * the message it must refuse
+ * them with. Identical to the direct outcomes `adversarial.test.ts` asserts against a live PDP;
  * asserting it here as well is what lets the completeness guard below be total, and it costs a
  * millisecond rather than a container.
  */
-const { throwingActions: THROWING_ACTIONS } = classifyActionsForAdapter(
-  actionsFile,
-  "prisma"
+const THROWING_ACTIONS = controlPlane.throwingActions.filter(
+  ({ action }) => action !== "null-eq-missing",
 );
 
 function translate(
@@ -77,7 +95,7 @@ function translate(
   options: {
     mapper?: Mapper;
     nullAttributeRepresentation?: NullAttributeRepresentation;
-  } = {}
+  } = {},
 ): QueryPlanToPrismaResult {
   return queryPlanToPrisma({
     queryPlan: planFromWireFixture(action),
@@ -92,7 +110,7 @@ function translate(
 /**
  * The plan kind for the two corpus actions the planner resolves without a condition.
  *
- * `p-has` is `knownDivergences` for every adapter — the planner folds `has(unknown attr)` to
+ * `p-has` is `upstream-blocked` direct outcomes for every adapter — the planner folds `has(unknown attr)` to
  * ALWAYS_ALLOWED, so the harness cannot compare it against the oracle. Translation is still
  * defined, and pinning it here is the only assertion the corpus makes about the action.
  */
@@ -126,7 +144,9 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
   "arith-add": { aNumber: { gt: 1 } },
   "arith-div": { aNumber: { equals: 2 } },
   "arith-div-frac": { aNumber: { gte: 3 } },
-  "arith-mult-neg": { OR: [{ aNumber: { gt: -1.5 } }, { aNumber: { gte: -1 } }] },
+  "arith-mult-neg": {
+    OR: [{ aNumber: { gt: -1.5 } }, { aNumber: { gte: -1 } }],
+  },
   "arith-sub": { aNumber: { lte: 3 } },
   // Value-first: the plan reads `K < add(aNumber, K)`, and the mirrored operator is the whole
   // assertion. Emitting `lt` here would invert the comparison — this repository's canonical bug
@@ -440,11 +460,15 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
   "cs-eq": { aString: { equals: "one" } },
   "cs-startswith": { aString: { startsWith: "one" } },
   "double-negation": { NOT: { aBool: { equals: false } } },
-  "double-threshold": { AND: [{ aNumber: { gte: 1.5 } }, { aNumber: { gt: 1 } }] },
+  "double-threshold": {
+    AND: [{ aNumber: { gte: 1.5 } }, { aNumber: { gt: 1 } }],
+  },
   "empty-string-eq": { aString: { equals: "" } },
   "exists-on-empty": { tags: { some: { name: { equals: "public" } } } },
   "field-to-field": {
-    aString: { equals: { _ref: "aOptionalString", _container: "AdversarialResource" } },
+    aString: {
+      equals: { _ref: "aOptionalString", _container: "AdversarialResource" },
+    },
   },
   "gt-bare": { aNumber: { gt: 1 } },
   "hier-ancestor-cf": { scope: { startsWith: "dept.eng." } },
@@ -475,19 +499,32 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
   "id-eq-const": { id: { equals: "f1" } },
   // `_ref`/`_container` is Prisma's field-reference encoding: comparing two columns needs the
   // model name, which is why `queryPlanToPrisma` takes `model`.
-  "id-f2f": { aString: { equals: { _ref: "id", _container: "AdversarialResource" } } },
+  "id-f2f": {
+    aString: { equals: { _ref: "id", _container: "AdversarialResource" } },
+  },
   "id-f2f-ne": {
-    NOT: { aString: { equals: { _ref: "id", _container: "AdversarialResource" } } },
+    NOT: {
+      aString: { equals: { _ref: "id", _container: "AdversarialResource" } },
+    },
   },
   "in-null-elem-hasint": {
-    OR: [{ tags: { some: { name: "public" } } }, { tags: { some: { name: null } } }],
+    OR: [
+      { tags: { some: { name: "public" } } },
+      { tags: { some: { name: null } } },
+    ],
   },
   "in-null-elem-mixed": {
-    OR: [{ aOptionalString: { in: ["x", "one_two"] } }, { aOptionalString: null }],
+    OR: [
+      { aOptionalString: { in: ["x", "one_two"] } },
+      { aOptionalString: null },
+    ],
   },
   "in-null-elem-neg": {
     NOT: {
-      OR: [{ aOptionalString: { in: ["x", "one_two"] } }, { aOptionalString: null }],
+      OR: [
+        { aOptionalString: { in: ["x", "one_two"] } },
+        { aOptionalString: null },
+      ],
     },
   },
   "in-null-elem-only": { aOptionalString: { equals: null } },
@@ -495,20 +532,26 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
   "in-null-elem-rel": { tags: { some: { name: null } } },
   "in-null-elem-rel-neg": { NOT: { tags: { some: { name: null } } } },
   "in-single": { aString: { equals: "one" } },
-  "lambda-in-principal": { tags: { some: { name: { in: ["public", "special"] } } } },
+  "lambda-in-principal": {
+    tags: { some: { name: { in: ["public", "special"] } } },
+  },
   "le-bare": { aNumber: { lte: 2 } },
   "like-bracket": { aString: { startsWith: "[SEC]" } },
   "macro-depth3-all": {
     categories: {
       some: {
-        subCategories: { every: { labels: { some: { name: { equals: "gold" } } } } },
+        subCategories: {
+          every: { labels: { some: { name: { equals: "gold" } } } },
+        },
       },
     },
   },
   "macro-depth3-exists": {
     categories: {
       some: {
-        subCategories: { some: { labels: { some: { name: { equals: "gold" } } } } },
+        subCategories: {
+          some: { labels: { some: { name: { equals: "gold" } } } },
+        },
       },
     },
   },
@@ -518,7 +561,9 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
         NOT: {
           categories: {
             some: {
-              subCategories: { some: { labels: { some: { name: { equals: "gold" } } } } },
+              subCategories: {
+                some: { labels: { some: { name: { equals: "gold" } } } },
+              },
             },
           },
         },
@@ -530,7 +575,9 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
               AND: [
                 {
                   NOT: {
-                    subCategories: { some: { labels: { some: { name: { equals: "gold" } } } } },
+                    subCategories: {
+                      some: { labels: { some: { name: { equals: "gold" } } } },
+                    },
                   },
                 },
                 {
@@ -538,7 +585,9 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
                     some: {
                       AND: [
                         {
-                          NOT: { labels: { some: { name: { equals: "gold" } } } },
+                          NOT: {
+                            labels: { some: { name: { equals: "gold" } } },
+                          },
                         },
                         { labels: { some: { name: null } } },
                       ],
@@ -574,7 +623,10 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
           {
             OR: [
               {
-                AND: [{ aBool: { equals: true } }, { aBool: { equals: false } }],
+                AND: [
+                  { aBool: { equals: true } },
+                  { aBool: { equals: false } },
+                ],
               },
             ],
           },
@@ -587,7 +639,10 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
             OR: [
               { aBool: { equals: true } },
               {
-                AND: [{ aBool: { equals: true } }, { aBool: { equals: false } }],
+                AND: [
+                  { aBool: { equals: true } },
+                  { aBool: { equals: false } },
+                ],
               },
             ],
           },
@@ -619,7 +674,9 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
   // The De Morgan branch. `NOT` over a conjunction was unreachable from the corpus until #387,
   // and it is the same wire shape a DENY-composed `nand` rule produces — byte-identical
   // `filter.condition` JSON, which is why the DENY spelling ported as a delete.
-  "not-and": { NOT: { AND: [{ aBool: { equals: true } }, { aString: { not: "one" } }] } },
+  "not-and": {
+    NOT: { AND: [{ aBool: { equals: true } }, { aString: { not: "one" } }] },
+  },
   "not-empty": { NOT: { tags: { none: {} } } },
   "not-exists": {
     AND: [
@@ -641,7 +698,9 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
           { aOptionalString: { not: null } },
           { scope: { not: null } },
           {
-            aOptionalString: { equals: { _ref: "scope", _container: "AdversarialResource" } },
+            aOptionalString: {
+              equals: { _ref: "scope", _container: "AdversarialResource" },
+            },
           },
         ],
       },
@@ -649,7 +708,10 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
   },
   "null-value-ne-const": {
     NOT: {
-      AND: [{ aOptionalString: { not: null } }, { aOptionalString: { equals: "x" } }],
+      AND: [
+        { aOptionalString: { not: null } },
+        { aOptionalString: { equals: "x" } },
+      ],
     },
   },
   // Under the explicit-null convention CEL holds a null VALUE, so `null != "x"` is TRUE and
@@ -659,7 +721,10 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
   // the mapper buy (cerbos/query-plan-adapters#308).
   "null-value-not-eq-const": {
     NOT: {
-      AND: [{ aOptionalString: { not: null } }, { aOptionalString: { equals: "x" } }],
+      AND: [
+        { aOptionalString: { not: null } },
+        { aOptionalString: { equals: "x" } },
+      ],
     },
   },
   "null-value-not-in-const": {
@@ -769,17 +834,24 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
       { tags: { some: { name: { equals: "public" } } } },
     ],
   },
-  "or-eq-in": { OR: [{ aBool: { equals: true } }, { tags: { some: { name: "public" } } }] },
+  "or-eq-in": {
+    OR: [{ aBool: { equals: true } }, { tags: { some: { name: "public" } } }],
+  },
   "outer-attr-depth2": {
     AND: [
       {
-        categories: { some: { subCategories: { some: { name: { equals: "finance" } } } } },
+        categories: {
+          some: { subCategories: { some: { name: { equals: "finance" } } } },
+        },
       },
       { aBool: { equals: true } },
     ],
   },
   "p-arith-in-lambda": {
-    AND: [{ tags: { some: { name: { equals: "public" } } } }, { aNumber: { gt: 1 } }],
+    AND: [
+      { tags: { some: { name: { equals: "public" } } } },
+      { aNumber: { gt: 1 } },
+    ],
   },
   "p-double-frac": {
     AND: [
@@ -792,7 +864,9 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
     AND: [
       {
         tags: {
-          some: { name: { in: ["public", "h\u00e9llo\ud83d\ude80", "100%_x"] } },
+          some: {
+            name: { in: ["public", "h\u00e9llo\ud83d\ude80", "100%_x"] },
+          },
         },
       },
       { NOT: { tags: { some: { name: null } } } },
@@ -802,7 +876,9 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
   "p-in-null-single": { aOptionalString: { equals: "x" } },
   "p-lambda-inner-f2f": {
     tags: {
-      some: { tagId: { equals: { _ref: "name", _container: "AdversarialTag" } } },
+      some: {
+        tagId: { equals: { _ref: "name", _container: "AdversarialTag" } },
+      },
     },
   },
   "p-not-exists-empty": {
@@ -844,7 +920,10 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
           {
             OR: [
               {
-                AND: [{ NOT: { aString: { equals: "" } } }, { aNumber: { gt: 1 } }],
+                AND: [
+                  { NOT: { aString: { equals: "" } } },
+                  { aNumber: { gt: 1 } },
+                ],
               },
               {
                 AND: [
@@ -862,7 +941,9 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
           {
             OR: [
               { NOT: { aNumber: { lt: 0 } } },
-              { AND: [{ aNumber: { lt: 0 } }, { NOT: { aNumber: { lt: 0 } } }] },
+              {
+                AND: [{ aNumber: { lt: 0 } }, { NOT: { aNumber: { lt: 0 } } }],
+              },
             ],
           },
         ],
@@ -896,7 +977,10 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
             OR: [
               { AND: [{ aString: { equals: "" } }, { aNumber: { gt: 1 } }] },
               {
-                AND: [{ NOT: { aString: { equals: "" } } }, { aNumber: { gt: 2 } }],
+                AND: [
+                  { NOT: { aString: { equals: "" } } },
+                  { aNumber: { gt: 2 } },
+                ],
               },
               {
                 AND: [
@@ -945,7 +1029,10 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
     AND: [
       { aOptionalString: { not: "set" } },
       {
-        AND: [{ aOptionalString: { not: "" } }, { aOptionalString: { not: "%_o" } }],
+        AND: [
+          { aOptionalString: { not: "" } },
+          { aOptionalString: { not: "%_o" } },
+        ],
       },
     ],
   },
@@ -976,7 +1063,9 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
     ],
   },
   "rel-bool-hop": { parent: { is: { aBool: { equals: true } } } },
-  "rel-bool-hop2": { parent: { is: { inner: { is: { aBool: { equals: true } } } } } },
+  "rel-bool-hop2": {
+    parent: { is: { inner: { is: { aBool: { equals: true } } } } },
+  },
   "rel-contains-hop": { parent: { is: { aString: { contains: "done" } } } },
   "rel-eq-hop": { parent: { is: { aString: { equals: "One" } } } },
   "rel-eq-num-hop": { parent: { is: { aNumber: { equals: 2 } } } },
@@ -1014,7 +1103,9 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
       { parent: { is: { aNumber: { lt: 12 } } } },
     ],
   },
-  "rel-startswith-hop2": { parent: { is: { inner: { is: { aString: { startsWith: "100" } } } } } },
+  "rel-startswith-hop2": {
+    parent: { is: { inner: { is: { aString: { startsWith: "100" } } } } },
+  },
   "root-bare-bool": { aBool: { equals: true } },
   "root-or": { OR: [{ aBool: { equals: true } }, { aNumber: { lt: 0 } }] },
   "ternary-bare": {
@@ -1057,7 +1148,10 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
           {
             OR: [
               {
-                AND: [{ NOT: { aString: { equals: "" } } }, { aNumber: { gte: 2 } }],
+                AND: [
+                  { NOT: { aString: { equals: "" } } },
+                  { aNumber: { gte: 2 } },
+                ],
               },
               {
                 AND: [
@@ -1102,9 +1196,13 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
   "vf-null-ne": { aOptionalString: { not: null } },
   "vf-size": { tags: { some: {} } },
   "w1-exists-chain": {
-    categories: { some: { subCategories: { some: { name: { equals: "finance" } } } } },
+    categories: {
+      some: { subCategories: { some: { name: { equals: "finance" } } } },
+    },
   },
-  "w1-in-chain": { categories: { some: { subCategories: { some: { name: "finance" } } } } },
+  "w1-in-chain": {
+    categories: { some: { subCategories: { some: { name: "finance" } } } },
+  },
   // The same absent-hop guard as `rel-not-bool-hop`, one level up a multi-hop chain: the negation
   // is joined through every intermediate relation, never off the root, and the leading existence
   // test is what stops a row with no category at all from satisfying the negation.
@@ -1113,7 +1211,9 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
       { categories: { some: {} } },
       {
         NOT: {
-          categories: { some: { subCategories: { some: { name: { equals: "finance" } } } } },
+          categories: {
+            some: { subCategories: { some: { name: { equals: "finance" } } } },
+          },
         },
       },
     ],
@@ -1123,7 +1223,9 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
       { categories: { some: {} } },
       {
         NOT: {
-          categories: { some: { subCategories: { some: { name: "finance" } } } },
+          categories: {
+            some: { subCategories: { some: { name: "finance" } } },
+          },
         },
       },
     ],
@@ -1133,7 +1235,9 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
       { categories: { some: {} } },
       {
         NOT: {
-          categories: { some: { subCategories: { some: { name: "finance" } } } },
+          categories: {
+            some: { subCategories: { some: { name: "finance" } } },
+          },
         },
       },
     ],
@@ -1145,13 +1249,17 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
     ],
   },
   "w1-size-chain": { categories: { some: { subCategories: { some: {} } } } },
-  "w1-size-zero-chain": { categories: { some: { subCategories: { none: {} } } } },
+  "w1-size-zero-chain": {
+    categories: { some: { subCategories: { none: {} } } },
+  },
   "w1-ternary-chain-cond": {
     OR: [
       {
         AND: [
           {
-            categories: { some: { subCategories: { some: { name: "finance" } } } },
+            categories: {
+              some: { subCategories: { some: { name: "finance" } } },
+            },
           },
           { aBool: { equals: true } },
         ],
@@ -1163,7 +1271,9 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
               { categories: { some: {} } },
               {
                 NOT: {
-                  categories: { some: { subCategories: { some: { name: "finance" } } } },
+                  categories: {
+                    some: { subCategories: { some: { name: "finance" } } },
+                  },
                 },
               },
             ],
@@ -1174,14 +1284,18 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
       {
         AND: [
           {
-            categories: { some: { subCategories: { some: { name: "finance" } } } },
+            categories: {
+              some: { subCategories: { some: { name: "finance" } } },
+            },
           },
           {
             AND: [
               { categories: { some: {} } },
               {
                 NOT: {
-                  categories: { some: { subCategories: { some: { name: "finance" } } } },
+                  categories: {
+                    some: { subCategories: { some: { name: "finance" } } },
+                  },
                 },
               },
             ],
@@ -1200,14 +1314,14 @@ describe("corpus shapes", () => {
         kind: PlanKind.CONDITIONAL,
         filters,
       });
-    }
+    },
   );
 
   test.each(Object.entries(EXPECTED_KINDS))(
     "%s resolves without a condition",
     (action, kind) => {
       expect(translate(action)).toStrictEqual({ kind });
-    }
+    },
   );
 
   // The message, not just the throw: a mapper typo or an unrelated validation satisfies a bare
@@ -1215,16 +1329,16 @@ describe("corpus shapes", () => {
   // same assertion against a live PDP; here it costs a millisecond and covers the whole roster,
   // which is what lets the completeness guard below be total.
   test.each(THROWING_ACTIONS)(
-    "%s is refused with the message actions.json pins (%s)",
-    (action, _reason, message) => {
+    "$action is refused with the message adapterctl.json pins ($reason)",
+    ({ action, message }) => {
       expect(() => translate(action)).toThrow(message);
-    }
+    },
   );
 
   test("every corpus action is classified here exactly once", () => {
     const filters = Object.keys(EXPECTED_FILTERS);
     const kinds = Object.keys(EXPECTED_KINDS);
-    const throwing = THROWING_ACTIONS.map(([action]) => action);
+    const throwing = THROWING_ACTIONS.map(({ action }) => action);
     const classified = [...filters, ...kinds, ...throwing].sort();
 
     // Total: a corpus action with no entry here lands as a failure rather than as silence. This
@@ -1237,24 +1351,18 @@ describe("corpus shapes", () => {
     // The table is alphabetical, so a translator change reads as the list of shapes it moved.
     expect(filters).toEqual([...filters].sort());
 
-    // Tripwires. Bump them deliberately: a count that moves without anyone noticing is how a
-    // shape gets dropped from a table nobody reads end to end.
-    expect({
-      filters: filters.length,
-      kinds: kinds.length,
-      throwing: throwing.length,
-    }).toEqual({ filters: 136, kinds: 2, throwing: 61 });
+    expect(classified).toEqual(controlPlane.allActions);
   });
 });
 
 describe("nullAttributeRepresentation", () => {
-  // `null-eq-missing` is the corpus's `nullRepresentationOmitted` probe: `== null` against an
+  // `null-eq-missing` is the corpus's omitted-NULL probe: `== null` against an
   // attribute the caller OMITS when the column is NULL. The two conventions are indistinguishable
   // on the wire — the planner emits the same `eq(attr, null)` either way — so the adapter has to
   // be told, and the whole behaviour is a translator property with no store in it.
   test("explicit: a null operand becomes an IS NULL filter", () => {
     expect(
-      translate("null-eq-missing", { nullAttributeRepresentation: "explicit" })
+      translate("null-eq-missing", { nullAttributeRepresentation: "explicit" }),
     ).toStrictEqual({
       kind: PlanKind.CONDITIONAL,
       filters: { aOptionalString: { equals: null } },
@@ -1265,8 +1373,10 @@ describe("nullAttributeRepresentation", () => {
     // A NULL column sends no attribute, so check() denies on a missing-attribute error while the
     // filter above would return exactly those rows (#302).
     expect(() =>
-      translate("null-eq-missing", { nullAttributeRepresentation: "omitted" })
-    ).toThrow("missing-attribute error");
+      translate("null-eq-missing", { nullAttributeRepresentation: "omitted" }),
+    ).toThrow(
+      requireOutcomeMessage({ controlPlane, action: "null-eq-missing" }),
+    );
   });
 });
 
@@ -1283,11 +1393,11 @@ describe("timestamp literals", () => {
     });
 
   test("a nanosecond instant — what the PDP actually folds — is refused", () => {
-    // This, and nothing else, is why `ts-window` and `ts-vf` are `adapterUnsupported`. A tidy
+    // This, and nothing else, is why `ts-window` and `ts-vf` have `rejected` direct outcomes. A tidy
     // millisecond substitution in the loader would translate cleanly and quietly contradict
-    // actions.json.
+    // adapterctl.json.
     expect(() => translate("ts-window")).toThrow(
-      "Timestamp value exceeds millisecond precision"
+      "Timestamp value exceeds millisecond precision",
     );
   });
 
@@ -1313,7 +1423,10 @@ describe("timestamp literals", () => {
     ["a year outside CEL's instant range", "0000-01-01T00:00:00Z"],
     ["a day that does not exist", "2024-02-30T00:00:00Z"],
     ["sub-millisecond precision", "2024-01-01T00:00:00.1234Z"],
-    ["an offset that pushes past the maximum instant", "9999-12-31T23:00:00-02:00"],
+    [
+      "an offset that pushes past the maximum instant",
+      "9999-12-31T23:00:00-02:00",
+    ],
   ])("%s fails closed", (_label, value) => {
     expect(() => at(value)).toThrow(/RFC 3339|millisecond|instant range/);
   });
@@ -1353,7 +1466,9 @@ describe("relation subqueryFilter", () => {
   test("declared: exists() examines only the records the application serialised", () => {
     expect(filtersFor("exists-on-empty", VISIBLE_ONLY)).toStrictEqual({
       tags: {
-        some: { AND: [{ name: { not: "hidden" } }, { name: { equals: "public" } }] },
+        some: {
+          AND: [{ name: { not: "hidden" } }, { name: { equals: "public" } }],
+        },
       },
     });
   });
@@ -1406,7 +1521,7 @@ describe("the mapper contract", () => {
         mapper: (key: string) => ({
           field: key.replace("request.resource.attr.", ""),
         }),
-      })
+      }),
     ).toStrictEqual({
       kind: PlanKind.CONDITIONAL,
       filters: { aString: { equals: "one" } },
@@ -1423,7 +1538,7 @@ describe("the mapper contract", () => {
             fields: { aBool: { field: "aBool" } },
           },
         }),
-      })
+      }),
     ).toStrictEqual({
       kind: PlanKind.CONDITIONAL,
       filters: { parent: { is: { aBool: { equals: true } } } },
@@ -1434,7 +1549,7 @@ describe("the mapper contract", () => {
     expect(() =>
       translate("not-empty", {
         mapper: { "request.resource.attr.tags": { field: "tags" } },
-      })
+      }),
     ).toThrow("size operator requires a relation mapping");
   });
 });
@@ -1466,14 +1581,14 @@ describe("plans the planner cannot produce", () => {
       queryPlanToPrisma({
         queryPlan: { kind: "INVALID_KIND" } as unknown as PlanResourcesResponse,
         mapper: {},
-      })
+      }),
     ).toThrow("Invalid query plan.");
   });
 
   test("a condition with neither operator nor operands", () => {
-    expect(() => queryPlanToPrisma({ queryPlan: plan({}), mapper: {} })).toThrow(
-      "Invalid Cerbos expression structure"
-    );
+    expect(() =>
+      queryPlanToPrisma({ queryPlan: plan({}), mapper: {} }),
+    ).toThrow("Invalid Cerbos expression structure");
   });
 
   test("an operator this adapter has never heard of", () => {
@@ -1481,7 +1596,7 @@ describe("plans the planner cannot produce", () => {
       queryPlanToPrisma({
         queryPlan: plan({ operator: "unsupported", operands: [] }),
         mapper: {},
-      })
+      }),
     ).toThrow("Unsupported operator: unsupported");
   });
 
@@ -1490,7 +1605,7 @@ describe("plans the planner cannot produce", () => {
       queryPlanToPrisma({
         queryPlan: plan({ operator: "eq", operands: [{}, { value: "test" }] }),
         mapper: {},
-      })
+      }),
     ).toThrow("No valid left operand found");
   });
 
@@ -1502,9 +1617,9 @@ describe("plans the planner cannot produce", () => {
           operands: [{ name: "request.resource.attr.aBool" }, { value: true }],
         }),
         mapper: MAPPER,
-      })
+      }),
     ).toThrow(
-      "if (ternary) requires exactly 3 operands (condition, then, else), got 2"
+      "if (ternary) requires exactly 3 operands (condition, then, else), got 2",
     );
   });
 
@@ -1516,7 +1631,7 @@ describe("plans the planner cannot produce", () => {
           operands: [{ value: null }, { value: true }, { value: false }],
         }),
         mapper: MAPPER,
-      })
+      }),
     ).toThrow("if (ternary) condition must be a boolean expression");
   });
 
@@ -1539,7 +1654,7 @@ describe("plans the planner cannot produce", () => {
           ],
         }),
         mapper: MAPPER,
-      })
+      }),
     ).toThrow("eq with a ternary requires exactly 2 operands, got 3");
   });
 
@@ -1566,7 +1681,7 @@ describe("plans the planner cannot produce", () => {
           ],
         }),
         mapper: MAPPER,
-      })
+      }),
     ).toThrow("exists over a literal collection requires a list value");
   });
 
@@ -1578,9 +1693,9 @@ describe("plans the planner cannot produce", () => {
           operands: [{ value: true }, { value: false }, { value: true }],
         }),
         mapper: MAPPER,
-      })
+      }),
     ).toThrow(
-      "A constant-false conditional predicate must be folded by the Cerbos planner"
+      "A constant-false conditional predicate must be folded by the Cerbos planner",
     );
   });
 });

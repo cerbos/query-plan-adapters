@@ -205,7 +205,7 @@
       }
     },
     "rel-eq-hop": {
-      "note": "The corpus's one real to-one relation (#375), flattened onto a dotted metadata key. Chroma has no join, so the chain resolves only because the application stored `parent.aString` on the document itself — and every `parent.*` mapping stays optional, because 8 of the 21 seeds have no parent, which is why the NEGATED hop shapes are fail-closed.",
+      "note": "The corpus's one real to-one relation (#375), flattened onto a dotted metadata key. Chroma has no join, so the chain resolves only because the application stored `parent.aString` on the document itself — and every `parent.*` mapping stays optional, because canonical resources may have no parent, which is why the NEGATED hop shapes are fail-closed.",
       "kind": "KIND_CONDITIONAL",
       "filters": {
         "parent.aString": {

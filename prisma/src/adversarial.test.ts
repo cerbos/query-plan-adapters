@@ -7,26 +7,15 @@ import {
   PlanExpressionValue,
   PlanExpressionVariable,
 } from "@cerbos/core";
-import type {
-  PlanExpressionOperand,
-  Principal,
-  Resource,
-  Value,
-} from "@cerbos/core";
+import type { PlanExpressionOperand, Principal } from "@cerbos/core";
 
 import { queryPlanToPrisma, PlanKind, MapperConfig } from ".";
+import { CONFORMANCE_DIR, MAPPER, MODEL } from "./corpus";
 import {
-  CONFORMANCE_DIR,
-  MAPPER,
-  MODEL,
-  classifyActionsForAdapter,
-  requireMessage,
-} from "./corpus";
-import type {
-  ActionClassification,
-  ActionsFile,
-  ThrowingAction,
-} from "./corpus";
+  loadActionControlPlane,
+  loadCheckResources,
+  requireOutcomeMessage,
+} from "./controlPlane";
 import { prisma } from "./test-setup.adversarial";
 
 /**
@@ -38,10 +27,9 @@ import { prisma } from "./test-setup.adversarial";
  *
  * No hand-computed expectations: if this adapter's filter semantics diverge from Cerbos's own
  * evaluation for any row, the mismatch surfaces mechanically. See `conformance/README.md` for the
- * oracle recipe (NULL-as-missing-attribute, the degeneracy guard) — this file only owns seeding
- * and executing the query. The mapper and the per-adapter classification live in `./corpus`,
- * shared with `translator.test.ts`, which pins the filter this suite then proves returns the
- * right rows.
+ * oracle recipe (NULL-as-missing-attribute and catalog cardinality expectations). This file owns
+ * seeding and query execution; `./controlPlane` validates the catalog and adapter-local direct
+ * outcomes shared with `translator.test.ts`.
  *
  * The whole corpus is replayed against every store this adapter is proved on, one store per run,
  * selected with `ADAPTER_TEST_DB` (`sqlite` by default, `postgres` and `mysql` for the
@@ -69,7 +57,10 @@ type StoreName = (typeof STORE_NAMES)[number];
  * engine.
  */
 const STORE_BANNERS: Record<StoreName, { query: string; engine: string }> = {
-  sqlite: { query: "select 'SQLite ' || sqlite_version() as banner", engine: "SQLite" },
+  sqlite: {
+    query: "select 'SQLite ' || sqlite_version() as banner",
+    engine: "SQLite",
+  },
   postgres: { query: "select version() as banner", engine: "PostgreSQL" },
   mysql: { query: "select @@version_comment as banner", engine: "MySQL" },
 };
@@ -80,7 +71,7 @@ function selectedStoreName(): StoreName {
   // repeat here is what keeps the assertion below reading against a value this file trusts.
   if (!STORE_NAMES.includes(requested as StoreName)) {
     throw new Error(
-      `Unknown ADAPTER_TEST_DB "${requested}": expected one of ${STORE_NAMES.join(", ")}`
+      `Unknown ADAPTER_TEST_DB "${requested}": expected one of ${STORE_NAMES.join(", ")}`,
     );
   }
   return requested as StoreName;
@@ -157,7 +148,7 @@ interface SeedsFile {
 //
 // The same parsed seed feeds the stored row AND the check() oracle, so a corpus field this harness
 // does not consume is dropped from both sides at once and the differential agrees for the wrong
-// reason — the projection trap conformance/README.md describes for actions.json, applied to the
+// reason — the projection trap conformance/README.md describes for adapterctl.json, applied to the
 // seeds. Asserting set equality catches both directions: a corpus key nothing here reads, and a key
 // this harness reads that the corpus no longer carries.
 
@@ -226,13 +217,13 @@ function assertKeys(
   label: string,
   got: string[],
   want: readonly string[],
-  optional: readonly string[] = []
+  optional: readonly string[] = [],
 ): void {
   const allowed = new Set<string>([...want, ...optional]);
   for (const key of got) {
     if (!allowed.has(key)) {
       throw new Error(
-        `${label} carries "${key}", which this harness does not consume: an unconsumed corpus field is dropped from the stored row and the check() oracle at once`
+        `${label} carries "${key}", which this harness does not consume: an unconsumed corpus field is dropped from the stored row and the check() oracle at once`,
       );
     }
   }
@@ -240,7 +231,7 @@ function assertKeys(
   for (const key of want) {
     if (!present.has(key)) {
       throw new Error(
-        `${label} is missing "${key}", which this harness consumes`
+        `${label} is missing "${key}", which this harness consumes`,
       );
     }
   }
@@ -257,18 +248,15 @@ function assertPrincipalAttrShape(label: string, value: unknown): void {
     return;
   }
   throw new Error(
-    `${label} is neither a string nor an array of strings, the only two shapes this harness consumes: a reshaped principal attribute feeds the plan and the check() oracle at once`
+    `${label} is neither a string nor an array of strings, the only two shapes this harness consumes: a reshaped principal attribute feeds the plan and the check() oracle at once`,
   );
 }
 
 const seedsFile: SeedsFile = JSON.parse(
-  fs.readFileSync(path.join(CONFORMANCE_DIR, "seeds.json"), "utf8")
-);
-const actionsFile: ActionsFile = JSON.parse(
-  fs.readFileSync(path.join(CONFORMANCE_DIR, "actions.json"), "utf8")
+  fs.readFileSync(path.join(CONFORMANCE_DIR, "seeds.json"), "utf8"),
 );
 const derivedFile: DerivedFile = JSON.parse(
-  fs.readFileSync(path.join(CONFORMANCE_DIR, "derived-fields.json"), "utf8")
+  fs.readFileSync(path.join(CONFORMANCE_DIR, "derived-fields.json"), "utf8"),
 );
 const SEEDS = seedsFile.seeds;
 
@@ -288,7 +276,7 @@ SEEDS.forEach((seed, index) => {
 assertKeys(
   "seeds.json principal",
   Object.keys(seedsFile.principal),
-  PRINCIPAL_KEYS
+  PRINCIPAL_KEYS,
 );
 // `attr` is optional on the SDK's Principal type; the corpus always carries it, and the assertion
 // above is what proves it rather than this fallback.
@@ -296,7 +284,7 @@ const PRINCIPAL_ATTR = seedsFile.principal.attr ?? {};
 assertKeys(
   "seeds.json principal.attr",
   Object.keys(PRINCIPAL_ATTR),
-  PRINCIPAL_ATTR_KEYS
+  PRINCIPAL_ATTR_KEYS,
 );
 for (const [key, value] of Object.entries(PRINCIPAL_ATTR)) {
   assertPrincipalAttrShape(`seeds.json principal.attr.${key}`, value);
@@ -306,168 +294,40 @@ assertKeys("derived-fields.json fields", derivedFile.fields, DERIVED_KEYS);
 const DERIVED_IDS = Object.keys(derivedFile.derived);
 if (DERIVED_IDS.length !== SEEDS.length) {
   throw new Error(
-    `derived-fields.json has ${DERIVED_IDS.length} entries for ${SEEDS.length} seeds`
+    `derived-fields.json has ${DERIVED_IDS.length} entries for ${SEEDS.length} seeds`,
   );
 }
 for (const seed of SEEDS) {
   assertKeys(
     `derived-fields.json derived["${seed.id}"]`,
     Object.keys(derivedFor(seed)),
-    DERIVED_KEYS
+    DERIVED_KEYS,
   );
 }
 
-const {
-  oracleActions: ORACLE_ACTIONS,
-  throwingActions: THROWING_ACTIONS,
-  supportedExpected: PRISMA_SUPPORTED_EXPECTED,
-} = classifyActionsForAdapter(actionsFile, "prisma");
-const PRISMA_KNOWN_DIVERGENCES = new Set(
-  (actionsFile.knownDivergences ?? [])
-    .filter((entry) => entry.adapters.includes("prisma"))
-    .map((entry) => entry.action)
-);
-const EXPECTED_UNSUPPORTED_ACTIONS = new Set(
-  actionsFile.expectedUnsupported.map((entry) => entry.action)
-);
+const ACTION_CONTROL_PLANE = loadActionControlPlane({
+  adapter: "prisma",
+  selectedAction: process.env["ADAPTERCTL_ACTION"],
+});
+const FULL_MATRIX = process.env["ADAPTERCTL_ACTION"] === undefined;
+const fullMatrixTest = FULL_MATRIX ? test : test.skip;
+const CHECK_RESOURCES = loadCheckResources();
+const ORACLE_ACTIONS = ACTION_CONTROL_PLANE.oracleActions;
 // Actions whose `== null` probe targets an attribute the oracle OMITS for NULL columns. They
 // carry no oracle comparison: under the omitted representation check() denies every row, so the
 // adapter must reject the shape rather than emit a filter (#302).
-const NULL_REPRESENTATION_OMITTED = actionsFile.nullRepresentationOmitted.map(
-  (entry): ThrowingAction => [
-    entry.action,
-    entry.reason,
-    requireMessage(
-      `nullRepresentationOmitted.${entry.action}.messages.prisma`,
-      entry.messages?.["prisma"]
-    ),
-  ]
+const NULL_REPRESENTATION_OMITTED = ACTION_CONTROL_PLANE.throwingActions.filter(
+  ({ action }) => action === "null-eq-missing",
+);
+const THROWING_ACTIONS = ACTION_CONTROL_PLANE.throwingActions.filter(
+  ({ action }) => action !== "null-eq-missing",
 );
 /** The one message every null-carrying action must be rejected with under `omitted`. */
-const NULL_OMITTED_MESSAGE = NULL_REPRESENTATION_OMITTED[0]?.[2] ?? "";
-const MANIFEST_ACTIONS = new Set([
-  ...actionsFile.conformance,
-  ...EXPECTED_UNSUPPORTED_ACTIONS,
-  ...NULL_REPRESENTATION_OMITTED.map(([action]) => action),
-  // ALL divergences, not just Prisma's: a divergence registered solely for another adapter
-  // must still enter this manifest, so the size tripwire and the classified-exactly-once
-  // check flag it for triage here instead of letting the action silently vanish from this
-  // harness. Classification/skipping still uses the Prisma-filtered set.
-  ...(actionsFile.knownDivergences ?? []).map((entry) => entry.action),
-]);
-
-// -- the degeneracy guard (conformance/README.md, "The degeneracy guard") -----------------------
-//
-// A representative sample of the actions this adapter ORACLE-COMPARES, one per hostile group it
-// can express. The two lists are asserted to be complements of `ORACLE_ACTIONS`, so neither can
-// drift into the other unnoticed.
-//
-// w1-size-zero-chain, w1-not-size-chain, w1-size-frac-chain, the two string-cast actions and
-// filter-as-conjunct are deliberately absent from both lists: their oracles are empty by
-// CONSTRUCTION (no seed holds a to-one parent with zero children, nor one with two or more; every
-// seed's aString raises in int()/double(); a filter() in boolean position is not evaluable at
-// all), so they cannot satisfy a non-empty assertion. filter-as-conjunct carries its own
-// anti-vacuity test instead — see "dropping the untranslatable half over-grants" below.
-
-const DEGENERACY_GUARD_ACTIONS = [
-  "vf-le",
-  // Prisma escapes no LIKE metacharacter at all, so every needle-carrying shape in that group is
-  // a liveness probe below. `[` is the one metacharacter it can leave alone — it is literal on
-  // every provider but SQL Server, which Prisma's own guard only rejects for hierarchy prefixes —
-  // so like-bracket is what carries the group's oracle comparison.
-  "like-bracket",
-  "all-on-empty",
-  "pv-exists",
-  "pv-all",
-  "null-eq",
-  "null-ne",
-  // The explicit-null convention against a non-null operand (#308). All five are compared rather
-  // than thrown, because the mapper declares the convention per attribute; every one of them
-  // under-granted by exactly the NULL-column rows before that declaration existed.
-  "null-value-ne-const",
-  "null-value-not-eq-const",
-  "null-value-not-in-const",
-  "null-value-f2f",
-  "null-value-pv-not-exists",
-  // The absent to-one parent (#309/#315/#316/#334): the four discriminating chain shapes Prisma
-  // translates. Its unsupported siblings are liveness probes below.
-  "w1-not-exists-chain",
-  "w1-not-in-chain",
-  "w1-not-hasint-chain",
-  "w1-ternary-chain-cond",
-  // The real to-one join (#375): one per hazard — the negated hop, the null comparison, two-level
-  // depth, the root conjunction, and the disjunction, whose failure direction is an under-grant.
-  "rel-not-bool-hop",
-  "rel-ne-null-hop",
-  "rel-bool-hop2",
-  "rel-hop-and-root",
-  "rel-hop2-or-exists",
-  // Case sensitivity in STRING MATCHING (#375 follow-up), a different mechanism from cs-eq:
-  // collation governs `=`, and on SQLite nothing but `PRAGMA case_sensitive_like` governs LIKE.
-  "cs-contains",
-  // The primary key as a filterable attribute (#376): the key against a constant, against a
-  // column under negation — the shape that emitted an invalid `not: { _ref }` before this
-  // change — the value-first concatenation solved back to a key equality, and the key inside a
-  // constructed hierarchy path.
-  "id-eq-const",
-  "id-f2f-ne",
-  "id-concat-vf",
-  "hier-list-id",
-  // Root position and bare operand forms (#388): one per hazard — the negation over a bare
-  // ordering (every other negated ordering in the corpus wraps a size() or a ternary), the bare
-  // boolean at the ROOT of the condition, and the collection subquery disjoined with a scalar
-  // predicate rather than conjoined with one.
-  "not-lt",
-  "root-bare-bool",
-  "or-eq-exists",
-  // Hazard classes the corpus missed (#387): the De Morgan branch over a conjunction, the
-  // value-first hasIntersection whose operands are not interchangeable in the emitted query, and
-  // the BELOW-cliff unroll of a principal collection — the shape a principal with three teams
-  // produces, which nothing planned while pv-exists carried only the value-list form.
-  "not-and",
-  "vf-hasint",
-  "pv-exists-unrolled",
-] as const;
-
-/**
- * Shapes Prisma refuses to translate: they have no oracle comparison to guard, and stay here as
- * PDP/policy liveness probes for a group Prisma's own list cannot cover. See
- * cerbos/query-plan-adapters#324.
- */
-const DEGENERACY_LIVENESS_PROBES = [
-  // Prisma emits LIKE with no ESCAPE clause, so a % needle throws — and so does a backslash one,
-  // which is the default escape character on PostgreSQL and MySQL and literal on SQLite
-  // (cerbos/query-plan-adapters#320).
-  "like-percent",
-  "like-backslash",
-  // every() cannot require the intermediate hop of a chain, and no relation count with an
-  // arbitrary threshold — >= 0 or a rounded fractional one — has a none/some spelling.
-  "w1-all-chain",
-  "w1-size-nonneg-chain",
-  "w1-size-frac-le-chain",
-  // Prisma filters have no column arithmetic, so the whole cr-div group (#311) throws.
-  "cr-div-neg-zero",
-  // int() over a numeric column: truncation-versus-rounding, unsupported for every adapter but
-  // convex, which promotes it in adapterSupportedExpected.
-  "cast-int-double",
-  // string() has no Prisma filter form (#376). cast-string-bool carries the group's probe rather
-  // than cast-string-double because its oracle is 14 of 21 rather than a single row, so a PDP or
-  // policy that went quiet fails the non-total half of the assertion too.
-  "cast-string-bool",
-  // Concatenation against the key where BOTH operands carry a column — the arithmetic solver
-  // needs a value on the other side, so the id-* group's one throwing shape probes here.
-  "id-concat",
-  // The same missing form with BOTH operands columns, so there is no constant to invert off
-  // either side (#391).
-  "concat-f2f",
-  // #387, one probe per group Prisma cannot compare. The negated LIKE is refused for its COLUMN
-  // needle before the negation matters, so the whole not-* group throws; `mod`, a positional read
-  // of a scalar list, and list equality over a projection have no Prisma filter form at all.
-  "not-contains",
-  "arith-mod",
-  "index-scalar-list",
-  "map-eq-list",
-] as const;
+const NULL_OMITTED_MESSAGE = requireOutcomeMessage({
+  controlPlane: ACTION_CONTROL_PLANE,
+  action: "null-eq-missing",
+});
+const MANIFEST_ACTIONS = new Set(ACTION_CONTROL_PLANE.selectedActions);
 
 // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") --------
 //
@@ -523,7 +383,7 @@ function parentSeedOf(seed: Seed | undefined): Seed | undefined {
   const parent = SEEDS_BY_ID.get(id);
   if (parent === undefined) {
     throw new Error(
-      `seeds.json: "${seed?.id}" names parent "${id}", which is not a seed id`
+      `seeds.json: "${seed?.id}" names parent "${id}", which is not a seed id`,
     );
   }
   return parent;
@@ -544,19 +404,6 @@ function relationColumns(seed: Seed): {
   };
 }
 
-/** The same four as check() attributes: a NULL column is a MISSING attribute, one hop out. */
-function relationAttr(seed: Seed): Record<string, Value> {
-  const attr: Record<string, Value> = {
-    aBool: seed.aBool,
-    aString: seed.aString,
-    aNumber: seed.aNumber,
-  };
-  if (seed.aOptionalString !== null) {
-    attr["aOptionalString"] = seed.aOptionalString;
-  }
-  return attr;
-}
-
 /**
  * The same mapper with every per-attribute null convention stripped, so the call-level option is
  * the only thing governing null operands.
@@ -568,13 +415,13 @@ function relationAttr(seed: Seed): Record<string, Value> {
  * job. Stripping the declarations keeps the guard testing what it was written to test.
  */
 function withoutNullConventions(
-  mapper: Record<string, MapperConfig>
+  mapper: Record<string, MapperConfig>,
 ): Record<string, MapperConfig> {
   return Object.fromEntries(
     Object.entries(mapper).map(([reference, config]) => {
       const { nullAttributeRepresentation: _stripped, ...rest } = config;
       return [reference, rest];
-    })
+    }),
   );
 }
 
@@ -657,113 +504,58 @@ afterAll(async () => {
 });
 
 function principal(): Principal {
-  return seedsFile.principal;
-}
-
-/** A NULL tag name in the DB is a missing element attribute on the check side. */
-function asTagAttribute(tag: Tag): Record<string, Value> {
-  const attr: Record<string, Value> = { id: tag.id };
-  if (tag.name !== null) {
-    attr["name"] = tag.name;
-  }
-  return attr;
-}
-
-/** Cerbos attributes mirroring exactly what the seeded DB row holds. */
-function asCheckResource(seed: Seed): Resource {
-  const attr: Record<string, Value> = {
-    aBool: seed.aBool,
-    aString: seed.aString,
-    aNumber: seed.aNumber,
-    createdBy: isoFor(seed),
-    owner: seed.aOptionalString,
-    // The explicit-null alias of the `scope` column, the second half of `null-value-f2f`:
-    // `scope` itself is omitted when NULL (below), so the corpus carries the same column under
-    // both conventions and the field-to-field probe has two explicit nulls to compare.
-    coOwner: scopeFor(seed),
-    tagNames: seed.tags.map((tag) => tag.name),
-    obj: { inner: seed.aString },
-    tags: seed.tags.map(asTagAttribute),
-    categories: seed.subCategoryNames.map((subName) => ({
-      name: "business",
-      subCategories: [
-        {
-          name: subName,
-          labels: labelsFor(seed).map((name): Record<string, Value> =>
-            name === null ? {} : { name }
-          ),
-        },
-      ],
-    })),
-  };
-  // A DB NULL is a missing attribute on the check side — conditions touching it must deny
-  // (CEL error), matching SQL three-valued logic excluding the row.
-  if (seed.aOptionalString !== null) {
-    attr["aOptionalString"] = seed.aOptionalString;
-  }
-  const aDouble = doubleFor(seed);
-  if (aDouble !== null) {
-    attr["aDouble"] = aDouble;
-  }
-  const scope = scopeFor(seed);
-  if (scope !== null) {
-    attr["scope"] = scope;
-  }
-  const createdAt = timestampFor(seed);
-  if (createdAt !== null) {
-    attr["createdAt"] = createdAt;
-  }
-  // mainCategory mirrors the row's single category as ONE nested object (the seeder creates
-  // at most one category per seed), so direct dotted-chain CEL expressions evaluate cleanly;
-  // rows without a category get NO attribute — a CEL missing-attr error (deny), matching the
-  // adapter's empty join chain excluding the row.
-  if (seed.subCategoryNames.length > 0) {
-    attr["mainCategory"] = {
-      name: "business",
-      subCategories: seed.subCategoryNames.map((name) => ({ name })),
-      subNames: seed.subCategoryNames,
-    };
-  }
-  // The real to-one chain, mirroring the seeded rows exactly. A row with no parent sends NO
-  // `parent` attribute — a CEL missing-path error (deny) — matching the adapter's join finding
-  // nothing; the same holds one level down for `parent.inner`.
-  const parentSeed = parentSeedOf(seed);
-  if (parentSeed !== undefined) {
-    const parentAttr = relationAttr(parentSeed);
-    const innerSeed = parentSeedOf(parentSeed);
-    if (innerSeed !== undefined) {
-      parentAttr["inner"] = relationAttr(innerSeed);
-    }
-    attr["parent"] = parentAttr;
-  }
-  return { kind: seedsFile.resourceKind, id: seed.id, attr };
+  return CHECK_RESOURCES.principal;
 }
 
 // -- oracle: ask the PDP itself, row by row --
 
 async function oracleAllowedIds(action: string): Promise<string[]> {
   const ids: string[] = [];
-  for (const seed of SEEDS) {
+  for (const resource of CHECK_RESOURCES.resources) {
     const result = await cerbos.checkResource({
       principal: principal(),
-      resource: asCheckResource(seed),
+      resource,
       actions: [action],
     });
     if (result.isAllowed(action)) {
-      ids.push(seed.id);
+      ids.push(resource.id);
     }
   }
   return ids.sort();
 }
 
-/** The degeneracy guard's per-action assertion, labelled so a failure names the action. */
-async function expectNonDegenerateOracle(action: string): Promise<void> {
+/** Assert the catalog's authoritative oracle cardinality for one action. */
+async function expectCatalogOracle(action: string): Promise<string[]> {
   const ids = await oracleAllowedIds(action);
-  expect({
-    action,
-    nonEmpty: ids.length > 0,
-    nonTotal: ids.length < SEEDS.length,
-  }).toEqual({ action, nonEmpty: true, nonTotal: true });
+  const expectation = ACTION_CONTROL_PLANE.oracleExpectations.get(action);
+  if (expectation === undefined)
+    throw new Error(`catalog has no action ${action}`);
+  switch (expectation.kind) {
+    case "empty":
+      expect({ action, cardinality: ids.length }).toEqual({
+        action,
+        cardinality: 0,
+      });
+      break;
+    case "total":
+      expect({ action, cardinality: ids.length }).toEqual({
+        action,
+        cardinality: CHECK_RESOURCES.resources.length,
+      });
+      break;
+    case "proper-subset":
+      expect({
+        action,
+        nonEmpty: ids.length > 0,
+        nonTotal: ids.length < CHECK_RESOURCES.resources.length,
+      }).toEqual({ action, nonEmpty: true, nonTotal: true });
+      break;
+    default: {
+      const exhaustive: never = expectation;
+      throw exhaustive;
+    }
+  }
+  return ids;
 }
 
 // -- adapter execution through the public queryPlanToPrisma path --
@@ -771,7 +563,7 @@ async function expectNonDegenerateOracle(action: string): Promise<void> {
 async function adapterFilteredIds(
   action: string,
   nullAttributeRepresentation: "explicit" | "omitted" = "explicit",
-  mapper: Record<string, MapperConfig> = MAPPER
+  mapper: Record<string, MapperConfig> = MAPPER,
 ): Promise<string[]> {
   const queryPlan = await cerbos.planResources({
     principal: principal(),
@@ -815,9 +607,11 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
   // this fails in every direction rather than only when a container is missing.
   test("executes against the store ADAPTER_TEST_DB selects", async () => {
     const rows = await prisma.$queryRawUnsafe<{ banner: string }[]>(
-      STORE_BANNERS[STORE_NAME].query
+      STORE_BANNERS[STORE_NAME].query,
     );
-    expect(rows[0]?.banner?.split(" ")[0]).toBe(STORE_BANNERS[STORE_NAME].engine);
+    expect(rows[0]?.banner?.split(" ")[0]).toBe(
+      STORE_BANNERS[STORE_NAME].engine,
+    );
   });
 
   // The MySQL leg's other precondition, and the one no banner reports: the collation the tables
@@ -856,15 +650,13 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
         accentFolded: [],
         wrongCasePrefix: [],
       });
-    }
+    },
   );
 
   test("every adversarial schema declares the same data model", () => {
     const [reference, ...rest] = ADVERSARIAL_SCHEMAS.map((name) => ({
       name,
-      models: modelBlocks(
-        fs.readFileSync(path.join(SCHEMA_DIR, name), "utf8")
-      ),
+      models: modelBlocks(fs.readFileSync(path.join(SCHEMA_DIR, name), "utf8")),
     }));
     if (!reference) {
       throw new Error("ADVERSARIAL_SCHEMAS is empty");
@@ -881,93 +673,28 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
     }
   });
 
-  test("adapter-supported expected shapes move from throwing to oracle", () => {
-    const promotedAction = "promoted-shape";
-    const classification = classifyActionsForAdapter(
-      {
-        conformance: [],
-        adapterSupportedExpected: {
-          prisma: [{ action: promotedAction, reason: "supported by Prisma" }],
-        },
-        expectedUnsupported: [
-          {
-            action: promotedAction,
-            shape: "synthetic globally unsupported shape",
-            messages: { prisma: "unsupported" },
-          },
-        ],
-        nullRepresentationOmitted: [],
-      },
-      "prisma"
-    );
-
-    expect(classification.oracleActions).toContain(promotedAction);
-    expect(
-      classification.throwingActions.map(([action]) => action)
-    ).not.toContain(promotedAction);
-  });
-
-  // Adding a throwing action without pinning its message must fail this harness rather than
-  // silently degrade the throw suite to a bare "it threw" (cerbos/query-plan-adapters#326).
-  test("a throwing action with no pinned message fails classification", () => {
-    const unpinnedAction = "unpinned-shape";
-    const classify = (): ActionClassification =>
-      classifyActionsForAdapter(
-        {
-          conformance: [unpinnedAction],
-          adapterUnsupported: {
-            prisma: [{ action: unpinnedAction, reason: "synthetic limitation" }],
-          },
-          expectedUnsupported: [],
-          nullRepresentationOmitted: [],
-        },
-        "prisma"
+  test("adapterctl selection is internally consistent", () => {
+    if (FULL_MATRIX) {
+      expect([...ACTION_CONTROL_PLANE.outcomes.keys()].sort()).toEqual(
+        ACTION_CONTROL_PLANE.allActions,
       );
-
-    expect(classify).toThrow(/pins no throw message/);
-  });
-
-  test("manifest assigns all 146 policy actions exactly one Prisma outcome", () => {
-    const oracle = new Set(ORACLE_ACTIONS);
-    const throwing = new Set(THROWING_ACTIONS.map(([action]) => action));
-    const nullOmitted = new Set(
-      NULL_REPRESENTATION_OMITTED.map(([action]) => action)
-    );
-    const misclassified = [...MANIFEST_ACTIONS].filter((action) => {
-      const classificationCount = [
-        oracle.has(action),
-        throwing.has(action),
-        nullOmitted.has(action),
-        PRISMA_KNOWN_DIVERGENCES.has(action),
-      ].filter(Boolean).length;
-      return classificationCount !== 1;
-    });
-
-    expect(MANIFEST_ACTIONS.size).toBe(199);
-    // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
-    // gained or lost has to be re-triaged here rather than joining the suite unnoticed.
-    expect(THROWING_ACTIONS).toHaveLength(61);
-    expect(misclassified).toEqual([]);
-    expect(
-      [...PRISMA_SUPPORTED_EXPECTED].filter(
-        (action) => !EXPECTED_UNSUPPORTED_ACTIONS.has(action)
-      )
-    ).toEqual([]);
-  });
-
-  test.each(ORACLE_ACTIONS)(
-    "%s matches the check() oracle",
-    async (action) => {
-      const [oracle, filtered] = await Promise.all([
-        oracleAllowedIds(action),
-        adapterFilteredIds(action),
-      ]);
-      expect(filtered).toEqual(oracle);
+      expect(ACTION_CONTROL_PLANE.unassessedActions).toEqual([]);
     }
-  );
+    expect(ACTION_CONTROL_PLANE.selectedActions).toHaveLength(
+      FULL_MATRIX ? ACTION_CONTROL_PLANE.allActions.length : 1,
+    );
+  });
+
+  test.each(ORACLE_ACTIONS)("%s matches the check() oracle", async (action) => {
+    const [oracle, filtered] = await Promise.all([
+      expectCatalogOracle(action),
+      adapterFilteredIds(action),
+    ]);
+    expect(filtered).toEqual(oracle);
+  });
 
   // Shapes the adapter does not support (globally unsupported planner shapes plus Prisma's
-  // declared adapterUnsupported list): translation must fail loudly, never produce a
+  // manifest's `rejected` outcomes): translation must fail loudly, never produce a
   // silently-wrong filter. The plan is fetched OUTSIDE the assertion so a PDP failure fails
   // the test instead of passing it, and no query executes — the invariant is that the shape
   // throws BEFORE a filter exists, so SQLite rejecting a wrongly emitted filter afterwards
@@ -977,8 +704,9 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
   // typo or an unrelated validation, which would leave the classification resting on a failure
   // that has nothing to do with the limitation it declares (cerbos/query-plan-adapters#326).
   test.each(THROWING_ACTIONS)(
-    "%s fails during translation with the declared message, before any filter exists (%s)",
-    async (action, _reason, message) => {
+    "$action fails during translation with the declared message, before any filter exists ($reason)",
+    async ({ action, message }) => {
+      await expectCatalogOracle(action);
       const queryPlan = await cerbos.planResources({
         principal: principal(),
         resource: { kind: seedsFile.resourceKind },
@@ -991,54 +719,53 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
           mapper: MAPPER,
           model: MODEL,
           nullAttributeRepresentation: "explicit",
-        })
+        }),
       ).toThrow(message);
-    }
+    },
   );
 
   // #387. `filter-as-conjunct` puts a filter() one level below the root, where the guard that
   // refuses `filter-as-condition` does not look. Its oracle is empty BY CONSTRUCTION — check()
-  // cannot evaluate a non-boolean conjunction — so it belongs to neither degeneracy-guard list,
+  // cannot evaluate a non-boolean conjunction — so the catalog marks its oracle as empty,
   // and a bare "it throws" would say nothing about whether refusing it is REQUIRED.
   //
   // This is that argument. The other conjunct is `R.attr.aBool`, which the adapter certainly can
   // express and which `root-bare-bool` spells on its own; an adapter that dropped the conjunct it
   // could not translate would emit exactly that filter and return every row it selects, all of
   // which the PDP denies for this action.
-  test("filter-as-conjunct must be refused: dropping its untranslatable half over-grants", async () => {
-    expect(await oracleAllowedIds("filter-as-conjunct")).toEqual([]);
+  fullMatrixTest(
+    "filter-as-conjunct must be refused: dropping its untranslatable half over-grants",
+    async () => {
+      await expectCatalogOracle("filter-as-conjunct");
+      await expectCatalogOracle("root-bare-bool");
 
-    const survivingHalf = await adapterFilteredIds("root-bare-bool");
-    expect(survivingHalf.length).toBeGreaterThan(0);
-    expect(survivingHalf.length).toBeLessThan(SEEDS.length);
-
-    const message = THROWING_ACTIONS.find(
-      ([action]) => action === "filter-as-conjunct"
-    )?.[2];
-    expect(message).toBeDefined();
-    await expect(adapterFilteredIds("filter-as-conjunct")).rejects.toThrow(
-      message
-    );
-  });
+      const message = THROWING_ACTIONS.find(
+        ({ action }) => action === "filter-as-conjunct",
+      )?.message;
+      expect(message).toBeDefined();
+      await expect(adapterFilteredIds("filter-as-conjunct")).rejects.toThrow(
+        message,
+      );
+    },
+  );
 
   // #302. `null-eq-missing` probes `aOptionalString == null`, and `aOptionalString` follows the
   // corpus default: a NULL column sends NO attribute. Both halves are asserted because the
   // rejection alone would pass vacuously if the adapter threw for an unrelated reason — the
   // over-grant under the default representation is what makes the rejection necessary.
   test.each(NULL_REPRESENTATION_OMITTED)(
-    "%s over-grants under the explicit representation and is rejected under omitted (%s)",
-    async (action, _reason, message) => {
-      const oracle = await oracleAllowedIds(action);
-      expect(oracle).toEqual([]);
+    "$action over-grants under the explicit representation and is rejected under omitted ($reason)",
+    async ({ action, message }) => {
+      await expectCatalogOracle(action);
 
       // The default translation emits IS NULL and returns exactly the rows the PDP denies.
       const overGranted = await adapterFilteredIds(action, "explicit");
       expect(overGranted.length).toBeGreaterThan(0);
 
       await expect(adapterFilteredIds(action, "omitted")).rejects.toThrow(
-        message
+        message,
       );
-    }
+    },
   );
 
   // #308. The per-attribute declaration overrides the call-level option, which is the property
@@ -1046,81 +773,91 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
   // against the SAME action and the SAME call-level option, varying only whether the mapper
   // declares the convention — so a declaration that did nothing would show up here as the two
   // runs agreeing.
-  test("a per-attribute declaration overrides the call-level representation", async () => {
-    // `owner` declares "explicit", so the call-level "omitted" does not reach it.
-    await expect(adapterFilteredIds("null-eq", "omitted")).resolves.toEqual(
-      await oracleAllowedIds("null-eq")
-    );
+  fullMatrixTest(
+    "a per-attribute declaration overrides the call-level representation",
+    async () => {
+      // `owner` declares "explicit", so the call-level "omitted" does not reach it.
+      await expect(adapterFilteredIds("null-eq", "omitted")).resolves.toEqual(
+        await oracleAllowedIds("null-eq"),
+      );
 
-    // Strip the declaration and the same action under the same option is rejected — so the
-    // stripped mapper the completeness guard below uses is not quietly equivalent to MAPPER.
-    await expect(
-      adapterFilteredIds("null-eq", "omitted", MAPPER_WITHOUT_NULL_CONVENTIONS)
-    ).rejects.toThrow(NULL_OMITTED_MESSAGE);
-  });
+      // Strip the declaration and the same action under the same option is rejected — so the
+      // stripped mapper the completeness guard below uses is not quietly equivalent to MAPPER.
+      await expect(
+        adapterFilteredIds(
+          "null-eq",
+          "omitted",
+          MAPPER_WITHOUT_NULL_CONVENTIONS,
+        ),
+      ).rejects.toThrow(NULL_OMITTED_MESSAGE);
+    },
+  );
 
   // #302 completeness guard. The rejection must key off the null OPERAND, not off a list of
   // operators: `hasIntersection(tagNames, ["public", null])` carries one in its value list, and
   // an allowlist of eq/ne/in silently misses it. Enumerating the corpus rather than naming
   // shapes means a newly added action carrying a null constant is covered automatically.
-  test("every corpus action carrying a null literal is rejected under omitted", async () => {
-    const nullCarrying: string[] = [];
-    for (const action of [...MANIFEST_ACTIONS].sort()) {
+  fullMatrixTest(
+    "every corpus action carrying a null literal is rejected under omitted",
+    async () => {
+      const nullCarrying: string[] = [];
+      for (const action of [...MANIFEST_ACTIONS].sort()) {
+        const queryPlan = await cerbos.planResources({
+          principal: principal(),
+          resource: { kind: seedsFile.resourceKind },
+          action,
+        });
+        if (
+          queryPlan.kind === PlanKind.CONDITIONAL &&
+          planCarriesNullLiteral(queryPlan.condition)
+        ) {
+          nullCarrying.push(action);
+        }
+      }
+
+      // Guard the guard: if the walk stopped finding null operands the loop below is vacuous.
+      expect(nullCarrying).toContain("null-eq-missing");
+      expect(nullCarrying).toContain("in-null-elem-hasint");
+
+      const notRejected: string[] = [];
+      for (const action of nullCarrying) {
+        try {
+          await adapterFilteredIds(
+            action,
+            "omitted",
+            MAPPER_WITHOUT_NULL_CONVENTIONS,
+          );
+          notRejected.push(action);
+        } catch (error) {
+          // The rejection must be the null-operand check talking, not an incidental failure — a
+          // transport error or mapper typo counting as the required rejection is the silent pass
+          // the corpus README warns about.
+          if (!String(error).includes(NULL_OMITTED_MESSAGE)) {
+            notRejected.push(
+              `${action} (rejected for the wrong reason: ${String(error)})`,
+            );
+          }
+        }
+      }
+      expect(notRejected).toEqual([]);
+    },
+  );
+
+  test.each(ACTION_CONTROL_PLANE.upstreamBlockedActions)(
+    "$action pins the upstream planner divergence ($reason)",
+    async ({ action }) => {
       const queryPlan = await cerbos.planResources({
         principal: principal(),
         resource: { kind: seedsFile.resourceKind },
         action,
       });
-      if (
-        queryPlan.kind === PlanKind.CONDITIONAL &&
-        planCarriesNullLiteral(queryPlan.condition)
-      ) {
-        nullCarrying.push(action);
-      }
-    }
+      await expectCatalogOracle(action);
+      const allIds = CHECK_RESOURCES.resources.map(({ id }) => id).sort();
 
-    // Guard the guard: if the walk stopped finding null operands the loop below is vacuous.
-    expect(nullCarrying).toContain("null-eq-missing");
-    expect(nullCarrying).toContain("in-null-elem-hasint");
-
-    const notRejected: string[] = [];
-    for (const action of nullCarrying) {
-      try {
-        await adapterFilteredIds(
-          action,
-          "omitted",
-          MAPPER_WITHOUT_NULL_CONVENTIONS
-        );
-        notRejected.push(action);
-      } catch (error) {
-        // The rejection must be the null-operand check talking, not an incidental failure — a
-        // transport error or mapper typo counting as the required rejection is the silent pass
-        // the corpus README warns about.
-        if (!String(error).includes(NULL_OMITTED_MESSAGE)) {
-          notRejected.push(`${action} (rejected for the wrong reason: ${String(error)})`);
-        }
-      }
-    }
-    expect(notRejected).toEqual([]);
-  });
-
-  test("pins the upstream has() planner over-grant", async () => {
-    const action = "p-has";
-    expect(PRISMA_KNOWN_DIVERGENCES.has(action)).toBe(true);
-    const queryPlan = await cerbos.planResources({
-      principal: principal(),
-      resource: { kind: seedsFile.resourceKind },
-      action,
-    });
-    const oracle = await oracleAllowedIds(action);
-    const allIds = SEEDS.map((seed) => seed.id).sort();
-
-    expect(queryPlan.kind).toBe(PlanKind.ALWAYS_ALLOWED);
-    expect(oracle.length).toBeGreaterThan(0);
-    expect(oracle.length).toBeLessThan(allIds.length);
-    expect(oracle).toContain("a1");
-    expect(await adapterFilteredIds(action)).toEqual(allIds);
-  });
+      expect(queryPlan.kind).toBe(PlanKind.ALWAYS_ALLOWED);
+      expect(await adapterFilteredIds(action)).toEqual(allIds);
+    },
+  );
 
   // The corpus pins two count spellings over the chain — `size(...) == 0` and
   // `!(size(...) > 0)` — and CEL's type checker rules out a third that a real policy could
@@ -1130,152 +867,171 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
   // these synthesise the remaining threshold/polarity combinations directly onto the same
   // seeded store and assert the parentless rows stay out of every one
   // (cerbos/query-plan-adapters#316).
-  test("every count threshold over the chain inherits the absent-parent guard", async () => {
-    const chain = new PlanExpressionVariable(
-      "request.resource.attr.mainCategory.subCategories"
-    );
-    const size = new PlanExpression("size", [chain]);
-    const compare = (operator: string, threshold: number) =>
-      new PlanExpression(operator, [size, new PlanExpressionValue(threshold)]);
-    const negate = (condition: PlanExpressionOperand) =>
-      new PlanExpression("not", [condition]);
+  fullMatrixTest(
+    "every count threshold over the chain inherits the absent-parent guard",
+    async () => {
+      const chain = new PlanExpressionVariable(
+        "request.resource.attr.mainCategory.subCategories",
+      );
+      const size = new PlanExpression("size", [chain]);
+      const compare = (operator: string, threshold: number) =>
+        new PlanExpression(operator, [
+          size,
+          new PlanExpressionValue(threshold),
+        ]);
+      const negate = (condition: PlanExpressionOperand) =>
+        new PlanExpression("not", [condition]);
 
-    const filteredIdsFor = async (
-      condition: PlanExpressionOperand
-    ): Promise<string[]> => {
-      const result = queryPlanToPrisma({
-        queryPlan: {
-          kind: PlanKind.CONDITIONAL,
-          condition,
-          cerbosCallId: "synthetic",
-          requestId: "synthetic",
-          validationErrors: [],
-          metadata: undefined,
-        },
-        mapper: MAPPER,
-        model: MODEL,
-      });
-      expect(result.kind).toBe(PlanKind.CONDITIONAL);
-      const where = result.kind === PlanKind.CONDITIONAL ? result.filters : {};
-      const rows = await prisma.adversarialResource.findMany({
-        where,
-        select: { id: true },
-      });
-      return rows.map((row) => row.id).sort();
-    };
+      const filteredIdsFor = async (
+        condition: PlanExpressionOperand,
+      ): Promise<string[]> => {
+        const result = queryPlanToPrisma({
+          queryPlan: {
+            kind: PlanKind.CONDITIONAL,
+            condition,
+            cerbosCallId: "synthetic",
+            requestId: "synthetic",
+            validationErrors: [],
+            metadata: undefined,
+          },
+          mapper: MAPPER,
+          model: MODEL,
+        });
+        expect(result.kind).toBe(PlanKind.CONDITIONAL);
+        const where =
+          result.kind === PlanKind.CONDITIONAL ? result.filters : {};
+        const rows = await prisma.adversarialResource.findMany({
+          where,
+          select: { id: true },
+        });
+        return rows.map((row) => row.id).sort();
+      };
 
-    // Each of these is TRUE for a row with no mainCategory only if the guard leaks: an
-    // absent to-one parent is a CEL missing-path error, so the PDP denies it outright.
-    const emptyByConstruction: [string, PlanExpressionOperand][] = [
-      ["size(chain) == 0", compare("eq", 0)],
-      ["size(chain) <= 0", compare("le", 0)],
-      ["size(chain) < 1", compare("lt", 1)],
-      ["!(size(chain) >= 1)", negate(compare("ge", 1))],
-      ["!(size(chain) > 0)", negate(compare("gt", 0))],
-    ];
+      // Each of these is TRUE for a row with no mainCategory only if the guard leaks: an
+      // absent to-one parent is a CEL missing-path error, so the PDP denies it outright.
+      const emptyByConstruction: [string, PlanExpressionOperand][] = [
+        ["size(chain) == 0", compare("eq", 0)],
+        ["size(chain) <= 0", compare("le", 0)],
+        ["size(chain) < 1", compare("lt", 1)],
+        ["!(size(chain) >= 1)", negate(compare("ge", 1))],
+        ["!(size(chain) > 0)", negate(compare("gt", 0))],
+      ];
 
-    for (const [shape, condition] of emptyByConstruction) {
-      expect([shape, await filteredIdsFor(condition)]).toEqual([shape, []]);
-    }
+      for (const [shape, condition] of emptyByConstruction) {
+        expect([shape, await filteredIdsFor(condition)]).toEqual([shape, []]);
+      }
 
-    // The mirror image, so the loop above cannot pass by denying everything: the negation of
-    // an emptiness check is TRUE for exactly the rows that HAVE the parent.
-    const withParent = await oracleAllowedIds("w1-size-nonneg-chain");
-    expect(withParent.length).toBeGreaterThan(0);
-    expect(withParent.length).toBeLessThan(SEEDS.length);
-    expect(await filteredIdsFor(negate(compare("eq", 0)))).toEqual(withParent);
-    expect(await filteredIdsFor(negate(compare("lt", 1)))).toEqual(withParent);
-  });
+      // The mirror image, so the loop above cannot pass by denying everything: the negation of
+      // an emptiness check is TRUE for exactly the rows that HAVE the parent.
+      const withParent = await oracleAllowedIds("w1-size-nonneg-chain");
+      expect(withParent.length).toBeGreaterThan(0);
+      expect(withParent.length).toBeLessThan(SEEDS.length);
+      expect(await filteredIdsFor(negate(compare("eq", 0)))).toEqual(
+        withParent,
+      );
+      expect(await filteredIdsFor(negate(compare("lt", 1)))).toEqual(
+        withParent,
+      );
+    },
+  );
 
   // The corpus pins ONE ternary whose condition reaches a chain — `w1-ternary-chain-cond`, whose
   // else-branch is a bare `!aBool`. The guard has to be a property of the ternary's false-branch
   // rather than of that one spelling, so these synthesise the other condition positions onto the
   // same seeded store (cerbos/query-plan-adapters#334). Each expectation is a real check() oracle,
   // never a hand-computed row list.
-  test("every ternary condition over the chain inherits the absent-parent guard", async () => {
-    const chainIn = new PlanExpression("in", [
-      new PlanExpressionValue("finance"),
-      new PlanExpressionVariable("request.resource.attr.mainCategory.subNames"),
-    ]);
-    const TRUE = new PlanExpressionValue(true);
-    const FALSE = new PlanExpressionValue(false);
-    const ternary = (
-      condition: PlanExpressionOperand,
-      thenBranch: PlanExpressionOperand,
-      elseBranch: PlanExpressionOperand
-    ) => new PlanExpression("if", [condition, thenBranch, elseBranch]);
+  fullMatrixTest(
+    "every ternary condition over the chain inherits the absent-parent guard",
+    async () => {
+      const chainIn = new PlanExpression("in", [
+        new PlanExpressionValue("finance"),
+        new PlanExpressionVariable(
+          "request.resource.attr.mainCategory.subNames",
+        ),
+      ]);
+      const TRUE = new PlanExpressionValue(true);
+      const FALSE = new PlanExpressionValue(false);
+      const ternary = (
+        condition: PlanExpressionOperand,
+        thenBranch: PlanExpressionOperand,
+        elseBranch: PlanExpressionOperand,
+      ) => new PlanExpression("if", [condition, thenBranch, elseBranch]);
 
-    const filteredIdsFor = async (
-      condition: PlanExpressionOperand
-    ): Promise<string[]> => {
-      const result = queryPlanToPrisma({
-        queryPlan: {
-          kind: PlanKind.CONDITIONAL,
-          condition,
-          cerbosCallId: "synthetic",
-          requestId: "synthetic",
-          validationErrors: [],
-          metadata: undefined,
-        },
-        mapper: MAPPER,
-        model: MODEL,
-      });
-      expect(result.kind).toBe(PlanKind.CONDITIONAL);
-      const where = result.kind === PlanKind.CONDITIONAL ? result.filters : {};
-      const rows = await prisma.adversarialResource.findMany({
-        where,
-        select: { id: true },
-      });
-      return rows.map((row) => row.id).sort();
-    };
+      const filteredIdsFor = async (
+        condition: PlanExpressionOperand,
+      ): Promise<string[]> => {
+        const result = queryPlanToPrisma({
+          queryPlan: {
+            kind: PlanKind.CONDITIONAL,
+            condition,
+            cerbosCallId: "synthetic",
+            requestId: "synthetic",
+            validationErrors: [],
+            metadata: undefined,
+          },
+          mapper: MAPPER,
+          model: MODEL,
+        });
+        expect(result.kind).toBe(PlanKind.CONDITIONAL);
+        const where =
+          result.kind === PlanKind.CONDITIONAL ? result.filters : {};
+        const rows = await prisma.adversarialResource.findMany({
+          where,
+          select: { id: true },
+        });
+        return rows.map((row) => row.id).sort();
+      };
 
-    // The rows the chain condition is definitively TRUE for, and the ones it is definitively
-    // FALSE for. Everything else — every row with no mainCategory at all — is a CEL
-    // missing-path error, which selects NEITHER branch.
-    const conditionTrue = await oracleAllowedIds("w1-in-chain");
-    const conditionFalse = await oracleAllowedIds("w1-not-in-chain");
-    expect(conditionTrue.length).toBeGreaterThan(0);
-    expect(conditionFalse.length).toBeGreaterThan(0);
-    expect(conditionTrue.length + conditionFalse.length).toBeLessThan(
-      SEEDS.length
-    );
+      // The rows the chain condition is definitively TRUE for, and the ones it is definitively
+      // FALSE for. Everything else — every row with no mainCategory at all — is a CEL
+      // missing-path error, which selects NEITHER branch.
+      const conditionTrue = await oracleAllowedIds("w1-in-chain");
+      const conditionFalse = await oracleAllowedIds("w1-not-in-chain");
+      expect(conditionTrue.length).toBeGreaterThan(0);
+      expect(conditionFalse.length).toBeGreaterThan(0);
+      expect(conditionTrue.length + conditionFalse.length).toBeLessThan(
+        SEEDS.length,
+      );
 
-    // The else-branch is what a bare `NOT` over the chain filter over-grants: it is TRUE for
-    // every parentless row, so each of these returned the 17 missing-parent seeds on top.
-    expect(await filteredIdsFor(ternary(chainIn, FALSE, TRUE))).toEqual(
-      conditionFalse
-    );
-    expect(
-      await filteredIdsFor(
-        ternary(new PlanExpression("not", [chainIn]), TRUE, FALSE)
-      )
-    ).toEqual(conditionFalse);
-    // A `not` condition in false-branch position: the double negation collapses back to the
-    // positive membership, which excludes the parentless rows by itself.
-    expect(
-      await filteredIdsFor(
-        ternary(new PlanExpression("not", [chainIn]), FALSE, TRUE)
-      )
-    ).toEqual(conditionTrue);
+      // The else-branch is what a bare `NOT` over the chain filter over-grants: it is TRUE for
+      // every parentless row, so each of these returned the 17 missing-parent seeds on top.
+      expect(await filteredIdsFor(ternary(chainIn, FALSE, TRUE))).toEqual(
+        conditionFalse,
+      );
+      expect(
+        await filteredIdsFor(
+          ternary(new PlanExpression("not", [chainIn]), TRUE, FALSE),
+        ),
+      ).toEqual(conditionFalse);
+      // A `not` condition in false-branch position: the double negation collapses back to the
+      // positive membership, which excludes the parentless rows by itself.
+      expect(
+        await filteredIdsFor(
+          ternary(new PlanExpression("not", [chainIn]), FALSE, TRUE),
+        ),
+      ).toEqual(conditionTrue);
 
-    // A conjunction condition needs De Morgan, not an outer NOT with the hops ANDed beside it:
-    // CEL's `&&` absorbs an erroring operand when the other is FALSE, so a parentless row with
-    // aBool=false makes the whole condition definitively FALSE and DOES select the else-branch.
-    const aBoolFalse = SEEDS.filter((seed) => !seed.aBool).map((seed) => seed.id);
-    expect(aBoolFalse.length).toBeGreaterThan(0);
-    expect(
-      await filteredIdsFor(
-        ternary(
-          new PlanExpression("and", [
-            chainIn,
-            new PlanExpressionVariable("request.resource.attr.aBool"),
-          ]),
-          FALSE,
-          TRUE
-        )
-      )
-    ).toEqual([...new Set([...conditionFalse, ...aBoolFalse])].sort());
-  });
+      // A conjunction condition needs De Morgan, not an outer NOT with the hops ANDed beside it:
+      // CEL's `&&` absorbs an erroring operand when the other is FALSE, so a parentless row with
+      // aBool=false makes the whole condition definitively FALSE and DOES select the else-branch.
+      const aBoolFalse = SEEDS.filter((seed) => !seed.aBool).map(
+        (seed) => seed.id,
+      );
+      expect(aBoolFalse.length).toBeGreaterThan(0);
+      expect(
+        await filteredIdsFor(
+          ternary(
+            new PlanExpression("and", [
+              chainIn,
+              new PlanExpressionVariable("request.resource.attr.aBool"),
+            ]),
+            FALSE,
+            TRUE,
+          ),
+        ),
+      ).toEqual([...new Set([...conditionFalse, ...aBoolFalse])].sort());
+    },
+  );
 
   // The to-one relation carries no corpus action yet — this is the expand half of
   // cerbos/query-plan-adapters#372's expand–contract — so nothing else in this file would notice a
@@ -1286,7 +1042,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
   test("the seeded to-one chain matches the corpus relation", async () => {
     const withParent = SEEDS.filter((seed) => parentSeedOf(seed) !== undefined);
     const withInner = SEEDS.filter(
-      (seed) => parentSeedOf(parentSeedOf(seed)) !== undefined
+      (seed) => parentSeedOf(parentSeedOf(seed)) !== undefined,
     );
     expect(withParent.length).toBeGreaterThan(0);
     expect(withInner.length).toBeGreaterThan(0);
@@ -1304,7 +1060,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       joined.map((row) => [
         row.id,
         [row.parent?.aString ?? null, row.parent?.inner?.aString ?? null],
-      ])
+      ]),
     );
     const expected = Object.fromEntries(
       SEEDS.map((seed) => [
@@ -1313,29 +1069,8 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
           parentSeedOf(seed)?.aString ?? null,
           parentSeedOf(parentSeedOf(seed))?.aString ?? null,
         ],
-      ])
+      ]),
     );
     expect(stored).toEqual(expected);
-  });
-
-  test("oracle is not degenerate", async () => {
-    // Guard the guard: each of these actions must produce a non-empty, non-total oracle set,
-    // otherwise the differential comparison could pass vacuously (e.g. PDP denying all).
-    //
-    // Every entry is asserted to be an action Prisma actually oracle-compares. A list copied
-    // from another harness drifts into naming shapes this adapter never compares, which guard
-    // nothing (cerbos/query-plan-adapters#324); the membership assertion turns moving an action
-    // into Prisma's `adapterUnsupported` set into a failure here rather than a silent no-op.
-    for (const action of DEGENERACY_GUARD_ACTIONS) {
-      expect(ORACLE_ACTIONS).toContain(action);
-      await expectNonDegenerateOracle(action);
-    }
-    // Shapes Prisma refuses to translate, so there is no comparison behind them: these carry
-    // PDP/policy liveness for their group only. Asserting the complement keeps the split
-    // honest — an action Prisma gains support for must move up into the guard proper.
-    for (const action of DEGENERACY_LIVENESS_PROBES) {
-      expect(ORACLE_ACTIONS).not.toContain(action);
-      await expectNonDegenerateOracle(action);
-    }
   });
 });

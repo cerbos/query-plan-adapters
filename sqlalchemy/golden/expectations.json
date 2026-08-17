@@ -1176,7 +1176,7 @@
       }
     },
     "p-has": {
-      "note": "The corpus's one `knownDivergences` entry, and the only action here with no WHERE clause at all. The planner folds `has()` on a missing attribute to ALWAYS_ALLOWED while `check()` denies those rows; the adapter must translate that faithfully, so an unfiltered SELECT is correct and the over-grant is upstream.",
+      "note": "The corpus's one `upstream-blocked` outcome, and the only action here with no WHERE clause at all. The planner folds `has()` on a missing attribute to ALWAYS_ALLOWED while `check()` denies those rows; the adapter must translate that faithfully, so an unfiltered SELECT is correct and the over-grant is upstream.",
       "where": {
         "sqlite": null,
         "postgresql": null

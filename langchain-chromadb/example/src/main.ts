@@ -16,9 +16,8 @@
  *      the exercise.
  *
  * Prints one JSON document to stdout; everything a human might want to read goes to stderr.
- * demo/scripts/run-example.sh diffs that document against demo/expected.json.
+ * The cases and expected results are read from demo/cases.json, and the program validates the document before emitting it.
  */
-import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { GRPC as Cerbos } from "@cerbos/grpc";
@@ -35,27 +34,13 @@ import {
   type Where,
 } from "chromadb";
 
+import { loadConsumerCases, loadDemoSeeds, runConsumerCases } from "./cases";
+
 const DEMO_DIR = resolve(__dirname, "../../../demo");
 const RESOURCE_KIND = "document";
 const COLLECTION_NAME = "cerbos-demo-documents";
-
-interface Seeds {
-  principals: { id: string; roles: string[] }[];
-  applicationFilter: { description: string; archived: boolean; region: string };
-  documents: {
-    id: string;
-    ownerId: string;
-    public: boolean;
-    region: string;
-    archived: boolean;
-  }[];
-}
-
-// demo/seeds.json is a repository-controlled corpus file, checked structurally by
-// demo/scripts/validate-demo.sh before this ever runs — not untrusted input.
-const seeds = JSON.parse(
-  readFileSync(resolve(DEMO_DIR, "seeds.json"), "utf8")
-) as Seeds;
+const consumerCases = loadConsumerCases(DEMO_DIR);
+const seeds = loadDemoSeeds(DEMO_DIR);
 
 /**
  * Cerbos attribute names are not Chroma metadata keys, so a consumer always writes one of these.
@@ -91,7 +76,7 @@ function requiredEnv(name: string): string {
   const value = process.env[name];
   if (!value) {
     throw new Error(
-      `${name} is not set — run this example through demo/scripts/run-example.sh langchain-chromadb`
+      `${name} is not set — run this example through demo/scripts/run-example.sh langchain-chromadb`,
     );
   }
   return value;
@@ -101,7 +86,7 @@ function requiredEnv(name: string): string {
  * The shared runner sets this, and a fallback would be actively harmful. The obvious default —
  * Cerbos's own 3592/3593 — is the address every adapter's `cerbos run` test sidecar binds, so an
  * unset CERBOS_HOST would not fail: it would quietly plan against the conformance corpus that
- * sidecar serves, and produce a diff against demo/expected.json that reads as an adapter bug.
+ * sidecar serves, and fail a demo/cases.json case in a way that reads as an adapter bug.
  * demo/README.md requires reaching the PDP at $CERBOS_HOST, "never a hardcoded address", for
  * exactly that reason.
  */
@@ -140,7 +125,7 @@ async function plan(principalId: string, action: string): Promise<QueryPlan> {
 
 async function translate(
   principalId: string,
-  action: string
+  action: string,
 ): Promise<QueryPlanToChromaDBResult> {
   return queryPlanToChromaDB({
     queryPlan: await plan(principalId, action),
@@ -185,7 +170,7 @@ function toFilter(result: QueryPlanToChromaDBResult): Filter {
       const filters = result.filters;
       if (!filters || Object.keys(filters).length === 0) {
         throw new Error(
-          "a KIND_CONDITIONAL plan carried no filter — refusing to query without one"
+          "a KIND_CONDITIONAL plan carried no filter — refusing to query without one",
         );
       }
       return filters;
@@ -201,7 +186,7 @@ function toFilter(result: QueryPlanToChromaDBResult): Filter {
  */
 function conjoin(
   adapterFilter: Where | undefined,
-  applicationFilter: Where
+  applicationFilter: Where,
 ): Where {
   if (adapterFilter === undefined) return applicationFilter;
   return { $and: [adapterFilter, applicationFilter] };
@@ -228,12 +213,12 @@ const QUERY_EMBEDDING = embeddingFor(0);
  *
  * `nResults` is Chroma's cap on how many neighbours come back, so "no limit" has to be spelled as
  * the collection size; shape 4 is what varies it. The returned ids are sorted before they are
- * asserted, because a vector search ranks by distance and demo/expected.json is shared by stores
+ * asserted, because a vector search ranks by distance and demo/cases.json is shared by stores
  * that have no notion of one.
  */
 async function findIds(
   collection: Collection,
-  filter: Filter
+  filter: Filter,
 ): Promise<string[]> {
   if (filter === "denied") return [];
   const results = await collection.query({
@@ -262,10 +247,13 @@ interface PaginatedShapeResult extends ShapeResult {
 async function filtered(
   collection: Collection,
   principalId: string,
-  action: string
+  action: string,
 ): Promise<ShapeResult> {
   const result = await translate(principalId, action);
-  return { kind: result.kind, ids: await findIds(collection, toFilter(result)) };
+  return {
+    kind: result.kind,
+    ids: await findIds(collection, toFilter(result)),
+  };
 }
 
 /**
@@ -278,7 +266,7 @@ async function filtered(
  * accepted by whichever of the two a consumer reaches for.
  *
  * Reported as page SIZES plus the sorted union of the ids, never as per-page order —
- * demo/expected.json is shared by every store and several of them have no total order to paginate
+ * demo/cases.json is shared by every store and several of them have no total order to paginate
  * by. Disjointness still falls out: overlapping pages would shrink the union below the sum.
  *
  * There is no ordering argument to add, unlike the SQL-backed examples, which sort by id so that
@@ -292,7 +280,7 @@ async function paginated(
   collection: Collection,
   principalId: string,
   action: string,
-  pageSize: number
+  pageSize: number,
 ): Promise<PaginatedShapeResult> {
   const result = await translate(principalId, action);
   const filter = toFilter(result);
@@ -324,7 +312,7 @@ async function paginated(
 async function composed(
   collection: Collection,
   principalId: string,
-  action: string
+  action: string,
 ): Promise<ShapeResult> {
   const result = await translate(principalId, action);
   const filter = toFilter(result);
@@ -368,7 +356,7 @@ async function seed(): Promise<Collection> {
       archived: document.archived,
     })),
     documents: seeds.documents.map(
-      (document) => `Document ${document.id}, owned by ${document.ownerId}.`
+      (document) => `Document ${document.id}, owned by ${document.ownerId}.`,
     ),
   });
 
@@ -379,31 +367,29 @@ async function main(): Promise<void> {
   const collection = await seed();
   console.error(`seeded ${seeds.documents.length} documents`);
 
-  const shapes = {
-    filtered: {
-      "alice/view": await filtered(collection, "alice", "view"),
-      "bob/view": await filtered(collection, "bob", "view"),
+  const shapes = await runConsumerCases({
+    cases: consumerCases,
+    execute: (testCase) => {
+      switch (testCase.operation) {
+        case "paginated":
+          return paginated(
+            collection,
+            testCase.principal,
+            testCase.action,
+            testCase.pagination.pageSize,
+          );
+        case "composed":
+          return composed(collection, testCase.principal, testCase.action);
+        case "filtered":
+        case "alwaysAllowed":
+        case "alwaysDenied":
+          return filtered(collection, testCase.principal, testCase.action);
+      }
     },
-    alwaysAllowed: {
-      "admin/admin-view": await filtered(collection, "admin", "admin-view"),
-    },
-    alwaysDenied: {
-      "alice/publish": await filtered(collection, "alice", "publish"),
-    },
-    paginated: {
-      "alice/view": await paginated(collection, "alice", "view", 2),
-      "admin/admin-view": await paginated(collection, "admin", "admin-view", 3),
-    },
-    composed: {
-      "alice/view": await composed(collection, "alice", "view"),
-      "bob/view": await composed(collection, "bob", "view"),
-      "admin/admin-view": await composed(collection, "admin", "admin-view"),
-      "alice/publish": await composed(collection, "alice", "publish"),
-    },
-  };
+  });
 
   process.stdout.write(
-    `${JSON.stringify({ adapter: "langchain-chromadb", shapes }, null, 2)}\n`
+    `${JSON.stringify({ adapter: "langchain-chromadb", shapes }, null, 2)}\n`,
   );
 }
 

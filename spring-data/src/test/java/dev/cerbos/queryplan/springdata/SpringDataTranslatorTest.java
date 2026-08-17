@@ -5,8 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import dev.cerbos.api.v1.response.Response.PlanResourcesResponse;
-import dev.cerbos.queryplan.springdata.Corpus.ActionsFile;
-import dev.cerbos.queryplan.springdata.Corpus.NullRepresentationOmitted;
+import dev.cerbos.queryplan.springdata.Corpus.ControlPlane;
+import dev.cerbos.queryplan.springdata.Corpus.RepresentationDependentRejection;
 import dev.cerbos.queryplan.springdata.testmodel.ResourceEntity;
 
 import jakarta.persistence.EntityManager;
@@ -59,6 +59,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * Translator unit test: for every action in the shared {@code ../conformance/} corpus, the SQL
@@ -76,7 +77,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *       <td>{@code conformance/wire-fixtures/}, replanned and diffed by the
  *           {@code Conformance Corpus} workflow</td></tr>
  *   <tr><td>which shapes this adapter must refuse, and with what message</td>
- *       <td>{@code conformance/actions.json} — read below, never restated</td></tr>
+ *       <td>{@code adapterctl.json} — read below, never restated</td></tr>
  *   <tr><td>the rows a filter returns</td>
  *       <td>{@link AdversarialConformanceTest}, against real H2/PostgreSQL/MySQL with
  *           {@code check()} as the oracle</td></tr>
@@ -131,18 +132,17 @@ class SpringDataTranslatorTest {
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
-    private static final ActionsFile ACTIONS = Corpus.actionsFile();
+    private static final ControlPlane ACTIONS = Corpus.actionsFile();
 
     /**
-     * The shapes {@code actions.json} says this adapter must refuse, each with the message it
+     * The shapes {@code adapterctl.json} says this adapter must refuse, each with the message it
      * must refuse them with. Identical to the classification the harness asserts against a live
      * PDP; asserting it here as well is what lets the completeness guard below be total, and it
      * costs a millisecond rather than a container.
      *
-     * <p>A throwing action needs no golden expectation of its own: the message is already corpus
-     * data, pinned once in {@code actions.json} and read by every adapter. Writing it into this
-     * adapter's asset too would create two places to change one string with nothing to say which
-     * is authoritative.
+     * <p>A throwing action needs no golden expectation of its own: the message is already pinned in
+     * this adapter's {@code adapterctl.json} manifest. Writing it into this adapter's asset too would
+     * create two places to change one string with nothing to say which is authoritative.
      */
     private static final Map<String, String> THROWING =
             Corpus.throwingActions(ACTIONS, Corpus.ADAPTER);
@@ -164,6 +164,9 @@ class SpringDataTranslatorTest {
 
     @BeforeAll
     static void setUp() {
+        assumeTrue(System.getenv("ADAPTERCTL_ACTION") == null
+                        || System.getenv("ADAPTERCTL_ACTION").isBlank(),
+                "action-scoped runs execute the live conformance harness only");
         DIALECTS.forEach((name, dialect) -> FACTORIES.put(name,
                 Persistence.createEntityManagerFactory(
                         "translator-pu", Map.of("hibernate.dialect", dialect))));
@@ -184,7 +187,7 @@ class SpringDataTranslatorTest {
         // sets the property, so a translator change that moves the emitted SQL fails there
         // whatever anyone ran locally. Skipping the throwing actions above is also what keeps
         // regeneration from papering over a misclassification — an action moved into
-        // `adapterUnsupported` that this adapter still translates fails the throw suite, and one
+        // `rejected` that this adapter still translates fails the throw suite, and one
         // moved out of it that this adapter still refuses fails regeneration itself.
         if (Boolean.getBoolean("golden.update")) {
             Map<String, ObjectNode> expectations = new TreeMap<>();
@@ -377,7 +380,7 @@ class SpringDataTranslatorTest {
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
                 () -> statementOf("h2", specificationFor(action)));
         assertTrue(ex.getMessage().contains(message),
-                "action '" + action + "' was rejected for a reason actions.json does not declare: "
+                "action '" + action + "' was rejected for a reason adapterctl.json does not declare: "
                         + ex.getMessage());
     }
 
@@ -392,6 +395,49 @@ class SpringDataTranslatorTest {
                     () -> Corpus.requireMessage("synthetic-entry", absent));
             assertTrue(ex.getMessage().contains("pins no throw message"), ex.getMessage());
         }
+    }
+
+    @Test
+    void selectedMissingOrUnassessedActionProvisionallyUsesOracle() {
+        for (Map<String, Corpus.Outcome> outcomes : List.<Map<String, Corpus.Outcome>>of(
+                Map.of(),
+                Map.of("new-action", new Corpus.Outcome("unassessed", null, null)))) {
+            ControlPlane controlPlane = new ControlPlane(
+                    List.of(new Corpus.CatalogAction(
+                            "new-action", new Corpus.OracleExpectation("proper-subset", null))),
+                    outcomes,
+                    "new-action");
+
+            assertEquals(List.of("new-action"),
+                    Corpus.oracleActions(controlPlane, Corpus.ADAPTER).toList());
+        }
+    }
+
+    @Test
+    void selectedAssessedActionKeepsItsClassification() {
+        ControlPlane controlPlane = new ControlPlane(
+                List.of(new Corpus.CatalogAction(
+                        "known-action", new Corpus.OracleExpectation("proper-subset", null))),
+                Map.of("known-action", new Corpus.Outcome(
+                        "rejected", "unsupported", "cannot translate")),
+                "known-action");
+
+        assertEquals(Map.of("known-action", "cannot translate"),
+                Corpus.throwingActions(controlPlane, Corpus.ADAPTER));
+    }
+
+    @Test
+    void unscopedRunStillRequiresCompleteOutcomes() {
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> new ControlPlane(
+                        List.of(new Corpus.CatalogAction(
+                                "new-action",
+                                new Corpus.OracleExpectation("proper-subset", null))),
+                        Map.of(),
+                        ""));
+
+        assertTrue(ex.getMessage().contains("outcomes must cover the catalog exactly"),
+                ex.getMessage());
     }
 
     @Test
@@ -416,13 +462,6 @@ class SpringDataTranslatorTest {
         assertEquals(new ArrayList<>(new TreeSet<>(recordedActions)), recordedActions,
                 "golden/expectations.json must stay sorted by action");
 
-        // Tripwires. Bump them deliberately: a count that moves without anyone noticing is how a
-        // shape gets dropped from an asset nobody reads end to end.
-        assertEquals(
-                Map.of("conditional", 179, "unconditional", 1, "throwing", 19),
-                Map.of("conditional", conditionalActions().size(),
-                        "unconditional", unconditionalActions().size(),
-                        "throwing", THROWING.size()));
     }
 
     /** Actions whose emitted statement carries no filter at all, on any dialect. */
@@ -433,14 +472,9 @@ class SpringDataTranslatorTest {
                 .toList();
     }
 
-    private static List<String> conditionalActions() {
-        List<String> unconditional = unconditionalActions();
-        return recordedActions.stream().filter(a -> !unconditional.contains(a)).toList();
-    }
-
     @Test
     void theUnconditionalActionIsThePlannerFoldTheCorpusDeclares() {
-        // `p-has` is the corpus's one knownDivergences entry: the planner folds has() on a
+        // `p-has` is the corpus's one `upstream-blocked` outcome: the planner folds has() on a
         // missing attribute to ALWAYS_ALLOWED while check() denies those rows. The adapter must
         // translate that faithfully — an unfiltered SELECT — and this is the assertion that says
         // the empty WHERE belongs to that shape rather than to a translation that quietly stopped
@@ -801,7 +835,7 @@ class SpringDataTranslatorTest {
     }
 
     /**
-     * The corpus's {@code nullRepresentationOmitted} probe, which has no store in it at all.
+     * The corpus's {@code representationDependentRejection} probe, which has no store in it at all.
      *
      * <p>{@code null-eq-missing} compares {@code aOptionalString == null}, and the planner emits
      * the same {@code eq(attr, null)} node whichever convention the caller uses — so the adapter
@@ -812,8 +846,8 @@ class SpringDataTranslatorTest {
     @Nested
     class NullAttributeRepresentationOption {
 
-        private final NullRepresentationOmitted probe =
-                Corpus.nullRepresentationThrows(ACTIONS).get(0);
+        private final RepresentationDependentRejection probe =
+                Corpus.representationDependentRejections(ACTIONS).get(0);
 
         @Test
         void explicitEmitsAnIsNullFilter() {

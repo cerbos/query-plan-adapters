@@ -7,7 +7,7 @@
 # The store is H2, in memory, inside the program's own JVM, so there is nothing to start here.
 #
 # Everything this script prints for a human goes to stderr. stdout carries exactly one JSON
-# document, which the shared runner diffs against demo/expected.json.
+# document, which the shared runner diffs against demo/cases.json.
 #
 # Pre-reqs: gradle (8.x), JDK 17+.
 

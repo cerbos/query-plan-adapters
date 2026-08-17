@@ -12,7 +12,7 @@ Needs `docker` (with compose), `jq`, `curl` and Node 22+. The runner starts the 
 this directory's `run.sh` starts a Convex backend, packs the adapter, installs the tarball, deploys
 the functions, builds the client, and runs it.
 
-It follows [`prisma/example/`](../../prisma/example/), which is the reference implementation.
+It consumes the shared runtime contract in [`demo/cases.json`](../../demo/cases.json).
 
 ## What it proves
 
@@ -151,7 +151,7 @@ Convex has no filtered count, which is why count is not one of the five shapes. 
 applies `.filter()` and then `.paginate()`, so a page holds `numItems` documents the adapter
 **allowed** rather than `numItems` documents of which some are then dropped, and the client walks
 the cursor. Pages are asserted by their sizes and by the sorted union of their ids, never by
-per-page order — `demo/expected.json` is shared by every store and several of them have no total
+per-page order — `demo/cases.json` is shared by every store and several of them have no total
 order to paginate by.
 
 `isDone` is the only end condition the client accepts. A filtered `.paginate()` walks the table

@@ -4,15 +4,18 @@
 certification, and consumer smoke tests. It discovers adapter-local `adapterctl.json` manifests;
 published adapter packages do not import it.
 
-The legacy classification ledger and the new direct outcomes run in parallel during migration.
-`adapterctl validate` normalizes both models and rejects any disagreement. Discovery mode relaxes
-only the requirement that every action is already assessed; it never makes CI certification
-non-strict.
+The versioned action catalog, consumer cases, canonical resources, and adapter manifests are the
+control plane's only inputs. Native harnesses read them directly; no compatibility ledger or
+duplicated count and liveness lists sit between the declared contract and executed tests.
+Discovery mode relaxes only the requirement that every action is already assessed; it never makes
+CI certification non-strict.
 
-Until the native harnesses consume the new catalog directly, their legacy count and liveness
-tripwires remain active as a second gate. The runbooks below describe the destination interface;
-the migration equivalence check makes any remaining legacy edit explicit instead of letting the
-two models drift.
+Requires Node.js 22.18 or newer. Install the repository-only CLI dependencies after a fresh
+checkout:
+
+```bash
+npm ci --prefix tools/adapterctl
+```
 
 ## Commands
 
@@ -65,6 +68,9 @@ matches or rejects that action is local because it changes only that adapter's c
    consumer commands. Finish with strict repository-wide validation and generated docs.
 
 An adapter is discovered from its manifest. There is no second root roster to update.
+Each adapter-owned workflow invokes the scoped certification action, so an adapter-local manifest
+change runs only that adapter's workflow. Catalog, schema, resource, case, tooling, and generated
+documentation changes run the repository control-plane workflow.
 
 ## Add a shared consumer case
 
@@ -72,10 +78,8 @@ An adapter is discovered from its manifest. There is no second root roster to up
    kind, and expected ids.
 2. Implement the operation through each example's native ORM interface. Filtering, pagination,
    composition, and package installation remain adapter-local.
-3. Update the migration-era `demo/expected.json` projection and run
-   `demo/scripts/validate-demo.sh`.
-4. Run `./adapterctl run --profile consumer` and `./adapterctl validate`. The validator compares
-   the case catalog with the legacy expectations so the two paths cannot drift during migration.
+3. Run `demo/scripts/validate-demo.sh`; it validates the catalog's structure and non-degeneracy.
+4. Run `./adapterctl run --profile consumer` and `./adapterctl validate`.
 5. Regenerate certification documentation.
 
 The consumer catalog describes shared inputs and observable output only. It must not grow

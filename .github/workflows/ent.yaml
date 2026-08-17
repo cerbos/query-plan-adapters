@@ -16,6 +16,14 @@ defaults:
     working-directory: ent
 
 jobs:
+  certification:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/validate-adapterctl
+        with:
+          adapter: ent
+
   # Lint and the adversarial suite share one job: they need the identical checkout and Go
   # toolchain, and the lint steps run first so a formatting break still fails in about a minute
   # rather than after the container-backed suite.

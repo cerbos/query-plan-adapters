@@ -47,7 +47,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * corpus harness in this repository runs its query with an explicit {@code distinct(true)}, which
  * is exactly what would mask a join-based translation duplicating an entity.
  *
- * <p><strong>Why this is not a third classification bucket.</strong> #372's binary triage — every
+ * <p><strong>Why this is not a third outcome.</strong> #372's binary triage — every
  * surviving shape becomes a corpus action, there is no "unit-test-only" shape — is about SHAPES:
  * what the planner can emit and what the adapter translates. Nothing here is a shape. "One
  * Specification instance survives being invoked twice" is a fact about Spring Data, and the corpus

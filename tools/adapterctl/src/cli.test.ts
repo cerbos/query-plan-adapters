@@ -1,16 +1,15 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { afterEach, test } from "node:test";
 
+import { isRecord } from "./records.ts";
+import { renderHumanView } from "./ui.ts";
+
 const cli = resolve(import.meta.dirname, "../../../adapterctl");
 const temporaryRoots: string[] = [];
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 afterEach(async () => {
   await Promise.all(temporaryRoots.splice(0).map(async (root) => rm(root, { recursive: true })));
@@ -83,16 +82,16 @@ async function writeValidRepository(
     "      roles: [USER]",
     "",
   ].join("\n"));
-  await writeJson(root, "demo/cases.json", { schemaVersion: 1, cases: [] });
-  await writeJson(root, "demo/expected.json", { shapes: {} });
-  await writeJson(root, "conformance/actions.json", {
-    adapters: ["alpha"],
-    conformance: ["read"],
-    adapterUnsupported: {},
-    adapterSupportedExpected: {},
-    expectedUnsupported: [],
-    nullRepresentationOmitted: [],
-    knownDivergences: [],
+  await writeJson(root, "demo/cases.json", {
+    schemaVersion: 1,
+    cases: [{
+      id: "filtered/user/read",
+      operation: "filtered",
+      principal: "user",
+      action: "read",
+      pagination: null,
+      expected: { kind: "KIND_CONDITIONAL", ids: ["r1"] },
+    }],
   });
   await writeJson(root, "conformance/seeds.json", {
     principal: { id: "u1", roles: ["USER"], attr: {} },
@@ -150,6 +149,9 @@ async function writeValidRepository(
     "jobs:",
     "  test:",
     "    steps:",
+    "      - uses: ./.github/actions/validate-adapterctl",
+    "        with:",
+    "          adapter: alpha",
     `      - run: ${process.execPath} -e process.exit(0)`,
     "",
   ].join("\n"));
@@ -185,6 +187,118 @@ async function runProgram(root: string, executable: string, arguments_: string[]
     child.once("close", resolveRun);
   });
 }
+
+test("Ink adapter list view renders semantic adapter data", () => {
+  assert.equal(renderHumanView({ kind: "adapter-list", adapters: ["alpha", "zeta"] }),
+    "alpha\nzeta\n");
+});
+
+test("Ink markdown report view preserves the document without terminal decoration", () => {
+  const rendered = renderHumanView({ kind: "markdown-report", markdown: "# Report\n\nReady\n" });
+  assert.equal(rendered, "# Report\n\nReady\n");
+  assert.doesNotMatch(rendered, /\u001b\[/);
+});
+
+test("Ink validation notices view renders notice data", () => {
+  assert.equal(renderHumanView({ kind: "validation-notices", notices: [
+    "alpha: read is unassessed",
+    "beta: read is unassessed",
+  ] }), "alpha: read is unassessed\nbeta: read is unassessed\n");
+});
+
+test("Ink explanation view renders explanation fields", () => {
+  assert.equal(renderHumanView({
+    kind: "adapter-explanation",
+    explanation: {
+      package: { ecosystem: "npm", name: "@example/alpha" },
+      workflow: ".github/workflows/alpha.yaml",
+      commands: {
+        test: { kind: "command", arguments: ["npm", "test"] },
+        typecheck: { kind: "command", arguments: ["npm", "run", "typecheck"] },
+        golden: { kind: "unavailable" },
+        consumer: { kind: "command", arguments: ["./example/run.sh"] },
+      },
+      semanticEnvironments: [{
+        name: "sqlite",
+        command: { kind: "command", arguments: ["npm", "run", "test:adversarial"] },
+        env: { ADAPTER_TEST_DB: "sqlite" },
+      }],
+      summary: {
+        adapter: "alpha",
+        matched: 1,
+        rejected: 2,
+        upstreamBlocked: 3,
+        unassessed: 4,
+        safetyAccounted: 6,
+        capabilitySupported: 1,
+        consumerCoverage: "artifact-install",
+        environments: ["sqlite"],
+      },
+    },
+  }), [
+    "Adapter: alpha",
+    "Package: npm:@example/alpha",
+    "Workflow: .github/workflows/alpha.yaml",
+    "Consumer coverage: artifact-install",
+    "Outcomes: 1 matched, 2 rejected, 3 upstream-blocked, 4 unassessed",
+    "Commands:",
+    "- test: npm test",
+    "- typecheck: npm run typecheck",
+    "- golden: unavailable",
+    "- consumer: ./example/run.sh",
+    "Semantic environments:",
+    "- sqlite: npm run test:adversarial [ADAPTER_TEST_DB=sqlite]",
+    "",
+  ].join("\n"));
+});
+
+test("Ink run output view renders command progress", () => {
+  assert.equal(renderHumanView({
+    kind: "run-plan",
+    executions: [{
+      adapter: "alpha",
+      environment: null,
+      command: { kind: "command", arguments: ["npm", "test"] },
+      env: {},
+    }],
+  }), "alpha: npm test\n");
+  assert.equal(renderHumanView({
+    kind: "run-plan",
+    executions: [{
+      adapter: "alpha",
+      environment: "quoted",
+      command: { kind: "command", arguments: ["node", "-e", "console.log('hello world')"] },
+      env: { TOKEN: "two words" },
+    }],
+  }), "alpha/quoted: env 'TOKEN=two words' -- node -e 'console.log('\"'\"'hello world'\"'\"')'\n");
+  assert.equal(renderHumanView({
+    kind: "run-progress",
+    event: {
+      kind: "golden-changed",
+      adapter: "alpha",
+      changes: " M alpha/golden/expectations.json",
+    },
+  }), "alpha golden changes:\n M alpha/golden/expectations.json\n");
+});
+
+test("Ink docs confirmation view renders the generated path", () => {
+  assert.equal(renderHumanView({
+    kind: "docs-confirmation",
+    path: "docs/generated/adapter-certification.md",
+  }), "wrote docs/generated/adapter-certification.md\n");
+});
+
+test("Ink scaffold result view renders generated next steps", () => {
+  assert.match(renderHumanView({
+    kind: "scaffold-result",
+    result: {
+      status: "written",
+      adapter: "beta",
+      manifestPath: "beta/adapterctl.json",
+      workflow: ".github/workflows/beta.yaml",
+    },
+  }), /^wrote beta\/adapterctl\.json\nNext steps:\n- set commands\.test/);
+});
 
 test("list discovers manifests without a root roster", async () => {
   const root = await createRoot();
@@ -247,6 +361,24 @@ test("validation accepts an alternate valid YAML action layout", async () => {
   assert.equal(result.code, 0, result.stderr);
 });
 
+test("all v1 commands work when legacy files are absent", async () => {
+  const root = await createRoot();
+  await writeValidRepository(root);
+  const commands = [
+    ["validate"],
+    ["report", "--format", "json"],
+    ["explain", "adapter", "alpha"],
+    ["explain", "action", "read"],
+    ["run", "--adapter", "alpha", "--profile", "test", "--dry-run"],
+    ["docs", "--write"],
+    ["docs", "--check"],
+  ];
+  for (const command of commands) {
+    const result = await runCli(root, command);
+    assert.equal(result.code, 0, `${command.join(" ")}: ${result.stderr}`);
+  }
+});
+
 test("validation rejects canonical check-resource drift", async () => {
   const root = await createRoot();
   await writeValidRepository(root);
@@ -289,6 +421,79 @@ test("validation rejects consumer case identity drift", async () => {
   assert.match(result.stderr, /cases\[0\]\.id: expected filtered\/alice\/view/);
 });
 
+test("consumer case schema couples pagination to the operation", async () => {
+  const paginatedRoot = await createRoot();
+  await writeValidRepository(paginatedRoot);
+  await writeJson(paginatedRoot, "demo/cases.json", {
+    schemaVersion: 1,
+    cases: [{
+      id: "paginated/alice/view",
+      operation: "paginated",
+      principal: "alice",
+      action: "view",
+      pagination: null,
+      expected: { kind: "KIND_CONDITIONAL", ids: ["d1"] },
+    }],
+  });
+
+  const paginated = await runCli(paginatedRoot, ["validate", "--discovery"]);
+  assert.equal(paginated.code, 1);
+  assert.match(paginated.stderr, /demo\/cases\.json\/cases\/0/);
+
+  const filteredRoot = await createRoot();
+  await writeValidRepository(filteredRoot);
+  await writeJson(filteredRoot, "demo/cases.json", {
+    schemaVersion: 1,
+    cases: [{
+      id: "filtered/alice/view",
+      operation: "filtered",
+      principal: "alice",
+      action: "view",
+      pagination: { pageSize: 1, pageSizes: [1] },
+      expected: { kind: "KIND_CONDITIONAL", ids: ["d1"] },
+    }],
+  });
+
+  const filtered = await runCli(filteredRoot, ["validate", "--discovery"]);
+  assert.equal(filtered.code, 1);
+  assert.match(filtered.stderr, /demo\/cases\.json\/cases\/0/);
+});
+
+test("consumer case catalog cannot be empty", async () => {
+  const root = await createRoot();
+  await writeValidRepository(root);
+  await writeJson(root, "demo/cases.json", { schemaVersion: 1, cases: [] });
+
+  const result = await runCli(root, ["validate", "--discovery"]);
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /demo\/cases\.json.*must NOT have fewer than 1 items/);
+});
+
+test("action catalog cannot be empty", async () => {
+  const root = await createRoot();
+  await writeValidRepository(root);
+  await writeJson(root, "conformance/catalog.json", { schemaVersion: 1, actions: [] });
+
+  const result = await runCli(root, ["validate", "--discovery"]);
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /conformance\/catalog\.json.*must NOT have fewer than 1 items/);
+});
+
+test("strict repository certification requires at least one adapter", async () => {
+  const root = await createRoot();
+  await writeValidRepository(root);
+  await rm(join(root, "alpha"), { recursive: true });
+
+  const strict = await runCli(root, ["validate"]);
+  const discovery = await runCli(root, ["validate", "--discovery"]);
+
+  assert.equal(strict.code, 1);
+  assert.match(strict.stderr, /strict certification requires at least one adapter/);
+  assert.equal(discovery.code, 0, discovery.stderr);
+});
+
 test("validation rejects workflow trigger drift", async () => {
   const root = await createRoot();
   await writeValidRepository(root);
@@ -298,6 +503,53 @@ test("validation rejects workflow trigger drift", async () => {
 
   assert.equal(result.code, 1);
   assert.match(result.stderr, /missing path trigger alpha\/\*\*/);
+});
+
+test("validation requires an adapter-scoped control-plane job", async () => {
+  const root = await createRoot();
+  await writeValidRepository(root);
+  await writeText(root, ".github/workflows/alpha.yaml", [
+    "on:",
+    "  push:",
+    "    paths: [alpha/**, conformance/**, demo/**]",
+    "jobs:",
+    "  test:",
+    "    steps:",
+    `      - run: ${process.execPath} -e process.exit(0)`,
+    "",
+  ].join("\n"));
+
+  const result = await runCli(root, ["validate", "--discovery"]);
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /missing scoped adapterctl validation for alpha/);
+});
+
+test("matrix conditions cannot hide a scoped control-plane validation", async () => {
+  const root = await createRoot();
+  await writeValidRepository(root);
+  await writeText(root, ".github/workflows/alpha.yaml", [
+    "on:",
+    "  push:",
+    "    paths: [alpha/**, conformance/**, demo/**]",
+    "jobs:",
+    "  test:",
+    "    strategy:",
+    "      matrix:",
+    "        node: ['22']",
+    "    steps:",
+    "      - if: matrix.node == 'never'",
+    "        uses: ./.github/actions/validate-adapterctl",
+    "        with:",
+    "          adapter: alpha",
+    `      - run: ${process.execPath} -e process.exit(0)`,
+    "",
+  ].join("\n"));
+
+  const result = await runCli(root, ["validate", "--discovery"]);
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /missing scoped adapterctl validation for alpha/);
 });
 
 test("workflow comments cannot satisfy certification evidence", async () => {
@@ -322,38 +574,113 @@ test("workflow comments cannot satisfy certification evidence", async () => {
   assert.match(result.stderr, /missing native command marker/);
 });
 
-test("discovery rejects an assessed outcome that contradicts the legacy ledger", async () => {
+test("workflow output cannot masquerade as a native command invocation", async () => {
   const root = await createRoot();
   await writeValidRepository(root);
-  const legacy = await readJson(root, "conformance/actions.json");
-  legacy["conformance"] = [];
-  await writeJson(root, "conformance/actions.json", legacy);
+  await writeText(root, ".github/workflows/alpha.yaml", [
+    "on:",
+    "  push:",
+    "    paths: [alpha/**, conformance/**, demo/**]",
+    "jobs:",
+    "  test:",
+    "    steps:",
+    "      - uses: ./.github/actions/validate-adapterctl",
+    "        with:",
+    "          adapter: alpha",
+    `      - run: echo ${process.execPath} -e process.exit(0)`,
+    "",
+  ].join("\n"));
 
   const result = await runCli(root, ["validate", "--discovery"]);
 
   assert.equal(result.code, 1);
-  assert.match(result.stderr, /alpha\/read: manifest outcome matched is absent from legacy actions\.json/);
+  assert.match(result.stderr, /missing native command marker/);
 });
 
-test("validation compares consumer cases with the legacy expected results", async () => {
+test("statically disabled workflow steps cannot satisfy command evidence", async () => {
   const root = await createRoot();
   await writeValidRepository(root);
-  await writeJson(root, "demo/cases.json", {
-    schemaVersion: 1,
-    cases: [{
-      id: "filtered/alice/view",
-      operation: "filtered",
-      principal: "alice",
-      action: "view",
-      pagination: null,
-      expected: { kind: "KIND_CONDITIONAL", ids: ["d1"] },
-    }],
-  });
+  await writeText(root, ".github/workflows/alpha.yaml", [
+    "on:",
+    "  push:",
+    "    paths: [alpha/**, conformance/**, demo/**]",
+    "jobs:",
+    "  test:",
+    "    steps:",
+    "      - uses: ./.github/actions/validate-adapterctl",
+    "        with:",
+    "          adapter: alpha",
+    "      - if: ${{ false }}",
+    `        run: ${process.execPath} -e process.exit(0)`,
+    "",
+  ].join("\n"));
 
   const result = await runCli(root, ["validate", "--discovery"]);
 
   assert.equal(result.code, 1);
-  assert.match(result.stderr, /demo\/cases\.json does not match demo\/expected\.json/);
+  assert.match(result.stderr, /missing native command marker/);
+});
+
+test("unreachable shell branches cannot satisfy command evidence", async () => {
+  const root = await createRoot();
+  await writeValidRepository(root);
+  await writeText(root, ".github/workflows/alpha.yaml", [
+    "on:",
+    "  push:",
+    "    paths: [alpha/**, conformance/**, demo/**]",
+    "jobs:",
+    "  test:",
+    "    steps:",
+    "      - uses: ./.github/actions/validate-adapterctl",
+    "        with:",
+    "          adapter: alpha",
+    `      - run: false && ${process.execPath} -e process.exit(0)`,
+    "",
+  ].join("\n"));
+
+  const result = await runCli(root, ["validate", "--discovery"]);
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /missing native command marker/);
+});
+
+test("uninvoked package scripts cannot satisfy workflow command evidence", async () => {
+  const root = await createRoot();
+  await writeValidRepository(root);
+  const manifest = await readJson(root, "alpha/adapterctl.json");
+  const commands = manifest["commands"];
+  const environments = manifest["semanticEnvironments"];
+  if (!isRecord(commands) || !Array.isArray(environments) || !isRecord(environments[0])) {
+    throw new Error("invalid command fixture");
+  }
+  commands["test"] = ["npm", "run", "desired"];
+  environments[0]["command"] = ["bash", "scripts/wrapper.sh", "true"];
+  await writeJson(root, "alpha/adapterctl.json", manifest);
+  await writeJson(root, "alpha/package.json", {
+    scripts: {
+      unrelated: "npm run desired",
+    },
+  });
+  await writeText(root, "alpha/scripts/wrapper.sh", "#!/usr/bin/env bash\n\"$@\"\n");
+  await writeText(root, ".github/workflows/alpha.yaml", [
+    "on:",
+    "  push:",
+    "    paths: [alpha/**, conformance/**, demo/**]",
+    "jobs:",
+    "  test:",
+    "    steps:",
+    "      - uses: ./.github/actions/validate-adapterctl",
+    "        with:",
+    "          adapter: alpha",
+    "      - run: bash scripts/wrapper.sh true",
+    `      - run: ${process.execPath} -e process.exit(0)`,
+    "",
+  ].join("\n"));
+
+  const result = await runCli(root, ["validate", "--discovery"]);
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /missing native command marker npm run desired/);
 });
 
 test("validation checks semantic environment values against the workflow matrix", async () => {
@@ -373,24 +700,113 @@ test("validation checks semantic environment values against the workflow matrix"
   assert.match(result.stderr, /missing environment marker ADAPTER_TEST_DB=mysql/);
 });
 
-test("validation rejects duplicate special-bucket legacy assignments", async () => {
+test("semantic environment evidence must be attached to its native command", async () => {
   const root = await createRoot();
   await writeValidRepository(root);
-  const legacy = await readJson(root, "conformance/actions.json");
-  legacy["adapterUnsupported"] = {
-    alpha: [{ action: "read", reason: "unsupported", message: "no read" }],
-  };
-  legacy["knownDivergences"] = [{
-    action: "read",
-    adapters: ["alpha"],
-    reason: "planner issue",
-  }];
-  await writeJson(root, "conformance/actions.json", legacy);
+  const manifest = await readJson(root, "alpha/adapterctl.json");
+  const environments = manifest["semanticEnvironments"];
+  if (!Array.isArray(environments) || !isRecord(environments[0])) {
+    throw new Error("invalid environment fixture");
+  }
+  environments[0]["env"] = { ADAPTER_TEST_DB: "mysql" };
+  await writeJson(root, "alpha/adapterctl.json", manifest);
+  await writeText(root, ".github/workflows/alpha.yaml", [
+    "on:",
+    "  push:",
+    "    paths: [alpha/**, conformance/**, demo/**]",
+    "jobs:",
+    "  test:",
+    "    steps:",
+    "      - uses: ./.github/actions/validate-adapterctl",
+    "        with:",
+    "          adapter: alpha",
+    `      - run: ${process.execPath} -e process.exit(0)`,
+    "      - run: echo unrelated",
+    "        env:",
+    "          ADAPTER_TEST_DB: mysql",
+    "",
+  ].join("\n"));
 
   const result = await runCli(root, ["validate", "--discovery"]);
 
   assert.equal(result.code, 1);
-  assert.match(result.stderr, /duplicate special classification for alpha\/read/);
+  assert.match(result.stderr, /missing environment marker ADAPTER_TEST_DB=mysql/);
+});
+
+test("semantic environment keys must coexist in one concrete matrix row", async () => {
+  const root = await createRoot();
+  await writeValidRepository(root);
+  const manifest = await readJson(root, "alpha/adapterctl.json");
+  const environments = manifest["semanticEnvironments"];
+  if (!Array.isArray(environments) || !isRecord(environments[0])) {
+    throw new Error("invalid environment fixture");
+  }
+  environments[0]["env"] = { RUBY_VERSION: "3.2", ACTIVERECORD_VERSION: "7.1" };
+  await writeJson(root, "alpha/adapterctl.json", manifest);
+  await writeText(root, ".github/workflows/alpha.yaml", [
+    "on:",
+    "  push:",
+    "    paths: [alpha/**, conformance/**, demo/**]",
+    "jobs:",
+    "  test:",
+    "    strategy:",
+    "      matrix:",
+    "        include:",
+    "          - ruby: '3.2'",
+    "            activerecord: '8.0'",
+    "          - ruby: '3.4'",
+    "            activerecord: '7.1'",
+    "    steps:",
+    "      - uses: ./.github/actions/validate-adapterctl",
+    "        with:",
+    "          adapter: alpha",
+    `      - run: ${process.execPath} -e process.exit(0)`,
+    "        env:",
+    "          RUBY_VERSION: ${{ matrix.ruby }}",
+    "          ACTIVERECORD_VERSION: ${{ matrix.activerecord }}",
+    "",
+  ].join("\n"));
+
+  const result = await runCli(root, ["validate", "--discovery"]);
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /missing environment marker/);
+});
+
+test("matrix conditions cannot certify rows they skip", async () => {
+  const root = await createRoot();
+  await writeValidRepository(root);
+  const manifest = await readJson(root, "alpha/adapterctl.json");
+  const environments = manifest["semanticEnvironments"];
+  if (!Array.isArray(environments) || !isRecord(environments[0])) {
+    throw new Error("invalid environment fixture");
+  }
+  environments[0]["env"] = { ADAPTER_TEST_DB: "mysql" };
+  await writeJson(root, "alpha/adapterctl.json", manifest);
+  await writeText(root, ".github/workflows/alpha.yaml", [
+    "on:",
+    "  push:",
+    "    paths: [alpha/**, conformance/**, demo/**]",
+    "jobs:",
+    "  test:",
+    "    strategy:",
+    "      matrix:",
+    "        database: [postgres, mysql]",
+    "    steps:",
+    "      - uses: ./.github/actions/validate-adapterctl",
+    "        with:",
+    "          adapter: alpha",
+    "      - if: matrix.database == 'postgres'",
+    `        run: ${process.execPath} -e process.exit(0)`,
+    "        env:",
+    "          ADAPTER_TEST_DB: ${{ matrix.database }}",
+    "",
+  ].join("\n"));
+
+  const result = await runCli(root, ["validate", "--discovery"]);
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /missing environment marker ADAPTER_TEST_DB=mysql/);
 });
 
 test("report emits a deterministic machine-readable confidence profile", async () => {
@@ -453,9 +869,9 @@ test("docs writes and checks the deterministic certification document", async ()
   assert.match(stale.stderr, /adapter certification documentation is out of date/);
 });
 
-test("run dry-run shows the selected native command, environment, and action", async () => {
+test("an action-scoped run executes an unassessed discovery action", async () => {
   const root = await createRoot();
-  await writeValidRepository(root);
+  await writeValidRepository(root, { read: { status: "unassessed" } });
   const manifest = await readJson(root, "alpha/adapterctl.json");
   const environments = manifest["semanticEnvironments"];
   if (!Array.isArray(environments) || !isRecord(environments[0])) {
@@ -474,6 +890,9 @@ test("run dry-run shows the selected native command, environment, and action", a
     "    env:",
     "      ADAPTER_TEST_DB: mysql",
     "    steps:",
+    "      - uses: ./.github/actions/validate-adapterctl",
+    "        with:",
+    "          adapter: alpha",
     `      - run: ${process.execPath} -e ${code}`,
     `      - run: ${process.execPath} -e process.exit(0)`,
     "",
@@ -485,8 +904,10 @@ test("run dry-run shows the selected native command, environment, and action", a
   ]);
   assert.equal(dryRun.code, 0, dryRun.stderr);
   assert.match(dryRun.stdout, /alpha\/default/);
-  assert.match(dryRun.stdout, /ADAPTER_TEST_DB=mysql/);
-  assert.match(dryRun.stdout, /ADAPTERCTL_ACTION=read/);
+  assert.match(
+    dryRun.stdout,
+    /env ADAPTER_TEST_DB=mysql ADAPTERCTL_ACTION=read --/,
+  );
 
   const executed = await runCli(root, [
     "run", "--adapter", "alpha", "--profile", "conformance",
@@ -498,6 +919,10 @@ test("run dry-run shows the selected native command, environment, and action", a
 
 test("scaffold creates a safe unassessed manifest and refuses existing targets", async () => {
   const root = await createRoot();
+  await writeJson(root, "conformance/catalog.json", {
+    schemaVersion: 1,
+    actions: [{ name: "read", oracleExpectation: { kind: "proper-subset" } }],
+  });
 
   const dryRun = await runCli(root, [
     "scaffold", "beta", "--ecosystem", "npm", "--package", "@example/beta",
@@ -514,7 +939,7 @@ test("scaffold creates a safe unassessed manifest and refuses existing targets",
   assert.equal(created.code, 0, created.stderr);
   const manifest = await readJson(root, "beta/adapterctl.json");
   assert.deepEqual(manifest["semanticEnvironments"], []);
-  assert.deepEqual(manifest["outcomes"], {});
+  assert.deepEqual(manifest["outcomes"], { read: { status: "unassessed" } });
   assert.deepEqual(manifest["consumer"], { coverage: "usage-only" });
 
   const duplicate = await runCli(root, [
@@ -522,19 +947,6 @@ test("scaffold creates a safe unassessed manifest and refuses existing targets",
   ]);
   assert.equal(duplicate.code, 1);
   assert.match(duplicate.stderr, /target already exists: beta/);
-});
-
-test("full validation rejects stale legacy adapter roster entries", async () => {
-  const root = await createRoot();
-  await writeValidRepository(root);
-  const legacy = await readJson(root, "conformance/actions.json");
-  legacy["adapters"] = ["alpha", "stale"];
-  await writeJson(root, "conformance/actions.json", legacy);
-
-  const result = await runCli(root, ["validate", "--discovery"]);
-
-  assert.equal(result.code, 1);
-  assert.match(result.stderr, /legacy adapter has no discovered manifest: stale/);
 });
 
 test("strict validation cannot certify a manifest with no semantic environments", async () => {
@@ -563,6 +975,67 @@ test("an explicit conformance run rejects an adapter with no semantic environmen
 
   assert.equal(result.code, 64);
   assert.match(result.stderr, /alpha: conformance command is unavailable/);
+});
+
+test("run completes the selected matrix before reporting command failures", async () => {
+  const root = await createRoot();
+  await writeValidRepository(root);
+  const alpha = await readJson(root, "alpha/adapterctl.json");
+  alpha["semanticEnvironments"] = [{
+    name: "default",
+    command: [process.execPath, "-e", "process.exit(7)"],
+    env: {},
+  }];
+  await writeJson(root, "alpha/adapterctl.json", alpha);
+
+  const beta = structuredClone(alpha);
+  beta["adapter"] = "beta";
+  beta["package"] = { ecosystem: "test", name: "beta" };
+  beta["workflow"] = ".github/workflows/beta.yaml";
+  beta["semanticEnvironments"] = [{
+    name: "default",
+    command: [
+      process.execPath,
+      "-e",
+      "require('node:fs').writeFileSync('matrix-complete','yes')",
+    ],
+    env: {},
+  }];
+  await writeJson(root, "beta/adapterctl.json", beta);
+  await writeText(root, ".github/workflows/alpha.yaml", [
+    "on:",
+    "  push:",
+    "    paths: [alpha/**, conformance/**, demo/**]",
+    "jobs:",
+    "  test:",
+    "    steps:",
+    "      - uses: ./.github/actions/validate-adapterctl",
+    "        with:",
+    "          adapter: alpha",
+    `      - run: ${process.execPath} -e process.exit(0)`,
+    `      - run: ${process.execPath} -e process.exit(7)`,
+    "",
+  ].join("\n"));
+  await writeText(root, ".github/workflows/beta.yaml", [
+    "on:",
+    "  push:",
+    "    paths: [beta/**, conformance/**, demo/**]",
+    "jobs:",
+    "  test:",
+    "    steps:",
+    "      - uses: ./.github/actions/validate-adapterctl",
+    "        with:",
+    "          adapter: beta",
+    `      - run: ${process.execPath} -e process.exit(0)`,
+    `      - run: ${process.execPath} -e require('node:fs').writeFileSync('matrix-complete','yes')`,
+    "",
+  ].join("\n"));
+
+  const result = await runCli(root, ["run", "--profile", "conformance", "--action", "read"]);
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /alpha\/default: command exited with status 7/);
+  assert.equal(await readFile(join(root, "beta/matrix-complete"), "utf8"), "yes");
 });
 
 test("validation checks available test and typecheck commands against the workflow", async () => {
@@ -601,7 +1074,7 @@ test("golden runs report adapter-local changed paths", async () => {
   assert.match(result.stdout, /alpha\/golden\//);
 });
 
-test("validation rejects unknown catalog references and legacy groups", async () => {
+test("validation rejects unknown catalog references", async () => {
   const unknownActionRoot = await createRoot();
   await writeValidRepository(unknownActionRoot);
   const manifest = await readJson(unknownActionRoot, "alpha/adapterctl.json");
@@ -612,13 +1085,4 @@ test("validation rejects unknown catalog references and legacy groups", async ()
   const unknownAction = await runCli(unknownActionRoot, ["validate", "--discovery"]);
   assert.equal(unknownAction.code, 1);
   assert.match(unknownAction.stderr, /unknown action ghost/);
-
-  const unknownGroupRoot = await createRoot();
-  await writeValidRepository(unknownGroupRoot);
-  const legacy = await readJson(unknownGroupRoot, "conformance/actions.json");
-  legacy["mystery"] = [];
-  await writeJson(unknownGroupRoot, "conformance/actions.json", legacy);
-  const unknownGroup = await runCli(unknownGroupRoot, ["validate", "--discovery"]);
-  assert.equal(unknownGroup.code, 1);
-  assert.match(unknownGroup.stderr, /unknown group mystery/);
 });

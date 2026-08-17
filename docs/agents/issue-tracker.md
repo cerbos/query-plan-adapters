@@ -46,7 +46,7 @@ Rules:
   A translation bug reported against one adapter has historically been the same bug in several —
   see "Changing how a condition is translated" in `CLAUDE.md`.
 - **Use `conformance` instead of tagging every adapter** when the issue is about the corpus itself: a new
-  hostile shape, a classification in `actions.json`, the wire fixtures, the degeneracy guard, or a
+  hostile shape, the global action catalog, canonical resources, wire fixtures, or a
   `CERBOS_VERSION` bump. It already means "affects every adapter", so don't also apply a label per adapter
   — that's noise.
 - **Combine the two when a corpus change has a known adapter-specific consequence.** `conformance` +

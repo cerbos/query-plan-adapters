@@ -698,7 +698,8 @@ resourcePolicy:
     # is the sole discriminator: int(-0.6) is 0 and the row is ALLOWED, while a rounding cast
     # gives -1 and drops it. Oracle a1/a2/a7 (aDouble -0.6 / 0.25 / 0.3). Unlike the string
     # casts this one has a real oracle, so an adapter that emits an explicit truncation rather
-    # than a bare CAST can be declared in `adapterSupportedExpected` and proved against it.
+    # than a bare CAST can record a matched direct outcome in its `adapterctl.json` and prove it
+    # in the adapter's native conformance environment.
     - actions: ["cast-int-double"]
       effect: EFFECT_ALLOW
       roles: ["USER"]
@@ -1852,7 +1853,7 @@ resourcePolicy:
     #
     # Rendering this as IS NULL returns the five NULL-column rows the PDP denies (#302), so
     # under `nullAttributeRepresentation: "omitted"` every adapter must reject it instead.
-    # `actions.json` lists it in `nullRepresentationOmitted`: harnesses translate this action
+    # Every adapter manifest rejects it under the omitted-null convention: harnesses translate this action
     # with the option set to "omitted" and assert the throw. Do not add it to `conformance`;
     # a throwing action has no filter to compare against the oracle.
     - actions: ["null-eq-missing"]

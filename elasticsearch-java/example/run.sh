@@ -10,7 +10,7 @@
 # also what keeps `demo/scripts/run-example.sh elasticsearch-java` a single command on a laptop.
 #
 # Everything this script prints for a human goes to stderr. stdout carries exactly one JSON
-# document, which the shared runner diffs against demo/expected.json.
+# document, which the shared runner diffs against demo/cases.json.
 #
 # Pre-reqs: docker, curl, gradle (8.x), JDK 17+.
 

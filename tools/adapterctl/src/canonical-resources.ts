@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 
-import { isRecord } from "./decode.ts";
+import { isRecord } from "./records.ts";
 import type { CheckResource, CheckResources } from "./model.ts";
 
 type CanonicalInputs = {
@@ -10,20 +10,20 @@ type CanonicalInputs = {
   derived: Record<string, Record<string, unknown>>;
 };
 
-export function validateCanonicalResources(
-  checkResources: CheckResources,
-  seedsValue: unknown,
-  derivedValue: unknown,
-): string[] {
+export function validateCanonicalResources(args: {
+  checkResources: CheckResources;
+  seedsValue: unknown;
+  derivedValue: unknown;
+}): string[] {
   const errors: string[] = [];
-  const inputs = decodeInputs(seedsValue, derivedValue, errors);
+  const inputs = decodeInputs(args.seedsValue, args.derivedValue, errors);
   if (inputs === undefined) return errors;
-  if (!isDeepStrictEqual(checkResources.principal, inputs.principal)) {
+  if (!isDeepStrictEqual(args.checkResources.principal, inputs.principal)) {
     errors.push("conformance/check-resources.json.principal: does not match seeds.json principal");
   }
   const expected = inputs.seeds.map((seed) => materializeResource(seed, inputs));
   const actualById = new Map<string, CheckResource>();
-  for (const resource of checkResources.resources) {
+  for (const resource of args.checkResources.resources) {
     if (actualById.has(resource.id)) {
       errors.push(`conformance/check-resources.json.resources: duplicate id ${resource.id}`);
     }

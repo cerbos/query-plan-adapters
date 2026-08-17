@@ -47,9 +47,10 @@ from corpus import (
     AdvResource,
     AdvSubCategory,
     AdvTag,
+    ControlPlane,
     classify_actions_for_adapter,
-    null_representation_throws,
-    parse_actions_file,
+    load_control_plane,
+    representation_dependent_rejections,
     read_corpus_json,
     require_message,
 )
@@ -60,17 +61,19 @@ from sqlalchemy.dialects import postgresql
 
 SEEDS_FILE = read_corpus_json("seeds.json")
 DERIVED_FILE = read_corpus_json("derived-fields.json")
-MANIFEST = parse_actions_file(read_corpus_json("actions.json"))
+CHECK_RESOURCES_FILE = read_corpus_json("check-resources.json")
+MANIFEST = load_control_plane()
 
 SEEDS: List[Dict[str, Any]] = SEEDS_FILE["seeds"]
 RESOURCE_KIND: str = SEEDS_FILE["resourceKind"]
+CHECK_RESOURCES: List[Dict[str, Any]] = CHECK_RESOURCES_FILE["resources"]
 
 # -- corpus coverage guards -------------------------------------------------
 #
 # The same parsed seed feeds the stored row AND the check() oracle, so a corpus
 # field this harness does not consume is dropped from both sides at once and the
 # differential agrees for the wrong reason — the projection trap
-# conformance/README.md describes for actions.json, applied to the seeds.
+# conformance/README.md describes for adapterctl.json, applied to the seeds.
 # Asserting set equality catches both directions: a corpus key nothing here
 # reads, and a key this harness reads that the corpus no longer carries.
 SEED_KEYS = {
@@ -170,17 +173,13 @@ if set(DERIVED) != {seed["id"] for seed in SEEDS}:
 for _id, _entry in DERIVED.items():
     _assert_keys(f'derived-fields.json derived["{_id}"]', set(_entry), DERIVED_KEYS)
 
-# Capability classifications come from the shared manifest, derived at runtime
+# Capability outcomes come from this adapter's manifest, derived at runtime
 # rather than copied: unsupported conformance actions must throw, and
 # globally-unsupported actions promoted for this adapter are instead checked
 # against the PDP oracle. `test_translator.py` derives the same classification
 # from the same expressions, which is what lets its completeness guard be total.
 _CLASSIFICATION = classify_actions_for_adapter(MANIFEST, ADAPTER)
 ORACLE_ACTIONS = _CLASSIFICATION.oracle_actions
-
-# Globally expected-unsupported shapes promoted by this adapter. Regex is not
-# promoted because SQL dialect regex engines do not guarantee CEL/RE2 semantics.
-SQLALCHEMY_SUPPORTED_EXPECTED = _CLASSIFICATION.supported_expected
 
 # Globally-unsupported planner shapes plus this adapter's own unsupported list:
 # translation (or execution) must fail loudly, never produce a silently-wrong
@@ -194,132 +193,29 @@ THROWING_ACTION_NAMES = {action for action, _ in THROWING_ACTIONS}
 # emit a filter (#302).
 # Every adapter must reject these, so the message map names the whole roster and
 # this harness resolves its own entry exactly as it does for a throwing action.
-NULL_REPRESENTATION_OMITTED = null_representation_throws(MANIFEST, ADAPTER)
+REPRESENTATION_DEPENDENT_REJECTIONS = representation_dependent_rejections(MANIFEST, ADAPTER)
 # The one message every null-carrying action must be rejected with under
 # ``omitted``.
-NULL_OMITTED_MESSAGE = NULL_REPRESENTATION_OMITTED[0][2]
+NULL_OMITTED_MESSAGE = require_message(
+    "outcomes.null-eq-missing",
+    MANIFEST.outcomes["null-eq-missing"].get("message"),
+)
 
 # Every classified action across all four manifest groups. `ActionsFile` reads each
 # group explicitly for the same reason: a group nothing names is dropped silently,
 # and a dropped group makes its actions vanish from every count at once (the
 # projection trap conformance/README.md warns about).
 MANIFEST_ACTIONS = MANIFEST.manifest_actions()
-SQLALCHEMY_SKIPPED_DIVERGENCES = MANIFEST.skipped_divergences(ADAPTER)
+SQLALCHEMY_UPSTREAM_BLOCKED = MANIFEST.upstream_blocked_actions(ADAPTER)
 
-# -- the degeneracy guard (conformance/README.md, "The degeneracy guard") ----
-#
-# A representative sample of the actions this adapter ORACLE-COMPARES, one per
-# hostile group it can express. The two lists are asserted to be complements of
-# ORACLE_ACTIONS, so neither can drift into the other unnoticed.
-#
-# w1-size-zero-chain, w1-not-size-chain, w1-size-frac-chain and the two
-# string-cast actions are deliberately absent: their oracles are empty by
-# CONSTRUCTION (no seed holds a to-one parent with zero children, nor one with
-# two or more; every seed's aString raises in int()/double()), so they cannot
-# satisfy this guard.
-DEGENERACY_GUARD_ACTIONS = (
-    "vf-le",
-    "like-percent",
-    "all-on-empty",
-    "pv-exists",
-    "pv-all",
-    "null-eq",
-    "null-ne",
-    # The explicit-null convention against a non-null operand (#308). All five are
-    # compared rather than raised, because the attribute map declares the convention
-    # per attribute; every one of them under-granted by exactly the NULL-column rows
-    # before that declaration existed.
-    "null-value-ne-const",
-    "null-value-not-eq-const",
-    "null-value-not-in-const",
-    "null-value-f2f",
-    "null-value-pv-not-exists",
-    # The absent to-one parent (#309/#315/#316/#333/#334).
-    "w1-all-chain",
-    "w1-not-exists-chain",
-    "w1-size-nonneg-chain",
-    "w1-not-in-chain",
-    "w1-not-hasint-chain",
-    "w1-ternary-chain-cond",
-    "w1-size-frac-le-chain",
-    # Column arithmetic under a division (#311); the zero-denominator arm is a
-    # liveness probe below.
-    "cr-div-other-column",
-    "cr-div-then-add",
-    "cr-div-then-add-ne",
-    # The real to-one join (#375): one per hazard — the negated hop, the null
-    # comparison, two-level depth, the root conjunction, and the disjunction,
-    # whose failure direction is an under-grant.
-    "rel-not-bool-hop",
-    "rel-ne-null-hop",
-    "rel-bool-hop2",
-    "rel-hop-and-root",
-    "rel-hop2-or-exists",
-    # Case sensitivity in STRING MATCHING, a different mechanism from cs-eq:
-    # collation governs `=`, and on SQLite only `PRAGMA case_sensitive_like`
-    # governs LIKE.
-    "cs-contains",
-    # The primary key as a filterable attribute (#376): against a constant,
-    # against a column under negation, and inside a concatenation in both
-    # operand orders. SQLAlchemy renders CEL's string `+` as `||` through the
-    # column's own type, so both concatenations compare rather than raise.
-    "id-eq-const",
-    "id-f2f-ne",
-    "id-concat",
-    "id-concat-vf",
-    # string() over a NUMERIC column, the half this adapter lowers. Its boolean
-    # sibling is refused instead, so this entry proves the supported half still
-    # compares rather than joining the probes below.
-    "cast-string-double",
-    # CEL's `+` between two COLUMNS (#391). SQLAlchemy renders it through the
-    # columns' own String type, so it emits `||` (or CONCAT on MySQL) without
-    # needing the plan to say which overload it is.
-    "concat-f2f",
-    # Root position and bare operand forms (#388): one per hazard — the
-    # negation over a bare ordering (every other negated ordering in the
-    # corpus wraps a size() or a ternary), the bare boolean at the ROOT of the
-    # condition, which this adapter refused outright before this change, and
-    # the collection subquery disjoined with a scalar predicate rather than
-    # conjoined with one.
-    "not-lt",
-    "root-bare-bool",
-    "or-eq-exists",
-    # Hazard classes the corpus missed (#387): the De Morgan branch over a
-    # conjunction; the negated LIKE against a COLUMN needle, where a
-    # definite-FALSE null guard would leak every NULL-needle row through the
-    # NOT; the value-first hasIntersection, which used to keep its wire order
-    # and hand the override a literal list where it expected a relation; and
-    # the BELOW-cliff unroll of a principal collection, the shape a principal
-    # with three teams produces.
-    "not-and",
-    "not-contains",
-    "vf-hasint",
-    "pv-exists-unrolled",
-)
+# Catalog oracle expectations replace per-harness liveness lists: every selected action states
+# whether the canonical check-resource oracle must be empty, total, or a proper subset.
+ORACLE_EXPECTATIONS = MANIFEST.oracle_expectations()
 
-# Shapes this adapter refuses to translate: they have no oracle comparison to
-# guard, and stay here as PDP/policy liveness probes for a group the list above
-# cannot cover. See cerbos/query-plan-adapters#324.
-DEGENERACY_LIVENESS_PROBES = (
-    # json.loads renders the wire's -0 as the integer 0, so the sign of a zero
-    # denominator is gone before the adapter sees it.
-    "cr-div-neg-zero",
-    # int() over a numeric column: truncation-versus-rounding, unsupported for
-    # every adapter but convex, which promotes it in adapterSupportedExpected.
-    "cast-int-double",
-    # string() over a BOOLEAN column, where CAST is dialect-dependent (#376).
-    "cast-string-bool",
-    # `list` has no operator-table entry, so the constructed hierarchy path is
-    # refused before the hierarchy operators around it are reached.
-    "hier-list-id",
-    # #387, one probe per group this adapter cannot compare: modulo (reached
-    # through the int() cast that gives `%` an integer operand), the positional
-    # read of a scalar list, and list equality over a map() projection, whose
-    # deferred intermediate no enclosing override consumes.
-    "arith-mod",
-    "index-scalar-list",
-    "map-eq-list",
-)
+
+def _require_selected(action: str) -> None:
+    if MANIFEST.selected_action and MANIFEST.selected_action != action:
+        pytest.skip("another action was selected by ADAPTERCTL_ACTION")
 
 
 # -- deterministic derived fields (conformance/README.md) --------------------
@@ -467,8 +363,8 @@ def adv_engine():
             tag_rows.append(
                 {"tag_id": tag["id"], "name": tag["name"], "resource_id": seed["id"]}
             )
-        # Distinct category graphs per seed (one category per sub-name, same
-        # shape the prisma reference harness seeds) so no rows share relations.
+        # Distinct category graphs per seed (one category per sub-name, matching
+        # the shared seed topology) so no rows share relations.
         for i, sub_name in enumerate(seed["subCategoryNames"]):
             category_id = f"{seed['id']}-cat{i}"
             category_rows.append(
@@ -532,7 +428,7 @@ def adv_cerbos_client():
 
 
 def _principal() -> Principal:
-    p = SEEDS_FILE["principal"]
+    p = CHECK_RESOURCES_FILE["principal"]
     return Principal(id=p["id"], roles=set(p["roles"]), attr=p["attr"])
 
 
@@ -616,9 +512,13 @@ def _check_resource(seed: Dict[str, Any]) -> Resource:
 
 def _oracle_allowed_ids(client: CerbosClient, action: str) -> Set[str]:
     return {
-        seed["id"]
-        for seed in SEEDS
-        if client.is_allowed(action, _principal(), _check_resource(seed))
+        resource["id"]
+        for resource in CHECK_RESOURCES
+        if client.is_allowed(
+            action,
+            _principal(),
+            Resource(id=resource["id"], kind=resource["kind"], attr=resource["attr"]),
+        )
     }
 
 
@@ -665,6 +565,77 @@ def _adapter_filtered_ids(
 # one) — a silent-wrongness bug class, so escalate it to an error.
 @pytest.mark.filterwarnings("error::sqlalchemy.exc.SAWarning")
 class TestAdversarialConformance:
+    @pytest.mark.parametrize("recorded", [None, {"status": "unassessed"}])
+    def test_selected_discovery_action_uses_oracle(self, monkeypatch, recorded):
+        monkeypatch.setenv("ADAPTERCTL_ACTION", "new-action")
+        outcomes = {} if recorded is None else {"new-action": recorded}
+        control_plane = ControlPlane(
+            {
+                "schemaVersion": 1,
+                "actions": [
+                    {
+                        "name": "new-action",
+                        "oracleExpectation": {"kind": "proper-subset"},
+                    }
+                ],
+            },
+            {"schemaVersion": 1, "adapter": ADAPTER, "outcomes": outcomes},
+        )
+
+        classification = classify_actions_for_adapter(control_plane, ADAPTER)
+
+        assert classification.oracle_actions == ["new-action"]
+
+    def test_selected_discovery_action_preserves_assessment(self, monkeypatch):
+        monkeypatch.setenv("ADAPTERCTL_ACTION", "known-action")
+        control_plane = ControlPlane(
+            {
+                "schemaVersion": 1,
+                "actions": [
+                    {
+                        "name": "known-action",
+                        "oracleExpectation": {"kind": "proper-subset"},
+                    }
+                ],
+            },
+            {
+                "schemaVersion": 1,
+                "adapter": ADAPTER,
+                "outcomes": {
+                    "known-action": {
+                        "status": "rejected",
+                        "reason": "unsupported",
+                        "message": "cannot translate",
+                    }
+                },
+            },
+        )
+
+        classification = classify_actions_for_adapter(control_plane, ADAPTER)
+
+        assert classification.throwing_actions == [
+            ("known-action", "cannot translate")
+        ]
+
+    def test_unscoped_discovery_still_requires_complete_outcomes(self, monkeypatch):
+        monkeypatch.delenv("ADAPTERCTL_ACTION", raising=False)
+
+        with pytest.raises(
+            AssertionError, match="outcomes must cover the catalog exactly"
+        ):
+            ControlPlane(
+                {
+                    "schemaVersion": 1,
+                    "actions": [
+                        {
+                            "name": "new-action",
+                            "oracleExpectation": {"kind": "proper-subset"},
+                        }
+                    ],
+                },
+                {"schemaVersion": 1, "adapter": ADAPTER, "outcomes": {}},
+            )
+
     def test_throwing_action_with_no_pinned_message_fails_classification(self):
         # Adding a throwing action without pinning its message must fail this
         # harness rather than silently degrade the throw suite to a bare "it
@@ -676,7 +647,7 @@ class TestAdversarialConformance:
     def test_manifest_assigns_every_action_exactly_one_outcome(self):
         oracle = set(ORACLE_ACTIONS)
         throwing = THROWING_ACTION_NAMES
-        null_omitted = {action for action, _, _ in NULL_REPRESENTATION_OMITTED}
+        null_omitted = {action for action, _, _ in REPRESENTATION_DEPENDENT_REJECTIONS}
         misclassified = [
             action
             for action in sorted(MANIFEST_ACTIONS)
@@ -684,22 +655,14 @@ class TestAdversarialConformance:
                 action in oracle,
                 action in throwing,
                 action in null_omitted,
-                action in SQLALCHEMY_SKIPPED_DIVERGENCES,
+                action in SQLALCHEMY_UPSTREAM_BLOCKED,
             ].count(True)
             != 1
         ]
 
-        # Deliberate tripwires: a corpus edit must bump these in the same
-        # change, so a new hostile action cannot join (or vanish) silently.
-        assert len(MANIFEST_ACTIONS) == 199
-        assert len(SEEDS) == 21
-        # Each of these carries a pinned message, so a shape gained or lost has
-        # to be re-triaged here rather than joining the throw suite unnoticed.
-        assert len(THROWING_ACTIONS) == 19
+        assert len(MANIFEST.outcomes) == len(MANIFEST.actions)
+        assert len(SEEDS) == len(CHECK_RESOURCES)
         assert misclassified == []
-        assert SQLALCHEMY_SUPPORTED_EXPECTED <= {
-            entry["action"] for entry in MANIFEST.expected_unsupported
-        }
 
     @pytest.mark.parametrize("action", ORACLE_ACTIONS)
     def test_matches_check_oracle(self, action, adv_cerbos_client, adv_conn):
@@ -753,6 +716,7 @@ class TestAdversarialConformance:
     # exactly that filter and return every row it selects, all of which the PDP
     # denies for this action.
     def test_filter_as_conjunct_must_be_refused(self, adv_cerbos_client, adv_conn):
+        _require_selected("filter-as-conjunct")
         assert _oracle_allowed_ids(adv_cerbos_client, "filter-as-conjunct") == set()
 
         surviving_half = _adapter_filtered_ids(
@@ -771,10 +735,11 @@ class TestAdversarialConformance:
     # attribute. Both halves are asserted because the rejection alone would pass
     # vacuously if the adapter raised for an unrelated reason — the over-grant
     # under the default representation is what makes the rejection necessary.
-    @pytest.mark.parametrize("action,reason,message", NULL_REPRESENTATION_OMITTED)
-    def test_null_representation_omitted_is_rejected(
+    @pytest.mark.parametrize("action,reason,message", REPRESENTATION_DEPENDENT_REJECTIONS)
+    def test_representation_dependent_rejection_is_rejected(
         self, action, reason, message, adv_cerbos_client, adv_conn
     ):
+        _require_selected(action)
         assert _oracle_allowed_ids(adv_cerbos_client, action) == set()
 
         # The default translation emits IS NULL and returns exactly the rows the
@@ -805,6 +770,7 @@ class TestAdversarialConformance:
     def test_attribute_declaration_overrides_the_call_level_representation(
         self, adv_cerbos_client, adv_conn
     ):
+        _require_selected("null-eq")
         # `owner` declares "explicit", so the call-level "omitted" does not reach it.
         assert _adapter_filtered_ids(
             adv_cerbos_client,
@@ -825,6 +791,7 @@ class TestAdversarialConformance:
     def test_every_null_carrying_action_is_rejected_under_omitted(
         self, adv_cerbos_client, adv_conn
     ):
+        _require_selected("null-eq-missing")
         null_carrying = []
         for action in sorted(MANIFEST_ACTIONS):
             plan = adv_cerbos_client.plan_resources(
@@ -867,7 +834,7 @@ class TestAdversarialConformance:
     # nan-ord-inf is absent: its 1.0/0.0 and -1.0/0.0 branches carry a CONSTANT zero
     # denominator, and over the HTTP transport that arrives as the integer 0 with the
     # sign bit already gone, so the adapter now rejects the shape rather than guess
-    # which infinity CEL produced. It is declared in adapterUnsupported[sqlalchemy]
+    # which infinity CEL produced. It is declared in rejected[sqlalchemy]
     # and asserted as a throw by test_fails_loudly (cerbos/query-plan-adapters#312).
     @pytest.mark.parametrize(
         "action",
@@ -880,6 +847,7 @@ class TestAdversarialConformance:
     def test_nonfinite_ordering_is_folded_before_postgresql_compilation(
         self, action, adv_cerbos_client
     ):
+        _require_selected(action)
         plan = adv_cerbos_client.plan_resources(
             action, _principal(), ResourceDesc(RESOURCE_KIND)
         )
@@ -906,6 +874,7 @@ class TestAdversarialConformance:
         so ``p-has`` can move back into the differential run.
         """
         action = "p-has"
+        _require_selected(action)
         plan = adv_cerbos_client.plan_resources(
             action, _principal(), ResourceDesc(RESOURCE_KIND)
         )
@@ -958,25 +927,15 @@ class TestAdversarialConformance:
         }
 
     def test_oracle_is_not_degenerate(self, adv_cerbos_client):
-        # Guard the guard: these actions must produce a non-empty, non-total
-        # oracle set, otherwise the differential comparison could pass
-        # vacuously (e.g. a PDP that denies everything).
-        #
-        # Every entry is asserted to be an action this adapter actually
-        # oracle-compares. A list copied from another harness drifts into naming
-        # shapes it never compares, which guard nothing
-        # (cerbos/query-plan-adapters#324); the membership assertion turns moving
-        # an action into adapterUnsupported into a failure here rather than a
-        # silent no-op.
-        def assert_non_degenerate(action: str) -> None:
+        for action, expectation in ORACLE_EXPECTATIONS.items():
             ids = _oracle_allowed_ids(adv_cerbos_client, action)
-            assert 0 < len(ids) < len(SEEDS), f"{action} has a degenerate oracle"
-
-        for action in DEGENERACY_GUARD_ACTIONS:
-            assert action in ORACLE_ACTIONS, f"{action} is not oracle-compared"
-            assert_non_degenerate(action)
-        # Asserting the complement keeps the split honest — an action this
-        # adapter gains support for must move up into the guard proper.
-        for action in DEGENERACY_LIVENESS_PROBES:
-            assert action not in ORACLE_ACTIONS, f"{action} is now oracle-compared"
-            assert_non_degenerate(action)
+            if expectation["kind"] == "proper-subset":
+                assert 0 < len(ids) < len(CHECK_RESOURCES), action
+            elif expectation["kind"] == "empty":
+                assert ids == set(), action
+            elif expectation["kind"] == "total":
+                assert len(ids) == len(CHECK_RESOURCES), action
+            else:
+                raise AssertionError(
+                    f"{action}: unknown oracle expectation {expectation['kind']!r}"
+                )

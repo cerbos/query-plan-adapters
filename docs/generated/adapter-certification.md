@@ -10,7 +10,7 @@ Actions: 199
 | convex | 191 | 7 | 1 | 0 | 199 | 191 | artifact-install | convex-self-hosted |
 | drizzle | 176 | 22 | 1 | 0 | 199 | 176 | artifact-install | sqlite, postgresql, mysql |
 | elasticsearch-java | 86 | 112 | 1 | 0 | 199 | 86 | artifact-install | elasticsearch-8.15.3 |
-| ent | 182 | 16 | 1 | 0 | 199 | 182 | usage-only | sqlite, postgresql-17, mysql-8.4 |
+| ent | 182 | 16 | 1 | 0 | 199 | 182 | usage-only | sqlite+postgresql-17+mysql-8.4 |
 | langchain-chromadb | 34 | 164 | 1 | 0 | 199 | 34 | artifact-install | chromadb-1.5.9 |
 | mongoose | 147 | 51 | 1 | 0 | 199 | 147 | artifact-install | mongodb-7.0, mongodb-8.0 |
 | pgx | 182 | 16 | 1 | 0 | 199 | 182 | usage-only | postgresql-17 |
@@ -89,9 +89,7 @@ Commands:
 - golden: unavailable
 
 Semantic environments:
-- sqlite: go test -race -count=1 -timeout 30m ./...
-- postgresql-17: go test -race -count=1 -timeout 30m ./...
-- mysql-8.4: go test -race -count=1 -timeout 30m ./...
+- sqlite+postgresql-17+mysql-8.4: go test -race -count=1 -timeout 30m ./...
 
 ## langchain-chromadb
 

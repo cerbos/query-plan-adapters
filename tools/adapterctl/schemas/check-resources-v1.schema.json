@@ -1,24 +1,51 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://cerbos.dev/query-plan-adapters/adapterctl/check-resources-v1.schema.json",
   "type": "object",
-  "additionalProperties": false,
-  "required": ["schemaVersion", "principal", "resources"],
+  "required": [
+    "schemaVersion",
+    "principal",
+    "resources"
+  ],
   "properties": {
-    "schemaVersion": { "const": 1 },
-    "principal": { "type": "object" },
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "principal": {
+      "type": "object",
+      "patternProperties": {
+        "^[\\s\\S]*$": {}
+      }
+    },
     "resources": {
       "type": "array",
       "items": {
         "type": "object",
-        "additionalProperties": false,
-        "required": ["kind", "id", "attr"],
+        "required": [
+          "kind",
+          "id",
+          "attr"
+        ],
         "properties": {
-          "kind": { "type": "string", "minLength": 1 },
-          "id": { "type": "string", "minLength": 1 },
-          "attr": { "type": "object" }
-        }
+          "kind": {
+            "type": "string",
+            "minLength": 1
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "attr": {
+            "type": "object",
+            "patternProperties": {
+              "^[\\s\\S]*$": {}
+            }
+          }
+        },
+        "additionalProperties": false
       }
     }
-  }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cerbos.dev/query-plan-adapters/adapterctl/check-resources-v1.schema.json",
+  "additionalProperties": false
 }

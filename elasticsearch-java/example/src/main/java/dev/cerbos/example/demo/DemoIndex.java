@@ -123,7 +123,7 @@ final class DemoIndex implements AutoCloseable {
      *
      * <p>The {@code sort} is required for the paging itself to be correct: without a total order,
      * successive pages may repeat or omit documents. How the RESULT is asserted is a separate
-     * question, and {@code demo/expected.json} asserts page sizes plus the sorted union rather than
+     * question, and {@code demo/cases.json} asserts page sizes plus the sorted union rather than
      * per-page order, because several of the stores behind the shared expectations have no total
      * order to paginate by.
      */

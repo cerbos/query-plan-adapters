@@ -26,7 +26,7 @@ carries no policies of its own.
 
 Needs Docker (for the PDP), `jq` and Ruby. The runner starts the pinned PDP over
 `demo/policies/`, sets `CERBOS_HOST`, invokes `run.sh`, and diffs the JSON it prints against
-`demo/expected.json`.
+`demo/cases.json`.
 
 Do not run `app.rb` directly: it reads `CERBOS_HOST` and refuses to start without it, because a
 default address would let the example pass against a PDP nobody meant to test.

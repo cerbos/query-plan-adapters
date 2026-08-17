@@ -1,9 +1,9 @@
 export class CliError extends Error {
   readonly exitCode: number;
 
-  constructor(message: string, exitCode = 1) {
-    super(message);
-    this.exitCode = exitCode;
+  constructor(args: { message: string; exitCode?: number }) {
+    super(args.message);
+    this.exitCode = args.exitCode ?? 1;
   }
 }
 
@@ -11,7 +11,7 @@ export class ValidationError extends CliError {
   readonly errors: string[];
 
   constructor(errors: string[]) {
-    super(errors.join("\n"));
+    super({ message: errors.join("\n") });
     this.errors = errors;
   }
 }
