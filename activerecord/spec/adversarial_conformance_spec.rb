@@ -200,7 +200,6 @@ RSpec.describe "adversarial conformance" do
       expect { adapter_filtered_ids("filter-as-conjunct") }
         .to raise_error(Cerbos::ActiveRecord::Error, /#{Regexp.escape(message)}/)
     end
-
   end
 
   describe "matches the check() oracle" do

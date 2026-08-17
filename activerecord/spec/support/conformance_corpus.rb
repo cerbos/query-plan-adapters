@@ -109,8 +109,8 @@ module ConformanceCorpus
 
   # --- v1 control plane ---------------------------------------------------------------------
 
-  unless [CATALOG_FILE, CHECK_RESOURCES_FILE, MANIFEST_FILE].all? {
-    |file| file.fetch("schemaVersion") == 1
+  unless [CATALOG_FILE, CHECK_RESOURCES_FILE, MANIFEST_FILE].all? { |file|
+    file.fetch("schemaVersion") == 1
   }
     raise "control-plane files must use schemaVersion 1"
   end
@@ -147,7 +147,7 @@ module ConformanceCorpus
   ).freeze
 
   def selected?(action)
-    SELECTED_ACTION.empty? || SELECTED_ACTION == action
+    SELECTED_ACTION.empty? || action == SELECTED_ACTION
   end
 
   MANIFEST_ACTIONS = ALL_CATALOG_ACTIONS.select { |action| selected?(action) }.freeze
@@ -156,12 +156,12 @@ module ConformanceCorpus
     .to_h { |entry| [entry.fetch("name"), entry.fetch("oracleExpectation")] }
     .freeze
 
-  UPSTREAM_BLOCKED = MANIFEST_ACTIONS.select {
-    |action| OUTCOMES.fetch(action).fetch("status") == "upstream-blocked"
+  UPSTREAM_BLOCKED = MANIFEST_ACTIONS.select { |action|
+    OUTCOMES.fetch(action).fetch("status") == "upstream-blocked"
   }.freeze
 
-  ORACLE_ACTIONS = MANIFEST_ACTIONS.select {
-    |action| OUTCOMES.fetch(action).fetch("status") == "matched"
+  ORACLE_ACTIONS = MANIFEST_ACTIONS.select { |action|
+    OUTCOMES.fetch(action).fetch("status") == "matched"
   }.freeze
 
   REPRESENTATION_DEPENDENT_REJECTIONS = MANIFEST_ACTIONS

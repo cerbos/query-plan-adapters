@@ -12,6 +12,9 @@ on:
     tags:
       - drizzle/v*
 
+permissions:
+  contents: read
+
 defaults:
   run:
     working-directory: drizzle
@@ -54,6 +57,7 @@ jobs:
         uses: cerbos/cerbos-setup-action@30ad92b0242d792bd156985682426577fcfcc589 # v1
         with:
           version: v${{ steps.cerbos.outputs.version }}
+          github_token: ${{ github.token }}
 
       - name: Test using Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0

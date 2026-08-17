@@ -643,16 +643,6 @@ func (c *Corpus) parentSeedOf(s *Seed) *Seed {
 	panic("seeds.json parentSeedId names no seed: " + *s.ParentSeedID)
 }
 
-// relationAttr is one level of the chain as check() attributes. A NULL column is a MISSING
-// attribute one hop out, exactly as it is on the resource row itself.
-func relationAttr(s *Seed) map[string]any {
-	attr := map[string]any{"aBool": s.ABool, "aString": s.AString, "aNumber": s.ANumber}
-	if s.AOptionalString != nil {
-		attr["aOptionalString"] = *s.AOptionalString
-	}
-	return attr
-}
-
 // parentID and innerID name the per-resource chain rows.
 func parentID(s Seed) string { return s.ID + "-parent" }
 func innerID(s Seed) string  { return s.ID + "-parent-inner" }

@@ -475,9 +475,49 @@ class ElasticsearchAdversarialConformanceTest {
         Resource resource = Resource.newInstance(input.kind(), input.id());
         for (Map.Entry<String, Object> attribute : input.attr().entrySet()) {
             resource = resource.withAttribute(
-                    attribute.getKey(), principalAttribute(attribute.getKey(), attribute.getValue()));
+                    attribute.getKey(), resourceAttribute(attribute.getKey(), attribute.getValue()));
         }
         return resource;
+    }
+
+    /** Convert one canonical check-resource attribute without narrowing its JSON shape. */
+    private static AttributeValue resourceAttribute(String path, Object value) {
+        if (value == null) return nullAttributeValue();
+        if (value instanceof Boolean b) return AttributeValue.boolValue(b);
+        if (value instanceof Number n) return AttributeValue.doubleValue(n.doubleValue());
+        if (value instanceof String s) return AttributeValue.stringValue(s);
+        if (value instanceof List<?> list) {
+            return AttributeValue.listValue(list.stream()
+                    .map(element -> resourceAttribute(path, element))
+                    .toList());
+        }
+        if (value instanceof Map<?, ?> map) {
+            Map<String, AttributeValue> attributes = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                if (!(entry.getKey() instanceof String key)) {
+                    throw new IllegalStateException(
+                            "check-resources.json " + path + " has a non-string object key");
+                }
+                attributes.put(key, resourceAttribute(path + "." + key, entry.getValue()));
+            }
+            return AttributeValue.mapValue(attributes);
+        }
+        throw new IllegalStateException(
+                "check-resources.json " + path + " has unsupported JSON value "
+                        + value.getClass().getName());
+    }
+
+    @Test
+    void canonicalCheckResourceConverterHandlesEveryJsonValueShape() {
+        Map<String, Object> nested = new LinkedHashMap<>();
+        nested.put("null", null);
+        nested.put("boolean", true);
+        nested.put("number", 1.5);
+        nested.put("string", "value");
+        nested.put("list", List.of("value", 2, false));
+        nested.put("map", Map.of("child", "value"));
+
+        assertNotNull(resourceAttribute("resource", nested));
     }
 
     private static AttributeValue tagAttribute(Tag tag) {

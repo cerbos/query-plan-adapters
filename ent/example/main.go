@@ -118,8 +118,8 @@ func loadSeeds() (*seeds, error) {
 }
 
 type demoPagination struct {
-	PageSize  int   `json:"pageSize"`
 	PageSizes []int `json:"pageSizes"`
+	PageSize  int   `json:"pageSize"`
 }
 
 type demoExpected struct {
@@ -137,8 +137,8 @@ type demoCase struct {
 }
 
 type demoCases struct {
-	SchemaVersion int        `json:"schemaVersion"`
 	Cases         []demoCase `json:"cases"`
+	SchemaVersion int        `json:"schemaVersion"`
 }
 
 func loadCases() (*demoCases, error) {
