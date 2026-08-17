@@ -1,0 +1,5 @@
+# The SQLite database main.go creates on every run: scratch state this directory owns, kept out of
+# git so a failing run can leave the seeded rows behind to inspect without dirtying the tree. The
+# journal is transient — SQLite removes it on commit — but a run killed mid-transaction leaves one.
+demo.db
+demo.db-journal
