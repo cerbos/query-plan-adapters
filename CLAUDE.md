@@ -112,11 +112,20 @@ do need Docker (testcontainers) and read the pinned PDP image from `conformance/
 `conformance/CERBOS_IMAGE_DIGEST`.
 
 The commands above are the two *published* modules, and `./...` stops at a nested `go.mod`, so
-neither reaches `ent/example/` — a third Go module, and deliberately so: a directory holding a
-`go.mod` is excluded from its parent's zip, which is what keeps the example's generator and driver
-dependencies out of a consumer's build. Lint it from its own directory with the adapter's config,
+neither reaches `ent/example/` or `pgx/example/` — each its own module, and deliberately so: a
+directory holding a `go.mod` is excluded from its parent's zip, which is what keeps an example's
+code, its version pins and (on ent) its generator and driver dependencies out of a consumer's build.
+Lint each from its own directory with the adapter's config,
 `golangci-lint run --config=../.golangci.yaml ./...`, and run it with
-`demo/scripts/run-example.sh ent`. Both happen in that adapter's `example` job.
+`demo/scripts/run-example.sh <adapter>`. Both happen in that adapter's `example` job, which is also
+why each adapter's `.golangci.yaml` carries a `gomoddirectives` exclusion scoped to
+`^example/go\.mod$` — the `replace` directive an example needs, without excusing one in the adapter.
+
+The PostgreSQL server both pgx suites use is pinned in `pgx/POSTGRES_IMAGE`, read by
+`pgx/adversarial_test.go` and `pgx/example/run.sh`, on the same argument as
+`langchain-chromadb/CHROMA_IMAGE` and `mongoose/MONGO_IMAGE`: `validate-corpus.sh` holds one digest
+per tag, and nothing holds two tags equal, so a second copy could be left behind on an older server
+and stay green.
 
 ### Java (Elasticsearch, Spring Data)
 ```bash
@@ -238,13 +247,18 @@ shapes, of which the load-bearing one is the adapter's filter composed with an a
 filter.
 
 The Go adapters are the one exception, and ADR 0002 states it: there is no packaging step, so
-`ent/example/` resolves the adapter with a `replace` directive and proves **usage shapes only, not
-packaging**. Its README says so rather than implying coverage it does not have, and what it gets
-in exchange is a shape no Go suite here reaches — the adapter's predicate handed to a *generated*
-ent client, which `ent/adversarial_test.go` never builds. Being a nested module is also what keeps
-the example's generator and driver dependencies out of a consumer's build: a directory holding a
-`go.mod` is excluded from its parent's module zip, which is the mechanism behind "both Go modules
-are standalone" above.
+`ent/example/` and `pgx/example/` resolve their adapter with a `replace` directive and prove **usage
+shapes only, not packaging**. Their READMEs say so rather than implying coverage they do not have,
+and what each gets in exchange is a shape no Go suite here reaches — on ent, the adapter's predicate
+handed to a *generated* ent client, which `ent/adversarial_test.go` never builds; on pgx, the
+`WHERE` fragment spliced into a statement the application owns, which is where that adapter's
+`$n` placeholders have to be renumbered (`WithPlaceholderOffset` in one direction,
+`len(Result.Args)` in the other) and where every suite in `pgx/` instead hands the fragment straight
+to a `SELECT` of its own. Being a nested module is also what keeps an example's code, its version
+pins and (on ent) its generator and driver dependencies out of a consumer's build: a directory
+holding a `go.mod` is excluded from its parent's module zip, which is the mechanism behind "both Go
+modules are standalone" above, and each example's README records the packing experiment that
+verified it rather than assuming it.
 
 ```bash
 demo/scripts/run-example.sh <adapter>   # pack, install, run, diff against demo/expected.json

@@ -43,11 +43,60 @@ case cerbospgx.KindConditional:
 ```
 
 `Where` is a bare boolean expression — it carries no `WHERE` keyword — so it composes with your own
-predicates. Use `WithPlaceholderOffset(n)` when appending it to a query that already binds `n`
-arguments.
+predicates. Every value from the plan is bound as a parameter; nothing from the policy is ever
+interpolated into SQL text.
 
-Every value from the plan is bound as a parameter; nothing from the policy is ever interpolated
-into SQL text.
+## Composing the fragment with your own predicates
+
+PostgreSQL placeholders are **ordinal**: `$1` means "the first argument sent with this statement", not
+"the first argument in this fragment". So the moment the fragment goes anywhere other than immediately
+after `WHERE`, you own the numbering, and getting it wrong is not a compile error. There are two
+directions and they need different things.
+
+**Your predicate first.** Tell the adapter how many arguments precede its own, and send its arguments
+after yours:
+
+```go
+where, args := `archived = $1 AND region = $2`, []any{false, "emea"}
+
+result, err := cerbospgx.Translate(plan.PlanResourcesResponse, "contact", mapper,
+    cerbospgx.WithPlaceholderOffset(len(args)))          // the fragment now starts at $3
+if err != nil {
+    return err
+}
+
+if result.Kind == cerbospgx.KindConditional {
+    where += " AND (" + result.Where + ")"
+    args = append(args, result.Args...)                  // …so Result.Args must follow yours
+}
+rows, err := pool.Query(ctx, `SELECT id FROM contact WHERE `+where, args...)
+```
+
+**The fragment first**, with your parameters after it — pagination is the usual case. There is no
+option for this side: the fragment keeps its own numbering from `$1`, and you number yours from
+`len(result.Args)+1`:
+
+```go
+stmt := fmt.Sprintf(`SELECT id FROM contact WHERE %s ORDER BY id LIMIT $%d OFFSET $%d`,
+    result.Where, len(result.Args)+1, len(result.Args)+2)
+rows, err := pool.Query(ctx, stmt, append(slices.Clone(result.Args), limit, offset)...)
+```
+
+Two things the offset does **not** do, both of which have bitten real code:
+
+- **It does not move your arguments.** `WithPlaceholderOffset(n)` renumbers the fragment's
+  placeholders; placing `Result.Args` at positions `n+1..n+len(Result.Args)` of the slice you send is
+  still yours to get right. Swap two same-typed parameters and PostgreSQL cannot tell — the statement
+  binds, the types fit, and the query answers the wrong question. A count or type mismatch, by
+  contrast, is refused by pgx or by the server.
+- **It does not apply to a non-conditional plan.** `Where` is empty and `Args` is nil for
+  `KindAlwaysAllowed` and `KindAlwaysDenied`, so branch on `Kind` before splicing. Concatenating an
+  empty `Where` produces `… AND ` and PostgreSQL rejects the statement, which fails safe — but it
+  fails at run time, where the `switch` above would not have compiled without the case.
+
+[`example/`](example) runs both directions against a real PostgreSQL server, checks every statement's
+numbering before executing it, and proves the check is load-bearing by composing one statement the
+wrong way on purpose.
 
 ## Mapping attributes
 
@@ -247,6 +296,28 @@ controlled by the database, so a case-insensitive column collation will match st
 reject — an over-grant the adapter cannot detect. Treat collation as part of your policy contract
 and use a case-sensitive (e.g. `C` or a `_cs_` ICU) collation on columns policies compare.
 
+## Example application
+
+This repository carries a runnable [`example/`](example/), which uses the adapter against a live PDP
+and a real PostgreSQL server over the shared [demo domain](../demo/README.md):
+
+```bash
+# from the repository root
+demo/scripts/run-example.sh pgx
+```
+
+It is the only place in this repository where the composition above is executed end to end: the suites
+below hand `Result.Where` straight to a `SELECT` of their own, so
+[Composing the fragment](#composing-the-fragment-with-your-own-predicates) — an application predicate
+ahead of the fragment with `WithPlaceholderOffset`, and pagination parameters numbered after it — runs
+there and nowhere else. It also proves the numbering is load-bearing, by composing one statement
+without the offset on purpose and requiring a different answer.
+
+Unlike the examples for the other adapters it proves **usage shapes only, not packaging**: Go has no
+packaging step, so `example/` resolves this module through a `replace` directive rather than
+installing a built artifact. See [`example/README.md`](example/README.md) and
+[ADR 0002](../docs/adr/0002-examples-install-the-packed-artifact.md).
+
 ## Development
 
 ```bash
@@ -257,7 +328,8 @@ golangci-lint fmt ./...
 ```
 
 The adversarial suite starts its own PostgreSQL and Cerbos containers, reading the pinned PDP
-version from `conformance/CERBOS_VERSION`.
+version from `conformance/CERBOS_VERSION` and the PostgreSQL image from [`POSTGRES_IMAGE`](POSTGRES_IMAGE) —
+the same file `example/run.sh` reads, so both are proved against the same server build.
 
 The unit suite is everything else, and needs nothing running. It covers what the corpus structurally
 cannot: malformed and hostile plans no planner emits. CI runs it as its own step before the
