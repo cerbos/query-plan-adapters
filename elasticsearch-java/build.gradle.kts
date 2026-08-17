@@ -15,15 +15,15 @@ repositories {
 }
 
 dependencies {
-    implementation("dev.cerbos:cerbos-sdk-java:0.19.0")
+    implementation("dev.cerbos:cerbos-sdk-java:0.20.1")
     implementation("com.google.protobuf:protobuf-java:4.35.1")
 
-    testImplementation(platform("org.junit:junit-bom:6.1.2"))
+    testImplementation(platform("org.junit:junit-bom:6.1.3"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testImplementation("org.testcontainers:testcontainers:2.0.5")
     testImplementation("org.testcontainers:junit-jupiter:1.21.4")
     testImplementation("org.testcontainers:elasticsearch:1.21.4")
-    testImplementation("com.fasterxml.jackson.core:jackson-databind:2.22.1")
+    testImplementation("com.fasterxml.jackson.core:jackson-databind:2.22.2")
     // Decodes conformance/wire-fixtures/*.json into the protobuf plan the SDK hands a caller:
     // JsonFormat is protobuf's own canonical JSON mapping, the one the PDP's HTTP API writes
     // (see Corpus.planFromWireFixture).

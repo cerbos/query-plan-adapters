@@ -25,7 +25,7 @@ repositories {
 }
 
 dependencies {
-    implementation("dev.cerbos:cerbos-sdk-java:0.19.0")
+    implementation("dev.cerbos:cerbos-sdk-java:0.20.1")
     // Must match the gencode version cerbos-sdk-java was generated against (see the README
     // "Pin protobuf-java" gotcha) — older runtimes throw ProtobufRuntimeVersionException.
     implementation("com.google.protobuf:protobuf-java:4.35.1")
@@ -48,7 +48,7 @@ dependencies {
     // `compileOnly` for the same reason as Spring Data JPA above: the consuming
     // application provides its own Hibernate, and the adapter degrades gracefully (plain
     // cb.toDouble casts) when Hibernate is absent at runtime.
-    compileOnly("org.hibernate.orm:hibernate-core:6.6.54.Final")
+    compileOnly("org.hibernate.orm:hibernate-core:6.6.55.Final")
 
     testImplementation("org.springframework.data:spring-data-jpa:3.5.13")
     testImplementation("jakarta.persistence:jakarta.persistence-api:3.2.0")
@@ -62,11 +62,11 @@ dependencies {
     testImplementation("org.testcontainers:mysql:1.21.4")
     testRuntimeOnly("org.postgresql:postgresql:42.7.13")
     testRuntimeOnly("com.mysql:mysql-connector-j:9.7.0")
-    testImplementation("org.hibernate.orm:hibernate-core:6.6.54.Final")
+    testImplementation("org.hibernate.orm:hibernate-core:6.6.55.Final")
     testImplementation("com.h2database:h2:2.4.240")
     // Parses seeds.json/actions.json from the shared ../conformance/ corpus (see
     // AdversarialConformanceTest and conformance/README.md).
-    testImplementation("com.fasterxml.jackson.core:jackson-databind:2.22.1")
+    testImplementation("com.fasterxml.jackson.core:jackson-databind:2.22.2")
     testImplementation("com.google.protobuf:protobuf-java-util:4.35.1")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     testRuntimeOnly("org.slf4j:slf4j-simple:2.0.18")

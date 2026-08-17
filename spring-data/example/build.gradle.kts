@@ -54,7 +54,7 @@ dependencies {
     // cerbos-sdk-java at RUNTIME scope, which is correct (a consumer that never names an SDK type
     // should not compile against one) and is why this line is not redundant. It is also the exact
     // shape of coupling a composite build papered over.
-    implementation("dev.cerbos:cerbos-sdk-java:0.19.0")
+    implementation("dev.cerbos:cerbos-sdk-java:0.20.1")
 
     // No protobuf-java declaration. The adapter publishes it at runtime scope, pinned to the
     // gencode cerbos-sdk-java was generated against, and that pin is load-bearing: gRPC drags in
