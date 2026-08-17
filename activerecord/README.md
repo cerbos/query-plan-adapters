@@ -1,5 +1,22 @@
 # Cerbos ActiveRecord Query Plan Adapter
 
+> [!WARNING]
+> **Alpha. A work in progress. Do not use this to enforce access control in a live system.**
+>
+> - **Not released.** No version of this gem is on RubyGems. Version `0.1.0` is a placeholder.
+> - **No real-world use.** Nobody runs this in production. Every result below comes from the
+>   test corpus in this repository, and a corpus is not a deployment: it cannot find the shapes
+>   of policy, schema and mapping that real applications have and this one has never seen.
+> - **The interface can change without warning.** Method names, arguments and the shapes that
+>   the adapter accepts or refuses can all still change, and there is no deprecation cycle
+>   until a first release.
+> - **The mapping is yours to get right.** The conformance results below prove the
+>   *translation*. They cannot prove that your attribute map points at the rows your
+>   application put into the Cerbos attributes — see [Mapping hazards](#mapping-hazards). A
+>   mistake there is an authorization bug that no test in this repository can see.
+>
+> Read it, try it, and report what breaks. Do not put it in front of your data yet.
+
 An adapter that changes a [Cerbos](https://cerbos.dev) query plan (`PlanResources`) into an
 `ActiveRecord::Relation`. Thus the database applies the authorization rules from your Cerbos
 policies, and your application code does not.

@@ -8,11 +8,14 @@ Gem::Specification.new do |spec|
   spec.authors = ["Cerbos"]
   spec.email = ["info@cerbos.dev"]
 
-  spec.summary = "Translate Cerbos query plans into ActiveRecord relations"
+  spec.summary = "Translate Cerbos query plans into ActiveRecord relations (ALPHA)"
   spec.description = <<~DESC.tr("\n", " ").strip
-    Converts a Cerbos PlanResources response into an ActiveRecord::Relation, so authorization
-    rules expressed as Cerbos policies are enforced in the database rather than in application
-    code. Shapes the adapter cannot express faithfully raise instead of emitting a filter.
+    ALPHA, and a work in progress: unreleased, not used in production, and free to change its
+    interface without a deprecation. Do not use it to enforce access control in a live system
+    yet. Converts a Cerbos PlanResources response into an ActiveRecord::Relation, so
+    authorization rules expressed as Cerbos policies are enforced in the database rather than in
+    application code. Shapes the adapter cannot express faithfully raise instead of emitting a
+    filter.
   DESC
   spec.homepage = "https://github.com/cerbos/query-plan-adapters"
   spec.license = "Apache-2.0"

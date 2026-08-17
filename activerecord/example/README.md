@@ -1,5 +1,11 @@
 # ActiveRecord example application
 
+> [!WARNING]
+> The ActiveRecord adapter is **alpha and a work in progress** — unreleased, unused in
+> production, and free to change its interface without warning. This example shows how it is
+> meant to be wired up; it is not a pattern to copy into a live system yet. See
+> [`../README.md`](../README.md).
+
 This is the ActiveRecord adapter's instance of the shared **demo domain**. It proves *plumbing* —
 that the published gem installs, that `require "cerbos/active_record"` resolves from it, and that
 the relation the adapter returns composes with the query methods a consumer actually reaches for.
