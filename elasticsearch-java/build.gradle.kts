@@ -1,5 +1,12 @@
 plugins {
     java
+    // For `publishToMavenLocal`. example/ resolves the adapter as a real Maven coordinate rather
+    // than through a Gradle composite build, so the example executes the POM and the Gradle module
+    // metadata a consumer resolves — dependency scopes included. That is the whole point of
+    // docs/adr/0002-examples-install-the-packed-artifact.md, and it is not hypothetical here:
+    // cerbos-sdk-java declares protobuf at runtime-only scope in its own module metadata, which a
+    // composite build hides and a coordinate exposes.
+    `maven-publish`
 }
 
 group = "dev.cerbos"
@@ -57,6 +64,12 @@ tasks.test {
     inputs.dir(project.file("golden"))
         .withPathSensitivity(PathSensitivity.RELATIVE)
         .withPropertyName("goldenExpectations")
+    // Same again for the pinned Elasticsearch reference, which ElasticsearchTestImage reads from
+    // `user.dir` at runtime. Undeclared, bumping the server would leave `:test` UP-TO-DATE and the
+    // two container-backed suites would report a pass they never ran.
+    inputs.file(project.file("ELASTICSEARCH_IMAGE"))
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+        .withPropertyName("elasticsearchImage")
 }
 
 // Rewrites golden/expectations.json from the Query DSL the translator emits today, then asserts
@@ -83,5 +96,43 @@ tasks.register<Test>("goldenUpdate") {
     testLogging {
         events("failed")
         showStandardStreams = true
+    }
+}
+
+// One publication, `dev.cerbos:cerbos-elasticsearch:<version>`, from the `java` component.
+//
+// What it publishes is the point: the `implementation` dependencies (cerbos-sdk-java,
+// protobuf-java) land at RUNTIME scope, which is what example/ resolves and therefore executes. That
+// scope is not a formality — it is why example/build.gradle.kts has to declare cerbos-sdk-java for
+// itself in order to compile against `PlanResourcesResult`, and it is the half a Gradle composite
+// build substitutes away.
+//
+// The protobuf-java version here is the pin README.md's Install section tells a consumer to add.
+// Measured rather than assumed while example/ was being written: at cerbos-sdk-java 0.19.0 the SDK's
+// own POM already requires protobuf-java 4.35.1 at runtime scope, so for a consumer who declares the
+// SDK — as the example does, and as anyone calling `cerbos.plan(...)` must — this line changes
+// nothing today. It is a floor against the SDK relaxing that requirement and letting the older
+// protobuf-java gRPC drags in transitively win, which throws
+// RuntimeVersion$ProtobufRuntimeVersionException at first message decode. Worth knowing before
+// reading it as the thing example/ proves: what example/ proves about this metadata is that it is
+// resolved at all, and example/README.md records the break-test that establishes it.
+//
+// The example is never part of the artifact: it is a separate Gradle build under example/ with its
+// own settings file, so it is not a source set here and cannot reach the jar. example/run.sh
+// asserts that rather than leaving it to inspection — ADR 0002's "examples must stay out of the
+// published artifacts they exercise", which for Java is a deliberate check rather than a `files`
+// allowlist.
+//
+// This is `publishToMavenLocal` only. Nothing here configures a Maven Central release, which
+// additionally requires POM `name`, `description`, `url`, `licenses`, `developers` and `scm`, plus
+// signing — Central rejects a POM without them. README.md's Install section still tells a consumer
+// to copy the two source files, because that is what this adapter ships today; what the example
+// resolves is the dependency metadata, which is what it exists to exercise. Wiring up the
+// `elasticsearch-java/v*` release is separate work, and it will change this block.
+publishing {
+    publications {
+        create<MavenPublication>("maven") {
+            from(components["java"])
+        }
     }
 }

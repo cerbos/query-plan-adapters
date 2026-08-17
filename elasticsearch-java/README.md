@@ -32,6 +32,12 @@ An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanRe
 
 This adapter is not published to Maven Central. Copy the source files directly into your project:
 
+> The build does configure `publishToMavenLocal`, and [`example/`](example/) resolves
+> `dev.cerbos:cerbos-elasticsearch` from mavenLocal as a real Maven coordinate. That exists so the
+> example executes the POM and Gradle module metadata a consumer would resolve
+> ([ADR 0002](../docs/adr/0002-examples-install-the-packed-artifact.md)); it is **not** a release, and
+> nothing configures the POM metadata or signing Maven Central requires.
+
 1. Copy `ElasticsearchQueryPlanAdapter.java` and `OperatorFunction.java` from [`src/main/java/dev/cerbos/queryplan/elasticsearch/`](src/main/java/dev/cerbos/queryplan/elasticsearch/) into your project.
 2. Adjust the `package` declaration to match your project structure.
 3. Add the required dependencies:
@@ -550,6 +556,25 @@ Four suites, and which of them needs a container is the useful distinction:
 | `ElasticsearchAdversarialConformanceTest` | the documents those queries return, against per-row `check()` | a pinned Cerbos PDP and Elasticsearch (Testcontainers) |
 | `ElasticsearchSurfaceTest` | what a real server does with an emitted clause, and the store facts the corpus reasons cite — an unindexed empty array, an unindexed JSON null, an analyzed field, Lucene regex, date precision | Elasticsearch (Testcontainers) |
 | `ElasticsearchQueryPlanAdapterTest` | the shapes no policy can produce — malformed operands, caller-supplied arguments, literal validation — plus a handful of shapes the corpus does not carry yet, each labelled | nothing |
+
+The Elasticsearch server the two container-backed suites start is pinned in
+[`ELASTICSEARCH_IMAGE`](ELASTICSEARCH_IMAGE), as `repo:tag@sha256:...`, and read by
+`ElasticsearchTestImage` — and by [`example/run.sh`](example/run.sh), which is why it is a file rather
+than a Java constant. `conformance/scripts/validate-corpus.sh` holds one digest per tag repository
+wide, so a second spelling of the reference could be left behind on an older server and stay green.
+
+## Example application
+
+[`example/`](example/README.md) is a runnable program over the shared
+[demo domain](../demo/README.md). It covers the two things none of the suites above can: the
+**published** package surface — the example resolves the adapter as a Maven coordinate rather than
+compiling its source set, so the POM's dependency scopes are executed — and the **Elasticsearch Java
+client**, which nothing above ever hands an emitted clause to.
+
+```bash
+# from the repository root
+demo/scripts/run-example.sh elasticsearch-java
+```
 
 ### Regenerating the golden expectations
 
