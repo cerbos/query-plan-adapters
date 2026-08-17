@@ -8,9 +8,9 @@ Gem::Specification.new do |spec|
   spec.authors = ["Cerbos"]
   spec.email = ["info@cerbos.dev"]
 
-  spec.summary = "Translate Cerbos query plans into ActiveRecord relations (ALPHA)"
+  spec.summary = "Translate Cerbos query plans into ActiveRecord relations (WORK IN PROGRESS)"
   spec.description = <<~DESC.tr("\n", " ").strip
-    ALPHA, and a work in progress: unreleased, not used in production, and free to change its
+    A WORK-IN-PROGRESS PROTOTYPE: unreleased, not used in production, and free to change its
     interface without a deprecation. Do not use it to enforce access control in a live system
     yet. Converts a Cerbos PlanResources response into an ActiveRecord::Relation, so
     authorization rules expressed as Cerbos policies are enforced in the database rather than in

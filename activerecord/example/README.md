@@ -1,7 +1,7 @@
 # ActiveRecord example application
 
 > [!WARNING]
-> The ActiveRecord adapter is **alpha and a work in progress** — unreleased, unused in
+> The ActiveRecord adapter is a **work-in-progress prototype** — unreleased, unused in
 > production, and free to change its interface without warning. This example shows how it is
 > meant to be wired up; it is not a pattern to copy into a live system yet. See
 > [`../README.md`](../README.md).

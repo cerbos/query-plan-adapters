@@ -1,7 +1,7 @@
 # Cerbos ActiveRecord Query Plan Adapter
 
 > [!WARNING]
-> **Alpha. A work in progress. Do not use this to enforce access control in a live system.**
+> **A work-in-progress prototype. Do not use this to enforce access control in a live system.**
 >
 > - **Not released.** No version of this gem is on RubyGems. Version `0.1.0` is a placeholder.
 > - **No real-world use.** Nobody runs this in production. Every result below comes from the
