@@ -1,0 +1,28 @@
+[project]
+name = "cerbos-sqlalchemy-example"
+version = "0.0.0"
+description = "Example application for cerbos-sqlalchemy, run against the shared demo domain"
+license = {text = "Apache-2.0"}
+# 3.10 is the version the adapter's own workflow runs, and the one the `example` job installs.
+requires-python = ">=3.10"
+
+# `cerbos-sqlalchemy` is deliberately ABSENT from these dependencies. run.sh installs it from the
+# wheel `pdm build` produced, which is rebuilt on every run and so cannot be named in a committed
+# lockfile. The ORM and the SDK ARE pinned here, which is the half Renovate manages: a SQLAlchemy
+# bump lands as one PR touching both ../pyproject.toml and this file, and the `example` job on
+# that PR is what blocks automerge if the new version broke real usage.
+#
+# EXACT pins, not the `>=` floor a library declares. Renovate opens a PR when a release falls
+# outside the declared constraint, so `sqlalchemy>=2.0` would absorb every future 2.x silently:
+# no PR would touch this directory, and there would be nothing for the `example` job to gate. An
+# application pinning exactly is also what a consumer of this adapter actually does — the
+# supported RANGE is ../pyproject.toml's business, and its own workflow runs both majors.
+dependencies = [
+    "cerbos==0.16.0",
+    "sqlalchemy==2.0.52",
+]
+
+[tool.pdm]
+# A program, never a package: PDM installs the dependencies above and does not try to build or
+# install this project itself.
+distribution = false
