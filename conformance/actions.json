@@ -1,6 +1,6 @@
 {
   "description": "Every action defined in policies/adversarial.yaml, grouped against the Spring Data reference harness. 'conformance' actions must match the check() oracle. 'adapterUnsupported' lists conformance actions an adapter cannot express and must reject loudly. 'expectedUnsupported' lists shapes rejected by the reference; 'adapterSupportedExpected' records adapters that intentionally translate one of those shapes. 'nullRepresentationOmitted' lists actions that probe a `== null` comparison against an attribute the oracle OMITS for NULL columns; every adapter must translate these with its null representation set to 'omitted' and reject them. 'knownDivergences' records upstream planner behavior that prevents an oracle comparison. 'adapters' is the canonical adapter roster: every key of 'adapterUnsupported' and 'adapterSupportedExpected', and every key of an 'expectedUnsupported' entry's 'messages' map, must name one of these. Every throwing classification carries the substring that adapter's error must contain — 'message' on an 'adapterUnsupported' entry, 'messages.<adapter>' on an 'expectedUnsupported' one — so a harness proves the throw is the declared mechanism rather than a mapper typo or an unrelated validation.",
-  "adapters": ["prisma", "mongoose", "drizzle", "convex", "langchain-chromadb", "sqlalchemy", "ent", "pgx", "elasticsearch-java", "spring-data"],
+  "adapters": ["prisma", "mongoose", "drizzle", "convex", "langchain-chromadb", "sqlalchemy", "ent", "pgx", "elasticsearch-java", "spring-data", "activerecord"],
   "conformance": [
     "vf-le", "vf-ge", "vf-ne",
     "in-single", "in-empty",
@@ -484,6 +484,16 @@
       { "action": "arith-mod", "reason": "The Query DSL has no arithmetic without painless scripts, so a computed leaf operand is refused outright \u2014 mod is not in the leaf resolver at all", "message": "Unexpected mod expression in leaf operand" },
       { "action": "index-scalar-list", "reason": "A positional read of an array field has no Query DSL form: a terms query matches ANY element, which is a different predicate, and the adapter refuses the computed operand rather than substituting it", "message": "Unexpected index expression in leaf operand" },
       { "action": "map-eq-list", "reason": "A map() projection is a computed leaf operand with no Query DSL equivalent, and list equality over a nested projection needs a script", "message": "Unexpected map expression in leaf operand" }
+    ],
+    "activerecord": [
+      { "action": "ts-window", "reason": "The planner folds `now() - duration(\"24h\")` to a literal with nanosecond precision, and ActiveRecord binds a Time into SQL at microsecond precision at best — SQLite stores a formatted string and MySQL DATETIME(6) truncates. Rounding the literal compares against a different instant than the policy names, in the direction that admits rows just outside the window, so the adapter refuses rather than move the boundary", "message": "carries sub-microsecond precision, which ActiveRecord truncates when binding a Time into SQL" },
+      { "action": "ts-vf", "reason": "The same sub-microsecond now() literal as ts-window, reached with the operands the other way round. Operand order does not change what a Time binds as, so the refusal is the same one", "message": "carries sub-microsecond precision, which ActiveRecord truncates when binding a Time into SQL" },
+      { "action": "cr-div-other-column", "reason": "The denominator is a DIFFERENT column, so it may be zero on a row where the numerator is not. CEL divides to a signed Infinity and IEEE-754 keeps the sign of the zero; SQL cannot tell -0.0 from 0.0, and a NULLIF guard collapses both to NULL. The sign of the Infinity decides which side of an order comparison the row falls on, so no guard recovers it and the adapter refuses. A constant denominator, or a column divided by itself, stays translatable", "message": "Cannot divide by a column that may be zero" },
+      { "action": "cr-div-then-add", "reason": "CEL carries a NaN or a signed Infinity out of the division and through the arithmetic composed on top of it; SQL has no value that does, because the NULLIF divide-by-zero guard turns the whole sum into NULL. The adapter resolves a non-finite division only where the division IS the comparison operand, so a division nested under further arithmetic fails closed instead of emitting the under-granting filter", "message": "add cannot take an operand that may be NaN or Infinity" },
+      { "action": "cr-div-then-add-ne", "reason": "The same nested-division limitation as cr-div-then-add, and the arm that proves it matters: `NaN != 2.0` is TRUE and the PDP allows the zero row, while `NULL + 1 <> 2` is UNKNOWN and drops it", "message": "add cannot take an operand that may be NaN or Infinity" },
+      { "action": "index-scalar-list", "reason": "Positional access into a scalar list. `index` has no case in the translator's operator dispatch at all, so the walk falls through to the generic unsupported-operator refusal rather than to a leaf-operand guard — which is why the message names the operator and offers an override. No case was written because row order in a SQL relation is not defined without an ORDER BY the plan does not carry: `tagNames` is a has_many association, and `tagNames[0]` names whichever row the engine happens to return first. A caller whose table has a deterministic ordering column can express it faithfully, and the override the message offers is that escape hatch", "message": "Unsupported operator: index" },
+      { "action": "map-eq-list", "reason": "map() is held as a projected relation until size() or hasIntersection() gives it a scalar meaning as an aggregate or an EXISTS subquery. Comparing the ordered projection itself to a literal list gives it neither, and a correlated subquery has no ordering to compare element-wise against, so the held projection reaches a plain value position and is refused there", "message": "eq cannot take a collection operand (a projected relation)" },
+      { "action": "cast-string-bool", "reason": "The translator lowers CEL `string()` to a SQL CAST, and a CAST over a boolean is not portable: SQLite and MySQL store 1/0 so it yields \"1\", while CEL and PostgreSQL yield \"true\", and the filter would then drop every row the PDP permits. So the cast path refuses a boolean column rather than emit one rendering on three engines that disagree. The limitation is the CAST, not the dialect — this adapter does branch per dialect elsewhere (`Dialect#concat`, `#char_length`, `#double_type`), and a three-valued `CASE WHEN col IS NULL THEN NULL WHEN col THEN 'true' ELSE 'false' END` would sidestep the disagreement on every engine at once. Writing it changes what the adapter can translate, so it is tracked in cerbos/query-plan-adapters#418 rather than folded into a rebase", "message": "string() over a boolean column is not supported" }
     ]
   },
   "adapterSupportedExpected": {
@@ -520,7 +530,8 @@
         "ent": "under mixed null conventions",
         "pgx": "under mixed null conventions",
         "langchain-chromadb": "Variable-to-variable comparisons are not supported by ChromaDB filters",
-        "elasticsearch-java": "Elasticsearch Query DSL cannot compare two document fields without scripts"
+        "elasticsearch-java": "Elasticsearch Query DSL cannot compare two document fields without scripts",
+        "activerecord": "between two columns under mixed null conventions"
       }
     },
     {
@@ -533,7 +544,8 @@
         "sqlalchemy": "timestamp() requires an RFC-3339 literal or a SQLAlchemy DateTime column",
         "ent": "timestamp() over a column requires that column to be mapped with a timestamp value type",
         "pgx": "timestamp() over a column requires that column to be mapped with a timestamp value type",
-        "spring-data": "timestamp() comparison requires a column mapped to java.time.Instant or java.time.OffsetDateTime, but 'request.resource.attr.createdBy' maps to String. Other temporal representations (LocalDateTime, java.util.Date, String) are ambiguous about the absolute instant they store; remap the column or register an OperatorFunction override for 'lt'."
+        "spring-data": "timestamp() comparison requires a column mapped to java.time.Instant or java.time.OffsetDateTime, but 'request.resource.attr.createdBy' maps to String. Other temporal representations (LocalDateTime, java.util.Date, String) are ambiguous about the absolute instant they store; remap the column or register an OperatorFunction override for 'lt'.",
+        "activerecord": "must map to a datetime column rather than to a column holding a formatted timestamp string"
       }
     },
     {
@@ -546,7 +558,8 @@
         "sqlalchemy": "Unrecognised operator: matches",
         "ent": "unsupported operator: matches. CEL's regex dialect (RE2) is not the dialect any SQL engine implements, so a translated pattern would accept or reject different strings than the PDP",
         "pgx": "unsupported operator: matches. CEL's regex dialect (RE2) is not the dialect any SQL engine implements, so a translated pattern would accept or reject different strings than the PDP",
-        "spring-data": "Unsupported operator: matches"
+        "spring-data": "Unsupported operator: matches",
+        "activerecord": "Unsupported operator: matches"
       }
     },
     {
@@ -560,7 +573,8 @@
         "ent": "unsupported operator: get-field",
         "pgx": "unsupported operator: get-field",
         "elasticsearch-java": "Unexpected get-field expression in leaf operand",
-        "spring-data": "Unexpected get-field() expression in leaf operand of eq"
+        "spring-data": "Unexpected get-field() expression in leaf operand of eq",
+        "activerecord": "Unsupported operator: index"
       }
     },
     {
@@ -575,7 +589,8 @@
         "ent": "'int()' cannot be lowered to SQL CAST: CAST reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero",
         "pgx": "'int()' cannot be lowered to SQL CAST: CAST reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero",
         "elasticsearch-java": "Unexpected int expression in leaf operand",
-        "spring-data": "Unexpected int() expression in leaf operand of gt"
+        "spring-data": "Unexpected int() expression in leaf operand of gt",
+        "activerecord": "int() applied to a :string column"
       }
     },
     {
@@ -590,7 +605,8 @@
         "ent": "'double()' cannot be lowered to SQL CAST: CAST reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero",
         "pgx": "'double()' cannot be lowered to SQL CAST: CAST reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero",
         "elasticsearch-java": "Unexpected double expression in leaf operand",
-        "spring-data": "Unexpected double() expression in leaf operand of gt"
+        "spring-data": "Unexpected double() expression in leaf operand of gt",
+        "activerecord": "double() needs a numeric column"
       }
     },
     {
@@ -605,7 +621,8 @@
         "ent": "'int()' cannot be lowered to SQL CAST: CAST reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero",
         "pgx": "'int()' cannot be lowered to SQL CAST: CAST reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero",
         "elasticsearch-java": "Unexpected int expression in leaf operand",
-        "spring-data": "Unexpected int() expression in leaf operand of eq"
+        "spring-data": "Unexpected int() expression in leaf operand of eq",
+        "activerecord": "int() applied to a double column is not portable"
       }
     },
     {
@@ -621,7 +638,8 @@
         "ent": "'filter' produces a collection rather than a boolean; it only translates inside size() or hasIntersection(), which give the collection a scalar meaning",
         "pgx": "'filter' produces a collection rather than a boolean; it only translates inside size() or hasIntersection(), which give the collection a scalar meaning",
         "elasticsearch-java": "Unexpected lambda expression in leaf operand",
-        "spring-data": "filter() returns a list, not a boolean, so it cannot be a condition on its own; only size(filter(...)) has a boolean meaning"
+        "spring-data": "filter() returns a list, not a boolean, so it cannot be a condition on its own; only size(filter(...)) has a boolean meaning",
+        "activerecord": "a filtered relation cannot be used as a condition"
       }
     },
     {
@@ -637,7 +655,8 @@
         "ent": "'filter' produces a collection rather than a boolean; it only translates inside size() or hasIntersection(), which give the collection a scalar meaning",
         "pgx": "'filter' produces a collection rather than a boolean; it only translates inside size() or hasIntersection(), which give the collection a scalar meaning",
         "elasticsearch-java": "Unexpected lambda expression in leaf operand",
-        "spring-data": "filter() returns a list, not a boolean, so it cannot be a condition on its own; only size(filter(...)) has a boolean meaning"
+        "spring-data": "filter() returns a list, not a boolean, so it cannot be a condition on its own; only size(filter(...)) has a boolean meaning",
+        "activerecord": "a filtered relation cannot be used as a condition"
       }
     },
     {
@@ -653,7 +672,8 @@
         "ent": "'map' produces a collection rather than a boolean; it only translates inside size() or hasIntersection(), which give the collection a scalar meaning",
         "pgx": "'map' produces a collection rather than a boolean; it only translates inside size() or hasIntersection(), which give the collection a scalar meaning",
         "elasticsearch-java": "Unexpected lambda expression in leaf operand",
-        "spring-data": "Unexpected lambda() expression in leaf operand of map"
+        "spring-data": "Unexpected lambda() expression in leaf operand of map",
+        "activerecord": "a projected relation cannot be used as a condition"
       }
     }
   ],
@@ -671,7 +691,8 @@
         "ent": "missing-attribute error",
         "pgx": "missing-attribute error",
         "elasticsearch-java": "explicit null value from a missing field",
-        "spring-data": "missing-attribute error"
+        "spring-data": "missing-attribute error",
+        "activerecord": "missing-attribute error"
       },
       "relatedIssue": "https://github.com/cerbos/query-plan-adapters/issues/302"
     }
@@ -679,7 +700,7 @@
   "knownDivergences": [
     {
       "action": "p-has",
-      "adapters": ["spring-data", "prisma", "drizzle", "sqlalchemy", "mongoose", "langchain-chromadb", "elasticsearch-java", "convex", "ent", "pgx"],
+      "adapters": ["spring-data", "prisma", "drizzle", "sqlalchemy", "mongoose", "langchain-chromadb", "elasticsearch-java", "convex", "ent", "pgx", "activerecord"],
       "reason": "The planner folds has(unknown attr) to KIND_ALWAYS_ALLOWED (a Cerbos planner bug, not an adapter bug), so the adapter returns all rows while check() denies rows where the attribute is missing. Excluded from the oracle run rather than asserted against.",
       "relatedIssue": null
     }

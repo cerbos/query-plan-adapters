@@ -128,7 +128,9 @@ mapfile -t tracked < <(
     | grep -vxF 'conformance/scripts/check-docs.sh'
 )
 
-hits="$(grep -nEH "${stale_count}" "${tracked[@]}" 2>/dev/null || true)"
+# Case-insensitive: a count that opens a sentence is capitalised, and "Eleven workflows trigger
+# on conformance/**" went stale in exactly that position while this check read clean.
+hits="$(grep -niEH "${stale_count}" "${tracked[@]}" 2>/dev/null || true)"
 
 if [[ -n "${hits}" ]]; then
   echo "These lines count the adapter roster in prose:"

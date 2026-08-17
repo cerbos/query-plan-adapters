@@ -302,7 +302,36 @@ SOURCE_EXCLUDES=(
   --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=lib --exclude-dir=build
   --exclude-dir=.venv --exclude-dir=.gradle --exclude-dir=bin --exclude-dir=dist
   --exclude-dir=generated --exclude-dir=__pypackages__
+  --exclude-dir=.gems --exclude-dir=.bundle-path
 )
+
+# `lib/` is BUILD OUTPUT on the TypeScript adapters and SOURCE on the Ruby gem, so one
+# --exclude-dir cannot serve both and Ruby gets a pass of its own with the exclusion dropped.
+# The same split as conformance/scripts/validate-corpus.sh, and for the same reason: excluding
+# `lib` by name hid the whole ActiveRecord implementation from checks written to catch exactly
+# the hardcoded PDP address that this file's own comment says both early examples shipped.
+RUBY_INCLUDES=(
+  --include='*.rb' --include='*.gemspec' --include='Gemfile' --include='Rakefile'
+)
+RUBY_EXCLUDES=()
+for exclusion in "${SOURCE_EXCLUDES[@]}"; do
+  [[ "${exclusion}" == "--exclude-dir=lib" ]] && continue
+  RUBY_EXCLUDES+=("${exclusion}")
+done
+
+# Every scan of example source goes through here, so a file type reaching one check and not
+# another is not expressible.
+source_grep() {
+  grep "$@" "${SOURCE_INCLUDES[@]}" "${SOURCE_EXCLUDES[@]}" 2>/dev/null || true
+  grep "$@" "${RUBY_INCLUDES[@]}" "${RUBY_EXCLUDES[@]}" 2>/dev/null || true
+}
+
+# The scan proves it reaches Ruby source under a `lib/` directory, so restoring the exclusion —
+# or dropping the Ruby pass — fails here instead of quietly returning every check below to
+# reading none of a Ruby adapter. Stated over any adapter rather than one by name.
+if ! source_grep -rl '' "${REPO_ROOT}" | grep -q '/lib/.*\.rb$'; then
+  fail "the source scan reaches no .rb file under a lib/ directory, so a Ruby adapter's source is invisible to every check below"
+fi
 for adapter in $(jq -r '.adapters[]' "${ACTIONS}"); do
   example_dir="${REPO_ROOT}/${adapter}/example"
   [[ -d "${example_dir}" ]] || continue
@@ -312,8 +341,8 @@ for adapter in $(jq -r '.adapters[]' "${ACTIONS}"); do
     case "${ref}" in *'ghcr.io/cerbos/cerbos:$'*|*'ghcr.io/cerbos/cerbos:{'*) continue ;; esac
     [[ "${ref}" == "${pinned_image}" ]] || \
       fail "${adapter}/example pins Cerbos as '${ref}', expected '${pinned_image}'"
-  done < <(grep -rhoE 'ghcr\.io/cerbos/cerbos:[^@"'"'"' )]*(@sha256:[0-9a-f]{64})?' \
-    "${SOURCE_INCLUDES[@]}" "${SOURCE_EXCLUDES[@]}" "${example_dir}" 2>/dev/null || true)
+  done < <(source_grep -rhoE 'ghcr\.io/cerbos/cerbos:[^@"'"'"' )]*(@sha256:[0-9a-f]{64})?' \
+    "${example_dir}")
 
   # ...and must reach it at the address the runner sets, never one of its own. Both examples that
   # existed when this check was written had shipped `?? "localhost:3593"`, which is not a harmless
@@ -328,8 +357,7 @@ for adapter in $(jq -r '.adapters[]' "${ACTIONS}"); do
   # container-side half of a port mapping is the PDP's own listen port, which is correct.
   while IFS= read -r addr; do
     fail "${adapter}/example hardcodes the PDP address '${addr}' — read \$CERBOS_HOST instead (demo/README.md)"
-  done < <(grep -rhoE '(localhost|127\.0\.0\.1):359[23]' \
-    "${SOURCE_INCLUDES[@]}" "${SOURCE_EXCLUDES[@]}" "${example_dir}" 2>/dev/null || true)
+  done < <(source_grep -rhoE '(localhost|127\.0\.0\.1):359[23]' "${example_dir}")
 done
 
 # ---------------------------------------------------------------------------------------------
@@ -530,8 +558,7 @@ for adapter in $(jq -r '.adapters[]' "${ACTIONS}"); do
   while IFS= read -r file; do
     grep -qE '^[[:space:]]*apiVersion:[[:space:]]*"?api\.cerbos\.dev/' "${file}" && continue
     sources+=("${file}")
-  done < <(grep -rlE '.' "${SOURCE_INCLUDES[@]}" "${SOURCE_EXCLUDES[@]}" \
-    "${example_dir}" 2>/dev/null || true)
+  done < <(source_grep -rlE '.' "${example_dir}")
   if (( ${#sources[@]} == 0 )); then
     fail "${adapter}/example has no scannable source files — there is nothing here to scan"
     continue

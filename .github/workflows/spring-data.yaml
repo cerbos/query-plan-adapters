@@ -99,8 +99,8 @@ jobs:
   #      Specification composed with the application's own.
   #
   # It is NOT the repository's only end-to-end live-PDP row-set verification, which this comment
-  # claimed until cerbos/query-plan-adapters#359. All ten conformance harnesses plan against a
-  # live PDP over gRPC, translate, execute against a real store, and compare the returned ids
+  # claimed until cerbos/query-plan-adapters#359. Every conformance harness plans against a
+  # live PDP over gRPC, translates, executes against a real store, and compares the returned ids
   # against per-row check() — including this adapter's, on H2, PostgreSQL and MySQL.
   #
   # THIS JOB MUST STAY IN THIS WORKFLOW. `renovate.json` sets `automerge: true` for every

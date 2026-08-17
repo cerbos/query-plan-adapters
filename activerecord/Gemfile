@@ -1,0 +1,22 @@
+# frozen_string_literal: true
+
+source "https://rubygems.org"
+
+gemspec
+
+group :development, :test do
+  # CI exercises both ends of the range the gemspec declares. The trailing `.0` pins the leg to
+  # ONE minor series: `~> 7.1` would resolve to the newest 7.x, so the leg named 7.1 would
+  # quietly become 7.2 and neither end of the range would be exercised. It also keeps
+  # golden/expectations.json's declared generator meaningful — the asset names the series it was
+  # rendered under, and a floating resolution would age it out on every ActiveRecord minor.
+  gem "activerecord", "~> #{ENV.fetch("ACTIVERECORD_VERSION", "8.0")}.0"
+  # The official Cerbos Ruby SDK (https://github.com/cerbos/cerbos-sdk-ruby). Both suites
+  # plan and check against a real PDP through it, so its output types are what the adapter
+  # is proved against.
+  gem "cerbos", "~> 0.13"
+  gem "rake", "~> 13.2"
+  gem "rspec", "~> 3.13"
+  gem "sqlite3", "~> 2.6"
+  gem "standard", "~> 1.50"
+end

@@ -1,0 +1,103 @@
+name: ActiveRecord Test
+
+# No `policies/**` trigger. The shared policy suite at the repository root is gone, and
+# conformance/policies/ is the only policy suite for semantics
+# (docs/adr/0008-the-shared-policy-suite-is-absorbed-into-the-conformance-corpus.md).
+on:
+  pull_request:
+    paths:
+      - "activerecord/**"
+      - "conformance/**"
+      - "demo/**"
+      - ".github/workflows/activerecord.yaml"
+      - ".github/workflows/activerecord-publish.yaml"
+  push:
+    tags:
+      - activerecord/v*
+
+defaults:
+  run:
+    working-directory: activerecord
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby-version: ["3.2", "3.3", "3.4"]
+        activerecord-version: ["8.0"]
+        include:
+          # The first version and the last version of the ActiveRecord range in the gemspec.
+          # The Gemfile pins each leg to ONE minor series, so the leg named 7.1 really is 7.1.
+          - ruby-version: "3.2"
+            activerecord-version: "7.1"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate conformance corpus
+        run: ../conformance/scripts/validate-corpus.sh
+
+      # The suites run in Docker. The PDP is pinned by tag and digest, from
+      # conformance/CERBOS_VERSION and conformance/CERBOS_IMAGE_DIGEST, and scripts/test.sh
+      # reads both files. Do not write either value in this file.
+      #
+      # Both of these are offline: the translator unit test replays conformance/wire-fixtures/
+      # and the contract suite builds its own plans, so neither starts a PDP. The ActiveRecord
+      # dimension is theirs — golden/expectations.json records SQL that ActiveRecord's own
+      # renderer produced, so the major is an input to the bytes and each leg asserts its side
+      # of that (spec/translator_spec.rb, RENDERING_DIFFERS_ON_ACTIVERECORD_71).
+      - name: Run the translator unit test and the adapter contract suite
+        env:
+          RUBY_VERSION: ${{ matrix.ruby-version }}
+          ACTIVERECORD_VERSION: ${{ matrix.activerecord-version }}
+        run: ./scripts/test.sh spec/translator_spec.rb spec/adapter_contract_spec.rb
+
+      # In the SAME job as the tests above, not a job of its own. Gated to the baseline leg,
+      # because the corpus discriminates the translator and the store, not the Ruby runtime —
+      # a second leg would multiply runner minutes for no extra cover.
+      - name: Run the adversarial differential suite
+        if: matrix.ruby-version == '3.4' && matrix.activerecord-version == '8.0'
+        env:
+          RUBY_VERSION: ${{ matrix.ruby-version }}
+          ACTIVERECORD_VERSION: ${{ matrix.activerecord-version }}
+        run: ./scripts/test.sh spec/adversarial_conformance_spec.rb
+
+      - name: Lint
+        if: matrix.ruby-version == '3.4' && matrix.activerecord-version == '8.0'
+        run: ./scripts/lint.sh
+
+  # THIS JOB MUST STAY IN THIS WORKFLOW. `renovate.json` sets `automerge: true` for every
+  # non-major bump, so an ActiveRecord bump arrives as a PR touching this adapter — and this
+  # job, being a check on that PR, is what blocks the automerge when the new ORM breaks real
+  # usage. Moving it to a nightly run or a workflow of its own silently restores that gap.
+  #
+  # One Ruby leg only: the demo domain discriminates the published gem and the ORM, not the
+  # runtime — the same reasoning that gates the adversarial step above.
+  example:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate conformance corpus
+        run: ../conformance/scripts/validate-corpus.sh
+
+      - name: Validate demo domain
+        run: ../demo/scripts/validate-demo.sh
+
+      # No `bundler-cache`: the example commits no Gemfile.lock, deliberately. It installs the
+      # adapter from the artifact run.sh builds, which has no stable checksum, and resolving the
+      # rest fresh is what lets an ActiveRecord release inside the declared range reach this job
+      # at all.
+      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
+        with:
+          ruby-version: "3.4"
+
+      # The PDP is a container started by the runner from demo/docker-compose.yml, pinned to
+      # conformance/CERBOS_VERSION and conformance/CERBOS_IMAGE_DIGEST — no cerbos-setup-action
+      # here, because an example must reach the PDP the way a deployed application does.
+      - name: Run the example against the demo domain
+        run: ../demo/scripts/run-example.sh activerecord

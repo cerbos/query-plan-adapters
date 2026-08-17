@@ -12,4 +12,9 @@ The skills speak in terms of five canonical triage roles. This file maps those r
 
 When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the corresponding label string from this table.
 
+These five are the only triage labels. The per-adapter **scope** labels are a separate,
+orthogonal axis and their roster lives in
+[`issue-tracker.md`](issue-tracker.md#scope-labels) — one label per adapter directory, plus
+`conformance`. An issue normally carries one label from this table and one or more from that one.
+
 Edit the right-hand column to match whatever vocabulary you actually use.

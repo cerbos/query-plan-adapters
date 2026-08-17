@@ -28,6 +28,7 @@ plus one or more scope labels.
 | `convex` | Convex (TypeScript) |
 | `langchain-chromadb` | LangChain/ChromaDB (TypeScript) |
 | `sqlalchemy` | SQLAlchemy (Python) |
+| `activerecord` | ActiveRecord (Ruby) |
 | `ent` | Ent (Go) |
 | `pgx` | pgx / PostgreSQL (Go) |
 | `elasticsearch-java` | Elasticsearch (Java) |
