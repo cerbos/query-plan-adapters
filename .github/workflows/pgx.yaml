@@ -27,10 +27,15 @@ jobs:
       - name: Validate conformance corpus
         run: ../conformance/scripts/validate-corpus.sh
 
+      # cache-dependency-path is not optional here: every Go module in this repository lives in a
+      # subdirectory, and setup-go resolves the default dependency file against the repository root
+      # rather than `defaults.run.working-directory`, which applies to `run` steps alone. Left off,
+      # it finds no go.sum, warns, and silently disables the module cache for the whole job.
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: pgx/go.mod
+          cache-dependency-path: pgx/go.sum
 
       - name: Lint
         uses: golangci/golangci-lint-action@d583c34f0599d37dbac4a198b9c83201be380893 # v9.3.0
@@ -82,10 +87,13 @@ jobs:
       - name: Validate demo domain
         run: ../demo/scripts/validate-demo.sh
 
+      # The example is its own module, so it caches against its own go.sum — see the note on the
+      # test job's Setup Go for why the path has to be spelled out at all.
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: pgx/example/go.mod
+          cache-dependency-path: pgx/example/go.sum
 
       # The example is a nested module, so `./...` in the job above stops at its directory and
       # nothing there is linted by it. Held to the adapter's own configuration rather than a
