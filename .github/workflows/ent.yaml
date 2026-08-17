@@ -54,8 +54,13 @@ jobs:
       # and running it with the adversarial test skipped is what keeps "these tests need no Docker"
       # a checked claim. Under `./...` a unit test that grew a container dependency would be
       # invisible, because the suite that follows starts Docker anyway.
+      # -count=1 on both suites: the Setup Go cache above covers GOCACHE as well as GOMODCACHE,
+      # and GOCACHE holds Go's test *result* cache — so without it, a re-run of an unchanged commit
+      # prints `ok ... (cached)` in zero seconds and neither the PDP nor the databases are ever
+      # started. A green run has to mean the suite ran. The compiled-package half of that cache is
+      # untouched and is where the time is actually saved.
       - name: Unit suite (no Docker)
-        run: go test -race -skip TestAdversarialConformance ./...
+        run: go test -race -count=1 -skip TestAdversarialConformance ./...
 
       # The harness starts its own Cerbos PDP with testcontainers, reading the pinned version from
       # conformance/CERBOS_VERSION — there is no separate sidecar to set up, and the version is
@@ -64,7 +69,7 @@ jobs:
       # WithDialect is actually exercised. Three dialect legs share one PDP and one plan pass;
       # the timeout allows for the extra container start.
       - name: Adversarial conformance suite
-        run: go test -race -timeout 30m ./...
+        run: go test -race -count=1 -timeout 30m ./...
 
   # The example application: the adapter used the way a consumer uses it, against the shared demo
   # domain. It covers the one thing the job above structurally cannot — the usage shapes. That
