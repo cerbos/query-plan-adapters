@@ -51,7 +51,7 @@
   "devDependencies": {
     "@cerbos/core": "^0.33.0",
     "@cerbos/grpc": "^0.29.0",
-    "@tsconfig/node22": "^22.0.0",
+    "@tsconfig/node24": "^24.0.0",
     "@tsconfig/strictest": "^2.0.8",
     "@types/jest": "^30.0.0",
     "@types/node": "^24.0.0",
