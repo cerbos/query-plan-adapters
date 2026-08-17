@@ -18,8 +18,9 @@
 #      in conformance/ — at $CERBOS_HOST, never at an address of its own. That second half is
 #      not fussiness: 3592/3593 are the ports every adapter's `cerbos run` test sidecar binds,
 #      so a hardcoded default does not fail, it silently plans against the wrong policy suite.
-#   4. Every adapter has an example/ directory. Landed DISABLED — it cannot pass until the last
-#      child of cerbos/query-plan-adapters#349 merges, and turning it on is #360's job.
+#   4. Every adapter has a runnable example/run.sh. The roster is `adapters` in
+#      conformance/actions.json — the one already there, never a second list — so registering an
+#      adapter is what demands an example of it, and adding one without an example fails here.
 #   5. Principal provenance: an example reads its principal out of seeds.json rather than
 #      restating one inline.
 
@@ -32,9 +33,6 @@ REPO_ROOT="$(cd "${DEMO_DIR}/.." && pwd)"
 SEEDS="${DEMO_DIR}/seeds.json"
 EXPECTED="${DEMO_DIR}/expected.json"
 ACTIONS="${REPO_ROOT}/conformance/actions.json"
-
-# Turning this on is cerbos/query-plan-adapters#360, once every adapter has an example.
-REQUIRE_ALL_EXAMPLES="${DEMO_REQUIRE_ALL_EXAMPLES:-0}"
 
 # The five usage shapes from cerbos/query-plan-adapters#349, in emission order.
 SHAPES=(filtered alwaysAllowed alwaysDenied paginated composed)
@@ -361,27 +359,34 @@ for adapter in $(jq -r '.adapters[]' "${ACTIONS}"); do
 done
 
 # ---------------------------------------------------------------------------------------------
-# 4. Every adapter has an example (DISABLED — see the header)
+# 4. Every adapter has a runnable example/run.sh
 # ---------------------------------------------------------------------------------------------
-missing=()
-have=()
+echo "==> [4/5] example coverage: every adapter has a runnable example/run.sh"
+
+# The roster is `adapters` in conformance/actions.json — the same one checks 3 and 5 iterate, and
+# the same rule that keeps the PDP pin in one place. A second list here would be a list that can
+# disagree with the corpus, and the adapter left off it is exactly the one nothing would demand an
+# example of. validate-corpus.sh already asserts that roster is non-empty and duplicate-free and
+# runs in the same job immediately before this script, so this cannot pass by iterating nothing.
+#
+# There is no per-adapter opt-out and no environment variable to switch it off: a gate with an
+# escape hatch is not a gate, and the reason there is nothing to opt out WITH is ADR 0001, the
+# same argument demo/README.md's check 4 states in full.
+#
+# Existence and the mode bit are separate failures because they need different fixes, and because
+# `-e` alone is not enough: run-example.sh executes the script directly, so a run.sh committed
+# without its mode bit is not a runnable example either. Testing existence alone would pass it
+# here and fail later in the example job, with a message about the runner rather than the mode bit.
 for adapter in $(jq -r '.adapters[]' "${ACTIONS}"); do
-  if [[ -x "${REPO_ROOT}/${adapter}/example/run.sh" ]]; then
-    have+=("${adapter}")
-  else
-    missing+=("${adapter}")
+  runner="${REPO_ROOT}/${adapter}/example/run.sh"
+  if [[ ! -e "${runner}" ]]; then
+    fail "${adapter} has no example/run.sh — every adapter in the actions.json roster needs an" \
+      "example application (demo/README.md)"
+  elif [[ ! -x "${runner}" ]]; then
+    fail "${adapter}/example/run.sh is not executable — demo/scripts/run-example.sh invokes it" \
+      "directly, so chmod +x it"
   fi
 done
-
-if [[ "${REQUIRE_ALL_EXAMPLES}" == "1" ]]; then
-  echo "==> [4/5] example coverage: enforced"
-  if (( ${#missing[@]} > 0 )); then
-    fail "no runnable example/run.sh for: ${missing[*]}"
-  fi
-else
-  echo "==> [4/5] example coverage: ${#have[@]}/$(( ${#have[@]} + ${#missing[@]} )) adapters" \
-    "(check disabled until cerbos/query-plan-adapters#360; still missing: ${missing[*]:-none})"
-fi
 
 # ---------------------------------------------------------------------------------------------
 # 5. Principal provenance
@@ -394,9 +399,11 @@ echo "==> [5/5] principal provenance: examples read their principal from seeds.j
 # Unlike the hardcoded PDP address check 3 catches, a restated principal does NOT fail quietly: it
 # matches what the corpus carries until someone edits seeds.json, and then that example's frozen
 # id lists stop matching and it fails loudly — as an adapter bug rather than as the misinvocation
-# it is. So this is a latency problem, not a correctness hole, and it earns a check only because
-# six more examples are queued (cerbos/query-plan-adapters#349): a rule constraining examples
-# being written is worth more than one added after they exist.
+# it is. So this is a latency problem, not a correctness hole, and it earned a check only because
+# six more examples were queued behind it (cerbos/query-plan-adapters#349): a rule constraining
+# examples being written is worth more than one added after they exist. Those examples have since
+# landed — check 4 above is what now holds the roster complete — so what this guards from here on
+# is the next adapter to join it.
 #
 # What makes it checkable is that a principal is an id AND its roles, and only the roles are
 # unobtainable any other way. An example naming `alice` is fine and unavoidable — it is the

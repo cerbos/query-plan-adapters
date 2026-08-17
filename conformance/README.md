@@ -1054,7 +1054,28 @@ unsupported before you have watched it fail is how a translatable shape gets per
    promotions — so onboarding an adapter without pinning its messages fails there rather than in
    the new harness alone.
 
-7. **Wire CI.** Copy an existing adapter workflow. It must: read the PDP version from
+7. **Write the example application.** Registering in the roster is what demands one:
+   `demo/scripts/validate-demo.sh` reads that same `adapters` key — there is deliberately no
+   second list — and fails the build for any adapter on it without a runnable
+   `<adapter>/example/run.sh`. So step 6 and this step land together or CI stays red.
+
+   An example implements the demo domain's five usage shapes against the adapter installed as a
+   **packed artifact** rather than imported from source
+   ([ADR 0002](../docs/adr/0002-examples-install-the-packed-artifact.md)). That is coverage this
+   corpus structurally cannot give you: every harness here imports its adapter from source, which
+   leaves the published surface — `exports` maps, type declarations, `files` allowlists, peer
+   ranges, POM scopes — executed nowhere, and asks only for one flat filtered query, never a
+   paginated one and never the adapter's filter composed with a predicate the application owns. An
+   adapter that cannot implement those five shapes has a packaging or ergonomics problem, and
+   finding it here is the point — before release rather than after.
+
+   There is no classification bucket to opt out with, and adding one is what
+   [ADR 0001](../docs/adr/0001-demo-domain-has-no-per-adapter-exceptions.md) rules out: a shape
+   that would need a per-adapter carve-out is wrong for the demo domain, and the argument belongs
+   back in this corpus, where the buckets already exist. Read
+   [demo/README.md](../demo/README.md) — "What an example must do" — before writing one.
+
+8. **Wire CI.** Copy an existing adapter workflow. It must: read the PDP version from
    `CERBOS_VERSION` and its digest from `CERBOS_IMAGE_DIGEST` (never hardcode either), run
    `scripts/validate-corpus.sh` in every job that replays the corpus **or** hardcodes the PDP
    image — a job that interpolates the two files at runtime cannot drift and does not need it,
@@ -1064,6 +1085,14 @@ unsupported before you have watched it fail is how a translatable shape gets per
    the translator and the datastore, so a separate job costs runner minutes for no extra
    coverage. Pin every service image the harness or the workflow starts, by tag **and** digest —
    see below.
+
+   It also carries the example job from step 7: trigger on `demo/**` too, run
+   `demo/scripts/validate-demo.sh` and `demo/scripts/run-example.sh <adapter>`, and keep that job
+   **in this adapter's own workflow**. `renovate.json` automerges non-major bumps, so an ORM bump
+   arrives as one PR touching both the adapter's manifest and the example's committed lockfile, and
+   the example job on that PR is what blocks the automerge when the new ORM breaks real usage. A
+   nightly or standalone workflow would still fail eventually, but not before the merge, which
+   silently restores the gap it exists to close.
 
 ### Pinning service images
 

@@ -154,18 +154,22 @@ The rot risk is real, and `validate-demo.sh` is what answers it:
    sidecar binds, and that failure is silent rather than loud. The scan is for a client address
    specifically: `docker-compose.yml`'s `"13592:3592"` names the PDP's own listen port on the
    container side, which is correct.
-4. **Example coverage.** Every adapter has an `example/`. **Currently disabled** — it cannot pass
-   until the last child of cerbos/query-plan-adapters#349 merges, and enabling it is
-   cerbos/query-plan-adapters#360's job. Run with `DEMO_REQUIRE_ALL_EXAMPLES=1` to see where it
-   stands. The roster it reads is `adapters` in `conformance/actions.json`; there is deliberately
-   no second list.
+4. **Example coverage.** Every adapter has a runnable `example/run.sh`. The roster it reads is
+   `adapters` in `conformance/actions.json`; there is deliberately no second list, so registering
+   an adapter in the corpus is what demands an example of it, and adding one without an example
+   fails the build rather than quietly shipping an adapter nothing has ever installed. There is no
+   opt-out and no environment variable to switch it off — an adapter that cannot implement the five
+   shared shapes has a packaging or ergonomics problem worth finding before release rather than
+   after, which is the argument of cerbos/query-plan-adapters#349, and it is the same reason
+   ADR 0001 gives this directory no classification buckets.
 5. **Principal provenance.** An example looks its principal up in `seeds.json` rather than writing
    one out. Unlike the hardcoded PDP address check 3 catches, a restated principal does **not** fail
    quietly — it matches the corpus until someone edits `seeds.json`, and then that example's frozen
    id lists mismatch and it fails loudly, as an adapter bug rather than as the misinvocation it is.
-   So this is a latency problem, and it earns a check only because six more examples are queued
-   (cerbos/query-plan-adapters#349): a rule constraining examples being *written* is worth more than
-   one added after they exist.
+   So this is a latency problem, and it earned a check only because six more examples were queued
+   behind it (cerbos/query-plan-adapters#349): a rule constraining examples being *written* is worth
+   more than one added after they exist. Those examples have since landed and check 4 now holds the
+   roster complete, so what this guards from here on is the next adapter to join it.
 
    The signal is an id **next to a role**: naming `alice` is unavoidable (it is the lookup key, the
    `expected.json` entry key, and the word a printed line uses), but naming `alice` alongside `user`
@@ -196,6 +200,10 @@ adapter's test workflow.
   second.
 - **Adding a usage shape** means implementing it in every example. There is no per-adapter
   classification to opt out with, and adding one is what ADR 0001 rules out.
+- **Adding an adapter** means adding an example for it, in the same sequence that registers it in
+  `conformance/actions.json` — that roster is what check 4 reads, so the two land together or CI
+  stays red. The step-by-step is in
+  [conformance/README.md](../conformance/README.md#adding-a-new-adapter).
 - **A shape that needs a carve-out for one adapter is wrong for this directory.** The argument
   belongs in `conformance/`, where the classification buckets exist.
 
