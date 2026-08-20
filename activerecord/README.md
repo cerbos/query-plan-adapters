@@ -46,10 +46,9 @@ into `exists`. If it cannot escape a `LIKE` needle, it never lets the wildcards 
 
 The tests compare this adapter with the PDP pinned in `../conformance/CERBOS_VERSION` and
 `../conformance/CERBOS_IMAGE_DIGEST`. For each action, the test makes a
-plan with a real PDP, translates the plan, runs the query against 21 difficult rows, and
+plan with a real PDP, translates the plan, runs the query against the canonical check resources, and
 compares the ids in the result with the decisions of `checkResource` for each row. The PDP
-gives the results for both sides. No person writes the expected results. The Spring Data
-adapter gives the reference behaviour.
+gives the results for both sides. No person writes the expected results.
 
 A second suite, `spec/translator_spec.rb`, replays the same corpus OFFLINE from
 `../conformance/wire-fixtures/` and pins the SQL this adapter emits for each action in
@@ -58,9 +57,9 @@ server. Rewrite it with `./scripts/golden-update.sh` and review the diff.
 
 | Classification | Coverage |
 | --- | --- |
-| Tested against the oracle | 178 corpus actions |
-| Fail-closed | 18 actions: 8 that this adapter cannot show, and the 10 that the reference adapter does not support either. Each one must raise an error whose message the corpus pins, so a typo or a transport error cannot pass as the refusal |
-| Refused under the `omitted` NULL convention | 1 action — see [The NULL convention of the caller](#the-null-convention-of-the-caller) |
+| Tested against the oracle | Actions whose manifest outcome is `matched` |
+| Fail-closed | Actions whose manifest outcome is `rejected`. Each one must raise an error whose message the manifest pins, so a typo or a transport error cannot pass as the refusal |
+| Refused under the `omitted` NULL convention | `null-eq-missing` — see [The NULL convention of the caller](#the-null-convention-of-the-caller) |
 | Known difference in the planner | The Cerbos planner changes `has()` on a missing attribute into `ALWAYS_ALLOWED`, but `checkResource` denies the rows in which the attribute is missing. Until the planner has a correction, use `R.attr.x != null` and not `has(R.attr.x)` for the attributes in your database |
 
 The fail-closed set is small, because SQL can show most of the corpus directly. The adapter
@@ -481,8 +480,9 @@ RUBY_VERSION=3.2 ACTIVERECORD_VERSION=7.1 ./scripts/test.sh
 ```
 
 The `tests` service mounts the **root directory of the repository**, because both corpus suites
-read shared data at `../conformance/` (`seeds.json`, `actions.json`, `derived-fields.json`,
-`wire-fixtures/`, `CERBOS_VERSION`, `CERBOS_IMAGE_DIGEST`).
+read shared data at `../conformance/` (`catalog.json`, `check-resources.json`, `seeds.json`,
+`derived-fields.json`, `wire-fixtures/`, `CERBOS_VERSION`, `CERBOS_IMAGE_DIGEST`) and the adapter's
+own `adapterctl.json` manifest.
 
 There are three suites:
 

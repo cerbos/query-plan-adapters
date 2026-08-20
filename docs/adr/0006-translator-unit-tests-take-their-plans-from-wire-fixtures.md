@@ -48,7 +48,7 @@ adapter and duplicated deliberately, so the adapter stays standalone
 
 **Every wire fixture must be classified, exactly once, in every adapter that has one of these
 tests** — as an expected filter, an expected plan kind, or an expected throw carrying the message
-`conformance/actions.json` pins. That completeness guard is what makes adding a corpus action land
+the adapter's `adapterctl.json` pins. That completeness guard is what makes adding a corpus action land
 as a failure rather than as silence, and it is the reason the file is worth having rather than a
 sampling of shapes somebody found interesting.
 
@@ -56,7 +56,7 @@ sampling of shapes somebody found interesting.
 rewrites the folded `now() - duration("24h")` literal in `ts-window` / `ts-vf` to a placeholder,
 because it differs on every capture. Reading it back means substituting a value, and the
 substitution has to reproduce what the PDP actually emits — nanosecond precision — or it
-contradicts the classification in `actions.json`. Pin both sides of that boundary rather than
+contradicts the direct adapter outcome. Pin both sides of that boundary rather than
 picking the tidy value.
 
 **Plans the planner cannot produce still belong in a unit test.** Malformed input — an unrecognised

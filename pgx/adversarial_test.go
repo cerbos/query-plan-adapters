@@ -228,7 +228,7 @@ func buildMapper() cerbospgx.Mapper {
 		"request.resource.attr.scope":     {Column: "scope"},
 		"request.resource.attr.createdAt": {Column: "created_at", ValueType: cerbospgx.ValueTimestamp},
 		// obj.inner is not a real nested column — it mirrors aString, the same trick the
-		// spring-data and prisma reference harnesses use for the p-struct probe.
+		// other harnesses use for the p-struct probe.
 		"request.resource.attr.obj.inner": {Column: "a_string"},
 
 		"request.resource.attr.tags":     {Relation: tags},
@@ -395,116 +395,16 @@ func seedDatabase(t *testing.T, ctx context.Context, pool *pgxpool.Pool, corpus 
 // -- the two sides of the differential ---------------------------------------------------------
 
 func (h *harness) principal() *cerbos.Principal {
-	p := h.corpus.Seeds.Principal
+	p := h.corpus.CheckResources.Principal
 	return cerbos.NewPrincipal(p.ID, p.Roles...).WithAttributes(p.Attr)
 }
 
-// checkResource builds Cerbos attributes mirroring exactly what the seeded row holds.
-//
-// A DB NULL is a MISSING attribute by default: CEL raises a missing-attribute error, which Cerbos
-// treats as a deny — the same three-valued logic SQL applies when a NULL participates in a
-// comparison. `owner` and `tagNames` are the deliberate exceptions, sent as explicit nulls.
-func (h *harness) checkResource(seed Seed) *cerbos.Resource {
-	tags := make([]any, 0, len(seed.Tags))
-	tagNames := make([]any, 0, len(seed.Tags))
-	for _, tag := range seed.Tags {
-		element := map[string]any{"id": tag.ID}
-		if tag.Name != nil {
-			element["name"] = *tag.Name
-		}
-		tags = append(tags, element)
+func (h *harness) checkResource(resource CheckResource) *cerbos.Resource {
+	return cerbos.NewResource(resource.Kind, resource.ID).WithAttributes(resource.Attr)
+}
 
-		if tag.Name == nil {
-			tagNames = append(tagNames, nil)
-		} else {
-			tagNames = append(tagNames, *tag.Name)
-		}
-	}
-
-	labels := make([]any, 0)
-	for _, label := range h.corpus.labelsOf(seed) {
-		if label == nil {
-			labels = append(labels, map[string]any{})
-		} else {
-			labels = append(labels, map[string]any{"name": *label})
-		}
-	}
-
-	categories := make([]any, 0, len(seed.SubCategoryNames))
-	for _, subName := range seed.SubCategoryNames {
-		categories = append(categories, map[string]any{
-			"name": "business",
-			"subCategories": []any{
-				map[string]any{"name": subName, "labels": labels},
-			},
-		})
-	}
-
-	attr := map[string]any{
-		"aBool":      seed.ABool,
-		"aString":    seed.AString,
-		"aNumber":    seed.ANumber,
-		"createdBy":  h.corpus.createdBy(seed),
-		"obj":        map[string]any{"inner": seed.AString},
-		"tags":       tags,
-		"tagNames":   tagNames,
-		"categories": categories,
-	}
-
-	// Explicit null: `owner` aliases the same column but is sent as a real null attribute.
-	if seed.AOptionalString != nil {
-		attr["owner"] = *seed.AOptionalString
-		attr["aOptionalString"] = *seed.AOptionalString
-	} else {
-		attr["owner"] = nil
-	}
-
-	// `coOwner` is the explicit-null alias of the `scope` column, the second half of
-	// `null-value-f2f`: `scope` itself is omitted when NULL (below), so the corpus carries the
-	// same column under both conventions and the field-to-field probe has two explicit nulls.
-	if s := h.corpus.scopeOf(seed); s != nil {
-		attr["coOwner"] = *s
-	} else {
-		attr["coOwner"] = nil
-	}
-
-	if d := h.corpus.aDouble(seed); d != nil {
-		attr["aDouble"] = *d
-	}
-	if s := h.corpus.scopeOf(seed); s != nil {
-		attr["scope"] = *s
-	}
-	if ts := h.corpus.createdAt(seed); ts != nil {
-		attr["createdAt"] = *ts
-	}
-
-	// mainCategory mirrors the row's category graph as ONE nested object. Rows without a
-	// category get NO attribute — a CEL missing-attribute error (deny), matching the adapter's
-	// empty join chain excluding the row.
-	if len(seed.SubCategoryNames) > 0 {
-		subs := make([]any, 0, len(seed.SubCategoryNames))
-		names := make([]any, 0, len(seed.SubCategoryNames))
-		for _, subName := range seed.SubCategoryNames {
-			subs = append(subs, map[string]any{"name": subName})
-			names = append(names, subName)
-		}
-		attr["mainCategory"] = map[string]any{
-			"name": "business", "subCategories": subs, "subNames": names,
-		}
-	}
-
-	// The real to-one chain, mirroring the seeded rows exactly. A row with no parent sends NO
-	// `parent` attribute — a CEL missing-path error (deny) — matching a join that finds nothing;
-	// the same holds one level down for `parent.inner`.
-	if parentSeed := h.corpus.parentSeedOf(&seed); parentSeed != nil {
-		parent := relationAttr(parentSeed)
-		if inner := h.corpus.parentSeedOf(parentSeed); inner != nil {
-			parent["inner"] = relationAttr(inner)
-		}
-		attr["parent"] = parent
-	}
-
-	return cerbos.NewResource(h.corpus.Seeds.ResourceKind, seed.ID).WithAttributes(attr)
+func (h *harness) resourceKind() string {
+	return h.corpus.CheckResources.Resources[0].Kind
 }
 
 // oracleAllowedIds asks the PDP itself, row by row.
@@ -512,11 +412,11 @@ func (h *harness) oracleAllowedIDs(t *testing.T, action string) []string {
 	t.Helper()
 
 	var allowed []string
-	for _, seed := range h.corpus.Seeds.Seeds {
-		ok, err := h.client.IsAllowed(t.Context(), h.principal(), h.checkResource(seed), action)
-		require.NoError(t, err, "check() for %s/%s", action, seed.ID)
+	for _, resource := range h.corpus.CheckResources.Resources {
+		ok, err := h.client.IsAllowed(t.Context(), h.principal(), h.checkResource(resource), action)
+		require.NoError(t, err, "check() for %s/%s", action, resource.ID)
 		if ok {
-			allowed = append(allowed, seed.ID)
+			allowed = append(allowed, resource.ID)
 		}
 	}
 	sort.Strings(allowed)
@@ -525,9 +425,9 @@ func (h *harness) oracleAllowedIDs(t *testing.T, action string) []string {
 
 // allSeedIDs is every seeded id, sorted — what an unfiltered query returns.
 func (h *harness) allSeedIDs() []string {
-	ids := make([]string, 0, len(h.corpus.Seeds.Seeds))
-	for _, seed := range h.corpus.Seeds.Seeds {
-		ids = append(ids, seed.ID)
+	ids := make([]string, 0, len(h.corpus.CheckResources.Resources))
+	for _, resource := range h.corpus.CheckResources.Resources {
+		ids = append(ids, resource.ID)
 	}
 	sort.Strings(ids)
 	return ids
@@ -538,7 +438,7 @@ func (h *harness) adapterFilteredIDs(t *testing.T, action string, opts ...cerbos
 	t.Helper()
 
 	plan, err := h.client.PlanResources(t.Context(), h.principal(),
-		cerbos.NewResource(h.corpus.Seeds.ResourceKind, ""), action)
+		cerbos.NewResource(h.resourceKind(), ""), action)
 	require.NoError(t, err, "planning %s", action)
 
 	result, err := cerbospgx.Translate(plan.PlanResourcesResponse, resourceTable, h.mapper, opts...)
@@ -590,18 +490,19 @@ func TestAdversarialConformance(t *testing.T) {
 		for action, count := range seen {
 			require.Equal(t, 1, count, "action %q classified %d times", action, count)
 		}
-		// Corpus-size tripwire: bump deliberately when the corpus grows, so a new hostile shape
-		// cannot slip past this adapter unnoticed.
-		require.Len(t, seen, 199, "corpus size changed; triage the new action(s) before bumping")
-		require.Len(t, h.corpus.Seeds.Seeds, 21, "seed count changed")
-		// Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
-		// lost has to be re-triaged here rather than joining the throw suite unnoticed.
-		require.Len(t, h.corpus.ThrowingActions, 15, "throwing action count changed")
+		expectedActions := len(h.corpus.Catalog.Actions)
+		if h.corpus.SelectedAction != "" {
+			expectedActions = 1
+		}
+		require.Len(t, seen, expectedActions,
+			"selected manifest outcomes must be classified exactly once")
+		require.Len(t, h.corpus.Seeds.Seeds, len(h.corpus.CheckResources.Resources),
+			"stored rows must match the canonical check resources")
 	})
 
 	t.Run("oracle", func(t *testing.T) {
 		for _, action := range h.corpus.OracleActions {
-			if h.corpus.SkippedActions[action] {
+			if h.corpus.UpstreamBlockedActions[action] {
 				continue
 			}
 			t.Run(action, func(t *testing.T) {
@@ -622,7 +523,7 @@ func TestAdversarialConformance(t *testing.T) {
 				// rejecting a wrongly emitted filter cannot masquerade as the adapter
 				// refusing to translate.
 				plan, err := h.client.PlanResources(t.Context(), h.principal(),
-					cerbos.NewResource(h.corpus.Seeds.ResourceKind, ""), entry.Action)
+					cerbos.NewResource(h.resourceKind(), ""), entry.Action)
 				require.NoError(t, err, "planning %s", entry.Action)
 
 				_, err = cerbospgx.Translate(plan.PlanResourcesResponse, resourceTable, h.mapper)
@@ -635,7 +536,7 @@ func TestAdversarialConformance(t *testing.T) {
 				// satisfy this case as well as the documented limitation
 				// (cerbos/query-plan-adapters#326).
 				require.ErrorContains(t, err, entry.Message,
-					"%s must be refused for the mechanism actions.json declares", entry.Action)
+					"%s must be refused for the mechanism adapterctl.json declares", entry.Action)
 			})
 		}
 	})
@@ -651,6 +552,9 @@ func TestAdversarialConformance(t *testing.T) {
 	// conjunct it could not translate would emit exactly that predicate and return every row it
 	// selects, all of which the PDP denies for this action.
 	t.Run("filter-as-conjunct must be refused because dropping its untranslatable half over-grants", func(t *testing.T) {
+		if h.corpus.SelectedAction != "" && h.corpus.SelectedAction != "filter-as-conjunct" {
+			t.Skip("another action was selected by ADAPTERCTL_ACTION")
+		}
 		require.Empty(t, h.oracleAllowedIDs(t, "filter-as-conjunct"),
 			"check() must deny every seed: a filter() in boolean position is not evaluable")
 
@@ -668,12 +572,12 @@ func TestAdversarialConformance(t *testing.T) {
 		for _, entry := range h.corpus.ThrowingActions {
 			if entry.Action == "filter-as-conjunct" {
 				require.ErrorContains(t, err, entry.Message,
-					"filter-as-conjunct must be refused for the mechanism actions.json declares")
+					"filter-as-conjunct must be refused for the mechanism adapterctl.json declares")
 			}
 		}
 	})
 
-	t.Run("null representation omitted is rejected", func(t *testing.T) {
+	t.Run("representation-dependent outcome is rejected", func(t *testing.T) {
 		for _, entry := range h.corpus.NullOmittedActions {
 			t.Run(entry.Action, func(t *testing.T) {
 				_, err := h.adapterFilteredIDs(t, entry.Action,
@@ -699,7 +603,7 @@ func TestAdversarialConformance(t *testing.T) {
 		}
 	})
 
-	// The has() planner fold is a known divergence, so it is excluded from the oracle run above
+	// The has() planner fold is upstream-blocked, so it is excluded from the oracle run above
 	// and nothing else in this suite touches it — the action would be exercised on neither side.
 	// Pin the over-grant itself: the plan folds to ALWAYS_ALLOWED while check() denies the seeds
 	// whose attribute is missing, so this adapter returns every row. When the planner stops
@@ -707,11 +611,14 @@ func TestAdversarialConformance(t *testing.T) {
 	// (cerbos/query-plan-adapters#324).
 	t.Run("pins the upstream has() planner over-grant", func(t *testing.T) {
 		const action = "p-has"
-		require.True(t, h.corpus.SkippedActions[action],
-			"%s must stay registered as a known divergence for this adapter", action)
+		if h.corpus.SelectedAction != "" && h.corpus.SelectedAction != action {
+			t.Skip("another action was selected by ADAPTERCTL_ACTION")
+		}
+		require.True(t, h.corpus.UpstreamBlockedActions[action],
+			"%s must stay registered as upstream-blocked for this adapter", action)
 
 		plan, err := h.client.PlanResources(t.Context(), h.principal(),
-			cerbos.NewResource(h.corpus.Seeds.ResourceKind, ""), action)
+			cerbos.NewResource(h.resourceKind(), ""), action)
 		require.NoError(t, err, "planning %s", action)
 		require.Equal(t, enginev1.PlanResourcesFilter_KIND_ALWAYS_ALLOWED,
 			plan.PlanResourcesResponse.GetFilter().GetKind(),
@@ -775,104 +682,25 @@ func TestAdversarialConformance(t *testing.T) {
 		require.Equal(t, want, got)
 	})
 
-	t.Run("degeneracy guard", func(t *testing.T) {
-		// The comparison above can pass vacuously if the oracle itself is trivial. Assert that a
-		// representative spread of actions has an oracle that is neither empty nor the full seed
-		// set — without this, a silently broken PDP connection would still pass every case.
-		//
-		// Every entry is asserted to be an action this adapter actually oracle-compares: a list
-		// copied between harnesses drifts into naming shapes the adapter never compares, which
-		// guard nothing (cerbos/query-plan-adapters#324). The membership assertion turns moving an
-		// action into adapterUnsupported into a failure here rather than a silent no-op.
-		//
-		// w1-size-zero-chain, w1-not-size-chain, w1-size-frac-chain, cast-int-string and
-		// cast-double-string are deliberately absent: their oracles are empty by CONSTRUCTION (no
-		// seed holds a to-one parent with zero children, nor one with two or more; every seed's
-		// aString raises in int()/double()), so they cannot satisfy this guard.
-		compared := []string{
-			"vf-le", "in-single", "like-percent", "exists-on-empty", "not-exists",
-			"nary-and", "field-to-field", "ternary-cmp", "arith-add", "size-threshold",
-			"hier-ancestor-cf", "pv-exists", "in-null-elem-mixed", "null-eq", "cs-eq",
-			// The explicit-null convention against a non-null operand (#308). All five are
-			// compared rather than thrown, because the mapper declares the convention per
-			// attribute; every one of them under-granted by exactly the NULL-column rows
-			// before that declaration existed.
-			"null-value-ne-const", "null-value-not-eq-const", "null-value-not-in-const",
-			"null-value-f2f", "null-value-pv-not-exists",
-			"w1-all-chain", "w1-not-exists-chain", "w1-size-nonneg-chain",
-			"w1-not-in-chain", "w1-not-hasint-chain",
-			"w1-ternary-chain-cond", "w1-size-frac-le-chain",
-			"cr-div-neg-zero", "cr-div-other-column", "cr-div-then-add", "cr-div-then-add-ne",
-			// The real to-one join (#375): one per hazard — the negated hop, the null comparison,
-			// two-level depth, the root conjunction, and the disjunction, whose failure
-			// direction is an under-grant.
-			"rel-not-bool-hop", "rel-ne-null-hop", "rel-bool-hop2",
-			"rel-hop-and-root", "rel-hop2-or-exists",
-			// Case sensitivity in STRING MATCHING, a different mechanism from cs-eq: collation
-			// governs `=`, and on SQLite only `PRAGMA case_sensitive_like` governs LIKE.
-			"cs-contains",
-			// The primary key as a filterable attribute (#376): against a constant, against a
-			// column under negation, and inside a concatenation in both operand orders. The
-			// concatenations are the load-bearing pair — rendered as numeric `+` they were a
-			// hard error on PostgreSQL and a silent OVER-grant on MySQL, which coerces both
-			// operands to 0.
-			"id-eq-const", "id-f2f-ne", "id-concat", "id-concat-vf",
-			// string() over a NUMERIC column, the half that lowers to CAST on every engine. Its
-			// boolean sibling is refused instead, so this entry proves the supported half still
-			// compares.
-			"cast-string-double",
-			// CEL's `+` between two COLUMNS (#391), resolved by the caller declaring the
-			// columns ValueString. Rendered as numeric `+` PostgreSQL rejects it outright,
-			// which is loud here but silent on the other two engines the shared translator serves.
-			"concat-f2f",
-			// Root position and bare operand forms (#388): one per hazard — the negation over a
-			// bare ordering (every other negated ordering in the corpus wraps a size() or a
-			// ternary), the bare boolean at the ROOT of the condition, and the collection
-			// subquery disjoined with a scalar predicate rather than conjoined with one.
-			"not-lt", "root-bare-bool", "or-eq-exists",
-			// Hazard classes the corpus missed (#387): the De Morgan branch over a conjunction;
-			// the negated LIKE against a COLUMN needle, where a definite-FALSE null guard would
-			// leak every NULL-needle row through the NOT; the value-first hasIntersection, whose
-			// operands are not interchangeable in the emitted SQL; and the BELOW-cliff unroll of
-			// a principal collection, the shape a principal with three teams produces.
-			"not-and", "not-contains", "vf-hasint", "pv-exists-unrolled",
-		}
-		// int() over a numeric column is unsupported for every adapter but convex, so there is no
-		// comparison behind it here: it stays as a PDP/policy liveness probe for the cast group.
-		// Asserting the complement keeps the split honest — a shape this adapter gains support for
-		// must move up into the compared list.
-		// string() over a BOOLEAN column is refused because CAST is dialect-dependent there
-		// (#376), and the constructed hierarchy path because `list` has no translator case at
-		// all — so neither has a comparison behind it here.
-		// #387 adds three more groups with no comparison behind them: modulo (reached through the
-		// int() cast that gives `%` an integer operand), the positional read of a scalar list, and
-		// list equality over a map() projection, which reaches a plain value position where a held
-		// collection has no scalar meaning.
-		livenessOnly := []string{
-			"cast-int-double", "cast-string-bool", "hier-list-id",
-			"arith-mod", "index-scalar-list", "map-eq-list",
-		}
-
-		oracleCompared := h.corpus.OracleComparedActions()
-		total := len(h.corpus.Seeds.Seeds)
-		assertNonDegenerate := func(t *testing.T, action string) {
-			t.Helper()
-			allowed := h.oracleAllowedIDs(t, action)
-			require.NotEmpty(t, allowed, "%s: oracle allows nothing", action)
-			require.Less(t, len(allowed), total, "%s: oracle allows every seed", action)
-		}
-		for _, action := range compared {
-			t.Run(action, func(t *testing.T) {
-				require.True(t, oracleCompared[action],
-					"%s guards nothing: this adapter does not oracle-compare it", action)
-				assertNonDegenerate(t, action)
-			})
-		}
-		for _, action := range livenessOnly {
-			t.Run(action, func(t *testing.T) {
-				require.False(t, oracleCompared[action],
-					"%s is now oracle-compared: move it into the compared list", action)
-				assertNonDegenerate(t, action)
+	t.Run("catalog oracle expectations are live", func(t *testing.T) {
+		total := len(h.corpus.CheckResources.Resources)
+		for _, entry := range h.corpus.Catalog.Actions {
+			if h.corpus.SelectedAction != "" && h.corpus.SelectedAction != entry.Name {
+				continue
+			}
+			t.Run(entry.Name, func(t *testing.T) {
+				allowed := h.oracleAllowedIDs(t, entry.Name)
+				switch entry.OracleExpectation.Kind {
+				case "proper-subset":
+					require.NotEmpty(t, allowed, "%s: oracle allows nothing", entry.Name)
+					require.Less(t, len(allowed), total, "%s: oracle allows every resource", entry.Name)
+				case "empty":
+					require.Empty(t, allowed, "%s: catalog declares an empty oracle", entry.Name)
+				case "total":
+					require.Len(t, allowed, total, "%s: catalog declares a total oracle", entry.Name)
+				default:
+					t.Fatalf("%s: unknown oracle expectation %q", entry.Name, entry.OracleExpectation.Kind)
+				}
 			})
 		}
 	})

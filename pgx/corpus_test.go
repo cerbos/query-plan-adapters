@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -16,8 +17,8 @@ import (
 )
 
 // The shared adversarial corpus. Everything about what is tested — the hostile rows, the action
-// list, the per-adapter classification, the pinned PDP version — is read from ../conformance/ at
-// runtime rather than restated here. Copying any of it into this file would let this adapter
+// catalog and pinned PDP version come from ../conformance/, while direct outcomes come from this
+// adapter's manifest. Copying any of it into this file would let this adapter
 // silently drift from the contract the other adapters are held to.
 //
 // See ../conformance/README.md for the oracle recipe and the classification rules.
@@ -85,50 +86,50 @@ type DerivedFile struct {
 	Fields      []string                `json:"fields"`
 }
 
-// UnsupportedShape is an entry in expectedUnsupported. Messages carries one entry per adapter that
-// must reject the shape, keyed by adapter name; the corpus asserts that key set.
-type UnsupportedShape struct {
-	Messages map[string]string `json:"messages"`
-	Action   string            `json:"action"`
-	Shape    string            `json:"shape"`
-}
-
-// AdapterEntry is an entry in adapterUnsupported / adapterSupportedExpected /
-// nullRepresentationOmitted.
-//
-// Messages is the per-adapter message map a nullRepresentationOmitted entry carries; the other two
-// groups leave it nil, and adapterUnsupported uses the flat Message below instead because it is
-// already per-adapter.
-//
-// Message is the substring this adapter's error must contain. adapterUnsupported carries it and
-// loadCorpus requires it; adapterSupportedExpected and nullRepresentationOmitted do not throw for
-// the reason recorded here, so they leave it empty.
+// AdapterEntry is one rejected outcome from this adapter's adapterctl manifest.
 type AdapterEntry struct {
-	Messages map[string]string `json:"messages"`
-	Action   string            `json:"action"`
-	Reason   string            `json:"reason"`
-	Message  string            `json:"message"`
+	Action  string `json:"action"`
+	Reason  string `json:"reason"`
+	Message string `json:"message"`
 }
 
-// KnownDivergence is an action excluded from the oracle run for named adapters.
-type KnownDivergence struct {
-	Action   string   `json:"action"`
-	Reason   string   `json:"reason"`
-	Adapters []string `json:"adapters"`
+type OracleExpectation struct {
+	Kind   string `json:"kind"`
+	Reason string `json:"reason"`
 }
 
-// ActionsFile is conformance/actions.json.
-//
-// Every group is parsed explicitly. A field this struct does not name would be dropped silently,
-// and a dropped group makes its actions vanish from the manifest assertion and from every
-// parameterised case at once — the projection trap conformance/README.md warns about.
-type ActionsFile struct {
-	AdapterUnsupported        map[string][]AdapterEntry `json:"adapterUnsupported"`
-	AdapterSupportedExpected  map[string][]AdapterEntry `json:"adapterSupportedExpected"`
-	Conformance               []string                  `json:"conformance"`
-	ExpectedUnsupported       []UnsupportedShape        `json:"expectedUnsupported"`
-	NullRepresentationOmitted []AdapterEntry            `json:"nullRepresentationOmitted"`
-	KnownDivergences          []KnownDivergence         `json:"knownDivergences"`
+type CatalogAction struct {
+	Name              string            `json:"name"`
+	OracleExpectation OracleExpectation `json:"oracleExpectation"`
+}
+
+type CatalogFile struct {
+	SchemaVersion int             `json:"schemaVersion"`
+	Actions       []CatalogAction `json:"actions"`
+}
+
+type ManifestOutcome struct {
+	Status  string `json:"status"`
+	Reason  string `json:"reason"`
+	Message string `json:"message"`
+}
+
+type ManifestFile struct {
+	SchemaVersion int                        `json:"schemaVersion"`
+	Adapter       string                     `json:"adapter"`
+	Outcomes      map[string]ManifestOutcome `json:"outcomes"`
+}
+
+type CheckResource struct {
+	Kind string         `json:"kind"`
+	ID   string         `json:"id"`
+	Attr map[string]any `json:"attr"`
+}
+
+type CheckResourcesFile struct {
+	SchemaVersion int             `json:"schemaVersion"`
+	Principal     Principal       `json:"principal"`
+	Resources     []CheckResource `json:"resources"`
 }
 
 // seedKeys is the exact set of seeds.json row keys this harness consumes. `note` is corpus prose
@@ -136,7 +137,7 @@ type ActionsFile struct {
 //
 // The same parsed seed feeds the stored row AND the check() oracle, so a key this harness does not
 // know about would vanish from both sides at once and the differential would agree for the wrong
-// reason — the projection trap conformance/README.md describes for actions.json, applied to the
+// reason — the projection trap conformance/README.md describes for adapterctl.json, applied to the
 // seeds. Asserting set equality rather than only rejecting unknown fields catches both directions:
 // a corpus key nothing here consumes, and a consumed key the corpus no longer carries (which would
 // otherwise decode to its zero value on both sides).
@@ -183,10 +184,12 @@ type Corpus struct {
 	CerbosVersion string
 	// CerbosImage is the fully pinned PDP reference — tag AND digest, so a re-pointed tag
 	// cannot change which build a run tested against.
-	CerbosImage string
-	Seeds       SeedsFile
-	Derived     DerivedFile
-	Actions     ActionsFile
+	CerbosImage    string
+	Seeds          SeedsFile
+	Derived        DerivedFile
+	Catalog        CatalogFile
+	Manifest       ManifestFile
+	CheckResources CheckResourcesFile
 
 	// OracleActions must match the check() oracle exactly.
 	OracleActions []string
@@ -194,8 +197,9 @@ type Corpus struct {
 	ThrowingActions []AdapterEntry
 	// NullOmittedActions are translated with the null representation flipped and must be rejected.
 	NullOmittedActions []AdapterEntry
-	// SkippedActions are known upstream divergences, excluded from the oracle run.
-	SkippedActions map[string]bool
+	// UpstreamBlockedActions are excluded from the oracle run.
+	UpstreamBlockedActions map[string]bool
+	SelectedAction         string
 }
 
 // cerbosImageRepository is the PDP image the corpus pins. The tag comes from CERBOS_VERSION and
@@ -203,13 +207,8 @@ type Corpus struct {
 // agree everywhere they are restated.
 const cerbosImageRepository = "ghcr.io/cerbos/cerbos"
 
-// loadCorpus reads the corpus and derives the classification for adapterName exactly as
-// conformance/README.md prescribes:
-//
-//	oracleActions   = conformance - adapterUnsupported[me] + adapterSupportedExpected[me]
-//	throwingActions = adapterUnsupported[me] + (expectedUnsupported - adapterSupportedExpected[me])
-//	nullOmitted     = nullRepresentationOmitted
-//	skipped         = knownDivergences where adapters contains me
+// loadCorpus reads the v1 control plane and derives this adapter's executable cases directly from
+// its manifest outcomes. No second classification source is part of this seam.
 func loadCorpus(tb testing.TB, adapterName string) *Corpus {
 	tb.Helper()
 
@@ -218,8 +217,20 @@ func loadCorpus(tb testing.TB, adapterName string) *Corpus {
 
 	readJSONStrict(tb, filepath.Join(dir, "seeds.json"), &c.Seeds)
 	readJSONStrict(tb, filepath.Join(dir, "derived-fields.json"), &c.Derived)
-	readJSON(tb, filepath.Join(dir, "actions.json"), &c.Actions)
+	readJSONStrict(tb, filepath.Join(dir, "catalog.json"), &c.Catalog)
+	readJSONStrict(tb, filepath.Join(dir, "check-resources.json"), &c.CheckResources)
+	readJSON(tb, filepath.Join(filepath.Dir(dir), adapterName, "adapterctl.json"), &c.Manifest)
 	assertCorpusCoverage(tb, dir, c)
+	if c.Catalog.SchemaVersion != 1 || c.Manifest.SchemaVersion != 1 || c.CheckResources.SchemaVersion != 1 {
+		tb.Fatal("control-plane files must use schemaVersion 1")
+	}
+	if c.Manifest.Adapter != adapterName {
+		tb.Fatalf("adapterctl.json names adapter %q, want %q", c.Manifest.Adapter, adapterName)
+	}
+	if len(c.CheckResources.Resources) != len(c.Seeds.Seeds) {
+		tb.Fatalf("check-resources.json has %d resources for %d seeded rows",
+			len(c.CheckResources.Resources), len(c.Seeds.Seeds))
+	}
 
 	version, err := os.ReadFile(filepath.Join(dir, "CERBOS_VERSION"))
 	if err != nil {
@@ -233,61 +244,60 @@ func loadCorpus(tb testing.TB, adapterName string) *Corpus {
 	}
 	c.CerbosImage = cerbosImageRepository + ":" + c.CerbosVersion + "@" + strings.TrimSpace(string(digest))
 
-	unsupported := c.Actions.AdapterUnsupported[adapterName]
-	unsupportedSet := make(map[string]bool, len(unsupported))
-	for _, entry := range unsupported {
-		unsupportedSet[entry.Action] = true
+	c.UpstreamBlockedActions = make(map[string]bool)
+	selectedAction := strings.TrimSpace(os.Getenv("ADAPTERCTL_ACTION"))
+	c.SelectedAction = selectedAction
+	catalogActions := make(map[string]bool, len(c.Catalog.Actions))
+	for _, catalogAction := range c.Catalog.Actions {
+		catalogActions[catalogAction.Name] = true
 	}
-
-	supportedExpected := c.Actions.AdapterSupportedExpected[adapterName]
-	supportedExpectedSet := make(map[string]bool, len(supportedExpected))
-	for _, entry := range supportedExpected {
-		supportedExpectedSet[entry.Action] = true
+	if selectedAction != "" && !catalogActions[selectedAction] {
+		tb.Fatalf("ADAPTERCTL_ACTION names unknown catalog action %q", selectedAction)
 	}
-
-	c.SkippedActions = make(map[string]bool)
-	for _, divergence := range c.Actions.KnownDivergences {
-		for _, adapter := range divergence.Adapters {
-			if adapter == adapterName {
-				c.SkippedActions[divergence.Action] = true
+	for _, catalogAction := range c.Catalog.Actions {
+		if selectedAction != "" && catalogAction.Name != selectedAction {
+			continue
+		}
+		outcome, ok := manifestOutcomeForAction(
+			c.Manifest.Outcomes, catalogAction.Name, selectedAction)
+		if !ok {
+			tb.Fatalf("adapterctl.json has no outcome for catalog action %q", catalogAction.Name)
+		}
+		entry := AdapterEntry{Action: catalogAction.Name, Reason: outcome.Reason, Message: outcome.Message}
+		switch outcome.Status {
+		case "matched":
+			c.OracleActions = append(c.OracleActions, catalogAction.Name)
+		case "rejected":
+			requireMessage(tb, "adapterctl.json outcome "+catalogAction.Name, outcome.Message)
+			if outcome.Reason == "" {
+				tb.Fatalf("adapterctl.json rejected outcome %q has no reason", catalogAction.Name)
+			}
+			if catalogAction.Name == "null-eq-missing" {
+				c.NullOmittedActions = append(c.NullOmittedActions, entry)
+			} else {
+				c.ThrowingActions = append(c.ThrowingActions, entry)
+			}
+		case "upstream-blocked":
+			if outcome.Reason == "" {
+				tb.Fatalf("adapterctl.json upstream-blocked outcome %q has no reason", catalogAction.Name)
+			}
+			c.UpstreamBlockedActions[catalogAction.Name] = true
+		case "unassessed":
+			tb.Fatalf("adapterctl.json outcome %q is unassessed", catalogAction.Name)
+		default:
+			tb.Fatalf("adapterctl.json outcome %q has unknown status %q", catalogAction.Name, outcome.Status)
+		}
+	}
+	if selectedAction == "" {
+		for action := range c.Manifest.Outcomes {
+			if !catalogActions[action] {
+				tb.Fatalf("adapterctl.json has outcome for unknown catalog action %q", action)
 			}
 		}
-	}
-
-	for _, action := range c.Actions.Conformance {
-		if !unsupportedSet[action] {
-			c.OracleActions = append(c.OracleActions, action)
+		if len(c.Manifest.Outcomes) != len(c.Catalog.Actions) {
+			tb.Fatalf("adapterctl.json has %d outcomes for %d catalog actions",
+				len(c.Manifest.Outcomes), len(c.Catalog.Actions))
 		}
-	}
-	for _, entry := range supportedExpected {
-		c.OracleActions = append(c.OracleActions, entry.Action)
-	}
-
-	for _, entry := range unsupported {
-		requireMessage(tb, fmt.Sprintf("adapterUnsupported.%s.%s", adapterName, entry.Action), entry.Message)
-		c.ThrowingActions = append(c.ThrowingActions, entry)
-	}
-	for _, shape := range c.Actions.ExpectedUnsupported {
-		if !supportedExpectedSet[shape.Action] {
-			message := shape.Messages[adapterName]
-			requireMessage(tb,
-				fmt.Sprintf("expectedUnsupported.%s.messages.%s", shape.Action, adapterName), message)
-			c.ThrowingActions = append(c.ThrowingActions, AdapterEntry{
-				Action:  shape.Action,
-				Reason:  shape.Shape,
-				Message: message,
-			})
-		}
-	}
-
-	// Every adapter must reject these, so the message map names the whole roster and this
-	// harness resolves its own entry exactly as it does for a throwing action.
-	for _, entry := range c.Actions.NullRepresentationOmitted {
-		message := entry.Messages[adapterName]
-		requireMessage(tb,
-			fmt.Sprintf("nullRepresentationOmitted.%s.messages.%s", entry.Action, adapterName), message)
-		entry.Message = message
-		c.NullOmittedActions = append(c.NullOmittedActions, entry)
 	}
 
 	return c
@@ -303,10 +313,57 @@ func loadCorpus(tb testing.TB, adapterName string) *Corpus {
 func validateMessage(label, message string) error {
 	if message == "" {
 		return fmt.Errorf(
-			"actions.json pins no throw message for %s: the throw suite would accept a failure for any reason",
+			"adapterctl.json pins no throw message for %s: the throw suite would accept a failure for any reason",
 			label)
 	}
 	return nil
+}
+
+// manifestOutcomeForAction makes a new or explicitly unassessed action executable only while
+// discovery selects that exact action. An unscoped run still sees the manifest as written and
+// therefore retains the full outcome-accounting gate.
+func manifestOutcomeForAction(
+	outcomes map[string]ManifestOutcome, action, selectedAction string,
+) (ManifestOutcome, bool) {
+	outcome, ok := outcomes[action]
+	if action == selectedAction && (!ok || outcome.Status == "unassessed") {
+		return ManifestOutcome{Status: "matched"}, true
+	}
+	return outcome, ok
+}
+
+func TestSelectedDiscoveryOutcome(t *testing.T) {
+	t.Parallel()
+
+	for name, outcomes := range map[string]map[string]ManifestOutcome{
+		"missing":    {},
+		"unassessed": {"new-action": {Status: "unassessed"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			outcome, ok := manifestOutcomeForAction(outcomes, "new-action", "new-action")
+			require.Equal(t, ManifestOutcome{Status: "matched"}, outcome)
+			require.True(t, ok)
+		})
+	}
+}
+
+func TestSelectedDiscoveryOutcomePreservesAssessment(t *testing.T) {
+	t.Parallel()
+
+	want := ManifestOutcome{Status: "rejected", Reason: "unsupported", Message: "cannot translate"}
+	got, ok := manifestOutcomeForAction(
+		map[string]ManifestOutcome{"known-action": want}, "known-action", "known-action")
+	require.Equal(t, want, got)
+	require.True(t, ok)
+}
+
+func TestUnscopedMissingOutcomeStaysMissing(t *testing.T) {
+	t.Parallel()
+
+	_, ok := manifestOutcomeForAction(map[string]ManifestOutcome{}, "new-action", "")
+	require.False(t, ok)
 }
 
 // requireMessage fails the run when validateMessage rejects the pin.
@@ -320,34 +377,18 @@ func requireMessage(tb testing.TB, label, message string) {
 // AllClassifiedActions returns every action the corpus classifies, so the harness can assert that
 // the groups it consumes cover the policy exactly once.
 func (c *Corpus) AllClassifiedActions() []string {
-	seen := make([]string, 0, len(c.Actions.Conformance)+len(c.Actions.ExpectedUnsupported))
-	seen = append(seen, c.Actions.Conformance...)
-	for _, s := range c.Actions.ExpectedUnsupported {
-		seen = append(seen, s.Action)
+	seen := append([]string{}, c.OracleActions...)
+	for _, outcome := range c.ThrowingActions {
+		seen = append(seen, outcome.Action)
 	}
-	for _, s := range c.Actions.NullRepresentationOmitted {
-		seen = append(seen, s.Action)
+	for _, outcome := range c.NullOmittedActions {
+		seen = append(seen, outcome.Action)
 	}
-	for _, d := range c.Actions.KnownDivergences {
-		seen = append(seen, d.Action)
+	for action := range c.UpstreamBlockedActions {
+		seen = append(seen, action)
 	}
+	sort.Strings(seen)
 	return seen
-}
-
-// OracleComparedActions is the set of actions this adapter actually compares against the check()
-// oracle. It applies the same skip the oracle run applies, so the two cannot drift: today no
-// knownDivergences action is also a conformance action, and the subtraction is a no-op — but a
-// divergence registered on one later must drop out of both at once, not just the run. The
-// degeneracy guard asserts membership against this, so a guard entry that guards nothing fails
-// loudly instead of going inert (cerbos/query-plan-adapters#324).
-func (c *Corpus) OracleComparedActions() map[string]bool {
-	compared := make(map[string]bool, len(c.OracleActions))
-	for _, action := range c.OracleActions {
-		if !c.SkippedActions[action] {
-			compared[action] = true
-		}
-	}
-	return compared
 }
 
 // findConformanceDir walks up from the working directory so the harness works whether it is run
@@ -537,6 +578,18 @@ func TestCorpusCoverage(t *testing.T) {
 	}
 }
 
+func TestControlPlaneMetadata(t *testing.T) {
+	t.Parallel()
+
+	corpus := loadCorpus(t, adapterName)
+	expectedActions := len(corpus.Catalog.Actions)
+	if corpus.SelectedAction != "" {
+		expectedActions = 1
+	}
+	require.Len(t, corpus.AllClassifiedActions(), expectedActions)
+	require.Len(t, corpus.CheckResources.Resources, len(corpus.Seeds.Seeds))
+}
+
 // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") -------
 //
 // These are part of the shared contract, not adapter-specific fixtures: the same values feed both
@@ -593,16 +646,6 @@ func (c *Corpus) parentSeedOf(s *Seed) *Seed {
 	}
 	// Unreachable: validate-corpus.sh proves every parentSeedId names a seed.
 	panic("seeds.json parentSeedId names no seed: " + *s.ParentSeedID)
-}
-
-// relationAttr is one level of the chain as check() attributes. A NULL column is a MISSING
-// attribute one hop out, exactly as it is on the resource row itself.
-func relationAttr(s *Seed) map[string]any {
-	attr := map[string]any{"aBool": s.ABool, "aString": s.AString, "aNumber": s.ANumber}
-	if s.AOptionalString != nil {
-		attr["aOptionalString"] = *s.AOptionalString
-	}
-	return attr
 }
 
 // parentID and innerID name the per-resource chain rows.

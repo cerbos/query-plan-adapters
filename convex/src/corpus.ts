@@ -21,16 +21,13 @@ import { PlanKind } from ".";
  *
  * `adversarial.test.ts` plans against a real PDP and executes the translated query inside a real
  * Convex backend; `translator.test.ts` reads the same actions off the golden wire fixtures and
- * asserts nothing but the filter the adapter emits. They must agree on two things or they prove
+ * asserts nothing but the filter the adapter emits. They must agree on the mapper or they prove
  * less than they appear to:
  *
  * - **the mapper.** The unit test pins the filter this adapter emits for a mapping; the harness
  *   proves that same filter returns the documents the PDP allows. Both read `MAPPER` from
  *   `../convex/adversarialMapper`, which is also where the Convex backend reads it — one
  *   definition, three readers, no copy to drift.
- * - **the classification.** Which actions this adapter must refuse, and with which message, is a
- *   corpus decision (`actions.json`), not a per-suite one.
- *
  * The declared-key guards live here for the same reason, even though only the harness consumes
  * seeds: they are one adapter's statement of what it reads out of the corpus, and a second copy
  * would be a second answer. They are exposed as `parse*` functions rather than run on import, so
@@ -76,10 +73,6 @@ export const isRecord = (value: unknown): value is Record<string, unknown> =>
 export const isStringArray = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every((item) => typeof item === "string");
 
-const isMessageMap = (value: unknown): value is Record<string, string> =>
-  isRecord(value) &&
-  Object.values(value).every((message) => typeof message === "string");
-
 /**
  * Set equality between the keys a corpus record carries and the keys a suite declares it consumes.
  *
@@ -111,208 +104,6 @@ export function assertKeys(
   }
 }
 
-// -- actions.json --------------------------------------------------------------------------------
-
-export interface UnsupportedShape {
-  action: string;
-  shape: string;
-  /** One entry per adapter that must reject the shape; the corpus asserts the key set. */
-  messages: Record<string, string>;
-}
-
-export interface AdapterOutcome {
-  action: string;
-  reason: string;
-  /** Absent on `adapterSupportedExpected` / `nullRepresentationOmitted`, required on a throw. */
-  message?: string;
-}
-
-/**
- * A `nullRepresentationOmitted` entry. Every adapter must reject these — the two NULL conventions
- * are indistinguishable on the wire — so `messages` names the whole roster with no promotions to
- * subtract.
- */
-export interface NullRepresentationOmittedEntry {
-  action: string;
-  reason: string;
-  messages: Record<string, string>;
-}
-
-export interface KnownDivergence {
-  action: string;
-  adapters: string[];
-}
-
-export interface ActionsFile {
-  conformance: string[];
-  adapterUnsupported: Record<string, AdapterOutcome[]>;
-  adapterSupportedExpected: Record<string, AdapterOutcome[]>;
-  expectedUnsupported: UnsupportedShape[];
-  nullRepresentationOmitted: NullRepresentationOmittedEntry[];
-  knownDivergences: KnownDivergence[];
-}
-
-const isUnsupportedShape = (value: unknown): value is UnsupportedShape =>
-  isRecord(value) &&
-  typeof value["action"] === "string" &&
-  typeof value["shape"] === "string" &&
-  isMessageMap(value["messages"]);
-
-const isAdapterOutcome = (value: unknown): value is AdapterOutcome =>
-  isRecord(value) &&
-  typeof value["action"] === "string" &&
-  typeof value["reason"] === "string" &&
-  // `adapterUnsupported` carries this and the classification below requires it;
-  // `adapterSupportedExpected` and `nullRepresentationOmitted` do not throw, so they do not.
-  (value["message"] === undefined || typeof value["message"] === "string");
-
-const isAdapterMap = (
-  value: unknown,
-): value is Record<string, AdapterOutcome[]> =>
-  isRecord(value) &&
-  Object.values(value).every(
-    (entries) => Array.isArray(entries) && entries.every(isAdapterOutcome),
-  );
-
-const isNullRepresentationOmitted = (
-  value: unknown,
-): value is NullRepresentationOmittedEntry =>
-  isRecord(value) &&
-  typeof value["action"] === "string" &&
-  typeof value["reason"] === "string" &&
-  isMessageMap(value["messages"]);
-
-const isKnownDivergence = (value: unknown): value is KnownDivergence =>
-  isRecord(value) &&
-  typeof value["action"] === "string" &&
-  isStringArray(value["adapters"]);
-
-/**
- * `actions.json`, validated rather than cast.
- *
- * Every group the interface declares is checked: a group this predicate does not name would be
- * read as `undefined` by whichever suite consumes it, and a suite that silently consumes nothing
- * is the failure the corpus README warns about.
- */
-export function parseActionsFile(value: unknown): ActionsFile {
-  if (
-    !isRecord(value) ||
-    !isStringArray(value["conformance"]) ||
-    !isAdapterMap(value["adapterUnsupported"]) ||
-    !isAdapterMap(value["adapterSupportedExpected"]) ||
-    !Array.isArray(value["expectedUnsupported"]) ||
-    !value["expectedUnsupported"].every(isUnsupportedShape) ||
-    !Array.isArray(value["nullRepresentationOmitted"]) ||
-    !value["nullRepresentationOmitted"].every(isNullRepresentationOmitted) ||
-    !Array.isArray(value["knownDivergences"]) ||
-    !value["knownDivergences"].every(isKnownDivergence)
-  ) {
-    throw new Error("Invalid conformance actions");
-  }
-  return value as unknown as ActionsFile;
-}
-
-/**
- * A shape this adapter must refuse, with the substring its error has to contain.
- *
- * The message is what turns "it threw" into "it threw for the declared reason": without it a
- * mapper typo or an unrelated validation satisfies the assertion just as well as the limitation
- * the corpus documents (cerbos/query-plan-adapters#326).
- */
-export interface ThrowingAction {
-  action: string;
-  /** Why the corpus says this adapter cannot express the shape. Titles read better with it. */
-  reason: string;
-  message: string;
-}
-
-export interface ActionClassification {
-  oracleActions: string[];
-  throwingActions: ThrowingAction[];
-  supportedExpected: Set<string>;
-}
-
-/** The pinned message, or a failure — a throwing action without one asserts nothing. */
-export function requireMessage(
-  label: string,
-  message: string | undefined,
-): string {
-  if (message === undefined || message === "") {
-    throw new Error(
-      `actions.json pins no throw message for ${label}: the throw suite would accept a failure for any reason`,
-    );
-  }
-  return message;
-}
-
-export function classifyActionsForAdapter(
-  manifest: ActionsFile,
-  adapter: string,
-): ActionClassification {
-  const unsupported = manifest.adapterUnsupported[adapter] ?? [];
-  const unsupportedActions = new Set(unsupported.map((entry) => entry.action));
-  const supportedExpected = new Set(
-    (manifest.adapterSupportedExpected[adapter] ?? []).map(
-      (entry) => entry.action,
-    ),
-  );
-  const oracleActions = [
-    ...manifest.conformance.filter((action) => !unsupportedActions.has(action)),
-    ...supportedExpected,
-  ];
-  const throwingActions: ThrowingAction[] = [
-    ...unsupported.map(
-      (entry): ThrowingAction => ({
-        action: entry.action,
-        reason: entry.reason,
-        message: requireMessage(
-          `adapterUnsupported.${adapter}.${entry.action}`,
-          entry.message,
-        ),
-      }),
-    ),
-    ...manifest.expectedUnsupported
-      .filter((entry) => !supportedExpected.has(entry.action))
-      .map(
-        (entry): ThrowingAction => ({
-          action: entry.action,
-          reason: entry.shape,
-          message: requireMessage(
-            `expectedUnsupported.${entry.action}.messages.${adapter}`,
-            entry.messages[adapter],
-          ),
-        }),
-      ),
-  ];
-
-  return {
-    oracleActions: [...new Set(oracleActions)].sort(),
-    throwingActions: throwingActions.sort((left, right) =>
-      left.action.localeCompare(right.action),
-    ),
-    supportedExpected,
-  };
-}
-
-/**
- * The `nullRepresentationOmitted` entries, each carrying the message THIS adapter must reject with.
- *
- * Separate from the classification above because these are not a throw the adapter chose: every
- * adapter must reject them, the two NULL conventions being indistinguishable on the wire (#302).
- */
-export function nullRepresentationOmittedFor(
-  manifest: ActionsFile,
-  adapter: string,
-): (NullRepresentationOmittedEntry & { message: string })[] {
-  return manifest.nullRepresentationOmitted.map((entry) => ({
-    ...entry,
-    message: requireMessage(
-      `nullRepresentationOmitted.${entry.action}.messages.${adapter}`,
-      entry.messages[adapter],
-    ),
-  }));
-}
-
 // -- seeds.json and derived-fields.json -----------------------------------------------------------
 //
 // Only the adversarial harness consumes these — the translator unit test asserts filters, not rows
@@ -322,7 +113,7 @@ export function nullRepresentationOmittedFor(
 //
 // The same parsed seed feeds the stored document AND the check() oracle, so a corpus field the
 // harness does not consume is dropped from both sides at once and the differential agrees for the
-// wrong reason — the projection trap conformance/README.md describes for actions.json, applied to
+// wrong reason — the projection trap conformance/README.md describes for adapterctl.json, applied to
 // the seeds.
 
 export interface Tag {
@@ -490,7 +281,11 @@ export function parseSeedsFile(value: unknown): SeedsFile {
   // `attr` is optional on the SDK's Principal type; the corpus always carries it, and the
   // assertion above is what proves it rather than this fallback.
   const attr = seedsFile.principal.attr ?? {};
-  assertKeys("seeds.json principal.attr", Object.keys(attr), PRINCIPAL_ATTR_KEYS);
+  assertKeys(
+    "seeds.json principal.attr",
+    Object.keys(attr),
+    PRINCIPAL_ATTR_KEYS,
+  );
   for (const [key, attrValue] of Object.entries(attr)) {
     assertPrincipalAttrShape(`seeds.json principal.attr.${key}`, attrValue);
   }
@@ -572,7 +367,9 @@ function operandFromWire(
   if (node.expression) {
     return new PlanExpression(
       node.expression.operator,
-      node.expression.operands.map((child) => operandFromWire(child, plannedAt)),
+      node.expression.operands.map((child) =>
+        operandFromWire(child, plannedAt),
+      ),
     );
   }
   if (node.variable !== undefined) {

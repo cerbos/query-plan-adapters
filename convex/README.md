@@ -108,12 +108,12 @@ under any nesting. See [#302](https://github.com/cerbos/query-plan-adapters/issu
 
 ## Conformance contract
 
-The adapter is differentially tested with 21 hostile seed documents against Cerbos PDP 0.54.0 `checkResource` decisions: each query plan is translated by the adapter and executed inside a Convex query function, and the returned document IDs must equal the PDP's per-document decisions. The Spring Data adapter defines the reference semantics for this compatibility snapshot. How much of that execution is Convex's filter engine and how much is the adapter's `postFilter` is set out below.
+The adapter is differentially tested with the canonical check resources against Cerbos PDP 0.54.0 `checkResource` decisions: each query plan is translated by the adapter and executed inside a Convex query function, and the returned document IDs must equal the PDP's per-document decisions. How much of that execution is Convex's filter engine and how much is the adapter's `postFilter` is set out below.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 184 of the 187 reference conformance actions, plus `matches()`, list indexing/`get-field`, `timestamp()`, and `int()`/`double()` cast plans that the Spring Data reference adapter rejects — the post-filter reimplements CEL cast semantics exactly (whole-string parse, truncation toward zero), so the SQL divergences do not apply (191 actions total) |
-| Fail-closed | `filter()`/`map()` used as a condition or as a conjunct (they return a list, not a boolean, in either position), a constant zero divisor whose sign the JSON hop into a Convex function discards, and a hierarchy path constructed by `list()`, an operator the adapter has no case for (6 actions). All six throw during translation, before any filter exists; unknown operators and invalid expression structures still throw |
+| Oracle-tested | Every catalog action with a `matched` direct outcome in `adapterctl.json`; catalog cardinality expectations guard empty, total, and proper-subset oracles |
+| Fail-closed | Every catalog action with a `rejected` direct outcome in `adapterctl.json`; its pinned message substring is asserted. These include non-boolean `filter()`/`map()` conditions, signed-zero divisors whose sign the JSON hop discards, and hierarchy paths constructed by an unknown `list()` operator |
 | Explicit opt-in | Any plan that cannot be represented entirely as a Convex database filter requires `allowPostFilter: true` |
 | Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`. Under the default it already returns the empty set the PDP demands *when the document omits the field for a NULL value*, which is what the conformance harness seeds. The alignment is the `postFilter`'s doing, not a Convex filter's: the field is `nullable: true`, so the predicate is evaluated in JavaScript and the absent path raises the same CEL missing-attribute error that made `check()` deny. A deployment that stores explicit nulls while omitting the attribute would over-grant |
 | Attribute NULL convention | Needs no declaration: Convex stores the value the caller sent, so a stored null already compares as a null *value* exactly as CEL does, and a stored null stays distinguishable from an absent field. Every `null-value-*` corpus probe for the explicit convention (cerbos/query-plan-adapters#308) was aligned before that option existed — including `null-value-f2f-mixed`, which Convex and Mongoose are the only two adapters to translate rather than refuse |
@@ -121,7 +121,7 @@ The adapter is differentially tested with 21 hostile seed documents against Cerb
 
 This support statement includes value-first comparisons, field-to-field expressions, null and missing-attribute behavior, nested lambdas, collection macros, string and arithmetic expressions, timestamps, hierarchy operations, and chained nested fields. Fields that may be absent must be marked `nullable: true` in the mapper so the adapter evaluates their predicates with CEL-compatible missing-value semantics instead of pushing them to a Convex filter.
 
-Every fail-closed shape's error message is pinned in the shared corpus (`conformance/actions.json`) and asserted by this adapter's conformance run, so a classification proves the throw names its declared mechanism rather than merely that something threw.
+Every fail-closed shape's error message is pinned in this adapter's direct-outcome manifest (`adapterctl.json`) and asserted by its conformance run, so an outcome proves the throw names its declared mechanism rather than merely that something threw.
 
 The filter each of these actions produces is pinned separately, in the translator unit test (`npm test`) — see [Testing](#testing). That is what makes a change to the emitted filter show up as a diff even when it selects the same documents from the corpus seeds, and it is the only place the parts of the contract no policy can reach are asserted at all: the `allowPostFilter` gate, function mappers, the identity fallback for an unmapped reference, the `nullAttributeRepresentation` boundary, and malformed input.
 
@@ -242,7 +242,7 @@ an action that silently crossed the boundary would pass the adversarial suite un
 altering what the database is asked to do.
 
 An action this adapter refuses carries **no entry**: its pinned message is corpus data, in
-`conformance/actions.json`, and duplicating it here would be two places to change one string. A
+`adapterctl.json`, and duplicating it here would be two places to change one string. A
 wire fixture that is neither in this file nor declared unsupported fails the suite, which is what
 makes a new corpus action land as a failure rather than as silence
 ([ADR 0006](../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md),

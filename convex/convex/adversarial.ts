@@ -93,7 +93,7 @@ export const deleteAll = mutation({
 export const executePlan = query({
   args: {
     queryPlan: v.any(),
-    // #302: the conformance harness runs the `nullRepresentationOmitted` actions through the
+    // #302: the conformance harness runs the `null-eq-missing` action through the
     // same entry point with the option flipped, so it has to cross the Convex boundary.
     nullAttributeRepresentation: v.optional(
       v.union(v.literal("explicit"), v.literal("omitted")),

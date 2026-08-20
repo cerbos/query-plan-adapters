@@ -195,33 +195,36 @@ undeclared side needs UNKNOWN — so the adapter throws rather than picking a di
 
 ### Conformance contract
 
-The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 21 hostile seed rows, both Prisma 6 and 7, and each of SQLite, PostgreSQL and MySQL. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
+The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using the canonical check resources, Prisma 5, 6, and 7, and each of SQLite, PostgreSQL and MySQL.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 136 reference actions |
-| Fail-closed | 51 reference actions plus the 10 reference-unsupported shapes (61 actions total) |
+| Oracle-tested | Every catalog action with a `matched` direct outcome in `adapterctl.json`; catalog cardinality expectations guard empty, total, and proper-subset oracles |
+| Fail-closed | Every catalog action with a `rejected` direct outcome in `adapterctl.json`; its pinned message substring is asserted |
 | Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute the caller sends as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare it per attribute — `nullAttributeRepresentation: "explicit"` on the mapper entry — or the historical rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 
-The fail-closed set consists of literal `LIKE` cases Prisma cannot escape safely, cross-model field references, arbitrary relation counts and string lengths, `exists_one`, unsolved column arithmetic, sub-millisecond `now()` thresholds, the reference probes for regex, ordered indexing, and `timestamp()` over a string field, `mod`, a positional read of a scalar list, and list equality over a `map()` projection. Supported timestamp plans require a mapper entry with `valueType: "dateTime"` and a strict, millisecond-exact RFC 3339 literal in CEL's supported instant range. These shapes throw instead of producing a broader authorization filter. Every fail-closed shape's error message is pinned in the shared corpus (`conformance/actions.json`) and asserted by this adapter's conformance run, so a classification proves the throw names its declared mechanism rather than merely that something threw.
+The fail-closed set consists of literal `LIKE` cases Prisma cannot escape safely, cross-model field references, arbitrary relation counts and string lengths, `exists_one`, unsolved column arithmetic, sub-millisecond `now()` thresholds, the reference probes for regex, ordered indexing, and `timestamp()` over a string field, `mod`, a positional read of a scalar list, and list equality over a `map()` projection. Supported timestamp plans require a mapper entry with `valueType: "dateTime"` and a strict, millisecond-exact RFC 3339 literal in CEL's supported instant range. These shapes throw instead of producing a broader authorization filter. Every fail-closed shape's error message is pinned in this adapter's direct-outcome manifest (`adapterctl.json`) and asserted by its conformance run, so an outcome proves the throw names its declared mechanism rather than merely that something threw.
 
 The `where` input each of these actions produces is pinned separately, in the translator unit test (`npm test`) — every corpus action, classified there exactly once as an emitted filter, an unconditional plan kind, or a throw. That is what makes a change to the emitted SQL show up as a diff even when it selects the same rows from the corpus seeds.
 
 #### Providers the contract is proved on
 
-The classification above holds where the corpus is **executed**, not where the emitted filter merely looks plausible. Until [#320](https://github.com/cerbos/query-plan-adapters/issues/320) it was executed on SQLite only, and until [#340](https://github.com/cerbos/query-plan-adapters/issues/340) MySQL was unexecuted too. The Prisma 6/7 matrix is an *engine* matrix, not a provider one — it says nothing about how a provider coerces a value, reads a `LIKE` pattern, or collates a string.
+The classification above holds where the corpus is **executed**, not where the emitted filter merely looks plausible. Until [#320](https://github.com/cerbos/query-plan-adapters/issues/320) it was executed on SQLite only, and until [#340](https://github.com/cerbos/query-plan-adapters/issues/340) MySQL was unexecuted too. The Prisma 5/6/7 matrix is an *engine* matrix, not a provider one — it says nothing about how a provider coerces a value, reads a `LIKE` pattern, or collates a string.
 
-The store and the Prisma major are independent dimensions, so there are six runs and CI does all six:
+The store and the Prisma major are independent dimensions, so there are 9 runs and CI does all 9:
 
 ```bash
-npm run test:adversarial:v7            # SQLite,     Prisma 7
+npm run test:adversarial:v5            # SQLite,     Prisma 5
 npm run test:adversarial:v6            # SQLite,     Prisma 6
-npm run test:adversarial:postgres:v7   # PostgreSQL, Prisma 7  (testcontainers)
+npm run test:adversarial:v7            # SQLite,     Prisma 7
+npm run test:adversarial:postgres:v5   # PostgreSQL, Prisma 5  (testcontainers)
 npm run test:adversarial:postgres:v6   # PostgreSQL, Prisma 6  (testcontainers)
-npm run test:adversarial:mysql:v7      # MySQL,      Prisma 7  (testcontainers)
+npm run test:adversarial:postgres:v7   # PostgreSQL, Prisma 7  (testcontainers)
+npm run test:adversarial:mysql:v5      # MySQL,      Prisma 5  (testcontainers)
 npm run test:adversarial:mysql:v6      # MySQL,      Prisma 6  (testcontainers)
+npm run test:adversarial:mysql:v7      # MySQL,      Prisma 7  (testcontainers)
 ```
 
 The MySQL legs run under `utf8mb4_0900_as_cs`, applied to the tables after `prisma db push` for the reason the [collation section](#database-collation-is-an-authorization-invariant) gives. `ADAPTER_TEST_MYSQL_COLLATION` replays them under any other collation, which is how the 42-action figure quoted there was measured. Every corpus action that translates on SQLite and PostgreSQL translates and agrees on MySQL too, so the classification is unchanged by this leg: it added no fail-closed shape and moved none.
@@ -629,11 +632,11 @@ const result = await primsa.resource.findMany({
 npm test
 ```
 
-This is the **translator unit test**: for every action in the shared conformance corpus, the `where` input this adapter emits. It reads its plans from `conformance/wire-fixtures/` — the golden `PlanResources` responses captured against the pinned Cerbos version — so it needs no Cerbos sidecar, no database, and no generated Prisma client, and it is engine-agnostic (there is no v6/v7 split). It also pins the shapes the adapter refuses, with the message `conformance/actions.json` records, and the parts of the mapper contract no policy can reach: the `nullAttributeRepresentation` boundary, `subqueryFilter`, and malformed input.
+This is the **translator unit test**: for every action in the shared conformance corpus, the `where` input this adapter emits. It reads its plans from `conformance/wire-fixtures/` — the golden `PlanResources` responses captured against the pinned Cerbos version — so it needs no Cerbos sidecar, no database, and no generated Prisma client, and it is engine-agnostic (there is no v5/v6/v7 split). It also pins the shapes the adapter refuses, with the message `adapterctl.json` records, and the parts of the mapper contract no policy can reach: the `nullAttributeRepresentation` boundary, `subqueryFilter`, and malformed input.
 
 Every wire fixture must be classified there exactly once, so adding a corpus action fails this suite until someone records the filter it produces. See [ADR 0006](../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md).
 
-Whether those filters return the rows the PDP allows is a separate question, answered by the adversarial suite — see [Conformance contract](#conformance-contract) above, which lists the six runs and what each one covers. That suite does need a Cerbos sidecar, Docker for the PostgreSQL and MySQL legs, and it resets `prisma/dev-adversarial.db` with `prisma db push --force-reset`, so run it only against disposable development databases.
+Whether those filters return the rows the PDP allows is a separate question, answered by the adversarial suite — see [Conformance contract](#conformance-contract) above, which lists the 9 runs and what each one covers. That suite does need a Cerbos sidecar, Docker for the PostgreSQL and MySQL legs, and it resets `prisma/dev-adversarial.db` with `prisma db push --force-reset`, so run it only against disposable development databases.
 
 ## Types
 

@@ -1,0 +1,864 @@
+{
+  "schemaVersion": 1,
+  "adapter": "elasticsearch-java",
+  "package": {
+    "ecosystem": "maven",
+    "name": "dev.cerbos:cerbos-elasticsearch"
+  },
+  "workflow": ".github/workflows/elasticsearch-java.yaml",
+  "commands": {
+    "test": [
+      "gradle",
+      "build",
+      "--no-daemon"
+    ],
+    "typecheck": null,
+    "golden": [
+      "gradle",
+      "goldenUpdate",
+      "--no-daemon"
+    ],
+    "consumer": [
+      "../demo/scripts/run-example.sh",
+      "elasticsearch-java"
+    ]
+  },
+  "semanticEnvironments": [
+    {
+      "name": "elasticsearch-8.15.3",
+      "command": [
+        "gradle",
+        "build",
+        "--no-daemon"
+      ],
+      "env": {}
+    }
+  ],
+  "consumer": {
+    "coverage": "artifact-install"
+  },
+  "outcomes": {
+    "all-on-empty": {
+      "status": "rejected",
+      "reason": "Elasticsearch does not index empty nested arrays, so a positive all predicate cannot distinguish an empty collection (true) from a missing collection (CEL error)",
+      "message": "all cannot distinguish a missing collection from an empty collection in Elasticsearch"
+    },
+    "arith-add": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot evaluate document-field arithmetic without scripts",
+      "message": "Unexpected add expression in leaf operand"
+    },
+    "arith-add-eq-frac": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot evaluate IEEE-754 document-field addition without scripts",
+      "message": "Unexpected add expression in leaf operand"
+    },
+    "arith-add-eq-frac-exact": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot evaluate IEEE-754 document-field addition without scripts",
+      "message": "Unexpected add expression in leaf operand"
+    },
+    "arith-add-ne-frac": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot evaluate IEEE-754 document-field addition without scripts",
+      "message": "Unexpected add expression in leaf operand"
+    },
+    "arith-both": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot evaluate document-field arithmetic without scripts",
+      "message": "Unexpected add expression in leaf operand"
+    },
+    "arith-div": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot evaluate document-field arithmetic without scripts",
+      "message": "Unexpected div expression in leaf operand"
+    },
+    "arith-div-frac": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot evaluate document-field arithmetic without scripts",
+      "message": "Unexpected div expression in leaf operand"
+    },
+    "arith-mod": {
+      "status": "rejected",
+      "reason": "The Query DSL has no arithmetic without painless scripts, so a computed leaf operand is refused outright — mod is not in the leaf resolver at all",
+      "message": "Unexpected mod expression in leaf operand"
+    },
+    "arith-mult-neg": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot evaluate document-field arithmetic without scripts",
+      "message": "Unexpected mult expression in leaf operand"
+    },
+    "arith-sub": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot evaluate document-field arithmetic without scripts",
+      "message": "Unexpected sub expression in leaf operand"
+    },
+    "arith-vf": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot evaluate document-field arithmetic without scripts",
+      "message": "Unexpected add expression in leaf operand"
+    },
+    "cast-double-string": {
+      "status": "rejected",
+      "reason": "double() cast over a string column — same whole-string-versus-leading-digits divergence as cast-int-string",
+      "message": "Unexpected double expression in leaf operand"
+    },
+    "cast-int-double": {
+      "status": "rejected",
+      "reason": "int() cast over a numeric column — CEL truncates toward zero, PostgreSQL and MySQL CAST round to nearest",
+      "message": "Unexpected int expression in leaf operand"
+    },
+    "cast-int-string": {
+      "status": "rejected",
+      "reason": "int() cast over a string column — CEL reads a whole string or raises, SQL reads the leading digits",
+      "message": "Unexpected int expression in leaf operand"
+    },
+    "cast-string-bool": {
+      "status": "rejected",
+      "reason": "Same missing computed operand as cast-string-double",
+      "message": "Unexpected string expression in leaf operand"
+    },
+    "cast-string-double": {
+      "status": "rejected",
+      "reason": "The Query DSL has no computed operand: a term or range query compares a FIELD against a literal, and there is no place to apply a cast to the field first. Painless runtime scripts could express it, which is the enhancement #226 tracks",
+      "message": "Unexpected string expression in leaf operand"
+    },
+    "concat-f2f": {
+      "status": "rejected",
+      "reason": "Same missing computed operand as id-concat, with both `+` operands document fields rather than one being the primary key. Painless runtime scripts could express it, which is the enhancement #226 tracks",
+      "message": "Unexpected add expression in leaf operand"
+    },
+    "cr-contains": {
+      "status": "rejected",
+      "reason": "This value-first string predicate uses a document field as the search needle against a constant haystack, which Elasticsearch Query DSL cannot express without scripts",
+      "message": "contains with a document field as the receiver argument cannot be expressed without scripts"
+    },
+    "cr-div-neg-zero": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot evaluate document-field division without scripts, whatever the denominator",
+      "message": "Unexpected div expression in leaf operand"
+    },
+    "cr-div-other-column": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot evaluate division by a second document field without scripts",
+      "message": "Unexpected div expression in leaf operand"
+    },
+    "cr-div-then-add": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot evaluate document-field arithmetic composed on a division without scripts",
+      "message": "Unexpected add expression in leaf operand"
+    },
+    "cr-div-then-add-ne": {
+      "status": "rejected",
+      "reason": "Same scriptless-arithmetic limitation as cr-div-then-add, reached through an inequality",
+      "message": "Unexpected add expression in leaf operand"
+    },
+    "cr-div-zero": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot evaluate division by a document field without scripts",
+      "message": "Unexpected div expression in leaf operand"
+    },
+    "cr-div-zero-eq-neg": {
+      "status": "rejected",
+      "reason": "Same scriptless-division limitation as cr-div-zero under a negated equality",
+      "message": "Unexpected div expression in leaf operand"
+    },
+    "cr-div-zero-ne": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot evaluate division by a document field without scripts, whatever the enclosing comparison",
+      "message": "Unexpected div expression in leaf operand"
+    },
+    "cr-endswith": {
+      "status": "rejected",
+      "reason": "This value-first string predicate uses a document field as the search needle against a constant haystack, which Elasticsearch Query DSL cannot express without scripts",
+      "message": "endsWith with a document field as the receiver argument cannot be expressed without scripts"
+    },
+    "cr-size-frac-ge": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot compare collection counts against arbitrary thresholds without scripts",
+      "message": "Unsupported size comparison: size(request.resource.attr.tags) ge 1.5. Only emptiness checks (size > 0, size == 0) are supported."
+    },
+    "cr-startswith": {
+      "status": "rejected",
+      "reason": "This value-first string predicate uses a document field as the search needle against a constant haystack, which Elasticsearch Query DSL cannot express without scripts",
+      "message": "startsWith with a document field as the receiver argument cannot be expressed without scripts"
+    },
+    "cr-startswith-concat": {
+      "status": "rejected",
+      "reason": "After constant folding, this value-first predicate still uses a document field as the search needle against a constant haystack, which requires scripts",
+      "message": "startsWith with a document field as the receiver argument cannot be expressed without scripts"
+    },
+    "cs-contains": {
+      "status": "matched"
+    },
+    "cs-endswith": {
+      "status": "matched"
+    },
+    "cs-eq": {
+      "status": "matched"
+    },
+    "cs-startswith": {
+      "status": "matched"
+    },
+    "double-negation": {
+      "status": "matched"
+    },
+    "double-threshold": {
+      "status": "matched"
+    },
+    "empty-string-eq": {
+      "status": "matched"
+    },
+    "exists-on-empty": {
+      "status": "matched"
+    },
+    "exists-one-multi": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot count nested matches to express exists_one without scripts",
+      "message": "exists_one cannot be expressed by Elasticsearch nested queries without scripts"
+    },
+    "f2f-contains": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot use one document field as another field's string-search needle without scripts",
+      "message": "Elasticsearch Query DSL cannot compare two document fields without scripts"
+    },
+    "f2f-endswith": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot use one document field as another field's string-search needle without scripts",
+      "message": "Elasticsearch Query DSL cannot compare two document fields without scripts"
+    },
+    "f2f-startswith": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot use one document field as another field's string-search needle without scripts",
+      "message": "Elasticsearch Query DSL cannot compare two document fields without scripts"
+    },
+    "field-to-field": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot compare two document fields without scripts",
+      "message": "Elasticsearch Query DSL cannot compare two document fields without scripts"
+    },
+    "filter-as-condition": {
+      "status": "rejected",
+      "reason": "filter() used as the whole condition — it returns a list, not a boolean",
+      "message": "Unexpected lambda expression in leaf operand"
+    },
+    "filter-as-conjunct": {
+      "status": "rejected",
+      "reason": "filter() as a CONJUNCT rather than the whole condition — the same non-boolean, one level down",
+      "message": "Unexpected lambda expression in leaf operand"
+    },
+    "gt-bare": {
+      "status": "matched"
+    },
+    "hier-ancestor-cf": {
+      "status": "matched"
+    },
+    "hier-ancestor-ff": {
+      "status": "matched"
+    },
+    "hier-bracket": {
+      "status": "matched"
+    },
+    "hier-descendent-cf": {
+      "status": "matched"
+    },
+    "hier-descendent-ff": {
+      "status": "matched"
+    },
+    "hier-list-id": {
+      "status": "rejected",
+      "reason": "The one hierarchy shape the term-level lowering cannot reach. Every other hier-* action compares a field's whole stored path against an adapter-controlled constant, which prefix/terms/term express; here the descendant path is CONSTRUCTED by list() from a constant segment and the primary key, so matching it would mean concatenating a stored field value into a path first. The Query DSL has no computed operand to do that with — the same missing evaluation step that refuses arithmetic and casts here",
+      "message": "A hierarchy path constructed by list() from a document field cannot be compared"
+    },
+    "hier-meta-in": {
+      "status": "matched"
+    },
+    "hier-meta-like": {
+      "status": "matched"
+    },
+    "hier-overlaps-cf": {
+      "status": "matched"
+    },
+    "hier-overlaps-ff": {
+      "status": "matched"
+    },
+    "hier-overlaps-meta": {
+      "status": "matched"
+    },
+    "id-concat": {
+      "status": "rejected",
+      "reason": "The value side is a concatenation of a constant with the primary key — a computed operand the Query DSL has no form for. The comparison is refused before the second field it names is reached",
+      "message": "Unexpected add expression in leaf operand"
+    },
+    "id-concat-vf": {
+      "status": "rejected",
+      "reason": "Same missing computed operand as id-concat, in value-first form",
+      "message": "Unexpected add expression in leaf operand"
+    },
+    "id-eq-const": {
+      "status": "matched"
+    },
+    "id-f2f": {
+      "status": "rejected",
+      "reason": "Comparing the primary key against another document field is field-to-field, which the Query DSL cannot express without a script",
+      "message": "Elasticsearch Query DSL cannot compare two document fields without scripts"
+    },
+    "id-f2f-ne": {
+      "status": "rejected",
+      "reason": "Same field-to-field limitation as id-f2f, under negation",
+      "message": "Elasticsearch Query DSL cannot compare two document fields without scripts"
+    },
+    "in-empty": {
+      "status": "matched"
+    },
+    "in-null-elem-hasint": {
+      "status": "rejected",
+      "reason": "Elasticsearch nested fields do not retain explicit null array elements, so intersection with null cannot be represented faithfully",
+      "message": "hasIntersection with null requires an explicit null-value mapping"
+    },
+    "in-null-elem-mixed": {
+      "status": "rejected",
+      "reason": "Elasticsearch does not index explicit null scalar values, so positive membership containing null cannot distinguish an explicit null attribute (true) from a missing attribute (CEL error)",
+      "message": "Elasticsearch cannot distinguish an explicit null value from a missing field without an indexed null-value sentinel"
+    },
+    "in-null-elem-neg": {
+      "status": "matched"
+    },
+    "in-null-elem-only": {
+      "status": "rejected",
+      "reason": "The planner folds this to positive equality with null, which Elasticsearch cannot distinguish from a missing attribute without an indexed null-value sentinel",
+      "message": "Elasticsearch cannot distinguish an explicit null value from a missing field without an indexed null-value sentinel"
+    },
+    "in-null-elem-only-neg": {
+      "status": "matched"
+    },
+    "in-null-elem-rel": {
+      "status": "rejected",
+      "reason": "Elasticsearch nested fields do not retain explicit null array elements, so null membership cannot be represented faithfully",
+      "message": "null membership in a document array requires an explicit null-value mapping"
+    },
+    "in-null-elem-rel-neg": {
+      "status": "rejected",
+      "reason": "Elasticsearch nested fields do not retain explicit null array elements, so negated null membership cannot be represented faithfully",
+      "message": "Negated membership in a document collection cannot distinguish a missing collection from an empty collection in Elasticsearch"
+    },
+    "in-single": {
+      "status": "matched"
+    },
+    "in-var-var": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot test membership of one document field in another without scripts",
+      "message": "Elasticsearch Query DSL cannot compare two document fields without scripts"
+    },
+    "in-var-var-neg": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot test negated membership of one document field in another without scripts",
+      "message": "Elasticsearch Query DSL cannot compare two document fields without scripts"
+    },
+    "index-scalar-list": {
+      "status": "rejected",
+      "reason": "A positional read of an array field has no Query DSL form: a terms query matches ANY element, which is a different predicate, and the adapter refuses the computed operand rather than substituting it",
+      "message": "Unexpected index expression in leaf operand"
+    },
+    "lambda-field-to-field": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot compare a nested field with an outer resource field without scripts",
+      "message": "Elasticsearch Query DSL cannot compare two document fields without scripts"
+    },
+    "lambda-in-principal": {
+      "status": "matched"
+    },
+    "le-bare": {
+      "status": "matched"
+    },
+    "like-backslash": {
+      "status": "matched"
+    },
+    "like-bracket": {
+      "status": "matched"
+    },
+    "like-percent": {
+      "status": "matched"
+    },
+    "like-underscore": {
+      "status": "matched"
+    },
+    "macro-depth3-all": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot preserve three levels of nested collection scope and CEL all semantics",
+      "message": "Unexpected lambda expression in leaf operand"
+    },
+    "macro-depth3-exists": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot preserve three levels of nested collection scope with the configured mappings",
+      "message": "Unexpected lambda expression in leaf operand"
+    },
+    "macro-depth3-not-exists": {
+      "status": "rejected",
+      "reason": "The negated exists is rejected before the nesting depth matters, for the same reason as not-exists: a bool must_not over a nested collection matches a document with no nested array at all, and Elasticsearch cannot tell that from one whose array holds no match. Three levels of nested scope are inexpressible underneath it either way",
+      "message": "Negated exists cannot distinguish a missing collection from an empty collection in Elasticsearch"
+    },
+    "map-as-condition": {
+      "status": "rejected",
+      "reason": "map() used as the whole condition — it returns a list, not a boolean",
+      "message": "Unexpected lambda expression in leaf operand"
+    },
+    "map-eq-list": {
+      "status": "rejected",
+      "reason": "A map() projection is a computed leaf operand with no Query DSL equivalent, and list equality over a nested projection needs a script",
+      "message": "Unexpected map expression in leaf operand"
+    },
+    "n-all-mixed-null": {
+      "status": "rejected",
+      "reason": "Positive all is unsafe because Elasticsearch cannot distinguish an empty nested collection from a missing collection, in addition to the nullable-element CEL error semantics this action exercises",
+      "message": "all cannot distinguish a missing collection from an empty collection in Elasticsearch"
+    },
+    "n-not-all-absorb": {
+      "status": "matched"
+    },
+    "n-not-all-null": {
+      "status": "matched"
+    },
+    "n-not-exists-one-null": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot count nested matches or preserve exists_one null/error semantics without scripts",
+      "message": "exists_one cannot be expressed by Elasticsearch nested queries without scripts"
+    },
+    "nan-ord-inf": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot evaluate the non-finite arithmetic operand required by this CEL predicate without scripts",
+      "message": "Unexpected if expression in leaf operand"
+    },
+    "nan-ord-le": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot evaluate the non-finite arithmetic operand required by this CEL predicate without scripts",
+      "message": "Unexpected if expression in leaf operand"
+    },
+    "nan-ord-ternary": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot reproduce CEL NaN ordering through conditional values without scripts",
+      "message": "Unexpected if expression in leaf operand"
+    },
+    "nan-ord-ternary-vf": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot reproduce CEL NaN ordering through conditional values without scripts",
+      "message": "Unexpected if expression in leaf operand"
+    },
+    "nary-and": {
+      "status": "matched"
+    },
+    "neg-number": {
+      "status": "matched"
+    },
+    "not-and": {
+      "status": "matched"
+    },
+    "not-contains": {
+      "status": "rejected",
+      "reason": "The needle is a second document field. The Query DSL compares a field against a value, never against another field, so a column-valued LIKE needs a script — the same refusal as the positive f2f-contains, reached before the negation",
+      "message": "Elasticsearch Query DSL cannot compare two document fields without scripts"
+    },
+    "not-empty": {
+      "status": "matched"
+    },
+    "not-exists": {
+      "status": "rejected",
+      "reason": "Elasticsearch does not index empty nested arrays, so negated exists cannot distinguish an empty collection (true) from a missing collection (CEL error)",
+      "message": "Negated exists cannot distinguish a missing collection from an empty collection in Elasticsearch"
+    },
+    "not-gt": {
+      "status": "matched"
+    },
+    "not-lt": {
+      "status": "matched"
+    },
+    "not-startswith": {
+      "status": "rejected",
+      "reason": "Same two-document-field comparison as not-contains, reached through startsWith",
+      "message": "Elasticsearch Query DSL cannot compare two document fields without scripts"
+    },
+    "null-eq": {
+      "status": "rejected",
+      "reason": "Elasticsearch does not index explicit null scalar values, so positive equality against null cannot distinguish an explicit null attribute (check() allows) from a missing field (CEL error, denies) without an indexed null_value sentinel. The negated forms (null-ne, vf-null-ne, null-not-eq) are expressible as exists and stay in the oracle set",
+      "message": "Elasticsearch cannot distinguish an explicit null value from a missing field without an indexed null-value sentinel"
+    },
+    "null-eq-missing": {
+      "status": "rejected",
+      "reason": "`aOptionalString` follows the corpus default: a NULL column sends NO attribute, so `R.attr.aOptionalString == null` is a CEL missing-attribute error and check() denies all 21 seeds. The planner emits the same `eq(var, null)` node as `null-eq` (explicit null, 5 rows allowed), so the wire cannot tell the two conventions apart. Every adapter must be told which one the caller uses. Harnesses translate this action with the adapter's null representation set to `omitted` and assert a throw; under the default `explicit` the adapter would emit IS NULL and return the 5 rows the PDP denies (#302).",
+      "message": "explicit null value from a missing field"
+    },
+    "null-ne": {
+      "status": "matched"
+    },
+    "null-not-eq": {
+      "status": "matched"
+    },
+    "null-value-f2f": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL compares a field against a literal only, so the field-to-field operand is rejected before either side's null convention is reached — the same limitation as field-to-field",
+      "message": "Elasticsearch Query DSL cannot compare two document fields without scripts"
+    },
+    "null-value-f2f-mixed": {
+      "status": "rejected",
+      "reason": "The declared side needs a definite answer for its NULL — CEL holds a null VALUE there. The undeclared side needs UNKNOWN for its NULL — that is a missing attribute, which CEL denies under BOTH polarities. A definite predicate returns rows the PDP refuses (e1, both columns NULL); a plain one drops rows the PDP allows (a2/a4/a8/c2). No single predicate is both, so every adapter refuses the shape rather than picking a direction. Declaring the convention on both attributes, or on neither, is expressible; mixing them across one comparison is not (cerbos/query-plan-adapters#308)",
+      "message": "Elasticsearch Query DSL cannot compare two document fields without scripts"
+    },
+    "null-value-ne-const": {
+      "status": "rejected",
+      "reason": "Elasticsearch does not index a JSON null, so an explicitly-null value and a missing field are the same document to every query the DSL can express. Under the explicit convention CEL holds a null VALUE and allows the row, while every Elasticsearch spelling of `!= \"x\"` either requires the field to exist (dropping it) or matches every document missing the field. Neither is the decision, so the comparison is refused rather than answered narrowly",
+      "message": "Elasticsearch cannot distinguish an explicit null value from a missing field without an indexed null-value sentinel"
+    },
+    "null-value-not-eq-const": {
+      "status": "rejected",
+      "reason": "The negated-equality spelling reaches the same unrepresentable convention as null-value-ne-const",
+      "message": "Elasticsearch cannot distinguish an explicit null value from a missing field without an indexed null-value sentinel"
+    },
+    "null-value-not-in-const": {
+      "status": "rejected",
+      "reason": "The negated membership reaches the same unrepresentable convention as null-value-ne-const",
+      "message": "Elasticsearch cannot distinguish an explicit null value from a missing field without an indexed null-value sentinel"
+    },
+    "null-value-pv-not-exists": {
+      "status": "rejected",
+      "reason": "The value-list fold turns the macro into a chain of equalities against the explicit-null attribute, each of which reaches the same unrepresentable convention as null-value-ne-const",
+      "message": "Elasticsearch cannot distinguish an explicit null value from a missing field without an indexed null-value sentinel"
+    },
+    "optional-ne": {
+      "status": "matched"
+    },
+    "or-eq-exists": {
+      "status": "matched"
+    },
+    "or-eq-in": {
+      "status": "matched"
+    },
+    "outer-attr-depth2": {
+      "status": "rejected",
+      "reason": "Elasticsearch nested queries cannot preserve a resource-field correlation across two nested scopes without scripts",
+      "message": "Unexpected lambda expression in leaf operand"
+    },
+    "p-arith-in-lambda": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot evaluate arithmetic inside a nested predicate without scripts",
+      "message": "Unexpected add expression in leaf operand"
+    },
+    "p-deep-nest": {
+      "status": "rejected",
+      "reason": "This predicate combines field arithmetic and nested-to-outer field comparison, neither expressible by Elasticsearch Query DSL without scripts",
+      "message": "Unexpected add expression in leaf operand"
+    },
+    "p-double-frac": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot evaluate document-field arithmetic with fractional values without scripts",
+      "message": "Unexpected mult expression in leaf operand"
+    },
+    "p-has": {
+      "status": "upstream-blocked",
+      "reason": "The planner folds has(unknown attr) to KIND_ALWAYS_ALLOWED (a Cerbos planner bug, not an adapter bug), so the adapter returns all rows while check() denies rows where the attribute is missing. Excluded from the oracle run rather than asserted against."
+    },
+    "p-hasintersection-map": {
+      "status": "matched"
+    },
+    "p-in-null-multi": {
+      "status": "matched"
+    },
+    "p-in-null-single": {
+      "status": "matched"
+    },
+    "p-index": {
+      "status": "rejected",
+      "reason": "list indexing (tags[0].name)",
+      "message": "Unexpected get-field expression in leaf operand"
+    },
+    "p-lambda-f2f-like": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot use an outer document field as a nested string-search needle without scripts",
+      "message": "Elasticsearch Query DSL cannot compare two document fields without scripts"
+    },
+    "p-lambda-inner-f2f": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot compare fields within a nested element without scripts",
+      "message": "Elasticsearch Query DSL cannot compare two document fields without scripts"
+    },
+    "p-matches": {
+      "status": "matched"
+    },
+    "p-not-exists-empty": {
+      "status": "rejected",
+      "reason": "Elasticsearch does not index empty nested arrays, so negated exists cannot distinguish an empty collection (true) from a missing collection (CEL error)",
+      "message": "Negated exists cannot distinguish a missing collection from an empty collection in Elasticsearch"
+    },
+    "p-not-ternary-null": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot preserve CEL null/error semantics through a negated conditional value without scripts",
+      "message": "Unexpected if expression in leaf operand"
+    },
+    "p-size-nested": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot express arbitrary nested collection-count thresholds without scripts",
+      "message": "Unexpected size expression in leaf operand"
+    },
+    "p-startswith-concat": {
+      "status": "matched"
+    },
+    "p-struct": {
+      "status": "matched"
+    },
+    "p-ternary-in-exists": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot evaluate a conditional value inside a nested predicate without scripts",
+      "message": "Unexpected if expression in leaf operand"
+    },
+    "p-ternary-of-ternaries": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to nested CEL ternaries without scripts",
+      "message": "Unexpected if expression in leaf operand"
+    },
+    "p-ternary-under-all": {
+      "status": "rejected",
+      "reason": "The positive all() is rejected before its body is examined, for the same reason as all-on-empty: Elasticsearch does not index an empty nested array, so all cannot distinguish an empty collection (true) from a missing one (CEL error). The conditional inside it would need scripts too, but the outer macro fails closed first",
+      "message": "all cannot distinguish a missing collection from an empty collection in Elasticsearch"
+    },
+    "p-ternary-vs-ternary": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to nested CEL ternaries without scripts",
+      "message": "Unexpected if expression in leaf operand"
+    },
+    "p-timestamp": {
+      "status": "matched"
+    },
+    "pv-all": {
+      "status": "matched"
+    },
+    "pv-all-unrolled": {
+      "status": "matched"
+    },
+    "pv-exists": {
+      "status": "matched"
+    },
+    "pv-exists-unrolled": {
+      "status": "matched"
+    },
+    "rel-bool-hop": {
+      "status": "matched"
+    },
+    "rel-bool-hop2": {
+      "status": "matched"
+    },
+    "rel-contains-hop": {
+      "status": "matched"
+    },
+    "rel-eq-hop": {
+      "status": "matched"
+    },
+    "rel-eq-num-hop": {
+      "status": "matched"
+    },
+    "rel-ge-hop": {
+      "status": "matched"
+    },
+    "rel-gt-hop": {
+      "status": "matched"
+    },
+    "rel-hop-and-root": {
+      "status": "matched"
+    },
+    "rel-hop2-or-exists": {
+      "status": "matched"
+    },
+    "rel-le-hop": {
+      "status": "matched"
+    },
+    "rel-lt-hop": {
+      "status": "matched"
+    },
+    "rel-ne-null-hop": {
+      "status": "matched"
+    },
+    "rel-not-bool-hop": {
+      "status": "matched"
+    },
+    "rel-range-hop": {
+      "status": "matched"
+    },
+    "rel-startswith-hop2": {
+      "status": "matched"
+    },
+    "root-bare-bool": {
+      "status": "matched"
+    },
+    "root-or": {
+      "status": "matched"
+    },
+    "size-filter-count": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot count only nested elements matching a predicate without scripts",
+      "message": "Unsupported size() expression"
+    },
+    "size-huge-gt": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot compare a string's length without scripts",
+      "message": "Unsupported size comparison: size(request.resource.attr.aString) gt 4.294967296E9. Only emptiness checks (size > 0, size == 0) are supported."
+    },
+    "size-huge-lt": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot compare a string's length without scripts",
+      "message": "Unsupported size comparison: size(request.resource.attr.aString) lt 4.294967296E9. Only emptiness checks (size > 0, size == 0) are supported."
+    },
+    "size-threshold": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot express arbitrary collection-count thresholds without scripts",
+      "message": "Unsupported size comparison: size(request.resource.attr.tags) gt 1.0. Only emptiness checks (size > 0, size == 0) are supported."
+    },
+    "string-size": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot compare a string's length without scripts",
+      "message": "Unsupported size comparison: size(request.resource.attr.aString) gt 4.0. Only emptiness checks (size > 0, size == 0) are supported."
+    },
+    "ternary-bare": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to CEL ternary without scripts",
+      "message": "if requires exactly 2 operands, got 3"
+    },
+    "ternary-cmp": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to CEL ternary without scripts",
+      "message": "Unexpected if expression in leaf operand"
+    },
+    "ternary-expr-cond": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to CEL ternary without scripts",
+      "message": "Unexpected if expression in leaf operand"
+    },
+    "ternary-negated": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to CEL ternary without scripts",
+      "message": "Unexpected if expression in leaf operand"
+    },
+    "ternary-nested": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to CEL ternary without scripts",
+      "message": "Unexpected if expression in leaf operand"
+    },
+    "ternary-null-cond": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to CEL ternary without scripts",
+      "message": "Unexpected if expression in leaf operand"
+    },
+    "ternary-value-first": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to CEL ternary without scripts",
+      "message": "Unexpected if expression in leaf operand"
+    },
+    "triple-negation": {
+      "status": "matched"
+    },
+    "ts-eq": {
+      "status": "matched"
+    },
+    "ts-eq-offset": {
+      "status": "matched"
+    },
+    "ts-ne": {
+      "status": "matched"
+    },
+    "ts-vf": {
+      "status": "rejected",
+      "reason": "The value-first runtime timestamp threshold carries sub-millisecond precision, which ordinary Elasticsearch date fields cannot preserve",
+      "message": "Sub-millisecond timestamp literals require an explicit date_nanos mapping mode, which this adapter does not configure"
+    },
+    "ts-window": {
+      "status": "rejected",
+      "reason": "The runtime timestamp threshold carries sub-millisecond precision, which ordinary Elasticsearch date fields cannot preserve",
+      "message": "Sub-millisecond timestamp literals require an explicit date_nanos mapping mode, which this adapter does not configure"
+    },
+    "unicode-eq": {
+      "status": "matched"
+    },
+    "vf-ge": {
+      "status": "matched"
+    },
+    "vf-hasint": {
+      "status": "matched"
+    },
+    "vf-le": {
+      "status": "matched"
+    },
+    "vf-lt": {
+      "status": "matched"
+    },
+    "vf-ne": {
+      "status": "matched"
+    },
+    "vf-null-ne": {
+      "status": "matched"
+    },
+    "vf-size": {
+      "status": "matched"
+    },
+    "w1-all-chain": {
+      "status": "rejected",
+      "reason": "Elasticsearch does not index empty nested arrays, so a positive all over a chained collection cannot distinguish an absent to-one parent (CEL error, denies) from an empty collection (vacuously true)",
+      "message": "all cannot distinguish a missing collection from an empty collection in Elasticsearch"
+    },
+    "w1-exists-chain": {
+      "status": "matched"
+    },
+    "w1-in-chain": {
+      "status": "matched"
+    },
+    "w1-not-exists-chain": {
+      "status": "rejected",
+      "reason": "Elasticsearch does not index empty nested arrays, so a negated exists over a chained collection cannot distinguish an absent to-one parent from an empty collection",
+      "message": "Negated exists cannot distinguish a missing collection from an empty collection in Elasticsearch"
+    },
+    "w1-not-hasint-chain": {
+      "status": "rejected",
+      "reason": "Same missing-versus-empty ambiguity as w1-not-in-chain, reached through hasIntersection over the same operand",
+      "message": "Negated hasIntersection cannot distinguish a missing collection from an empty collection in Elasticsearch"
+    },
+    "w1-not-in-chain": {
+      "status": "rejected",
+      "reason": "Same missing-versus-empty ambiguity as w1-not-exists-chain, reached through negated membership: a bool must_not over a nested collection matches a document with no nested array at all, and Elasticsearch cannot tell that from a document whose array holds no match",
+      "message": "Negated membership in a document collection cannot distinguish a missing collection from an empty collection in Elasticsearch"
+    },
+    "w1-not-size-chain": {
+      "status": "rejected",
+      "reason": "Same missing-versus-empty ambiguity as w1-size-zero-chain, reached through the negated positive-count spelling rather than the direct zero-count one",
+      "message": "size(request.resource.attr.mainCategory.subCategories) emptiness cannot distinguish a missing collection from an empty collection in Elasticsearch"
+    },
+    "w1-size-chain": {
+      "status": "matched"
+    },
+    "w1-size-frac-chain": {
+      "status": "rejected",
+      "reason": "Same arbitrary-count-threshold limitation as w1-size-nonneg-chain, reached through a fractional threshold: >= 1.5 rounds up to >= 2, and the Query DSL expresses only emptiness over nested collections",
+      "message": "Unsupported size comparison: size(request.resource.attr.mainCategory.subCategories) ge 1.5. Only emptiness checks (size > 0, size == 0) are supported."
+    },
+    "w1-size-frac-le-chain": {
+      "status": "rejected",
+      "reason": "Same arbitrary-count-threshold limitation as w1-size-frac-chain under the opposite ordering: <= 1.5 rounds down to <= 1, still not an emptiness check",
+      "message": "Unsupported size comparison: size(request.resource.attr.mainCategory.subCategories) le 1.5. Only emptiness checks (size > 0, size == 0) are supported."
+    },
+    "w1-size-nonneg-chain": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL expresses only emptiness checks over nested collections, not arbitrary count thresholds, so a >= 0 threshold — which is TRUE exactly when the to-one parent exists — has no equivalent",
+      "message": "Unsupported size comparison: size(request.resource.attr.mainCategory.subCategories) ge 0.0. Only emptiness checks (size > 0, size == 0) are supported."
+    },
+    "w1-size-zero-chain": {
+      "status": "rejected",
+      "reason": "Same missing-versus-empty ambiguity as w1-not-exists-chain, reached through a zero-count emptiness check",
+      "message": "size(request.resource.attr.mainCategory.subCategories) emptiness cannot distinguish a missing collection from an empty collection in Elasticsearch"
+    },
+    "w1-ternary-chain-cond": {
+      "status": "rejected",
+      "reason": "Same missing conditional-value expression as ternary-bare: the Query DSL has no CEL-ternary equivalent without scripts, so the conditional is rejected at the top of the filter before its chained condition is examined",
+      "message": "if requires exactly 2 operands, got 3"
+    },
+    "w2-outer-relation": {
+      "status": "rejected",
+      "reason": "Elasticsearch Query DSL cannot correlate nested traversal with an outer relation-count predicate without scripts",
+      "message": "Unexpected size expression in leaf operand"
+    }
+  }
+}

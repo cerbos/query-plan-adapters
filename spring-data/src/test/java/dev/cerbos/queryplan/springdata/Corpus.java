@@ -25,6 +25,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
@@ -38,7 +39,7 @@ import java.util.stream.Stream;
  * allowed to differ ({@code docs/adr/0007-adapters-share-data-not-code.md}).
  *
  * <p>What lives here is what BOTH of this adapter's corpus suites must agree on: the
- * classification in {@code actions.json}, the wire-fixture decoding, and the
+ * classification in {@code adapterctl.json}, the wire-fixture decoding, and the
  * {@link AttributeMapping} the corpus is mapped through. That last one is the load-bearing
  * part — {@link SpringDataTranslatorTest} pins the SQL the adapter emits for a corpus action
  * and {@link AdversarialConformanceTest} proves the rows that same SQL returns, and the two
@@ -60,151 +61,237 @@ final class Corpus {
         return Path.of(System.getProperty("user.dir"), "..", "conformance").normalize();
     }
 
-    // -- conformance/actions.json ---------------------------------------------------------------
+    // -- v1 control plane -----------------------------------------------------------------------
 
-    /**
-     * An {@code expectedUnsupported} entry. {@code messages} carries one entry per adapter that
-     * must reject the shape, keyed by adapter name; {@code validate-corpus.sh} asserts that key
-     * set is exactly the roster minus the adapters that promoted the shape.
-     */
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    record UnsupportedShape(String action, String shape, Map<String, String> messages) {}
+    record OracleExpectation(String kind, String reason) {}
 
-    /**
-     * A {@code nullRepresentationOmitted} entry. Every adapter must reject these — the two NULL
-     * conventions are indistinguishable on the wire — so {@code messages} names the whole roster
-     * with no promotions to subtract.
-     */
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    record NullRepresentationOmitted(String action, String reason, Map<String, String> messages) {}
+    record CatalogAction(String name, OracleExpectation oracleExpectation) {}
 
-    /**
-     * An {@code adapterUnsupported} / {@code adapterSupportedExpected} entry. {@code message} is
-     * the substring this adapter's error must contain — present on the first, absent on the
-     * second, which does not throw.
-     */
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    record AdapterUnsupported(String action, String reason, String message) {}
+    record CatalogFile(int schemaVersion, List<CatalogAction> actions) {}
+
+    record Outcome(String status, String reason, String message) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    record KnownDivergence(String action, String reason, List<String> adapters) {}
+    record ManifestFile(int schemaVersion, String adapter, Map<String, Outcome> outcomes) {}
 
-    /**
-     * Every group in actions.json must be named here: Jackson silently drops a field this
-     * record does not declare, and a dropped group makes its actions vanish from every count
-     * and every parameterised case at once — the projection trap conformance/README.md warns
-     * about. The manifest tripwire in each suite is what makes an undropped group load-bearing.
-     */
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    record ActionsFile(
-            List<String> conformance,
-            Map<String, List<AdapterUnsupported>> adapterUnsupported,
-            Map<String, List<AdapterUnsupported>> adapterSupportedExpected,
-            List<UnsupportedShape> expectedUnsupported,
-            List<NullRepresentationOmitted> nullRepresentationOmitted,
-            List<KnownDivergence> knownDivergences) {
+    record RepresentationDependentRejection(String action, String reason, String message) {}
 
-        List<AdapterUnsupported> adapterUnsupportedFor(String adapter) {
-            return adapterUnsupported == null
-                    ? List.of()
-                    : adapterUnsupported.getOrDefault(adapter, List.of());
+    record RejectedOutcome(String action, String reason, String message) {}
+
+    record CheckPrincipal(String id, List<String> roles, Map<String, Object> attr) {}
+
+    record CheckResource(String kind, String id, Map<String, Object> attr) {}
+
+    record CheckResourcesFile(int schemaVersion, CheckPrincipal principal,
+                              List<CheckResource> resources) {}
+
+    static final class ControlPlane {
+        private final List<CatalogAction> actions;
+        private final Map<String, Outcome> outcomes;
+        private final String selectedAction;
+
+        ControlPlane(List<CatalogAction> actions, Map<String, Outcome> outcomes) {
+            this(actions, outcomes,
+                    System.getenv().getOrDefault("ADAPTERCTL_ACTION", "").trim());
         }
 
-        List<AdapterUnsupported> adapterSupportedExpectedFor(String adapter) {
-            return adapterSupportedExpected == null
-                    ? List.of()
-                    : adapterSupportedExpected.getOrDefault(adapter, List.of());
+        ControlPlane(List<CatalogAction> actions, Map<String, Outcome> outcomes,
+                     String selectedAction) {
+            this.actions = List.copyOf(actions);
+            this.selectedAction = selectedAction.trim();
+            Set<String> names = actions.stream()
+                    .map(CatalogAction::name)
+                    .collect(Collectors.toCollection(TreeSet::new));
+            if (names.size() != actions.size()) {
+                throw new IllegalStateException("catalog action names must be unique");
+            }
+            if (this.selectedAction.isEmpty() && !names.equals(outcomes.keySet())) {
+                throw new IllegalStateException(
+                        "adapterctl outcomes must cover the catalog exactly");
+            }
+            if (!this.selectedAction.isEmpty() && !names.contains(this.selectedAction)) {
+                throw new IllegalStateException(
+                        "ADAPTERCTL_ACTION names unknown catalog action " + this.selectedAction);
+            }
+            Map<String, Outcome> effectiveOutcomes = new TreeMap<>(outcomes);
+            Outcome selectedOutcome = effectiveOutcomes.get(this.selectedAction);
+            if (!this.selectedAction.isEmpty()
+                    && (selectedOutcome == null
+                        || selectedOutcome.status().equals("unassessed"))) {
+                effectiveOutcomes.put(
+                        this.selectedAction, new Outcome("matched", null, null));
+            }
+            this.outcomes = Map.copyOf(effectiveOutcomes);
+            for (CatalogAction action : actions) {
+                if (!selected(action.name())) {
+                    continue;
+                }
+                Outcome outcome = this.outcomes.get(action.name());
+                switch (outcome.status()) {
+                    case "matched" -> {
+                        if (outcome.reason() != null || outcome.message() != null) {
+                            throw new IllegalStateException(
+                                    "matched outcome must be status-only: " + action.name());
+                        }
+                    }
+                    case "rejected" -> {
+                        if (outcome.reason() == null || outcome.reason().isEmpty()) {
+                            throw new IllegalStateException(
+                                    "rejected outcome has no reason: " + action.name());
+                        }
+                        requireMessage("outcomes." + action.name(), outcome.message());
+                    }
+                    case "upstream-blocked" -> {
+                        if (outcome.reason() == null || outcome.reason().isEmpty()) {
+                            throw new IllegalStateException(
+                                    "upstream-blocked outcome has no reason: " + action.name());
+                        }
+                    }
+                    case "unassessed" -> throw new IllegalStateException(
+                            "adapterctl outcome is unassessed: " + action.name());
+                    default -> throw new IllegalStateException(
+                            "unknown adapterctl outcome status " + outcome.status());
+                }
+            }
         }
 
-        /** Every action the corpus declares, in any group. */
+        boolean selected(String action) {
+            return selectedAction.isEmpty() || selectedAction.equals(action);
+        }
+
+        List<CatalogAction> actions() {
+            return actions;
+        }
+
+        Set<String> allCatalogActions() {
+            return actions.stream()
+                    .map(CatalogAction::name)
+                    .collect(Collectors.toCollection(TreeSet::new));
+        }
+
         Set<String> manifestActions() {
-            Set<String> manifest = new TreeSet<>(conformance);
-            expectedUnsupported.forEach(u -> manifest.add(u.action()));
-            nullRepresentationOmitted.forEach(n -> manifest.add(n.action()));
-            knownDivergences.forEach(d -> manifest.add(d.action()));
-            return manifest;
+            return actions.stream()
+                    .map(CatalogAction::name)
+                    .filter(this::selected)
+                    .collect(Collectors.toCollection(TreeSet::new));
         }
 
         Set<String> skippedDivergences(String adapter) {
-            return knownDivergences.stream()
-                    .filter(d -> d.adapters().contains(adapter))
-                    .map(KnownDivergence::action)
-                    .collect(java.util.stream.Collectors.toCollection(TreeSet::new));
+            requireAdapter(adapter);
+            return manifestActions().stream()
+                    .filter(action -> outcomes.get(action).status().equals("upstream-blocked"))
+                    .collect(Collectors.toCollection(TreeSet::new));
+        }
+
+        Map<String, OracleExpectation> oracleExpectations() {
+            return actions.stream()
+                    .filter(action -> selected(action.name()))
+                    .collect(Collectors.toMap(
+                            CatalogAction::name,
+                            CatalogAction::oracleExpectation,
+                            (left, right) -> left,
+                            TreeMap::new));
+        }
+
+        Outcome outcome(String action) {
+            return outcomes.get(action);
+        }
+
+        private static void requireAdapter(String adapter) {
+            if (!ADAPTER.equals(adapter)) {
+                throw new IllegalStateException(
+                        "control plane loaded for " + ADAPTER + ", not " + adapter);
+            }
         }
     }
 
-    static ActionsFile actionsFile() {
+    static ControlPlane actionsFile() {
         try {
-            return JSON.readValue(
-                    conformanceDir().resolve("actions.json").toFile(), ActionsFile.class);
+            CatalogFile catalog = JSON.readValue(
+                    conformanceDir().resolve("catalog.json").toFile(), CatalogFile.class);
+            ManifestFile manifest = JSON.readValue(
+                    conformanceDir().getParent().resolve(ADAPTER).resolve("adapterctl.json").toFile(),
+                    ManifestFile.class);
+            if (catalog.schemaVersion() != 1 || manifest.schemaVersion() != 1) {
+                throw new IllegalStateException("control-plane files must use schemaVersion 1");
+            }
+            if (!ADAPTER.equals(manifest.adapter())) {
+                throw new IllegalStateException("adapterctl.json names the wrong adapter");
+            }
+            return new ControlPlane(catalog.actions(), manifest.outcomes());
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
     }
 
-    /**
-     * The substring this adapter's error must contain, or a loud failure. The message is what
-     * turns "it threw" into "it threw for the declared reason": without it a mapper typo or an
-     * unrelated validation satisfies the throw suite just as well as the documented limitation
-     * (cerbos/query-plan-adapters#326).
-     */
     static String requireMessage(String label, String message) {
         if (message == null || message.isEmpty()) {
-            throw new IllegalStateException("actions.json pins no throw message for " + label
+            throw new IllegalStateException("adapterctl.json pins no throw message for " + label
                     + ": the throw suite would accept a failure for any reason");
         }
         return message;
     }
 
-    /** Actions this adapter oracle-compares: conformance minus its own unsupported, plus promotions. */
-    static Stream<String> oracleActions(ActionsFile actions, String adapter) {
-        Set<String> unsupported = actions.adapterUnsupportedFor(adapter).stream()
-                .map(AdapterUnsupported::action)
-                .collect(java.util.stream.Collectors.toSet());
-        return Stream.concat(
-                actions.conformance().stream().filter(a -> !unsupported.contains(a)),
-                actions.adapterSupportedExpectedFor(adapter).stream()
-                        .map(AdapterUnsupported::action).sorted());
+    static Stream<String> oracleActions(ControlPlane actions, String adapter) {
+        ControlPlane.requireAdapter(adapter);
+        return actions.manifestActions().stream()
+                .filter(action -> actions.outcome(action).status().equals("matched"));
     }
 
-    /**
-     * Every action this adapter must refuse, each with the message it must refuse it with:
-     * {@code adapterUnsupported[me]} plus {@code expectedUnsupported} minus its own promotions.
-     *
-     * <p>{@code nullRepresentationOmitted} is deliberately absent — under the DEFAULT
-     * representation those actions translate, so they carry a golden expectation like any other
-     * and their refusal is a property of the flipped option (see
-     * {@link #nullRepresentationThrows}).
-     */
-    static Map<String, String> throwingActions(ActionsFile actions, String adapter) {
-        Set<String> promoted = actions.adapterSupportedExpectedFor(adapter).stream()
-                .map(AdapterUnsupported::action)
-                .collect(java.util.stream.Collectors.toSet());
+    static Map<String, String> throwingActions(ControlPlane actions, String adapter) {
+        ControlPlane.requireAdapter(adapter);
         Map<String, String> throwing = new TreeMap<>();
-        for (AdapterUnsupported entry : actions.adapterUnsupportedFor(adapter)) {
-            throwing.put(entry.action(), requireMessage(
-                    "adapterUnsupported." + adapter + "." + entry.action(), entry.message()));
-        }
-        for (UnsupportedShape entry : actions.expectedUnsupported()) {
-            if (promoted.contains(entry.action())) {
-                continue;
+        for (String action : actions.manifestActions()) {
+            Outcome outcome = actions.outcome(action);
+            if (outcome.status().equals("rejected") && !action.equals("null-eq-missing")) {
+                throwing.put(action, requireMessage(
+                        "outcomes." + action, outcome.message()));
             }
-            throwing.put(entry.action(), requireMessage(
-                    "expectedUnsupported." + entry.action() + ".messages." + adapter,
-                    entry.messages() == null ? null : entry.messages().get(adapter)));
         }
         return throwing;
     }
 
-    /** The {@code nullRepresentationOmitted} probes, each with the message its rejection must carry. */
-    static List<NullRepresentationOmitted> nullRepresentationThrows(ActionsFile actions) {
-        return actions.nullRepresentationOmitted();
+    static List<RejectedOutcome> rejectedOutcomes(ControlPlane actions) {
+        return actions.manifestActions().stream()
+                .filter(action -> actions.outcome(action).status().equals("rejected"))
+                .filter(action -> !action.equals("null-eq-missing"))
+                .map(action -> {
+                    Outcome outcome = actions.outcome(action);
+                    return new RejectedOutcome(action, outcome.reason(), outcome.message());
+                })
+                .toList();
     }
 
-    static String nullOmittedMessage(NullRepresentationOmitted entry, String adapter) {
-        return requireMessage(
-                "nullRepresentationOmitted." + entry.action() + ".messages." + adapter,
-                entry.messages() == null ? null : entry.messages().get(adapter));
+    static CheckResourcesFile checkResourcesFile() {
+        try {
+            CheckResourcesFile file = JSON.readValue(
+                    conformanceDir().resolve("check-resources.json").toFile(),
+                    CheckResourcesFile.class);
+            if (file.schemaVersion() != 1) {
+                throw new IllegalStateException("check-resources.json must use schemaVersion 1");
+            }
+            return file;
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    static List<RepresentationDependentRejection> representationDependentRejections(ControlPlane actions) {
+        String action = "null-eq-missing";
+        if (!actions.selected(action)) {
+            return List.of();
+        }
+        Outcome outcome = actions.outcome(action);
+        if (!outcome.status().equals("rejected")) {
+            throw new IllegalStateException("adapterctl.json must reject " + action);
+        }
+        return List.of(new RepresentationDependentRejection(
+                action, outcome.reason(), requireMessage("outcomes." + action, outcome.message())));
+    }
+
+    static String nullOmittedMessage(RepresentationDependentRejection entry, String adapter) {
+        ControlPlane.requireAdapter(adapter);
+        return entry.message();
     }
 
     // -- conformance/wire-fixtures/ -------------------------------------------------------------

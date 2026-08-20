@@ -11,7 +11,7 @@ demo/scripts/run-example.sh prisma
 Needs `docker` (with compose), `jq` and Node 22+. The runner starts the pinned Cerbos PDP; this
 directory's `run.sh` packs the adapter, installs the tarball, builds, and runs.
 
-This is the reference implementation every other adapter's example copies.
+This example consumes the shared runtime contract in `demo/cases.json`.
 
 ## What it proves
 

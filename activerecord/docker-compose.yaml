@@ -5,8 +5,8 @@
 #   ./scripts/test.sh spec/adversarial_conformance_spec.rb
 #
 # The `tests` service mounts the root directory of the repository, because both corpus suites
-# read shared data at ../conformance/ (seeds.json, actions.json, derived-fields.json,
-# wire-fixtures/, CERBOS_VERSION, CERBOS_IMAGE_DIGEST).
+# read catalog.json, check-resources.json, seeds.json, derived-fields.json, wire-fixtures/ and the
+# PDP pin from ../conformance/, plus the adapter's own adapterctl.json manifest.
 #
 # `tests` depends on the PDP, but only the adversarial harness needs one: scripts/test.sh runs
 # the offline suites with `--no-deps`, so the PDP is not merely unused there, it is absent.

@@ -625,7 +625,7 @@
       "path": "post"
     },
     "null-eq-missing": {
-      "note": "The `nullRepresentationOmitted` probe, recorded under the DEFAULT representation. The planner emits the same `eq(attr, null)` node either way, so the wire cannot tell the two conventions apart and this entry is what the adapter does when told `explicit`. Under `omitted` it throws, with the message actions.json pins.",
+      "note": "The `null-eq-missing` probe, recorded under the DEFAULT representation. The planner emits the same `eq(attr, null)` node either way, so the wire cannot tell the two conventions apart and this entry is what the adapter does when told `explicit`. Under `omitted` it throws, with the message adapterctl.json pins.",
       "kind": "KIND_CONDITIONAL",
       "path": "post"
     },

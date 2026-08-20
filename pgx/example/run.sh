@@ -14,7 +14,7 @@
 # says why, and docs/adr/0002-examples-install-the-packed-artifact.md is where the exception lives.
 #
 # Everything this script prints for a human goes to stderr. stdout carries exactly one JSON
-# document, which the shared runner diffs against demo/expected.json.
+# document, which the shared runner diffs against demo/cases.json.
 #
 # Pre-reqs: docker, and a Go toolchain satisfying this module's `go` directive.
 

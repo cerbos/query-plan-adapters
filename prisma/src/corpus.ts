@@ -19,147 +19,20 @@ import { PlanKind, MapperConfig } from ".";
  *
  * `adversarial.test.ts` plans against a real PDP and executes the translated query;
  * `translator.test.ts` reads the same actions off the golden wire fixtures and asserts nothing
- * but the emitted filter. They must agree on two things or they prove less than they appear to:
+ * but the emitted filter. They must agree on the mapper or they prove less than they appear to:
  *
  * - **the mapper.** The unit test pins the filter this adapter emits for a mapping; the harness
  *   proves that same filter returns the rows the PDP allows. Two copies that drifted would leave
  *   the pinned filters describing a mapping no harness ever executes.
- * - **the classification.** Which actions this adapter must refuse, and with which message, is a
- *   corpus decision (`actions.json`), not a per-suite one.
- *
  * Test-only: excluded from `tsc --build` by `tsconfig.json`, so nothing here reaches `lib/`.
  */
 
-export const CONFORMANCE_DIR = path.join(
-  __dirname,
-  "..",
-  "..",
-  "conformance"
-);
+export const CONFORMANCE_DIR = path.join(__dirname, "..", "..", "conformance");
 
 const WIRE_FIXTURES_DIR = path.join(CONFORMANCE_DIR, "wire-fixtures");
 
 /** The Prisma model the corpus's resource kind maps onto. */
 export const MODEL = "AdversarialResource";
-
-// -- actions.json --------------------------------------------------------------------------------
-
-export interface UnsupportedShape {
-  action: string;
-  shape: string;
-  /** One entry per adapter that must reject the shape; the corpus asserts the key set. */
-  messages: Record<string, string>;
-}
-
-export interface AdapterUnsupportedEntry {
-  action: string;
-  reason: string;
-  /** Absent on `adapterSupportedExpected` / `nullRepresentationOmitted`, required on a throw. */
-  message?: string;
-}
-
-/**
- * A `nullRepresentationOmitted` entry. Every adapter must reject these — the two NULL conventions
- * are indistinguishable on the wire — so `messages` names the whole roster with no promotions to
- * subtract.
- */
-export interface NullRepresentationOmittedEntry {
-  action: string;
-  reason: string;
-  messages: Record<string, string>;
-}
-
-export interface KnownDivergence {
-  action: string;
-  adapters: string[];
-}
-
-export interface ActionsFile {
-  conformance: string[];
-  adapterUnsupported?: Record<string, AdapterUnsupportedEntry[]>;
-  adapterSupportedExpected?: Record<string, AdapterUnsupportedEntry[]>;
-  expectedUnsupported: UnsupportedShape[];
-  nullRepresentationOmitted: NullRepresentationOmittedEntry[];
-  knownDivergences?: KnownDivergence[];
-}
-
-/**
- * A shape this adapter must refuse, with the substring its error has to contain.
- *
- * The message is what turns "it threw" into "it threw for the declared reason": without it a
- * mapper typo or an unrelated validation satisfies the assertion just as well as the limitation
- * the corpus documents (cerbos/query-plan-adapters#326).
- */
-export type ThrowingAction = readonly [
-  action: string,
-  reason: string,
-  message: string,
-];
-
-export interface ActionClassification {
-  oracleActions: string[];
-  throwingActions: ThrowingAction[];
-  supportedExpected: Set<string>;
-}
-
-/** The pinned message, or a failure — a throwing action without one asserts nothing. */
-export function requireMessage(
-  label: string,
-  message: string | undefined
-): string {
-  if (message === undefined || message === "") {
-    throw new Error(
-      `actions.json pins no throw message for ${label}: the throw suite would accept a failure for any reason`
-    );
-  }
-  return message;
-}
-
-export function classifyActionsForAdapter(
-  manifest: ActionsFile,
-  adapter: string
-): ActionClassification {
-  const unsupported = manifest.adapterUnsupported?.[adapter] ?? [];
-  const unsupportedActions = new Set(unsupported.map((entry) => entry.action));
-  const supportedExpected = new Set(
-    (manifest.adapterSupportedExpected?.[adapter] ?? []).map(
-      (entry) => entry.action
-    )
-  );
-  const oracleActions = [
-    ...manifest.conformance.filter(
-      (action) => !unsupportedActions.has(action)
-    ),
-    ...supportedExpected,
-  ];
-  const throwingActions: ThrowingAction[] = [
-    ...unsupported.map(
-      (entry): ThrowingAction => [
-        entry.action,
-        entry.reason,
-        requireMessage(`adapterUnsupported.${adapter}.${entry.action}`, entry.message),
-      ]
-    ),
-    ...manifest.expectedUnsupported
-      .filter((entry) => !supportedExpected.has(entry.action))
-      .map((entry): ThrowingAction => [
-        entry.action,
-        entry.shape,
-        requireMessage(
-          `expectedUnsupported.${entry.action}.messages.${adapter}`,
-          entry.messages?.[adapter]
-        ),
-      ]),
-  ];
-
-  return {
-    oracleActions: [...new Set(oracleActions)].sort(),
-    throwingActions: throwingActions.sort(([left], [right]) =>
-      left.localeCompare(right)
-    ),
-    supportedExpected,
-  };
-}
 
 // -- the golden wire fixtures --------------------------------------------------------------------
 
@@ -170,9 +43,9 @@ export function classifyActionsForAdapter(
  * literal timestamp: a different value on every capture, so the script rewrites it to
  * `__NOW_MINUS_24H__` to keep the drift check deterministic. Reading the fixture back therefore
  * means choosing a value, and the choice is load-bearing rather than arbitrary — Cerbos emits the
- * PDP's clock at nanosecond precision, which is exactly why both actions are `adapterUnsupported`
+ * PDP's clock at nanosecond precision, which is exactly why both actions have `rejected` direct outcomes
  * for this adapter (`Timestamp value exceeds millisecond precision`). A tidy millisecond instant
- * here would translate cleanly and quietly contradict `actions.json`, so the fraction carries the
+ * here would translate cleanly and quietly contradict `adapterctl.json`, so the fraction carries the
  * nine digits a real plan carries. `translator.test.ts` pins both sides of that boundary, which is
  * what the `plannedAt` override on `planFromWireFixture` is for.
  */
@@ -192,12 +65,14 @@ interface WireFixture {
 
 function operandFromWire(
   node: WireOperand,
-  plannedAt: string
+  plannedAt: string,
 ): PlanExpressionOperand {
   if (node.expression) {
     return new PlanExpression(
       node.expression.operator,
-      node.expression.operands.map((child) => operandFromWire(child, plannedAt))
+      node.expression.operands.map((child) =>
+        operandFromWire(child, plannedAt),
+      ),
     );
   }
   if (node.variable !== undefined) {
@@ -205,14 +80,14 @@ function operandFromWire(
   }
   if (!("value" in node)) {
     throw new Error(
-      `Wire fixture operand is neither an expression, a variable nor a value: ${JSON.stringify(node)}`
+      `Wire fixture operand is neither an expression, a variable nor a value: ${JSON.stringify(node)}`,
     );
   }
   // The one cast in this file. A fixture is JSON the PDP produced, so its leaves are already
   // exactly the JSON shapes `Value` admits — but `JSON.parse` cannot say so, and re-validating a
   // file the corpus workflow regenerates and diffs would assert nothing new.
   return new PlanExpressionValue(
-    (node.value === "__NOW_MINUS_24H__" ? plannedAt : node.value) as Value
+    (node.value === "__NOW_MINUS_24H__" ? plannedAt : node.value) as Value,
   );
 }
 
@@ -236,10 +111,10 @@ export function wireFixtureActions(): string[] {
  */
 export function planFromWireFixture(
   action: string,
-  plannedAt: string = PLANNED_AT
+  plannedAt: string = PLANNED_AT,
 ): PlanResourcesResponse {
   const fixture: WireFixture = JSON.parse(
-    fs.readFileSync(path.join(WIRE_FIXTURES_DIR, `${action}.json`), "utf8")
+    fs.readFileSync(path.join(WIRE_FIXTURES_DIR, `${action}.json`), "utf8"),
   );
   const base = {
     cerbosCallId: "",
@@ -250,7 +125,9 @@ export function planFromWireFixture(
   switch (fixture.filter.kind) {
     case PlanKind.CONDITIONAL:
       if (!fixture.filter.condition) {
-        throw new Error(`Wire fixture ${action} is conditional with no condition`);
+        throw new Error(
+          `Wire fixture ${action} is conditional with no condition`,
+        );
       }
       return {
         ...base,
@@ -262,7 +139,7 @@ export function planFromWireFixture(
       return { ...base, kind: fixture.filter.kind };
     default:
       throw new Error(
-        `Wire fixture ${action} has an unrecognised filter kind ${fixture.filter.kind}`
+        `Wire fixture ${action} has an unrecognised filter kind ${fixture.filter.kind}`,
       );
   }
 }
@@ -299,8 +176,8 @@ export const MAPPER: Record<string, MapperConfig> = {
     nullable: true,
     nullAttributeRepresentation: "explicit",
   },
-  // obj.inner is not a real nested column — mirrors aString, same trick the spring-data
-  // reference harness uses for the p-struct probe. `parent.inner` below is the opposite: a real
+  // obj.inner is not a real nested column — it mirrors aString to give the p-struct probe a
+  // stable nested shape. `parent.inner` below is the opposite: a real
   // two-level join. The two are kept side by side on purpose.
   "request.resource.attr.obj.inner": { field: "aString" },
   // The corpus's one REAL to-one chain (the `rel-*` actions). `type: "one"` is what makes the

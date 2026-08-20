@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "json"
+
 # Reads the shared corpus of the repository (cerbos/query-plan-adapters#263).
 #
 # Nothing here is data only for this adapter. The same rows and the same attributes go to both
@@ -15,7 +17,8 @@ module ConformanceCorpus
   DIR = File.expand_path("../../../conformance", __dir__)
 
   SEEDS_FILE = JSON.parse(File.read(File.join(DIR, "seeds.json"))).freeze
-  ACTIONS_FILE = JSON.parse(File.read(File.join(DIR, "actions.json"))).freeze
+  CATALOG_FILE = JSON.parse(File.read(File.join(DIR, "catalog.json"))).freeze
+  CHECK_RESOURCES_FILE = JSON.parse(File.read(File.join(DIR, "check-resources.json"))).freeze
   DERIVED_FILE = JSON.parse(File.read(File.join(DIR, "derived-fields.json"))).freeze
   CERBOS_VERSION = File.read(File.join(DIR, "CERBOS_VERSION")).strip.freeze
 
@@ -24,10 +27,14 @@ module ConformanceCorpus
   # Verbatim. A projection here — an allowlist of principal attributes, for example — would
   # drop the attribute that a new action discriminates on from the plan AND from the oracle,
   # and the action would then pass without testing anything.
-  PRINCIPAL = SEEDS_FILE.fetch("principal").freeze
+  PRINCIPAL = CHECK_RESOURCES_FILE.fetch("principal").freeze
+  CHECK_RESOURCES = CHECK_RESOURCES_FILE.fetch("resources").freeze
 
   # The key of this adapter in the manifest is the name of its directory.
   ADAPTER = "activerecord"
+  MANIFEST_FILE = JSON.parse(
+    File.read(File.expand_path("../../../#{ADAPTER}/adapterctl.json", __dir__))
+  ).freeze
 
   # --- corpus coverage guards ---------------------------------------------------------------
 
@@ -100,100 +107,101 @@ module ConformanceCorpus
     assert_keys!("derived-fields.json derived[#{id.inspect}]", entry.keys, DERIVED_KEYS)
   end
 
-  # --- classification, read from the manifest at run time ------------------------------------
-  #
-  # Each group is read by name. A group that this file did not name would disappear from every
-  # count and from every test at the same time, and the run would then pass without a word.
-  # That is the projection trap in conformance/README.md.
+  # --- v1 control plane ---------------------------------------------------------------------
 
-  UNSUPPORTED = ACTIONS_FILE
-    .fetch("adapterUnsupported", {})
-    .fetch(ADAPTER, [])
-    .freeze
+  unless [CATALOG_FILE, CHECK_RESOURCES_FILE, MANIFEST_FILE].all? { |file|
+    file.fetch("schemaVersion") == 1
+  }
+    raise "control-plane files must use schemaVersion 1"
+  end
+  raise "adapterctl.json names the wrong adapter" unless MANIFEST_FILE.fetch("adapter") == ADAPTER
 
-  SUPPORTED_EXPECTED = ACTIONS_FILE
-    .fetch("adapterSupportedExpected", {})
-    .fetch(ADAPTER, [])
-    .map { |entry| entry.fetch("action") }
-    .freeze
+  CATALOG = CATALOG_FILE.fetch("actions").freeze
+  ALL_CATALOG_ACTIONS = CATALOG.map { |entry| entry.fetch("name") }.freeze
+  SELECTED_ACTION = ENV.fetch("ADAPTERCTL_ACTION", "").strip.freeze
 
-  EXPECTED_UNSUPPORTED = ACTIONS_FILE
-    .fetch("expectedUnsupported")
-    .map { |entry| entry.fetch("action") }
-    .freeze
-
-  # Actions that probe `== null` against an attribute whose NULL columns the oracle OMITS.
-  # The harness translates these with the null representation of the adapter set to omitted and
-  # asserts the rejection. Their oracle is empty by construction, so they must not join the
-  # degeneracy guard.
-  NULL_REPRESENTATION_OMITTED = ACTIONS_FILE
-    .fetch("nullRepresentationOmitted", [])
-    .map { |entry| entry.fetch("action") }
-    .freeze
-
-  SKIPPED = ACTIONS_FILE
-    .fetch("knownDivergences", [])
-    .select { |entry| entry.fetch("adapters").include?(ADAPTER) }
-    .map { |entry| entry.fetch("action") }
-    .freeze
-
-  ORACLE_ACTIONS = (
-    (ACTIONS_FILE.fetch("conformance") - UNSUPPORTED.map { |entry| entry.fetch("action") }) +
-      SUPPORTED_EXPECTED - SKIPPED
-  ).freeze
-
-  # Every action that the corpus classifies, whichever adapter it belongs to. A divergence that
-  # only another adapter registered must still arrive here, so the size tripwire and the
-  # "classified exactly once" test bring it up for triage instead of letting it disappear.
-  MANIFEST_ACTIONS = (
-    ACTIONS_FILE.fetch("conformance") +
-      EXPECTED_UNSUPPORTED +
-      NULL_REPRESENTATION_OMITTED +
-      SUPPORTED_EXPECTED +
-      ACTIONS_FILE.fetch("knownDivergences", []).map { |entry| entry.fetch("action") }
-  ).uniq.freeze
-
-  # The message that the error of a throwing action must contain.
-  #
-  # Without it, "it threw" is satisfied as happily by a typo in the attribute map, by an
-  # unrelated validation or by a transport error as by the limitation that the classification
-  # names — and the classification then rests on a failure that never reached its own mechanism
-  # (cerbos/query-plan-adapters#326).
-  def require_message(label, message)
-    if message.nil? || message.empty?
-      raise "actions.json pins no throw message for #{label}: the throw suite would then " \
-            "accept a failure for any reason at all"
+  def effective_outcomes(catalog_actions, outcomes, selected_action)
+    if catalog_actions.uniq.size != catalog_actions.size
+      raise "catalog action names must be unique"
+    end
+    if !selected_action.empty? && !catalog_actions.include?(selected_action)
+      raise "ADAPTERCTL_ACTION names unknown catalog action #{selected_action.inspect}"
+    end
+    if selected_action.empty?
+      unless outcomes.keys.sort == catalog_actions.sort
+        raise "adapterctl outcomes must cover the catalog exactly"
+      end
+      return outcomes
     end
 
+    selected_outcome = outcomes[selected_action]
+    return outcomes unless selected_outcome.nil? || selected_outcome.fetch("status") == "unassessed"
+
+    outcomes.merge(selected_action => {"status" => "matched"})
+  end
+
+  OUTCOMES = effective_outcomes(
+    ALL_CATALOG_ACTIONS,
+    MANIFEST_FILE.fetch("outcomes"),
+    SELECTED_ACTION
+  ).freeze
+
+  def selected?(action)
+    SELECTED_ACTION.empty? || action == SELECTED_ACTION
+  end
+
+  MANIFEST_ACTIONS = ALL_CATALOG_ACTIONS.select { |action| selected?(action) }.freeze
+  ORACLE_EXPECTATIONS = CATALOG
+    .select { |entry| selected?(entry.fetch("name")) }
+    .to_h { |entry| [entry.fetch("name"), entry.fetch("oracleExpectation")] }
+    .freeze
+
+  UPSTREAM_BLOCKED = MANIFEST_ACTIONS.select { |action|
+    OUTCOMES.fetch(action).fetch("status") == "upstream-blocked"
+  }.freeze
+
+  ORACLE_ACTIONS = MANIFEST_ACTIONS.select { |action|
+    OUTCOMES.fetch(action).fetch("status") == "matched"
+  }.freeze
+
+  REPRESENTATION_DEPENDENT_REJECTIONS = MANIFEST_ACTIONS
+    .select { |action|
+      action == "null-eq-missing" && OUTCOMES.fetch(action).fetch("status") == "rejected"
+    }
+    .freeze
+
+  def require_message(label, message)
+    if message.nil? || message.empty?
+      raise "adapterctl.json pins no throw message for #{label}: the throw suite would then " \
+            "accept a failure for any reason at all"
+    end
     message
   end
 
-  # [action, message] for every shape this adapter must refuse.
-  THROWING_ACTIONS = (
-    UNSUPPORTED.map { |entry|
-      action = entry.fetch("action")
-      [action, require_message("adapterUnsupported.#{ADAPTER}.#{action}", entry["message"])]
-    } +
-    ACTIONS_FILE.fetch("expectedUnsupported")
-      .reject { |entry| SUPPORTED_EXPECTED.include?(entry.fetch("action")) }
-      .map { |entry|
-        action = entry.fetch("action")
-        [action, require_message(
-          "expectedUnsupported.#{action}.messages.#{ADAPTER}", entry["messages"]&.[](ADAPTER)
-        )]
-      }
-  ).freeze
+  THROWING_ACTIONS = MANIFEST_ACTIONS.filter_map { |action|
+    outcome = OUTCOMES.fetch(action)
+    status = outcome.fetch("status")
+    case status
+    when "rejected"
+      reason = outcome.fetch("reason", "")
+      raise "adapterctl.json rejected outcome #{action.inspect} has no reason" if reason.empty?
+      next if action == "null-eq-missing"
+      [action, require_message("outcomes.#{action}", outcome["message"])]
+    when "matched", "upstream-blocked"
+      nil
+    when "unassessed"
+      raise "adapterctl.json outcome #{action.inspect} is unassessed"
+    else
+      raise "adapterctl.json outcome #{action.inspect} has unknown status #{status.inspect}"
+    end
+  }.freeze
 
-  # The same, for the group that every adapter must refuse under the `omitted` representation.
-  NULL_OMITTED_THROWS = ACTIONS_FILE
-    .fetch("nullRepresentationOmitted", [])
-    .map { |entry|
-      action = entry.fetch("action")
-      [action, require_message(
-        "nullRepresentationOmitted.#{action}.messages.#{ADAPTER}", entry["messages"]&.[](ADAPTER)
-      )]
-    }
-    .freeze
+  REPRESENTATION_DEPENDENT_THROWS = REPRESENTATION_DEPENDENT_REJECTIONS.map { |action|
+    outcome = OUTCOMES.fetch(action)
+    reason = outcome.fetch("reason", "")
+    raise "adapterctl.json rejected outcome #{action.inspect} has no reason" if reason.empty?
+    [action, require_message("outcomes.#{action}", outcome["message"])]
+  }.freeze
 
   # --- the golden wire fixtures (ADR 0006) ---------------------------------------------------
   #
@@ -207,7 +215,7 @@ module ConformanceCorpus
   # placeholder, because the real one moves on every replan and every fixture would then differ.
   # A reader has to put an instant back, and the PRECISION of the one it chooses is load-bearing
   # here: the planner emits nanoseconds, and that is exactly what ts-window and ts-vf are
-  # classified `adapterUnsupported` for. Substituting a microsecond instant would make both
+  # classified `rejected` for. Substituting a microsecond instant would make both
   # translate and read as a misclassification.
   NOW_PLACEHOLDER = "__NOW_MINUS_24H__"
   PLANNED_AT = "2026-08-11T09:13:39.123456789Z"

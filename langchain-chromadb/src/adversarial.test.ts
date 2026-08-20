@@ -1,5 +1,12 @@
-import { afterAll, beforeAll, describe, expect, jest, test } from "@jest/globals";
-import type { Principal, Resource, Value } from "@cerbos/core";
+import {
+  afterAll,
+  beforeAll,
+  describe,
+  expect,
+  jest,
+  test,
+} from "@jest/globals";
+import type { Principal, Value } from "@cerbos/core";
 import { GRPC as Cerbos } from "@cerbos/grpc";
 import {
   ChromaClient,
@@ -12,18 +19,15 @@ import { PlanKind, queryPlanToChromaDB } from ".";
 import {
   ADAPTER,
   FIELD_NAME_MAPPER,
-  classifyActionsForAdapter,
-  nullRepresentationThrows,
-  parseActionsFile,
   parseStringArray,
   readCorpusJson,
   requireArray,
   requireBoolean,
-  requireMessage,
   requireNumber,
   requireRecord,
   requireString,
 } from "./corpus";
+import { loadActionControlPlane, loadCheckResources } from "./controlPlane";
 
 /**
  * Shared-corpus differential suite for the flat scalar subset Chroma metadata filters can
@@ -35,20 +39,17 @@ import {
  * outside Chroma's scalar filter model must fail during translation, before a malformed or
  * silently incomplete Where filter reaches Chroma.
  *
- * The corpus reader, the classification and the metadata mapping live in `./corpus`, shared with
- * `translator.test.ts` — the offline suite pins the filter this adapter emits for a mapping, and
- * this one proves that same filter returns the documents the PDP allows, so a second copy of the
- * mapper would leave the pinned filters describing metadata nothing seeds. What stays here is what
- * only this suite needs: the seeds, the derived fields, the stored metadata and the oracle.
+ * The metadata mapping lives in `./corpus`; `./controlPlane` validates catalog expectations and
+ * adapter-local direct outcomes for both this harness and `translator.test.ts`. The offline suite
+ * pins the emitted filter, while this suite proves that filter returns the documents the PDP
+ * allows.
  */
 
 jest.setTimeout(120_000);
 
 const CERBOS_PORT = 3641;
 const cerbos = new Cerbos(`127.0.0.1:${CERBOS_PORT}`, { tls: false });
-const chromaUrl = new URL(
-  process.env["CHROMA_URL"] ?? "http://127.0.0.1:8234",
-);
+const chromaUrl = new URL(process.env["CHROMA_URL"] ?? "http://127.0.0.1:8234");
 const chroma = new ChromaClient({
   host: chromaUrl.hostname,
   port: Number(chromaUrl.port) || 8000,
@@ -109,7 +110,7 @@ function parseTag(value: unknown, label: string): Tag {
 //
 // The same parsed seed feeds the stored metadata AND the check() oracle, so a corpus field this
 // harness does not consume is dropped from both sides at once and the differential agrees for the
-// wrong reason — the projection trap conformance/README.md describes for actions.json, applied to
+// wrong reason — the projection trap conformance/README.md describes for adapterctl.json, applied to
 // the seeds. Asserting set equality catches both directions: a corpus key nothing here reads, and a
 // key this harness reads that the corpus no longer carries.
 
@@ -271,10 +272,7 @@ function parseDerivedEntry(value: unknown, label: string): DerivedEntry {
 
 function parseDerivedFile(value: unknown): DerivedFile {
   const file = requireRecord(value, "derived-fields.json");
-  const fields = parseStringArray(
-    file["fields"],
-    "derived-fields.json fields",
-  );
+  const fields = parseStringArray(file["fields"], "derived-fields.json fields");
   assertKeys("derived-fields.json fields", fields, DERIVED_KEYS);
   const derived: Record<string, DerivedEntry> = {};
   for (const [id, entry] of Object.entries(
@@ -340,7 +338,6 @@ const rawSeedsJson = readCorpusJson("seeds.json");
 assertSeedKeyCoverage(rawSeedsJson);
 assertPrincipalKeyCoverage(rawSeedsJson);
 const seedsFile = parseSeedsFile(rawSeedsJson);
-const actionsFile = parseActionsFile(readCorpusJson("actions.json"));
 const derivedFile = parseDerivedFile(readCorpusJson("derived-fields.json"));
 const SEEDS = seedsFile.seeds;
 
@@ -354,142 +351,27 @@ for (const seed of SEEDS) {
   derivedFor(seed);
 }
 
-const CHROMA_UNSUPPORTED = actionsFile.adapterUnsupported[ADAPTER] ?? [];
-const CHROMA_SUPPORTED_EXPECTED =
-  actionsFile.adapterSupportedExpected[ADAPTER] ?? [];
-const CHROMA_DIVERGENCES = new Set(
-  actionsFile.knownDivergences
-    .filter(({ adapters }) => adapters.includes(ADAPTER))
-    .map(({ action }) => action),
-);
+const ACTION_CONTROL_PLANE = loadActionControlPlane({
+  adapter: ADAPTER,
+  selectedAction: process.env["ADAPTERCTL_ACTION"],
+});
+const FULL_MATRIX = process.env["ADAPTERCTL_ACTION"] === undefined;
+const fullMatrixTest = FULL_MATRIX ? test : test.skip;
+const CHECK_RESOURCES = loadCheckResources();
 /**
- * The classification, read from the corpus by the loader `translator.test.ts` shares. Which actions
- * this adapter must refuse, and with which message, is a corpus decision — asserting it identically
- * in both suites is what makes the offline completeness guard total.
+ * Adapter-local direct outcomes, read through the loader `translator.test.ts` shares. Asserting
+ * them identically in both suites makes the offline completeness guard total.
  */
-const {
-  oracleActions: CHROMA_SUPPORTED_ACTIONS,
-  throwingActions: THROWING_ACTIONS,
-} = classifyActionsForAdapter(actionsFile, ADAPTER);
+const CHROMA_SUPPORTED_ACTIONS = ACTION_CONTROL_PLANE.oracleActions;
+const THROWING_ACTIONS = ACTION_CONTROL_PLANE.throwingActions.filter(
+  ({ action }) => action !== "null-eq-missing",
+);
 // Actions whose `== null` probe targets an attribute the oracle OMITS for NULL columns. Chroma
 // needs no representation option: it cannot index an explicit null distinguishably from a missing
 // key, so every null comparison operand is already rejected outright (#302).
-const NULL_REPRESENTATION_OMITTED = nullRepresentationThrows(
-  actionsFile,
-  ADAPTER,
+const NULL_REPRESENTATION_OMITTED = ACTION_CONTROL_PLANE.throwingActions.filter(
+  ({ action }) => action === "null-eq-missing",
 );
-const MANIFEST_ACTIONS = new Set([
-  ...actionsFile.conformance,
-  ...actionsFile.expectedUnsupported.map(({ action }) => action),
-  ...NULL_REPRESENTATION_OMITTED.map(([action]) => action),
-  ...CHROMA_DIVERGENCES,
-]);
-
-// -- the degeneracy guard (conformance/README.md, "The degeneracy guard") -----------------------
-//
-// Chroma's flat scalar metadata leaves it the narrowest oracle set of any adapter, so the guard
-// is derived from that set rather than shared with the relational harnesses: every entry below is
-// asserted to be in `CHROMA_SUPPORTED_ACTIONS` (cerbos/query-plan-adapters#324). This is every
-// action Chroma oracle-compares except `in-empty`, whose oracle is empty by CONSTRUCTION
-// (`x in []` is false for every seed) and so cannot satisfy a non-empty assertion.
-
-const DEGENERACY_GUARD_ACTIONS = [
-  "vf-le",
-  "vf-ge",
-  "vf-ne",
-  "nary-and",
-  "double-negation",
-  "triple-negation",
-  "cs-eq",
-  "empty-string-eq",
-  "unicode-eq",
-  "in-single",
-  "neg-number",
-  "p-struct",
-  "p-in-null-single",
-  "p-in-null-multi",
-  // The real to-one join (#375). Chroma translates 9 of the 15 — the positive scalar shapes over
-  // the flattened chain keys — so the guard names the ones it compares: a scalar leaf one hop out
-  // and the same two levels out. Its six negated, string-matching and composite siblings throw,
-  // and are liveness probes below.
-  "rel-eq-hop",
-  "rel-bool-hop2",
-  // The primary key as a filterable attribute (#376). Chroma translates exactly one of the six:
-  // the key against a literal, which is the only id-* shape that reduces to a bare metadata key
-  // on one side and a constant on the other. Its five siblings compare the key against a second
-  // key or wrap it in a computed operand, and are liveness probes below.
-  "id-eq-const",
-  // Root position and bare operand forms (#388). Chroma takes both scalar shapes: a bare
-  // metadata key under a negated ordering, and a bare boolean key as the whole condition. Its
-  // two collection-disjunction siblings throw and are liveness probes below.
-  "not-lt",
-  "root-bare-bool",
-  // Hazard classes the corpus missed (#387). Chroma takes the two scalar shapes: the De Morgan
-  // branch over a conjunction of metadata keys, and the BELOW-cliff unroll of a principal
-  // collection, which folds to a plain disjunction of equalities. Its eight collection-, cast-
-  // and pattern-carrying siblings throw and are liveness probes below.
-  "not-and",
-  "pv-exists-unrolled",
-] as const;
-
-/**
- * Shapes Chroma refuses to translate: they have no oracle comparison to guard, and stay here as
- * PDP/policy liveness probes for the groups Chroma's own list cannot cover — the collection
- * macros, the null-selecting directions, the chained relation (#309/#315/#316), the column
- * arithmetic (#311) and the numeric cast. See cerbos/query-plan-adapters#324.
- */
-const DEGENERACY_LIVENESS_PROBES = [
-  "pv-exists",
-  "null-eq",
-  // The explicit-null convention against a non-null operand (#308). Chroma refuses all five:
-  // metadata has no null value, so `owner` is stored as an ABSENT key for a NULL column and
-  // $ne/$nin match absent keys — the convention is not representable in this store at all.
-  // Kept as probes because the group has no compared member here.
-  "null-value-ne-const",
-  "null-value-not-eq-const",
-  "null-value-not-in-const",
-  "null-value-f2f",
-  "null-value-pv-not-exists",
-  "w1-all-chain",
-  // The chain reached through a ternary condition (#334) and through a fractional count
-  // threshold (#333): different rejection sites, both still fail-closed here.
-  "w1-ternary-chain-cond",
-  "w1-size-frac-le-chain",
-  "cr-div-neg-zero",
-  "cast-int-double",
-  // The real to-one join's fail-closed half (#375). rel-not-bool-hop is the load-bearing one:
-  // a missing metadata key MATCHES $ne, so lowering the negated hop is exactly the parentless
-  // over-grant, and Chroma refuses it rather than emitting it.
-  "rel-not-bool-hop",
-  "rel-ne-null-hop",
-  "rel-hop2-or-exists",
-  // Case sensitivity in string matching: Chroma has no pattern operator at all, so the
-  // comparison these probe is never built and the group has no compared member here.
-  "cs-contains",
-  // The id-* group's fail-closed half (#376), one per rejection site: a second metadata key on
-  // the value side, and a computed operand there. string() is the same computed-operand
-  // rejection reached through a cast, and has no compared member at all.
-  "id-f2f-ne",
-  "id-concat",
-  "cast-string-bool",
-  // A concatenation of two metadata fields is a computed operand, which Chroma has no form for.
-  "concat-f2f",
-  // The disjoined collection subquery (#388). Chroma's Where model has no nested-expression
-  // form, so the exists branch is refused and the whole disjunction with it — the group's only
-  // fail-closed member here, kept as a probe because the compared pair above cannot cover it.
-  "or-eq-exists",
-  // #387, one probe per group Chroma cannot compare: the negated LIKE (no pattern operator to
-  // negate), the modulo, the scalar-list index and the list equality over a projection (all
-  // computed operands), the mirrored hasIntersection (metadata values are scalars, so there is
-  // no list to intersect), and the unrolled all(), whose $ne chain would match every document
-  // missing the optional key — the same over-grant that refuses pv-all.
-  "not-contains",
-  "arith-mod",
-  "index-scalar-list",
-  "map-eq-list",
-  "vf-hasint",
-  "pv-all-unrolled",
-] as const;
 
 // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") --------
 //
@@ -503,36 +385,6 @@ function derivedFor(seed: Seed): DerivedEntry {
     throw new Error(`derived-fields.json has no entry for seed "${seed.id}"`);
   }
   return entry;
-}
-
-function doubleFor(seed: Seed): number | null {
-  return derivedFor(seed).aDouble;
-}
-
-/** Third-level label names. A null element is a NULL label name — a missing element attribute. */
-function labelsFor(seed: Seed): (string | null)[] {
-  return derivedFor(seed).labels;
-}
-
-/** Deterministic ISO instant per seed for the timestamp probe: split around 2025-01-01. */
-function isoFor(seed: Seed): string {
-  return derivedFor(seed).createdBy;
-}
-
-function timestampFor(seed: Seed): string | null {
-  return derivedFor(seed).createdAt;
-}
-
-function scopeFor(seed: Seed): string | null {
-  return derivedFor(seed).scope;
-}
-
-function tagAttribute(tag: Tag): Record<string, Value> {
-  const attr: Record<string, Value> = { id: tag.id };
-  if (tag.name !== null) {
-    attr["name"] = tag.name;
-  }
-  return attr;
 }
 
 // -- the real to-one relation (conformance/README.md, "The real to-one relation") ----------------
@@ -554,84 +406,6 @@ function parentSeedOf(seed: Seed | undefined): Seed | undefined {
     );
   }
   return parent;
-}
-
-/** The four scalars as check() attributes: a NULL column is a MISSING attribute, one hop out. */
-function relationAttr(seed: Seed): Record<string, Value> {
-  const attr: Record<string, Value> = {
-    aBool: seed.aBool,
-    aString: seed.aString,
-    aNumber: seed.aNumber,
-  };
-  if (seed.aOptionalString !== null) {
-    attr["aOptionalString"] = seed.aOptionalString;
-  }
-  return attr;
-}
-
-function checkResource(seed: Seed): Resource {
-  const attr: Record<string, Value> = {
-    aBool: seed.aBool,
-    aString: seed.aString,
-    aNumber: seed.aNumber,
-    createdBy: isoFor(seed),
-    owner: seed.aOptionalString,
-    // The explicit-null alias of the `scope` field, the second half of `null-value-f2f`:
-    // `scope` itself is omitted when NULL (below), so the corpus carries the same field under
-    // both conventions and the field-to-field probe has two explicit nulls to compare.
-    coOwner: scopeFor(seed),
-    tagNames: seed.tags.map((tag) => tag.name),
-    obj: { inner: seed.aString },
-    tags: seed.tags.map(tagAttribute),
-    categories: seed.subCategoryNames.map((subCategoryName) => ({
-      name: "business",
-      subCategories: [
-        {
-          name: subCategoryName,
-          labels: labelsFor(seed).map((name): Record<string, Value> =>
-            name === null ? {} : { name },
-          ),
-        },
-      ],
-    })),
-  };
-
-  if (seed.aOptionalString !== null) {
-    attr["aOptionalString"] = seed.aOptionalString;
-  }
-  const aDouble = doubleFor(seed);
-  if (aDouble !== null) {
-    attr["aDouble"] = aDouble;
-  }
-  const scope = scopeFor(seed);
-  if (scope !== null) {
-    attr["scope"] = scope;
-  }
-  const createdAt = timestampFor(seed);
-  if (createdAt !== null) {
-    attr["createdAt"] = createdAt;
-  }
-  if (seed.subCategoryNames.length > 0) {
-    attr["mainCategory"] = {
-      name: "business",
-      subCategories: seed.subCategoryNames.map((name) => ({ name })),
-      subNames: seed.subCategoryNames,
-    };
-  }
-  // The real to-one chain, mirroring the flattened metadata keys exactly. A row with no parent
-  // sends NO `parent` attribute — a CEL missing-path error (deny) — matching the metadata
-  // carrying no `parent.*` key; the same holds one level down for `parent.inner`.
-  const parentSeed = parentSeedOf(seed);
-  if (parentSeed !== undefined) {
-    const parentAttr = relationAttr(parentSeed);
-    const innerSeed = parentSeedOf(parentSeed);
-    if (innerSeed !== undefined) {
-      parentAttr["inner"] = relationAttr(innerSeed);
-    }
-    attr["parent"] = parentAttr;
-  }
-
-  return { kind: seedsFile.resourceKind, id: seed.id, attr };
 }
 
 function metadataFor(seed: Seed): Metadata {
@@ -699,7 +473,7 @@ afterAll(async () => {
 
 async function planFor(action: string) {
   return cerbos.planResources({
-    principal: seedsFile.principal,
+    principal: CHECK_RESOURCES.principal,
     resource: { kind: seedsFile.resourceKind },
     action,
   });
@@ -707,27 +481,50 @@ async function planFor(action: string) {
 
 async function oracleAllowedIds(action: string): Promise<string[]> {
   const ids: string[] = [];
-  for (const seed of SEEDS) {
+  for (const resource of CHECK_RESOURCES.resources) {
     const result = await cerbos.checkResource({
-      principal: seedsFile.principal,
-      resource: checkResource(seed),
+      principal: CHECK_RESOURCES.principal,
+      resource,
       actions: [action],
     });
     if (result.isAllowed(action)) {
-      ids.push(seed.id);
+      ids.push(resource.id);
     }
   }
   return ids.sort();
 }
 
-/** The degeneracy guard's per-action assertion, labelled so a failure names the action. */
-async function expectNonDegenerateOracle(action: string): Promise<void> {
+async function expectCatalogOracle(action: string): Promise<string[]> {
   const ids = await oracleAllowedIds(action);
-  expect({
-    action,
-    nonEmpty: ids.length > 0,
-    nonTotal: ids.length < SEEDS.length,
-  }).toEqual({ action, nonEmpty: true, nonTotal: true });
+  const expectation = ACTION_CONTROL_PLANE.oracleExpectations.get(action);
+  if (expectation === undefined)
+    throw new Error(`catalog has no action ${action}`);
+  switch (expectation.kind) {
+    case "empty":
+      expect({ action, cardinality: ids.length }).toEqual({
+        action,
+        cardinality: 0,
+      });
+      break;
+    case "total":
+      expect({ action, cardinality: ids.length }).toEqual({
+        action,
+        cardinality: CHECK_RESOURCES.resources.length,
+      });
+      break;
+    case "proper-subset":
+      expect({
+        action,
+        nonEmpty: ids.length > 0,
+        nonTotal: ids.length < CHECK_RESOURCES.resources.length,
+      }).toEqual({ action, nonEmpty: true, nonTotal: true });
+      break;
+    default: {
+      const exhaustive: never = expectation;
+      throw exhaustive;
+    }
+  }
+  return ids;
 }
 
 async function adapterFilteredIds(action: string): Promise<string[]> {
@@ -742,56 +539,30 @@ async function adapterFilteredIds(action: string): Promise<string[]> {
   const results = await activeCollection().query({
     queryEmbeddings: [BASE_EMBEDDING],
     where:
-      translated.kind === PlanKind.CONDITIONAL
-        ? translated.filters
-        : undefined,
+      translated.kind === PlanKind.CONDITIONAL ? translated.filters : undefined,
     nResults: SEEDS.length,
   });
   return [...(results.ids[0] ?? [])].sort();
 }
 
 describe("adversarial conformance corpus", () => {
-
-  // Adding a throwing action without pinning its message must fail this harness rather than
-  // silently degrade the throw suite to a bare "it threw" (cerbos/query-plan-adapters#326).
-  test("a throwing action with no pinned message fails classification", () => {
-    expect(() => requireMessage("synthetic-entry", undefined)).toThrow(
-      /pins no throw message/,
+  test("adapterctl selection is internally consistent", () => {
+    if (FULL_MATRIX) {
+      expect([...ACTION_CONTROL_PLANE.outcomes.keys()].sort()).toEqual(
+        ACTION_CONTROL_PLANE.allActions,
+      );
+      expect(ACTION_CONTROL_PLANE.unassessedActions).toEqual([]);
+    }
+    expect(ACTION_CONTROL_PLANE.selectedActions).toHaveLength(
+      FULL_MATRIX ? ACTION_CONTROL_PLANE.allActions.length : 1,
     );
-    expect(() => requireMessage("synthetic-entry", "")).toThrow(
-      /pins no throw message/,
-    );
-  });
-  test("manifest assigns all 199 policy actions exactly one Chroma outcome", () => {
-    const oracle = new Set(CHROMA_SUPPORTED_ACTIONS);
-    const throwing = new Set(THROWING_ACTIONS.map(([action]) => action));
-    const nullOmitted = new Set(
-      NULL_REPRESENTATION_OMITTED.map(([action]) => action),
-    );
-    const misclassified = [...MANIFEST_ACTIONS].filter((action) => {
-      const classificationCount = [
-        oracle.has(action),
-        throwing.has(action),
-        nullOmitted.has(action),
-        CHROMA_DIVERGENCES.has(action),
-      ].filter(Boolean).length;
-      return classificationCount !== 1;
-    });
-
-    expect(MANIFEST_ACTIONS.size).toBe(199);
-    expect(CHROMA_SUPPORTED_ACTIONS).toHaveLength(34);
-    expect(oracle.size).toBe(CHROMA_SUPPORTED_ACTIONS.length);
-    expect(CHROMA_UNSUPPORTED).toHaveLength(153);
-    expect(CHROMA_SUPPORTED_EXPECTED).toHaveLength(0);
-    expect(THROWING_ACTIONS).toHaveLength(163);
-    expect(misclassified).toEqual([]);
   });
 
   test.each(CHROMA_SUPPORTED_ACTIONS)(
     "%s matches the check() oracle",
     async (action) => {
       const [oracle, filtered] = await Promise.all([
-        oracleAllowedIds(action),
+        expectCatalogOracle(action),
         adapterFilteredIds(action),
       ]);
       expect(filtered).toEqual(oracle);
@@ -802,8 +573,9 @@ describe("adversarial conformance corpus", () => {
   // typo or an unrelated validation, which would leave the classification resting on a failure
   // that has nothing to do with the limitation it declares (cerbos/query-plan-adapters#326).
   test.each(THROWING_ACTIONS)(
-    "%s fails during translation with the declared message (%s)",
-    async (action, _reason, message) => {
+    "$action fails during translation with the declared message ($reason)",
+    async ({ action, message }) => {
+      await expectCatalogOracle(action);
       const queryPlan = await planFor(action);
       expect(() =>
         queryPlanToChromaDB({
@@ -816,41 +588,42 @@ describe("adversarial conformance corpus", () => {
 
   // #387. `filter-as-conjunct` puts a filter() one level below the root, where the guard that
   // refuses `filter-as-condition` does not look. Its oracle is empty BY CONSTRUCTION — check()
-  // cannot evaluate a non-boolean conjunction — so it belongs to neither degeneracy-guard list,
+  // cannot evaluate a non-boolean conjunction — so the catalog marks its oracle as empty,
   // and a bare "it throws" would say nothing about whether refusing it is REQUIRED.
   //
   // This is that argument. The other conjunct is `R.attr.aBool`, which Chroma certainly can
   // express and which `root-bare-bool` spells on its own; an adapter that dropped the conjunct it
   // could not translate would emit exactly that filter and return every document it selects, all
   // of which the PDP denies for this action.
-  test("filter-as-conjunct must be refused: dropping its untranslatable half over-grants", async () => {
-    expect(await oracleAllowedIds("filter-as-conjunct")).toEqual([]);
+  fullMatrixTest(
+    "filter-as-conjunct must be refused: dropping its untranslatable half over-grants",
+    async () => {
+      await expectCatalogOracle("filter-as-conjunct");
+      await expectCatalogOracle("root-bare-bool");
 
-    const survivingHalf = await adapterFilteredIds("root-bare-bool");
-    expect(survivingHalf.length).toBeGreaterThan(0);
-    expect(survivingHalf.length).toBeLessThan(SEEDS.length);
-
-    const entry = THROWING_ACTIONS.find(
-      ([action]) => action === "filter-as-conjunct",
-    );
-    expect(entry).toBeDefined();
-    const queryPlan = await planFor("filter-as-conjunct");
-    expect(() =>
-      queryPlanToChromaDB({ queryPlan, fieldNameMapper: FIELD_NAME_MAPPER }),
-    ).toThrow(entry?.[2]);
-  });
+      const entry = THROWING_ACTIONS.find(
+        ({ action }) => action === "filter-as-conjunct",
+      );
+      expect(entry).toBeDefined();
+      const queryPlan = await planFor("filter-as-conjunct");
+      expect(() =>
+        queryPlanToChromaDB({ queryPlan, fieldNameMapper: FIELD_NAME_MAPPER }),
+      ).toThrow(entry?.message);
+    },
+  );
 
   // #302. Chroma is one of two adapters that need no `nullAttributeRepresentation` option: its
   // metadata filters accept only finite numbers, strings and booleans, so a null comparison
   // operand is rejected before the representation could matter. `null-eq` (explicit null) is
-  // already in `adapterUnsupported` for the same reason, and `null-eq-missing` must fail the same
+  // already has a `rejected` direct outcome for the same reason, and `null-eq-missing` must fail
+  // the same
   // way. This test guards that equivalence: if Chroma ever gains a null sentinel, the shape stops
   // throwing here and the adapter acquires a representation dependency it must then declare.
 
   test.each(NULL_REPRESENTATION_OMITTED)(
-    "%s is rejected regardless of representation (%s)",
-    async (action, _reason, message) => {
-      expect(await oracleAllowedIds(action)).toEqual([]);
+    "$action is rejected regardless of representation ($reason)",
+    async ({ action, message }) => {
+      await expectCatalogOracle(action);
 
       const queryPlan = await planFor(action);
       expect(() =>
@@ -862,18 +635,17 @@ describe("adversarial conformance corpus", () => {
     },
   );
 
-  test("pins the upstream has() planner over-grant", async () => {
-    const action = "p-has";
-    const queryPlan = await planFor(action);
-    const oracle = await oracleAllowedIds(action);
-    const allIds = SEEDS.map(({ id }) => id).sort();
+  test.each(ACTION_CONTROL_PLANE.upstreamBlockedActions)(
+    "$action pins the upstream planner divergence ($reason)",
+    async ({ action }) => {
+      const queryPlan = await planFor(action);
+      await expectCatalogOracle(action);
+      const allIds = CHECK_RESOURCES.resources.map(({ id }) => id).sort();
 
-    expect(CHROMA_DIVERGENCES.has(action)).toBe(true);
-    expect(queryPlan.kind).toBe(PlanKind.ALWAYS_ALLOWED);
-    expect(oracle.length).toBeGreaterThan(0);
-    expect(oracle.length).toBeLessThan(allIds.length);
-    expect(await adapterFilteredIds(action)).toEqual(allIds);
-  });
+      expect(queryPlan.kind).toBe(PlanKind.ALWAYS_ALLOWED);
+      expect(await adapterFilteredIds(action)).toEqual(allIds);
+    },
+  );
 
   // The to-one relation carries no corpus action yet — this is the expand half of
   // cerbos/query-plan-adapters#372's expand–contract — so nothing else in this file would notice a
@@ -918,23 +690,5 @@ describe("adversarial conformance corpus", () => {
         ]),
       ),
     );
-  });
-
-  test("oracle is not degenerate", async () => {
-    // Guard the guard: each of these actions must produce a non-empty, non-total oracle set,
-    // otherwise the differential comparison could pass vacuously (e.g. PDP denying all). The
-    // membership assertion is what keeps the list honest — Chroma compares 34 of the corpus's
-    // 187 conformance actions, so a guard list shared with a relational harness would name
-    // shapes it never compares (cerbos/query-plan-adapters#324).
-    for (const action of DEGENERACY_GUARD_ACTIONS) {
-      expect(CHROMA_SUPPORTED_ACTIONS).toContain(action);
-      await expectNonDegenerateOracle(action);
-    }
-    // Asserting the complement keeps the split honest — an action Chroma gains support for must
-    // move up into the guard proper.
-    for (const action of DEGENERACY_LIVENESS_PROBES) {
-      expect(CHROMA_SUPPORTED_ACTIONS).not.toContain(action);
-      await expectNonDegenerateOracle(action);
-    }
   });
 });

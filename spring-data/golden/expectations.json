@@ -741,7 +741,7 @@
       }
     },
     "p-has": {
-      "note": "The corpus's one knownDivergences entry: the planner folds `has()` on a missing attribute to ALWAYS_ALLOWED while check() denies those rows. The adapter translates that faithfully — Specification.unrestricted(), so no WHERE clause at all. The null here is the fold, not a translation that stopped emitting a filter.",
+      "note": "The corpus's one `upstream-blocked` outcome: the planner folds `has()` on a missing attribute to ALWAYS_ALLOWED while check() denies those rows. The adapter translates that faithfully — Specification.unrestricted(), so no WHERE clause at all. The null here is the fold, not a translation that stopped emitting a filter.",
       "where": {
         "h2": null,
         "postgresql": null,

@@ -42,6 +42,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * Differential suite over the shared hostile corpus. A real, pinned PDP supplies both the query
@@ -98,39 +99,11 @@ class ElasticsearchAdversarialConformanceTest {
     private record DerivedFile(@JsonProperty("$schema") String schema, String description,
                                List<String> fields, Map<String, DerivedEntry> derived) {}
 
-    /**
-     * An {@code expectedUnsupported} entry. {@code messages} carries one entry per adapter that
-     * must reject the shape, keyed by adapter name; {@code validate-corpus.sh} asserts that key
-     * set is exactly the roster minus the adapters that promoted the shape.
-     */
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    private record UnsupportedShape(String action, Map<String, String> messages) {}
-
-    /**
-     * An {@code adapterUnsupported} / {@code adapterSupportedExpected} entry. {@code message} is
-     * the substring this adapter's error must contain — present on the first, absent on the
-     * second, which does not throw.
-     */
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    private record AdapterOutcome(String action, String reason, String message,
-                                 Map<String, String> messages) {}
-
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    private record KnownDivergence(String action, List<String> adapters) {}
-
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    private record ActionsFile(List<String> conformance,
-                               Map<String, List<AdapterOutcome>> adapterUnsupported,
-                               Map<String, List<AdapterOutcome>> adapterSupportedExpected,
-                               List<UnsupportedShape> expectedUnsupported,
-                               List<AdapterOutcome> nullRepresentationOmitted,
-                               List<KnownDivergence> knownDivergences) {}
-
     // -- corpus coverage guards -----------------------------------------------------------------
     //
     // The same parsed seed feeds the indexed document AND the check() oracle, so a corpus field
     // this harness does not consume is dropped from both sides at once and the differential agrees
-    // for the wrong reason — the projection trap conformance/README.md describes for actions.json,
+    // for the wrong reason — the projection trap conformance/README.md describes for adapterctl.json,
     // applied to the seeds. Asserting set equality catches both directions: a corpus key nothing
     // here reads, and a key this harness reads that the corpus no longer carries.
 
@@ -174,14 +147,15 @@ class ElasticsearchAdversarialConformanceTest {
     private static final String ADAPTER = "elasticsearch-java";
 
     private static SeedsFile seedsFile;
-    private static ActionsFile actionsFile;
+    private static Corpus.ControlPlane actionsFile;
+    private static Corpus.CheckResourcesFile checkResources;
     private static DerivedFile derivedFile;
     private static List<Seed> seeds;
     private static List<String> oracleActions;
     private static List<String> throwingActions;
     private static Map<String, String> throwingMessages;
-    private static List<String> nullRepresentationOmittedActions;
-    private static Map<String, String> nullRepresentationOmittedMessages;
+    private static List<String> representationDependentRejectionActions;
+    private static Map<String, String> representationDependentRejectionMessages;
 
     /**
      * The substring this adapter's error must contain, or a loud failure. The message is what
@@ -189,14 +163,6 @@ class ElasticsearchAdversarialConformanceTest {
      * unrelated validation satisfies the throw suite just as well as the documented limitation
      * (cerbos/query-plan-adapters#326).
      */
-    private static String requireMessage(String label, String message) {
-        if (message == null || message.isEmpty()) {
-            throw new IllegalStateException("actions.json pins no throw message for " + label
-                    + ": the throw suite would accept a failure for any reason");
-        }
-        return message;
-    }
-
     private static GenericContainer<?> cerbos;
     private static ElasticsearchContainer elasticsearch;
     private static CerbosBlockingClient client;
@@ -210,19 +176,28 @@ class ElasticsearchAdversarialConformanceTest {
         return throwingActions.stream();
     }
 
-    static Stream<String> nullRepresentationOmittedActions() {
-        return nullRepresentationOmittedActions.stream();
+    static Stream<String> representationDependentRejectionActions() {
+        return representationDependentRejectionActions.stream();
     }
 
     @BeforeAll
     static void setUp() throws Exception {
         Path conformance = conformanceDir();
         seedsFile = MAPPER.readValue(conformance.resolve("seeds.json").toFile(), SeedsFile.class);
-        actionsFile = MAPPER.readValue(conformance.resolve("actions.json").toFile(), ActionsFile.class);
+        actionsFile = Corpus.actionsFile();
+        checkResources = Corpus.checkResourcesFile();
         derivedFile = MAPPER.readValue(
                 conformance.resolve("derived-fields.json").toFile(), DerivedFile.class);
         seeds = seedsFile.seeds();
         assertCorpusCoverage(conformance);
+        Set<String> seedIds = new TreeSet<>(seeds.stream().map(Seed::id).toList());
+        Set<String> checkResourceIds = new TreeSet<>(checkResources.resources().stream()
+                .map(Corpus.CheckResource::id).toList());
+        assertEquals(seedIds, checkResourceIds,
+                "canonical check resources must cover every seed exactly once");
+        assertEquals(seedsFile.principal().id(), checkResources.principal().id());
+        assertEquals(seedsFile.principal().roles(), checkResources.principal().roles());
+        assertEquals(seedsFile.principal().attr(), checkResources.principal().attr());
         classifyActions();
 
         cerbos = new GenericContainer<>(CerbosTestImage.IMAGE)
@@ -252,86 +227,42 @@ class ElasticsearchAdversarialConformanceTest {
     }
 
     private static void classifyActions() {
-        Set<String> conformance = Set.copyOf(actionsFile.conformance());
-        Set<String> expected = actionsFile.expectedUnsupported().stream()
-                .map(UnsupportedShape::action).collect(java.util.stream.Collectors.toSet());
-        Set<String> unsupported = actionsFile.adapterUnsupported()
-                .getOrDefault(ADAPTER, List.of()).stream()
-                .map(AdapterOutcome::action).collect(java.util.stream.Collectors.toSet());
-        Set<String> supportedExpected = actionsFile.adapterSupportedExpected()
-                .getOrDefault(ADAPTER, List.of()).stream()
-                .map(AdapterOutcome::action).collect(java.util.stream.Collectors.toSet());
-        Set<String> divergences = actionsFile.knownDivergences().stream()
-                .filter(divergence -> divergence.adapters().contains(ADAPTER))
-                .map(KnownDivergence::action).collect(java.util.stream.Collectors.toSet());
+        Set<String> divergences = actionsFile.skippedDivergences(ADAPTER);
         // Actions whose `== null` probe targets an attribute the oracle OMITS for NULL columns.
         // Elasticsearch needs no representation option — it cannot index an explicit null
         // distinguishably from a missing field, so every null-SELECTING direction already fails
         // closed — but the action still has to be classified somewhere (#302).
         // Every adapter must reject these, so the message map names the whole roster and this
         // harness resolves its own entry exactly as it does for a throwing action.
-        nullRepresentationOmittedActions = actionsFile.nullRepresentationOmitted().stream()
-                .map(AdapterOutcome::action).sorted().toList();
+        List<Corpus.RepresentationDependentRejection> nullProbes =
+                Corpus.representationDependentRejections(actionsFile);
+        representationDependentRejectionActions = nullProbes.stream()
+                .map(Corpus.RepresentationDependentRejection::action).sorted().toList();
         Map<String, String> nullMessages = new LinkedHashMap<>();
-        actionsFile.nullRepresentationOmitted().forEach(outcome ->
-                nullMessages.put(outcome.action(), requireMessage(
-                        "nullRepresentationOmitted." + outcome.action() + ".messages." + ADAPTER,
-                        outcome.messages() == null ? null : outcome.messages().get(ADAPTER))));
-        nullRepresentationOmittedMessages = Map.copyOf(nullMessages);
+        nullProbes.forEach(outcome -> nullMessages.put(outcome.action(), outcome.message()));
+        representationDependentRejectionMessages = Map.copyOf(nullMessages);
 
-        assertTrue(conformance.containsAll(unsupported),
-                "adapterUnsupported.elasticsearch-java contains non-conformance actions");
-        assertTrue(expected.containsAll(supportedExpected),
-                "adapterSupportedExpected.elasticsearch-java contains non-expected actions");
-        assertEquals(103, unsupported.size(),
-                "Elasticsearch unsupported coverage changed without updating the ledger assertion");
-        assertEquals(2, supportedExpected.size(),
-                "Elasticsearch supported-expected coverage changed without updating the ledger assertion");
-        assertEquals(Set.of("p-has"), divergences,
-                "Elasticsearch planner divergences changed without updating the tripwire");
-
-        TreeSet<String> oracle = new TreeSet<>(conformance);
-        oracle.removeAll(unsupported);
-        oracle.addAll(supportedExpected);
-        oracleActions = List.copyOf(oracle);
+        oracleActions = Corpus.oracleActions(actionsFile, ADAPTER).sorted().toList();
 
         // The substring each throwing action's error must contain, resolved once here so a
         // classification with no pinned message fails the whole suite rather than degrading its
         // case to a bare "it threw" (cerbos/query-plan-adapters#326).
         Map<String, String> messages = new LinkedHashMap<>();
-        actionsFile.adapterUnsupported().getOrDefault(ADAPTER, List.of()).forEach(outcome ->
-                messages.put(outcome.action(), requireMessage(
-                        "adapterUnsupported." + ADAPTER + "." + outcome.action(),
-                        outcome.message())));
-        actionsFile.expectedUnsupported().stream()
-                .filter(shape -> !supportedExpected.contains(shape.action()))
-                .forEach(shape -> messages.put(shape.action(), requireMessage(
-                        "expectedUnsupported." + shape.action() + ".messages." + ADAPTER,
-                        shape.messages() == null ? null : shape.messages().get(ADAPTER))));
+        Corpus.rejectedOutcomes(actionsFile).forEach(outcome ->
+                messages.put(outcome.action(), outcome.message()));
         throwingMessages = Map.copyOf(messages);
 
-        TreeSet<String> throwing = new TreeSet<>(unsupported);
-        throwing.addAll(expected);
-        throwing.removeAll(supportedExpected);
-        throwingActions = List.copyOf(throwing);
-        assertEquals(throwing, throwingMessages.keySet(),
+        throwingActions = List.copyOf(messages.keySet());
+        assertEquals(new TreeSet<>(throwingActions), new TreeSet<>(throwingMessages.keySet()),
                 "every throwing action must pin the message that names its mechanism");
 
         Set<String> classified = new LinkedHashSet<>();
         classified.addAll(oracleActions);
         classified.addAll(throwingActions);
-        classified.addAll(nullRepresentationOmittedActions);
+        classified.addAll(representationDependentRejectionActions);
         classified.addAll(divergences);
-        Set<String> manifest = new LinkedHashSet<>();
-        manifest.addAll(conformance);
-        manifest.addAll(expected);
-        manifest.addAll(nullRepresentationOmittedActions);
-        manifest.addAll(divergences);
-        assertEquals(86, oracleActions.size());
-        assertEquals(111, throwingActions.size());
-        assertEquals(1, nullRepresentationOmittedActions.size());
-        assertEquals(199, classified.size());
-        assertEquals(manifest, classified, "every manifest action must be classified locally");
+        assertEquals(actionsFile.manifestActions(), classified,
+                "every manifest action must be classified locally");
     }
 
     @AfterAll
@@ -471,7 +402,7 @@ class ElasticsearchAdversarialConformanceTest {
     }
 
     private static Principal principal() {
-        PrincipalSpec spec = seedsFile.principal();
+        Corpus.CheckPrincipal spec = checkResources.principal();
         Principal principal = Principal.newInstance(spec.id(), spec.roles().toArray(String[]::new));
         for (Map.Entry<String, Object> entry : spec.attr().entrySet()) {
             principal = principal.withAttribute(entry.getKey(),
@@ -540,70 +471,53 @@ class ElasticsearchAdversarialConformanceTest {
         return level;
     }
 
-    private static Resource checkResource(Seed seed) {
-        Resource resource = Resource.newInstance(seedsFile.resourceKind(), seed.id())
-                .withAttribute("aBool", AttributeValue.boolValue(seed.aBool()))
-                .withAttribute("aString", AttributeValue.stringValue(seed.aString()))
-                .withAttribute("aNumber", AttributeValue.doubleValue(seed.aNumber()))
-                .withAttribute("createdBy", AttributeValue.stringValue(isoFor(seed)))
-                .withAttribute("obj", AttributeValue.mapValue(Map.of(
-                        "inner", AttributeValue.stringValue(seed.aString()))))
-                .withAttribute("tags", AttributeValue.listValue(seed.tags().stream()
-                        .map(ElasticsearchAdversarialConformanceTest::tagAttribute).toList()))
-                .withAttribute("categories", AttributeValue.listValue(seed.subCategoryNames().stream()
-                        .map(name -> AttributeValue.mapValue(Map.of(
-                                "name", AttributeValue.stringValue("business"),
-                                "subCategories", AttributeValue.listValue(AttributeValue.mapValue(Map.of(
-                                        "name", AttributeValue.stringValue(name),
-                                        "labels", AttributeValue.listValue(labelsFor(seed).stream()
-                                                .map(ElasticsearchAdversarialConformanceTest::labelAttribute)
-                                                .toList())))))))
-                        .toList()));
-        if (seed.aOptionalString() != null) {
-            resource = resource.withAttribute("aOptionalString",
-                    AttributeValue.stringValue(seed.aOptionalString()));
-        }
-        resource = resource.withAttribute("owner", seed.aOptionalString() == null
-                ? nullAttributeValue() : AttributeValue.stringValue(seed.aOptionalString()));
-        // The explicit-null alias of the `scope` field, the second half of `null-value-f2f`.
-        resource = resource.withAttribute("coOwner", scopeFor(seed) == null
-                ? nullAttributeValue() : AttributeValue.stringValue(scopeFor(seed)));
-        resource = resource.withAttribute("tagNames", AttributeValue.listValue(seed.tags().stream()
-                .map(tag -> tag.name() == null
-                        ? nullAttributeValue() : AttributeValue.stringValue(tag.name()))
-                .toList()));
-        if (doubleFor(seed) != null) {
-            resource = resource.withAttribute("aDouble", AttributeValue.doubleValue(doubleFor(seed)));
-        }
-        if (scopeFor(seed) != null) {
-            resource = resource.withAttribute("scope", AttributeValue.stringValue(scopeFor(seed)));
-        }
-        if (timestampFor(seed) != null) {
-            resource = resource.withAttribute("createdAt",
-                    AttributeValue.stringValue(timestampFor(seed).toString()));
-        }
-        if (!seed.subCategoryNames().isEmpty()) {
-            resource = resource.withAttribute("mainCategory", AttributeValue.mapValue(Map.of(
-                    "name", AttributeValue.stringValue("business"),
-                    "subCategories", AttributeValue.listValue(seed.subCategoryNames().stream()
-                            .map(name -> AttributeValue.mapValue(Map.of(
-                                    "name", AttributeValue.stringValue(name)))).toList()),
-                    "subNames", AttributeValue.listValue(seed.subCategoryNames().stream()
-                            .map(AttributeValue::stringValue).toList()))));
-        }
-        // The real to-one chain, mirroring the indexed document exactly. A row with no parent
-        // sends NO `parent` attribute — a CEL missing-path error (deny) — matching a document with
-        // no `parent` field; the same holds one level down for `parent.inner`.
-        Seed parentSeed = parentSeedOf(seed);
-        if (parentSeed != null) {
-            Map<String, AttributeValue> parent = relationAttribute(parentSeed);
-            Seed innerSeed = parentSeedOf(parentSeed);
-            if (innerSeed != null) {
-                parent.put("inner", AttributeValue.mapValue(relationAttribute(innerSeed)));
-            }
-            resource = resource.withAttribute("parent", AttributeValue.mapValue(parent));
+    private static Resource checkResource(Corpus.CheckResource input) {
+        Resource resource = Resource.newInstance(input.kind(), input.id());
+        for (Map.Entry<String, Object> attribute : input.attr().entrySet()) {
+            resource = resource.withAttribute(
+                    attribute.getKey(), resourceAttribute(attribute.getKey(), attribute.getValue()));
         }
         return resource;
+    }
+
+    /** Convert one canonical check-resource attribute without narrowing its JSON shape. */
+    private static AttributeValue resourceAttribute(String path, Object value) {
+        if (value == null) return nullAttributeValue();
+        if (value instanceof Boolean b) return AttributeValue.boolValue(b);
+        if (value instanceof Number n) return AttributeValue.doubleValue(n.doubleValue());
+        if (value instanceof String s) return AttributeValue.stringValue(s);
+        if (value instanceof List<?> list) {
+            return AttributeValue.listValue(list.stream()
+                    .map(element -> resourceAttribute(path, element))
+                    .toList());
+        }
+        if (value instanceof Map<?, ?> map) {
+            Map<String, AttributeValue> attributes = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                if (!(entry.getKey() instanceof String key)) {
+                    throw new IllegalStateException(
+                            "check-resources.json " + path + " has a non-string object key");
+                }
+                attributes.put(key, resourceAttribute(path + "." + key, entry.getValue()));
+            }
+            return AttributeValue.mapValue(attributes);
+        }
+        throw new IllegalStateException(
+                "check-resources.json " + path + " has unsupported JSON value "
+                        + value.getClass().getName());
+    }
+
+    @Test
+    void canonicalCheckResourceConverterHandlesEveryJsonValueShape() {
+        Map<String, Object> nested = new LinkedHashMap<>();
+        nested.put("null", null);
+        nested.put("boolean", true);
+        nested.put("number", 1.5);
+        nested.put("string", "value");
+        nested.put("list", List.of("value", 2, false));
+        nested.put("map", Map.of("child", "value"));
+
+        assertNotNull(resourceAttribute("resource", nested));
     }
 
     private static AttributeValue tagAttribute(Tag tag) {
@@ -631,9 +545,10 @@ class ElasticsearchAdversarialConformanceTest {
     }
 
     private static List<String> oracleAllowedIds(String action) {
-        return seeds.stream()
-                .filter(seed -> client.check(principal(), checkResource(seed), action).isAllowed(action))
-                .map(Seed::id).sorted().toList();
+        return checkResources.resources().stream()
+                .filter(resource -> client.check(
+                        principal(), checkResource(resource), action).isAllowed(action))
+                .map(Corpus.CheckResource::id).sorted().toList();
     }
 
     private static List<String> adapterFilteredIds(String action) throws Exception {
@@ -673,10 +588,10 @@ class ElasticsearchAdversarialConformanceTest {
                 "unsupported action must fail during translation: " + action);
         // The corpus pins the exact mechanism, which subsumes the old "Unknown attribute" guard:
         // an unmapped Corpus.FIELD_MAP entry (which once let six actions throw here while never
-        // reaching the mechanism their actions.json reasons claim) now fails this assertion with
+        // reaching the mechanism their adapterctl.json reasons claim) now fails this assertion with
         // every other wrong-reason rejection (cerbos/query-plan-adapters#326).
         assertTrue(ex.getMessage().contains(throwingMessages.get(action)),
-                "action '" + action + "' was rejected for a reason actions.json does not declare: "
+                "action '" + action + "' was rejected for a reason adapterctl.json does not declare: "
                         + ex.getMessage());
     }
 
@@ -685,18 +600,18 @@ class ElasticsearchAdversarialConformanceTest {
      * cannot index an explicit null distinguishably from a missing field, so every shape that
      * would SELECT null documents already fails closed and only the {@code exists}-shaped
      * directions translate. {@code null-eq} (explicit null) is already in
-     * {@code adapterUnsupported} for that reason; {@code null-eq-missing} must fail the same way.
+     * {@code rejected} for that reason; {@code null-eq-missing} must fail the same way.
      * If Elasticsearch ever gains a null sentinel, this stops throwing and the adapter acquires a
      * representation dependency it must then declare.
      */
     @ParameterizedTest(name = "{0}")
-    @MethodSource("nullRepresentationOmittedActions")
-    void nullRepresentationOmittedIsRejectedRegardless(String action) throws Exception {
+    @MethodSource("representationDependentRejectionActions")
+    void representationDependentRejectionIsRejectedRegardless(String action) throws Exception {
         assertEquals(List.of(), oracleAllowedIds(action),
                 "the omitted representation must deny every seed for " + action);
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
                 () -> adapterFilteredIds(action));
-        assertTrue(ex.getMessage().contains(nullRepresentationOmittedMessages.get(action)),
+        assertTrue(ex.getMessage().contains(representationDependentRejectionMessages.get(action)),
                 ex.getMessage());
     }
 
@@ -714,6 +629,7 @@ class ElasticsearchAdversarialConformanceTest {
      */
     @Test
     void filterAsConjunctMustBeRefusedBecauseDroppingItsUntranslatableHalfOverGrants() throws Exception {
+        assumeTrue(actionsFile.selected("filter-as-conjunct"));
         assertEquals(List.of(), oracleAllowedIds("filter-as-conjunct"),
                 "check() must deny every seed: a filter() in boolean position is not evaluable");
 
@@ -735,13 +651,14 @@ class ElasticsearchAdversarialConformanceTest {
     void throwingActionWithNoPinnedMessageFailsClassification() {
         for (String absent : new String[] {null, ""}) {
             IllegalStateException ex = assertThrows(IllegalStateException.class,
-                    () -> requireMessage("synthetic-entry", absent));
+                    () -> Corpus.requireMessage("synthetic-entry", absent));
             assertTrue(ex.getMessage().contains("pins no throw message"), ex.getMessage());
         }
     }
 
     @Test
     void upstreamHasFoldOverGrantTripwire() throws Exception {
+        assumeTrue(actionsFile.selected("p-has"));
         PlanResourcesResult plan = client.plan(
                 principal(), Resource.newInstance(seedsFile.resourceKind()), "p-has");
         List<String> oracle = oracleAllowedIds("p-has");
@@ -754,118 +671,22 @@ class ElasticsearchAdversarialConformanceTest {
         assertEquals(allIds(), adapterFilteredIds("p-has"));
     }
 
-    /**
-     * A representative sample of the actions this adapter ORACLE-COMPARES, one per hostile group
-     * it can express. Asserted against {@code oracleActions} so moving one into
-     * {@code adapterUnsupported} fails here rather than silently going inert
-     * (cerbos/query-plan-adapters#324).
-     */
-    private static final List<String> DEGENERACY_GUARD_ACTIONS = List.of(
-            "vf-le", "like-percent", "pv-exists", "pv-all", "null-ne",
-            // The chained relation (#309): the shapes Elasticsearch's nested queries express.
-            "w1-exists-chain",
-            // The real to-one join (#375). Indexed as plain objects rather than `nested`, so an
-            // absent level is simply a missing field — already the CEL missing-attribute case,
-            // which is why all fifteen translate here. One per hazard.
-            "rel-not-bool-hop", "rel-ne-null-hop", "rel-bool-hop2",
-            "rel-hop-and-root", "rel-hop2-or-exists",
-            // Case sensitivity in STRING MATCHING, a different mechanism from cs-eq.
-            "cs-contains",
-            // The primary key as a filterable attribute (#376). Exactly one of the six translates:
-            // the key against a literal, which is an ordinary term query once the corpus id is
-            // indexed as a field rather than left as `_id` metadata. Its five siblings need a
-            // second field or a computed operand, and are liveness probes below.
-            "id-eq-const",
-            // Root position and bare operand forms (#388): one per hazard — the negation over a
-            // bare ordering (every other negated ordering in the corpus wraps a size() or a
-            // ternary), the bare boolean at the ROOT of the condition, and the collection
-            // subquery disjoined with a scalar predicate rather than conjoined with one.
-            "not-lt", "root-bare-bool", "or-eq-exists",
-            // Hazard classes the corpus missed (#387): the De Morgan branch over a conjunction;
-            // size() on the RIGHT of an ordering, which the adapter used to refuse as an
-            // unsupported threshold because it scanned for the size operand without mirroring the
-            // operator; the value-first hasIntersection; and the BELOW-cliff unroll of a principal
-            // collection, the shape a principal with three teams produces.
-            "not-and", "vf-size", "vf-hasint", "pv-exists-unrolled",
-            // The hierarchy relations (#332), which lower to term-level queries over the field's
-            // whole stored path. Every hier-* action it translates is listed rather than a few, because
-            // three lowerings and the two path spellings cross: `prefix` on the constant plus its
-            // delimiter, `terms` over the constant's proper prefixes, and the `bool.should` union
-            // of both plus a `term` — each reachable from either operand order, and each again
-            // under a custom delimiter over path segments carrying SQL metacharacters. A prefix
-            // query is term-level, so those segments are matched literally here and the escaping
-            // the SQL adapters need has no analogue; the guard is what proves the seeds still
-            // discriminate that rather than agreeing vacuously.
-            "hier-ancestor-ff", "hier-ancestor-cf",
-            "hier-descendent-ff", "hier-descendent-cf",
-            "hier-overlaps-ff", "hier-overlaps-cf",
-            "hier-meta-like", "hier-meta-in", "hier-overlaps-meta", "hier-bracket");
-
-    /**
-     * Shapes this adapter refuses to translate: they have no oracle comparison to guard, and stay
-     * here as PDP/policy liveness probes for a group the list above cannot cover.
-     */
-    private static final List<String> DEGENERACY_LIVENESS_PROBES = List.of(
-            // Elasticsearch does not index an empty nested array, so a positive all() cannot tell
-            // an empty collection (true) from a missing one (CEL error).
-            "all-on-empty",
-            // The chain reached through a ternary condition (#334) and through a fractional count
-            // threshold (#333): different rejection sites, both still fail-closed here — the
-            // Query DSL has no conditional-value expression and no arbitrary count threshold.
-            "w1-ternary-chain-cond",
-            "w1-size-frac-le-chain",
-            // Nor an explicit null scalar, so positive equality against null cannot tell an
-            // explicit null (allow) from a missing field (deny). The negated forms stay compared.
-            "null-eq",
-            // The other half of the same limitation (#308): comparing that explicit-null
-            // attribute against a NON-null constant. Every Query DSL spelling either requires
-            // the field to exist or matches every document missing it, and neither is the
-            // decision, so the whole group is refused and probed rather than compared.
-            "null-value-ne-const",
-            "null-value-not-eq-const",
-            "null-value-not-in-const",
-            "null-value-f2f",
-            "null-value-pv-not-exists",
-            // The id-* group's fail-closed half (#376), one per rejection site: a second document
-            // field on the value side, and a computed operand there. string() is the same
-            // computed-operand rejection reached through a cast and has no compared member at all.
-            "id-f2f-ne",
-            "id-concat",
-            "cast-string-bool",
-            // A concatenation of two document fields is the same computed operand id-concat is
-            // refused for, without the primary key involved (#391).
-            "concat-f2f",
-            // #387, one probe per group this adapter cannot compare: the negated LIKE, whose
-            // COLUMN needle is a second document field; modulo; the positional read of a scalar
-            // list; and list equality over a map() projection. All four are computed leaf
-            // operands the Query DSL has no form for without scripts.
-            "not-contains",
-            "arith-mod",
-            "index-scalar-list",
-            "map-eq-list",
-            // The one hierarchy shape that stays fail-closed once the rest of the group translates (#332):
-            // its descendant path is CONSTRUCTED by list() from a constant segment and the primary
-            // key, so there is no stored path for a prefix or terms query to run against. It sits
-            // here rather than in the guard proper, and the complement assertion below is what
-            // makes that split a statement rather than an omission.
-            "hier-list-id");
-
     @Test
-    void oracleIsNotDegenerate() {
-        // Guard the guard: each of these actions must produce a non-empty, non-total oracle set,
-        // otherwise the differential comparison could pass vacuously (e.g. PDP denying all).
-        Set<String> compared = Set.copyOf(oracleActions);
-        for (String action : DEGENERACY_GUARD_ACTIONS) {
-            assertTrue(compared.contains(action),
-                    "'" + action + "' guards nothing: this adapter does not oracle-compare it");
-            assertNonDegenerateOracle(action);
-        }
-        // Asserting the complement keeps the split honest — an action this adapter gains support
-        // for must move up into the guard proper.
-        for (String action : DEGENERACY_LIVENESS_PROBES) {
-            assertFalse(compared.contains(action),
-                    "'" + action + "' is now oracle-compared: move it into the guard proper");
-            assertNonDegenerateOracle(action);
+    void oracleMatchesCatalogLiveness() {
+        for (Map.Entry<String, Corpus.OracleExpectation> entry :
+                actionsFile.oracleExpectations().entrySet()) {
+            List<String> ids = oracleAllowedIds(entry.getKey());
+            switch (entry.getValue().kind()) {
+                case "proper-subset" -> assertTrue(
+                        !ids.isEmpty() && ids.size() < checkResources.resources().size(),
+                        "oracle for '" + entry.getKey() + "' is degenerate: " + ids);
+                case "empty" -> assertTrue(ids.isEmpty(),
+                        "oracle for '" + entry.getKey() + "' must be empty: " + ids);
+                case "total" -> assertEquals(checkResources.resources().size(), ids.size(),
+                        "oracle for '" + entry.getKey() + "' must be total: " + ids);
+                default -> throw new IllegalStateException(
+                        "unknown oracle expectation " + entry.getValue().kind());
+            }
         }
     }
 

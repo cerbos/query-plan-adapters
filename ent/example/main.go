@@ -19,7 +19,7 @@
 // Consequences section of docs/adr/0002-examples-install-the-packed-artifact.md.
 //
 // Prints one JSON document to stdout; everything a human might want to read goes to stderr.
-// demo/scripts/run-example.sh diffs that document against demo/expected.json.
+// demo/scripts/run-example.sh diffs that document against demo/cases.json.
 package main
 
 import (
@@ -52,6 +52,7 @@ const (
 	// The shared corpus, relative to this directory: run.sh runs the program from ent/example, and
 	// a Go binary has no equivalent of Python's __file__ to resolve against instead.
 	seedsPath = "../../demo/seeds.json"
+	casesPath = "../../demo/cases.json"
 
 	// A file rather than an in-memory database, so a failing run leaves the seeded rows behind to
 	// inspect. It is scratch state this directory owns and .gitignore excludes, and every run deletes
@@ -59,18 +60,12 @@ const (
 	// delete alongside it: the rollback journal this configuration uses is transient and SQLite
 	// removes it itself.
 	dbPath = "demo.db"
-
-	// The page sizes demo/expected.json pins for usage shape 4. Named rather than passed as
-	// literals because they are part of the shared expectation, not an arbitrary choice here.
-	viewPageSize      = 2
-	adminViewPageSize = 3
 )
 
 // seedPrincipal is one entry of demo/seeds.json's `principals`.
 //
-// Read rather than restated. The roles are the half that exists nowhere else — they are what the
-// policy's rules are keyed on — so a copy here would go stale silently, and
-// demo/scripts/validate-demo.sh fails the build on one.
+// Read rather than restated. Every live case looks its principal up here, so an unknown or stale
+// principal fails during execution instead of silently using a local copy.
 type seedPrincipal struct {
 	ID    string   `json:"id"`
 	Roles []string `json:"roles"`
@@ -122,6 +117,47 @@ func loadSeeds() (*seeds, error) {
 	return &parsed, nil
 }
 
+type demoPagination struct {
+	PageSizes []int `json:"pageSizes"`
+	PageSize  int   `json:"pageSize"`
+}
+
+type demoExpected struct {
+	Kind string   `json:"kind"`
+	IDs  []string `json:"ids"`
+}
+
+type demoCase struct {
+	ID         string          `json:"id"`
+	Operation  string          `json:"operation"`
+	Principal  string          `json:"principal"`
+	Action     string          `json:"action"`
+	Pagination *demoPagination `json:"pagination"`
+	Expected   demoExpected    `json:"expected"`
+}
+
+type demoCases struct {
+	Cases         []demoCase `json:"cases"`
+	SchemaVersion int        `json:"schemaVersion"`
+}
+
+func loadCases() (*demoCases, error) {
+	raw, err := os.ReadFile(casesPath)
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", casesPath, err)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	var parsed demoCases
+	if err := decoder.Decode(&parsed); err != nil {
+		return nil, fmt.Errorf("decoding %s: %w", casesPath, err)
+	}
+	if parsed.SchemaVersion != 1 {
+		return nil, fmt.Errorf("%s uses schemaVersion %d, want 1", casesPath, parsed.SchemaVersion)
+	}
+	return &parsed, nil
+}
+
 // principal looks one principal up in the corpus by id.
 func (s *seeds) principal(id string) (*cerbos.Principal, error) {
 	for _, candidate := range s.Principals {
@@ -147,7 +183,7 @@ var mapper = cerbosent.MapperMap{
 	"request.resource.attr.public":  {Column: document.FieldIsPublic},
 }
 
-// shapeResult is one entry of demo/expected.json: the plan kind alongside the ids.
+// shapeResult is one entry of demo/cases.json: the plan kind alongside the ids.
 //
 // The kind is what stops this program returning every row for `admin-view` without ever having
 // reached the PDP. pageSize and pageSizes belong to usage shape 4 alone and are omitted elsewhere,
@@ -169,63 +205,44 @@ type app struct {
 	cerbos *cerbos.GRPCClient
 	ent    *ent.Client
 	seeds  *seeds
+	cases  *demoCases
 }
 
-// The five shapes, and the principal/action pair each is asserted on. Exactly the keys
-// demo/expected.json carries: the shared runner diffs the whole document, so an entry missing here
-// fails there.
-//
-// The three unconditional-looking shapes share one exercise, because from the application's side
-// they ARE one — a plain filtered list, planned for three principal/action pairs the policy answers
-// with three different plan kinds. Which kind comes back is the policy's business, not the caller's.
-var wanted = []struct {
-	shape       string
-	principalID string
-	action      string
-	// pageSize is usage shape 4's page size, and zero everywhere else.
-	pageSize int
-}{
-	{shape: "filtered", principalID: "alice", action: "view"},
-	{shape: "filtered", principalID: "bob", action: "view"},
-	{shape: "alwaysAllowed", principalID: "admin", action: "admin-view"},
-	{shape: "alwaysDenied", principalID: "alice", action: "publish"},
-	{shape: "paginated", principalID: "alice", action: "view", pageSize: viewPageSize},
-	{shape: "paginated", principalID: "admin", action: "admin-view", pageSize: adminViewPageSize},
-	{shape: "composed", principalID: "alice", action: "view"},
-	{shape: "composed", principalID: "bob", action: "view"},
-	{shape: "composed", principalID: "admin", action: "admin-view"},
-	{shape: "composed", principalID: "alice", action: "publish"},
-}
-
-// shapes executes every usage shape, keyed the way demo/expected.json keys them.
+// shapes executes every usage shape, keyed the way demo/cases.json keys them.
 func (a *app) shapes(ctx context.Context) (map[string]map[string]shapeResult, error) {
 	shapes := map[string]map[string]shapeResult{}
 
-	for _, want := range wanted {
+	for _, demoCase := range a.cases.Cases {
+		if demoCase.ID != demoCase.Operation+"/"+demoCase.Principal+"/"+demoCase.Action {
+			return nil, fmt.Errorf("invalid demo case id %q", demoCase.ID)
+		}
 		var (
 			result shapeResult
 			err    error
 		)
-		switch want.shape {
+		switch demoCase.Operation {
 		case "paginated":
-			result, err = a.paginated(ctx, want.principalID, want.action, want.pageSize)
+			if demoCase.Pagination == nil {
+				return nil, fmt.Errorf("%s: missing pagination", demoCase.ID)
+			}
+			result, err = a.paginated(ctx, demoCase.Principal, demoCase.Action, demoCase.Pagination.PageSize)
 		case "composed":
-			result, err = a.composed(ctx, want.principalID, want.action)
+			result, err = a.composed(ctx, demoCase.Principal, demoCase.Action)
 		case "filtered", "alwaysAllowed", "alwaysDenied":
-			result, err = a.filtered(ctx, want.principalID, want.action)
+			result, err = a.filtered(ctx, demoCase.Principal, demoCase.Action)
 		default:
 			// Named rather than defaulted, so a mistyped shape fails here and says so. Falling
 			// through to `filtered` would fail the shared diff instead, as a missing entry.
-			return nil, fmt.Errorf("no exercise for shape %q", want.shape)
+			return nil, fmt.Errorf("no exercise for operation %q", demoCase.Operation)
 		}
 		if err != nil {
-			return nil, fmt.Errorf("%s/%s/%s: %w", want.shape, want.principalID, want.action, err)
+			return nil, fmt.Errorf("%s: %w", demoCase.ID, err)
 		}
 
-		if shapes[want.shape] == nil {
-			shapes[want.shape] = map[string]shapeResult{}
+		if shapes[demoCase.Operation] == nil {
+			shapes[demoCase.Operation] = map[string]shapeResult{}
 		}
-		shapes[want.shape][want.principalID+"/"+want.action] = result
+		shapes[demoCase.Operation][demoCase.Principal+"/"+demoCase.Action] = result
 	}
 
 	return shapes, nil
@@ -252,7 +269,7 @@ func (a *app) filtered(ctx context.Context, principalID, action string) (shapeRe
 // paginated is usage shape 4: ent's own Limit/Offset applied on top of the adapter's predicate.
 //
 // Reported as page SIZES plus the sorted union of the ids, never as per-page order:
-// demo/expected.json is shared by every example and several of the stores have no total order to
+// demo/cases.json is shared by every example and several of the stores have no total order to
 // paginate by. The Order is still required for the paging itself to be correct — without a total
 // order, LIMIT/OFFSET may repeat or omit rows between pages — which is a separate concern from how
 // the result is asserted.
@@ -377,7 +394,7 @@ func applyPlan(query *ent.DocumentQuery, result cerbosent.Result) (*ent.Document
 // idsUnderPlan applies a translated plan to a query, runs it, and returns the ids it selects,
 // sorted.
 //
-// Sorted because demo/expected.json is: a SELECT with no ORDER BY has no defined row order, and
+// Sorted because demo/cases.json is: a SELECT with no ORDER BY has no defined row order, and
 // SQLite returning insertion order is an implementation detail rather than a promise.
 //
 // A denied plan returns the empty set without executing anything, and that is the adapter's API
@@ -432,9 +449,8 @@ func (a *app) seed(ctx context.Context) error {
 //
 // There is deliberately no fallback. The obvious default — Cerbos's own 3592/3593 — is where every
 // adapter's `cerbos run` test sidecar listens, so an unset CERBOS_HOST would not fail: it would
-// quietly plan against whatever policies that sidecar serves and produce a diff against
-// demo/expected.json that reads as an adapter bug. demo/README.md requires reaching the PDP at
-// $CERBOS_HOST, "never a hardcoded address", for exactly that reason.
+// quietly plan against whatever policies that sidecar serves. The live runner injects a
+// non-default CERBOS_HOST, so successful case execution proves this value is actually used.
 func cerbosHost() (string, error) {
 	host := os.Getenv("CERBOS_HOST")
 	if host == "" {
@@ -472,6 +488,10 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	cases, err := loadCases()
+	if err != nil {
+		return err
+	}
 
 	entClient, closeStore, err := openStore()
 	if err != nil {
@@ -488,7 +508,7 @@ func run() error {
 		return fmt.Errorf("connecting to the PDP at %s: %w", host, err)
 	}
 
-	application := &app{cerbos: cerbosClient, ent: entClient, seeds: corpus}
+	application := &app{cerbos: cerbosClient, ent: entClient, seeds: corpus, cases: cases}
 
 	ctx := context.Background()
 	if err := application.seed(ctx); err != nil {

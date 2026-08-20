@@ -10,6 +10,7 @@ import dev.cerbos.sdk.builders.Resource;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -32,7 +33,7 @@ import java.util.Map;
  *       exercise.</li>
  * </ol>
  *
- * <p>The plan kind is reported alongside the ids because {@code demo/expected.json} pins it: that is
+ * <p>The plan kind is reported alongside the ids because {@code demo/cases.json} pins it: that is
  * what stops this program returning all the rows for {@code admin-view} without ever having reached
  * the PDP. It is read off the adapter's own {@link Result}, not off the SDK's plan predicates,
  * because the {@code Result} variant is what the rest of this class actually branches on — deriving
@@ -59,7 +60,7 @@ final class DemoShapes {
             "request.resource.attr.public", "isPublic");
 
     /**
-     * One shape's answer, as {@code demo/expected.json} spells it: the plan kind, and the ids the
+     * One shape's answer, as {@code demo/cases.json} spells it: the plan kind, and the ids the
      * search returned. Typed rather than a {@code Map<String, Object>} so a mistyped key is a
      * compile error here instead of a diff in the shared runner.
      */
@@ -80,25 +81,25 @@ final class DemoShapes {
     }
 
     /** Seeds the index, runs every shape, and returns the {@code shapes} object to emit. */
-    Map<String, Object> run() throws IOException {
+    Map<String, Object> run(List<DemoCases.DemoCase> cases) throws IOException {
         index.recreate(seeds.documents());
-
-        return Map.of(
-                "filtered", Map.of(
-                        "alice/view", filtered("alice", "view"),
-                        "bob/view", filtered("bob", "view")),
-                "alwaysAllowed", Map.of(
-                        "admin/admin-view", filtered("admin", "admin-view")),
-                "alwaysDenied", Map.of(
-                        "alice/publish", filtered("alice", "publish")),
-                "paginated", Map.of(
-                        "alice/view", paginated("alice", "view", 2),
-                        "admin/admin-view", paginated("admin", "admin-view", 3)),
-                "composed", Map.of(
-                        "alice/view", composed("alice", "view"),
-                        "bob/view", composed("bob", "view"),
-                        "admin/admin-view", composed("admin", "admin-view"),
-                        "alice/publish", composed("alice", "publish")));
+        Map<String, Map<String, Object>> shapes = new LinkedHashMap<>();
+        for (DemoCases.DemoCase demoCase : cases) {
+            Object result = switch (demoCase.operation()) {
+                case "filtered", "alwaysAllowed", "alwaysDenied" ->
+                        filtered(demoCase.principal(), demoCase.action());
+                case "paginated" -> paginated(
+                        demoCase.principal(), demoCase.action(), demoCase.pagination().pageSize());
+                case "composed" -> composed(demoCase.principal(), demoCase.action());
+                default -> throw new IllegalStateException(
+                        "unknown demo operation " + demoCase.operation());
+            };
+            shapes.computeIfAbsent(demoCase.operation(), ignored -> new LinkedHashMap<>())
+                    .put(demoCase.principal() + "/" + demoCase.action(), result);
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        shapes.forEach(result::put);
+        return result;
     }
 
     // -- the five usage shapes --
@@ -116,7 +117,7 @@ final class DemoShapes {
      * {@code size}.
      *
      * <p>Reported as page SIZES plus the sorted union of the ids, never as per-page order:
-     * {@code demo/expected.json} is shared by every example and several of the stores behind it have
+     * {@code demo/cases.json} is shared by every example and several of the stores behind it have
      * no total order to paginate by. Pages are read until one comes back short, which is what stops
      * the loop on a total that is an exact multiple of the page size as well as on one that is not.
      */
@@ -195,7 +196,7 @@ final class DemoShapes {
 
     /**
      * The adapter's answer, in the two forms every shape here needs: the plan kind as
-     * {@code demo/expected.json} spells it, and one {@code bool.filter} entry.
+     * {@code demo/cases.json} spells it, and one {@code bool.filter} entry.
      *
      * @param kind the plan kind, for the emitted document
      * @param clause the authorization half of the query

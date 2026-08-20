@@ -17,7 +17,7 @@ package queryplan
 
 // Expr is any node of the abstract expression tree. Expressions are either predicates (boolean
 // results) or values; the translator tracks which is which by construction rather than by type,
-// mirroring the reference adapters.
+// mirroring the other adapters.
 type Expr interface {
 	isExpr()
 }

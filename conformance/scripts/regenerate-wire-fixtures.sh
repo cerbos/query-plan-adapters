@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Regenerates conformance/wire-fixtures/*.json: for every action in actions.json, captures the
+# Regenerates conformance/wire-fixtures/*.json: for every action in catalog.json, captures the
 # exact PlanResources response the pinned Cerbos PDP (see CERBOS_VERSION) returns for
 # policies/adversarial.yaml. These are golden wire fixtures -- they pin planner *shape*
 # (operand order, operator choice, filter kind) independent of any adapter, so a PDP upgrade
@@ -63,12 +63,7 @@ RESOURCE_KIND="$(jq -r '.resourceKind' seeds.json)"
 
 mkdir -p wire-fixtures
 
-ACTIONS="$(jq -r '
-  .conformance[],
-  .expectedUnsupported[].action,
-  .nullRepresentationOmitted[].action,
-  .knownDivergences[].action
-' actions.json | sort -u)"
+ACTIONS="$(jq -r '.actions[].name' catalog.json | sort -u)"
 COUNT=0
 while IFS= read -r action; do
   BODY="$(jq -nc \

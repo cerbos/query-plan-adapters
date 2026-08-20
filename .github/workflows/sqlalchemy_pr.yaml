@@ -16,6 +16,14 @@ defaults:
     working-directory: sqlalchemy
 
 jobs:
+  certification:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/validate-adapterctl
+        with:
+          adapter: sqlalchemy
+
   test-sqla:
     name: SQLA ${{ matrix.sqlalchemy.name }} test
     runs-on: ubuntu-latest
@@ -27,9 +35,9 @@ jobs:
         # 2.0 — so a single-version job leaves half the supported range unproven.
         sqlalchemy:
           - name: "1.4"
-            constraint: "sqlalchemy<2"
+            command: "bash scripts/test-sqlalchemy-version.sh 1.4"
           - name: "2.x"
-            constraint: ""
+            command: "bash scripts/test-sqlalchemy-version.sh 2.x"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -49,41 +57,20 @@ jobs:
           prerelease: true # Allow prerelease versions to be installed
           enable-pep582: true # Enable PEP 582 package loading globally
 
-      # The 2.x leg installs straight from the committed lockfile. The 1.4 leg
-      # re-resolves under a constraint into a throwaway lockfile, so pdm.lock
-      # stays the single pinned source of truth and no second lockfile has to be
-      # kept in step with it.
-      - if: matrix.sqlalchemy.constraint == ''
-        run: pdm install -G testcontainers
-
-      - if: matrix.sqlalchemy.constraint != ''
-        run: |
-          echo "${{ matrix.sqlalchemy.constraint }}" > /tmp/sqlalchemy-constraint.txt
-          pdm install -G testcontainers \
-            --override /tmp/sqlalchemy-constraint.txt \
-            --lockfile /tmp/sqlalchemy-${{ matrix.sqlalchemy.name }}.lock
-
-      # Fails the job if the constraint did not take, rather than silently
-      # running the same version twice.
-      - name: Assert SQLAlchemy version
-        run: |
-          pdm run python - <<'PY'
-          import sqlalchemy
-          installed = sqlalchemy.__version__
-          expected = "${{ matrix.sqlalchemy.name }}".rstrip("x")
-          assert installed.startswith(expected), f"expected {expected}*, got {installed}"
-          print(f"SQLAlchemy {installed}")
-          PY
+      # The native profile command owns version selection, the temporary 1.4 lockfile, the
+      # installed-version assertion, and the runtime suite. Keeping that seam shared with
+      # adapterctl prevents the environment called 1.4 from quietly running the committed 2.x
+      # lockfile when it is invoked outside this workflow.
+      - name: Install and test SQLAlchemy ${{ matrix.sqlalchemy.name }}
+        run: ${{ matrix.sqlalchemy.command }}
 
       # `get_query`'s overloads are a static contract the runtime suite cannot
       # reach, so pyright checks them separately. 2.x only: 1.4's stubs declare
       # neither `DeclarativeBase` nor `__table__`, so none of the inferences the
       # fixture pins exist there.
       - name: Type-check the public signature
-        if: matrix.sqlalchemy.constraint == ''
+        if: matrix.sqlalchemy.name == '2.x'
         run: npx -y pyright@1.1.411
-
-      - run: pdm run test
 
   # The example application: the published distribution, installed from the wheel `pdm build`
   # produced and used the way a consumer uses it, against the shared demo domain. It covers the

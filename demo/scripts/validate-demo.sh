@@ -8,21 +8,13 @@
 # documentation and is the better tripwire — but it means the lists can rot to something that
 # passes vacuously. These checks are what stops that.
 #
-#   1. Structural: expected.json declares exactly the five usage shapes, and every entry in each
-#      is well-formed for that shape. run-example.sh diffs the WHOLE shapes object exactly, so an
-#      example that skips a shape or an entry fails there; this check is what makes that diff
-#      mean "all five shapes" rather than "whatever expected.json happened to contain".
+#   1. Structural: every catalog case is well-formed.
+#      run-example.sh diffs the complete projected result, so an example that skips a case fails.
 #   2. Non-degeneracy: the expectations still discriminate — a proper subset somewhere, and
 #      shape 5 differing from both of the two filters it composes.
-#   3. Pin reuse: the demo domain has no PDP version of its own and every example reaches the one
-#      in conformance/ — at $CERBOS_HOST, never at an address of its own. That second half is
-#      not fussiness: 3592/3593 are the ports every adapter's `cerbos run` test sidecar binds,
-#      so a hardcoded default does not fail, it silently plans against the wrong policy suite.
-#   4. Every adapter has a runnable example/run.sh. The roster is `adapters` in
-#      conformance/actions.json — the one already there, never a second list — so registering an
-#      adapter is what demands an example of it, and adding one without an example fails here.
-#   5. Principal provenance: an example reads its principal out of seeds.json rather than
-#      restating one inline.
+#   3. Pin reuse: the demo domain has no PDP version of its own. run-example.sh injects a
+#      non-default $CERBOS_HOST, so live example execution proves the runtime endpoint contract.
+#   4. Every discovered adapter manifest has a runnable example/run.sh.
 
 set -euo pipefail
 
@@ -31,19 +23,20 @@ DEMO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_ROOT="$(cd "${DEMO_DIR}/.." && pwd)"
 
 SEEDS="${DEMO_DIR}/seeds.json"
-EXPECTED="${DEMO_DIR}/expected.json"
-ACTIONS="${REPO_ROOT}/conformance/actions.json"
-
-# The five usage shapes from cerbos/query-plan-adapters#349, in emission order.
-SHAPES=(filtered alwaysAllowed alwaysDenied paginated composed)
+CASES="${DEMO_DIR}/cases.json"
 
 failures=0
 fail() { echo "  ✗ $*" >&2; failures=$((failures + 1)); }
 
-for f in "${SEEDS}" "${EXPECTED}" "${ACTIONS}"; do
+for f in "${SEEDS}" "${CASES}"; do
   [[ -f "${f}" ]] || { echo "missing ${f}" >&2; exit 1; }
   jq -e . "${f}" >/dev/null || { echo "${f} is not valid JSON" >&2; exit 1; }
 done
+
+ADAPTERS="$(for manifest in "${REPO_ROOT}"/*/adapterctl.json; do
+  basename "$(dirname "${manifest}")"
+done | sort)"
+[[ -n "${ADAPTERS}" ]] || { echo "no adapterctl.json manifests discovered" >&2; exit 1; }
 
 # Shared jq preamble: the seed id list, and the id set the APPLICATION's own predicate selects on
 # its own. Both are derived from seeds.json so neither can drift from the rows the examples load.
@@ -63,108 +56,63 @@ echo "==> demo domain: ${SEED_COUNT} seed rows, application filter selects $(jq 
 # ---------------------------------------------------------------------------------------------
 # 1. Structural
 # ---------------------------------------------------------------------------------------------
-echo "==> [1/5] structural: five usage shapes, well-formed entries"
+echo "==> [1/4] structural: well-formed catalog cases"
 
-declared="$(jq -r '.shapes | keys_unsorted | join(",")' "${EXPECTED}")"
-expected_shapes="$(IFS=,; echo "${SHAPES[*]}")"
-if [[ "${declared}" != "${expected_shapes}" ]]; then
-  fail "expected.json declares shapes [${declared}], expected [${expected_shapes}]"
+if ! jq -e --argjson seedIds "${SEED_IDS}" '
+  .schemaVersion == 1
+  and (.cases | type == "array" and length > 0)
+  and ([.cases[].id] | length == (unique | length))
+  and all(.cases[];
+    .id == (.operation + "/" + .principal + "/" + .action)
+    and (.principal | type == "string" and test("^[a-z0-9-]+$"))
+    and (.action | type == "string" and test("^[a-z0-9-]+$"))
+    and (.expected.kind == "KIND_CONDITIONAL"
+      or .expected.kind == "KIND_ALWAYS_ALLOWED"
+      or .expected.kind == "KIND_ALWAYS_DENIED")
+    and (.expected.ids | type == "array")
+    and .expected.ids == (.expected.ids | sort)
+    and (.expected.ids | length) == (.expected.ids | unique | length)
+    and ((.expected.ids - $seedIds) | length) == 0
+    and (if .operation == "filtered" then
+      .expected.kind == "KIND_CONDITIONAL" and .pagination == null
+    elif .operation == "alwaysAllowed" then
+      .expected.kind == "KIND_ALWAYS_ALLOWED"
+      and .expected.ids == ($seedIds | sort)
+      and .pagination == null
+    elif .operation == "alwaysDenied" then
+      .expected.kind == "KIND_ALWAYS_DENIED"
+      and .expected.ids == []
+      and .pagination == null
+    elif .operation == "paginated" then
+      (.pagination.pageSize | type == "number" and . >= 1)
+      and (.pagination.pageSizes | type == "array" and length >= 2)
+      and all(.pagination.pageSizes[]; type == "number" and . >= 1)
+      and (.pagination.pageSizes | add) == (.expected.ids | length)
+      and (.pagination as $pagination
+        | all($pagination.pageSizes[:-1][]; . == $pagination.pageSize)
+        and $pagination.pageSizes[-1] <= $pagination.pageSize)
+    elif .operation == "composed" then .pagination == null
+    else false end)
+  )
+' "${CASES}" >/dev/null; then
+  fail "cases.json must contain unique, well-formed catalog cases"
 fi
-
-for shape in "${SHAPES[@]}"; do
-  if ! jq -e --arg s "${shape}" '.shapes[$s].description | type == "string" and length > 0' \
-    "${EXPECTED}" >/dev/null; then
-    fail "shape '${shape}' has no description"
-  fi
-  if ! jq -e --arg s "${shape}" '.shapes[$s].results | type == "object" and length > 0' \
-    "${EXPECTED}" >/dev/null; then
-    fail "shape '${shape}' has no results"
-  fi
-done
-
-# Every entry, in every shape: a "<principal>/<action>" key, a real plan kind, and an id list that
-# is sorted, duplicate-free and drawn from the seed rows. Sorted ids are what makes run-example.sh
-# able to diff textually without a per-store ordering carve-out.
-while IFS= read -r problem; do
-  fail "${problem}"
-done < <(jq -r --argjson seedIds "${SEED_IDS}" '
-  ["KIND_CONDITIONAL", "KIND_ALWAYS_ALLOWED", "KIND_ALWAYS_DENIED"] as $kinds
-  | .shapes
-  | to_entries[]
-  | .key as $shape
-  | .value.results
-  | to_entries[]
-  | .key as $k | .value as $v
-  | [
-      (select($k | test("^[a-z0-9-]+/[a-z0-9-]+$") | not)
-        | "\($shape)/\($k): key must be \"<principal>/<action>\""),
-      (select($kinds | index($v.kind) | not)
-        | "\($shape)/\($k): unknown plan kind \"\($v.kind // "")\""),
-      (select($v.ids | type != "array")
-        | "\($shape)/\($k): ids must be an array"),
-      (select(($v.ids | type == "array") and ($v.ids != ($v.ids | sort)))
-        | "\($shape)/\($k): ids must be sorted"),
-      (select(($v.ids | type == "array") and (($v.ids | length) != ($v.ids | unique | length)))
-        | "\($shape)/\($k): ids must be duplicate-free"),
-      (select(($v.ids | type == "array") and (($v.ids - $seedIds) | length > 0))
-        | "\($shape)/\($k): ids not in seeds.json: \(($v.ids - $seedIds) | join(","))")
-    ][]
-' "${EXPECTED}")
-
-# Per-shape structure. alwaysAllowed/alwaysDenied exist to pin a plan KIND, so an entry carrying
-# the wrong one would leave that kind untested while still looking covered.
-while IFS= read -r problem; do
-  fail "${problem}"
-done < <(jq -r --argjson seedIds "${SEED_IDS}" '
-  [
-    (.shapes.filtered.results | to_entries[] | select(.value.kind != "KIND_CONDITIONAL")
-      | "filtered/\(.key): must be KIND_CONDITIONAL, got \(.value.kind)"),
-
-    (.shapes.alwaysAllowed.results | to_entries[] | select(.value.kind != "KIND_ALWAYS_ALLOWED")
-      | "alwaysAllowed/\(.key): must be KIND_ALWAYS_ALLOWED, got \(.value.kind)"),
-    (.shapes.alwaysAllowed.results | to_entries[] | select(.value.ids != ($seedIds | sort))
-      | "alwaysAllowed/\(.key): an unconditional plan must return every seed row"),
-
-    (.shapes.alwaysDenied.results | to_entries[] | select(.value.kind != "KIND_ALWAYS_DENIED")
-      | "alwaysDenied/\(.key): must be KIND_ALWAYS_DENIED, got \(.value.kind)"),
-    (.shapes.alwaysDenied.results | to_entries[] | select(.value.ids != [])
-      | "alwaysDenied/\(.key): an unconditional denial must return no rows"),
-
-    (.shapes.paginated.results | to_entries[]
-      | .key as $k | .value as $v
-      | [
-          (select((($v.pageSize | type) != "number") or $v.pageSize < 1)
-            | "paginated/\($k): pageSize must be a positive number"),
-          (select(($v.pageSizes | type) != "array" or ($v.pageSizes | length) < 2)
-            | "paginated/\($k): pageSizes must span more than one page"),
-          (select(($v.pageSizes | type) == "array" and ($v.pageSizes | any(. < 1)))
-            | "paginated/\($k): an empty page is not a page"),
-          (select(($v.pageSizes | type) == "array"
-                  and ($v.pageSizes | add // 0) != ($v.ids | length))
-            | "paginated/\($k): page sizes sum to \($v.pageSizes | add // 0), ids has \($v.ids | length)"),
-          (select(($v.pageSizes | type) == "array"
-                  and ($v.pageSizes[:-1] | any(. != $v.pageSize)))
-            | "paginated/\($k): every page but the last must be full (\($v.pageSize))"),
-          (select(($v.pageSizes | type) == "array" and ($v.pageSizes[-1:] | any(. > $v.pageSize)))
-            | "paginated/\($k): the last page cannot exceed pageSize")
-        ][])
-  ][]
-' "${EXPECTED}")
 
 # ---------------------------------------------------------------------------------------------
 # 2. Non-degeneracy
 # ---------------------------------------------------------------------------------------------
-echo "==> [2/5] non-degeneracy: the expectations still discriminate"
+echo "==> [2/4] non-degeneracy: the expectations still discriminate"
 
 # The analogue of the conformance degeneracy guard. Without it these lists can rot to all-empty,
 # or to every-seed-row, and still pass every diff.
-proper_subsets="$(jq -r --argjson seedIds "${SEED_IDS}" '
-  [ .shapes.filtered.results, .shapes.composed.results
-    | to_entries[]
-    | select((.value.ids | length) > 0 and (.value.ids | length) < ($seedIds | length))
-  ] | length
-' "${EXPECTED}")"
-if (( proper_subsets < 2 )); then
+proper_subset_operations="$(jq -r --argjson seedIds "${SEED_IDS}" '
+  [ .cases[]
+    | select(.operation == "filtered" or .operation == "composed")
+    | select((.expected.ids | length) > 0 and (.expected.ids | length) < ($seedIds | length))
+    | .operation
+  ] | unique | length
+' "${CASES}")"
+if (( proper_subset_operations < 2 )); then
   fail "filtered and composed must each contain at least one proper, non-empty subset of the seed rows"
 fi
 
@@ -175,49 +123,58 @@ fi
 while IFS= read -r problem; do
   fail "${problem}"
 done < <(jq -r --argjson appIds "${APP_IDS}" --argjson seedIds "${SEED_IDS}" '
-  .shapes.filtered.results as $filtered
-  | .shapes.alwaysAllowed.results as $allowed
-  | .shapes.composed.results
-  | to_entries[]
-  | .key as $k | .value as $v
-  | (if $v.kind == "KIND_ALWAYS_ALLOWED" then ($seedIds | sort)
-     elif $v.kind == "KIND_ALWAYS_DENIED" then []
-     else ($filtered[$k].ids // null) end) as $unfiltered
+  .cases as $cases
+  | .cases[]
+  | select(.operation == "composed")
+  | . as $case
+  | ($cases | map(select(
+      .operation != "composed" and .operation != "paginated"
+      and .principal == $case.principal and .action == $case.action
+    )) | first) as $base
+  | (if $case.expected.kind == "KIND_ALWAYS_ALLOWED" then ($seedIds | sort)
+     elif $case.expected.kind == "KIND_ALWAYS_DENIED" then []
+     else ($base.expected.ids // null) end) as $unfiltered
+  | ($case.principal + "/" + $case.action) as $key
   | [
       (select($unfiltered == null)
-        | "composed/\($k): KIND_CONDITIONAL needs the same key under `filtered` to compose from"),
+        | "composed/\($key): KIND_CONDITIONAL needs a matching filtered case"),
 
       # The composed answer must BE the intersection. This recomputes shape 5 from shape 1 and
       # seeds.json, so the two hardcoded lists cannot rot independently of each other.
-      (select($unfiltered != null and ($v.ids != ($unfiltered - ($unfiltered - $appIds) | sort)))
-        | "composed/\($k): expected \(($unfiltered - ($unfiltered - $appIds) | sort) | join(",")), got \($v.ids | join(","))"),
+      (select($unfiltered != null and ($case.expected.ids != ($unfiltered - ($unfiltered - $appIds) | sort)))
+        | "composed/\($key): expected \(($unfiltered - ($unfiltered - $appIds) | sort) | join(",")), got \($case.expected.ids | join(","))"),
 
-      (select($v.kind == "KIND_CONDITIONAL" and $v.ids == $unfiltered)
-        | "composed/\($k): equals the adapter filter alone — the application predicate is a no-op here"),
-      (select($v.kind == "KIND_CONDITIONAL" and $v.ids == ($appIds | sort))
-        | "composed/\($k): equals the application predicate alone — an example that never called the adapter would pass")
+      (select($case.expected.kind == "KIND_CONDITIONAL" and $case.expected.ids == $unfiltered)
+        | "composed/\($key): equals the adapter filter alone — the application predicate is a no-op here"),
+      (select($case.expected.kind == "KIND_CONDITIONAL" and $case.expected.ids == ($appIds | sort))
+        | "composed/\($key): equals the application predicate alone — an example that never called the adapter would pass")
     ][]
-' "${EXPECTED}")
+' "${CASES}")
 
 # A paginated entry pages over an answer another shape already pins, so the two must agree.
 while IFS= read -r problem; do
   fail "${problem}"
 done < <(jq -r '
-  (.shapes.filtered.results + .shapes.alwaysAllowed.results + .shapes.alwaysDenied.results) as $unpaged
-  | .shapes.paginated.results
-  | to_entries[]
-  | .key as $k | .value as $v
+  .cases as $cases
+  | .cases[]
+  | select(.operation == "paginated")
+  | . as $case
+  | ($cases | map(select(
+      .operation != "paginated" and .operation != "composed"
+      and .principal == $case.principal and .action == $case.action
+    )) | first) as $base
+  | ($case.principal + "/" + $case.action) as $key
   | [
-      (select($unpaged[$k] == null)
-        | "paginated/\($k): no unpaginated shape pins this principal/action"),
-      (select($unpaged[$k] != null and $unpaged[$k].ids != $v.ids)
-        | "paginated/\($k): pages union to \($v.ids | join(",")), unpaginated is \($unpaged[$k].ids | join(","))"),
-      (select($unpaged[$k] != null and $unpaged[$k].kind != $v.kind)
-        | "paginated/\($k): plan kind \($v.kind) disagrees with \($unpaged[$k].kind)")
+      (select($base == null)
+        | "paginated/\($key): no unpaginated case pins this principal/action"),
+      (select($base != null and $base.expected.ids != $case.expected.ids)
+        | "paginated/\($key): paged ids disagree with unpaginated ids"),
+      (select($base != null and $base.expected.kind != $case.expected.kind)
+        | "paginated/\($key): plan kind disagrees with the unpaginated case")
     ][]
-' "${EXPECTED}")
+' "${CASES}")
 
-# Every principal and action named in expected.json has to exist. A typo in an action name makes
+# Every principal and action named in cases.json has to exist. A typo in an action name makes
 # the PDP return ALWAYS_DENIED, and the example would then assert an empty list forever without
 # anything looking wrong.
 #
@@ -246,7 +203,7 @@ while IFS= read -r shape_ref; do
   action="${ref##*/}"
 
   if ! jq -e --arg p "${principal}" 'any(.principals[]; .id == $p)' "${SEEDS}" >/dev/null; then
-    fail "expected.json refers to principal '${principal}', which is not in seeds.json"
+    fail "cases.json refers to principal '${principal}', which is not in seeds.json"
   fi
 
   granted=0
@@ -255,18 +212,17 @@ while IFS= read -r shape_ref; do
   if [[ "${shape}" == "alwaysDenied" ]]; then
     (( granted == 0 )) || \
       fail "alwaysDenied/${ref}: '${action}' IS granted by demo/policies/document.yaml, so the planner will not return KIND_ALWAYS_DENIED"
-  elif jq -e --arg s "${shape}" --arg k "${ref}" \
-    '.shapes[$s].results[$k].kind != "KIND_ALWAYS_DENIED"' "${EXPECTED}" >/dev/null; then
+  elif jq -e --arg id "${shape}/${ref}" \
+    'any(.cases[]; .id == $id and .expected.kind != "KIND_ALWAYS_DENIED")' "${CASES}" >/dev/null; then
     (( granted == 1 )) || \
       fail "${shape}/${ref}: no rule in demo/policies/document.yaml grants '${action}'"
   fi
-done < <(jq -r '.shapes | to_entries[] | .key as $s | .value.results | keys[] | "\($s) \(.)"' \
-  "${EXPECTED}")
+done < <(jq -r '.cases[] | "\(.operation) \(.principal)/\(.action)"' "${CASES}")
 
 # ---------------------------------------------------------------------------------------------
 # 3. PDP pin reuse
 # ---------------------------------------------------------------------------------------------
-echo "==> [3/5] PDP pin: one pin in the repository, reused, and reached at \$CERBOS_HOST"
+echo "==> [3/4] PDP pin: one pin in the repository, reused by the demo domain"
 
 pinned_version="$(tr -d '[:space:]' <"${REPO_ROOT}/conformance/CERBOS_VERSION")"
 pinned_digest="$(tr -d '[:space:]' <"${REPO_ROOT}/conformance/CERBOS_IMAGE_DIGEST")"
@@ -283,91 +239,13 @@ if ! grep -qF "${pinned_image}" "${DEMO_DIR}/docker-compose.yml"; then
   fail "demo/docker-compose.yml must pin ${pinned_image}"
 fi
 
-# Every adapter that HAS an example must reach that PDP: either through the shared compose file
-# above, or through a compose file of its own that names the same tag AND digest.
-# (conformance/scripts/validate-corpus.sh scans the whole repository for the same agreement; this
-# is restated here because the example job runs validate-demo.sh on its own.)
-#
-# Same file set as validate-corpus.sh, deliberately: things that RUN, never prose, and never
-# installed or built output. An example's node_modules holds a copy of the adapter's own README,
-# and two scans disagreeing about whether that counts would make one of them wrong.
-SOURCE_INCLUDES=(
-  --include='*.yml' --include='*.yaml' --include='*.sh' --include='*.py' --include='*.go'
-  --include='*.java' --include='*.kts' --include='*.ts' --include='*.js' --include='*.json'
-  --include='Dockerfile' --include='*_IMAGE'
-)
-SOURCE_EXCLUDES=(
-  --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=lib --exclude-dir=build
-  --exclude-dir=.venv --exclude-dir=.gradle --exclude-dir=bin --exclude-dir=dist
-  --exclude-dir=generated --exclude-dir=__pypackages__
-  --exclude-dir=.gems --exclude-dir=.bundle-path
-)
-
-# `lib/` is BUILD OUTPUT on the TypeScript adapters and SOURCE on the Ruby gem, so one
-# --exclude-dir cannot serve both and Ruby gets a pass of its own with the exclusion dropped.
-# The same split as conformance/scripts/validate-corpus.sh, and for the same reason: excluding
-# `lib` by name hid the whole ActiveRecord implementation from checks written to catch exactly
-# the hardcoded PDP address that this file's own comment says both early examples shipped.
-RUBY_INCLUDES=(
-  --include='*.rb' --include='*.gemspec' --include='Gemfile' --include='Rakefile'
-)
-RUBY_EXCLUDES=()
-for exclusion in "${SOURCE_EXCLUDES[@]}"; do
-  [[ "${exclusion}" == "--exclude-dir=lib" ]] && continue
-  RUBY_EXCLUDES+=("${exclusion}")
-done
-
-# Every scan of example source goes through here, so a file type reaching one check and not
-# another is not expressible.
-source_grep() {
-  grep "$@" "${SOURCE_INCLUDES[@]}" "${SOURCE_EXCLUDES[@]}" 2>/dev/null || true
-  grep "$@" "${RUBY_INCLUDES[@]}" "${RUBY_EXCLUDES[@]}" 2>/dev/null || true
-}
-
-# The scan proves it reaches Ruby source under a `lib/` directory, so restoring the exclusion —
-# or dropping the Ruby pass — fails here instead of quietly returning every check below to
-# reading none of a Ruby adapter. Stated over any adapter rather than one by name.
-if ! source_grep -rl '' "${REPO_ROOT}" | grep -q '/lib/.*\.rb$'; then
-  fail "the source scan reaches no .rb file under a lib/ directory, so a Ruby adapter's source is invisible to every check below"
-fi
-for adapter in $(jq -r '.adapters[]' "${ACTIONS}"); do
-  example_dir="${REPO_ROOT}/${adapter}/example"
-  [[ -d "${example_dir}" ]] || continue
-  while IFS= read -r ref; do
-    # An interpolation (`cerbos:${CERBOS_VERSION}`) reads the pinned files at runtime and cannot
-    # drift, so it is already correct by construction.
-    case "${ref}" in *'ghcr.io/cerbos/cerbos:$'*|*'ghcr.io/cerbos/cerbos:{'*) continue ;; esac
-    [[ "${ref}" == "${pinned_image}" ]] || \
-      fail "${adapter}/example pins Cerbos as '${ref}', expected '${pinned_image}'"
-  done < <(source_grep -rhoE 'ghcr\.io/cerbos/cerbos:[^@"'"'"' )]*(@sha256:[0-9a-f]{64})?' \
-    "${example_dir}")
-
-  # ...and must reach it at the address the runner sets, never one of its own. Both examples that
-  # existed when this check was written had shipped `?? "localhost:3593"`, which is not a harmless
-  # default: 3592/3593 are the ports every adapter's `cerbos run` test sidecar binds, and it is
-  # why demo/docker-compose.yml publishes the demo PDP on 13592/13593 instead. An unset
-  # CERBOS_HOST therefore did not fail — the example planned against whichever sidecar held those
-  # ports rather than the one loaded with `demo/policies/`, and the mismatch against expected.json
-  # read as an adapter bug. The rule was already in demo/README.md's "What an example must do" and both
-  # examples broke it anyway, which is what makes it a check rather than prose.
-  #
-  # A CLIENT address specifically. `demo/docker-compose.yml` maps "13592:3592", and the
-  # container-side half of a port mapping is the PDP's own listen port, which is correct.
-  while IFS= read -r addr; do
-    fail "${adapter}/example hardcodes the PDP address '${addr}' — read \$CERBOS_HOST instead (demo/README.md)"
-  done < <(source_grep -rhoE '(localhost|127\.0\.0\.1):359[23]' "${example_dir}")
-done
-
 # ---------------------------------------------------------------------------------------------
 # 4. Every adapter has a runnable example/run.sh
 # ---------------------------------------------------------------------------------------------
-echo "==> [4/5] example coverage: every adapter has a runnable example/run.sh"
+echo "==> [4/4] example coverage: every adapter has a runnable example/run.sh"
 
-# The roster is `adapters` in conformance/actions.json — the same one checks 3 and 5 iterate, and
-# the same rule that keeps the PDP pin in one place. A second list here would be a list that can
-# disagree with the corpus, and the adapter left off it is exactly the one nothing would demand an
-# example of. validate-corpus.sh already asserts that roster is non-empty and duplicate-free and
-# runs in the same job immediately before this script, so this cannot pass by iterating nothing.
+# Adapter manifests are the roster. Discovery means registering an adapter immediately demands an
+# example without adding it to a second central list.
 #
 # There is no per-adapter opt-out and no environment variable to switch it off: a gate with an
 # escape hatch is not a gate, and the reason there is nothing to opt out WITH is ADR 0001, the
@@ -377,217 +255,15 @@ echo "==> [4/5] example coverage: every adapter has a runnable example/run.sh"
 # `-e` alone is not enough: run-example.sh executes the script directly, so a run.sh committed
 # without its mode bit is not a runnable example either. Testing existence alone would pass it
 # here and fail later in the example job, with a message about the runner rather than the mode bit.
-for adapter in $(jq -r '.adapters[]' "${ACTIONS}"); do
+for adapter in ${ADAPTERS}; do
   runner="${REPO_ROOT}/${adapter}/example/run.sh"
   if [[ ! -e "${runner}" ]]; then
-    fail "${adapter} has no example/run.sh — every adapter in the actions.json roster needs an" \
+    fail "${adapter} has no example/run.sh — every discovered adapter needs an" \
       "example application (demo/README.md)"
   elif [[ ! -x "${runner}" ]]; then
     fail "${adapter}/example/run.sh is not executable — demo/scripts/run-example.sh invokes it" \
       "directly, so chmod +x it"
   fi
-done
-
-# ---------------------------------------------------------------------------------------------
-# 5. Principal provenance
-# ---------------------------------------------------------------------------------------------
-echo "==> [5/5] principal provenance: examples read their principal from seeds.json"
-
-# Every example plans for the principals seeds.json declares, and is supposed to look them up
-# there rather than write one out. Nothing said so.
-#
-# Unlike the hardcoded PDP address check 3 catches, a restated principal does NOT fail quietly: it
-# matches what the corpus carries until someone edits seeds.json, and then that example's frozen
-# id lists stop matching and it fails loudly — as an adapter bug rather than as the misinvocation
-# it is. So this is a latency problem, not a correctness hole, and it earned a check only because
-# six more examples were queued behind it (cerbos/query-plan-adapters#349): a rule constraining
-# examples being written is worth more than one added after they exist. Those examples have since
-# landed — check 4 above is what now holds the roster complete — so what this guards from here on
-# is the next adapter to join it.
-#
-# What makes it checkable is that a principal is an id AND its roles, and only the roles are
-# unobtainable any other way. An example naming `alice` is fine and unavoidable — it is the
-# lookup key, the expected.json entry key, and the word a printed line uses. An example naming
-# `alice` NEXT TO `user` has restated the corpus record, because roles are what the policy's
-# rules are keyed on and the corpus is the only place they come from.
-#
-# A role that is ALSO a principal id cannot carry that signal, and `admin` is both here. Every
-# example emits `"admin/admin-view": filtered("admin", "admin-view")` two lines from an `alice`,
-# so pairing on it would fail all four; suppressing that pair is not tuning around a false
-# positive, it is that the two readings are genuinely indistinguishable from the literals alone.
-# Note what is and is not dropped: `admin` leaves the ROLE set only. It is still a principal id,
-# so `{ id: "admin", roles: ["user"] }` pairs like any other. The consequence is stated rather
-# than hidden: a restatement of the `admin` principal ALONE, with only its `admin` role, is not
-# caught. Restating the other two is, and an example that looks two principals up in the corpus
-# and writes the third out by hand is not the mistake this exists to stop.
-PRINCIPAL_IDS="$(jq -r '[.principals[].id] | unique | join(",")' "${SEEDS}")"
-PRINCIPAL_ROLES="$(jq -r '([.principals[].roles[]] - [.principals[].id]) | unique | join(",")' \
-  "${SEEDS}")"
-
-# Both derived from seeds.json rather than spelled here, for the same reason check 2 derives the
-# action names from the policy: renaming a principal or a role in the corpus must not leave a
-# stale literal in this script silently guarding nothing.
-#
-# And the corpus can empty that second list — give every principal a role named after a principal
-# and there is nothing left to pair, so the scan below would pass every example vacuously. That is
-# a corpus problem with a corpus fix (one principal holding one role no principal is named after),
-# which is why it fails here rather than being worked around in the scan.
-if [[ -z "${PRINCIPAL_IDS}" || -z "${PRINCIPAL_ROLES}" ]]; then
-  fail "seeds.json must declare a principal, and a role no principal is NAMED after —" \
-    "otherwise every role reads as an id and the scan below guards nothing"
-fi
-
-# Extracts every string literal outside comments, and reports two things per example:
-#
-#   INLINE  a window of consecutive lines carrying a principal id and a role as two distinct
-#           literals — the signature of `{ id: "alice", roles: ["user"] }` in any of the five
-#           languages, however it is wrapped.
-#   CORPUS  whether the example names seeds.json and its principals array in code at all.
-#
-# Comments are skipped rather than scanned, because an id in a comment or a printed line of
-# output is a legitimate mention: spring-data's photo domain documents `?user=alice&role=user` in
-# a Javadoc block and must keep passing unmodified. Only string LITERALS count, and they are
-# matched WHOLE, so that same domain's `new Album("a1", "acme", "alice", …)` rows and
-# `@RequestParam(defaultValue = "user")` defaults stay clear of each other, and a printed
-# `"planning for alice as user"` is one literal matching neither. It is the pairing that means
-# something, not either half.
-#
-# The one shape that reads as a restatement without being one is a diagnostic passing the id and
-# the role as SEPARATE literals — `console.error("principal", "alice", "role", "user")`. Nothing
-# in the literals distinguishes that from building a principal out of them; put both words in the
-# message, or interpolate the id, and it is a whole literal matching neither.
-#
-# And the window cuts the other way too: an id and a role bound to separate variables far enough
-# apart — `const id = "bob"` with `const roles = ["user"]` six lines later — is a restatement this
-# does not see. Widening the window is not the fix, because the shapes block every example emits
-# puts `alice` and `admin` within a few lines of each other and a wide enough window starts
-# reporting those. This catches a principal WRITTEN OUT, which is the mistake a new example makes
-# by copying a literal; it is not a proof that one was not assembled piecewise.
-#
-# One lexer nuance in the same spirit: `#` ends a line, which is right for shell, YAML and Python
-# and wrong for a shell parameter expansion like `${ref##*/}`, where it drops the rest of that
-# line. It costs a finding rather than inventing one, so it stays the simple rule.
-read -r -d '' AWK_PRINCIPALS <<'AWK' || true
-BEGIN {
-  n = split(IDS, a, ",");   for (i = 1; i <= n; i++) isId[a[i]] = 1
-  n = split(ROLES, a, ","); for (i = 1; i <= n; i++) isRole[a[i]] = 1
-}
-
-# Comment state is per file; so is the window, which must not straddle two files.
-FNR == 1 { inBlock = 0; inDoc = 0; head = 1; tail = 0; split("", lit); split("", ln) }
-
-{
-  code = ""
-  i = 1
-  len = length($0)
-  while (i <= len) {
-    if (inBlock) {                                  # inside /* ... */
-      p = index(substr($0, i), "*/")
-      if (p == 0) break
-      i += p + 1; inBlock = 0; continue
-    }
-    if (inDoc) {                                    # inside a Python docstring
-      p = index(substr($0, i), docDelim)
-      if (p == 0) break
-      i += p + 2; inDoc = 0; continue
-    }
-    c = substr($0, i, 1)
-    if (substr($0, i, 3) == "\"\"\"" || substr($0, i, 3) == "'''") {
-      inDoc = 1; docDelim = substr($0, i, 3); i += 3; continue
-    }
-    if (substr($0, i, 2) == "/*") { inBlock = 1; i += 2; continue }
-    if (substr($0, i, 2) == "//" || c == "#") break  # to end of line
-    # A template literal is one literal, not a window onto the quotes inside it: `${a} 'b'` must
-    # not yield `b`, and an apostrophe in interpolated prose must not swallow the rest of the line.
-    if (c == "\"" || c == "'" || c == "`") {
-      q = c; i++; buf = ""
-      while (i <= len) {
-        ch = substr($0, i, 1)
-        if (ch == "\\") { i += 2; continue }
-        if (ch == q) { i++; break }
-        buf = buf ch; i++
-      }
-      tail++; lit[tail] = buf; ln[tail] = FNR
-      code = code " " buf " "                       # a path or key may sit inside the quotes
-      continue
-    }
-    code = code c
-    i++
-  }
-
-  if (code ~ /seeds\.json/) sawSeeds = 1
-  if (code ~ /principals/)  sawPrincipals = 1
-
-  while (head <= tail && ln[head] < FNR - WINDOW + 1) { delete lit[head]; delete ln[head]; head++ }
-
-  # Deduplicated on the MESSAGE, not on the pair of literals that produced it. Every window
-  # holding both halves re-examines the same pair, and one line can hold a literal several times
-  # over — `{ id: "admin", roles: ["admin"], fallback: "admin" }` is three pairs saying one thing.
-  # Keying on the indices deduplicates the wrong one and reports the same sentence three times,
-  # which inflates the failure count the summary line prints.
-  for (x = head; x <= tail; x++) {
-    if (!isId[lit[x]]) continue
-    for (y = head; y <= tail; y++) {
-      if (x == y || !isRole[lit[y]]) continue
-      message = sprintf("INLINE %s:%d: id \"%s\" alongside role \"%s\" (line %d)",
-        FILENAME, ln[x], lit[x], lit[y], ln[y])
-      if (message in seen) continue
-      seen[message] = 1
-      print message
-    }
-  }
-}
-
-END {
-  if (!sawSeeds)      print "CORPUS demo/seeds.json"
-  if (!sawPrincipals) print "CORPUS its principals array"
-}
-AWK
-
-for adapter in $(jq -r '.adapters[]' "${ACTIONS}"); do
-  example_dir="${REPO_ROOT}/${adapter}/example"
-  [[ -d "${example_dir}" ]] || continue
-
-  # Same file set as check 3 and as validate-corpus.sh: things that RUN, never prose, and never
-  # installed or built output. Minus the Cerbos policies, which that set includes as *.yaml.
-  #
-  # A policy is the one file where writing a role out is the POINT — it is what the PDP keys its
-  # rules on, and an example is free to carry policies of its own (spring-data's photo domain
-  # does). Two rules four lines apart, one granting `user` and one granting `admin`, pair exactly
-  # like a restated principal and would be reported as "look it up in demo/seeds.json", which is
-  # meaningless advice for a policy. spring-data's happen to sit ten lines apart, so this is a
-  # trap the next example walks into rather than a failure today.
-  #
-  # Identified by the apiVersion every Cerbos policy declares, not by living under policies/: a
-  # path rule is a carve-out the next adapter has to know about, and ADR 0001 is about not having
-  # those. A file that says what it is gets taken at its word.
-  sources=()
-  while IFS= read -r file; do
-    grep -qE '^[[:space:]]*apiVersion:[[:space:]]*"?api\.cerbos\.dev/' "${file}" && continue
-    sources+=("${file}")
-  done < <(source_grep -rlE '.' "${example_dir}")
-  if (( ${#sources[@]} == 0 )); then
-    fail "${adapter}/example has no scannable source files — there is nothing here to scan"
-    continue
-  fi
-
-  # A four-line window rather than a single line: prettier and google-java-format both break a
-  # principal literal across its `id:` and `roles:` lines, and a per-line scan would see one half
-  # of it at a time and report neither.
-  while IFS= read -r finding; do
-    case "${finding}" in
-      INLINE\ *)
-        location="${finding#INLINE }"
-        fail "${adapter}/example restates a principal at ${location#"${REPO_ROOT}/"} — look it" \
-          "up in demo/seeds.json instead (demo/README.md)"
-        ;;
-      CORPUS\ *)
-        fail "${adapter}/example never reads ${finding#CORPUS } — its principal must come from" \
-          "demo/seeds.json, not be restated (demo/README.md)"
-        ;;
-    esac
-  done < <(awk -v IDS="${PRINCIPAL_IDS}" -v ROLES="${PRINCIPAL_ROLES}" -v WINDOW=4 \
-    "${AWK_PRINCIPALS}" "${sources[@]}")
 done
 
 if (( failures > 0 )); then

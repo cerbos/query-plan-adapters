@@ -6,7 +6,7 @@
 #
 # The split between this script and the example is deliberate. Everything language-independent
 # lives here — PDP lifecycle, output capture, canonicalisation, the diff against
-# demo/expected.json. Everything language-specific lives in `<adapter>/example/run.sh`, which
+# demo/cases.json. Everything language-specific lives in `<adapter>/example/run.sh`, which
 # packs the adapter into a real distributable, installs THAT (never the source directory — see
 # docs/adr/0002-examples-install-the-packed-artifact.md), runs the example, and prints one JSON
 # document to stdout. Each adapter brings its own packaging story; growing a language switch in here
@@ -35,11 +35,11 @@ if [[ $# -ne 1 ]]; then
 fi
 ADAPTER="$1"
 
-# The adapter roster is `adapters` in conformance/actions.json. Deliberately not a second list:
-# an adapter added to one roster but not the other looks consistent from either side.
-if ! jq -e --arg a "${ADAPTER}" '.adapters | index($a)' \
-  "${REPO_ROOT}/conformance/actions.json" >/dev/null; then
-  fail "'${ADAPTER}' is not in conformance/actions.json .adapters"
+# Adapter discovery is manifest-based. A new adapter becomes part of the shared demo contract by
+# adding its repository-local manifest, with no central roster to update.
+MANIFEST="${REPO_ROOT}/${ADAPTER}/adapterctl.json"
+if [[ ! -f "${MANIFEST}" ]] || ! jq -e --arg a "${ADAPTER}" '.adapter == $a' "${MANIFEST}" >/dev/null; then
+  fail "'${ADAPTER}' has no matching adapterctl.json manifest"
 fi
 
 EXAMPLE_DIR="${REPO_ROOT}/${ADAPTER}/example"
@@ -87,18 +87,23 @@ declared="$(jq -r '.adapter // ""' "${WORK_DIR}/stdout.json")"
 [[ "${declared}" == "${ADAPTER}" ]] || \
   fail "example declared adapter '${declared}', expected '${ADAPTER}'"
 
-# expected.json carries its documentation inline, under a `description` sibling of each shape's
-# `results`. Examples emit the results alone, so the comparison strips the prose from the
-# expectation rather than asking every example to reproduce it.
-jq -S '.shapes | with_entries(.value |= .results)' "${DEMO_DIR}/expected.json" \
-  >"${WORK_DIR}/expected.json"
+# The case catalog owns the language-independent input and expected output. Native examples keep
+# their existing grouped JSON output; this projection is presentation-only and contains no second
+# expectation source.
+jq -S '
+  reduce .cases[] as $case ({};
+    .[$case.operation][($case.principal + "/" + $case.action)] =
+      ($case.expected
+        + (if $case.pagination == null then {} else $case.pagination end)))
+' "${DEMO_DIR}/cases.json" \
+  >"${WORK_DIR}/projected-cases.json"
 jq -S '.shapes' "${WORK_DIR}/stdout.json" >"${WORK_DIR}/actual.json"
 
-if ! diff -u "${WORK_DIR}/expected.json" "${WORK_DIR}/actual.json" >"${WORK_DIR}/diff" 2>&1; then
-  echo "==> ${ADAPTER} diverged from demo/expected.json (- expected, + actual)" >&2
+if ! diff -u "${WORK_DIR}/projected-cases.json" "${WORK_DIR}/actual.json" >"${WORK_DIR}/diff" 2>&1; then
+  echo "==> ${ADAPTER} diverged from demo/cases.json (- expected, + actual)" >&2
   cat "${WORK_DIR}/diff" >&2
-  fail "${ADAPTER} example output does not match demo/expected.json"
+  fail "${ADAPTER} example output does not match demo/cases.json"
 fi
 
 shape_count="$(jq -r '.shapes | length' "${WORK_DIR}/stdout.json")"
-ok "${ADAPTER} example matched demo/expected.json across ${shape_count} usage shapes"
+ok "${ADAPTER} example matched demo/cases.json across ${shape_count} usage shapes"

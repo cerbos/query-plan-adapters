@@ -12,11 +12,22 @@ on:
     tags:
       - prisma/v*
 
+permissions:
+  contents: read
+
 defaults:
   run:
     working-directory: prisma
 
 jobs:
+  certification:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/validate-adapterctl
+        with:
+          adapter: prisma
+
   test:
     strategy:
       # The adversarial suite now shares this matrix, so the default fail-fast would let an
@@ -26,7 +37,7 @@ jobs:
       fail-fast: false
       matrix:
         node-version: ["22", "24", "25"]
-        prisma-version: ["6", "7"]
+        prisma-version: ["5", "6", "7"]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -38,13 +49,16 @@ jobs:
       # conformance/wire-fixtures/, which the `Conformance Corpus` workflow replans and diffs
       # against this same pinned version.
       - name: Read pinned Cerbos version
+        if: matrix.node-version == '22'
         id: cerbos
         run: echo "version=$(tr -d '[:space:]' < ../conformance/CERBOS_VERSION)" >> "$GITHUB_OUTPUT"
 
       - name: Setup Cerbos
+        if: matrix.node-version == '22'
         uses: cerbos/cerbos-setup-action@30ad92b0242d792bd156985682426577fcfcc589 # v1
         with:
           version: v${{ steps.cerbos.outputs.version }}
+          github_token: ${{ github.token }}
 
       - name: Test using Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -67,9 +81,7 @@ jobs:
         run: npm test
 
       # The adversarial corpus is a property of the translator, not of the Node runtime, so it
-      # runs once per Prisma major on the baseline Node leg rather than on all three — the same
-      # two executions the standalone `adversarial` job used to perform, minus the duplicated
-      # checkout, Cerbos install and `npm install`.
+      # runs once per Prisma major on the baseline Node leg rather than on all three.
       - name: Run adversarial differential suite (SQLite)
         if: matrix.node-version == '22'
         run: npm run test:adversarial:v${{ matrix.prisma-version }}
@@ -90,7 +102,7 @@ jobs:
       # accent-insensitive, so a Prisma-managed MySQL database over-grants `cs-eq`, `unicode-eq`
       # and every `hier-*` prefix probe until someone converts the tables. This leg proves the
       # corpus against the collation README.md tells consumers to use. Gated to the baseline Node
-      # leg like the other two, giving 2 majors x 3 stores = 6 adversarial runs, all on Node 22.
+      # leg like the other two, giving 3 majors x 3 stores = 9 adversarial runs, all on Node 22.
       - name: Run adversarial differential suite (MySQL)
         if: matrix.node-version == '22'
         run: npm run test:adversarial:mysql:v${{ matrix.prisma-version }}

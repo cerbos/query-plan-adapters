@@ -3,7 +3,7 @@ const store = process.env.ADAPTER_TEST_DB || "sqlite";
 
 // `./test-setup.adversarial` resolves to the (store x Prisma major) fixture: each combination has
 // its own generated client, because the provider is baked into a generated Prisma client and the
-// two majors generate incompatible ones. SQLite carries no infix, being the default the file
+// three majors generate incompatible ones. SQLite carries no infix, being the default the file
 // names were written around.
 const STORE_SUFFIXES = {
   sqlite: "",

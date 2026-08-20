@@ -7,7 +7,7 @@
 # The store is SQLite, in a file this directory owns, so there is nothing to start here.
 #
 # Everything this script prints for a human goes to stderr. stdout carries exactly one JSON
-# document, which the shared runner diffs against demo/expected.json.
+# document, which the shared runner diffs against demo/cases.json.
 #
 # Pre-reqs: pdm, and a Python matching this example's `requires-python`.
 

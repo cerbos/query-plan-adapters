@@ -145,19 +145,19 @@ See [#302](https://github.com/cerbos/query-plan-adapters/issues/302).
 
 ## Conformance contract
 
-The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 21
-hostile seed rows and real Ent-built queries. The whole corpus is replayed against **SQLite,
+The adapter is differentially tested against the pinned Cerbos PDP's `checkResource` decisions using
+the canonical check resources and real Ent-built queries. The whole corpus is replayed against **SQLite,
 PostgreSQL and MySQL**, so the dialect-sensitive choices this adapter makes are proved rather than
-assumed. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
+assumed. The PDP is the semantic oracle.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 182 reference conformance actions, on SQLite, PostgreSQL and MySQL |
-| Fail-closed corpus shapes | Regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an untyped string field, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero) `filter()`/`map()` used as a condition (both return a list, not a boolean), `string()` over a column declared `ValueBool` (SQLite and MySQL store a boolean as 1/0 and render `"1"` where CEL and PostgreSQL render `"true"`), a hierarchy path constructed by `list()` rather than read from a column, `mod` (reached through the `int()` cast that gives `%` an integer operand), a positional read of a scalar list (row order in a SQL relation is not defined), and list equality over a `map()` projection (15 actions) |
+| Oracle-tested | Actions whose manifest outcome is `matched`, on SQLite, PostgreSQL and MySQL |
+| Fail-closed corpus shapes | Manifest outcomes marked `rejected`, including regex `matches()`, ordered list indexing/`get-field`, ambiguous casts, list-valued expressions in condition position, and operations the SQL dialects cannot represent faithfully |
 | Operand types the plan does not carry | CEL overloads `+` on strings, and a query plan names no operand types. One string operand settles it, so `R.attr.a + "x"` and `"x" + R.attr.a` translate on their own. Between **two columns** neither does: declare the string column with `ValueType: cerbosent.ValueString` and the adapter emits concatenation, or it fails closed rather than emitting a numeric `+` — which is a hard error on PostgreSQL, `0` on SQLite, and on MySQL a silent match against every row (cerbos/query-plan-adapters#391) |
 | Representation-dependent | `null-eq-missing` — rejected under `NullOmitted`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute the caller sends as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare it per attribute — `NullConvention: NullConventionExplicit` on the mapper `Entry` — or the historical rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
-| Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
+| Upstream-blocked | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 
 The oracle coverage includes value-first and field-to-field comparisons, escaped string predicates,
 relation counts and nested collection macros, null/error propagation, arithmetic and ternaries,
@@ -170,7 +170,7 @@ Go's `time.Time` carries nanoseconds, so those instants survive translation exac
 The eleven fail-closed shapes return an error wrapping `ErrUnsupported` rather than a broader
 predicate. `matches()` is rejected because SQL regex dialects do not guarantee CEL/RE2 semantics.
 
-Every fail-closed shape's error message is pinned in the shared corpus (`conformance/actions.json`) and asserted by this adapter's conformance run, so a classification proves the throw names its declared mechanism rather than merely that something threw.
+Every fail-closed shape's error message is pinned in this adapter's `adapterctl.json` manifest and asserted by its conformance run, so a rejected outcome proves the throw names its declared mechanism rather than merely that something threw.
 
 **Behaviour change.** A `filter()`/`map()` result reaching a plain **value** position — `map(R.attr.tags, t.id) == [...]` — now fails at translation with a named error. It used to be bound as a query parameter, so the translator emitted SQL for a shape it cannot express and only the driver's encoder refused it, at execution time ([#387](https://github.com/cerbos/query-plan-adapters/issues/387)). Both were errors; this one arrives before a query is built and says why.
 
@@ -268,7 +268,7 @@ difference from the [pgx adapter](../pgx), which quotes defensively.
 
 An adversarial review found these. They are real but unfixed here, because each either needs a
 corpus action first (this repository's rule is that translation changes start in the shared corpus,
-not in one adapter) or is shared with the reference adapters and should be fixed across all of them
+not in one adapter) or is shared across adapters and should be fixed across all of them
 at once. Treat them as constraints on the policies you write.
 
 | Gap | Effect |

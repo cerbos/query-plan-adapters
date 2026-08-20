@@ -442,15 +442,15 @@ convention is the one Elasticsearch's storage already matches. See
 
 ### Conformance contract
 
-The adapter is differentially tested against Cerbos PDP 0.54.0 `check()` decisions using 21 hostile seed documents and real Elasticsearch queries. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
+The adapter is differentially tested against the pinned Cerbos PDP's `check()` decisions, using the canonical check resources and real Elasticsearch queries. The PDP is the semantic oracle.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 84 reference conformance actions plus regex and timestamp probes (86 actions) |
-| Fail-closed | 103 reference actions plus ordered list indexing/`get-field`, `int()`/`double()` casts and `filter()`/`map()` used as a condition or a conjunct (111 actions total) |
+| Oracle-tested | Actions whose manifest outcome is `matched` |
+| Fail-closed | Actions whose manifest outcome is `rejected` |
 | Representation-independent | `null-eq-missing` — rejected like every other null-selecting comparison, so no NULL-representation option is required |
 | Attribute NULL convention | Declared, in order to REFUSE. Elasticsearch does not index a JSON null, so an explicitly-null value and a missing field are the same document to every query the DSL can express. Pass the attributes you send as explicit nulls in `explicitNullAttributes`, and the equality family over them throws instead of answering narrowly — every spelling of `!= "x"` either requires the field to exist (dropping the row CEL allows) or matches every document missing it (cerbos/query-plan-adapters#308) |
-| Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute documents. Until the planner is fixed, use `R.attr.x != null` for indexed attributes instead of `has(R.attr.x)` |
+| Upstream-blocked | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute documents. Until the planner is fixed, use `R.attr.x != null` for indexed attributes instead of `has(R.attr.x)` |
 
 The oracle-tested set covers value-first comparisons, literal-safe wildcard matching, safe
 null/missing polarities, positive `exists` and non-empty collection checks, negated `all`,
@@ -460,31 +460,18 @@ unexpressible categories above plus positive explicit-null comparisons,
 null-sensitive variable membership, positive `all`, negated `exists`, and collection-emptiness
 predicates that require distinguishing an indexed empty array from a missing field.
 
-Every fail-closed shape's error message is pinned in the shared corpus (`conformance/actions.json`) and asserted by this adapter's conformance run, so a classification proves the throw names its declared mechanism rather than merely that something threw.
+Every fail-closed shape's error message is pinned in this adapter's `adapterctl.json` manifest and asserted by its conformance run, so a rejected outcome proves the throw names its declared mechanism rather than merely that something threw.
 
 `ElasticsearchTranslatorTest` asserts the same classification offline, and adds the property the
 per-action assertions cannot state: the **distribution of the refusals over the sites in the walk
-that raise them**. 112 of the corpus's 199 shapes are refused here — the 111 fail-closed actions
-above plus `null-eq-missing` — so it matters whether that happens at one catch-all or at many. It
-is seventeen sites, and one mechanism — an operand slot holding a computed sub-expression, where
-the Query DSL admits only a field and a literal — accounts for 54 of them:
-
-| Rejection site | Actions |
-| --- | --- |
-| computed leaf operand (arithmetic, casts, ternaries, `map()`/`filter()`, nested `size()`, a lambda one scope too deep) | 54 |
-| field-to-field comparison | 15 |
-| count threshold that is not an emptiness check | 8 |
-| explicit null against null, or against a constant | 8 |
-| string operator whose receiver is the constant | 4 |
-| negated `exists` over a collection | 4 |
-| positive `all` over a collection | 4 |
-| `exists_one`, collection emptiness, negated membership, operand arity, sub-millisecond timestamp | 2 each |
-| count over a non-collection, negated `hasIntersection`, null in a document array, null in an intersection, hierarchy path built from a document field | 1 each |
+that raise them**. The generated adapter report supplies the current refusal total. The test keeps
+the more useful mechanism-level invariant: every refusal maps to exactly one known rejection site,
+including computed operands, field-to-field comparisons, unsupported count thresholds, explicit
+nulls, collection operations, and sub-millisecond timestamps.
 
 The list is asserted **total** — a shape refused by an accident rather than by a declared
-limitation matches no site and fails — and the counts are pinned, so a translator change that moves
-a shape from one site to another shows up as a diff even though both sites throw and
-`conformance/actions.json` is unchanged. Zero refusals are an unmapped field, which is the accident
+limitation matches no site and fails — and every known site stays reachable. The generated report
+owns action cardinality instead of duplicating it here. Zero refusals are an unmapped field, which is the accident
 [#326](https://github.com/cerbos/query-plan-adapters/issues/326) was filed for.
 
 Elasticsearch does not index empty arrays. An `exists` or nested query therefore cannot distinguish an attribute explicitly set to `[]` from an attribute omitted entirely. CEL treats the former as an empty collection and the latter as an evaluation error, so polarity matters: positive `exists`, positive non-empty checks, negated `all`, and negated empty checks remain safe; the opposite polarities throw rather than authorizing a document with a missing collection.
@@ -512,7 +499,7 @@ This adapter **builds no subquery.** A collection is a `nested` field on the sam
 | Subtype discrimination | **Caller-owned** | The index or alias you send the query to, and any filtered alias on it. The adapter is handed a plan, never an index, so it cannot check that the documents you search are the ones the resource attributes were built from. An alias whose filter differs from the application's own read path, or an index holding several document kinds, needs its discriminator added to your `bool.filter` yourself |
 | To-one relation used as a collection | Not applicable — a `nested` field holds exactly the inner objects the application indexed | — |
 | Composite association key | Not applicable — no join, so no key to compose | — |
-| Absent to-one parent | **Reproduced** for the safe polarities, **rejected** for the rest — `w1-exists-chain`, `w1-size-chain` and `w1-in-chain` are oracle-tested; `w1-all-chain`, `w1-not-exists-chain`, `w1-size-zero-chain`, `w1-size-nonneg-chain`, `w1-not-in-chain`, `w1-not-hasint-chain` and `w1-not-size-chain` are in `adapterUnsupported` and throw | None — it is the empty-array limitation above, not a mapping choice: Elasticsearch cannot tell a document with no parent from a document whose parent has no children, so the polarities that would read that as an allow are refused ([#309](https://github.com/cerbos/query-plan-adapters/issues/309)) |
+| Absent to-one parent | **Reproduced** for the safe polarities, **rejected** for the rest — `w1-exists-chain`, `w1-size-chain` and `w1-in-chain` are oracle-tested; `w1-all-chain`, `w1-not-exists-chain`, `w1-size-zero-chain`, `w1-size-nonneg-chain`, `w1-not-in-chain`, `w1-not-hasint-chain` and `w1-not-size-chain` are in `rejected` and throw | None — it is the empty-array limitation above, not a mapping choice: Elasticsearch cannot tell a document with no parent from a document whose parent has no children, so the polarities that would read that as an allow are refused ([#309](https://github.com/cerbos/query-plan-adapters/issues/309)) |
 | Analyzed (`text`) field mapping | **Caller-owned** | `GET <index>/_mapping`. Every field named in your `fieldMap` must be a type Elasticsearch compares exactly — `keyword`, `boolean`, a numeric type, or `date`. A `text` field is tokenized and lowercased before it is indexed, and the `term`, `terms`, `prefix`, `wildcard` and `regexp` queries this adapter emits then run against those tokens rather than against the stored value. See below |
 
 #### Why an analyzed mapping is not something the adapter can reject
@@ -603,7 +590,7 @@ Four suites, and which of them needs a container is the useful distinction:
 
 | Suite | What it asserts | Needs |
 |---|---|---|
-| `ElasticsearchTranslatorTest` | the Query DSL emitted for every corpus action, against `golden/expectations.json`, and the pinned refusal message for every action `conformance/actions.json` says this adapter must reject | nothing — plans come from `conformance/wire-fixtures/`, so no PDP, no Elasticsearch and no Docker |
+| `ElasticsearchTranslatorTest` | the Query DSL emitted for every corpus action, against `golden/expectations.json`, and the pinned refusal message for every action `adapterctl.json` says this adapter must reject | nothing — plans come from `conformance/wire-fixtures/`, so no PDP, no Elasticsearch and no Docker |
 | `ElasticsearchAdversarialConformanceTest` | the documents those queries return, against per-row `check()` | a pinned Cerbos PDP and Elasticsearch (Testcontainers) |
 | `ElasticsearchSurfaceTest` | what a real server does with an emitted clause, and the store facts the corpus reasons cite — an unindexed empty array, an unindexed JSON null, an analyzed field, Lucene regex, date precision | Elasticsearch (Testcontainers) |
 | `ElasticsearchQueryPlanAdapterTest` | the shapes no policy can produce — malformed operands, caller-supplied arguments, literal validation — plus a handful of shapes the corpus does not carry yet, each labelled | nothing |

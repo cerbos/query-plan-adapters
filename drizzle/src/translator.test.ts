@@ -2,7 +2,10 @@ import * as fs from "fs";
 import * as path from "path";
 
 import { describe, expect, test } from "@jest/globals";
-import type { PlanExpressionOperand, PlanResourcesResponse } from "@cerbos/core";
+import type {
+  PlanExpressionOperand,
+  PlanResourcesResponse,
+} from "@cerbos/core";
 import { eq, ne, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { MySqlDialect } from "drizzle-orm/mysql-core/dialect";
@@ -21,23 +24,16 @@ import {
   GOLDEN_REGENERATE_COMMAND,
   GOLDEN_STORES,
   buildMapper,
-  classifyActionsForAdapter,
   mysqlSchema,
   planFromWireFixture,
   postgresSchema,
-  readCorpusJson,
   readGoldenExpectations,
-  requireMessage,
   sqliteSchema,
   wireFixtureActions,
   writeGoldenExpectations,
 } from "./corpus";
-import type {
-  ActionsFile,
-  GoldenExpectation,
-  GoldenStore,
-  RenderedFilter,
-} from "./corpus";
+import type { GoldenExpectation, GoldenStore, RenderedFilter } from "./corpus";
+import { loadActionControlPlane, requireOutcomeMessage } from "./controlPlane";
 
 /**
  * Translator unit test: for every action in the shared `../conformance/` corpus, the SQL this
@@ -49,7 +45,7 @@ import type {
  * | assertion | who owns it |
  * | --- | --- |
  * | the plan the PDP produces for a policy | `conformance/wire-fixtures/`, replanned and diffed by the `Conformance Corpus` workflow |
- * | which shapes this adapter must refuse, and with what message | `conformance/actions.json` — read below, not restated |
+ * | which shapes this adapter must refuse, and with what message | `drizzle/adapterctl.json` — read below, not restated |
  * | the rows a filter returns | `adversarial.test.ts`, against real SQLite and PostgreSQL with `check()` as the oracle |
  * | **the SQL this adapter emits for a plan** | **here** |
  *
@@ -76,27 +72,51 @@ import type {
  *
  * **Adding a corpus action fails this file.** Every wire fixture must be accounted for here
  * exactly once — a golden expectation (an emitted filter or an unconditional plan kind) or a throw
- * carrying the message `actions.json` pins — and the completeness guard below is what makes a new
+ * carrying the message `adapterctl.json` pins — and the completeness guard below is what makes a new
  * action land as a failure rather than as silence.
  */
 
-const actionsFile = readCorpusJson("actions.json") as ActionsFile;
+const controlPlane = loadActionControlPlane({
+  adapter: ADAPTER,
+  selectedAction: undefined,
+});
+
+test("ADAPTERCTL_ACTION selects one direct outcome", () => {
+  const previous = process.env["ADAPTERCTL_ACTION"];
+  process.env["ADAPTERCTL_ACTION"] = "vf-le";
+  try {
+    const focused = loadActionControlPlane({
+      adapter: ADAPTER,
+      selectedAction: process.env["ADAPTERCTL_ACTION"],
+    });
+    expect(focused.selectedActions).toEqual(["vf-le"]);
+    expect(focused.oracleActions).toEqual(["vf-le"]);
+    expect(focused.throwingActions).toEqual([]);
+    expect(focused.upstreamBlockedActions).toEqual([]);
+    expect(focused.unassessedActions).toEqual([]);
+  } finally {
+    if (previous === undefined) {
+      delete process.env["ADAPTERCTL_ACTION"];
+    } else {
+      process.env["ADAPTERCTL_ACTION"] = previous;
+    }
+  }
+});
 
 /**
- * The shapes `actions.json` says this adapter must refuse, each with the message it must refuse
- * them with. Identical to the classification `adversarial.test.ts` asserts against a live PDP;
+ * The shapes `adapterctl.json` says this adapter must refuse, each with the message it must refuse
+ * them with. Identical to the direct outcomes `adversarial.test.ts` asserts against a live PDP;
  * asserting it here as well is what lets the completeness guard below be total, and it costs a
  * millisecond rather than two containers.
  *
  * A throwing action needs no golden expectation of its own: the message is already corpus data,
- * pinned once in `actions.json` and read by every adapter. Writing it into this adapter's asset
+ * pinned once in `adapterctl.json` and read by every adapter. Writing it into this adapter's asset
  * too would create two places to change one string with nothing to say which is authoritative.
  */
-const { throwingActions: THROWING_ACTIONS } = classifyActionsForAdapter(
-  actionsFile,
-  ADAPTER,
+const THROWING_ACTIONS = controlPlane.throwingActions.filter(
+  ({ action }) => action !== "null-eq-missing",
 );
-const THROWING = new Set(THROWING_ACTIONS.map(([action]) => action));
+const THROWING = new Set(THROWING_ACTIONS.map(({ action }) => action));
 
 // -- the stores, their mappers, and the dialects ---------------------------------------------
 
@@ -234,8 +254,8 @@ if (process.env["GOLDEN_UPDATE"] === "1") {
   const regenerated = new Map<string, GoldenExpectation>();
   for (const action of wireFixtureActions()) {
     // A throwing action gets no entry: its message is corpus data. Skipping it here is also what
-    // keeps regeneration from papering over a misclassification — an action moved into
-    // `adapterUnsupported` that this adapter still translates fails the throw suite, and one moved
+    // keeps regeneration from papering over a misclassification — an action assigned a
+    // `rejected` direct outcome that this adapter still translates fails the throw suite, and one moved
     // out of it that this adapter still refuses fails regeneration itself.
     if (THROWING.has(action)) {
       continue;
@@ -263,27 +283,16 @@ describe("corpus shapes", () => {
   // same assertion against a live PDP; here it costs a millisecond and covers the whole roster,
   // which is what lets the completeness guard below be total.
   test.each(THROWING_ACTIONS)(
-    "%s is refused with the message actions.json pins (%s)",
-    (action, _reason, message) => {
+    "$action is refused with the message adapterctl.json pins ($reason)",
+    ({ action, message }) => {
       for (const store of GOLDEN_STORES) {
         expect(() => translate(store, action)).toThrow(message);
       }
     },
   );
 
-  // Adding a throwing action without pinning its message must fail this suite rather than
-  // silently degrade the throw assertions to a bare "it threw" (#326).
-  test("a throwing action with no pinned message fails classification", () => {
-    expect(() => requireMessage("synthetic-entry", undefined)).toThrow(
-      /pins no throw message/,
-    );
-    expect(() => requireMessage("synthetic-entry", "")).toThrow(
-      /pins no throw message/,
-    );
-  });
-
   test("every corpus action is accounted for here exactly once", () => {
-    const throwing = THROWING_ACTIONS.map(([action]) => action);
+    const throwing = THROWING_ACTIONS.map(({ action }) => action);
     const classified = [...RECORDED_ACTIONS, ...throwing].sort();
 
     // Total: a corpus action with no golden expectation and no pinned throw lands as a failure
@@ -297,13 +306,7 @@ describe("corpus shapes", () => {
     // The asset is written sorted, so a translator change reads as the list of shapes it moved.
     expect(RECORDED_ACTIONS).toEqual([...RECORDED_ACTIONS].sort());
 
-    // Tripwires. Bump them deliberately: a count that moves without anyone noticing is how a
-    // shape gets dropped from an asset nobody reads end to end.
-    expect({
-      conditional: CONDITIONAL_ACTIONS.length,
-      unconditional: RECORDED_ACTIONS.length - CONDITIONAL_ACTIONS.length,
-      throwing: throwing.length,
-    }).toEqual({ conditional: 176, unconditional: 2, throwing: 21 });
+    expect(classified).toEqual(controlPlane.allActions);
   });
 
   /**
@@ -392,18 +395,23 @@ describe("rendering across the claimed dialects", () => {
   const mysqlRendered = (action: string): string =>
     render("mysql", action, filterFor("mysql", action)).sql;
 
-  test.each(CONDITIONAL_ACTIONS)("%s uses no SQLite-only string function", (action) => {
-    // instr() exists on SQLite and MySQL but not PostgreSQL; replace/substr/length are common to
-    // all three. PostgreSQL's own evaluation of the string operators is proved by the corpus's
-    // cr-contains, cs-*, f2f-* and hier-* actions on the executed PostgreSQL leg.
-    for (const dialect of GOLDEN_STORES) {
-      const rendered = render(dialect, action, filterFor(dialect, action));
-      expect({ dialect, usesInstr: rendered.sql.includes("instr(") }).toEqual({
-        dialect,
-        usesInstr: false,
-      });
-    }
-  });
+  test.each(CONDITIONAL_ACTIONS)(
+    "%s uses no SQLite-only string function",
+    (action) => {
+      // instr() exists on SQLite and MySQL but not PostgreSQL; replace/substr/length are common to
+      // all three. PostgreSQL's own evaluation of the string operators is proved by the corpus's
+      // cr-contains, cs-*, f2f-* and hier-* actions on the executed PostgreSQL leg.
+      for (const dialect of GOLDEN_STORES) {
+        const rendered = render(dialect, action, filterFor(dialect, action));
+        expect({ dialect, usesInstr: rendered.sql.includes("instr(") }).toEqual(
+          {
+            dialect,
+            usesInstr: false,
+          },
+        );
+      }
+    },
+  );
 
   test.each(CONDITIONAL_ACTIONS)(
     "%s casts to 53-bit floating point, never to single precision",
@@ -453,9 +461,8 @@ describe("rendering across the claimed dialects", () => {
     (action) => {
       expect({
         action,
-        collapsesNullToFalse: mysqlRendered(action).includes(
-          "is null then false",
-        ),
+        collapsesNullToFalse:
+          mysqlRendered(action).includes("is null then false"),
       }).toEqual({ action, collapsesNullToFalse: false });
     },
   );
@@ -533,11 +540,7 @@ describe("mapper forms", () => {
         filterFor("postgresql", DEEP_ACTION, { mapper: asFunction }),
       ),
     ).toEqual(
-      render(
-        "postgresql",
-        DEEP_ACTION,
-        filterFor("postgresql", DEEP_ACTION),
-      ),
+      render("postgresql", DEEP_ACTION, filterFor("postgresql", DEEP_ACTION)),
     );
   });
 
@@ -567,16 +570,17 @@ describe("mapper forms", () => {
     // and the value it binds is the one the transform produced rather than the plan's literal.
     expect(rendered.sql).toContain("lower(");
     expect(rendered.params).toEqual(
-      (pinned as { rendered: Record<GoldenStore, RenderedFilter> }).rendered
-        .postgresql.params.map((param) => String(param).toLowerCase()),
+      (
+        pinned as { rendered: Record<GoldenStore, RenderedFilter> }
+      ).rendered.postgresql.params.map((param) => String(param).toLowerCase()),
     );
   });
 
   test("an unmapped reference is refused rather than dropped", () => {
     // Dropping it would emit a filter that answers a different question from the policy.
-    expect(() =>
-      translate("postgresql", "cs-eq", { mapper: {} }),
-    ).toThrow(/No mapping/);
+    expect(() => translate("postgresql", "cs-eq", { mapper: {} })).toThrow(
+      /No mapping/,
+    );
   });
 });
 
@@ -648,16 +652,14 @@ describe("relation subqueryFilter", () => {
 });
 
 describe("nullAttributeRepresentation", () => {
-  // `null-eq-missing` is the corpus's `nullRepresentationOmitted` probe: `== null` against an
+  // `null-eq-missing` is the corpus's omitted-NULL probe: `== null` against an
   // attribute the caller OMITS when the column is NULL. The two conventions are indistinguishable
   // on the wire — the planner emits the same `eq(attr, null)` either way — so the adapter has to
   // be told, and the whole behaviour is a translator property with no store in it.
-  const OMITTED_MESSAGE = requireMessage(
-    "nullRepresentationOmitted.null-eq-missing.messages.drizzle",
-    actionsFile.nullRepresentationOmitted.find(
-      (entry) => entry.action === "null-eq-missing",
-    )?.messages?.[ADAPTER],
-  );
+  const OMITTED_MESSAGE = requireOutcomeMessage({
+    controlPlane,
+    action: "null-eq-missing",
+  });
 
   test("explicit: a null operand becomes an IS NULL filter", () => {
     expect(
@@ -720,11 +722,7 @@ describe("nullAttributeRepresentation", () => {
   // orderings must keep propagating it rather than being made definite.
   test("an ordering comparison keeps propagating UNKNOWN", () => {
     expect(
-      render(
-        "postgresql",
-        "vf-le",
-        filterFor("postgresql", "vf-le"),
-      ).sql,
+      render("postgresql", "vf-le", filterFor("postgresql", "vf-le")).sql,
     ).not.toContain("is null");
   });
 });
@@ -738,9 +736,9 @@ describe("timestamp literals", () => {
     filterFor("postgresql", "ts-window", { plannedAt });
 
   test("a nanosecond instant — what the PDP actually folds — is refused", () => {
-    // This, and nothing else, is why `ts-window` and `ts-vf` are `adapterUnsupported`. A tidy
+    // This, and nothing else, is why `ts-window` and `ts-vf` have `rejected` direct outcomes. A tidy
     // millisecond substitution in the loader would translate cleanly and quietly contradict
-    // actions.json.
+    // adapterctl.json.
     expect(() => translate("postgresql", "ts-window")).toThrow(
       "Timestamp value exceeds millisecond precision",
     );
@@ -771,7 +769,10 @@ describe("timestamp literals", () => {
     ["a year outside CEL's instant range", "0000-01-01T00:00:00Z"],
     ["a day that does not exist", "2024-02-30T00:00:00Z"],
     ["sub-millisecond precision", "2024-01-01T00:00:00.1234Z"],
-    ["an offset that pushes past the maximum instant", "9999-12-31T23:00:00-02:00"],
+    [
+      "an offset that pushes past the maximum instant",
+      "9999-12-31T23:00:00-02:00",
+    ],
   ])("%s fails closed", (_label, value) => {
     expect(() => at(value)).toThrow(/RFC-3339|millisecond|instant range/);
   });

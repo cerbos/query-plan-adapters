@@ -11,7 +11,7 @@ demo/scripts/run-example.sh drizzle
 Needs `docker` (with compose), `jq` and Node 22+. The runner starts the pinned Cerbos PDP; this
 directory's `run.sh` packs the adapter, installs the tarball, builds, and runs.
 
-It follows [`prisma/example/`](../../prisma/example/), which is the reference implementation.
+It consumes the shared runtime contract in [`demo/cases.json`](../../demo/cases.json).
 
 ## What it proves
 

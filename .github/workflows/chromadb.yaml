@@ -12,11 +12,22 @@ on:
     tags:
       - langchain-chromadb/v*
 
+permissions:
+  contents: read
+
 defaults:
   run:
     working-directory: langchain-chromadb
 
 jobs:
+  certification:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/validate-adapterctl
+        with:
+          adapter: langchain-chromadb
+
   test:
     strategy:
       # The adversarial suite now shares this matrix, so the default fail-fast would let an
@@ -35,8 +46,8 @@ jobs:
       # Only the adversarial suite needs a PDP and a vector store: `npm test` is the translator
       # unit test, which reads its plans from conformance/wire-fixtures/ — replanned and diffed
       # against this same pinned version by the `Conformance Corpus` workflow — and its expected
-      # filters from golden/expectations.json. Both setup steps are therefore gated to the
-      # baseline Node leg, the one the adversarial step below runs on.
+      # filters from golden/expectations.json. The native adversarial command below owns the
+      # vector-store lifecycle; Cerbos remains workflow setup because its binary launches the PDP.
       - name: Read pinned Cerbos version
         if: matrix.node-version == '22'
         id: cerbos
@@ -47,23 +58,7 @@ jobs:
         uses: cerbos/cerbos-setup-action@30ad92b0242d792bd156985682426577fcfcc589 # v1
         with:
           version: v${{ steps.cerbos.outputs.version }}
-
-      # The image is read from langchain-chromadb/CHROMA_IMAGE rather than restated here: the
-      # `npm run chroma` helper developers use locally reads the same file, and a matrix entry
-      # that drifted from it would prove the adapter against a different server than anyone
-      # reproducing a failure locally.
-      - name: Start ChromaDB
-        if: matrix.node-version == '22'
-        run: |
-          docker run -d --name chromadb -p 8000:8000 "$(cat CHROMA_IMAGE)"
-          for _ in {1..30}; do
-            if curl -sf http://127.0.0.1:8000/api/v2/heartbeat > /dev/null; then
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "ChromaDB failed to start" >&2
-          exit 1
+          github_token: ${{ github.token }}
 
       - name: Test using Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -80,13 +75,9 @@ jobs:
       # `npm install`.
       - name: Run adversarial differential suite
         if: matrix.node-version == '22'
-        run: npm run test:adversarial:cerbos
-        env:
-          CHROMA_URL: http://127.0.0.1:8000
-
-      - name: Stop ChromaDB
-        if: always() && matrix.node-version == '22'
-        run: docker rm -f chromadb
+        # `test:adversarial` starts the exact CHROMA_IMAGE pin, waits for it on 8234, forwards
+        # that URL to the low-level Cerbos suite, and tears the server down when the suite exits.
+        run: npm run test:adversarial
 
   # The example application: the published package, installed from `npm pack`'s tarball and used
   # the way a consumer uses it, against the shared demo domain. It covers the two things the job

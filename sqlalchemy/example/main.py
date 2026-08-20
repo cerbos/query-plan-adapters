@@ -16,13 +16,13 @@ under ``../tests`` structurally cannot:
    exercise.
 
 Prints one JSON document to stdout; everything a human might want to read goes to stderr.
-``demo/scripts/run-example.sh`` diffs that document against ``demo/expected.json``.
+``demo/scripts/run-example.sh`` diffs that document against ``demo/cases.json``.
 """
 
 import json
 import os
 import sys
-from typing import Any, Dict, List, TypedDict, cast
+from typing import Any, Dict, List, Optional, TypedDict, cast
 
 from cerbos.engine.v1 import engine_pb2
 from cerbos.response.v1 import response_pb2
@@ -93,18 +93,50 @@ class Seeds(TypedDict):
     documents: List[SeedDocument]
 
 
+class Pagination(TypedDict):
+    pageSize: int
+    pageSizes: List[int]
+
+
+class DemoExpected(TypedDict):
+    kind: str
+    ids: List[str]
+
+
+class DemoCase(TypedDict):
+    id: str
+    operation: str
+    principal: str
+    action: str
+    pagination: Optional[Pagination]
+    expected: DemoExpected
+
+
+class DemoCases(TypedDict):
+    schemaVersion: int
+    cases: List[DemoCase]
+
+
 def read_seeds() -> Seeds:
     """The shared corpus rows, read rather than restated.
 
-    ``demo/seeds.json`` is a repository-controlled file, checked structurally by
-    ``demo/scripts/validate-demo.sh`` before this ever runs -- not untrusted input, which is why
-    the shape above is declared and cast rather than validated here.
+    ``demo/seeds.json`` is repository-controlled. Live case execution resolves every principal
+    through this parsed data.
     """
     with open(os.path.join(DEMO_DIR, "seeds.json"), encoding="utf-8") as f:
         return cast(Seeds, json.load(f))
 
 
+def read_cases() -> DemoCases:
+    with open(os.path.join(DEMO_DIR, "cases.json"), encoding="utf-8") as f:
+        cases = cast(DemoCases, json.load(f))
+    if cases["schemaVersion"] != 1:
+        raise SystemExit("demo/cases.json must use schemaVersion 1")
+    return cases
+
+
 SEEDS = read_seeds()
+CASES = read_cases()
 
 #: Cerbos attribute names are not column names, so a consumer always writes one of these. Without
 #: it the adapter has nothing to resolve ``request.resource.attr.ownerId`` to and raises -- which
@@ -123,9 +155,8 @@ def cerbos_host() -> str:
 
     There is deliberately no fallback. The obvious default -- Cerbos's own 3592/3593 -- is where
     every adapter's ``cerbos run`` test sidecar listens, so an unset ``CERBOS_HOST`` would not
-    fail: it would quietly plan against whatever policies that sidecar serves and produce a diff
-    against ``demo/expected.json`` that reads as an adapter bug. ``demo/README.md`` requires
-    reaching the PDP at ``$CERBOS_HOST``, "never a hardcoded address", for exactly that reason.
+    fail: it would quietly plan against whatever policies that sidecar serves. The live runner
+    injects a non-default address and executes every canonical case, proving this value is used.
     """
     host = os.environ.get("CERBOS_HOST")
     if not host:
@@ -140,8 +171,7 @@ def principal(principal_id: str) -> engine_pb2.Principal:
     """Look one principal up in the corpus rather than writing an id and its roles out here.
 
     The roles are the half that exists nowhere else: they are what the policy's rules are keyed
-    on, so a copy here would go stale silently. ``demo/scripts/validate-demo.sh`` fails the build
-    on a restated one.
+    on. Every live case resolves its principal here, so an unknown id fails during execution.
     """
     for candidate in SEEDS["principals"]:
         if candidate["id"] == principal_id:
@@ -150,7 +180,7 @@ def principal(principal_id: str) -> engine_pb2.Principal:
 
 
 def plan_kind(plan: response_pb2.PlanResourcesResponse) -> str:
-    """The plan kind exactly as ``demo/expected.json`` spells it.
+    """The plan kind exactly as ``demo/cases.json`` spells it.
 
     Reported alongside the ids because that is what stops this program returning all eight rows
     for ``admin-view`` without ever having reached the PDP.
@@ -178,29 +208,29 @@ class Shapes:
         self._engine = engine
 
     def run(self) -> Dict[str, Any]:
-        """Every shape, keyed the way ``demo/expected.json`` keys them."""
-        return {
-            "filtered": {
-                "alice/view": self.filtered("alice", "view"),
-                "bob/view": self.filtered("bob", "view"),
-            },
-            "alwaysAllowed": {
-                "admin/admin-view": self.filtered("admin", "admin-view"),
-            },
-            "alwaysDenied": {
-                "alice/publish": self.filtered("alice", "publish"),
-            },
-            "paginated": {
-                "alice/view": self.paginated("alice", "view", 2),
-                "admin/admin-view": self.paginated("admin", "admin-view", 3),
-            },
-            "composed": {
-                "alice/view": self.composed("alice", "view"),
-                "bob/view": self.composed("bob", "view"),
-                "admin/admin-view": self.composed("admin", "admin-view"),
-                "alice/publish": self.composed("alice", "publish"),
-            },
-        }
+        """Every versioned consumer case, keyed by operation and principal/action."""
+        shapes: Dict[str, Dict[str, Any]] = {}
+        for case in CASES["cases"]:
+            expected_id = f"{case['operation']}/{case['principal']}/{case['action']}"
+            if case["id"] != expected_id:
+                raise SystemExit(f"invalid demo case id {case['id']!r}")
+            if case["operation"] == "paginated":
+                pagination = case["pagination"]
+                if pagination is None:
+                    raise SystemExit(f"{case['id']}: missing pagination")
+                result = self.paginated(
+                    case["principal"], case["action"], pagination["pageSize"]
+                )
+            elif case["operation"] == "composed":
+                result = self.composed(case["principal"], case["action"])
+            elif case["operation"] in ("filtered", "alwaysAllowed", "alwaysDenied"):
+                result = self.filtered(case["principal"], case["action"])
+            else:
+                raise SystemExit(f"unsupported demo operation {case['operation']!r}")
+            shapes.setdefault(case["operation"], {})[
+                f"{case['principal']}/{case['action']}"
+            ] = result
+        return shapes
 
     # -- the five usage shapes --
 
@@ -218,7 +248,7 @@ class Shapes:
         """Shape 4: ``.limit()``/``.offset()`` applied on top of the adapter's ``Select``.
 
         Reported as page SIZES plus the sorted union of the ids, never as per-page order:
-        ``demo/expected.json`` is shared by every example and several of the stores have no total
+        ``demo/cases.json`` is shared by every example and several of the stores have no total
         order to paginate by. The ``ORDER BY`` is still required for the paging itself to be
         correct -- without a total order, LIMIT/OFFSET may repeat or omit rows between pages --
         which is a separate concern from how the result is asserted.
@@ -285,7 +315,7 @@ class Shapes:
     def _ids(self, query: Select[Any]) -> List[str]:
         """Run one query in its own session, the way a request-scoped application would.
 
-        Sorted, because ``demo/expected.json`` is: a SELECT with no ORDER BY has no defined row
+        Sorted, because ``demo/cases.json`` is: a SELECT with no ORDER BY has no defined row
         order, and SQLite returning insertion order is an implementation detail rather than a
         promise. Shape 4 sorts each page too, which costs it nothing -- it asserts page sizes and
         the union, never per-page order.

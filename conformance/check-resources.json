@@ -1,0 +1,811 @@
+{
+  "schemaVersion": 1,
+  "principal": {
+    "id": "u1",
+    "roles": [
+      "USER"
+    ],
+    "attr": {
+      "allowedTags": [
+        "public",
+        "special"
+      ],
+      "context": "projects:f1",
+      "fewTeams": [
+        "set",
+        "",
+        "%_o"
+      ],
+      "manyTeams": [
+        "set",
+        "same",
+        "",
+        "%_o",
+        "X",
+        "Y",
+        "MIRROR",
+        "filler-1",
+        "filler-2",
+        "filler-3",
+        "filler-4"
+      ]
+    }
+  },
+  "resources": [
+    {
+      "kind": "adversarial",
+      "id": "a1",
+      "attr": {
+        "aBool": true,
+        "aString": "one",
+        "aNumber": 5,
+        "createdBy": "2024-06-01T00:00:00Z",
+        "owner": "set",
+        "coOwner": "dept",
+        "tagNames": [
+          "public"
+        ],
+        "obj": {
+          "inner": "one"
+        },
+        "tags": [
+          {
+            "id": "t1a",
+            "name": "public"
+          }
+        ],
+        "categories": [
+          {
+            "name": "business",
+            "subCategories": [
+              {
+                "name": "finance",
+                "labels": [
+                  {
+                    "name": "gold"
+                  },
+                  {
+                    "name": "silver"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "aOptionalString": "set",
+        "aDouble": -0.6,
+        "scope": "dept",
+        "createdAt": "2020-03-15T10:30:00Z",
+        "mainCategory": {
+          "name": "business",
+          "subCategories": [
+            {
+              "name": "finance"
+            }
+          ],
+          "subNames": [
+            "finance"
+          ]
+        },
+        "parent": {
+          "aBool": true,
+          "aString": "100xdone",
+          "aNumber": 2,
+          "aOptionalString": "x",
+          "inner": {
+            "aBool": true,
+            "aString": "héllo🚀",
+            "aNumber": 3,
+            "aOptionalString": ""
+          }
+        }
+      }
+    },
+    {
+      "kind": "adversarial",
+      "id": "a2",
+      "attr": {
+        "aBool": false,
+        "aString": "100%_done",
+        "aNumber": -2,
+        "createdBy": "2026-06-01T00:00:00Z",
+        "owner": null,
+        "coOwner": "dept.eng",
+        "tagNames": [],
+        "obj": {
+          "inner": "100%_done"
+        },
+        "tags": [],
+        "categories": [],
+        "aDouble": 0.25,
+        "scope": "dept.eng",
+        "createdAt": "2037-01-01T00:00:00Z",
+        "parent": {
+          "aBool": false,
+          "aString": "50%_off",
+          "aNumber": 6,
+          "aOptionalString": "%_o",
+          "inner": {
+            "aBool": true,
+            "aString": "back\\slash",
+            "aNumber": -4,
+            "aOptionalString": "k\\s"
+          }
+        }
+      }
+    },
+    {
+      "kind": "adversarial",
+      "id": "a3",
+      "attr": {
+        "aBool": true,
+        "aString": "100xdone",
+        "aNumber": 2,
+        "createdBy": "2024-06-01T00:00:00Z",
+        "owner": "x",
+        "coOwner": "dept.eng.platform",
+        "tagNames": [
+          "public",
+          "public"
+        ],
+        "obj": {
+          "inner": "100xdone"
+        },
+        "tags": [
+          {
+            "id": "t3a",
+            "name": "public"
+          },
+          {
+            "id": "t3b",
+            "name": "public"
+          }
+        ],
+        "categories": [],
+        "aOptionalString": "x",
+        "scope": "dept.eng.platform",
+        "parent": {
+          "aBool": true,
+          "aString": "héllo🚀",
+          "aNumber": 3,
+          "aOptionalString": ""
+        }
+      }
+    },
+    {
+      "kind": "adversarial",
+      "id": "a4",
+      "attr": {
+        "aBool": true,
+        "aString": "xa_by",
+        "aNumber": 1,
+        "createdBy": "2026-06-01T00:00:00Z",
+        "owner": null,
+        "coOwner": "dept.eng.platform.obs",
+        "tagNames": [
+          "private"
+        ],
+        "obj": {
+          "inner": "xa_by"
+        },
+        "tags": [
+          {
+            "id": "t4a",
+            "name": "private"
+          }
+        ],
+        "categories": [],
+        "aDouble": 1.3,
+        "scope": "dept.eng.platform.obs",
+        "createdAt": "2024-06-01T00:00:00Z",
+        "parent": {
+          "aBool": false,
+          "aString": "100%_done",
+          "aNumber": -2,
+          "inner": {
+            "aBool": false,
+            "aString": "50%_off",
+            "aNumber": 6,
+            "aOptionalString": "%_o"
+          }
+        }
+      }
+    },
+    {
+      "kind": "adversarial",
+      "id": "a5",
+      "attr": {
+        "aBool": false,
+        "aString": "xaXby",
+        "aNumber": -5,
+        "createdBy": "2026-06-01T00:00:00Z",
+        "owner": "y",
+        "coOwner": "dept.engineering",
+        "tagNames": [
+          "public"
+        ],
+        "obj": {
+          "inner": "xaXby"
+        },
+        "tags": [
+          {
+            "id": "t5a",
+            "name": "public"
+          }
+        ],
+        "categories": [],
+        "aOptionalString": "y",
+        "aDouble": -4.7,
+        "scope": "dept.engineering",
+        "createdAt": "2020-03-15T10:30:00.123456Z"
+      }
+    },
+    {
+      "kind": "adversarial",
+      "id": "a6",
+      "attr": {
+        "aBool": true,
+        "aString": "héllo🚀",
+        "aNumber": 3,
+        "createdBy": "2024-06-01T00:00:00Z",
+        "owner": "",
+        "coOwner": "dept.sales",
+        "tagNames": [
+          "public",
+          "private"
+        ],
+        "obj": {
+          "inner": "héllo🚀"
+        },
+        "tags": [
+          {
+            "id": "t6a",
+            "name": "public"
+          },
+          {
+            "id": "t6b",
+            "name": "private"
+          }
+        ],
+        "categories": [
+          {
+            "name": "business",
+            "subCategories": [
+              {
+                "name": "finance",
+                "labels": [
+                  {},
+                  {
+                    "name": "silver"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "aOptionalString": "",
+        "aDouble": 3.3,
+        "scope": "dept.sales",
+        "createdAt": "2036-06-06T06:06:06Z",
+        "mainCategory": {
+          "name": "business",
+          "subCategories": [
+            {
+              "name": "finance"
+            }
+          ],
+          "subNames": [
+            "finance"
+          ]
+        }
+      }
+    },
+    {
+      "kind": "adversarial",
+      "id": "a7",
+      "attr": {
+        "aBool": true,
+        "aString": "tail\\",
+        "aNumber": 0,
+        "createdBy": "2026-06-01T00:00:00Z",
+        "owner": "z",
+        "coOwner": null,
+        "tagNames": [
+          "other"
+        ],
+        "obj": {
+          "inner": "tail\\"
+        },
+        "tags": [
+          {
+            "id": "t7a",
+            "name": "other"
+          }
+        ],
+        "categories": [],
+        "aOptionalString": "z",
+        "aDouble": 0.3,
+        "createdAt": "2021-05-05T05:05:05Z",
+        "parent": {
+          "aBool": true,
+          "aString": "",
+          "aNumber": 2
+        }
+      }
+    },
+    {
+      "kind": "adversarial",
+      "id": "a8",
+      "attr": {
+        "aBool": true,
+        "aString": "",
+        "aNumber": 2,
+        "createdBy": "2024-06-01T00:00:00Z",
+        "owner": null,
+        "coOwner": "",
+        "tagNames": [
+          "public"
+        ],
+        "obj": {
+          "inner": ""
+        },
+        "tags": [
+          {
+            "id": "t8a",
+            "name": "public"
+          }
+        ],
+        "categories": [
+          {
+            "name": "business",
+            "subCategories": [
+              {
+                "name": "tech",
+                "labels": [
+                  {
+                    "name": "silver"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "aDouble": 2.3,
+        "scope": "",
+        "createdAt": "2036-06-06T06:06:06Z",
+        "mainCategory": {
+          "name": "business",
+          "subCategories": [
+            {
+              "name": "tech"
+            }
+          ],
+          "subNames": [
+            "tech"
+          ]
+        }
+      }
+    },
+    {
+      "kind": "adversarial",
+      "id": "a9",
+      "attr": {
+        "aBool": true,
+        "aString": "same",
+        "aNumber": 4,
+        "createdBy": "2024-06-01T00:00:00Z",
+        "owner": "same",
+        "coOwner": "50%",
+        "tagNames": [
+          "same"
+        ],
+        "obj": {
+          "inner": "same"
+        },
+        "tags": [
+          {
+            "id": "t9a",
+            "name": "same"
+          }
+        ],
+        "categories": [],
+        "aOptionalString": "same",
+        "aDouble": 4.3,
+        "scope": "50%",
+        "createdAt": "2036-06-06T06:06:06Z",
+        "parent": {
+          "aBool": false,
+          "aString": "mirror",
+          "aNumber": 8,
+          "aOptionalString": "mirror"
+        }
+      }
+    },
+    {
+      "kind": "adversarial",
+      "id": "b1",
+      "attr": {
+        "aBool": true,
+        "aString": "oneXtwo",
+        "aNumber": 7,
+        "createdBy": "2024-06-01T00:00:00Z",
+        "owner": "one_two",
+        "coOwner": "50%:a_b:x",
+        "tagNames": [],
+        "obj": {
+          "inner": "oneXtwo"
+        },
+        "tags": [],
+        "categories": [],
+        "aOptionalString": "one_two",
+        "aDouble": 7.3,
+        "scope": "50%:a_b:x",
+        "createdAt": "2036-06-06T06:06:06Z",
+        "parent": {
+          "aBool": true,
+          "aString": "One",
+          "aNumber": 11,
+          "aOptionalString": "Set",
+          "inner": {
+            "aBool": false,
+            "aString": "xA_by",
+            "aNumber": 12
+          }
+        }
+      }
+    },
+    {
+      "kind": "adversarial",
+      "id": "b2",
+      "attr": {
+        "aBool": false,
+        "aString": "50%_off",
+        "aNumber": 6,
+        "createdBy": "2024-06-01T00:00:00Z",
+        "owner": "%_o",
+        "coOwner": "50x:a_b:y",
+        "tagNames": [],
+        "obj": {
+          "inner": "50%_off"
+        },
+        "tags": [],
+        "categories": [],
+        "aOptionalString": "%_o",
+        "aDouble": 6.3,
+        "scope": "50x:a_b:y",
+        "createdAt": "2036-06-06T06:06:06Z",
+        "parent": {
+          "aBool": true,
+          "aString": "back\\slash",
+          "aNumber": -4,
+          "aOptionalString": "k\\s"
+        }
+      }
+    },
+    {
+      "kind": "adversarial",
+      "id": "b3",
+      "attr": {
+        "aBool": true,
+        "aString": "back\\slash",
+        "aNumber": -4,
+        "createdBy": "2026-06-01T00:00:00Z",
+        "owner": "k\\s",
+        "coOwner": "50%:aXb:y",
+        "tagNames": [],
+        "obj": {
+          "inner": "back\\slash"
+        },
+        "tags": [],
+        "categories": [],
+        "aOptionalString": "k\\s",
+        "aDouble": -3.7,
+        "scope": "50%:aXb:y",
+        "createdAt": "2021-05-05T05:05:05Z"
+      }
+    },
+    {
+      "kind": "adversarial",
+      "id": "b4",
+      "attr": {
+        "aBool": false,
+        "aString": "mirror",
+        "aNumber": 8,
+        "createdBy": "2024-06-01T00:00:00Z",
+        "owner": "mirror",
+        "coOwner": "50%:a_b",
+        "tagNames": [
+          "mirror"
+        ],
+        "obj": {
+          "inner": "mirror"
+        },
+        "tags": [
+          {
+            "id": "mirror",
+            "name": "mirror"
+          }
+        ],
+        "categories": [],
+        "aOptionalString": "mirror",
+        "aDouble": 8.3,
+        "scope": "50%:a_b",
+        "createdAt": "2036-06-06T06:06:06Z"
+      }
+    },
+    {
+      "kind": "adversarial",
+      "id": "b5",
+      "attr": {
+        "aBool": true,
+        "aString": "nulltag",
+        "aNumber": 9,
+        "createdBy": "2024-06-01T00:00:00Z",
+        "owner": "nt",
+        "coOwner": "dept.eng.platform2",
+        "tagNames": [
+          null
+        ],
+        "obj": {
+          "inner": "nulltag"
+        },
+        "tags": [
+          {
+            "id": "t10a"
+          }
+        ],
+        "categories": [],
+        "aOptionalString": "nt",
+        "aDouble": 9.3,
+        "scope": "dept.eng.platform2",
+        "createdAt": "2036-06-06T06:06:06Z"
+      }
+    },
+    {
+      "kind": "adversarial",
+      "id": "b6",
+      "attr": {
+        "aBool": false,
+        "aString": "mixed",
+        "aNumber": 10,
+        "createdBy": "2024-06-01T00:00:00Z",
+        "owner": "mx",
+        "coOwner": "50%.a_b",
+        "tagNames": [
+          null,
+          "public"
+        ],
+        "obj": {
+          "inner": "mixed"
+        },
+        "tags": [
+          {
+            "id": "t11a"
+          },
+          {
+            "id": "t11b",
+            "name": "public"
+          }
+        ],
+        "categories": [],
+        "aOptionalString": "mx",
+        "aDouble": 10.3,
+        "scope": "50%.a_b",
+        "createdAt": "2036-06-06T06:06:06Z",
+        "parent": {
+          "aBool": true,
+          "aString": "[SEC]ret",
+          "aNumber": 13,
+          "aOptionalString": "[SEC]",
+          "inner": {
+            "aBool": false,
+            "aString": "Secret",
+            "aNumber": 14,
+            "aOptionalString": "xSECy"
+          }
+        }
+      }
+    },
+    {
+      "kind": "adversarial",
+      "id": "c1",
+      "attr": {
+        "aBool": true,
+        "aString": "One",
+        "aNumber": 11,
+        "createdBy": "2024-06-01T00:00:00Z",
+        "owner": "Set",
+        "coOwner": "Dept.Eng",
+        "tagNames": [
+          "Public"
+        ],
+        "obj": {
+          "inner": "One"
+        },
+        "tags": [
+          {
+            "id": "tc1",
+            "name": "Public"
+          }
+        ],
+        "categories": [
+          {
+            "name": "business",
+            "subCategories": [
+              {
+                "name": "Finance",
+                "labels": [
+                  {
+                    "name": "Gold"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "aOptionalString": "Set",
+        "aDouble": 11.3,
+        "scope": "Dept.Eng",
+        "createdAt": "2036-06-06T06:06:06Z",
+        "mainCategory": {
+          "name": "business",
+          "subCategories": [
+            {
+              "name": "Finance"
+            }
+          ],
+          "subNames": [
+            "Finance"
+          ]
+        },
+        "parent": {
+          "aBool": false,
+          "aString": "xA_by",
+          "aNumber": 12
+        }
+      }
+    },
+    {
+      "kind": "adversarial",
+      "id": "c2",
+      "attr": {
+        "aBool": false,
+        "aString": "xA_by",
+        "aNumber": 12,
+        "createdBy": "2024-06-01T00:00:00Z",
+        "owner": null,
+        "coOwner": "dept.eng.",
+        "tagNames": [],
+        "obj": {
+          "inner": "xA_by"
+        },
+        "tags": [],
+        "categories": [],
+        "aDouble": 12.3,
+        "scope": "dept.eng.",
+        "createdAt": "2036-06-06T06:06:06Z"
+      }
+    },
+    {
+      "kind": "adversarial",
+      "id": "d1",
+      "attr": {
+        "aBool": true,
+        "aString": "[SEC]ret",
+        "aNumber": 13,
+        "createdBy": "2024-06-01T00:00:00Z",
+        "owner": "[SEC]",
+        "coOwner": "[env]:prod:eu",
+        "tagNames": [],
+        "obj": {
+          "inner": "[SEC]ret"
+        },
+        "tags": [],
+        "categories": [],
+        "aOptionalString": "[SEC]",
+        "aDouble": 13.3,
+        "scope": "[env]:prod:eu",
+        "createdAt": "2036-06-06T06:06:06Z",
+        "parent": {
+          "aBool": false,
+          "aString": "Secret",
+          "aNumber": 14,
+          "aOptionalString": "xSECy"
+        }
+      }
+    },
+    {
+      "kind": "adversarial",
+      "id": "d2",
+      "attr": {
+        "aBool": false,
+        "aString": "Secret",
+        "aNumber": 14,
+        "createdBy": "2024-06-01T00:00:00Z",
+        "owner": "xSECy",
+        "coOwner": "e:prod:eu",
+        "tagNames": [],
+        "obj": {
+          "inner": "Secret"
+        },
+        "tags": [],
+        "categories": [],
+        "aOptionalString": "xSECy",
+        "aDouble": 14.3,
+        "scope": "e:prod:eu",
+        "createdAt": "2036-06-06T06:06:06Z"
+      }
+    },
+    {
+      "kind": "adversarial",
+      "id": "e1",
+      "attr": {
+        "aBool": true,
+        "aString": "nullowner",
+        "aNumber": 15,
+        "createdBy": "2024-06-01T00:00:00Z",
+        "owner": null,
+        "coOwner": null,
+        "tagNames": [
+          null
+        ],
+        "obj": {
+          "inner": "nullowner"
+        },
+        "tags": [
+          {
+            "id": "te1"
+          }
+        ],
+        "categories": [],
+        "aDouble": 15.3,
+        "createdAt": "2036-06-06T06:06:06Z",
+        "parent": {
+          "aBool": true,
+          "aString": "one",
+          "aNumber": 5,
+          "aOptionalString": "set",
+          "inner": {
+            "aBool": true,
+            "aString": "100xdone",
+            "aNumber": 2,
+            "aOptionalString": "x"
+          }
+        }
+      }
+    },
+    {
+      "kind": "adversarial",
+      "id": "f1",
+      "attr": {
+        "aBool": true,
+        "aString": "f1",
+        "aNumber": 16,
+        "createdBy": "2024-06-01T00:00:00Z",
+        "owner": "prefix:f1",
+        "coOwner": null,
+        "tagNames": [],
+        "obj": {
+          "inner": "f1"
+        },
+        "tags": [],
+        "categories": [],
+        "aOptionalString": "prefix:f1",
+        "aDouble": 16.3,
+        "createdAt": "2036-06-06T06:06:06Z",
+        "parent": {
+          "aBool": true,
+          "aString": "same",
+          "aNumber": 4,
+          "aOptionalString": "same",
+          "inner": {
+            "aBool": false,
+            "aString": "mirror",
+            "aNumber": 8,
+            "aOptionalString": "mirror"
+          }
+        }
+      }
+    }
+  ]
+}

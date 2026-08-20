@@ -1,0 +1,1214 @@
+{
+  "schemaVersion": 1,
+  "actions": [
+    {
+      "name": "all-on-empty",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "arith-add",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "arith-add-eq-frac",
+      "oracleExpectation": {
+        "kind": "empty",
+        "reason": "The pinned PDP oracle allows no canonical resource; the explicit expectation prevents a vacuous pass from being mistaken for liveness."
+      }
+    },
+    {
+      "name": "arith-add-eq-frac-exact",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "arith-add-ne-frac",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "arith-both",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "arith-div",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "arith-div-frac",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "arith-mod",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "arith-mult-neg",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "arith-sub",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "arith-vf",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "cast-double-string",
+      "oracleExpectation": {
+        "kind": "empty",
+        "reason": "The pinned PDP oracle allows no canonical resource; the explicit expectation prevents a vacuous pass from being mistaken for liveness."
+      }
+    },
+    {
+      "name": "cast-int-double",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "cast-int-string",
+      "oracleExpectation": {
+        "kind": "empty",
+        "reason": "The pinned PDP oracle allows no canonical resource; the explicit expectation prevents a vacuous pass from being mistaken for liveness."
+      }
+    },
+    {
+      "name": "cast-string-bool",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "cast-string-double",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "concat-f2f",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "cr-contains",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "cr-div-neg-zero",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "cr-div-other-column",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "cr-div-then-add",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "cr-div-then-add-ne",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "cr-div-zero",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "cr-div-zero-eq-neg",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "cr-div-zero-ne",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "cr-endswith",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "cr-size-frac-ge",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "cr-startswith",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "cr-startswith-concat",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "cs-contains",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "cs-endswith",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "cs-eq",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "cs-startswith",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "double-negation",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "double-threshold",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "empty-string-eq",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "exists-on-empty",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "exists-one-multi",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "f2f-contains",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "f2f-endswith",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "f2f-startswith",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "field-to-field",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "filter-as-condition",
+      "oracleExpectation": {
+        "kind": "empty",
+        "reason": "The pinned PDP oracle allows no canonical resource; the explicit expectation prevents a vacuous pass from being mistaken for liveness."
+      }
+    },
+    {
+      "name": "filter-as-conjunct",
+      "oracleExpectation": {
+        "kind": "empty",
+        "reason": "The pinned PDP oracle allows no canonical resource; the explicit expectation prevents a vacuous pass from being mistaken for liveness."
+      }
+    },
+    {
+      "name": "gt-bare",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "hier-ancestor-cf",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "hier-ancestor-ff",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "hier-bracket",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "hier-descendent-cf",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "hier-descendent-ff",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "hier-list-id",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "hier-meta-in",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "hier-meta-like",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "hier-overlaps-cf",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "hier-overlaps-ff",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "hier-overlaps-meta",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "id-concat",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "id-concat-vf",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "id-eq-const",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "id-f2f",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "id-f2f-ne",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "in-empty",
+      "oracleExpectation": {
+        "kind": "empty",
+        "reason": "The pinned PDP oracle allows no canonical resource; the explicit expectation prevents a vacuous pass from being mistaken for liveness."
+      }
+    },
+    {
+      "name": "in-null-elem-hasint",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "in-null-elem-mixed",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "in-null-elem-neg",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "in-null-elem-only",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "in-null-elem-only-neg",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "in-null-elem-rel",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "in-null-elem-rel-neg",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "in-single",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "in-var-var",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "in-var-var-neg",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "index-scalar-list",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "lambda-field-to-field",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "lambda-in-principal",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "le-bare",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "like-backslash",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "like-bracket",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "like-percent",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "like-underscore",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "macro-depth3-all",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "macro-depth3-exists",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "macro-depth3-not-exists",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "map-as-condition",
+      "oracleExpectation": {
+        "kind": "empty",
+        "reason": "The pinned PDP oracle allows no canonical resource; the explicit expectation prevents a vacuous pass from being mistaken for liveness."
+      }
+    },
+    {
+      "name": "map-eq-list",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "n-all-mixed-null",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "n-not-all-absorb",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "n-not-all-null",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "n-not-exists-one-null",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "nan-ord-inf",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "nan-ord-le",
+      "oracleExpectation": {
+        "kind": "empty",
+        "reason": "The pinned PDP oracle allows no canonical resource; the explicit expectation prevents a vacuous pass from being mistaken for liveness."
+      }
+    },
+    {
+      "name": "nan-ord-ternary",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "nan-ord-ternary-vf",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "nary-and",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "neg-number",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "not-and",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "not-contains",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "not-empty",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "not-exists",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "not-gt",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "not-lt",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "not-startswith",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "null-eq",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "null-eq-missing",
+      "oracleExpectation": {
+        "kind": "empty",
+        "reason": "The pinned PDP oracle allows no canonical resource; the explicit expectation prevents a vacuous pass from being mistaken for liveness."
+      }
+    },
+    {
+      "name": "null-ne",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "null-not-eq",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "null-value-f2f",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "null-value-f2f-mixed",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "null-value-ne-const",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "null-value-not-eq-const",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "null-value-not-in-const",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "null-value-pv-not-exists",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "optional-ne",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "or-eq-exists",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "or-eq-in",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "outer-attr-depth2",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "p-arith-in-lambda",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "p-deep-nest",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "p-double-frac",
+      "oracleExpectation": {
+        "kind": "empty",
+        "reason": "The pinned PDP oracle allows no canonical resource; the explicit expectation prevents a vacuous pass from being mistaken for liveness."
+      }
+    },
+    {
+      "name": "p-has",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "p-hasintersection-map",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "p-in-null-multi",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "p-in-null-single",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "p-index",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "p-lambda-f2f-like",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "p-lambda-inner-f2f",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "p-matches",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "p-not-exists-empty",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "p-not-ternary-null",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "p-size-nested",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "p-startswith-concat",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "p-struct",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "p-ternary-in-exists",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "p-ternary-of-ternaries",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "p-ternary-under-all",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "p-ternary-vs-ternary",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "p-timestamp",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "pv-all",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "pv-all-unrolled",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "pv-exists",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "pv-exists-unrolled",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "rel-bool-hop",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "rel-bool-hop2",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "rel-contains-hop",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "rel-eq-hop",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "rel-eq-num-hop",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "rel-ge-hop",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "rel-gt-hop",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "rel-hop-and-root",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "rel-hop2-or-exists",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "rel-le-hop",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "rel-lt-hop",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "rel-ne-null-hop",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "rel-not-bool-hop",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "rel-range-hop",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "rel-startswith-hop2",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "root-bare-bool",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "root-or",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "size-filter-count",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "size-huge-gt",
+      "oracleExpectation": {
+        "kind": "empty",
+        "reason": "The pinned PDP oracle allows no canonical resource; the explicit expectation prevents a vacuous pass from being mistaken for liveness."
+      }
+    },
+    {
+      "name": "size-huge-lt",
+      "oracleExpectation": {
+        "kind": "total",
+        "reason": "The pinned PDP oracle allows every canonical resource; the explicit expectation prevents a total result from being mistaken for a discriminating probe."
+      }
+    },
+    {
+      "name": "size-threshold",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "string-size",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "ternary-bare",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "ternary-cmp",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "ternary-expr-cond",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "ternary-negated",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "ternary-nested",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "ternary-null-cond",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "ternary-value-first",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "triple-negation",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "ts-eq",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "ts-eq-offset",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "ts-ne",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "ts-vf",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "ts-window",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "unicode-eq",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "vf-ge",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "vf-hasint",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "vf-le",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "vf-lt",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "vf-ne",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "vf-null-ne",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "vf-size",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "w1-all-chain",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "w1-exists-chain",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "w1-in-chain",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "w1-not-exists-chain",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "w1-not-hasint-chain",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "w1-not-in-chain",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "w1-not-size-chain",
+      "oracleExpectation": {
+        "kind": "empty",
+        "reason": "The pinned PDP oracle allows no canonical resource; the explicit expectation prevents a vacuous pass from being mistaken for liveness."
+      }
+    },
+    {
+      "name": "w1-size-chain",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "w1-size-frac-chain",
+      "oracleExpectation": {
+        "kind": "empty",
+        "reason": "The pinned PDP oracle allows no canonical resource; the explicit expectation prevents a vacuous pass from being mistaken for liveness."
+      }
+    },
+    {
+      "name": "w1-size-frac-le-chain",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "w1-size-nonneg-chain",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "w1-size-zero-chain",
+      "oracleExpectation": {
+        "kind": "empty",
+        "reason": "The pinned PDP oracle allows no canonical resource; the explicit expectation prevents a vacuous pass from being mistaken for liveness."
+      }
+    },
+    {
+      "name": "w1-ternary-chain-cond",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    },
+    {
+      "name": "w2-outer-relation",
+      "oracleExpectation": {
+        "kind": "proper-subset"
+      }
+    }
+  ]
+}

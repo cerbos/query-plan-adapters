@@ -10,7 +10,7 @@
 # here is also what keeps `demo/scripts/run-example.sh mongoose` a single command on a laptop.
 #
 # Everything this script prints for a human goes to stderr. stdout carries exactly one JSON
-# document, which the shared runner diffs against demo/expected.json.
+# document whose cases and expected results come from demo/cases.json.
 
 set -euo pipefail
 

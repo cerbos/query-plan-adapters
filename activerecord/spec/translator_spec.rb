@@ -22,6 +22,10 @@
 AdversarialModels.establish!
 
 RSpec.describe "translator" do
+  before do
+    skip "ADAPTERCTL_ACTION scopes this invocation to the live conformance harness" \
+      unless ConformanceCorpus::SELECTED_ACTION.empty?
+  end
   # The statement every emitted relation opens with. Recording only the WHERE clause is lossless
   # exactly because this is constant, and that is asserted below rather than assumed.
   PREAMBLE = %(SELECT "adversarial_resources".* FROM "adversarial_resources")
@@ -29,7 +33,7 @@ RSpec.describe "translator" do
   THROWING_ACTIONS = ConformanceCorpus::THROWING_ACTIONS
   THROWING = THROWING_ACTIONS.map(&:first).freeze
 
-  # `nullRepresentationOmitted` is NOT in that list. Under the default representation this
+  # `representationDependentRejection` is NOT in that list. Under the default representation this
   # adapter translates `null-eq-missing` into an IS NULL filter, so it carries a golden entry
   # like any other action; its refusal is a property of the flipped option and is asserted on
   # its own below.
@@ -67,7 +71,7 @@ RSpec.describe "translator" do
   # Regeneration is a deliberate act and CI never performs it, so a translator change that moves
   # an emitted filter fails there whatever anyone ran locally, and the diff is the review.
   #
-  # A throwing action gets no entry: its message is corpus data, pinned in actions.json and
+  # A throwing action gets no entry: its message is corpus data, pinned in adapterctl.json and
   # asserted below. Skipping it here is also what keeps regeneration from papering over a
   # misclassification — an action that starts throwing loses its entry rather than gaining a
   # recorded error string.
@@ -92,18 +96,13 @@ RSpec.describe "translator" do
       expect(RECORDED.keys).to eq(RECORDED.keys.sort)
     end
 
-    # Tripwires. Bump them deliberately: a count that moves unnoticed is how a shape gets
-    # dropped from an asset nobody reads end to end.
-    it "pins how the corpus divides here" do
+    it "accounts for the catalog cardinality" do
       conditional, unconditional = RECORDED.values.partition { |entry|
         entry.fetch("kind") == "KIND_CONDITIONAL"
       }
 
-      expect({
-        "conditional" => conditional.size,
-        "unconditional" => unconditional.size,
-        "throwing" => THROWING_ACTIONS.size
-      }).to eq({"conditional" => 179, "unconditional" => 2, "throwing" => 18})
+      expect(conditional.size + unconditional.size + THROWING_ACTIONS.size)
+        .to eq(ConformanceCorpus::ALL_CATALOG_ACTIONS.size)
     end
 
     # The two unconditional folds are the planner's, not this adapter's, and each is pinned
@@ -114,7 +113,7 @@ RSpec.describe "translator" do
       expect(unconditional.keys).to eq(%w[in-empty p-has])
       expect(unconditional.fetch("in-empty").fetch("kind")).to eq("KIND_ALWAYS_DENIED")
       expect(unconditional.fetch("p-has").fetch("kind")).to eq("KIND_ALWAYS_ALLOWED")
-      expect(ConformanceCorpus::SKIPPED).to include("p-has")
+      expect(ConformanceCorpus::UPSTREAM_BLOCKED).to include("p-has")
     end
 
     it "declares the adapter, the generator and a command that exists" do
@@ -291,11 +290,11 @@ RSpec.describe "translator" do
     end
   end
 
-  # The `nullRepresentationOmitted` group. Its refusal is a property of the flipped option, so
+  # The `representationDependentRejection` group. Its refusal is a property of the flipped option, so
   # it is asserted here rather than folded into the list above — and BOTH halves are asserted,
   # because the rejection alone would pass vacuously if the adapter raised for another reason.
   describe "the omitted null representation" do
-    ConformanceCorpus::NULL_OMITTED_THROWS.each do |(action, message)|
+    ConformanceCorpus::REPRESENTATION_DEPENDENT_THROWS.each do |(action, message)|
       it "#{action} is refused" do
         expect {
           Cerbos::ActiveRecord.query_plan_to_relation(

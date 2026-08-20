@@ -44,6 +44,7 @@
     "test": "jest",
     "golden:update": "GOLDEN_UPDATE=1 jest src/translator.test.ts",
     "test:adversarial": "cerbos run --log-level=error --set=storage.disk.directory=../conformance/policies --set=telemetry.disabled=true -- jest --config jest.adversarial.config.js --runInBand",
+    "test:integration": "npm run typecheck && npm run test:adversarial",
     "convex:deploy": "npx convex deploy --url ${CONVEX_URL:-http://127.0.0.1:3210} --admin-key ${CONVEX_ADMIN_KEY}",
     "convex:up": "docker compose up -d && echo 'Waiting for Convex backend...' && sleep 5",
     "convex:down": "docker compose down -v"

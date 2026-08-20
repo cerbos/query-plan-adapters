@@ -19,9 +19,8 @@ spring:
 # adapter's `cerbos run` test sidecar binds, so an unset CERBOS_HOST would not fail: it would
 # quietly plan against the conformance corpus that sidecar serves and produce a wrong row set that
 # reads as an adapter bug.
-# It is also why docker-compose.yml here publishes on 23592/23593 and demo/docker-compose.yml
-# on 13592/13593. demo/scripts/validate-demo.sh fails the build on a hardcoded client address
-# inside any example, because prose did not hold this: two examples shipped that default anyway.
+# The live demo runner injects a non-default CERBOS_HOST and executes every canonical case, so a
+# hardcoded default cannot pass by inspection alone.
 #
 # Note that CERBOS_HOST here is a host:port pair, matching what the shared runner sets. The
 # ADAPTER's own test suite reads a CERBOS_HOST/CERBOS_PORT pair instead (see ../../README.md);

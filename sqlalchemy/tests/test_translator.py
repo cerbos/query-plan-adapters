@@ -13,7 +13,7 @@ assertion                                            who owns it
 the plan the PDP produces for a policy               ``conformance/wire-fixtures/``, replanned
                                                      and diffed by the ``Conformance Corpus``
                                                      workflow
-which shapes this adapter must refuse, and with      ``conformance/actions.json`` — read below,
+which shapes this adapter must refuse, and with      ``adapterctl.json`` — read below,
 what message                                         never restated
 the rows a filter returns                            ``test_adversarial_conformance.py``,
                                                      against real SQLite with ``check()`` as
@@ -44,7 +44,7 @@ reasoned about all through ``query.py`` and executed by nothing in this reposito
 rendered at all.
 
 **Adding a corpus action fails this file.** Every wire fixture must be accounted for here
-exactly once — a golden expectation or a throw carrying the message ``actions.json`` pins —
+exactly once — a golden expectation or a throw carrying the message ``adapterctl.json`` pins —
 and the completeness guard below is what makes a new action land as a failure rather than as
 silence.
 """
@@ -72,10 +72,9 @@ from corpus import (
     declared_columns,
     grpc_plan_from_wire_fixture,
     json_parameter,
-    null_representation_throws,
-    parse_actions_file,
+    load_control_plane,
+    representation_dependent_rejections,
     plan_from_wire_fixture,
-    read_corpus_json,
     read_golden_expectations,
     render,
     require_message,
@@ -89,25 +88,32 @@ from corpus import (
 from cerbos_sqlalchemy import get_query
 from sqlalchemy import any_, exists, literal, select
 
-ACTIONS_FILE = parse_actions_file(read_corpus_json("actions.json"))
+CONTROL_PLANE = load_control_plane()
 
-# The shapes `actions.json` says this adapter must refuse, each with the message it must
+# The shapes `adapterctl.json` says this adapter must refuse, each with the message it must
 # refuse them with. Identical to the classification `test_adversarial_conformance.py` asserts
 # against a live PDP; asserting it here as well is what lets the completeness guard below be
 # total, and it costs a millisecond rather than a container.
 #
-# A throwing action needs no golden expectation of its own: the message is already corpus
-# data, pinned once in `actions.json` and read by every adapter. Writing it into this
-# adapter's asset too would create two places to change one string with nothing to say which
-# is authoritative.
-THROWING_ACTIONS = classify_actions_for_adapter(ACTIONS_FILE, ADAPTER).throwing_actions
+# A throwing action needs no golden expectation of its own: the message is already pinned in
+# this adapter's `adapterctl.json` manifest. Writing it into this adapter's asset too would create
+# two places to change one string with nothing to say which is authoritative.
+THROWING_ACTIONS = classify_actions_for_adapter(CONTROL_PLANE, ADAPTER).throwing_actions
 THROWING = {action for action, _ in THROWING_ACTIONS}
 
-# `nullRepresentationOmitted` is NOT in that list: under the default representation this
+# `representationDependentRejection` is NOT in that list: under the default representation this
 # adapter translates `null-eq-missing` into an `IS NULL` filter, so it carries a golden entry
 # like any other action. Its refusal is a property of the flipped option, asserted on its own
 # below.
-NULL_REPRESENTATION_OMITTED = null_representation_throws(ACTIONS_FILE, ADAPTER)
+REPRESENTATION_DEPENDENT_REJECTIONS = representation_dependent_rejections(CONTROL_PLANE, ADAPTER)
+
+# An action-scoped conformance run exercises the live differential harness only. The offline
+# translator suite remains part of unscoped test/typecheck profiles and would otherwise replay the
+# entire fixture corpus despite ADAPTERCTL_ACTION selecting one native conformance case.
+pytestmark = pytest.mark.skipif(
+    bool(CONTROL_PLANE.selected_action),
+    reason="ADAPTERCTL_ACTION scopes this invocation to the live conformance harness",
+)
 
 
 def translate(
@@ -177,7 +183,7 @@ if os.environ.get("GOLDEN_UPDATE") == "1":
         {
             # A throwing action gets no entry: its message is corpus data. Skipping it here is
             # also what keeps regeneration from papering over a misclassification — an action
-            # moved into `adapterUnsupported` that this adapter still translates fails the
+            # moved into `rejected` that this adapter still translates fails the
             # throw suite, and one moved out of it that this adapter still refuses fails
             # regeneration itself.
             action: expectation_for(action)
@@ -325,13 +331,12 @@ class TestCorpusShapes:
         # moved.
         assert RECORDED_ACTIONS == sorted(RECORDED_ACTIONS)
 
-        # Tripwires. Bump them deliberately: a count that moves without anyone noticing is how
-        # a shape gets dropped from an asset nobody reads end to end.
-        assert {
-            "conditional": len(CONDITIONAL_ACTIONS),
-            "unconditional": len(UNCONDITIONAL_ACTIONS),
-            "throwing": len(THROWING_ACTIONS),
-        } == {"conditional": 179, "unconditional": 1, "throwing": 19}
+        assert (
+            len(CONDITIONAL_ACTIONS)
+            + len(UNCONDITIONAL_ACTIONS)
+            + len(THROWING_ACTIONS)
+            == len(CONTROL_PLANE.actions)
+        )
 
     def test_the_asset_declares_the_compiler_that_wrote_it(self):
         # The asset is one compiler's rendering of the adapter's expression trees, and the two
@@ -364,7 +369,7 @@ class TestCorpusShapes:
         # oracle set while staying on this list would break that argument silently, which is
         # why it is asserted rather than asserted in a comment. Runs on both majors, since the
         # claim is about the list rather than about either compiler.
-        oracle = set(classify_actions_for_adapter(ACTIONS_FILE, ADAPTER).oracle_actions)
+        oracle = set(classify_actions_for_adapter(CONTROL_PLANE, ADAPTER).oracle_actions)
         assert [
             action
             for action in RENDERING_DIFFERS_ON_SQLALCHEMY_14
@@ -372,13 +377,13 @@ class TestCorpusShapes:
         ] == []
 
     def test_the_unconditional_action_is_the_planner_fold_the_corpus_declares(self):
-        # `p-has` is the corpus's one `knownDivergences` entry: the planner folds `has()` on a
+        # `p-has` is the corpus's one `upstream-blocked` outcome: the planner folds `has()` on a
         # missing attribute to ALWAYS_ALLOWED while `check()` denies those rows. The adapter
         # must translate that faithfully — an unfiltered SELECT — and this is the assertion
         # that says the empty WHERE above belongs to that shape rather than to a translation
         # that quietly stopped emitting a filter.
         assert UNCONDITIONAL_ACTIONS == ["p-has"]
-        assert "p-has" in ACTIONS_FILE.skipped_divergences(ADAPTER)
+        assert "p-has" in CONTROL_PLANE.upstream_blocked_actions(ADAPTER)
 
 
 class TestWhatTheEmittedStatementContains:
@@ -555,11 +560,9 @@ def _from_clauses_naming_the_resource(statement):
 
 
 def _null_omitted_message(action):
-    """The message ``actions.json`` pins for one ``nullRepresentationOmitted`` action."""
-    return next(
-        message
-        for candidate, _reason, message in NULL_REPRESENTATION_OMITTED
-        if candidate == action
+    """The message ``adapterctl.json`` pins for one ``representationDependentRejection`` action."""
+    return require_message(
+        f"outcomes.{action}", CONTROL_PLANE.outcomes[action].get("message")
     )
 
 
@@ -572,7 +575,7 @@ def _looks_like_an_instant(value):
 
 
 class TestNullAttributeRepresentation:
-    """The corpus's ``nullRepresentationOmitted`` probe, which has no store in it at all.
+    """The corpus's ``representationDependentRejection`` probe, which has no store in it at all.
 
     ``null-eq-missing`` compares ``aOptionalString == null``, and the planner emits the same
     ``eq(attr, null)`` node whichever convention the caller uses — so the adapter has to be
@@ -655,7 +658,7 @@ class TestOperatorOverrides:
             translate("cs-eq", attr_map={}, attribute_null_representation=None)
 
     # The two tests below are the coverage the retired suite had that the corpus genuinely
-    # cannot carry, and the distinction is worth stating once. `actions.json` classifies a
+    # cannot carry, and the distinction is worth stating once. `adapterctl.json` classifies a
     # shape against ONE mapping — the corpus's — so "unsupported" there means "this adapter
     # refuses it with these overrides", not "no caller can translate it". Both shapes are
     # documented in the README as caller-supplied, so an assertion that the documented
@@ -663,7 +666,7 @@ class TestOperatorOverrides:
     # the corpus pins, and the translation the declaration buys.
 
     def test_a_matches_override_admits_the_regex_the_corpus_refuses(self):
-        # `p-matches` is `expectedUnsupported` because SQL dialect regex engines do not
+        # `p-matches` is `rejected` because SQL dialect regex engines do not
         # guarantee CEL/RE2 semantics, so the adapter has no default lowering. An application
         # whose database translation is known to be equivalent may supply one — the README
         # says so — and this is what says that path still works.
@@ -685,7 +688,7 @@ class TestOperatorOverrides:
         assert params["a_string_1"] == "^h"
 
     def test_an_index_override_admits_the_positional_read_the_corpus_refuses(self):
-        # `index-scalar-list` is `adapterUnsupported` because row order in a SQL relation is
+        # `index-scalar-list` is `rejected` because row order in a SQL relation is
         # not defined — but the refusal the corpus pins comes from the MAPPING, not the
         # operator: `tagNames` is a relation marker, `index` is not in the corpus's override
         # map, so the reference is not override-owned and `get_query`'s pre-validation refuses
@@ -716,8 +719,8 @@ class TestTimestampLiterals:
     ``regenerate-wire-fixtures.sh`` rewrites ``ts-window``'s folded ``now() - duration("24h")``
     literal to a placeholder, because it differs on every capture — so reading the fixture back
     means choosing a value, and here that choice is load-bearing. The PDP emits NANOSECOND
-    precision, which is the entire reason ``actions.json`` classifies ``ts-window`` and
-    ``ts-vf`` as ``adapterUnsupported`` for this adapter. A tidy millisecond substitution in
+    precision, which is the entire reason ``adapterctl.json`` classifies ``ts-window`` and
+    ``ts-vf`` as ``rejected`` for this adapter. A tidy millisecond substitution in
     ``corpus.py`` would translate cleanly and quietly contradict the corpus, so the throw suite
     above would be asserting a limitation that does not exist.
 

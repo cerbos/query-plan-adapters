@@ -26,7 +26,7 @@ import java.util.Map;
  * <p>It takes no arguments, exercises the
  * <a href="https://github.com/cerbos/query-plan-adapters/issues/349">five shared usage
  * shapes</a> against {@code demo/}'s policies and seed rows, and prints exactly one JSON
- * document to stdout for the shared runner to diff against {@code demo/expected.json}. The
+ * document to stdout for the shared runner to diff against {@code demo/cases.json}. The
  * photo-sharing application it shares this source tree with is untouched and still the
  * onboarding artifact: the demo domain is a floor, not a ceiling
  * ({@code docs/adr/0001-demo-domain-has-no-per-adapter-exceptions.md}).
@@ -71,7 +71,8 @@ public class DemoApplication {
                     // build directory or a copied run.sh fails there instead of quietly passing
                     // on the shared expectations.
                     "adapter", "spring-data",
-                    "shapes", context.getBean(DemoShapes.class).run());
+                    "shapes", context.getBean(DemoShapes.class).run(
+                            DemoCases.read(demoDir.resolve("cases.json"))));
 
             // Map keys sorted, which is the same canonical form demo/scripts/run-example.sh puts
             // both sides of its diff into (`jq -S`). Java's Map.of has no defined iteration
@@ -110,10 +111,8 @@ public class DemoApplication {
      * The runner sets {@code CERBOS_HOST}, and there is deliberately no fallback anywhere in
      * this example. The obvious default — Cerbos's own 3592/3593 — is what every adapter's
      * {@code cerbos run} test sidecar binds, so an unset {@code CERBOS_HOST} would not fail: it
-     * would quietly plan against the conformance corpus that sidecar serves, and produce a diff
-     * against {@code demo/expected.json} that reads as an adapter bug. Two other examples shipped
-     * that exact default, which is why {@code demo/scripts/validate-demo.sh} now fails the build
-     * on a hardcoded PDP address rather than trusting prose.
+     * would quietly plan against the conformance corpus that sidecar serves. The live runner
+     * injects a non-default address and executes every canonical case, proving this value is used.
      */
     private static void requireCerbosHost() {
         String host = System.getenv("CERBOS_HOST");

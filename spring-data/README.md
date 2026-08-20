@@ -345,19 +345,19 @@ undeclared side needs UNKNOWN — so the adapter throws rather than picking a di
 
 ## Conformance contract
 
-The adapter is differentially tested against Cerbos PDP 0.54.0 `check()` decisions using 21 hostile seed rows on H2, PostgreSQL, and MySQL. This Spring Data implementation defines the reference semantics that the other adapters follow.
+The adapter is differentially tested against the pinned Cerbos PDP's `check()` decisions, using the canonical check resources on H2, PostgreSQL, and MySQL. The PDP is the semantic oracle.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 178 of the 187 reference conformance actions |
-| Fail-closed corpus shapes | Regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an ambiguous string column, `int()`/`double()` casts, `filter()`/`map()` used as a condition, arithmetic composed on a division whose denominator may be zero, `string()` over any column (the Criteria API has no cast expression, and a boolean's text rendering differs across the dialects Spring Data JPA targets), and CEL's `+` over strings, which the reference lowers as arithmetic — against a constant and between two columns alike, `mod` (CEL `%` is integer-only, and the `int()` cast that would make it satisfiable has no faithful lowering), a positional read of a scalar list, and list equality over a `map()` projection (19 actions) |
+| Oracle-tested | Actions whose manifest outcome is `matched` |
+| Fail-closed corpus shapes | Manifest outcomes marked `rejected`, including regex `matches()`, ordered list indexing/`get-field`, ambiguous casts, list-valued expressions in condition position, division edge cases, and operations the Criteria API cannot represent faithfully |
 | Representation-dependent | `null-eq-missing` — rejected under `NullAttributeRepresentation.OMITTED`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute the caller sends as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare it per attribute — `AttributeMapping.field(path, NullAttributeRepresentation.EXPLICIT)` — or the historical rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
-| Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute rows; this is pinned separately as an upstream divergence |
+| Upstream-blocked | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute rows; this is pinned separately as an upstream-blocked outcome |
 
-Two suites read that classification, and they answer different questions. `AdversarialConformanceTest` plans each action against a real PDP and compares the rows the filter returns with `check()`. `SpringDataTranslatorTest` translates the same actions offline from `conformance/wire-fixtures/` and asserts the **SQL** against `golden/expectations.json` — 180 recorded statements and 19 refusals, one per action, with the union asserted to be the corpus exactly. What the second buys over the first is the rows nobody seeded: two different queries can agree on all 21 seeds and disagree on the row a consumer has, so a rewrite that quietly changes the emitted SQL passes the oracle and shows up there as a diff.
+Two suites read that classification, and they answer different questions. `AdversarialConformanceTest` plans each action against a real PDP and compares the rows the filter returns with `check()`. `SpringDataTranslatorTest` translates the same actions offline from `conformance/wire-fixtures/` and asserts the **SQL** against `golden/expectations.json`, with every catalog action accounted for by either an expectation or a manifest-declared refusal. What the second buys over the first is the rows absent from the canonical resources: two different queries can agree on the current resources and disagree on a row a consumer has, so a rewrite that quietly changes the emitted SQL passes the oracle and shows up there as a diff.
 
-The oracle coverage includes value-first and field-to-field comparisons, literal-safe string matching, nested and correlated collection macros, three-valued null/error propagation, arithmetic and ternaries, hierarchy operations, timestamp comparisons on supported absolute-instant columns, and multi-hop relations. Unsupported shapes throw before a predicate can be used — including the two conformance shapes this reference cannot express itself (`cr-div-then-add`, `cr-div-then-add-ne`): CEL carries a NaN through the surrounding arithmetic and SQL has no value that does. Every fail-closed shape's error message is pinned in the shared corpus (`conformance/actions.json`) and asserted by this adapter's conformance run, so a classification proves the throw names its declared mechanism rather than merely that something threw.
+The oracle coverage includes value-first and field-to-field comparisons, literal-safe string matching, nested and correlated collection macros, three-valued null/error propagation, arithmetic and ternaries, hierarchy operations, timestamp comparisons on supported absolute-instant columns, and multi-hop relations. Unsupported shapes throw before a predicate can be used — including the two conformance shapes this adapter cannot express (`cr-div-then-add`, `cr-div-then-add-ne`): CEL carries a NaN through the surrounding arithmetic and SQL has no value that does. Every fail-closed shape's error message is pinned in this adapter's `adapterctl.json` manifest and asserted by its conformance run, so a rejected outcome proves the throw names its declared mechanism rather than merely that something threw.
 
 **Behaviour change.** A negated string match against a **column** needle — `!R.attr.a.contains(R.attr.b)` — used to return the rows whose needle is NULL. The null guard was spelled `needle IS NOT NULL AND haystack LIKE pattern`, which is definite FALSE for a NULL needle, and `NOT FALSE` is TRUE; CEL raises a missing-attribute error there, which denies. Those rows are now excluded under both polarities, because the guard is nested so the LIKE sees a NULL PATTERN and stays UNKNOWN. This **removes rows from results** that the PDP denies — an over-grant fix, so upgrade rather than pin ([#387](https://github.com/cerbos/query-plan-adapters/issues/387)). The positive form is unaffected: it excluded those rows already.
 
@@ -709,7 +709,7 @@ gradle goldenUpdate   # rewrite golden/expectations.json from what the translato
 `golden/expectations.json` is this adapter's [golden expectation](../conformance/README.md#golden-expectations)
 file: the SQL it is pinned to emit for each corpus action, regenerated with `gradle goldenUpdate`
 and reviewed as a diff. An action the corpus says this adapter must refuse carries no entry —
-its message is already pinned in `conformance/actions.json`.
+its message is already pinned in `adapterctl.json`.
 
 The adapter emits a JPA `Specification`, so the recorded value is that Specification **rendered**:
 the query the differential harness executes (`select distinct re1_0.id from resources re1_0`),
@@ -735,4 +735,3 @@ minus that preamble, leaving the root joins and the filter.
 - **The file declares the Hibernate minor that rendered it.** The SQL is the adapter's Criteria
   tree plus Hibernate's renderer, and `hibernate-core` is a `compileOnly` dependency — a consumer
   brings their own. See `conformance/README.md`, "When the generator is an input".
-

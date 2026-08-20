@@ -1,0 +1,191 @@
+{
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "cases"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "cases": {
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {
+            "type": "object",
+            "required": [
+              "id",
+              "principal",
+              "action",
+              "expected",
+              "operation",
+              "pagination"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "principal": {
+                "type": "string",
+                "minLength": 1
+              },
+              "action": {
+                "type": "string",
+                "minLength": 1
+              },
+              "expected": {
+                "type": "object",
+                "required": [
+                  "kind",
+                  "ids"
+                ],
+                "properties": {
+                  "kind": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "const": "KIND_CONDITIONAL"
+                      },
+                      {
+                        "type": "string",
+                        "const": "KIND_ALWAYS_ALLOWED"
+                      },
+                      {
+                        "type": "string",
+                        "const": "KIND_ALWAYS_DENIED"
+                      }
+                    ]
+                  },
+                  "ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "additionalProperties": false
+              },
+              "operation": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "filtered"
+                  },
+                  {
+                    "type": "string",
+                    "const": "alwaysAllowed"
+                  },
+                  {
+                    "type": "string",
+                    "const": "alwaysDenied"
+                  },
+                  {
+                    "type": "string",
+                    "const": "composed"
+                  }
+                ]
+              },
+              "pagination": {
+                "type": "null"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": [
+              "id",
+              "principal",
+              "action",
+              "expected",
+              "operation",
+              "pagination"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "principal": {
+                "type": "string",
+                "minLength": 1
+              },
+              "action": {
+                "type": "string",
+                "minLength": 1
+              },
+              "expected": {
+                "type": "object",
+                "required": [
+                  "kind",
+                  "ids"
+                ],
+                "properties": {
+                  "kind": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "const": "KIND_CONDITIONAL"
+                      },
+                      {
+                        "type": "string",
+                        "const": "KIND_ALWAYS_ALLOWED"
+                      },
+                      {
+                        "type": "string",
+                        "const": "KIND_ALWAYS_DENIED"
+                      }
+                    ]
+                  },
+                  "ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "additionalProperties": false
+              },
+              "operation": {
+                "type": "string",
+                "const": "paginated"
+              },
+              "pagination": {
+                "type": "object",
+                "required": [
+                  "pageSize",
+                  "pageSizes"
+                ],
+                "properties": {
+                  "pageSize": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "pageSizes": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "minItems": 1
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          }
+        ]
+      },
+      "minItems": 1
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cerbos.dev/query-plan-adapters/adapterctl/consumer-cases-v1.schema.json",
+  "additionalProperties": false
+}

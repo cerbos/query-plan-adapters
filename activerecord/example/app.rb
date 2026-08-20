@@ -37,6 +37,10 @@ CERBOS_HOST = ENV.fetch("CERBOS_HOST") {
 SEEDS = JSON.parse(
   File.read(File.join(DEMO_DIR, "seeds.json"), encoding: "UTF-8")
 ).freeze
+CASES = JSON.parse(
+  File.read(File.join(DEMO_DIR, "cases.json"), encoding: "UTF-8")
+).freeze
+raise "demo/cases.json must use schemaVersion 1" unless CASES.fetch("schemaVersion") == 1
 
 # --- the store ------------------------------------------------------------------------------
 
@@ -156,30 +160,27 @@ def composed(principal_id, action)
   {"kind" => result.kind.to_s, "ids" => ids(application_filter(authorized(result)))}
 end
 
-shapes = {
-  "filtered" => {
-    "alice/view" => filtered("alice", "view"),
-    "bob/view" => filtered("bob", "view")
-  },
-  # 2. An unconditional allow. The adapter returns the whole relation, and every seed row comes
-  #    back through the same code path as a conditional plan.
-  "alwaysAllowed" => {
-    "admin/admin-view" => filtered("admin", "admin-view")
-  },
-  # 3. An unconditional deny, for an action the policy carries no rule for at all.
-  "alwaysDenied" => {
-    "alice/publish" => filtered("alice", "publish")
-  },
-  "paginated" => {
-    "alice/view" => paginated("alice", "view", 2),
-    "admin/admin-view" => paginated("admin", "admin-view", 3)
-  },
-  "composed" => {
-    "alice/view" => composed("alice", "view"),
-    "bob/view" => composed("bob", "view"),
-    "admin/admin-view" => composed("admin", "admin-view"),
-    "alice/publish" => composed("alice", "publish")
-  }
-}
+shapes = {}
+CASES.fetch("cases").each do |demo_case|
+  operation = demo_case.fetch("operation")
+  principal_id = demo_case.fetch("principal")
+  action = demo_case.fetch("action")
+  expected_id = [operation, principal_id, action].join("/")
+  raise "invalid demo case id #{demo_case.fetch("id").inspect}" \
+    unless demo_case.fetch("id") == expected_id
+
+  result = case operation
+  when "paginated"
+    paginated(principal_id, action, demo_case.fetch("pagination").fetch("pageSize"))
+  when "composed"
+    composed(principal_id, action)
+  when "filtered", "alwaysAllowed", "alwaysDenied"
+    filtered(principal_id, action)
+  else
+    raise "unsupported demo operation #{operation.inspect}"
+  end
+  shapes[operation] ||= {}
+  shapes.fetch(operation)["#{principal_id}/#{action}"] = result
+end
 
 REAL_STDOUT.puts(JSON.pretty_generate({"adapter" => "activerecord", "shapes" => shapes}))

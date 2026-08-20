@@ -1,0 +1,971 @@
+{
+  "schemaVersion": 1,
+  "adapter": "langchain-chromadb",
+  "package": {
+    "ecosystem": "npm",
+    "name": "@cerbos/langchain-chromadb"
+  },
+  "workflow": ".github/workflows/chromadb.yaml",
+  "commands": {
+    "test": [
+      "npm",
+      "test"
+    ],
+    "typecheck": [
+      "npm",
+      "run",
+      "typecheck"
+    ],
+    "golden": [
+      "npm",
+      "run",
+      "golden:update"
+    ],
+    "consumer": [
+      "../demo/scripts/run-example.sh",
+      "langchain-chromadb"
+    ]
+  },
+  "semanticEnvironments": [
+    {
+      "name": "chromadb-1.5.9",
+      "command": [
+        "npm",
+        "run",
+        "test:adversarial"
+      ],
+      "env": {}
+    }
+  ],
+  "consumer": {
+    "coverage": "artifact-install"
+  },
+  "outcomes": {
+    "all-on-empty": {
+      "status": "rejected",
+      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "arith-add": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters compare a stored field against a literal only — there is no computed-value or column-arithmetic operand — so the plan's arithmetic expression cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "arith-add-eq-frac": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters compare a stored field against a literal only — there is no computed-value or column-arithmetic operand — so the plan's arithmetic expression cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "arith-add-eq-frac-exact": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters compare a stored field against a literal only — there is no computed-value or column-arithmetic operand — so the plan's arithmetic expression cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "arith-add-ne-frac": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters compare a stored field against a literal only — there is no computed-value or column-arithmetic operand — so the plan's arithmetic expression cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "arith-both": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters compare a stored field against a literal only — there is no computed-value or column-arithmetic operand — so the plan's arithmetic expression cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "arith-div": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters compare a stored field against a literal only — there is no computed-value or column-arithmetic operand — so the plan's arithmetic expression cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "arith-div-frac": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters compare a stored field against a literal only — there is no computed-value or column-arithmetic operand — so the plan's arithmetic expression cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "arith-mod": {
+      "status": "rejected",
+      "reason": "Every Chroma comparison operand must be a bare metadata key or a literal. `int(aNumber) % 2` is a computed operand, so it is refused as a nested expression before the modulo semantics matter",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "arith-mult-neg": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters compare a stored field against a literal only — there is no computed-value or column-arithmetic operand — so the plan's arithmetic expression cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "arith-sub": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters compare a stored field against a literal only — there is no computed-value or column-arithmetic operand — so the plan's arithmetic expression cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "arith-vf": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters compare a stored field against a literal only — there is no computed-value or column-arithmetic operand — so the plan's arithmetic expression cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "cast-double-string": {
+      "status": "rejected",
+      "reason": "double() cast over a string column — same whole-string-versus-leading-digits divergence as cast-int-string",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "cast-int-double": {
+      "status": "rejected",
+      "reason": "int() cast over a numeric column — CEL truncates toward zero, PostgreSQL and MySQL CAST round to nearest",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "cast-int-string": {
+      "status": "rejected",
+      "reason": "int() cast over a string column — CEL reads a whole string or raises, SQL reads the leading digits",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "cast-string-bool": {
+      "status": "rejected",
+      "reason": "Same missing computed operand as cast-string-double",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "cast-string-double": {
+      "status": "rejected",
+      "reason": "Every Chroma comparison operand must be a bare metadata field or a literal. string() wraps the field in an expression, and Chroma's Where model has no computed operand at all — there is no cast, and no place to put one",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "concat-f2f": {
+      "status": "rejected",
+      "reason": "The comparison's left operand is a concatenation of two metadata fields — a computed operand, which the Where model has no form for. Chroma never reaches the question of which `+` overload the plan means",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "cr-contains": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters have no substring or pattern operator, so contains has no faithful Where equivalent and the adapter rejects it",
+      "message": "Unsupported operator contains"
+    },
+    "cr-div-neg-zero": {
+      "status": "rejected",
+      "reason": "Same flat-scalar-metadata limitation as cr-div-zero: Chroma compares a stored field against a literal only, so a division operand cannot be translated whatever its denominator",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "cr-div-other-column": {
+      "status": "rejected",
+      "reason": "Same flat-scalar-metadata limitation as cr-div-zero, with a second metadata key as the denominator — Chroma has neither arithmetic nor a field-to-field operand",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "cr-div-then-add": {
+      "status": "rejected",
+      "reason": "Same flat-scalar-metadata limitation as cr-div-zero, with addition composed on the division",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "cr-div-then-add-ne": {
+      "status": "rejected",
+      "reason": "Same flat-scalar-metadata limitation as cr-div-then-add, reached through an inequality",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "cr-div-zero": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters compare a stored field against a literal only — there is no computed-value or column-arithmetic operand — so the plan's arithmetic expression cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "cr-div-zero-eq-neg": {
+      "status": "rejected",
+      "reason": "Same flat-scalar-metadata limitation as cr-div-zero under a negated equality",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "cr-div-zero-ne": {
+      "status": "rejected",
+      "reason": "Same flat-scalar-metadata limitation as cr-div-zero: the arithmetic operand cannot be translated at all, whatever the enclosing comparison",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "cr-endswith": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters have no suffix or pattern operator, so endsWith has no faithful Where equivalent and the adapter rejects it",
+      "message": "Unsupported operator endsWith"
+    },
+    "cr-size-frac-ge": {
+      "status": "rejected",
+      "reason": "Chroma metadata is a flat scalar map with no relation model and no count function, so a size(...) collection-count operand cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "cr-startswith": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters expose only scalar comparison and membership operators ($eq/$ne/$lt/$lte/$gt/$gte/$in/$nin) — there is no prefix, substring, or pattern operator — so startsWith has no faithful Where equivalent and the adapter rejects it",
+      "message": "Unsupported operator startsWith"
+    },
+    "cr-startswith-concat": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters expose only scalar comparison and membership operators ($eq/$ne/$lt/$lte/$gt/$gte/$in/$nin) — there is no prefix, substring, or pattern operator — so startsWith has no faithful Where equivalent and the adapter rejects it",
+      "message": "Unsupported operator startsWith"
+    },
+    "cs-contains": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters expose only scalar comparison and membership operators ($eq/$ne/$lt/$lte/$gt/$gte/$in/$nin) — there is no substring operator — so the case-sensitivity this action probes is never reached: the operator is refused first, exactly as for like-underscore",
+      "message": "Unsupported operator contains"
+    },
+    "cs-endswith": {
+      "status": "rejected",
+      "reason": "Same missing pattern-operator limitation as like-backslash: Chroma has no suffix operator, so the comparison whose case-sensitivity this action probes is never built",
+      "message": "Unsupported operator endsWith"
+    },
+    "cs-eq": {
+      "status": "matched"
+    },
+    "cs-startswith": {
+      "status": "rejected",
+      "reason": "Same missing pattern-operator limitation as like-percent: Chroma has no prefix operator, so the comparison whose case-sensitivity this action probes is never built",
+      "message": "Unsupported operator startsWith"
+    },
+    "double-negation": {
+      "status": "matched"
+    },
+    "double-threshold": {
+      "status": "rejected",
+      "reason": "Chroma distinguishes integer and floating-point metadata; a fractional threshold against this integer field is not faithful",
+      "message": "ge cannot safely compare a fractional threshold unless the mapped Chroma metadata field declares numericType: \"float\""
+    },
+    "empty-string-eq": {
+      "status": "matched"
+    },
+    "exists-on-empty": {
+      "status": "rejected",
+      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "exists-one-multi": {
+      "status": "rejected",
+      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "f2f-contains": {
+      "status": "rejected",
+      "reason": "Chroma has no field-to-field operand and no substring or pattern operator, so a column-valued needle is doubly inexpressible",
+      "message": "Variable-to-variable comparisons are not supported by ChromaDB filters"
+    },
+    "f2f-endswith": {
+      "status": "rejected",
+      "reason": "Chroma has no field-to-field operand and no substring or pattern operator, so a column-valued needle is doubly inexpressible",
+      "message": "Variable-to-variable comparisons are not supported by ChromaDB filters"
+    },
+    "f2f-startswith": {
+      "status": "rejected",
+      "reason": "Chroma has no field-to-field operand and no substring or pattern operator, so a column-valued needle is doubly inexpressible",
+      "message": "Variable-to-variable comparisons are not supported by ChromaDB filters"
+    },
+    "field-to-field": {
+      "status": "rejected",
+      "reason": "Chroma Where documents compare a metadata field against a literal only; there is no field-to-field operand, so a comparison of two metadata keys cannot be translated",
+      "message": "Variable-to-variable comparisons are not supported by ChromaDB filters"
+    },
+    "filter-as-condition": {
+      "status": "rejected",
+      "reason": "filter() used as the whole condition — it returns a list, not a boolean",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "filter-as-conjunct": {
+      "status": "rejected",
+      "reason": "filter() as a CONJUNCT rather than the whole condition — the same non-boolean, one level down",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "gt-bare": {
+      "status": "matched"
+    },
+    "hier-ancestor-cf": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters have no path or prefix operator, and every comparison operand must be a bare field or literal, so the plan's hierarchy(...) operands cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "hier-ancestor-ff": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters have no path or prefix operator, and every comparison operand must be a bare field or literal, so the plan's hierarchy(...) operands cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "hier-bracket": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters have no path or prefix operator, and every comparison operand must be a bare field or literal, so the plan's hierarchy(...) operands cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "hier-descendent-cf": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters have no path or prefix operator, and every comparison operand must be a bare field or literal, so the plan's hierarchy(...) operands cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "hier-descendent-ff": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters have no path or prefix operator, and every comparison operand must be a bare field or literal, so the plan's hierarchy(...) operands cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "hier-list-id": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters have no path or prefix operator, and both hierarchy(...) operands are computed — one of them from a list() built around the primary key — so neither side reduces to the bare field or literal a Where clause requires",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "hier-meta-in": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters have no path or prefix operator, and every comparison operand must be a bare field or literal, so the plan's hierarchy(...) operands cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "hier-meta-like": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters have no path or prefix operator, and every comparison operand must be a bare field or literal, so the plan's hierarchy(...) operands cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "hier-overlaps-cf": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters have no path or prefix operator, and every comparison operand must be a bare field or literal, so the plan's hierarchy(...) operands cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "hier-overlaps-ff": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters have no path or prefix operator, and every comparison operand must be a bare field or literal, so the plan's hierarchy(...) operands cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "hier-overlaps-meta": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters have no path or prefix operator, and every comparison operand must be a bare field or literal, so the plan's hierarchy(...) operands cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "id-concat": {
+      "status": "rejected",
+      "reason": "The value side is a concatenation of a constant with the primary key — a computed operand, which the Where model has no form for. The comparison is refused before the second metadata key it names is reached",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "id-concat-vf": {
+      "status": "rejected",
+      "reason": "Same missing computed operand as id-concat, in value-first form",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "id-eq-const": {
+      "status": "matched"
+    },
+    "id-f2f": {
+      "status": "rejected",
+      "reason": "Comparing the primary key against a metadata field is variable-to-variable: a Chroma Where clause compares one metadata key against a LITERAL, and has no form that names a second key on the value side",
+      "message": "Variable-to-variable comparisons are not supported by ChromaDB filters"
+    },
+    "id-f2f-ne": {
+      "status": "rejected",
+      "reason": "Same variable-to-variable limitation as id-f2f, under negation",
+      "message": "Variable-to-variable comparisons are not supported by ChromaDB filters"
+    },
+    "in-empty": {
+      "status": "matched"
+    },
+    "in-null-elem-hasint": {
+      "status": "rejected",
+      "reason": "Chroma metadata values are scalars with no list-intersection operator, so hasIntersection has no Where equivalent",
+      "message": "Unsupported operator hasIntersection"
+    },
+    "in-null-elem-mixed": {
+      "status": "rejected",
+      "reason": "Chroma metadata values are non-null scalars, so a membership list containing null cannot be represented and the adapter refuses to silently drop the null element",
+      "message": "in requires a list containing only finite numbers, strings, or booleans"
+    },
+    "in-null-elem-neg": {
+      "status": "rejected",
+      "reason": "Chroma $nin matches records whose metadata key is absent, unlike Cerbos missing-attribute error semantics, and this field is not declared required",
+      "message": "nin is unsafe for optional Chroma metadata because missing fields match the filter"
+    },
+    "in-null-elem-only": {
+      "status": "rejected",
+      "reason": "The planner folds membership in [null] to an equality against null; Chroma metadata has no null value, so the comparison cannot be represented",
+      "message": "eq requires a finite number, string, or boolean literal"
+    },
+    "in-null-elem-only-neg": {
+      "status": "rejected",
+      "reason": "Chroma $ne matches records whose metadata key is absent, unlike Cerbos missing-attribute error semantics, and this field is not declared required",
+      "message": "ne is unsafe for optional Chroma metadata because missing fields match the filter"
+    },
+    "in-null-elem-rel": {
+      "status": "rejected",
+      "reason": "Chroma's $in tests a metadata field against a literal list; it cannot test whether a literal is a member of a list-valued metadata field, and Chroma metadata values are scalars anyway",
+      "message": "ChromaDB filters cannot test whether a literal is contained in a metadata field"
+    },
+    "in-null-elem-rel-neg": {
+      "status": "rejected",
+      "reason": "Chroma's $in tests a metadata field against a literal list; it cannot test whether a literal is a member of a list-valued metadata field, and Chroma metadata values are scalars anyway",
+      "message": "ChromaDB filters cannot test whether a literal is contained in a metadata field"
+    },
+    "in-single": {
+      "status": "matched"
+    },
+    "in-var-var": {
+      "status": "rejected",
+      "reason": "Chroma Where documents compare a metadata field against a literal only; there is no field-to-field operand, so a comparison of two metadata keys cannot be translated",
+      "message": "Variable-to-variable comparisons are not supported by ChromaDB filters"
+    },
+    "in-var-var-neg": {
+      "status": "rejected",
+      "reason": "Chroma Where documents compare a metadata field against a literal only; there is no field-to-field operand, so a comparison of two metadata keys cannot be translated",
+      "message": "Variable-to-variable comparisons are not supported by ChromaDB filters"
+    },
+    "index-scalar-list": {
+      "status": "rejected",
+      "reason": "Chroma metadata values are scalars, so there is no list to index, and the index() node is a nested expression in an operand position either way",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "lambda-field-to-field": {
+      "status": "rejected",
+      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "lambda-in-principal": {
+      "status": "rejected",
+      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "le-bare": {
+      "status": "matched"
+    },
+    "like-backslash": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters have no suffix or pattern operator, so endsWith has no faithful Where equivalent and the adapter rejects it",
+      "message": "Unsupported operator endsWith"
+    },
+    "like-bracket": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters expose only scalar comparison and membership operators ($eq/$ne/$lt/$lte/$gt/$gte/$in/$nin) — there is no prefix, substring, or pattern operator — so startsWith has no faithful Where equivalent and the adapter rejects it",
+      "message": "Unsupported operator startsWith"
+    },
+    "like-percent": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters expose only scalar comparison and membership operators ($eq/$ne/$lt/$lte/$gt/$gte/$in/$nin) — there is no prefix, substring, or pattern operator — so startsWith has no faithful Where equivalent and the adapter rejects it",
+      "message": "Unsupported operator startsWith"
+    },
+    "like-underscore": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters have no substring or pattern operator, so contains has no faithful Where equivalent and the adapter rejects it",
+      "message": "Unsupported operator contains"
+    },
+    "macro-depth3-all": {
+      "status": "rejected",
+      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "macro-depth3-exists": {
+      "status": "rejected",
+      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "macro-depth3-not-exists": {
+      "status": "rejected",
+      "reason": "Chroma has no negation of a collection predicate: $ne/$nin negate a scalar comparison, not a macro, and the adapter refuses to invert one",
+      "message": "Cannot negate operator exists"
+    },
+    "map-as-condition": {
+      "status": "rejected",
+      "reason": "map() used as the whole condition — it returns a list, not a boolean",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "map-eq-list": {
+      "status": "rejected",
+      "reason": "A map() projection is a nested expression in an operand position, and Chroma has no relation to project from",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "n-all-mixed-null": {
+      "status": "rejected",
+      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "n-not-all-absorb": {
+      "status": "rejected",
+      "reason": "Chroma has no negation of a collection predicate: $ne/$nin negate a scalar comparison, not a macro, and the adapter refuses to invert one",
+      "message": "Cannot negate operator all"
+    },
+    "n-not-all-null": {
+      "status": "rejected",
+      "reason": "Chroma has no negation of a collection predicate: $ne/$nin negate a scalar comparison, not a macro, and the adapter refuses to invert one",
+      "message": "Cannot negate operator all"
+    },
+    "n-not-exists-one-null": {
+      "status": "rejected",
+      "reason": "Chroma has no negation of a collection predicate: $ne/$nin negate a scalar comparison, not a macro, and the adapter refuses to invert one",
+      "message": "Cannot negate operator exists_one"
+    },
+    "nan-ord-inf": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters have neither conditional nor arithmetic operands, so a ternary whose branches are IEEE-754 division results cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "nan-ord-le": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters have neither conditional nor arithmetic operands, so a ternary whose branches are IEEE-754 division results cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "nan-ord-ternary": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters have neither conditional nor arithmetic operands, so a ternary whose branches are IEEE-754 division results cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "nan-ord-ternary-vf": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters have neither conditional nor arithmetic operands, so a ternary whose branches are IEEE-754 division results cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "nary-and": {
+      "status": "matched"
+    },
+    "neg-number": {
+      "status": "matched"
+    },
+    "not-and": {
+      "status": "matched"
+    },
+    "not-contains": {
+      "status": "rejected",
+      "reason": "Chroma's Where model has no string-matching operator to negate: `contains` is not in the adapter's negation table because it is not expressible positively either",
+      "message": "Cannot negate operator contains"
+    },
+    "not-empty": {
+      "status": "rejected",
+      "reason": "Chroma metadata is a flat scalar map with no relation model and no count function, so a size(...) collection-count operand cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "not-exists": {
+      "status": "rejected",
+      "reason": "Chroma has no negation of a collection predicate: $ne/$nin negate a scalar comparison, not a macro, and the adapter refuses to invert one",
+      "message": "Cannot negate operator exists"
+    },
+    "not-gt": {
+      "status": "matched"
+    },
+    "not-lt": {
+      "status": "matched"
+    },
+    "not-startswith": {
+      "status": "rejected",
+      "reason": "Same missing string-matching operator as not-contains, reached through startsWith",
+      "message": "Cannot negate operator startsWith"
+    },
+    "null-eq": {
+      "status": "rejected",
+      "reason": "Chroma $eq accepts only a finite number, string or boolean literal, and Chroma metadata has no null value, so an equality against null cannot be represented",
+      "message": "eq requires a finite number, string, or boolean literal"
+    },
+    "null-eq-missing": {
+      "status": "rejected",
+      "reason": "`aOptionalString` follows the corpus default: a NULL column sends NO attribute, so `R.attr.aOptionalString == null` is a CEL missing-attribute error and check() denies every canonical check resource. The planner emits the same `eq(var, null)` node as `null-eq` (explicit null, a proper subset allowed), so the wire cannot tell the two conventions apart. Every adapter must be told which one the caller uses. Harnesses translate this action with the adapter's null representation set to `omitted` and assert a throw; under the default `explicit` the adapter would emit IS NULL and return the rows the PDP denies (#302).",
+      "message": "finite number, string, or boolean literal"
+    },
+    "null-ne": {
+      "status": "rejected",
+      "reason": "Chroma $ne matches records whose metadata key is absent, unlike Cerbos missing-attribute error semantics, and this field is not declared required",
+      "message": "ne is unsafe for optional Chroma metadata because missing fields match the filter"
+    },
+    "null-not-eq": {
+      "status": "rejected",
+      "reason": "Negating the null equality routes through the same $ne absent-key mismatch as null-ne",
+      "message": "ne is unsafe for optional Chroma metadata because missing fields match the filter"
+    },
+    "null-value-f2f": {
+      "status": "rejected",
+      "reason": "Chroma Where documents compare a metadata field against a literal only, so the field-to-field operand is rejected before the null convention on either side is reached — the same limitation as field-to-field",
+      "message": "Variable-to-variable comparisons are not supported by ChromaDB filters"
+    },
+    "null-value-f2f-mixed": {
+      "status": "rejected",
+      "reason": "The declared side needs a definite answer for its NULL — CEL holds a null VALUE there. The undeclared side needs UNKNOWN for its NULL — that is a missing attribute, which CEL denies under BOTH polarities. A definite predicate returns rows the PDP refuses (e1, both columns NULL); a plain one drops rows the PDP allows (a2/a4/a8/c2). No single predicate is both, so every adapter refuses the shape rather than picking a direction. Declaring the convention on both attributes, or on neither, is expressible; mixing them across one comparison is not (cerbos/query-plan-adapters#308)",
+      "message": "Variable-to-variable comparisons are not supported by ChromaDB filters"
+    },
+    "null-value-ne-const": {
+      "status": "rejected",
+      "reason": "Chroma $ne matches records whose metadata key is absent, and `owner` is stored as absent for a NULL column because Chroma metadata has no null value. The explicit-null convention this action probes therefore cannot even be represented in the store, let alone compared",
+      "message": "ne is unsafe for optional Chroma metadata because missing fields match the filter"
+    },
+    "null-value-not-eq-const": {
+      "status": "rejected",
+      "reason": "The negated-equality spelling lowers to the same $ne absent-key mismatch as null-value-ne-const",
+      "message": "ne is unsafe for optional Chroma metadata because missing fields match the filter"
+    },
+    "null-value-not-in-const": {
+      "status": "rejected",
+      "reason": "The negated membership lowers to $nin, which matches records whose metadata key is absent for the same reason $ne does",
+      "message": "nin is unsafe for optional Chroma metadata because missing fields match the filter"
+    },
+    "null-value-pv-not-exists": {
+      "status": "rejected",
+      "reason": "The value-list fold puts a collection macro under a negation, and Chroma has no negation for `exists` — the macro is refused before the comparison leaves it folds into are reached, the same limitation as pv-exists reaches from the positive side",
+      "message": "Cannot negate operator exists"
+    },
+    "optional-ne": {
+      "status": "rejected",
+      "reason": "Chroma $ne includes records with missing metadata, unlike Cerbos missing-attribute error semantics",
+      "message": "ne is unsafe for optional Chroma metadata because missing fields match the filter"
+    },
+    "or-eq-exists": {
+      "status": "rejected",
+      "reason": "Same missing nested-operand form as rel-hop2-or-exists, without the relation hop that masked it: the disjunction's left branch IS a bare boolean metadata field Chroma can take, and the right branch is an exists macro over a collection, which it cannot. A Where clause has no way to hold one of the two, so the whole disjunction is refused",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "or-eq-in": {
+      "status": "rejected",
+      "reason": "The membership spelling of or-eq-exists. Chroma's $in tests a metadata field against a literal LIST; the plan asks the mirror image — whether a literal is a member of a list-valued metadata field — and Chroma metadata values are scalars anyway, so the right branch is refused before the disjunction is built",
+      "message": "ChromaDB filters cannot test whether a literal is contained in a metadata field"
+    },
+    "outer-attr-depth2": {
+      "status": "rejected",
+      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "p-arith-in-lambda": {
+      "status": "rejected",
+      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "p-deep-nest": {
+      "status": "rejected",
+      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "p-double-frac": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters compare a stored field against a literal only — there is no computed-value or column-arithmetic operand — so the plan's arithmetic expression cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "p-has": {
+      "status": "upstream-blocked",
+      "reason": "The planner folds has(unknown attr) to KIND_ALWAYS_ALLOWED (a Cerbos planner bug, not an adapter bug), so the adapter returns all rows while check() denies rows where the attribute is missing. Excluded from the oracle run rather than asserted against."
+    },
+    "p-hasintersection-map": {
+      "status": "rejected",
+      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "p-in-null-multi": {
+      "status": "matched"
+    },
+    "p-in-null-single": {
+      "status": "matched"
+    },
+    "p-index": {
+      "status": "rejected",
+      "reason": "list indexing (tags[0].name)",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "p-lambda-f2f-like": {
+      "status": "rejected",
+      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "p-lambda-inner-f2f": {
+      "status": "rejected",
+      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "p-matches": {
+      "status": "rejected",
+      "reason": "matches() regex",
+      "message": "Unsupported operator matches"
+    },
+    "p-not-exists-empty": {
+      "status": "rejected",
+      "reason": "Chroma has no negation of a collection predicate: $ne/$nin negate a scalar comparison, not a macro, and the adapter refuses to invert one",
+      "message": "Cannot negate operator exists"
+    },
+    "p-not-ternary-null": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters have no conditional operand: the plan's ternary must be evaluated per record before comparison, which a static Where document cannot express",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "p-size-nested": {
+      "status": "rejected",
+      "reason": "Chroma metadata is a flat scalar map with no relation model and no count function, so a size(...) collection-count operand cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "p-startswith-concat": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters expose only scalar comparison and membership operators ($eq/$ne/$lt/$lte/$gt/$gte/$in/$nin) — there is no prefix, substring, or pattern operator — so startsWith has no faithful Where equivalent and the adapter rejects it",
+      "message": "Unsupported operator startsWith"
+    },
+    "p-struct": {
+      "status": "matched"
+    },
+    "p-ternary-in-exists": {
+      "status": "rejected",
+      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "p-ternary-of-ternaries": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters have no conditional operand: the plan's ternary must be evaluated per record before comparison, which a static Where document cannot express",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "p-ternary-under-all": {
+      "status": "rejected",
+      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "p-ternary-vs-ternary": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters have no conditional operand: the plan's ternary must be evaluated per record before comparison, which a static Where document cannot express",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "p-timestamp": {
+      "status": "rejected",
+      "reason": "timestamp() comparison over an ISO-date string column",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "pv-all": {
+      "status": "rejected",
+      "reason": "Same missing collection-macro operator as pv-exists; additionally the unrolled form is a chain of $ne, which Chroma can only express safely when the mapper declares the metadata key required, since a document missing the key matches $ne",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "pv-all-unrolled": {
+      "status": "rejected",
+      "reason": "The unrolled all() is a conjunction of `ne` comparisons against an optional metadata key. A Chroma $ne matches documents that do not carry the key at all, so the NULL-aOptionalString rows the PDP denies as missing-attribute errors would be returned — the same guard that refuses pv-all",
+      "message": "ne is unsafe for optional Chroma metadata because missing fields match the filter"
+    },
+    "pv-exists": {
+      "status": "rejected",
+      "reason": "Chroma has no collection-macro operator to fold the lambda into: above the planner's 10-element unroll cap the collection arrives as a literal value list with a lambda body, and $in matches a field against a list rather than evaluating a per-element predicate. Write membership as `R.attr.x in P.attr.xs`, which the planner emits as `in` + value list at every collection size and maps to a single $in",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "pv-exists-unrolled": {
+      "status": "matched"
+    },
+    "rel-bool-hop": {
+      "status": "matched"
+    },
+    "rel-bool-hop2": {
+      "status": "matched"
+    },
+    "rel-contains-hop": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters expose only scalar comparison and membership operators — there is no substring operator — so contains has no faithful Where equivalent, through a chain key exactly as at the root",
+      "message": "Unsupported operator contains"
+    },
+    "rel-eq-hop": {
+      "status": "matched"
+    },
+    "rel-eq-num-hop": {
+      "status": "matched"
+    },
+    "rel-ge-hop": {
+      "status": "matched"
+    },
+    "rel-gt-hop": {
+      "status": "matched"
+    },
+    "rel-hop-and-root": {
+      "status": "rejected",
+      "reason": "The conjunction itself is expressible, but its second conjunct is a contains against the chain key, which Chroma has no substring operator for — the walk reaches that limitation before the conjunction is assembled",
+      "message": "Unsupported operator contains"
+    },
+    "rel-hop2-or-exists": {
+      "status": "rejected",
+      "reason": "Every Chroma comparison operand must be a bare metadata field or a literal, and the disjunction's second branch is an exists macro over a relation — a nested expression the Where model has no form for. The two-level hop in the first branch is never reached",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "rel-le-hop": {
+      "status": "matched"
+    },
+    "rel-lt-hop": {
+      "status": "matched"
+    },
+    "rel-ne-null-hop": {
+      "status": "rejected",
+      "reason": "Same optional-metadata $ne limitation as rel-not-bool-hop, reached through the null comparison: `!= null` over a chain key lowers to $ne, which a document missing that key satisfies. Both flavours of absence — no parent at all, and a parent whose optional column is NULL — are stored as a missing key, so there is nothing for Chroma to distinguish them with",
+      "message": "ne is unsafe for optional Chroma metadata because missing fields match the filter"
+    },
+    "rel-not-bool-hop": {
+      "status": "rejected",
+      "reason": "Chroma lowers a negated boolean to $ne, and a document whose to-one parent is absent carries no parent.aBool key at all — a missing metadata key MATCHES $ne, which is exactly the parentless rows the PDP denies. The mapping therefore leaves every chain key optional and the adapter refuses $ne over an optional field rather than emitting the over-grant",
+      "message": "ne is unsafe for optional Chroma metadata because missing fields match the filter"
+    },
+    "rel-range-hop": {
+      "status": "matched"
+    },
+    "rel-startswith-hop2": {
+      "status": "rejected",
+      "reason": "Same missing pattern-operator limitation as like-percent, reached two levels out: Chroma has no prefix operator for the flattened parent.inner.aString key",
+      "message": "Unsupported operator startsWith"
+    },
+    "root-bare-bool": {
+      "status": "matched"
+    },
+    "root-or": {
+      "status": "matched"
+    },
+    "size-filter-count": {
+      "status": "rejected",
+      "reason": "Chroma metadata is a flat scalar map with no relation model and no count function, so a size(...) collection-count operand cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "size-huge-gt": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters have no string-length function, and every comparison operand must be a bare field or literal, so size(field) cannot be an operand",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "size-huge-lt": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters have no string-length function, and every comparison operand must be a bare field or literal, so size(field) cannot be an operand",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "size-threshold": {
+      "status": "rejected",
+      "reason": "Chroma metadata is a flat scalar map with no relation model and no count function, so a size(...) collection-count operand cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "string-size": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters have no string-length function, and every comparison operand must be a bare field or literal, so size(field) cannot be an operand",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "ternary-bare": {
+      "status": "rejected",
+      "reason": "The bare ternary plans as a three-operand conditional at the top of the filter; Chroma's Where model only takes two-operand field-vs-literal comparisons",
+      "message": "Expected exactly two operands"
+    },
+    "ternary-cmp": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters have no conditional operand: the plan's ternary must be evaluated per record before comparison, which a static Where document cannot express",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "ternary-expr-cond": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters have no conditional operand: the plan's ternary must be evaluated per record before comparison, which a static Where document cannot express",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "ternary-negated": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters have no conditional operand: the plan's ternary must be evaluated per record before comparison, which a static Where document cannot express",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "ternary-nested": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters have no conditional operand: the plan's ternary must be evaluated per record before comparison, which a static Where document cannot express",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "ternary-null-cond": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters have no conditional operand: the plan's ternary must be evaluated per record before comparison, which a static Where document cannot express",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "ternary-value-first": {
+      "status": "rejected",
+      "reason": "Chroma metadata filters have no conditional operand: the plan's ternary must be evaluated per record before comparison, which a static Where document cannot express",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "triple-negation": {
+      "status": "matched"
+    },
+    "ts-eq": {
+      "status": "rejected",
+      "reason": "Chroma metadata values are strings, numbers, and booleans only — there is no temporal type and no timestamp(...) operand — so the plan's instant comparison cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "ts-eq-offset": {
+      "status": "rejected",
+      "reason": "Chroma metadata values are strings, numbers, and booleans only — there is no temporal type and no timestamp(...) operand — so the plan's instant comparison cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "ts-ne": {
+      "status": "rejected",
+      "reason": "Chroma metadata values are strings, numbers, and booleans only — there is no temporal type and no timestamp(...) operand — so the plan's instant comparison cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "ts-vf": {
+      "status": "rejected",
+      "reason": "Chroma metadata values are strings, numbers, and booleans only — there is no temporal type and no timestamp(...) operand — so the plan's instant comparison cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "ts-window": {
+      "status": "rejected",
+      "reason": "Chroma metadata values are strings, numbers, and booleans only — there is no temporal type and no timestamp(...) operand — so the plan's instant comparison cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "unicode-eq": {
+      "status": "matched"
+    },
+    "vf-ge": {
+      "status": "matched"
+    },
+    "vf-hasint": {
+      "status": "rejected",
+      "reason": "hasIntersection is not in the adapter's operator set: Chroma metadata values are scalars, so there is no list-valued field for a set intersection to test, and mirroring the operands does not change that",
+      "message": "Unsupported operator hasIntersection"
+    },
+    "vf-le": {
+      "status": "matched"
+    },
+    "vf-lt": {
+      "status": "matched"
+    },
+    "vf-ne": {
+      "status": "matched"
+    },
+    "vf-null-ne": {
+      "status": "rejected",
+      "reason": "Value-first form of null-ne; the same $ne absent-key mismatch applies after the planner mirrors the operands",
+      "message": "ne is unsafe for optional Chroma metadata because missing fields match the filter"
+    },
+    "vf-size": {
+      "status": "rejected",
+      "reason": "size() over a collection is a computed operand with no Chroma equivalent — there is no count function and no relation to count — so it is refused as a nested expression, in this operand position as in the collection-first one",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "w1-all-chain": {
+      "status": "rejected",
+      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, so the chained collection lambda cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "w1-exists-chain": {
+      "status": "rejected",
+      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "w1-in-chain": {
+      "status": "rejected",
+      "reason": "Chroma's $in tests a metadata field against a literal list; it cannot test whether a literal is a member of a list-valued metadata field, and Chroma metadata values are scalars anyway",
+      "message": "ChromaDB filters cannot test whether a literal is contained in a metadata field"
+    },
+    "w1-not-exists-chain": {
+      "status": "rejected",
+      "reason": "Chroma has no negation of a collection predicate, and no relation model to reach the chained collection with in the first place",
+      "message": "Cannot negate operator exists"
+    },
+    "w1-not-hasint-chain": {
+      "status": "rejected",
+      "reason": "Chroma has no operator that intersects a list-valued metadata field with a literal list, so hasIntersection has no Where equivalent to negate; the adapter refuses to invert it",
+      "message": "Cannot negate operator hasIntersection"
+    },
+    "w1-not-in-chain": {
+      "status": "rejected",
+      "reason": "Same literal-in-field limitation as w1-in-chain, reached under a negation: the adapter rejects the membership direction before the negation is even considered",
+      "message": "ChromaDB filters cannot test whether a literal is contained in a metadata field"
+    },
+    "w1-not-size-chain": {
+      "status": "rejected",
+      "reason": "Chroma comparison operands must be a bare field or literal, so the negated size(...) collection count is rejected as a nested expression — the same missing relation model and count function as w1-size-zero-chain",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "w1-size-chain": {
+      "status": "rejected",
+      "reason": "Chroma metadata is a flat scalar map with no relation model and no count function, so a size(...) collection-count operand cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "w1-size-frac-chain": {
+      "status": "rejected",
+      "reason": "Same missing relation model and count function as w1-size-zero-chain, reached through a fractional threshold",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "w1-size-frac-le-chain": {
+      "status": "rejected",
+      "reason": "Same missing relation model and count function as w1-size-frac-chain under the opposite ordering",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "w1-size-nonneg-chain": {
+      "status": "rejected",
+      "reason": "Same missing relation model and count function as w1-size-zero-chain",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "w1-size-zero-chain": {
+      "status": "rejected",
+      "reason": "Chroma metadata is a flat scalar map with no relation model and no count function, so a size(...) collection-count operand cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    },
+    "w1-ternary-chain-cond": {
+      "status": "rejected",
+      "reason": "Same three-operand conditional as ternary-bare: Chroma's Where model takes only two-operand field-vs-literal comparisons, so the ternary is rejected at the top of the filter before its chained condition is examined",
+      "message": "Expected exactly two operands"
+    },
+    "w2-outer-relation": {
+      "status": "rejected",
+      "reason": "Chroma metadata is a flat scalar map with no relation model and no count function, so a size(...) collection-count operand cannot be translated",
+      "message": "Nested expressions are not supported by ChromaDB filters"
+    }
+  }
+}

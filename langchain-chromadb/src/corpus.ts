@@ -24,15 +24,13 @@ import type { FieldNameMapperConfig } from ".";
  *
  * `adversarial.test.ts` plans against a real PDP and queries a real ChromaDB collection;
  * `translator.test.ts` reads the same actions off the golden wire fixtures and asserts nothing but
- * the emitted `Where` filter. They must agree on two things or they prove less than they appear to:
+ * the emitted `Where` filter. They must agree on the field mapper or they prove less than they
+ * appear to:
  *
  * - **the field name mapper.** The unit test pins the filter this adapter emits for a mapping; the
  *   harness proves that same filter returns the documents the PDP allows. Two copies that drifted
  *   would leave the pinned filters describing metadata keys no harness ever seeds, which is why
  *   `FIELD_NAME_MAPPER` lives here rather than in either suite.
- * - **the classification.** Which actions this adapter must refuse, and with which message, is a
- *   corpus decision (`actions.json`), not a per-suite one.
- *
  * The code in this file is duplicated across adapters **on purpose** — adapters share data, not
  * code, so that every adapter stays standalone. Do not extract it into `conformance/`, do not
  * import another adapter's copy, and do not add a drift check between them. See
@@ -112,262 +110,6 @@ export function parseStringArray(value: unknown, label: string): string[] {
   );
 }
 
-// -- actions.json --------------------------------------------------------------------------------
-
-export interface UnsupportedShape {
-  action: string;
-  shape: string;
-  /** One entry per adapter that must reject the shape; the corpus asserts the key set. */
-  messages: Record<string, string>;
-}
-
-export interface AdapterUnsupportedEntry {
-  action: string;
-  reason: string;
-  /** Absent on `adapterSupportedExpected`, required on a throw. */
-  message?: string;
-}
-
-/**
- * A `nullRepresentationOmitted` entry. Every adapter must reject these — the two NULL conventions
- * are indistinguishable on the wire — so `messages` names the whole roster with no promotions to
- * subtract.
- */
-export interface NullRepresentationOmittedEntry {
-  action: string;
-  reason: string;
-  messages: Record<string, string>;
-}
-
-export interface KnownDivergence {
-  action: string;
-  adapters: string[];
-}
-
-export interface ActionsFile {
-  conformance: string[];
-  adapterUnsupported: Record<string, AdapterUnsupportedEntry[]>;
-  adapterSupportedExpected: Record<string, AdapterUnsupportedEntry[]>;
-  expectedUnsupported: UnsupportedShape[];
-  nullRepresentationOmitted: NullRepresentationOmittedEntry[];
-  knownDivergences: KnownDivergence[];
-}
-
-/** The `messages` map of one entry: adapter key -> required substring. */
-function parseMessages(value: unknown, label: string): Record<string, string> {
-  const messages = requireRecord(value, label);
-  const result: Record<string, string> = {};
-  for (const [adapter, message] of Object.entries(messages)) {
-    result[adapter] = requireString(message, `${label}.${adapter}`);
-  }
-  return result;
-}
-
-function parseUnsupportedShape(value: unknown, index: number): UnsupportedShape {
-  const label = `expectedUnsupported[${index}]`;
-  const shape = requireRecord(value, label);
-  return {
-    action: requireString(shape["action"], `${label}.action`),
-    shape: requireString(shape["shape"], `${label}.shape`),
-    messages: parseMessages(shape["messages"], `${label}.messages`),
-  };
-}
-
-function parseAdapterUnsupportedEntry(
-  value: unknown,
-  label: string,
-): AdapterUnsupportedEntry {
-  const entry = requireRecord(value, label);
-  const message = entry["message"];
-  return {
-    action: requireString(entry["action"], `${label}.action`),
-    reason: requireString(entry["reason"], `${label}.reason`),
-    // `adapterUnsupported` carries this and the classification below requires it;
-    // `adapterSupportedExpected` does not throw, so it does not.
-    ...(message === undefined
-      ? {}
-      : { message: requireString(message, `${label}.message`) }),
-  };
-}
-
-function parseAdapterMap(
-  value: unknown,
-  label: string,
-): Record<string, AdapterUnsupportedEntry[]> {
-  const adapters = requireRecord(value, label);
-  const result: Record<string, AdapterUnsupportedEntry[]> = {};
-  for (const [adapter, entries] of Object.entries(adapters)) {
-    result[adapter] = requireArray(entries, `${label}.${adapter}`).map(
-      (entry, index) =>
-        parseAdapterUnsupportedEntry(entry, `${label}.${adapter}[${index}]`),
-    );
-  }
-  return result;
-}
-
-/**
- * `actions.json`, validated rather than cast.
- *
- * Every group is parsed **explicitly**: this rebuilds the manifest field by field, so a corpus group
- * it does not name is silently dropped — and a dropped group makes its actions vanish from every
- * count and every `test.each`, passing vacuously.
- */
-export function parseActionsFile(value: unknown): ActionsFile {
-  const file = requireRecord(value, "actions.json");
-  return {
-    conformance: parseStringArray(file["conformance"], "conformance"),
-    adapterUnsupported: parseAdapterMap(
-      file["adapterUnsupported"],
-      "adapterUnsupported",
-    ),
-    adapterSupportedExpected: parseAdapterMap(
-      file["adapterSupportedExpected"],
-      "adapterSupportedExpected",
-    ),
-    expectedUnsupported: requireArray(
-      file["expectedUnsupported"],
-      "expectedUnsupported",
-    ).map(parseUnsupportedShape),
-    nullRepresentationOmitted: requireArray(
-      file["nullRepresentationOmitted"],
-      "nullRepresentationOmitted",
-    ).map((entry, index) => {
-      const label = `nullRepresentationOmitted[${index}]`;
-      const record = requireRecord(entry, label);
-      return {
-        action: requireString(record["action"], `${label}.action`),
-        reason: requireString(record["reason"], `${label}.reason`),
-        messages: parseMessages(record["messages"], `${label}.messages`),
-      };
-    }),
-    knownDivergences: requireArray(
-      file["knownDivergences"],
-      "knownDivergences",
-    ).map((entry, index) => {
-      const label = `knownDivergences[${index}]`;
-      const record = requireRecord(entry, label);
-      return {
-        action: requireString(record["action"], `${label}.action`),
-        adapters: parseStringArray(record["adapters"], `${label}.adapters`),
-      };
-    }),
-  };
-}
-
-/**
- * A shape this adapter must refuse, with the substring its error has to contain.
- *
- * The message is what turns "it threw" into "it threw for the declared reason": without it a
- * mapper typo or an unrelated validation satisfies the assertion just as well as the limitation
- * the corpus documents. This adapter is the largest consumer of that distinction — 164 of the
- * corpus's 199 shapes are fail-closed here, so a bare throw assertion would prove almost nothing
- * (cerbos/query-plan-adapters#326).
- */
-export type ThrowingAction = readonly [
-  action: string,
-  reason: string,
-  message: string,
-];
-
-export interface ActionClassification {
-  oracleActions: string[];
-  throwingActions: ThrowingAction[];
-  supportedExpected: Set<string>;
-}
-
-/** The pinned message, or a failure — a throwing action without one asserts nothing. */
-export function requireMessage(
-  label: string,
-  message: string | undefined,
-): string {
-  if (message === undefined || message === "") {
-    throw Error(
-      `actions.json pins no throw message for ${label}: the throw suite would accept a failure for any reason`,
-    );
-  }
-  return message;
-}
-
-/**
- * The corpus's own classification of every action, from this adapter's point of view.
- *
- * `nullRepresentationOmitted` is deliberately NOT folded in: it is its own classification, and the
- * harness's four-way "exactly one outcome per action" guard depends on the groups staying distinct.
- * Read it with `nullRepresentationThrows` below.
- */
-export function classifyActionsForAdapter(
-  manifest: ActionsFile,
-  adapter: string,
-): ActionClassification {
-  const unsupported = manifest.adapterUnsupported[adapter] ?? [];
-  const unsupportedActions = new Set(unsupported.map((entry) => entry.action));
-  const supportedExpected = new Set(
-    (manifest.adapterSupportedExpected[adapter] ?? []).map(
-      (entry) => entry.action,
-    ),
-  );
-  const oracleActions = [
-    ...manifest.conformance.filter((action) => !unsupportedActions.has(action)),
-    ...supportedExpected,
-  ];
-  const throwingActions: ThrowingAction[] = [
-    ...unsupported.map(
-      (entry): ThrowingAction => [
-        entry.action,
-        entry.reason,
-        requireMessage(
-          `adapterUnsupported.${adapter}.${entry.action}`,
-          entry.message,
-        ),
-      ],
-    ),
-    ...manifest.expectedUnsupported
-      .filter((entry) => !supportedExpected.has(entry.action))
-      .map(
-        (entry): ThrowingAction => [
-          entry.action,
-          entry.shape,
-          requireMessage(
-            `expectedUnsupported.${entry.action}.messages.${adapter}`,
-            entry.messages?.[adapter],
-          ),
-        ],
-      ),
-  ];
-
-  return {
-    oracleActions: [...new Set(oracleActions)].sort(),
-    throwingActions: throwingActions.sort(([left], [right]) =>
-      left.localeCompare(right),
-    ),
-    supportedExpected,
-  };
-}
-
-/**
- * The `nullRepresentationOmitted` actions, as throws.
- *
- * Every adapter must reject these — the two NULL conventions are indistinguishable on the wire — but
- * most reject them only under the `omitted` convention. This adapter rejects them unconditionally
- * and needs no `nullAttributeRepresentation` option at all: Chroma metadata holds only finite
- * numbers, strings and booleans, so it cannot store an explicit null distinguishably from an absent
- * key and the null comparison operand is refused before the convention could matter
- * (cerbos/query-plan-adapters#302). The message that says so is corpus data, pinned per adapter.
- */
-export function nullRepresentationThrows(
-  manifest: ActionsFile,
-  adapter: string,
-): ThrowingAction[] {
-  return manifest.nullRepresentationOmitted.map((entry): ThrowingAction => [
-    entry.action,
-    entry.reason,
-    requireMessage(
-      `nullRepresentationOmitted.${entry.action}.messages.${adapter}`,
-      entry.messages?.[adapter],
-    ),
-  ]);
-}
-
 // -- the golden wire fixtures --------------------------------------------------------------------
 
 /**
@@ -401,7 +143,9 @@ function operandFromWire(
   if (node.expression) {
     return new PlanExpression(
       node.expression.operator,
-      node.expression.operands.map((child) => operandFromWire(child, plannedAt)),
+      node.expression.operands.map((child) =>
+        operandFromWire(child, plannedAt),
+      ),
     );
   }
   if (node.variable !== undefined) {
@@ -605,7 +349,7 @@ export const FIELD_NAME_MAPPER: Record<string, string | FieldNameMapperConfig> =
     "request.resource.attr.obj.inner": { field: "obj.inner", required: true },
     // The corpus's one REAL to-one chain (the `rel-*` actions), flattened onto dotted metadata keys
     // by `metadataFor`. EVERY level stays `required: false` — the whole point of the relation is
-    // that a level can be absent, and 8 of the 21 seeds have no parent at all — so Chroma's
+    // that a level can be absent, and some canonical resources have no parent at all — so Chroma's
     // inequality shapes over these keys stay fail-closed. A metadata key Chroma cannot prove is
     // present cannot answer `$ne` the way CEL's missing-attribute error does
     // (cerbos/query-plan-adapters#375).

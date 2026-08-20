@@ -6,10 +6,10 @@ Accepted. Recorded in
 ## Context
 
 `conformance/` is shared by every adapter: one hostile policy suite, one set of seed rows, one
-derived-field table, one classification ledger, and one golden wire fixture per action. The code
+derived-field table, one action catalog, canonical check resources, and one golden wire fixture per action. The code
 that *reads* those files is not shared. Each adapter carries its own loader, doing the same two
-jobs — decoding wire fixtures into that language's plan types, and reading `actions.json` into that
-adapter's action lists. Two adapters have a translator unit test today
+jobs — decoding wire fixtures into that language's plan types, and reading the catalog plus the
+adapter-local direct outcomes. Two adapters have a translator unit test today
 ([ADR 0006](0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md)) and each carries an
 independent copy; six more adapters, across three languages, are queued to grow the same file
 ([#379](https://github.com/cerbos/query-plan-adapters/issues/379) onwards).
@@ -63,7 +63,7 @@ identical would not make either of them correct — the failure mode that matter
 projecting the corpus into a narrower local shape, which feeds both sides of the comparison and so
 passes vacuously whether or not another adapter's copy agrees. What guards against that is
 corpus-side and per-adapter: the declared `seeds.json` and `derived-fields.json` key sets, the
-classification completeness guard, the degeneracy guards. A diff between copies guards none of it.
+manifest/catalog completeness guard and global cardinality expectations. A diff between copies guards none of it.
 
 The repository has therefore already decided, implicitly, that translators may not drift and harness
 loaders may. This ADR makes that explicit rather than extending a rule written for the other case. A
@@ -101,7 +101,7 @@ for keeping per-harness service image pins out of the corpus, and it holds whate
 expectations take.
 
 **The loaders are allowed to differ, including where one is better than the other.** They already
-do: mongoose's validates `actions.json` as it parses, prisma's type-asserts it. That is a question
+do: each language validates the same catalog and adapter manifest through its native boundary. That is a question
 for whichever adapter is wrong, answered in that adapter — not an argument for a shared
 implementation, and not an argument for a drift check.
 

@@ -224,7 +224,7 @@ demo/scripts/run-example.sh spring-data   # from the repository root
 ```
 
 The runner starts the demo PDP, invokes [`run.sh`](run.sh), and diffs the emitted document
-against `demo/expected.json`. `run.sh` publishes the adapter, builds the program's own executable
+against `demo/cases.json`. `run.sh` publishes the adapter, builds the program's own executable
 jar via the `demoJar` task, and launches it with `java -jar` — Gradle is kept out of the launching
 process because its stdout carries lifecycle output, and the contract is one JSON document on
 stdout with everything else on stderr. `DemoApplication` does the other half by redirecting

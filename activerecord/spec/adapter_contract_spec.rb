@@ -4,7 +4,7 @@
 #
 # Read CLAUDE.md, "What a translator unit test may pin", before adding to this file. Most of it
 # is kind 2 — **a caller-supplied argument the corpus structurally cannot vary**, and permanent.
-# conformance/actions.json classifies each action against ONE attribute map per adapter, so an
+# adapterctl.json classifies each action against ONE attribute map per adapter, so an
 # operator override, a second mapper form, a per-call `null_attribute_representation` and the
 # association shapes this adapter refuses to guess at have no corpus spelling at all: the corpus
 # asks what a POLICY produces, not what a caller passes. The association block is the largest of

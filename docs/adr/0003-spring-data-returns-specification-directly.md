@@ -109,7 +109,7 @@ Specifics:
   `planResult.isAlwaysDenied()` on the SDK response instead of pattern-matching the return value.
   Callers using the raw protobuf overloads check `response.getFilter().getKind()`.
 - **No behaviour change.** Nothing about what the adapter can translate moves, so
-  `conformance/actions.json`, the wire fixtures, and the README conformance contract table are
+  the direct outcomes in `spring-data/adapterctl.json`, the wire fixtures, and the README conformance contract table are
   untouched. The differential oracle suite's row-level assertions pass unchanged; the harness
   plumbing does move, because several tests currently cast to `Result.Conditional` to reach the
   spec and that cast disappears.

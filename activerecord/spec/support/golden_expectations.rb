@@ -6,7 +6,7 @@
 # Like spec/support/conformance_corpus.rb this code is duplicated across adapters ON PURPOSE
 # (ADR 0007). Do not extract it into conformance/, do not import another adapter's copy, and do
 # not add a drift check between them. What the adapters share is the DATA — the wire fixtures,
-# the seeds, the classification ledger. The golden expectations are not shared data at all: they
+# the seeds, or the manifest outcomes. The golden expectations are not shared data at all: they
 # are this adapter's own output, and they live here rather than under conformance/ for that
 # reason.
 module GoldenExpectations

@@ -1,0 +1,81 @@
+name: Adapter Control Plane
+
+on:
+  pull_request:
+    paths:
+      - "adapterctl"
+      - "tools/adapterctl/**"
+      - "conformance/catalog.json"
+      - "conformance/check-resources.json"
+      - "conformance/seeds.json"
+      - "conformance/derived-fields.json"
+      - "conformance/policies/**"
+      - "demo/cases.json"
+      - "demo/seeds.json"
+      - "demo/policies/**"
+      - "docs/adapterctl.md"
+      - "docs/generated/**"
+      - ".github/actions/validate-adapterctl/**"
+      - ".github/workflows/**"
+  push:
+    branches:
+      - main
+    paths:
+      - "adapterctl"
+      - "tools/adapterctl/**"
+      - "conformance/catalog.json"
+      - "conformance/check-resources.json"
+      - "conformance/seeds.json"
+      - "conformance/derived-fields.json"
+      - "conformance/policies/**"
+      - "demo/cases.json"
+      - "demo/seeds.json"
+      - "demo/policies/**"
+      - "docs/adapterctl.md"
+      - "docs/generated/**"
+      - ".github/actions/validate-adapterctl/**"
+      - ".github/workflows/**"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: tools/adapterctl/package-lock.json
+
+      - name: Install adapterctl dependencies
+        run: npm ci
+        working-directory: tools/adapterctl
+
+      - name: Type-check adapterctl
+        run: npm run typecheck
+        working-directory: tools/adapterctl
+
+      - name: Test adapterctl through its public interface
+        run: npm test
+        working-directory: tools/adapterctl
+
+      - name: Exercise scoped certification action
+        uses: ./.github/actions/validate-adapterctl
+        with:
+          adapter: prisma
+
+      - name: Validate the conformance corpus
+        run: conformance/scripts/validate-corpus.sh
+
+      - name: Validate the demo domain
+        run: demo/scripts/validate-demo.sh
+
+      - name: Certify manifests and direct outcomes
+        run: ./adapterctl validate
+
+      - name: Check generated certification documentation
+        run: ./adapterctl docs --check

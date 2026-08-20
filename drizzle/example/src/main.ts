@@ -15,9 +15,9 @@
  *      the exercise.
  *
  * Prints one JSON document to stdout; everything a human might want to read goes to stderr.
- * demo/scripts/run-example.sh diffs that document against demo/expected.json.
+ * The cases and expected results are read from demo/cases.json, and the program validates the document before emitting it.
  */
-import { readFileSync, rmSync } from "node:fs";
+import { rmSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { GRPC as Cerbos } from "@cerbos/grpc";
@@ -31,10 +31,12 @@ import Database from "better-sqlite3";
 import { and, asc, eq, type SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 
+import { loadConsumerCases, loadDemoSeeds, runConsumerCases } from "./cases";
 import { CREATE_TABLE, documents } from "./schema";
 
 const DEMO_DIR = resolve(__dirname, "../../../demo");
 const RESOURCE_KIND = "document";
+const consumerCases = loadConsumerCases(DEMO_DIR);
 
 /**
  * A dedicated file rather than `:memory:`, so a failing run leaves the seeded rows behind to
@@ -44,23 +46,7 @@ const RESOURCE_KIND = "document";
  */
 const DB_PATH = resolve(__dirname, "../demo.db");
 
-interface Seeds {
-  principals: { id: string; roles: string[] }[];
-  applicationFilter: { description: string; archived: boolean; region: string };
-  documents: {
-    id: string;
-    ownerId: string;
-    public: boolean;
-    region: string;
-    archived: boolean;
-  }[];
-}
-
-// demo/seeds.json is a repository-controlled corpus file, checked structurally by
-// demo/scripts/validate-demo.sh before this ever runs — not untrusted input.
-const seeds = JSON.parse(
-  readFileSync(resolve(DEMO_DIR, "seeds.json"), "utf8")
-) as Seeds;
+const seeds = loadDemoSeeds(DEMO_DIR);
 
 /**
  * Cerbos attribute names are not column names, so a consumer always writes one of these. Without
@@ -75,14 +61,14 @@ const MAPPER: Mapper = {
 /** The application's OWN predicate. Never expressed in policy; declared in demo/seeds.json. */
 const APPLICATION_FILTER = and(
   eq(documents.archived, seeds.applicationFilter.archived),
-  eq(documents.region, seeds.applicationFilter.region)
+  eq(documents.region, seeds.applicationFilter.region),
 );
 
 /**
  * The runner sets this, and there is deliberately no fallback. The obvious default — Cerbos's own
  * 3592/3593 — is the address every adapter's `cerbos run` test sidecar binds, so an unset
  * CERBOS_HOST would not fail: it would quietly plan against the conformance corpus that sidecar
- * serves, and produce a diff against demo/expected.json that reads as an adapter bug.
+ * serves, and fail a demo/cases.json case in a way that reads as an adapter bug.
  * demo/README.md requires reaching the PDP at $CERBOS_HOST, "never a hardcoded address", for
  * exactly that reason.
  *
@@ -91,7 +77,7 @@ const APPLICATION_FILTER = and(
 const cerbosHost = process.env["CERBOS_HOST"];
 if (!cerbosHost) {
   throw new Error(
-    "CERBOS_HOST is not set — run this example through demo/scripts/run-example.sh drizzle"
+    "CERBOS_HOST is not set — run this example through demo/scripts/run-example.sh drizzle",
   );
 }
 
@@ -165,7 +151,7 @@ interface PaginatedShapeResult extends ShapeResult {
 /** Shape 1: a plain filtered list. The adapter's filter is the whole query. */
 async function filtered(
   principalId: string,
-  action: string
+  action: string,
 ): Promise<ShapeResult> {
   const queryPlan = await plan(principalId, action);
   const result = queryPlanToDrizzle({ queryPlan, mapper: MAPPER });
@@ -174,13 +160,13 @@ async function filtered(
 
 /**
  * Shape 4: pagination applied on top of the filter. Reported as page SIZES plus the sorted union
- * of the ids, never as per-page order — demo/expected.json is shared by every store and several
+ * of the ids, never as per-page order — demo/cases.json is shared by every store and several
  * of them have no total order to paginate by.
  */
 async function paginated(
   principalId: string,
   action: string,
-  pageSize: number
+  pageSize: number,
 ): Promise<PaginatedShapeResult> {
   const queryPlan = await plan(principalId, action);
   const result = queryPlanToDrizzle({ queryPlan, mapper: MAPPER });
@@ -222,7 +208,7 @@ async function paginated(
  */
 async function composed(
   principalId: string,
-  action: string
+  action: string,
 ): Promise<ShapeResult> {
   const queryPlan = await plan(principalId, action);
   const result = queryPlanToDrizzle({ queryPlan, mapper: MAPPER });
@@ -242,31 +228,28 @@ async function main(): Promise<void> {
   seed();
   console.error(`seeded ${seeds.documents.length} documents`);
 
-  const shapes = {
-    filtered: {
-      "alice/view": await filtered("alice", "view"),
-      "bob/view": await filtered("bob", "view"),
+  const shapes = await runConsumerCases({
+    cases: consumerCases,
+    execute: (testCase) => {
+      switch (testCase.operation) {
+        case "paginated":
+          return paginated(
+            testCase.principal,
+            testCase.action,
+            testCase.pagination.pageSize,
+          );
+        case "composed":
+          return composed(testCase.principal, testCase.action);
+        case "filtered":
+        case "alwaysAllowed":
+        case "alwaysDenied":
+          return filtered(testCase.principal, testCase.action);
+      }
     },
-    alwaysAllowed: {
-      "admin/admin-view": await filtered("admin", "admin-view"),
-    },
-    alwaysDenied: {
-      "alice/publish": await filtered("alice", "publish"),
-    },
-    paginated: {
-      "alice/view": await paginated("alice", "view", 2),
-      "admin/admin-view": await paginated("admin", "admin-view", 3),
-    },
-    composed: {
-      "alice/view": await composed("alice", "view"),
-      "bob/view": await composed("bob", "view"),
-      "admin/admin-view": await composed("admin", "admin-view"),
-      "alice/publish": await composed("alice", "publish"),
-    },
-  };
+  });
 
   process.stdout.write(
-    `${JSON.stringify({ adapter: "drizzle", shapes }, null, 2)}\n`
+    `${JSON.stringify({ adapter: "drizzle", shapes }, null, 2)}\n`,
   );
 }
 

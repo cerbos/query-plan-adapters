@@ -12,11 +12,22 @@ on:
     tags:
       - mongoose/v*
 
+permissions:
+  contents: read
+
 defaults:
   run:
     working-directory: mongoose
 
 jobs:
+  certification:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/validate-adapterctl
+        with:
+          adapter: mongoose
+
   test:
     strategy:
       # The adversarial suite now shares this matrix, so the default fail-fast would let an
@@ -67,8 +78,8 @@ jobs:
 
       # Only the adversarial suite needs a PDP and a server: the translator unit test reads its
       # plans from conformance/wire-fixtures/, which the `Conformance Corpus` workflow replans and
-      # diffs against this same pinned version. Both are therefore gated to the baseline Node leg,
-      # the one the adversarial step below runs on.
+      # diffs against this same pinned version. The native profile command below owns the server;
+      # the Cerbos binary remains workflow setup because the low-level npm suite launches it.
       - name: Read pinned Cerbos version
         if: matrix.node-version == '22'
         id: cerbos
@@ -79,21 +90,7 @@ jobs:
         uses: cerbos/cerbos-setup-action@30ad92b0242d792bd156985682426577fcfcc589 # v1
         with:
           version: v${{ steps.cerbos.outputs.version }}
-
-      - name: Start MongoDB
-        if: matrix.node-version == '22'
-        run: |
-          docker run -d --name mongodb -p 27017:27017 "$(cat "${{ matrix.mongodb-image-file }}")"
-          for _ in {1..30}; do
-            if docker exec mongodb mongosh --quiet --eval 'db.runCommand({ ping: 1 }).ok' \
-              > /dev/null 2>&1; then
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "MongoDB failed to start" >&2
-          docker logs mongodb >&2 || true
-          exit 1
+          github_token: ${{ github.token }}
 
       - name: Test using Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -108,13 +105,16 @@ jobs:
       # it runs once per server version on the baseline Node leg — the same two executions the
       # standalone `adversarial` job used to perform, minus the duplicated checkout, Cerbos
       # install, MongoDB start and `npm install`.
-      - name: Run adversarial differential suite
-        if: matrix.node-version == '22'
-        run: npm run test:adversarial
+      # These are deliberately two exact native commands rather than one interpolated command:
+      # each label remains mechanically tied to the pinned image file it claims, and adapterctl
+      # validates the same command markers the workflow actually executes.
+      - name: Run adversarial differential suite (MongoDB 7.0)
+        if: matrix.node-version == '22' && matrix.mongodb-image-file == 'MONGO_IMAGE'
+        run: bash scripts/test-adversarial.sh MONGO_IMAGE
 
-      - name: Stop MongoDB
-        if: always() && matrix.node-version == '22'
-        run: docker rm -f mongodb
+      - name: Run adversarial differential suite (MongoDB 8.0)
+        if: matrix.node-version == '22' && matrix.mongodb-image-file == 'MONGO_NEXT_IMAGE'
+        run: bash scripts/test-adversarial.sh MONGO_NEXT_IMAGE
 
   # The example application: the published package, installed from `npm pack`'s tarball and used
   # the way a consumer uses it, against the shared demo domain. It covers the two things the

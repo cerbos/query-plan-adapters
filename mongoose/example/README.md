@@ -13,7 +13,7 @@ packs the adapter by building it, so the adapter's own `node_modules` has to exi
 starts the pinned Cerbos PDP; this directory's `run.sh` starts the pinned MongoDB server, packs
 the adapter, installs the tarball, builds, and runs.
 
-It follows [`prisma/example/`](../../prisma/example/), which is the reference implementation.
+It consumes the shared runtime contract in [`demo/cases.json`](../../demo/cases.json).
 
 ## What it proves
 

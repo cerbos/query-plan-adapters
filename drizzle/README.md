@@ -78,17 +78,17 @@ undeclared side needs UNKNOWN — so the adapter throws rather than picking a di
 
 ## Conformance contract
 
-The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 21 hostile seed rows and real Drizzle queries, executed on SQLite, PostgreSQL and MySQL. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
+The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using the canonical check resources and real Drizzle queries, executed on SQLite, PostgreSQL and MySQL.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 176 reference conformance actions |
-| Fail-closed corpus shapes | Sub-millisecond `now()` thresholds, regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an untyped string field, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero) `filter()`/`map()` used as a condition (both return a list, not a boolean), `string()` over any column (no SQL `CAST` target spells it on all three stores: `TEXT` and `VARCHAR` are syntax errors on MySQL, which spells it `CHAR`, while `CHAR` is `character(1)` on PostgreSQL — and over a boolean it is wrong rather than merely unspellable, since SQLite and MySQL store 1/0 and render `"1"` where CEL and PostgreSQL render `"true"`), CEL's `+` over strings (`||` concatenates on SQLite and PostgreSQL but is logical OR on MySQL, and the numeric `+` this adapter emits coerces the operands to 0 rather than failing), a hierarchy path constructed by `list()` rather than read from a column, `mod` (reached through the `int()` cast that gives `%` an integer operand), a positional read of a scalar list (row order in a SQL relation is not defined), and list equality over a `map()` projection (21 actions) |
+| Oracle-tested | Every catalog action with a `matched` direct outcome in `adapterctl.json`; catalog cardinality expectations guard empty, total, and proper-subset oracles |
+| Fail-closed corpus shapes | Every catalog action with a `rejected` direct outcome in `adapterctl.json`; its pinned message substring is asserted. These include sub-millisecond timestamps, regex and ordered indexing, casts with store-dependent semantics, non-boolean collection macros, string concatenation, unsupported hierarchy paths, positional relation reads, and projected-list equality |
 | Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute the caller sends as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare it per attribute — `nullAttributeRepresentation: "explicit"` on the mapper entry — or the historical rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 
-The oracle coverage includes value-first and field-to-field comparisons, escaped string predicates, relation counts and nested collection macros, null/error propagation, arithmetic and ternaries, hierarchy operations, typed timestamps, and multi-hop relations. The fail-closed shapes throw rather than return a broader SQL filter. `matches()` is rejected because SQL regex dialects do not guarantee CEL/RE2 semantics. Every fail-closed shape's error message is pinned in the shared corpus (`conformance/actions.json`) and asserted by this adapter's conformance run, so a classification proves the throw names its declared mechanism rather than merely that something threw.
+The oracle coverage includes value-first and field-to-field comparisons, escaped string predicates, relation counts and nested collection macros, null/error propagation, arithmetic and ternaries, hierarchy operations, typed timestamps, and multi-hop relations. The fail-closed shapes throw rather than return a broader SQL filter. `matches()` is rejected because SQL regex dialects do not guarantee CEL/RE2 semantics. Every fail-closed shape's error message is pinned in this adapter's direct-outcome manifest (`adapterctl.json`) and asserted by its conformance run, so an outcome proves the throw names its declared mechanism rather than merely that something threw.
 
 The SQL each of these actions produces is pinned separately, in the translator unit test (`npm test`) — see [Testing](#testing). That is what makes a change to the emitted SQL show up as a diff even when it selects the same rows from the corpus seeds, and it is the only place the parts of the mapper contract no policy can reach are asserted at all: function mappers, `transform`, `subqueryFilter`, the `nullAttributeRepresentation` boundary, the timestamp literal contract, and malformed input.
 
@@ -414,7 +414,7 @@ action, keyed by action name:
 ```
 
 An action this adapter refuses carries **no entry**: its pinned message is corpus data, in
-`conformance/actions.json`, and duplicating it here would be two places to change one string. A
+`adapterctl.json`, and duplicating it here would be two places to change one string. A
 wire fixture that is neither in this file nor declared unsupported fails the suite, which is what
 makes a new corpus action land as a failure rather than as silence
 ([ADR 0006](../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md),

@@ -114,6 +114,7 @@ const CONTAINER_STORES = {
       return new PostgreSqlContainer(POSTGRES_IMAGE).start();
     },
     schemas: {
+      5: "prisma/schema.adversarial.pg.v5.prisma",
       6: "prisma/schema.adversarial.pg.v6.prisma",
       7: "prisma/schema.adversarial.pg.prisma",
     },
@@ -126,6 +127,7 @@ const CONTAINER_STORES = {
       return new MySqlContainer(MYSQL_IMAGE).start();
     },
     schemas: {
+      5: "prisma/schema.adversarial.mysql.v5.prisma",
       6: "prisma/schema.adversarial.mysql.v6.prisma",
       7: "prisma/schema.adversarial.mysql.prisma",
     },
@@ -133,11 +135,15 @@ const CONTAINER_STORES = {
   },
 };
 
-// The two majors differ in every part of the `db push` invocation, so they are described once
-// rather than branched on per store. Prisma 6's `db push` has no `--url` and reads the schema's
-// `env("DATABASE_URL")` (set below); Prisma 7 dropped `--skip-generate` and takes the url on the
-// command line, its adversarial schemas carrying none.
+// The legacy and current clients differ in every part of the `db push` invocation, so they are
+// described once rather than branched on per store. Prisma 5 and 6 have no `--url` and read the
+// schema's `env("DATABASE_URL")` (set below); Prisma 7 dropped `--skip-generate` and takes the url
+// on the command line, its adversarial schemas carrying none.
 const MAJORS = {
+  5: {
+    cli: "node_modules/prisma-v5/build/index.js",
+    extraArgs: () => ["--skip-generate"],
+  },
   6: {
     cli: "node_modules/prisma-v6/build/index.js",
     extraArgs: () => ["--skip-generate"],

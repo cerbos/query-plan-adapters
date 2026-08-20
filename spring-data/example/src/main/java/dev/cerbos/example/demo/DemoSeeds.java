@@ -14,9 +14,8 @@ import java.util.List;
  * principals every one of them plans for, read from the shared corpus rather than restated here
  * — a copy per example would be one more thing to update when the domain gains a row.
  *
- * <p>Corpus files are repository-controlled and structurally checked by
- * {@code demo/scripts/validate-demo.sh} before this program ever runs; this is not untrusted
- * input.
+ * <p>Corpus files are repository-controlled. Live case execution resolves every principal and
+ * expected operation through this parsed data.
  *
  * @param principals the three demo principals
  * @param applicationFilter the predicate the APPLICATION owns, never expressed in policy
@@ -33,8 +32,8 @@ public record DemoSeeds(List<Principal> principals,
 
     /**
      * {@code archived == false AND region == 'emea'} — the application's own predicate. It lives
-     * in the corpus so {@code demo/scripts/validate-demo.sh} can recompute usage shape 5 from it
-     * and prove that shape discriminates: applying this predicate alone, or the adapter's filter
+     * in the corpus so the canonical composed cases can prove the shape discriminates: applying
+     * this predicate alone, or the adapter's filter
      * alone, must both give the wrong answer.
      */
     @JsonIgnoreProperties(ignoreUnknown = true)

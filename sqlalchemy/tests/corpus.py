@@ -12,7 +12,7 @@ things or they prove less than they appear to:
   ``OPERATOR_OVERRIDES`` and ``ATTRIBUTE_NULL_REPRESENTATION`` live here rather than in
   either suite.
 - **the classification.** Which actions this adapter must refuse, and with which message, is
-  a corpus decision (``conformance/actions.json``), not a per-suite one.
+  a corpus decision (``adapterctl.json``), not a per-suite one.
 
 What is deliberately NOT here: the seed rows, the derived fields and the ``check()`` oracle.
 Only the harness consumes those, and its coverage guards assert set equality against the
@@ -95,162 +95,158 @@ def read_corpus_json(name: str) -> Any:
         return json.load(f)
 
 
-# -- actions.json -----------------------------------------------------------
-#
-# Every group is parsed EXPLICITLY. Rebuilding the manifest field by field is what makes a
-# corpus group nobody named land as a failure: a dropped group makes its actions vanish from
-# every count and every parametrised case at once, and the suite then passes vacuously (the
-# projection trap conformance/README.md describes).
+# -- v1 control plane -------------------------------------------------------
 
 
-class ActionsFile:
-    """``conformance/actions.json``, read group by group rather than duck-typed."""
+class ControlPlane:
+    """The catalog plus this adapter's direct outcome manifest."""
 
-    def __init__(self, raw: Dict[str, Any]) -> None:
-        self.adapters: List[str] = _require_list(raw, "adapters")
-        self.conformance: List[str] = _require_list(raw, "conformance")
-        self.adapter_unsupported: Dict[str, List[Dict[str, Any]]] = _require_dict(
-            raw, "adapterUnsupported"
-        )
-        self.adapter_supported_expected: Dict[
-            str, List[Dict[str, Any]]
-        ] = _require_dict(raw, "adapterSupportedExpected")
-        self.expected_unsupported: List[Dict[str, Any]] = _require_list(
-            raw, "expectedUnsupported"
-        )
-        self.null_representation_omitted: List[Dict[str, Any]] = _require_list(
-            raw, "nullRepresentationOmitted"
-        )
-        self.known_divergences: List[Dict[str, Any]] = _require_list(
-            raw, "knownDivergences"
-        )
+    def __init__(self, catalog: Dict[str, Any], manifest: Dict[str, Any]) -> None:
+        if catalog.get("schemaVersion") != 1 or manifest.get("schemaVersion") != 1:
+            raise AssertionError("control-plane files must use schemaVersion 1")
+        if manifest.get("adapter") != ADAPTER:
+            raise AssertionError(
+                f'adapterctl.json declares {manifest.get("adapter")!r}, not {ADAPTER!r}'
+            )
+        actions = catalog.get("actions")
+        outcomes = manifest.get("outcomes")
+        if not isinstance(actions, list) or not isinstance(outcomes, dict):
+            raise AssertionError("catalog actions and manifest outcomes must be objects")
+        self.actions: List[Dict[str, Any]] = actions
+        names = [entry.get("name") for entry in actions]
+        if not all(isinstance(name, str) and name for name in names):
+            raise AssertionError("catalog action names must be non-empty strings")
+        if len(set(names)) != len(names):
+            raise AssertionError("catalog action names must be unique")
+        self.selected_action = os.environ.get("ADAPTERCTL_ACTION", "").strip()
+        if self.selected_action and self.selected_action not in names:
+            raise AssertionError(
+                f"ADAPTERCTL_ACTION names unknown catalog action {self.selected_action!r}"
+            )
+        if not self.selected_action and set(names) != set(outcomes):
+            raise AssertionError("adapterctl outcomes must cover the catalog exactly")
+        self.outcomes = dict(outcomes)
+        selected_outcome = self.outcomes.get(self.selected_action)
+        if self.selected_action and (
+            selected_outcome is None
+            or selected_outcome.get("status") == "unassessed"
+        ):
+            self.outcomes[self.selected_action] = {"status": "matched"}
+
+    def selected(self, action: str) -> bool:
+        return not self.selected_action or self.selected_action == action
 
     def manifest_actions(self) -> Set[str]:
-        """Every action the corpus classifies, across every group."""
-        return (
-            set(self.conformance)
-            | {entry["action"] for entry in self.expected_unsupported}
-            | {entry["action"] for entry in self.null_representation_omitted}
-            | {entry["action"] for entry in self.known_divergences}
-        )
-
-    def skipped_divergences(self, adapter: str) -> Set[str]:
         return {
-            entry["action"]
-            for entry in self.known_divergences
-            if adapter in entry["adapters"]
+            entry["name"]
+            for entry in self.actions
+            if self.selected(entry["name"])
+        }
+
+    def upstream_blocked_actions(self, adapter: str) -> Set[str]:
+        if adapter != ADAPTER:
+            raise AssertionError(f"control plane loaded for {ADAPTER}, not {adapter}")
+        return {
+            action
+            for action, outcome in self.outcomes.items()
+            if self.selected(action) and outcome.get("status") == "upstream-blocked"
+        }
+
+    def oracle_expectations(self) -> Dict[str, Dict[str, Any]]:
+        return {
+            entry["name"]: entry["oracleExpectation"]
+            for entry in self.actions
+            if self.selected(entry["name"])
         }
 
 
-def _require_list(raw: Dict[str, Any], key: str) -> List[Any]:
-    value = raw.get(key)
-    if not isinstance(value, list):
-        raise AssertionError(f"actions.json {key} must be an array")
-    return value
-
-
-def _require_dict(raw: Dict[str, Any], key: str) -> Dict[str, Any]:
-    value = raw.get(key)
-    if not isinstance(value, dict):
-        raise AssertionError(f"actions.json {key} must be an object")
-    return value
-
-
-def parse_actions_file(raw: Dict[str, Any]) -> ActionsFile:
-    return ActionsFile(raw)
+def load_control_plane(adapter: str = ADAPTER) -> ControlPlane:
+    if adapter != ADAPTER:
+        raise AssertionError(f"control plane loaded for {ADAPTER}, not {adapter}")
+    root = os.path.dirname(CONFORMANCE_DIR)
+    with open(os.path.join(CONFORMANCE_DIR, "catalog.json"), encoding="utf-8") as f:
+        catalog = json.load(f)
+    with open(os.path.join(root, adapter, "adapterctl.json"), encoding="utf-8") as f:
+        manifest = json.load(f)
+    return ControlPlane(catalog, manifest)
 
 
 def require_message(label: str, message: Any) -> str:
-    """The substring this adapter's error must contain, or a loud failure.
-
-    The message is what turns "it raised" into "it raised for the declared reason": without
-    it a mapper typo or an unrelated validation satisfies the throw suite just as well as
-    the documented limitation (cerbos/query-plan-adapters#326).
-    """
+    """The non-empty refusal substring pinned by the adapter manifest."""
     if not isinstance(message, str) or not message:
         raise AssertionError(
-            f"actions.json pins no throw message for {label}: the throw suite "
+            f"adapterctl.json pins no throw message for {label}: the throw suite "
             "would accept a failure for any reason"
         )
     return message
 
 
 class Classification:
-    """The corpus's own view of every action, from this adapter's point of view.
-
-    ``nullRepresentationOmitted`` is deliberately NOT folded in: it is its own
-    classification, and the harness's four-way "exactly one outcome per action" guard
-    depends on the groups staying distinct. Read it with :func:`null_representation_throws`.
-    """
-
     def __init__(
         self,
         oracle_actions: List[str],
         throwing_actions: List[Tuple[str, str]],
-        supported_expected: Set[str],
     ) -> None:
         self.oracle_actions = oracle_actions
-        #: ``(action, pinned message substring)``, sorted.
         self.throwing_actions = throwing_actions
-        self.supported_expected = supported_expected
 
 
-def classify_actions_for_adapter(manifest: ActionsFile, adapter: str) -> Classification:
-    unsupported = manifest.adapter_unsupported.get(adapter, [])
-    unsupported_actions = {entry["action"] for entry in unsupported}
-    supported_expected = {
-        entry["action"]
-        for entry in manifest.adapter_supported_expected.get(adapter, [])
-    }
-    oracle_actions = [
-        action for action in manifest.conformance if action not in unsupported_actions
-    ] + sorted(supported_expected)
-    throwing_actions = sorted(
-        [
-            (
-                entry["action"],
-                require_message(
-                    f'adapterUnsupported.{adapter}.{entry["action"]}',
-                    entry.get("message"),
-                ),
+def classify_actions_for_adapter(
+    control_plane: ControlPlane, adapter: str
+) -> Classification:
+    if adapter != ADAPTER:
+        raise AssertionError(f"control plane loaded for {ADAPTER}, not {adapter}")
+    oracle_actions: List[str] = []
+    throwing_actions: List[Tuple[str, str]] = []
+    for entry in control_plane.actions:
+        action = entry["name"]
+        if not control_plane.selected(action):
+            continue
+        outcome = control_plane.outcomes[action]
+        status = outcome.get("status")
+        if status == "matched":
+            oracle_actions.append(action)
+        elif status == "rejected":
+            reason = outcome.get("reason")
+            if not isinstance(reason, str) or not reason:
+                raise AssertionError(
+                    f"adapterctl.json rejected outcome {action!r} has no reason"
+                )
+            message = require_message(
+                f"outcomes.{action}", outcome.get("message")
             )
-            for entry in unsupported
-        ]
-        + [
-            (
-                entry["action"],
-                require_message(
-                    f'expectedUnsupported.{entry["action"]}.messages.{adapter}',
-                    entry.get("messages", {}).get(adapter),
-                ),
+            if action != "null-eq-missing":
+                throwing_actions.append((action, message))
+        elif status == "upstream-blocked":
+            reason = outcome.get("reason")
+            if not isinstance(reason, str) or not reason:
+                raise AssertionError(
+                    f"adapterctl.json upstream-blocked outcome {action!r} has no reason"
+                )
+        elif status == "unassessed":
+            raise AssertionError(f"adapterctl.json outcome {action!r} is unassessed")
+        else:
+            raise AssertionError(
+                f"adapterctl.json outcome {action!r} has unknown status {status!r}"
             )
-            for entry in manifest.expected_unsupported
-            if entry["action"] not in supported_expected
-        ]
-    )
-    return Classification(oracle_actions, throwing_actions, supported_expected)
+    return Classification(oracle_actions, sorted(throwing_actions))
 
 
-def null_representation_throws(
-    manifest: ActionsFile, adapter: str
+def representation_dependent_rejections(
+    control_plane: ControlPlane, adapter: str
 ) -> List[Tuple[str, str, str]]:
-    """The ``nullRepresentationOmitted`` actions as ``(action, reason, message)``.
-
-    Every adapter must reject these -- the two NULL conventions are indistinguishable on the
-    wire -- so the message map names the whole roster and this adapter resolves its own
-    entry exactly as it does for a throwing action (#302).
-    """
-    return [
-        (
-            entry["action"],
-            entry["reason"],
-            require_message(
-                f'nullRepresentationOmitted.{entry["action"]}.messages.{adapter}',
-                entry.get("messages", {}).get(adapter),
-            ),
-        )
-        for entry in manifest.null_representation_omitted
-    ]
+    if adapter != ADAPTER:
+        raise AssertionError(f"control plane loaded for {ADAPTER}, not {adapter}")
+    action = "null-eq-missing"
+    if not control_plane.selected(action):
+        return []
+    outcome = control_plane.outcomes[action]
+    if outcome.get("status") != "rejected":
+        raise AssertionError(f"adapterctl.json must reject {action}")
+    reason = outcome.get("reason")
+    if not isinstance(reason, str) or not reason:
+        raise AssertionError(f"adapterctl.json rejected outcome {action!r} has no reason")
+    return [(action, reason, require_message(f"outcomes.{action}", outcome.get("message")))]
 
 
 # -- the golden wire fixtures -----------------------------------------------
@@ -262,7 +258,7 @@ def null_representation_throws(
 #: to ``__NOW_MINUS_24H__`` to keep the drift check deterministic. Reading the fixture back
 #: therefore means choosing a value, and the choice is load-bearing HERE -- the PDP emits
 #: NANOSECOND precision, which is exactly why this adapter refuses both actions, and a tidy
-#: millisecond substitution would translate cleanly and quietly contradict ``actions.json``.
+#: millisecond substitution would translate cleanly and quietly contradict ``adapterctl.json``.
 PLANNED_AT = "2026-08-11T09:13:39.123456789Z"
 
 _NOW_MINUS_24H = "__NOW_MINUS_24H__"
@@ -868,7 +864,7 @@ ATTR_MAP = {
     "request.resource.attr.scope": AdvResource.scope,
     "request.resource.attr.createdAt": AdvResource.created_at,
     # obj.inner is not a real nested column — mirrors aString, the same trick
-    # the spring-data and prisma reference harnesses use for the p-struct probe.
+    # other harnesses use for the p-struct probe.
     "request.resource.attr.obj.inner": AdvResource.a_string,
     # The corpus's one REAL to-one chain (the `rel-*` actions). This adapter has no
     # relation model, so the caller supplies the hop as a correlated scalar

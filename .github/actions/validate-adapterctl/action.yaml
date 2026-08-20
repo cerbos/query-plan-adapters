@@ -1,0 +1,28 @@
+name: Validate adapter certification
+description: Validate one adapter manifest against the shared control plane
+
+inputs:
+  adapter:
+    description: Adapter directory and manifest identity
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: "22"
+        cache: npm
+        cache-dependency-path: tools/adapterctl/package-lock.json
+
+    - name: Install adapterctl dependencies
+      shell: bash
+      run: npm ci
+      working-directory: ${{ github.workspace }}/tools/adapterctl
+
+    - name: Validate adapter manifest and workflow
+      shell: bash
+      env:
+        ADAPTERCTL_ADAPTER: ${{ inputs.adapter }}
+      run: ./adapterctl validate --adapter "${ADAPTERCTL_ADAPTER}"
+      working-directory: ${{ github.workspace }}
