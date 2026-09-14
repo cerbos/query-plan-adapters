@@ -31,7 +31,7 @@ public class WorkspaceService {
 
     public List<Workspace> listAllowed(AccessContext context, String action) {
         PlanResourcesResult plan = cerbos.plan(
-                context.toPrincipal(), Resource.newInstance("workspace"), action);
+                context.toPrincipal(), Resource.newInstance("workspace"), List.of(action));
         Specification<Workspace> allowed =
                 SpringDataQueryPlanAdapter.toSpecification(plan, WORKSPACE_ATTRS);
         Specification<Workspace> tenantBoundary = (root, query, cb) ->
