@@ -503,17 +503,20 @@ func checkPlaceholders(stmt string, args []any) error {
 	switch {
 	case highest == 0 && len(args) > 0:
 		return fmt.Errorf(
-			"statement references no placeholders but binds %d argument(s): %s", len(args), stmt)
+			"statement references no placeholders but binds %d argument(s): %s", len(args), stmt,
+		)
 	case highest != len(args):
 		return fmt.Errorf(
 			"statement references $1..$%d but binds %d argument(s) — a composed fragment is misnumbered: %s",
-			highest, len(args), stmt)
+			highest, len(args), stmt,
+		)
 	}
 	for n := 1; n <= len(args); n++ {
 		if !seen[n] {
 			return fmt.Errorf(
 				"statement binds %d argument(s) but never references $%d — a composed fragment is misnumbered: %s",
-				len(args), n, stmt)
+				len(args), n, stmt,
+			)
 		}
 	}
 	return nil
@@ -553,7 +556,8 @@ func (a *app) assertOffsetIsLoadBearing(
 	if !accessible || where == "" {
 		return fmt.Errorf(
 			"re-planning %s/%s for the negative control gave plan kind %d rather than a conditional one",
-			principalID, action, misnumbered.Kind)
+			principalID, action, misnumbered.Kind,
+		)
 	}
 
 	stmt := idSelect + " WHERE " + appWhere + " AND (" + where + ")"
@@ -562,7 +566,8 @@ func (a *app) assertOffsetIsLoadBearing(
 	if err := checkPlaceholders(stmt, args); err == nil {
 		return fmt.Errorf(
 			"composing without WithPlaceholderOffset produced a statement checkPlaceholders accepts, "+
-				"so that check is guarding nothing: %s", stmt)
+				"so that check is guarding nothing: %s", stmt,
+		)
 	}
 
 	// Deliberately past checkPlaceholders and straight to query: the statement it just rejected is the
@@ -578,7 +583,8 @@ func (a *app) assertOffsetIsLoadBearing(
 	case slices.Equal(ids, correct):
 		return fmt.Errorf(
 			"composing without WithPlaceholderOffset returned the same rows as composing with it, "+
-				"so usage shape 5 is not exercising the numbering at all: %s", stmt)
+				"so usage shape 5 is not exercising the numbering at all: %s", stmt,
+		)
 	default:
 		fmt.Fprintf(os.Stderr, "    omitting WithPlaceholderOffset: silently returned [%s] instead of [%s]\n",
 			joinIDs(ids), joinIDs(correct))
@@ -603,7 +609,8 @@ func (a *app) assertDenialCannotBeSpliced(
 	if result.Where != "" || len(result.Args) != 0 {
 		return fmt.Errorf(
 			"a denied plan carried a filter (%q, %d argument(s)) — this adapter's contract is that it carries none",
-			result.Where, len(result.Args))
+			result.Where, len(result.Args),
+		)
 	}
 
 	// Straight to query, past checkPlaceholders: the numbering here is fine and the SYNTAX is what is
@@ -616,7 +623,8 @@ func (a *app) assertDenialCannotBeSpliced(
 	}
 	return fmt.Errorf(
 		"splicing a denied plan's empty filter into a statement returned [%s] rather than failing — "+
-			"a caller ignoring Kind would see rows the PDP denies", joinIDs(ids))
+			"a caller ignoring Kind would see rows the PDP denies", joinIDs(ids),
+	)
 }
 
 // -- plumbing -----------------------------------------------------------------------------------

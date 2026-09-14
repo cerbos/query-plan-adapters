@@ -299,7 +299,8 @@ func validateMessage(label, message string) error {
 	if message == "" {
 		return fmt.Errorf(
 			"actions.json pins no throw message for %s: the throw suite would accept a failure for any reason",
-			label)
+			label,
+		)
 	}
 	return nil
 }
