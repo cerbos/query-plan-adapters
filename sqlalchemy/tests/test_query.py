@@ -12,7 +12,7 @@ What used to sit above all of this was 48 tests that planned corpus-adjacent sha
 against a live PDP loaded with the shared policy suite, executed the query against three
 seeded rows and compared the result with a hardcoded count. Those are retired: the shapes are
 all corpus actions now, ``test_translator.py`` pins the SQL each one emits and
-``test_adversarial_conformance.py`` proves the rows against ``check()`` over 21 hostile
+``test_adversarial_conformance.py`` proves the rows against ``check()`` over 22 hostile
 seeds instead of 3 friendly ones. A shape CEL *can* express belongs there, not here,
 whatever its plan looks like — see
 `ADR 0006 <../../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md>`_.

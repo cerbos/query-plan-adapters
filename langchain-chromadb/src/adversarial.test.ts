@@ -430,6 +430,12 @@ const DEGENERACY_GUARD_ACTIONS = [
   // and pattern-carrying siblings throw and are liveness probes below.
   "not-and",
   "pv-exists-unrolled",
+  // Membership in a map literal (the planner folds it to its key list) and a double literal
+  // beyond int64 on a double field — the first shapes to compare aDouble here, since every other
+  // aDouble action is a nested expression Chroma refuses. double-huge-lt has an EMPTY oracle by
+  // construction and sits in neither list.
+  "in-map-keys",
+  "double-huge-gt",
 ] as const;
 
 /**
@@ -439,6 +445,11 @@ const DEGENERACY_GUARD_ACTIONS = [
  * arithmetic (#311) and the numeric cast. See cerbos/query-plan-adapters#324.
  */
 const DEGENERACY_LIVENESS_PROBES = [
+  // size(string) and a hierarchy relation are nested expressions a Chroma `Where` cannot hold,
+  // and matches() is never translated here.
+  "string-size-gt0",
+  "hier-empty-delim",
+  "matches-alt",
   "pv-exists",
   "null-eq",
   // The explicit-null convention against a non-null operand (#308). Chroma refuses all five:
@@ -645,6 +656,14 @@ function metadataFor(seed: Seed): Metadata {
   if (seed.aOptionalString !== null) {
     metadata["aOptionalString"] = seed.aOptionalString;
   }
+  // Stored only when present (a3 is NULL), mirroring the attribute the check side omits. Until
+  // the double-huge-* actions no corpus shape compared aDouble in a form Chroma can express, so
+  // the key was never written — and a filter over a key nothing seeds returns nothing while the
+  // oracle, built from the same seed, still sees the attribute: the projection trap.
+  const aDouble = doubleFor(seed);
+  if (aDouble !== null) {
+    metadata["aDouble"] = aDouble;
+  }
   // The to-one chain, flattened onto dotted keys. A level that does not exist writes no key at
   // all, which is what the check side's missing `parent` / `parent.inner` path mirrors.
   const levels: [string, Seed | undefined][] = [
@@ -778,12 +797,12 @@ describe("adversarial conformance corpus", () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(199);
-    expect(CHROMA_SUPPORTED_ACTIONS).toHaveLength(34);
+    expect(MANIFEST_ACTIONS.size).toBe(205);
+    expect(CHROMA_SUPPORTED_ACTIONS).toHaveLength(37);
     expect(oracle.size).toBe(CHROMA_SUPPORTED_ACTIONS.length);
-    expect(CHROMA_UNSUPPORTED).toHaveLength(153);
+    expect(CHROMA_UNSUPPORTED).toHaveLength(155);
     expect(CHROMA_SUPPORTED_EXPECTED).toHaveLength(0);
-    expect(THROWING_ACTIONS).toHaveLength(163);
+    expect(THROWING_ACTIONS).toHaveLength(166);
     expect(misclassified).toEqual([]);
   });
 

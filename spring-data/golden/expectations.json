@@ -180,6 +180,20 @@
         "mysql": "re1_0.a_string like 'one%' escape '\\\\'"
       }
     },
+    "double-huge-gt": {
+      "where": {
+        "h2": "re1_0.a_double>-1.0E19",
+        "postgresql": "re1_0.a_double>-1.0E19",
+        "mysql": "re1_0.a_double>-1.0E19"
+      }
+    },
+    "double-huge-lt": {
+      "where": {
+        "h2": "re1_0.a_double<-1.0E19",
+        "postgresql": "re1_0.a_double<-1.0E19",
+        "mysql": "re1_0.a_double<-1.0E19"
+      }
+    },
     "double-negation": {
       "where": {
         "h2": "not(not(re1_0.a_bool=true))",
@@ -362,6 +376,13 @@
         "h2": "1<>1",
         "postgresql": "1<>1",
         "mysql": "1<>1"
+      }
+    },
+    "in-map-keys": {
+      "where": {
+        "h2": "re1_0.a_string in ('one','same')",
+        "postgresql": "re1_0.a_string in ('one','same')",
+        "mysql": "re1_0.a_string in ('one','same')"
       }
     },
     "in-null-elem-hasint": {
@@ -1102,6 +1123,13 @@
         "h2": "character_length(re1_0.a_string)>4",
         "postgresql": "character_length(re1_0.a_string)>4",
         "mysql": "character_length(re1_0.a_string)>4"
+      }
+    },
+    "string-size-gt0": {
+      "where": {
+        "h2": "character_length(re1_0.a_string)>0",
+        "postgresql": "character_length(re1_0.a_string)>0",
+        "mysql": "character_length(re1_0.a_string)>0"
       }
     },
     "ternary-bare": {

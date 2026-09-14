@@ -418,6 +418,13 @@ const DEGENERACY_GUARD_ACTIONS = [
   "index-scalar-list",
   "vf-hasint",
   "pv-exists-unrolled",
+  // The shapes an Elasticsearch audit found unguarded: size(string) as an emptiness check,
+  // membership in a map literal (the planner folds it to its key list), and a double literal
+  // beyond int64 on a double field. double-huge-lt has an EMPTY oracle by construction and sits
+  // in neither list; its sibling below carries the group.
+  "string-size-gt0",
+  "in-map-keys",
+  "double-huge-gt",
 ] as const;
 
 /**
@@ -426,6 +433,10 @@ const DEGENERACY_GUARD_ACTIONS = [
  * cerbos/query-plan-adapters#324.
  */
 const DEGENERACY_LIVENESS_PROBES = [
+  // An empty hierarchy separator is refused before the anchored prefix regex is built, and a
+  // regex with a top-level alternation falls outside the RE2/PCRE2 subset this adapter accepts.
+  "hier-empty-delim",
+  "matches-alt",
   // A negated macro over a chain has no UNKNOWN to represent in a Mongo filter.
   "w1-not-exists-chain",
   // The value-list fold puts a collection macro under a negation, which Mongoose refuses before
@@ -860,11 +871,11 @@ describe("adversarial conformance corpus", () => {
       return count !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(199);
-    expect(unsupportedCount).toBe(44);
+    expect(MANIFEST_ACTIONS.size).toBe(205);
+    expect(unsupportedCount).toBe(45);
     expect(supportedExpectedCount).toBe(4);
-    expect(ORACLE_ACTIONS).toHaveLength(147);
-    expect(THROWING_ACTIONS).toHaveLength(50);
+    expect(ORACLE_ACTIONS).toHaveLength(151);
+    expect(THROWING_ACTIONS).toHaveLength(52);
     expect(misclassified).toEqual([]);
   });
 

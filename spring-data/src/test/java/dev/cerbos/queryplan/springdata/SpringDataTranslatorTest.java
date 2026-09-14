@@ -100,7 +100,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * asserted against ({@code conformance/README.md}, "Golden expectations").
  *
  * <p><strong>What a pinned statement buys over the harness.</strong> The harness proves the query
- * returns the right rows AGAINST THE ROWS IT SEEDS. Two different queries can agree on all 21 of
+ * returns the right rows AGAINST THE ROWS IT SEEDS. Two different queries can agree on all 22 of
  * them and disagree on the row a consumer has, so a rewrite that quietly changes the emitted SQL
  * passes there and shows up here as a diff a reviewer reads.
  */
@@ -419,7 +419,7 @@ class SpringDataTranslatorTest {
         // Tripwires. Bump them deliberately: a count that moves without anyone noticing is how a
         // shape gets dropped from an asset nobody reads end to end.
         assertEquals(
-                Map.of("conditional", 179, "unconditional", 1, "throwing", 19),
+                Map.of("conditional", 183, "unconditional", 1, "throwing", 21),
                 Map.of("conditional", conditionalActions().size(),
                         "unconditional", unconditionalActions().size(),
                         "throwing", THROWING.size()));

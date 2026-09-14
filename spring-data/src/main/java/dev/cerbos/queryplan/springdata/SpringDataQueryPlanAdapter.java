@@ -2070,7 +2070,7 @@ public final class SpringDataQueryPlanAdapter {
                             // The original wording here claimed the condition "can never be
                             // satisfied by the PDP". That holds only for a BARE `attr % n`, which
                             // is a CEL no-overload error; `int(attr) % n` is satisfiable, and the
-                            // corpus's arith-mod action allows 8 of its 21 seeds
+                            // corpus's arith-mod action allows 9 of its 22 seeds
                             // (cerbos/query-plan-adapters#387). The rejection stands either way,
                             // because the cast that makes it satisfiable is itself unlowerable —
                             // the same limitation that refuses cast-int-double.

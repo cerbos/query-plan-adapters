@@ -18,6 +18,7 @@ heading, regenerate this list with `scripts/check-docs.sh --print-toc` — CI ch
     - [`nullRepresentationOmitted`: the two conventions are indistinguishable on the wire](#nullrepresentationomitted-the-two-conventions-are-indistinguishable-on-the-wire)
     - [The other side of the same option: an explicit null against a non-null constant](#the-other-side-of-the-same-option-an-explicit-null-against-a-non-null-constant)
     - [The absent to-one parent](#the-absent-to-one-parent)
+  - [Shapes that live only in a unit test](#shapes-that-live-only-in-a-unit-test)
   - [The real to-one relation](#the-real-to-one-relation)
   - [The primary key as a filterable attribute](#the-primary-key-as-a-filterable-attribute)
   - [Casts and concatenation are store-dependent in opposite directions](#casts-and-concatenation-are-store-dependent-in-opposite-directions)
@@ -173,7 +174,7 @@ have byte-identical wire fixtures apart from the variable name. Their oracles do
 | `null-eq-missing` | omitted | **nothing** | those 5 — **over-grants** |
 
 Under the omitted convention CEL raises a missing-attribute error for every NULL row and compares
-`"set" == null` false for every other, so `check()` denies all 21 seeds. An adapter cannot recover
+`"set" == null` false for every other, so `check()` denies all 22 seeds. An adapter cannot recover
 the caller's convention from the plan, so it has to be told: every adapter that can emit a
 NULL-selecting predicate takes a `nullAttributeRepresentation` option, defaulting to `explicit`
 (the historical translation). See cerbos/query-plan-adapters#302.
@@ -241,7 +242,7 @@ break them.
 
 `coOwner` is the second explicit-null attribute the corpus carries, added for `null-value-f2f`. It
 aliases the **`scope`** column rather than `aOptionalString`, because comparing a column with itself
-is TRUE for all 21 seeds and the degeneracy guard forbids a total oracle. Against `scope` the only
+is TRUE for all 22 seeds and the degeneracy guard forbids a total oracle. Against `scope` the only
 row where both sides are NULL is `e1`, so the oracle is exactly one row — thin, but non-degenerate,
 and it is precisely the row the naive translation loses.
 
@@ -341,6 +342,86 @@ negation — but only that adapter's unit tests can prove it (#333). This is the
 `CLAUDE.md` ("What a translator unit test may pin") admits against "a per-adapter unit test is not
 a substitute for a corpus action": there is no corpus action to substitute for, and there never can
 be.
+
+### Shapes that live only in a unit test
+
+`CLAUDE.md` ("What a translator unit test may pin") admits three kinds of material into a
+per-adapter unit test, and this is the registry of what is parked there today, per adapter, so
+that a reader can tell a permanent entry from a bridge. The banners in each test class are the
+source; this list is kept by hand and reviewed with the test, and an entry here that no test
+carries any more is a stale entry, not a licence.
+
+**elasticsearch-java** (`ElasticsearchQueryPlanAdapterTest`, with the regex probes in
+`ElasticsearchSurfaceTest`):
+
+- **Kind 1 — a branch CEL itself cannot reach.** Permanent. Each test quotes the checker error
+  that stops the shape from ever being planned, rather than inferring unreachability from the
+  adapter's own code:
+  - an operator the adapter does not know (`unsupported_op`) — `undeclared reference to
+    'unsupported_op' (in container '')`;
+  - `isSet` (#261) — `undeclared reference to 'isSet'`; existence is spelled
+    `R.attr.x != null`, which the corpus carries as `null-ne`;
+  - a lambda body naming a variable the lambda does not bind — `undeclared reference to 'x'`;
+  - a collection macro over a scalar literal — `expression of type 'string' cannot be range of a
+    comprehension (must be list, map, or dynamic)`;
+  - a `timestamp()` literal outside strict RFC 3339 or outside CEL's representable range — CEL's
+    own `timestamp()` rejects each (a calendar-invalid date reads `parsing time
+    "2024-02-30T00:00:00Z": day out of range`). The adapter validates the literal anyway, because it
+    decides whether the emitted `term` or `range` is even well-formed.
+- **Kind 2 — a caller-supplied argument the corpus structurally cannot vary.** Permanent.
+  `actions.json` classifies each action against one `Options` per adapter, so these have no corpus
+  spelling: an unmapped reference (refused rather than used verbatim), an `OperatorFunction`
+  override and which polarities of its operator it reaches, the two lowerings that borrow a shape
+  without borrowing its override (hierarchy → `prefix`/`terms`, `^literal` → `prefix`), a collection
+  macro over an undeclared nested path, a value-list macro needing no nested path, `size()` over a
+  declared flat collection versus an undeclared field, the immutability of `Options` and the
+  convenience overloads delegating to it, and the three typed refusals
+  (`UnsupportedPlanShapeException`, `UnmappedAttributeException`, `MalformedPlanException`).
+- **Kind 3 — a corpus gap wearing a unit test.** Policy-reachable, pinned in this adapter alone and
+  asked of none of the others; each is a bridge tracked by
+  [#414](https://github.com/cerbos/query-plan-adapters/issues/414) and is deleted when its corpus
+  action lands. Every one opens with *Corpus gap.* in the test:
+  - `aValueListElementMissingTheProjectedFieldIsRefused` — a struct element without the projected
+    field, under a principal list of structs;
+  - `containsEscapesTheWildcardMetacharactersInItsNeedle` and
+    `endsWithEscapesTheWildcardMetacharactersInItsNeedle` — no seed value carries a `*` or a `?`,
+    so no corpus action exercises the escaping this adapter actually needs (the surface suite
+    executes it against Lucene);
+  - `aRegexOutsideTheSharedRe2LuceneSubsetIsRefused`,
+    `aTopLevelAlternationInAnAnchoredRegexIsRefusedAndAParenthesisedOneTranslates` and
+    `aBraceThatDoesNotBeginARepetitionIntervalIsRefused`, plus the surface suite's
+    `luceneOptionalOperatorsAreLiteralsBecauseTheAdapterDisablesThem`,
+    `luceneDotMatchesANewlineWhichIsWhyTheAdapterRefusesIt` and
+    `luceneAlternationIsWholeFieldWhichIsWhyATopLevelBarIsRefused` — the corpus's one `matches()`
+    action (`p-matches`) lowers to a `prefix` query and never reaches Lucene's regex engine;
+  - `anUnfoldableMacroOverAValueListIsRefusedByName` — `exists_one`, `filter` and `map` over a
+    principal value list;
+  - `exceptIsRefusedByNameWhereverItAppears` — `except(list, list)` in every position it can
+    arrive in. The nested `must_not` the adapter once emitted for a *lambda* form of `except` was
+    unreachable from any real plan and is gone; what remains is a refusal by name;
+  - `aTernaryAsALambdaBodyIsRefusedByName` — the ternary that *is* the lambda body;
+  - `anEmptyValueListKeepsCelIdentitySemantics`,
+    `aNegatedValueListMacroFoldsExactlyAsTheUnrolledChainDoes`,
+    `aValueListElementFieldIsDrilledIntoDuringTheFold`,
+    `aStructElementHoldingANullMemberIsRefusedRatherThanCrashing` and
+    `aNestedLambdaRebindingTheVariableShadowsTheSubstitution` — the value-list fold under shapes
+    the corpus principal never produces: an empty list, a negated macro, struct elements, a null
+    member, a rebound iteration variable;
+  - `everySpellingOfNonEmptinessIsTheSameCheck` — `size(c) >= 1` and `size(c) != 0`;
+  - `sizeOverAStringOrANumberIsRefusedRatherThanLoweredToExists` — **the suspected live
+    over-grant**: `size(R.attr.aString) > 0` used to lower to `exists`, which matches the indexed
+    empty string `a8` carries while `check()` denies it. The corpus's string-length actions are all
+    thresholds, so none reaches the branch;
+  - `membershipOverNumbersBindsIntegralValuesAsIntegers`,
+    `anIntegralLiteralOutsideTheLongRangeStaysADouble` and
+    `aNonFiniteNumericLiteralIsRefusedAtTheLeaf` — numeric literal conversion the corpus's string
+    `terms` and unfolded `nan-ord-*` divisions never exercise;
+  - `hasIntersectionWithANullElementIsRefusedWhicheverPositionCarriesIt` and
+    `hasIntersectionWithTheProjectionOnEitherSideEmitsTheSameNestedQuery` — the symmetric operand
+    positions `in-null-elem-hasint` and the `map()` projection do not cover;
+  - `aNonScalarLiteralWhereAScalarIsExpectedIsRefused` — list and map literals where a `term` or
+    `range` expects a scalar;
+  - `anEmptyHierarchyDelimiterIsRefused` — `hierarchy(R.attr.scope, "")`.
 
 ### The real to-one relation
 
@@ -545,7 +626,7 @@ only inside a shape some adapters throw on is not proven for those adapters.
 
 `root-or`'s second disjunct is `R.attr.aNumber < 0` rather than the `aString != "one"` it was
 specified with: `aString` is never NULL and only one seed holds `"one"`, whose `aBool` is true, so
-that spelling allows all 21 seeds. A total oracle is exactly what the degeneracy guard below exists
+that spelling allows all 22 seeds. A total oracle is exactly what the degeneracy guard below exists
 to catch, and it would have passed against any filter whatsoever.
 
 ### Hazard classes the corpus missed
@@ -720,7 +801,8 @@ it replaced it can only fail loudly, never make both sides of a differential agr
 The rules the file materialises:
 
 - `createdBy`: `aNumber >= 2 ? "2024-06-01T00:00:00Z" : "2026-06-01T00:00:00Z"`.
-- `aDouble`: `a1 = -0.6`, `a2 = 0.25`, `a3 = NULL`/missing, otherwise `aNumber + 0.3`.
+- `aDouble`: `a1 = -0.6`, `a2 = 0.25`, `a3 = NULL`/missing, `g1 = -9.5e18` (the int64-saturation
+  witness for `double-huge-lt`/`double-huge-gt`), otherwise `aNumber + 0.3`.
 - `createdAt`: `a1 = 2020-03-15T10:30:00Z`, `a2 = 2037-01-01T00:00:00Z`, `a3 = NULL`/missing,
   `a4 = 2024-06-01T00:00:00Z`, `a5 = 2020-03-15T10:30:00.123456Z`; otherwise use
   `2036-06-06T06:06:06Z` when `aNumber >= 2`, or `2021-05-05T05:05:05Z`.
@@ -1120,10 +1202,12 @@ by tag cannot answer "what did this pass against", and a suite pinned only by di
 - Markdown is out of scope for both scans. A README telling a *consumer* how to start a PDP of
   their own is prose about their environment, not something this repository runs.
 
-Renovate is configured with `docker:disable`, so nothing proposes these bumps: they are made by
-hand, deliberately, alongside whatever re-verification the bump needs. That is the accepted
-trade — reproducibility now, staleness to be watched for — and re-enabling Docker updates is a
-maintainer decision, not a drive-by one.
+Renovate's built-in Docker managers are off (`docker:disable`), so a `Dockerfile` or a compose
+file is bumped by hand, deliberately, alongside whatever re-verification the bump needs. The
+`*_IMAGE` files are the exception: a regex custom manager in `renovate.json` reads the
+`repo:tag@sha256:...` line and proposes tag and digest bumps for them, non-major ones automerged
+like every other dependency and majors left for a maintainer. That keeps the pins from going stale
+while keeping the digest half of the pin under Renovate's control rather than a human's.
 
 ### Vendored code stays byte-identical
 

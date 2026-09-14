@@ -37,7 +37,7 @@ reviewed as a diff, exactly like the wire fixtures it is asserted against. See
 expectations" section of ``conformance/README.md``.
 
 **What a pinned statement buys over the harness.** The harness proves the query returns the
-right rows *against the rows it seeds*. Two different queries can agree on all 21 of them and
+right rows *against the rows it seeds*. Two different queries can agree on all 22 of them and
 disagree on the row a consumer has, so a rewrite that quietly changes the emitted SQL passes
 there and shows up here as a diff a reviewer reads. It is also the only place PostgreSQL —
 reasoned about all through ``query.py`` and executed by nothing in this repository — is
@@ -331,7 +331,7 @@ class TestCorpusShapes:
             "conditional": len(CONDITIONAL_ACTIONS),
             "unconditional": len(UNCONDITIONAL_ACTIONS),
             "throwing": len(THROWING_ACTIONS),
-        } == {"conditional": 179, "unconditional": 1, "throwing": 19}
+        } == {"conditional": 183, "unconditional": 1, "throwing": 21}
 
     def test_the_asset_declares_the_compiler_that_wrote_it(self):
         # The asset is one compiler's rendering of the adapter's expression trees, and the two

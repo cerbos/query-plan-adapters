@@ -61,6 +61,8 @@
     { "id": "e1", "aBool": true,  "aString": "nullowner",   "aNumber": 15, "aOptionalString": null,    "tags": [{"id": "te1", "name": null}], "subCategoryNames": [], "parentSeedId": "a1",
       "note": "explicit-null owner and null-in-null-list witness for variable membership" },
     { "id": "f1", "aBool": true,  "aString": "f1",          "aNumber": 16, "aOptionalString": "prefix:f1", "tags": [], "subCategoryNames": [], "parentSeedId": "a9",
-      "note": "id-as-attribute witness: aString equals this row's own id and aOptionalString is a prefixed concatenation of it, so comparing an attribute against request.resource.id — or against a folded principal attribute carrying the same id, principal.attr.context — is non-degenerate" }
+      "note": "id-as-attribute witness: aString equals this row's own id and aOptionalString is a prefixed concatenation of it, so comparing an attribute against request.resource.id — or against a folded principal attribute carrying the same id, principal.attr.context — is non-degenerate" },
+    { "id": "g1", "aBool": false, "aString": "big",         "aNumber": 17, "aOptionalString": "q",    "tags": [], "subCategoryNames": [], "parentSeedId": null,
+      "note": "int64-saturation witness: its derived aDouble is -9.5e18, the one value in the corpus that lies between -1e19 and -2^63, so a numeric constant narrowed through a 64-bit integer returns this row for double-huge-lt and drops it for double-huge-gt. Every other scalar is inert: no LIKE metacharacter, no case trap, no relation, no collection" }
   ]
 }

@@ -692,6 +692,52 @@
         }
       }
     },
+    "double-huge-gt": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "\"adversarial_resources\".\"a_double\" > cast(? as float(53))",
+          "params": [
+            -10000000000000000000
+          ]
+        },
+        "postgresql": {
+          "sql": "\"adversarial_resources\".\"a_double\" > cast($1 as float(53))",
+          "params": [
+            -10000000000000000000
+          ]
+        },
+        "mysql": {
+          "sql": "`adversarial_resources`.`a_double` > cast(? as float(53))",
+          "params": [
+            -10000000000000000000
+          ]
+        }
+      }
+    },
+    "double-huge-lt": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "\"adversarial_resources\".\"a_double\" < cast(? as float(53))",
+          "params": [
+            -10000000000000000000
+          ]
+        },
+        "postgresql": {
+          "sql": "\"adversarial_resources\".\"a_double\" < cast($1 as float(53))",
+          "params": [
+            -10000000000000000000
+          ]
+        },
+        "mysql": {
+          "sql": "`adversarial_resources`.`a_double` < cast(? as float(53))",
+          "params": [
+            -10000000000000000000
+          ]
+        }
+      }
+    },
     "double-negation": {
       "kind": "KIND_CONDITIONAL",
       "rendered": {
@@ -1241,6 +1287,32 @@
     },
     "in-empty": {
       "kind": "KIND_ALWAYS_DENIED"
+    },
+    "in-map-keys": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "\"adversarial_resources\".\"a_string\" in (?, ?)",
+          "params": [
+            "one",
+            "same"
+          ]
+        },
+        "postgresql": {
+          "sql": "\"adversarial_resources\".\"a_string\" in ($1, $2)",
+          "params": [
+            "one",
+            "same"
+          ]
+        },
+        "mysql": {
+          "sql": "`adversarial_resources`.`a_string` in (?, ?)",
+          "params": [
+            "one",
+            "same"
+          ]
+        }
+      }
     },
     "in-null-elem-hasint": {
       "kind": "KIND_CONDITIONAL",
@@ -3715,6 +3787,29 @@
           "sql": "length(`adversarial_resources`.`a_string`) > ?",
           "params": [
             4
+          ]
+        }
+      }
+    },
+    "string-size-gt0": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "length(\"adversarial_resources\".\"a_string\") > ?",
+          "params": [
+            0
+          ]
+        },
+        "postgresql": {
+          "sql": "length(\"adversarial_resources\".\"a_string\") > $1",
+          "params": [
+            0
+          ]
+        },
+        "mysql": {
+          "sql": "length(`adversarial_resources`.`a_string`) > ?",
+          "params": [
+            0
           ]
         }
       }

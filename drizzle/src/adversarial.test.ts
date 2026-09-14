@@ -373,6 +373,13 @@ const DEGENERACY_GUARD_ACTIONS = [
   "not-contains",
   "vf-hasint",
   "pv-exists-unrolled",
+  // The shapes an Elasticsearch audit found unguarded: size(string) as an emptiness check,
+  // membership in a map literal (the planner folds it to its key list), and a double literal
+  // beyond int64 on a double field. double-huge-lt has an EMPTY oracle by construction and sits
+  // in neither list; its sibling below carries the group.
+  "string-size-gt0",
+  "in-map-keys",
+  "double-huge-gt",
 ] as const;
 
 /**
@@ -384,9 +391,16 @@ const DEGENERACY_GUARD_ACTIONS = [
  * in the sample and the guard was one-sided; `cast-string-double` was in the COMPARED list, on the
  * belief that `CAST(... AS TEXT)` rendered a double identically on every store. It is a syntax
  * error on MySQL. `cast-string-double` rather than its boolean sibling because its oracle is a
- * single row out of 21 — a non-empty, non-total set, which is what the guard asserts.
+ * single row out of 22 — a non-empty, non-total set, which is what the guard asserts.
  */
-const DEGENERACY_LIVENESS_PROBES = ["cast-string-double"] as const;
+const DEGENERACY_LIVENESS_PROBES = [
+  "cast-string-double",
+  // An empty hierarchy delimiter is refused before the prefix LIKE is built (the LIKE would
+  // match the path itself), and a regex with a top-level alternation is a matches(), which this
+  // adapter never translates.
+  "hier-empty-delim",
+  "matches-alt",
+] as const;
 
 // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") --------
 //
@@ -1443,11 +1457,11 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(199);
+    expect(MANIFEST_ACTIONS.size).toBe(205);
     expect(NULL_REPRESENTATION_OMITTED).toHaveLength(1);
     // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
     // gained or lost has to be re-triaged here rather than joining the suite unnoticed.
-    expect(THROWING_ACTIONS).toHaveLength(21);
+    expect(THROWING_ACTIONS).toHaveLength(23);
     expect(misclassified).toEqual([]);
     expect(
       [...DRIZZLE_SUPPORTED_EXPECTED].filter(

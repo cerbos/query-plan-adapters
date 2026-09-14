@@ -1266,14 +1266,14 @@ class AdversarialConformanceTest {
                         .filter(Boolean::booleanValue).count() != 1)
                 .toList();
 
-        assertEquals(199, manifest.size(),
+        assertEquals(205, manifest.size(),
                 "corpus size changed; triage the new action(s) before bumping this pin");
-        assertEquals(21, SEEDS.size(), "seed count changed");
+        assertEquals(22, SEEDS.size(), "seed count changed");
         // Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
         // lost has to be re-triaged here rather than joining the throw suite unnoticed. The two
         // @MethodSource streams that feed the throw cases are what resolve those messages, and
         // both fail loudly on a missing one.
-        assertEquals(19, throwing.size(), "throwing action count changed");
+        assertEquals(21, throwing.size(), "throwing action count changed");
         assertEquals(throwing.size(),
                 adapterUnsupportedActions().count() + unsupportedShapes().count(),
                 "every throwing action must reach a parameterised throw case");
@@ -1336,7 +1336,12 @@ class AdversarialConformanceTest {
             // ...`, so `NOT` flipped it to TRUE and every NULL-needle row the PDP denies came back.
             // Beside it, the De Morgan branch over a conjunction, the value-first hasIntersection,
             // and the BELOW-cliff unroll of a principal collection.
-            "not-and", "not-contains", "vf-hasint", "pv-exists-unrolled");
+            "not-and", "not-contains", "vf-hasint", "pv-exists-unrolled",
+            // The shapes an Elasticsearch audit found unguarded: size(string) as an emptiness
+            // check, membership in a map literal (the planner folds it to its key list), and a
+            // double literal beyond int64 on a double field. double-huge-lt has an EMPTY oracle
+            // by construction and sits in neither list; its sibling carries the group.
+            "string-size-gt0", "in-map-keys", "double-huge-gt");
 
     /**
      * Shapes this adapter refuses to translate: they have no oracle comparison to guard, and stay
@@ -1360,7 +1365,11 @@ class AdversarialConformanceTest {
             // integer-only, and the int() cast that would make it satisfiable has no faithful
             // lowering), the positional read of a scalar list, and list equality over a map()
             // projection.
-            "arith-mod", "index-scalar-list", "map-eq-list");
+            "arith-mod", "index-scalar-list", "map-eq-list",
+            // An empty hierarchy delimiter is refused before the prefix LIKE is built (the LIKE
+            // would match the path itself), and a regex with a top-level alternation is a
+            // matches(), which the reference never translates.
+            "hier-empty-delim", "matches-alt");
 
     @Test
     void oracleIsNotDegenerate() {

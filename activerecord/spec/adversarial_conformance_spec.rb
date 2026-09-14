@@ -147,7 +147,12 @@ RSpec.describe "adversarial conformance" do
     # CEL `%`, which is integer-only and so arrives under an int() cast. This adapter lowers
     # both, which is why the entry is here rather than among the probes below: ent, pgx and
     # spring-data all refuse the shape at the cast.
-    %w[arith-mod]).freeze
+    %w[arith-mod] +
+    # The shapes an Elasticsearch audit found unguarded: size(string) as an emptiness check,
+    # membership in a map literal (the planner folds it to its key list), and a double literal
+    # beyond int64 on a double field. double-huge-lt has an EMPTY oracle by construction and
+    # sits in neither list; its sibling carries the group.
+    %w[string-size-gt0 in-map-keys double-huge-gt]).freeze
 
   # Shapes that this adapter REFUSES, kept because their group has no compared member here and
   # a non-degenerate oracle still proves that the PDP and the policy are live. Each one is
@@ -163,8 +168,12 @@ RSpec.describe "adversarial conformance" do
   # The other two are positional access into a scalar list and a map() projection compared to a
   # literal list. Each is the only member of its group this adapter refuses, so each stays a
   # probe until the adapter learns to translate it.
+  #
+  # An empty hierarchy delimiter is refused before the prefix LIKE is built, and a regex with a
+  # top-level alternation is a matches(), which this adapter never translates.
   LIVENESS_ONLY_PROBES = %w[
     cr-div-other-column cr-div-then-add index-scalar-list map-eq-list
+    hier-empty-delim matches-alt
   ].freeze
 
   describe "corpus" do
@@ -172,17 +181,17 @@ RSpec.describe "adversarial conformance" do
     # this adapter without a test. Increase these numbers only when you know why
     # conformance/actions.json is larger.
     it "pins the corpus size" do
-      expect(ConformanceCorpus::ACTIONS_FILE.fetch("conformance").size).to eq(187)
-      expect(ConformanceCorpus::EXPECTED_UNSUPPORTED.size).to eq(10)
+      expect(ConformanceCorpus::ACTIONS_FILE.fetch("conformance").size).to eq(192)
+      expect(ConformanceCorpus::EXPECTED_UNSUPPORTED.size).to eq(11)
       expect(ConformanceCorpus::NULL_REPRESENTATION_OMITTED.size).to eq(1)
-      expect(ConformanceCorpus::MANIFEST_ACTIONS.size).to eq(199)
+      expect(ConformanceCorpus::MANIFEST_ACTIONS.size).to eq(205)
       # Every one of these carries a pinned message, so a throwing action that appears or
       # disappears must be triaged here and cannot join the suite quietly.
-      expect(ConformanceCorpus::THROWING_ACTIONS.size).to eq(18)
+      expect(ConformanceCorpus::THROWING_ACTIONS.size).to eq(20)
       # The guard has one entry for each group of hostile shapes. A new group arrives with a
       # new action, which the count above already stops. This number makes the second half of
       # that decision explicit: name a representative for the new group here.
-      expect(DEGENERACY_GUARD_ACTIONS.size).to eq(62)
+      expect(DEGENERACY_GUARD_ACTIONS.size).to eq(65)
     end
 
     # Adding a throwing action without a pinned message must fail the run and must not turn the

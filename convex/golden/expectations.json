@@ -147,6 +147,14 @@
       "kind": "KIND_CONDITIONAL",
       "path": "post"
     },
+    "double-huge-gt": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "double-huge-lt": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
     "double-negation": {
       "kind": "KIND_CONDITIONAL",
       "path": "db",
@@ -265,6 +273,10 @@
       "kind": "KIND_CONDITIONAL",
       "path": "post"
     },
+    "hier-empty-delim": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
     "hier-meta-in": {
       "kind": "KIND_CONDITIONAL",
       "path": "post"
@@ -321,6 +333,39 @@
     "in-empty": {
       "note": "The one plan the planner folds before any filter exists. `in` over an empty list can allow nothing, so there is nothing for either half of the adapter to decide.",
       "kind": "KIND_ALWAYS_DENIED"
+    },
+    "in-map-keys": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "db",
+      "filter": {
+        "op": "or",
+        "args": [
+          {
+            "op": "eq",
+            "args": [
+              {
+                "op": "field",
+                "args": [
+                  "aString"
+                ]
+              },
+              "one"
+            ]
+          },
+          {
+            "op": "eq",
+            "args": [
+              {
+                "op": "field",
+                "args": [
+                  "aString"
+                ]
+              },
+              "same"
+            ]
+          }
+        ]
+      }
     },
     "in-null-elem-hasint": {
       "kind": "KIND_CONDITIONAL",
@@ -929,6 +974,10 @@
       "path": "post"
     },
     "string-size": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "string-size-gt0": {
       "kind": "KIND_CONDITIONAL",
       "path": "post"
     },

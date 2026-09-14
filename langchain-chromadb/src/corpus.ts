@@ -602,10 +602,16 @@ export const FIELD_NAME_MAPPER: Record<string, string | FieldNameMapperConfig> =
       field: "aOptionalString",
       required: false,
     },
+    // NULL for a3 (no metadata key), so `required: false`. Mapped for the `double-huge-*` actions,
+    // the first corpus shapes to compare aDouble in a Chroma-expressible form — every other
+    // aDouble action is a nested arithmetic or ternary expression, refused before the field is
+    // resolved — and, because the same mapper feeds the harness, the first to prove the trap:
+    // unmapped, the filter named `request.resource.attr.aDouble` verbatim and returned nothing.
+    "request.resource.attr.aDouble": { field: "aDouble", required: false },
     "request.resource.attr.obj.inner": { field: "obj.inner", required: true },
     // The corpus's one REAL to-one chain (the `rel-*` actions), flattened onto dotted metadata keys
     // by `metadataFor`. EVERY level stays `required: false` — the whole point of the relation is
-    // that a level can be absent, and 8 of the 21 seeds have no parent at all — so Chroma's
+    // that a level can be absent, and 9 of the 22 seeds have no parent at all — so Chroma's
     // inequality shapes over these keys stay fail-closed. A metadata key Chroma cannot prove is
     // present cannot answer `$ne` the way CEL's missing-attribute error does
     // (cerbos/query-plan-adapters#375).

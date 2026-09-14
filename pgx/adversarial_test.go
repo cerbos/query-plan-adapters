@@ -592,11 +592,11 @@ func TestAdversarialConformance(t *testing.T) {
 		}
 		// Corpus-size tripwire: bump deliberately when the corpus grows, so a new hostile shape
 		// cannot slip past this adapter unnoticed.
-		require.Len(t, seen, 199, "corpus size changed; triage the new action(s) before bumping")
-		require.Len(t, h.corpus.Seeds.Seeds, 21, "seed count changed")
+		require.Len(t, seen, 205, "corpus size changed; triage the new action(s) before bumping")
+		require.Len(t, h.corpus.Seeds.Seeds, 22, "seed count changed")
 		// Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
 		// lost has to be re-triaged here rather than joining the throw suite unnoticed.
-		require.Len(t, h.corpus.ThrowingActions, 15, "throwing action count changed")
+		require.Len(t, h.corpus.ThrowingActions, 17, "throwing action count changed")
 	})
 
 	t.Run("oracle", func(t *testing.T) {
@@ -836,6 +836,11 @@ func TestAdversarialConformance(t *testing.T) {
 			// operands are not interchangeable in the emitted SQL; and the BELOW-cliff unroll of
 			// a principal collection, the shape a principal with three teams produces.
 			"not-and", "not-contains", "vf-hasint", "pv-exists-unrolled",
+			// The shapes an Elasticsearch audit found unguarded: size(string) as an emptiness check,
+			// membership in a map literal (the planner folds it to its key list), and a double
+			// literal beyond int64 on a double field. double-huge-lt has an EMPTY oracle by
+			// construction and sits in neither list; its sibling carries the group.
+			"string-size-gt0", "in-map-keys", "double-huge-gt",
 		}
 		// int() over a numeric column is unsupported for every adapter but convex, so there is no
 		// comparison behind it here: it stays as a PDP/policy liveness probe for the cast group.
@@ -851,6 +856,9 @@ func TestAdversarialConformance(t *testing.T) {
 		livenessOnly := []string{
 			"cast-int-double", "cast-string-bool", "hier-list-id",
 			"arith-mod", "index-scalar-list", "map-eq-list",
+			// An empty hierarchy delimiter is refused before the prefix LIKE is built, and a regex
+			// with a top-level alternation is a matches(), never translated here.
+			"hier-empty-delim", "matches-alt",
 		}
 
 		oracleCompared := h.corpus.OracleComparedActions()

@@ -740,7 +740,7 @@ resourcePolicy:
     # "true" and the same lowering is correct. One translator, one wire node, two answers
     # depending only on the store — which is why an adapter spanning both (prisma and drizzle each
     # run this corpus twice, once per ADAPTER_TEST_DB) cannot lower it store-blind, and why the
-    # oracle is deliberately large: 14 of the 21 seeds carry aBool = true, so the SQLite failure
+    # oracle is deliberately large: 14 of the 22 seeds carry aBool = true, so the SQLite failure
     # direction is an UNDER-grant of all 14 rather than a near miss.
     - actions: ["cast-string-bool"]
       effect: EFFECT_ALLOW
@@ -753,7 +753,7 @@ resourcePolicy:
     # Both return a list, not a boolean. Cerbos compiles the policy and the planner emits the
     # macro verbatim as the whole condition (PDP-verified: KIND_CONDITIONAL with a bare
     # `filter`/`map` node), but check() cannot evaluate a non-boolean condition, so the oracle
-    # is empty for all 21 seeds. Every adapter must REJECT the shape: translating it means
+    # is empty for all 22 seeds. Every adapter must REJECT the shape: translating it means
     # choosing a meaning the policy never stated — `filter(...)` is not `size(filter(...)) > 0`,
     # and a `map(...)` projection is not "the projection is non-empty".
     - actions: ["filter-as-condition"]
@@ -991,7 +991,7 @@ resourcePolicy:
     # than collapsing to the empty-collection case.
     #
     # Seeds discriminate already — a category graph is created only for a seed with
-    # subCategoryNames, so 17 of the 21 seeds carry NO mainCategory at all: a1/a6 hold
+    # subCategoryNames, so 18 of the 22 seeds carry NO mainCategory at all: a1/a6 hold
     # "finance", a8 "tech", c1 "Finance" (the case witness).
 
     # all() over the chain: oracle a1/a6; a vacuous-TRUE chain adds the 17 parentless rows.
@@ -1026,7 +1026,7 @@ resourcePolicy:
     # The lower-bound mirror of w1-size-chain (`> 0`, which agrees for the wrong reason because
     # a positive count already implies the parent exists). A count is never negative, so `>= 0`
     # is TRUE for exactly the rows that HAVE the attribute: oracle a1/a6/a8/c1, while a chain
-    # that folds the threshold to always-true returns all 21. Non-degenerate, so this is the
+    # that folds the threshold to always-true returns all 22. Non-degenerate, so this is the
     # count-path member of the degeneracy guard.
     - actions: ["w1-size-nonneg-chain"]
       effect: EFFECT_ALLOW
@@ -1351,8 +1351,8 @@ resourcePolicy:
 
     # `<= 1.5` rounds DOWN to `<= 1`, which a count of ZERO also satisfies — so this arm
     # discriminates the hop guard as well as the rounding. Oracle a1/a6/a8/c1, the rows that
-    # HAVE the parent (each holds one subCategory); an unguarded chain counts 0 for the 17
-    # parentless rows and returns all 21. Non-degenerate, so this one belongs in the guard.
+    # HAVE the parent (each holds one subCategory); an unguarded chain counts 0 for the 18
+    # parentless rows and returns all 22. Non-degenerate, so this one belongs in the guard.
     - actions: ["w1-size-frac-le-chain"]
       effect: EFFECT_ALLOW
       roles: ["USER"]
@@ -1571,7 +1571,7 @@ resourcePolicy:
     # The key against a COLUMN, both polarities. `field-to-field` already covers column-versus-
     # column, but never against the key, where an adapter has to name the primary key on one side
     # of a comparison it usually only reads. The negation is the load-bearing half: its oracle is
-    # 20 of 21, so an adapter that resolves the key to the wrong column, or drops the comparison,
+    # 21 of 22, so an adapter that resolves the key to the wrong column, or drops the comparison,
     # is caught by the row COUNT rather than by a single missing row.
     - actions: ["id-f2f"]
       effect: EFFECT_ALLOW
@@ -1693,7 +1693,7 @@ resourcePolicy:
     # oracle sends `null` rather than omitting the attribute. Under the default
     # missing-attribute convention `== null` would deny every row at check time while the
     # adapter's IS NULL returned five, which probes attribute representation rather than
-    # the operator. NULL owners: a2/a4/a8/c2/e1 (5 of 21) — non-degenerate either way.
+    # the operator. NULL owners: a2/a4/a8/c2/e1 (5 of 22) — non-degenerate either way.
 
     - actions: ["null-eq"]
       effect: EFFECT_ALLOW
@@ -1766,7 +1766,7 @@ resourcePolicy:
     # predicate definite; a list of plain constants does not, so `NOT (col IN (...))` is UNKNOWN
     # for a NULL column and drops it. CEL compares a null VALUE against each element — false, not
     # an error — so the negation is TRUE. a3 ("x") and b1 ("one_two") are the two matches, so the
-    # oracle is 19 of 21 and the naive translation returns 14.
+    # oracle is 20 of 22 and the naive translation returns 15.
     #
     # This is why the rule is stated over the EQUALITY FAMILY rather than over `ne`: `eq`, `ne`
     # and `in` are the operators CEL evaluates to a definite boolean over a null operand, so they
@@ -1789,7 +1789,7 @@ resourcePolicy:
     #
     # `coOwner` is the explicit-null alias of the `scope` column, added for this action.
     # It is NOT a second alias of `aOptionalString`: comparing a column with itself is TRUE
-    # for all 21 seeds, and the degeneracy guard forbids a total oracle. Against `scope` the
+    # for all 22 seeds, and the degeneracy guard forbids a total oracle. Against `scope` the
     # only row where both sides are NULL is e1, and no row holds the same non-null value in
     # both columns, so the oracle is exactly {e1} — one row, but the only row the naive
     # translation loses.
@@ -1834,8 +1834,8 @@ resourcePolicy:
     # `pv-exists`/`pv-all` do not reach it — they use `aOptionalString`, the omitted-convention
     # attribute, where the NULL rows are missing-attribute errors that deny under both
     # polarities. Allowed: every seed whose owner matches no element — a1/a6/a9/b2 match
-    # ("set"/""/"same"/"%_o") and are denied, so the oracle is 17 of 21 and the naive fold
-    # returns 12.
+    # ("set"/""/"same"/"%_o") and are denied, so the oracle is 18 of 22 and the naive fold
+    # returns 13.
     - actions: ["null-value-pv-not-exists"]
       effect: EFFECT_ALLOW
       roles: ["USER"]
@@ -1846,7 +1846,7 @@ resourcePolicy:
     # The SAME shape against `aOptionalString`, which follows the corpus DEFAULT convention:
     # a NULL column sends NO attribute at all. CEL then raises a missing-attribute error for
     # every NULL row, and `"set" == null` is false for every non-NULL row, so check() denies
-    # ALL 21 seeds. The planner emits the identical `eq(a_optional_string, null)` wire node as
+    # ALL 22 seeds. The planner emits the identical `eq(a_optional_string, null)` wire node as
     # `null-eq` — the two are indistinguishable on the wire, which is exactly the point: the
     # adapter cannot recover the caller's representation from the plan.
     #
@@ -2042,8 +2042,8 @@ resourcePolicy:
     # the operand a store can actually index is never the thing under the negation. `not(lt)`
     # is absent from the corpus outright; `not(gt)` exists only over those wrapped operands.
     #
-    # The pair partitions the 21 seeds exactly — oracle a1/a3/a6/a8/a9/b1/b2/b4/b5/b6/c1/c2/
-    # d1/d2/e1/f1 (16) and a2/a4/a5/a7/b3 (5) — because aNumber is never NULL, so there is no
+    # The pair partitions the 22 seeds exactly — oracle a1/a3/a6/a8/a9/b1/b2/b4/b5/b6/c1/c2/
+    # d1/d2/e1/f1/g1 (17) and a2/a4/a5/a7/b3 (5) — because aNumber is never NULL, so there is no
     # third answer and a row missing from both sets is an adapter dropping rows. Dropping the
     # negation is the failure this catches: it swaps the two oracles outright.
     #
@@ -2104,7 +2104,7 @@ resourcePolicy:
     #
     # The second disjunct is `aNumber < 0` and NOT the `aString != "one"` this action was
     # specified with, because that spelling is TOTAL: `aString` is never NULL and only a1 holds
-    # "one", and a1's aBool is true, so every one of the 21 seeds is allowed and the comparison
+    # "one", and a1's aBool is true, so every one of the 22 seeds is allowed and the comparison
     # passes vacuously against any filter whatsoever. `< 0` instead admits two aBool-FALSE rows
     # (a2, a5) and denies five others, so dropping either disjunct changes the answer.
     - actions: ["root-or"]
@@ -2352,7 +2352,7 @@ resourcePolicy:
     # dispatches on the operator and a lambda node reaches whatever the default branch does.
     #
     # The oracle is EMPTY BY CONSTRUCTION, like filter-as-condition: `filter()` returns a list,
-    # so check() cannot evaluate the conjunction and denies all 21 seeds. It therefore stays out
+    # so check() cannot evaluate the conjunction and denies all 22 seeds. It therefore stays out
     # of both degeneracy-guard lists, and its anti-vacuity assertion has to pin WHY the rejection
     # is required rather than that one happens — see README, "The degeneracy guard".
     #
@@ -2368,3 +2368,97 @@ resourcePolicy:
             of:
               - expr: R.attr.tags.filter(t, t.name == "public")
               - expr: R.attr.aBool
+
+    # ==================== shapes an Elasticsearch audit found unguarded ====================
+    # Each of these is policy-reachable, translated by more than one adapter, and until now
+    # discriminated by nothing in the corpus: an adapter could emit a wrong filter for it and
+    # every harness stayed green. They were found by auditing one adapter and are added here
+    # rather than pinned there, so every other adapter is asked the same question.
+
+    # size(string) as an EMPTINESS check. string-size and the size-huge-* pair compare a string's
+    # length against a threshold; none of them uses the `> 0` spelling, which is exactly the one
+    # an adapter's collection-emptiness fast path (`size(x) > 0` → "the array is non-empty")
+    # is keyed on. A translator that dispatches on the threshold before looking at the operand
+    # emits an exists/non-empty-array query over a STRING field: a8's aString is "" and is the
+    # one row check() denies, so an adapter answering "the field exists" returns it, and one
+    # answering "the field is a non-empty array" returns nothing. Oracle: every seed but a8.
+    - actions: ["string-size-gt0"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'size(R.attr.aString) > 0'
+
+    # Membership in a MAP literal. CEL's `in` over a map tests the KEYS, and the planner folds
+    # the literal to its key list before it reaches the wire — the fixture carries
+    # `in(aString, ["one", "same"])`, indistinguishable from a list literal. That fold is the
+    # contract this action pins: a planner that shipped the map verbatim would change the
+    # fixture, and an adapter given the struct would have to refuse it rather than compare
+    # against its values. The values are chosen not to be strings so a translator that did see
+    # them could not match on them by accident. Oracle: a1 ("one") and a9 ("same") — c1's
+    # "One" is the case trap.
+    - actions: ["in-map-keys"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aString in {"one": 1, "same": 2}'
+
+    # A double literal outside the int64 range on a double field. `-10000000000000000000` as an
+    # INTEGER literal does not compile (CEL: "invalid int literal"), so `-1e19` is the only
+    # spelling a policy can reach, and it arrives on the wire as a plain number. An adapter that
+    # narrows a numeric constant through a 64-bit integer — `Number.longValue()`, `int64(v)`,
+    # a `parseInt` — saturates it to Long.MIN_VALUE (-9223372036854775808), and no seed used to
+    # sit between the two: every existing aDouble is within ±20, on the same side of both
+    # thresholds. g1's aDouble is -9.5e18, chosen INSIDE the gap (-1e19 < -9.5e18 < -2^63) and
+    # exactly representable as a double. The oracle is EMPTY BY CONSTRUCTION — no seed is below
+    # -1e19 — so this action stays out of both degeneracy-guard lists; what it discriminates is
+    # the narrowed filter `aDouble < -9223372036854775808`, which returns g1 while check()
+    # denies every row. See README, "The degeneracy guard".
+    - actions: ["double-huge-lt"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aDouble < -1e19'
+
+    # The mirror arm, with a NON-degenerate oracle: every seed with a present aDouble is above
+    # -1e19 (a3's is NULL and is a missing-attribute deny), so this one belongs in the guard
+    # proper. The same saturation turns it into `aDouble > -9223372036854775808`, which DROPS g1
+    # — the under-grant direction of the narrowing double-huge-lt catches as an over-grant.
+    - actions: ["double-huge-gt"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aDouble > -1e19'
+
+    # An anchored regex with a TOP-LEVEL alternation. RE2 (CEL's dialect) parses `^o|e$` as
+    # two alternatives, `^o` OR `e$`, each carrying its own anchor; an adapter that lowers a
+    # leading `^` to a prefix query, or that wraps the pattern as `^(...)$` for an engine whose
+    # matching is implicitly anchored (Lucene), reads it as `^(o|e)$` and matches only a
+    # one-character string — nothing in the corpus. p-matches uses `^h`, which every one of
+    # those lowerings gets right. Both alternatives are exercised: `^o` admits a1 ("one") and
+    # b1 ("oneXtwo"); `e$` admits a2 ("100%_done"), a3 ("100xdone"), a9 ("same") and c1 ("One"
+    # — the case trap, matched by its tail and NOT by its head). Oracle a1/a2/a3/a9/b1/c1.
+    - actions: ["matches-alt"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aString.matches("^o|e$")'
+
+    # A hierarchy with an EMPTY delimiter, which the PDP accepts: Cerbos splits the path on ""
+    # and gets one segment per CHARACTER, so descendentOf becomes a strict STRING-prefix test.
+    # Two wrong lowerings are visible from the same constant. An adapter that substitutes its
+    # default "." for an empty delimiter emits `scope LIKE 'dept.eng.%'` and drops a5
+    # ("dept.engineering" — a string descendant, not a path one). An adapter that concatenates
+    # `prefix + delimiter + '%'` emits `scope LIKE 'dept.eng%'`, which also matches a2
+    # ("dept.eng" itself, never its own descendant). Oracle a3/a4/a5/b5/c2 — every scope that
+    # STARTS WITH "dept.eng" and is longer than it; c1's "Dept.Eng" is the case trap.
+    - actions: ["hier-empty-delim"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'hierarchy(R.attr.scope, "").descendentOf(hierarchy("dept.eng", ""))'

@@ -111,6 +111,14 @@
       "kind": "KIND_CONDITIONAL",
       "where": "\"adversarial_resources\".\"a_string\" LIKE 'one%' ESCAPE '\\'"
     },
+    "double-huge-gt": {
+      "kind": "KIND_CONDITIONAL",
+      "where": "\"adversarial_resources\".\"a_double\" > -10000000000000000000"
+    },
+    "double-huge-lt": {
+      "kind": "KIND_CONDITIONAL",
+      "where": "\"adversarial_resources\".\"a_double\" < -10000000000000000000"
+    },
     "double-negation": {
       "kind": "KIND_CONDITIONAL",
       "where": "NOT ((NOT ((\"adversarial_resources\".\"a_bool\" = 1))))"
@@ -218,6 +226,10 @@
     "in-empty": {
       "kind": "KIND_ALWAYS_DENIED",
       "where": "(1=0)"
+    },
+    "in-map-keys": {
+      "kind": "KIND_CONDITIONAL",
+      "where": "\"adversarial_resources\".\"a_string\" IN ('one', 'same')"
     },
     "in-null-elem-hasint": {
       "kind": "KIND_CONDITIONAL",
@@ -593,6 +605,10 @@
     "string-size": {
       "kind": "KIND_CONDITIONAL",
       "where": "LENGTH(\"adversarial_resources\".\"a_string\") > 4"
+    },
+    "string-size-gt0": {
+      "kind": "KIND_CONDITIONAL",
+      "where": "LENGTH(\"adversarial_resources\".\"a_string\") > 0"
     },
     "ternary-bare": {
       "kind": "KIND_CONDITIONAL",

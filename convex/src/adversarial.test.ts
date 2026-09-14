@@ -209,6 +209,15 @@ const DEGENERACY_GUARD_ACTIONS = [
   "map-eq-list",
   "vf-hasint",
   "pv-exists-unrolled",
+  // The shapes an Elasticsearch audit found unguarded: size(string) as an emptiness check,
+  // membership in a map literal (the planner folds it to its key list), a double literal beyond
+  // int64 on a double field, and a hierarchy with an empty delimiter, which the post-filter
+  // answers as the strict string-prefix test Cerbos makes of it. double-huge-lt has an EMPTY
+  // oracle by construction and sits in neither list; its sibling below carries the group.
+  "string-size-gt0",
+  "in-map-keys",
+  "double-huge-gt",
+  "hier-empty-delim",
 ] as const;
 
 /**
@@ -217,6 +226,9 @@ const DEGENERACY_GUARD_ACTIONS = [
  * cerbos/query-plan-adapters#324.
  */
 const DEGENERACY_LIVENESS_PROBES = [
+  // A regex with a top-level alternation falls outside the literal/anchor/trailing-.* subset
+  // the post-filter accepts.
+  "matches-alt",
   // JSON.stringify(-0) is "0", so the sign of a zero denominator is gone before the adapter
   // sees it and the shape is refused rather than guessed.
   "cr-div-neg-zero",
@@ -260,6 +272,9 @@ const DB_DECIDED_DEFAULT = [
   // six id-* actions that does: the rest compare the key against another field or wrap it in a
   // concatenation, neither of which `canPushToDb` accepts.
   "id-eq-const",
+  // Membership in a map literal: the planner folds it to a key list before it reaches the wire,
+  // so the engine sees the same `in` a list literal produces.
+  "in-map-keys",
   "in-single",
   "le-bare",
   "nary-and",
@@ -644,11 +659,11 @@ describe("adversarial conformance corpus", () => {
         ].filter(Boolean).length !== 1,
     );
 
-    expect(allActions.size).toBe(199);
+    expect(allActions.size).toBe(205);
     expect(CONVEX_UNSUPPORTED).toHaveLength(3);
     expect(CONVEX_SUPPORTED_EXPECTED).toHaveLength(7);
-    expect(ORACLE_ACTIONS).toHaveLength(191);
-    expect(THROWING_ACTIONS).toHaveLength(6);
+    expect(ORACLE_ACTIONS).toHaveLength(196);
+    expect(THROWING_ACTIONS).toHaveLength(7);
     expect(misclassified).toEqual([]);
   });
 
@@ -774,17 +789,17 @@ describe("adversarial conformance corpus", () => {
       // skipping the other 180 actions there sound rather than a coverage hole.
       moved: pushdown.db.filter((action) => !base.db.includes(action)),
     }).toEqual({
-      total: 191,
+      total: 196,
       defaultDb: DB_DECIDED_DEFAULT,
       // Exactly one corpus action splits: `buildFilters` only splits a root `and`, and
       // rel-hop-and-root is the one hostile shape rooted there that mixes a pushable conjunct
       // with a non-pushable one (#375). Both mappers split it — the hop is `nullable` under each.
       defaultSplit: SPLIT_ACTIONS,
       defaultUnconditional: UNCONDITIONAL_ACTIONS,
-      defaultPostCount: 167,
+      defaultPostCount: 171,
       pushdownDb: DB_DECIDED_PUSHDOWN,
       pushdownSplit: SPLIT_ACTIONS,
-      pushdownPostCount: 156,
+      pushdownPostCount: 160,
       moved: PUSHDOWN_ONLY_ACTIONS,
     });
   });

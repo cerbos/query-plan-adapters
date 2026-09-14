@@ -656,6 +656,34 @@ _LAMBDA_BINDING_OPERATORS = frozenset(
 _FOLDABLE_COLLECTION_OPERATORS = frozenset({"exists", "all"})
 
 
+_INT64_MAX = 2**63 - 1
+_INT64_MIN = -(2**63)
+
+
+def _widen_integral_literals(node):
+    """Rebind wire integers that do not fit int64 as floats.
+
+    A plan literal is a protobuf ``Value.number_value`` — always a double — but
+    the JSON path renders an integral double without a fraction, so ``-1e19``
+    arrives as the Python int ``-10000000000000000000``. Binding that int is a
+    driver error on SQLite (``OverflowError: Python int too large to convert to
+    SQLite INTEGER``) rather than the comparison the policy wrote. Every int
+    outside int64 is such a double exactly, so widening it back is lossless;
+    ints inside int64 are left alone so nothing else this module emits moves.
+    """
+    if isinstance(node, dict):
+        return {key: _widen_integral_literals(value) for key, value in node.items()}
+    if isinstance(node, list):
+        return [_widen_integral_literals(value) for value in node]
+    if (
+        isinstance(node, int)
+        and not isinstance(node, bool)
+        and (node > _INT64_MAX or node < _INT64_MIN)
+    ):
+        return float(node)
+    return node
+
+
 def _unwrap_expression(operand: dict) -> dict:
     """Return the `{operator, operands}` node an operand carries, if any."""
     expression = operand.get("expression")
@@ -991,7 +1019,7 @@ def get_query(
     if query_plan.filter.kind in _allow_types:
         return select(table)
 
-    cond = (
+    cond = _widen_integral_literals(
         MessageToDict(query_plan.filter.condition)
         if isinstance(query_plan, response_pb2.PlanResourcesResponse)
         else query_plan.filter.condition.to_dict()
