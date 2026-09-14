@@ -18,6 +18,7 @@ version = "0.1.0-alpha.1"
 // a JDK 17 runtime.
 tasks.withType<JavaCompile> {
     options.release = 17
+    options.compilerArgs.add("-Xlint:deprecation")
 }
 
 repositories {
@@ -25,7 +26,7 @@ repositories {
 }
 
 dependencies {
-    implementation("dev.cerbos:cerbos-sdk-java:0.19.0")
+    implementation("dev.cerbos:cerbos-sdk-java:0.20.1")
     // Must match the gencode version cerbos-sdk-java was generated against (see the README
     // "Pin protobuf-java" gotcha) — older runtimes throw ProtobufRuntimeVersionException.
     implementation("com.google.protobuf:protobuf-java:4.35.1")
@@ -52,14 +53,14 @@ dependencies {
 
     testImplementation("org.springframework.data:spring-data-jpa:3.5.13")
     testImplementation("jakarta.persistence:jakarta.persistence-api:3.2.0")
-    testImplementation(platform("org.junit:junit-bom:5.14.4"))
+    testImplementation(platform("org.junit:junit-bom:6.1.2"))
     testImplementation("org.junit.jupiter:junit-jupiter")
-    testImplementation("org.testcontainers:testcontainers:1.21.4")
-    testImplementation("org.testcontainers:junit-jupiter:1.21.4")
+    testImplementation("org.testcontainers:testcontainers:2.0.5")
+    testImplementation("org.testcontainers:testcontainers-junit-jupiter:2.0.5")
     // Real-database legs for AdversarialConformanceTest (selected via ADAPTER_TEST_DB /
     // -Dadapter.test.db): PostgreSQL and MySQL containers + their JDBC drivers.
-    testImplementation("org.testcontainers:postgresql:1.21.4")
-    testImplementation("org.testcontainers:mysql:1.21.4")
+    testImplementation("org.testcontainers:testcontainers-postgresql:2.0.5")
+    testImplementation("org.testcontainers:testcontainers-mysql:2.0.5")
     testRuntimeOnly("org.postgresql:postgresql:42.7.13")
     testRuntimeOnly("com.mysql:mysql-connector-j:9.7.0")
     testImplementation("org.hibernate.orm:hibernate-core:6.6.54.Final")
