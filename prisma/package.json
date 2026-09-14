@@ -91,7 +91,9 @@
   "overrides": {
     "@prisma/dev": {
       "@hono/node-server": "^2.0.0"
-    }
+    },
+    "mysql2": "^3.22.0",
+    "mariadb": "$mariadb"
   },
   "keywords": [
     "cerbos",
