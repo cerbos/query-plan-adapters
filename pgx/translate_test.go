@@ -350,7 +350,8 @@ func TestIdentifiersAreQuoted(t *testing.T) {
 	}
 	result, err := cerbospgx.Translate(
 		conditional(expr("eq", variable("request.resource.attr.name"), val(t, "x"))),
-		"resource", mapper)
+		"resource", mapper,
+	)
 	require.NoError(t, err)
 	require.Contains(t, result.Where, `"we""ird"`)
 	require.Equal(t, 1, strings.Count(result.Where, `"we""ird"`))
@@ -500,7 +501,8 @@ func TestMapperQualifierCannotShadowGeneratedAliases(t *testing.T) {
 	}
 	_, err := cerbospgx.Translate(
 		conditional(expr("eq", variable("request.resource.attr.name"), val(t, "x"))),
-		"resource", mapper)
+		"resource", mapper,
+	)
 	require.ErrorIs(t, err, cerbospgx.ErrUnsupported)
 }
 
@@ -634,17 +636,20 @@ func TestSubqueryFilterMembershipEdges(t *testing.T) {
 	cond := tagsExists(t)
 
 	empty := translateWith(t, hazardMapper(tagRelation(
-		cerbospgx.Restriction{Column: "kind", Op: cerbospgx.RestrictIn})), cond)
+		cerbospgx.Restriction{Column: "kind", Op: cerbospgx.RestrictIn},
+	)), cond)
 	require.NotContains(t, empty.Where, "IN ()")
 	require.Contains(t, empty.Where, "FALSE", "membership in an empty list hides every row")
 
 	emptyNot := translateWith(t, hazardMapper(tagRelation(
-		cerbospgx.Restriction{Column: "kind", Op: cerbospgx.RestrictNotIn})), cond)
+		cerbospgx.Restriction{Column: "kind", Op: cerbospgx.RestrictNotIn},
+	)), cond)
 	require.NotContains(t, emptyNot.Where, "IN ()")
 	require.Contains(t, emptyNot.Where, "TRUE", "non-membership in an empty list hides none")
 
 	listed := translateWith(t, hazardMapper(tagRelation(
-		cerbospgx.Restriction{Column: "kind", Op: cerbospgx.RestrictIn, Values: []any{"a", "b"}})), cond)
+		cerbospgx.Restriction{Column: "kind", Op: cerbospgx.RestrictIn, Values: []any{"a", "b"}},
+	)), cond)
 	require.Contains(t, listed.Where, `"kind" IN (`)
 	require.NotContains(t, listed.Where, "'a'", "the declared values are bound, never interpolated")
 	require.Contains(t, listed.Args, "a")
@@ -663,13 +668,15 @@ func TestRestrictionMismatchFailsClosed(t *testing.T) {
 	// Values supplied where Op reads Value: the comparison renders against NULL, which is
 	// UNKNOWN, so the subquery matches nothing.
 	valuesOnEq := translateWith(t, hazardMapper(tagRelation(
-		cerbospgx.Restriction{Column: "kind", Op: cerbospgx.RestrictEq, Values: []any{"a"}})), cond)
+		cerbospgx.Restriction{Column: "kind", Op: cerbospgx.RestrictEq, Values: []any{"a"}},
+	)), cond)
 	require.Contains(t, valuesOnEq.Where, `"kind" = NULL`)
 	require.NotContains(t, valuesOnEq.Args, "a")
 
 	// Value supplied where Op reads Values: the empty list folds to FALSE.
 	valueOnIn := translateWith(t, hazardMapper(tagRelation(
-		cerbospgx.Restriction{Column: "kind", Op: cerbospgx.RestrictIn, Value: "a"})), cond)
+		cerbospgx.Restriction{Column: "kind", Op: cerbospgx.RestrictIn, Value: "a"},
+	)), cond)
 	require.Contains(t, valueOnIn.Where, "FALSE")
 	require.NotContains(t, valueOnIn.Args, "a")
 }

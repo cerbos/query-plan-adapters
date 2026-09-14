@@ -396,7 +396,8 @@ func TestPredicateComposesAfterTheCallersOwnArguments(t *testing.T) {
 
 	result, err := cerbosent.Translate(
 		conditional(expr("eq", variable("request.resource.attr.name"), val(t, "plan"))),
-		"resource", testMapper(), cerbosent.WithDialect(dialect.Postgres))
+		"resource", testMapper(), cerbosent.WithDialect(dialect.Postgres),
+	)
 	require.NoError(t, err)
 
 	selector := entsql.Dialect(dialect.Postgres).Select("id").From(entsql.Table("resource"))
@@ -621,7 +622,8 @@ func TestMapperQualifierCannotShadowGeneratedAliases(t *testing.T) {
 	}
 	_, err := cerbosent.Translate(
 		conditional(expr("eq", variable("request.resource.attr.name"), val(t, "x"))),
-		"resource", mapper)
+		"resource", mapper,
+	)
 	require.ErrorIs(t, err, cerbosent.ErrUnsupported)
 }
 
@@ -745,7 +747,8 @@ func TestRestrictionValuesAreTypedForPostgres(t *testing.T) {
 
 			mapper := cerbosent.MapperMap{
 				"request.resource.attr.tags": {Relation: tagRelation(
-					cerbosent.Restriction{Column: "kind", Value: tc.value})},
+					cerbosent.Restriction{Column: "kind", Value: tc.value},
+				)},
 			}
 			query, args := whereFor(t, dialect.Postgres, mapper, tagsExists(t))
 			require.Contains(t, query, tc.want)
@@ -904,17 +907,20 @@ func TestSubqueryFilterMembershipEdges(t *testing.T) {
 	// ent's builder spells the boolean constants `1 = 0` / `1 = 1`; they lead the subquery's
 	// WHERE because the restrictions are prepended to the correlation conjunction.
 	empty, _ := translateWith(t, mapperFor(tagRelation(
-		cerbosent.Restriction{Column: "kind", Op: cerbosent.RestrictIn})), cond)
+		cerbosent.Restriction{Column: "kind", Op: cerbosent.RestrictIn},
+	)), cond)
 	require.NotContains(t, empty, "IN ()")
 	require.Contains(t, empty, "WHERE (1 = 0 AND", "membership in an empty list hides every row")
 
 	emptyNot, _ := translateWith(t, mapperFor(tagRelation(
-		cerbosent.Restriction{Column: "kind", Op: cerbosent.RestrictNotIn})), cond)
+		cerbosent.Restriction{Column: "kind", Op: cerbosent.RestrictNotIn},
+	)), cond)
 	require.NotContains(t, emptyNot, "IN ()")
 	require.Contains(t, emptyNot, "WHERE (1 = 1 AND", "non-membership in an empty list hides none")
 
 	listed, args := translateWith(t, mapperFor(tagRelation(
-		cerbosent.Restriction{Column: "kind", Op: cerbosent.RestrictIn, Values: []any{"a", "b"}})), cond)
+		cerbosent.Restriction{Column: "kind", Op: cerbosent.RestrictIn, Values: []any{"a", "b"}},
+	)), cond)
 	require.Contains(t, listed, "`kind` IN (")
 	require.NotContains(t, listed, "'a'", "the declared values are bound, never interpolated")
 	require.Contains(t, args, "a")
@@ -936,13 +942,15 @@ func TestRestrictionMismatchFailsClosed(t *testing.T) {
 	// Values supplied where Op reads Value: the comparison renders against NULL, which is
 	// UNKNOWN, so the subquery matches nothing.
 	valuesOnEq, args := translateWith(t, mapperFor(tagRelation(
-		cerbosent.Restriction{Column: "kind", Op: cerbosent.RestrictEq, Values: []any{"a"}})), cond)
+		cerbosent.Restriction{Column: "kind", Op: cerbosent.RestrictEq, Values: []any{"a"}},
+	)), cond)
 	require.Contains(t, valuesOnEq, "`kind` = NULL")
 	require.NotContains(t, args, "a")
 
 	// Value supplied where Op reads Values: the empty list folds to FALSE.
 	valueOnIn, args := translateWith(t, mapperFor(tagRelation(
-		cerbosent.Restriction{Column: "kind", Op: cerbosent.RestrictIn, Value: "a"})), cond)
+		cerbosent.Restriction{Column: "kind", Op: cerbosent.RestrictIn, Value: "a"},
+	)), cond)
 	require.Contains(t, valueOnIn, "WHERE (1 = 0 AND")
 	require.NotContains(t, args, "a")
 }
