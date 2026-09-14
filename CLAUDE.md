@@ -73,7 +73,8 @@ classpath, so its entry is the translator's return value verbatim — the plan k
 for a conditional plan — and it declares no generator. Object keys are sorted on the way in, because
 the adapter builds its queries with `Map.of`, whose iteration order is randomised per JVM run; a
 suite assertion pins that no library type ever reaches the asset, which is what keeps "no generator"
-true. 122 of the corpus's 199 shapes carry no entry at all because it refuses them. The schema is in
+true. Most of the corpus's shapes carry no entry at all because it refuses them — the count is in the
+README's `Conformance contract` table, not here. The schema is in
 `conformance/README.md`, "Golden expectations"; the principle is
 [ADR 0007](docs/adr/0007-adapters-share-data-not-code.md).
 
@@ -181,9 +182,9 @@ Both Java adapters have a **translator unit test** that reads its plans from
 ("What a translator unit test may pin", below) — with no sidecar and no store. On spring-data,
 `SpringDataTranslatorTest` needs no database — its persistence unit carries no JDBC connection at
 all, and Hibernate is told the dialect rather than discovering it. On elasticsearch-java,
-`ElasticsearchTranslatorTest` needs no Elasticsearch, and reads as mostly-throws: 122 of the
-corpus's 199 shapes are fail-closed there, each asserted against the message
-`conformance/actions.json` pins.
+`ElasticsearchTranslatorTest` needs no Elasticsearch, and reads as mostly-throws: more than half of
+the corpus's shapes are fail-closed there, each asserted against the message
+`conformance/actions.json` pins (the README's `Conformance contract` table carries the count).
 
 Two suites on elasticsearch-java need Docker, and they need different things:
 `ElasticsearchAdversarialConformanceTest` starts a pinned PDP and Elasticsearch;
@@ -336,8 +337,10 @@ Each adapter has its own GitHub Actions workflow triggered by changes in its dir
 
 Adding a new adversarial job — or dropping the Node gate so the corpus replays on every Node leg — multiplies runner minutes for no extra coverage. Adding a *store* leg does buy coverage; adding a Node leg does not. `conformance.yaml` additionally replans the golden wire fixtures against the pinned PDP and fails on drift.
 
-Tag-based publishing: `prisma/v*` -> npm, `sqla/v*` -> PyPI, `activerecord/v*` -> RubyGems, `elasticsearch-java/v*` and `spring-data/v*` -> Maven Central; `ent/v*` and `pgx/v*` are Go
-module tags resolved directly from the repository.
+Tag-based publishing: `prisma/v*` -> npm, `sqla/v*` -> PyPI, `activerecord/v*` -> RubyGems; `ent/v*` and `pgx/v*` are Go
+module tags resolved directly from the repository. `elasticsearch-java/v*` and `spring-data/v*` only run that adapter's CI
+workflow: neither build configures a Maven Central release (both are `publishToMavenLocal` only, and their `publishing` blocks
+say what wiring a release still needs), so no Maven Central publish is wired yet.
 
 ## Changing how a condition is translated
 

@@ -12,9 +12,13 @@ plugins {
 group = "dev.cerbos"
 version = "0.1.0"
 
-java {
-    sourceCompatibility = JavaVersion.VERSION_17
-    targetCompatibility = JavaVersion.VERSION_17
+// `options.release` (unlike source/targetCompatibility) also constrains the JDK API surface:
+// compiling on JDK 21 still resolves against the Java 17 class library, so a stray post-17 API
+// reference fails at compile time instead of with NoSuchMethodError on a JDK 17 runtime. 17 is the
+// floor README.md "Requirements" declares, and the same setting spring-data and example/ use.
+tasks.withType<JavaCompile> {
+    options.release = 17
+    options.compilerArgs.add("-Xlint:deprecation")
 }
 
 repositories {
@@ -22,14 +26,18 @@ repositories {
 }
 
 dependencies {
-    implementation("dev.cerbos:cerbos-sdk-java:0.19.0")
+    implementation("dev.cerbos:cerbos-sdk-java:0.20.1")
     implementation("com.google.protobuf:protobuf-java:4.35.1")
 
     testImplementation(platform("org.junit:junit-bom:6.1.2"))
     testImplementation("org.junit.jupiter:junit-jupiter")
+    // Testcontainers 2.x throughout. The 2.x modules are published under new artifact ids
+    // (`testcontainers-junit-jupiter`, `testcontainers-elasticsearch`), and the 1.x ids stop at
+    // 1.21.x — so a 1.x module on this 2.x core is a mixed classpath that happens to link, not a
+    // supported combination. All three are held to one version on purpose.
     testImplementation("org.testcontainers:testcontainers:2.0.5")
-    testImplementation("org.testcontainers:junit-jupiter:1.21.4")
-    testImplementation("org.testcontainers:elasticsearch:1.21.4")
+    testImplementation("org.testcontainers:testcontainers-junit-jupiter:2.0.5")
+    testImplementation("org.testcontainers:testcontainers-elasticsearch:2.0.5")
     testImplementation("com.fasterxml.jackson.core:jackson-databind:2.22.1")
     // Decodes conformance/wire-fixtures/*.json into the protobuf plan the SDK hands a caller:
     // JsonFormat is protobuf's own canonical JSON mapping, the one the PDP's HTTP API writes
@@ -64,10 +72,21 @@ tasks.test {
     inputs.dir(project.file("golden"))
         .withPathSensitivity(PathSensitivity.RELATIVE)
         .withPropertyName("goldenExpectations")
-    // Same again for the pinned Elasticsearch reference, which ElasticsearchTestImage reads from
+    // Which pinned Elasticsearch reference the two container-backed suites start: ELASTICSEARCH_IMAGE
+    // (the baseline, the server example/run.sh starts too) unless ELASTICSEARCH_IMAGE_FILE names
+    // another, which is how the workflow runs the forward-compatibility leg against
+    // ELASTICSEARCH_NEXT_IMAGE without restating either reference. A filename rather than an image
+    // reference, so every reference stays in a `*_IMAGE` file that
+    // conformance/scripts/validate-corpus.sh scans and holds to one digest per tag.
+    val elasticsearchImageFile = System.getProperty("elasticsearch.test.image.file")
+        ?: System.getenv("ELASTICSEARCH_IMAGE_FILE")
+        ?: "ELASTICSEARCH_IMAGE"
+    systemProperty("elasticsearch.test.image.file", elasticsearchImageFile)
+    // Declared as an input for the same reason as the corpus: ElasticsearchTestImage reads it from
     // `user.dir` at runtime. Undeclared, bumping the server would leave `:test` UP-TO-DATE and the
-    // two container-backed suites would report a pass they never ran.
-    inputs.file(project.file("ELASTICSEARCH_IMAGE"))
+    // two container-backed suites would report a pass they never ran. The system property above is
+    // an input too, so switching files re-runs the task rather than replaying the other leg's pass.
+    inputs.file(project.file(elasticsearchImageFile))
         .withPathSensitivity(PathSensitivity.RELATIVE)
         .withPropertyName("elasticsearchImage")
 }
@@ -108,7 +127,7 @@ tasks.register<Test>("goldenUpdate") {
 // build substitutes away.
 //
 // The protobuf-java version here is the pin README.md's Install section tells a consumer to add.
-// Measured rather than assumed while example/ was being written: at cerbos-sdk-java 0.19.0 the SDK's
+// Measured rather than assumed while example/ was being written, and re-checked against the 0.20.1 POM: at cerbos-sdk-java 0.20.1 the SDK's
 // own POM already requires protobuf-java 4.35.1 at runtime scope, so for a consumer who declares the
 // SDK — as the example does, and as anyone calling `cerbos.plan(...)` must — this line changes
 // nothing today. It is a floor against the SDK relaxing that requirement and letting the older
@@ -126,7 +145,7 @@ tasks.register<Test>("goldenUpdate") {
 // This is `publishToMavenLocal` only. Nothing here configures a Maven Central release, which
 // additionally requires POM `name`, `description`, `url`, `licenses`, `developers` and `scm`, plus
 // signing — Central rejects a POM without them. README.md's Install section still tells a consumer
-// to copy the two source files, because that is what this adapter ships today; what the example
+// to copy the package's source files, because that is what this adapter ships today; what the example
 // resolves is the dependency metadata, which is what it exists to exercise. Wiring up the
 // `elasticsearch-java/v*` release is separate work, and it will change this block.
 publishing {

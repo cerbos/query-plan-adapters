@@ -1,3 +1,8 @@
+/*
+ * Copyright 2021-2026 Zenauth Ltd.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package dev.cerbos.queryplan.elasticsearch;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -28,6 +33,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -302,7 +308,7 @@ class ElasticsearchTranslatorTest {
         // Tripwires. Bump them deliberately: a count that moves without anyone noticing is how a
         // shape gets dropped from an asset nobody reads end to end.
         assertEquals(
-                Map.of("conditional", 85, "unconditional", 2, "throwing", 112),
+                Map.of("conditional", 88, "unconditional", 2, "throwing", 115),
                 Map.of("conditional", actionsOfKind("CONDITIONAL").size(),
                         "unconditional", unconditionalActions().size(),
                         "throwing", THROWING.size()));
@@ -368,8 +374,8 @@ class ElasticsearchTranslatorTest {
 
             IllegalArgumentException undeclared = assertThrows(IllegalArgumentException.class,
                     () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
-                            Corpus.planFromWireFixture(probe.action()), Corpus.FIELD_MAP,
-                            Map.of(), Corpus.NESTED_PATHS, Set.of()));
+                            Corpus.planFromWireFixture(probe.action()),
+                            Corpus.OPTIONS.withExplicitNullAttributes(Set.of())));
             assertTrue(undeclared.getMessage().contains(message), undeclared.getMessage());
         }
     }
@@ -424,15 +430,32 @@ class ElasticsearchTranslatorTest {
      * does, with the complement asserted so it is about this file rather than about a spelling that
      * appears nowhere in the tree.
      */
+    /**
+     * This file and every test helper it reaches. {@link Corpus} is the one: it decodes the wire
+     * fixtures and translates them, so a PDP client or a container acquired THERE would make this
+     * suite online just as surely as one imported here — and the scan of this file alone would
+     * not see it.
+     */
+    private static final List<String> OFFLINE_SOURCES =
+            List.of("ElasticsearchTranslatorTest", "Corpus");
+
     @Test
     void thisSuiteReachesNoPdpAndNoContainer() {
         List<String> forbidden = List.of("org.testcontainers.", "dev.cerbos.sdk.", "java.net.http.");
         // The IMPORT LINES, not a substring of the file: the names below appear in this method as
         // string literals, and a substring scan would match itself.
-        assertEquals(List.of(), importsOf("ElasticsearchTranslatorTest").stream()
-                        .filter(imported -> forbidden.stream().anyMatch(imported::startsWith))
-                        .toList(),
-                "this suite reaches a PDP or a container, so it is no longer offline");
+        for (String source : OFFLINE_SOURCES) {
+            assertEquals(List.of(), importsOf(source).stream()
+                            .filter(imported -> forbidden.stream().anyMatch(imported::startsWith))
+                            .toList(),
+                    source + " reaches a PDP or a container, so this suite is no longer offline");
+        }
+        // The list above is the helpers this file names. Every sibling test source it refers to
+        // in code must be on it, or a new helper is scanned by nobody.
+        assertEquals(Set.of("Corpus"), siblingsReferencedBy("ElasticsearchTranslatorTest"),
+                "this suite reaches a test helper OFFLINE_SOURCES does not scan");
+        assertEquals(Set.of(), siblingsReferencedBy("Corpus"),
+                "Corpus reaches a test helper OFFLINE_SOURCES does not scan");
         // ...and the container-backed siblings DO import each of them, so the assertion above is
         // about this file rather than about a package prefix nothing in the tree uses.
         List<String> siblings = Stream.of("ElasticsearchAdversarialConformanceTest",
@@ -444,16 +467,43 @@ class ElasticsearchTranslatorTest {
         }
     }
 
+    private static final Path TEST_SOURCES = Path.of(System.getProperty("user.dir"), "src",
+            "test", "java", "dev", "cerbos", "queryplan", "elasticsearch");
+
     /** The fully-qualified names one test source imports. */
     private static List<String> importsOf(String simpleName) {
-        Path source = Path.of(System.getProperty("user.dir"), "src", "test", "java", "dev",
-                "cerbos", "queryplan", "elasticsearch", simpleName + ".java");
-        try (Stream<String> lines = Files.lines(source)) {
+        try (Stream<String> lines = Files.lines(TEST_SOURCES.resolve(simpleName + ".java"))) {
             return lines.map(String::strip)
                     .filter(line -> line.startsWith("import ") && line.endsWith(";"))
                     .map(line -> line.substring("import ".length(), line.length() - 1)
                             .replace("static ", "").strip())
                     .toList();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    /**
+     * The other test sources in this package one source names in CODE — comments, Javadoc and
+     * string literals stripped first, because this file links its container-backed siblings in
+     * prose and names them as literals in the complement assertion above without reaching them.
+     */
+    private static Set<String> siblingsReferencedBy(String simpleName) {
+        String code;
+        try (Stream<Path> files = Files.list(TEST_SOURCES)) {
+            code = Files.readString(TEST_SOURCES.resolve(simpleName + ".java"))
+                    .replaceAll("(?s)/\\*.*?\\*/", "")
+                    .replaceAll("//[^\\n]*", "")
+                    .replaceAll("\"(?:\\\\.|[^\"\\\\])*\"", "\"\"");
+            Set<String> referenced = new TreeSet<>();
+            for (Path file : files.toList()) {
+                String sibling = file.getFileName().toString().replace(".java", "");
+                if (!sibling.equals(simpleName)
+                        && Pattern.compile("\\b" + Pattern.quote(sibling) + "\\b").matcher(code).find()) {
+                    referenced.add(sibling);
+                }
+            }
+            return referenced;
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
@@ -519,13 +569,24 @@ class ElasticsearchTranslatorTest {
                 Map.entry("collection emptiness", " emptiness cannot distinguish a missing collection"),
                 // exists_one needs a count of matching nested documents.
                 Map.entry("exists_one", "exists_one cannot be expressed by Elasticsearch nested queries"),
-                // A count comparison that is not an emptiness check, or not over a collection.
+                // A count comparison over a declared collection that is not an emptiness check.
                 Map.entry("count threshold", "Unsupported size comparison:"),
-                Map.entry("count over a non-collection", "Unsupported size() expression"),
-                // A ternary reaches the leaf path with three operands rather than two.
-                Map.entry("operand arity", " requires exactly 2 operands, got "),
+                // size() over a field the caller declared as neither a nested path nor a flat
+                // collection: the adapter cannot tell a string's length from an array count.
+                Map.entry("count over an undeclared collection",
+                        "size() over a field not declared as a collection"),
+                // size() whose argument is a computed collection (a filter() projection).
+                Map.entry("count over a computed collection", "Unsupported size() expression"),
+                // A ternary used as the condition itself, refused by name at the top of the walk.
+                Map.entry("conditional value as a condition",
+                        "if (CEL ternary) cannot be expressed"),
                 // An ordinary Elasticsearch date field cannot preserve sub-millisecond precision.
-                Map.entry("sub-millisecond timestamp", "Sub-millisecond timestamp literals"));
+                Map.entry("sub-millisecond timestamp", "Sub-millisecond timestamp literals"),
+                // An empty delimiter leaves no segment boundary to compare a stored path against.
+                Map.entry("empty hierarchy delimiter", "hierarchy delimiter is empty"),
+                // RE2 parses `^a|b$` as two alternatives; Lucene's whole-field `a|b` does not.
+                Map.entry("top-level regex alternation",
+                        "matches regex has a top-level alternation"));
 
         private String siteOf(String action) {
             String raised;
@@ -556,21 +617,24 @@ class ElasticsearchTranslatorTest {
             assertEquals(new TreeMap<>(Map.ofEntries(
                             Map.entry("computed leaf operand", 54),
                             Map.entry("field-to-field", 15),
-                            Map.entry("count threshold", 8),
                             Map.entry("explicit null", 8),
+                            Map.entry("count threshold", 5),
                             Map.entry("constant receiver", 4),
                             Map.entry("negated exists over a collection", 4),
                             Map.entry("positive all over a collection", 4),
+                            Map.entry("count over an undeclared collection", 4),
                             Map.entry("collection emptiness", 2),
+                            Map.entry("conditional value as a condition", 2),
                             Map.entry("exists_one", 2),
                             Map.entry("negated membership in a collection", 2),
-                            Map.entry("operand arity", 2),
                             Map.entry("sub-millisecond timestamp", 2),
-                            Map.entry("count over a non-collection", 1),
+                            Map.entry("count over a computed collection", 1),
                             Map.entry("hierarchy path built from a field", 1),
                             Map.entry("negated hasIntersection over a collection", 1),
                             Map.entry("null in a document array", 1),
-                            Map.entry("null in an intersection", 1))),
+                            Map.entry("null in an intersection", 1),
+                            Map.entry("empty hierarchy delimiter", 1),
+                            Map.entry("top-level regex alternation", 1))),
                     counts);
             assertEquals(THROWING.size(),
                     counts.values().stream().mapToInt(Integer::intValue).sum());
@@ -599,8 +663,8 @@ class ElasticsearchTranslatorTest {
             // rather than hoped for.
             IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
                     () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
-                            Corpus.planFromWireFixture("cs-eq"), Map.of(), Map.of(),
-                            Corpus.NESTED_PATHS, Set.of()));
+                            Corpus.planFromWireFixture("cs-eq"),
+                            Corpus.OPTIONS.withFieldMap(Map.of())));
             assertTrue(ex.getMessage().contains("Unknown attribute"), ex.getMessage());
         }
     }

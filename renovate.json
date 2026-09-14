@@ -22,5 +22,18 @@
   ],
   "additionalReviewers": [
     "alexolivier"
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "The per-harness service image pins (`<adapter>/<SERVICE>_IMAGE`, one `repo:tag@sha256:<digest>` line each, the form conformance/scripts/validate-corpus.sh enforces). `docker:disable` above switches off the Dockerfile and compose managers, not the docker datasource, so this is the one path by which those files are bumped; the digest is captured so a tag bump carries the build it resolves to, and a major stays a non-automerged PR like every other major.",
+      "managerFilePatterns": [
+        "/(^|/)[A-Z][A-Z0-9_]*_IMAGE$/"
+      ],
+      "matchStrings": [
+        "^(?<depName>[a-z0-9][a-z0-9._/-]*):(?<currentValue>[A-Za-z0-9._-]+)@(?<currentDigest>sha256:[0-9a-f]{64})\\s*$"
+      ],
+      "datasourceTemplate": "docker"
+    }
   ]
 }

@@ -42,6 +42,26 @@
         }
       }
     },
+    "double-huge-gt": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "range": {
+          "aDouble": {
+            "gt": -1.0E19
+          }
+        }
+      }
+    },
+    "double-huge-lt": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "range": {
+          "aDouble": {
+            "lt": -1.0E19
+          }
+        }
+      }
+    },
     "double-negation": {
       "kind": "CONDITIONAL",
       "query": {
@@ -275,6 +295,17 @@
     },
     "in-empty": {
       "kind": "ALWAYS_DENIED"
+    },
+    "in-map-keys": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "terms": {
+          "aString": [
+            "one",
+            "same"
+          ]
+        }
+      }
     },
     "in-null-elem-neg": {
       "kind": "CONDITIONAL",

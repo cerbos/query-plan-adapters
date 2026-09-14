@@ -1,3 +1,8 @@
+/*
+ * Copyright 2021-2026 Zenauth Ltd.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package dev.cerbos.queryplan.elasticsearch;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -39,9 +44,9 @@ import java.util.stream.Stream;
  * copies: they are allowed to differ ({@code docs/adr/0007-adapters-share-data-not-code.md}).
  *
  * <p>What lives here is what BOTH of this adapter's corpus suites must agree on: the classification
- * in {@code actions.json}, the wire-fixture decoding, and the three call arguments the corpus is
- * translated through — {@link #FIELD_MAP}, {@link #NESTED_PATHS} and
- * {@link #EXPLICIT_NULL_ATTRIBUTES}. That last group is the load-bearing part:
+ * in {@code actions.json}, the wire-fixture decoding, and the call arguments the corpus is
+ * translated through — {@link #FIELD_MAP}, {@link #NESTED_PATHS}, {@link #COLLECTION_FIELDS} and
+ * {@link #EXPLICIT_NULL_ATTRIBUTES}, gathered into {@link #OPTIONS}. That last group is the load-bearing part:
  * {@link ElasticsearchTranslatorTest} pins the Query DSL this adapter emits for a corpus action and
  * {@link ElasticsearchAdversarialConformanceTest} proves the documents that same query returns, and
  * the two statements are only about the same query while both are built from these arguments.
@@ -337,14 +342,30 @@ final class Corpus {
             "tags", "mainCategory.subCategories",
             "categories", "categories.subCategories", "categories.subCategories.labels");
 
+    /**
+     * The field paths the corpus index maps as FLAT arrays of scalars — {@code tagNames} is a
+     * {@code keyword} array. The adapter cannot tell {@code size(aString)} from
+     * {@code size(tagNames)} on its own, so a {@code size()} over a field declared in neither
+     * this set nor {@link #NESTED_PATHS} is refused ({@code string-size}, {@code size-huge-*}).
+     * No corpus action sizes a flat array today; the declaration is here so the harness states
+     * the whole mapping rather than the part the corpus happens to reach.
+     */
+    static final Set<String> COLLECTION_FIELDS = Set.of("tagNames");
+
+    /** The one set of declarations both corpus suites translate through. */
+    static final ElasticsearchQueryPlanAdapter.Options OPTIONS =
+            ElasticsearchQueryPlanAdapter.Options.of(FIELD_MAP)
+                    .withNestedPaths(NESTED_PATHS)
+                    .withCollectionFields(COLLECTION_FIELDS)
+                    .withExplicitNullAttributes(EXPLICIT_NULL_ATTRIBUTES);
+
     /** Translates one corpus action exactly as the harness does. */
     static ElasticsearchQueryPlanAdapter.Result translate(String action) {
         return translate(planFromWireFixture(action));
     }
 
     static ElasticsearchQueryPlanAdapter.Result translate(PlanResourcesResponse plan) {
-        return ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
-                plan, FIELD_MAP, Map.of(), NESTED_PATHS, EXPLICIT_NULL_ATTRIBUTES);
+        return ElasticsearchQueryPlanAdapter.toElasticsearchQuery(plan, OPTIONS);
     }
 
     // -- elasticsearch-java/golden/expectations.json ---------------------------------------------
