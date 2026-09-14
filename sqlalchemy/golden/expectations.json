@@ -368,6 +368,24 @@
         "a_string_1": "one%"
       }
     },
+    "double-huge-gt": {
+      "where": {
+        "sqlite": "adversarial_resource.a_double > ?",
+        "postgresql": "adversarial_resource.a_double > %(a_double_1)s"
+      },
+      "params": {
+        "a_double_1": -1e+19
+      }
+    },
+    "double-huge-lt": {
+      "where": {
+        "sqlite": "adversarial_resource.a_double < ?",
+        "postgresql": "adversarial_resource.a_double < %(a_double_1)s"
+      },
+      "params": {
+        "a_double_1": -1e+19
+      }
+    },
     "double-negation": {
       "where": {
         "sqlite": "adversarial_resource.a_bool = 1",
@@ -631,6 +649,16 @@
         "postgresql": "false"
       },
       "params": {}
+    },
+    "in-map-keys": {
+      "where": {
+        "sqlite": "adversarial_resource.a_string IN (?, ?)",
+        "postgresql": "adversarial_resource.a_string IN (%(a_string_1_1)s, %(a_string_1_2)s)"
+      },
+      "params": {
+        "a_string_1_1": "one",
+        "a_string_1_2": "same"
+      }
     },
     "in-null-elem-hasint": {
       "where": {
@@ -1598,6 +1626,15 @@
       },
       "params": {
         "length_1": 4
+      }
+    },
+    "string-size-gt0": {
+      "where": {
+        "sqlite": "length(adversarial_resource.a_string) > ?",
+        "postgresql": "length(adversarial_resource.a_string) > %(length_1)s"
+      },
+      "params": {
+        "length_1": 0
       }
     },
     "ternary-bare": {

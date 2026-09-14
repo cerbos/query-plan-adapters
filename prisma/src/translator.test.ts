@@ -46,7 +46,7 @@ import type { ActionsFile } from "./corpus";
  * [ADR 0006](../../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md).
  *
  * **What a pinned filter buys over the harness.** The harness proves the filter returns the right
- * rows *against the 21 rows it seeds*. Two different filters can agree on all of them and
+ * rows *against the 22 rows it seeds*. Two different filters can agree on all of them and
  * disagree on the row a consumer has, so a rewrite that quietly changes the emitted SQL passes
  * there and shows up here as a diff a reviewer reads. It is also the only place a
  * `nullAttributeRepresentation` boundary, a timestamp literal, or a mapping the corpus cannot
@@ -439,6 +439,10 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
   "cs-endswith": { aString: { endsWith: "one" } },
   "cs-eq": { aString: { equals: "one" } },
   "cs-startswith": { aString: { startsWith: "one" } },
+  // A double literal beyond int64 on a double column: the wire carries -1e19 as a plain number
+  // and it is bound as one, with no narrowing through a 64-bit integer on the way.
+  "double-huge-gt": { aDouble: { gt: -10000000000000000000 } },
+  "double-huge-lt": { aDouble: { lt: -10000000000000000000 } },
   "double-negation": { NOT: { aBool: { equals: false } } },
   "double-threshold": { AND: [{ aNumber: { gte: 1.5 } }, { aNumber: { gt: 1 } }] },
   "empty-string-eq": { aString: { equals: "" } },
@@ -479,6 +483,9 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
   "id-f2f-ne": {
     NOT: { aString: { equals: { _ref: "id", _container: "AdversarialResource" } } },
   },
+  // Membership in a map literal: the planner folds it to its key list, so the filter is the one
+  // a list literal produces.
+  "in-map-keys": { aString: { in: ["one", "same"] } },
   "in-null-elem-hasint": {
     OR: [{ tags: { some: { name: "public" } } }, { tags: { some: { name: null } } }],
   },
@@ -1243,7 +1250,7 @@ describe("corpus shapes", () => {
       filters: filters.length,
       kinds: kinds.length,
       throwing: throwing.length,
-    }).toEqual({ filters: 136, kinds: 2, throwing: 61 });
+    }).toEqual({ filters: 139, kinds: 2, throwing: 64 });
   });
 });
 

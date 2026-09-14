@@ -1,3 +1,8 @@
+/*
+ * Copyright 2021-2026 Zenauth Ltd.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package dev.cerbos.queryplan.elasticsearch;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -39,6 +44,7 @@ import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -230,15 +236,23 @@ class ElasticsearchAdversarialConformanceTest {
                 .withCommand("server", "--set=storage.disk.directory=/policies")
                 .withEnv("CERBOS_NO_TELEMETRY", "1")
                 .waitingFor(Wait.forLogMessage(".*Starting gRPC server.*", 1));
-        try {
-            byte[] policy = Files.readAllBytes(conformance.resolve("policies/adversarial.yaml"));
-            cerbos.withCopyToContainer(Transferable.of(policy), "/policies/adversarial.yaml");
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
+        // The WHOLE policy directory, not the one file the corpus carries today. A second policy
+        // file — a derived-roles or exported-variables file a future action depends on — would
+        // otherwise be silently absent from the PDP, and every action reaching it would plan
+        // against a policy that never loaded.
+        List<Path> policies = policyFiles(conformance.resolve("policies"));
+        assertFalse(policies.isEmpty(), "conformance/policies/ holds no policy file");
+        for (Path policy : policies) {
+            String relative = conformance.resolve("policies").relativize(policy).toString();
+            try {
+                cerbos.withCopyToContainer(
+                        Transferable.of(Files.readAllBytes(policy)), "/policies/" + relative);
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
         }
         cerbos.start();
-        System.out.printf("==> Elasticsearch conformance PDP: %s (digest %s)%n",
-                CerbosTestImage.IMAGE, CerbosTestImage.resolvedDigest(cerbos));
+        CerbosTestImage.assertPinned(cerbos);
         client = new CerbosClientBuilder(cerbos.getHost() + ":" + cerbos.getMappedPort(3593))
                 .withPlaintext().buildBlockingClient();
 
@@ -249,6 +263,13 @@ class ElasticsearchAdversarialConformanceTest {
         createIndex();
         seedIndex();
         es.refresh(INDEX);
+    }
+
+    /** Every regular file under the policy directory, in a stable order. */
+    private static List<Path> policyFiles(Path directory) throws IOException {
+        try (Stream<Path> files = Files.walk(directory)) {
+            return files.filter(Files::isRegularFile).sorted().toList();
+        }
     }
 
     private static void classifyActions() {
@@ -283,7 +304,7 @@ class ElasticsearchAdversarialConformanceTest {
                 "adapterUnsupported.elasticsearch-java contains non-conformance actions");
         assertTrue(expected.containsAll(supportedExpected),
                 "adapterSupportedExpected.elasticsearch-java contains non-expected actions");
-        assertEquals(103, unsupported.size(),
+        assertEquals(105, unsupported.size(),
                 "Elasticsearch unsupported coverage changed without updating the ledger assertion");
         assertEquals(2, supportedExpected.size(),
                 "Elasticsearch supported-expected coverage changed without updating the ledger assertion");
@@ -327,10 +348,10 @@ class ElasticsearchAdversarialConformanceTest {
         manifest.addAll(expected);
         manifest.addAll(nullRepresentationOmittedActions);
         manifest.addAll(divergences);
-        assertEquals(86, oracleActions.size());
-        assertEquals(111, throwingActions.size());
+        assertEquals(89, oracleActions.size());
+        assertEquals(114, throwingActions.size());
         assertEquals(1, nullRepresentationOmittedActions.size());
-        assertEquals(199, classified.size());
+        assertEquals(205, classified.size());
         assertEquals(manifest, classified, "every manifest action must be classified locally");
     }
 
@@ -636,12 +657,21 @@ class ElasticsearchAdversarialConformanceTest {
                 .map(Seed::id).sorted().toList();
     }
 
+    /**
+     * The plan the PDP produces for one action. The SDK's single-action {@code plan} overload is
+     * deprecated in favour of the multi-action one; one action in the list is the same request,
+     * and the result's filter is that action's.
+     */
+    private static PlanResourcesResult plan(String action) {
+        return client.plan(
+                principal(), Resource.newInstance(seedsFile.resourceKind()), List.of(action));
+    }
+
     private static List<String> adapterFilteredIds(String action) throws Exception {
-        PlanResourcesResult plan = client.plan(
-                principal(), Resource.newInstance(seedsFile.resourceKind()), action);
+        // Translated through Corpus.OPTIONS — the SAME declarations ElasticsearchTranslatorTest
+        // pins the emitted query under — so the two suites are statements about one query.
         Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
-                plan, Corpus.FIELD_MAP, Map.of(), Corpus.NESTED_PATHS,
-                Corpus.EXPLICIT_NULL_ATTRIBUTES);
+                plan(action), Corpus.OPTIONS);
         if (result instanceof Result.AlwaysAllowed) {
             return allIds();
         }
@@ -664,12 +694,9 @@ class ElasticsearchAdversarialConformanceTest {
         // The plan is fetched OUTSIDE the assertion (a PDP failure fails the test rather than
         // passing it) and no search executes: the invariant is that an inexpressible shape
         // must throw during translation, before any query exists.
-        PlanResourcesResult plan = client.plan(
-                principal(), Resource.newInstance(seedsFile.resourceKind()), action);
+        PlanResourcesResult plan = plan(action);
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
-                plan, Corpus.FIELD_MAP, Map.of(), Corpus.NESTED_PATHS,
-                Corpus.EXPLICIT_NULL_ATTRIBUTES),
+                () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(plan, Corpus.OPTIONS),
                 "unsupported action must fail during translation: " + action);
         // The corpus pins the exact mechanism, which subsumes the old "Unknown attribute" guard:
         // an unmapped Corpus.FIELD_MAP entry (which once let six actions throw here while never
@@ -740,72 +767,76 @@ class ElasticsearchAdversarialConformanceTest {
         }
     }
 
+    /**
+     * The one {@code knownDivergences} entry, kept visible rather than skipped. The planner folds
+     * {@code has(R.attr.aOptionalString)} to {@code ALWAYS_ALLOWED}, so a caller searches
+     * unfiltered — and this is what unfiltered COSTS, measured: the search returns every document
+     * {@code check()} denies. {@code allIds() == adapterFilteredIds("p-has")} used to stand here,
+     * and it was a tautology: an always-allowed result returns {@code allIds()} by construction,
+     * so it could not fail whatever the PDP or the index held.
+     */
     @Test
     void upstreamHasFoldOverGrantTripwire() throws Exception {
-        PlanResourcesResult plan = client.plan(
-                principal(), Resource.newInstance(seedsFile.resourceKind()), "p-has");
+        assertTrue(plan("p-has").isAlwaysAllowed(),
+                "p-has should remain the documented planner divergence");
+        assertInstanceOf(Result.AlwaysAllowed.class,
+                ElasticsearchQueryPlanAdapter.toElasticsearchQuery(plan("p-has"), Corpus.OPTIONS));
+
         List<String> oracle = oracleAllowedIds("p-has");
-        assertTrue(plan.isAlwaysAllowed(), "p-has should remain the documented planner divergence");
         // Both halves: an empty oracle is a silently broken PDP or policy load, which the
         // non-total assertion alone would pass.
         assertFalse(oracle.isEmpty(), "p-has check() oracle must still allow the seeds holding the attr");
         assertTrue(oracle.size() < seeds.size(), "p-has check() oracle must still deny missing attrs");
         assertTrue(oracle.contains("a1"), "p-has: a1 holds aOptionalString");
-        assertEquals(allIds(), adapterFilteredIds("p-has"));
+
+        // The over-grant itself. An ALWAYS_ALLOWED plan means the caller runs its search with no
+        // authorization clause, which is `match_all` here; every id the oracle denies comes back.
+        Set<String> denied = new TreeSet<>(allIds());
+        denied.removeAll(oracle);
+        assertFalse(denied.isEmpty(), "p-has: check() must deny at least one seed, or there is"
+                + " no over-grant for this tripwire to see");
+        List<String> unfiltered = es.ids(searchPath(), Map.of("query", Map.of("match_all", Map.of())));
+        assertTrue(unfiltered.containsAll(denied), "the unfiltered search must return every"
+                + " document the PDP denies for p-has; denied " + denied + ", got " + unfiltered);
+        assertEquals(allIds(), unfiltered);
     }
 
     /**
-     * A representative sample of the actions this adapter ORACLE-COMPARES, one per hostile group
-     * it can express. Asserted against {@code oracleActions} so moving one into
-     * {@code adapterUnsupported} fails here rather than silently going inert
-     * (cerbos/query-plan-adapters#324).
+     * Oracle-compared actions whose oracle is degenerate BY CONSTRUCTION, each with the reason.
+     *
+     * <p>The guard below sweeps EVERY oracle-compared action, so this is the only way out of it,
+     * and each entry is asserted to be degenerate as claimed: an entry whose oracle stopped being
+     * trivial fails, so the list cannot rot into a blanket exemption. Everything else the
+     * corpus's own degeneracy exclusions name ({@code conformance/README.md}, "The degeneracy
+     * guard") — {@code w1-size-zero-chain}, {@code w1-not-size-chain}, {@code w1-size-frac-chain},
+     * the string casts, {@code filter-as-conjunct}, {@code null-eq-missing} — is refused on this
+     * adapter and so never reaches the oracle comparison at all.
      */
-    private static final List<String> DEGENERACY_GUARD_ACTIONS = List.of(
-            "vf-le", "like-percent", "pv-exists", "pv-all", "null-ne",
-            // The chained relation (#309): the shapes Elasticsearch's nested queries express.
-            "w1-exists-chain",
-            // The real to-one join (#375). Indexed as plain objects rather than `nested`, so an
-            // absent level is simply a missing field — already the CEL missing-attribute case,
-            // which is why all fifteen translate here. One per hazard.
-            "rel-not-bool-hop", "rel-ne-null-hop", "rel-bool-hop2",
-            "rel-hop-and-root", "rel-hop2-or-exists",
-            // Case sensitivity in STRING MATCHING, a different mechanism from cs-eq.
-            "cs-contains",
-            // The primary key as a filterable attribute (#376). Exactly one of the six translates:
-            // the key against a literal, which is an ordinary term query once the corpus id is
-            // indexed as a field rather than left as `_id` metadata. Its five siblings need a
-            // second field or a computed operand, and are liveness probes below.
-            "id-eq-const",
-            // Root position and bare operand forms (#388): one per hazard — the negation over a
-            // bare ordering (every other negated ordering in the corpus wraps a size() or a
-            // ternary), the bare boolean at the ROOT of the condition, and the collection
-            // subquery disjoined with a scalar predicate rather than conjoined with one.
-            "not-lt", "root-bare-bool", "or-eq-exists",
-            // Hazard classes the corpus missed (#387): the De Morgan branch over a conjunction;
-            // size() on the RIGHT of an ordering, which the adapter used to refuse as an
-            // unsupported threshold because it scanned for the size operand without mirroring the
-            // operator; the value-first hasIntersection; and the BELOW-cliff unroll of a principal
-            // collection, the shape a principal with three teams produces.
-            "not-and", "vf-size", "vf-hasint", "pv-exists-unrolled",
-            // The hierarchy relations (#332), which lower to term-level queries over the field's
-            // whole stored path. Every hier-* action it translates is listed rather than a few, because
-            // three lowerings and the two path spellings cross: `prefix` on the constant plus its
-            // delimiter, `terms` over the constant's proper prefixes, and the `bool.should` union
-            // of both plus a `term` — each reachable from either operand order, and each again
-            // under a custom delimiter over path segments carrying SQL metacharacters. A prefix
-            // query is term-level, so those segments are matched literally here and the escaping
-            // the SQL adapters need has no analogue; the guard is what proves the seeds still
-            // discriminate that rather than agreeing vacuously.
-            "hier-ancestor-ff", "hier-ancestor-cf",
-            "hier-descendent-ff", "hier-descendent-cf",
-            "hier-overlaps-ff", "hier-overlaps-cf",
-            "hier-meta-like", "hier-meta-in", "hier-overlaps-meta", "hier-bracket");
+    private static final Map<String, String> DEGENERATE_BY_CONSTRUCTION = Map.of(
+            // `R.attr.aString in []`: nothing is a member of the empty list, so the planner folds
+            // the plan to ALWAYS_DENIED and check() denies every seed. The comparison is still
+            // made — an adapter that emitted `terms: []` and let Elasticsearch match nothing would
+            // agree by accident — which is why it stays oracle-compared rather than excluded.
+            "in-empty", "statically false membership: the plan is ALWAYS_DENIED and the oracle"
+                    + " is empty",
+            // `R.attr.aDouble < -1e19`: no seed lies below the literal, so check() denies every
+            // seed. The shape exists to catch a translator that narrows the literal to Long.MIN,
+            // which would return g1 (-9.5e18); the mirrored `double-huge-gt` carries the
+            // non-empty oracle, so this half is compared for liveness only.
+            "double-huge-lt", "no seed lies below -1e19: the oracle is empty, and the mirrored"
+                    + " double-huge-gt is the compared half");
 
     /**
      * Shapes this adapter refuses to translate: they have no oracle comparison to guard, and stay
      * here as PDP/policy liveness probes for a group the list above cannot cover.
      */
     private static final List<String> DEGENERACY_LIVENESS_PROBES = List.of(
+            // Three shapes the audit added the corpus for, each refused by name here and compared
+            // on the adapters that can express it: size() over a string, a top-level regex
+            // alternation, and an empty hierarchy delimiter.
+            "string-size-gt0",
+            "matches-alt",
+            "hier-empty-delim",
             // Elasticsearch does not index an empty nested array, so a positive all() cannot tell
             // an empty collection (true) from a missing one (CEL error).
             "all-on-empty",
@@ -850,21 +881,49 @@ class ElasticsearchAdversarialConformanceTest {
             // makes that split a statement rather than an omission.
             "hier-list-id");
 
+    /**
+     * Guard the guard, over the WHOLE oracle set. The comparison in
+     * {@link #adapterMatchesCheckOracle} passes vacuously when the oracle is trivial — the PDP
+     * denying every seed, or allowing every seed, whatever the adapter emitted — so every
+     * oracle-compared action must produce a non-empty, non-total oracle, minus the entries
+     * {@link #DEGENERATE_BY_CONSTRUCTION} accounts for. A representative sample used to stand
+     * here; a sample leaves the actions it does not name free to go degenerate unnoticed.
+     */
     @Test
-    void oracleIsNotDegenerate() {
-        // Guard the guard: each of these actions must produce a non-empty, non-total oracle set,
-        // otherwise the differential comparison could pass vacuously (e.g. PDP denying all).
+    void everyOracleComparedActionHasANonDegenerateOracle() {
         Set<String> compared = Set.copyOf(oracleActions);
-        for (String action : DEGENERACY_GUARD_ACTIONS) {
+        List<String> degenerate = new ArrayList<>();
+        for (String action : oracleActions) {
+            if (DEGENERATE_BY_CONSTRUCTION.containsKey(action)) {
+                continue;
+            }
+            List<String> ids = oracleAllowedIds(action);
+            if (ids.isEmpty() || ids.size() >= seeds.size()) {
+                degenerate.add(action + ": " + ids);
+            }
+        }
+        assertEquals(List.of(), degenerate,
+                "these oracle-compared actions have a degenerate oracle: the differential cannot"
+                        + " fail for them, so either the corpus lost its discriminating seed or"
+                        + " the action belongs in DEGENERATE_BY_CONSTRUCTION with a reason");
+
+        // The allowlist is asserted in both directions: each entry is oracle-compared (an entry
+        // this adapter refuses exempts nothing), and each is degenerate as it claims (an entry
+        // whose oracle became discriminating is a guard entry wearing an exemption).
+        for (Map.Entry<String, String> entry : DEGENERATE_BY_CONSTRUCTION.entrySet()) {
+            String action = entry.getKey();
             assertTrue(compared.contains(action),
-                    "'" + action + "' guards nothing: this adapter does not oracle-compare it");
-            assertNonDegenerateOracle(action);
+                    "'" + action + "' exempts nothing: this adapter does not oracle-compare it");
+            List<String> ids = oracleAllowedIds(action);
+            assertTrue(ids.isEmpty() || ids.size() >= seeds.size(),
+                    "'" + action + "' is allowlisted as degenerate (" + entry.getValue()
+                            + ") but its oracle discriminates: " + ids);
         }
         // Asserting the complement keeps the split honest — an action this adapter gains support
-        // for must move up into the guard proper.
+        // for must move out of the liveness probes and into the total sweep above.
         for (String action : DEGENERACY_LIVENESS_PROBES) {
             assertFalse(compared.contains(action),
-                    "'" + action + "' is now oracle-compared: move it into the guard proper");
+                    "'" + action + "' is now oracle-compared: remove it from the liveness probes");
             assertNonDegenerateOracle(action);
         }
     }

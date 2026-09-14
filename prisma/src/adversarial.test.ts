@@ -424,6 +424,12 @@ const DEGENERACY_GUARD_ACTIONS = [
   "not-and",
   "vf-hasint",
   "pv-exists-unrolled",
+  // The shapes an Elasticsearch audit found unguarded: size(string) as an emptiness check,
+  // membership in a map literal (the planner folds it to its key list), and a double literal
+  // beyond int64 on a double field. double-huge-lt has an EMPTY oracle by construction and sits
+  // in neither list; its sibling below carries the group.
+  "in-map-keys",
+  "double-huge-gt",
 ] as const;
 
 /**
@@ -432,6 +438,12 @@ const DEGENERACY_GUARD_ACTIONS = [
  * cerbos/query-plan-adapters#324.
  */
 const DEGENERACY_LIVENESS_PROBES = [
+  // size() is lowered only over a named relation, so the string emptiness check throws; an
+  // empty hierarchy delimiter is refused before the prefix filter is built; and a regex with a
+  // top-level alternation is a matches(), which this adapter never translates.
+  "string-size-gt0",
+  "hier-empty-delim",
+  "matches-alt",
   // Prisma emits LIKE with no ESCAPE clause, so a % needle throws — and so does a backslash one,
   // which is the default escape character on PostgreSQL and MySQL and literal on SQLite
   // (cerbos/query-plan-adapters#320).
@@ -448,7 +460,7 @@ const DEGENERACY_LIVENESS_PROBES = [
   // convex, which promotes it in adapterSupportedExpected.
   "cast-int-double",
   // string() has no Prisma filter form (#376). cast-string-bool carries the group's probe rather
-  // than cast-string-double because its oracle is 14 of 21 rather than a single row, so a PDP or
+  // than cast-string-double because its oracle is 14 of 22 rather than a single row, so a PDP or
   // policy that went quiet fails the non-total half of the assertion too.
   "cast-string-bool",
   // Concatenation against the key where BOTH operands carry a column — the arithmetic solver
@@ -940,10 +952,10 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(199);
+    expect(MANIFEST_ACTIONS.size).toBe(205);
     // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
     // gained or lost has to be re-triaged here rather than joining the suite unnoticed.
-    expect(THROWING_ACTIONS).toHaveLength(61);
+    expect(THROWING_ACTIONS).toHaveLength(64);
     expect(misclassified).toEqual([]);
     expect(
       [...PRISMA_SUPPORTED_EXPECTED].filter(

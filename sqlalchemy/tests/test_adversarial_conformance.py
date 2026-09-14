@@ -295,12 +295,25 @@ DEGENERACY_GUARD_ACTIONS = (
     "not-contains",
     "vf-hasint",
     "pv-exists-unrolled",
+    # The shapes an Elasticsearch audit found unguarded: size(string) as an
+    # emptiness check, membership in a map literal (the planner folds it to its
+    # key list), and a double literal beyond int64 on a double field.
+    # double-huge-lt has an EMPTY oracle by construction and sits in neither
+    # list; its sibling carries the group.
+    "string-size-gt0",
+    "in-map-keys",
+    "double-huge-gt",
 )
 
 # Shapes this adapter refuses to translate: they have no oracle comparison to
 # guard, and stay here as PDP/policy liveness probes for a group the list above
 # cannot cover. See cerbos/query-plan-adapters#324.
 DEGENERACY_LIVENESS_PROBES = (
+    # An empty hierarchy delimiter is refused before the prefix LIKE is built,
+    # and a regex with a top-level alternation is a matches(), never
+    # translated here.
+    "hier-empty-delim",
+    "matches-alt",
     # json.loads renders the wire's -0 as the integer 0, so the sign of a zero
     # denominator is gone before the adapter sees it.
     "cr-div-neg-zero",
@@ -691,11 +704,11 @@ class TestAdversarialConformance:
 
         # Deliberate tripwires: a corpus edit must bump these in the same
         # change, so a new hostile action cannot join (or vanish) silently.
-        assert len(MANIFEST_ACTIONS) == 199
-        assert len(SEEDS) == 21
+        assert len(MANIFEST_ACTIONS) == 205
+        assert len(SEEDS) == 22
         # Each of these carries a pinned message, so a shape gained or lost has
         # to be re-triaged here rather than joining the throw suite unnoticed.
-        assert len(THROWING_ACTIONS) == 19
+        assert len(THROWING_ACTIONS) == 21
         assert misclassified == []
         assert SQLALCHEMY_SUPPORTED_EXPECTED <= {
             entry["action"] for entry in MANIFEST.expected_unsupported

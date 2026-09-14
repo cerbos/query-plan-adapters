@@ -16,10 +16,42 @@ defaults:
     working-directory: elasticsearch-java
 
 jobs:
+  # Every suite runs in this one job — the translator unit test, which needs nothing, and the two
+  # container-backed suites, which start a pinned PDP and a pinned Elasticsearch through
+  # Testcontainers. There is no separate adversarial job (CLAUDE.md, "CI").
   test:
     strategy:
+      # The Elasticsearch dimension only discriminates the two container-backed suites, and a
+      # failed forward-compatibility leg is a finding of its own; the default fail-fast would
+      # cancel the baseline leg mid-corpus and report it as neither a pass nor a failure.
+      fail-fast: false
       matrix:
         java-version: ["17", "21"]
+        # Pinned by tag AND digest, and the references themselves live in
+        # elasticsearch-java/ELASTICSEARCH_IMAGE and elasticsearch-java/ELASTICSEARCH_NEXT_IMAGE,
+        # so this dimension is a list of FILENAMES and no image is restated here.
+        # ElasticsearchTestImage and example/run.sh read ELASTICSEARCH_IMAGE too, and a matrix
+        # entry that drifted from it would prove the adapter against a different server than
+        # anyone reproducing a failure locally. conformance/scripts/validate-corpus.sh holds every
+        # reference to one digest per tag, but nothing holds two tags equal — the same argument as
+        # mongoose/MONGO_IMAGE and MONGO_NEXT_IMAGE, which is the precedent this follows.
+        #
+        # ELASTICSEARCH_IMAGE is the baseline: the server the adapter is developed against, the
+        # major the example's client matches, and the only one the example runs.
+        # ELASTICSEARCH_NEXT_IMAGE is the forward-compatibility leg, deliberately the next major
+        # and read by nothing else — test-only until example/ moves its client to that major, which
+        # example/run.sh's client/server major check would otherwise refuse. Both names end in
+        # `_IMAGE` because that suffix is what validate-corpus.sh's `--include='*_IMAGE'` scans; an
+        # `ELASTICSEARCH_IMAGE_NEXT` would be a pin nothing checks.
+        elasticsearch-image-file:
+          - ELASTICSEARCH_IMAGE
+          - ELASTICSEARCH_NEXT_IMAGE
+        # The server dimension discriminates the container-backed suites, not the JDK: off the
+        # baseline JDK the second server leg would replay byte-identical translator work against a
+        # store the baseline leg already covers. Excluding it keeps the coverage and drops a runner.
+        exclude:
+          - elasticsearch-image-file: ELASTICSEARCH_NEXT_IMAGE
+            java-version: "21"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -35,9 +67,21 @@ jobs:
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+        with:
+          # Pinned rather than taking the runner's floating preinstall, and to the same version
+          # the `example` job below pins and the adapter's README documents building with — so a
+          # Gradle major landing on the runner image cannot turn this job red for a reason that is
+          # not the change under review, and a failure here reproduces locally on that version.
+          gradle-version: "8.12"
 
-      - name: Build and test
+      # ELASTICSEARCH_IMAGE_FILE is a filename under elasticsearch-java/, which build.gradle.kts
+      # forwards to the suites as the `elasticsearch.test.image.file` system property and declares
+      # as a task input — so the two legs run the same build against different pinned servers, and
+      # neither can be reported UP-TO-DATE on the other's result.
+      - name: Build and test (${{ matrix.elasticsearch-image-file }})
         run: gradle build --no-daemon
+        env:
+          ELASTICSEARCH_IMAGE_FILE: ${{ matrix.elasticsearch-image-file }}
 
   # The example application, against the shared demo domain in demo/. It proves what the job above
   # structurally cannot, and for this adapter the two halves are unusually separable:
@@ -100,10 +144,10 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
         with:
-          # Pinned rather than taking the runner's floating preinstall, which is what the `test` job
-          # above does: this job's assertions are about resolution and publication, the two things a
-          # Gradle major is most likely to change the behaviour of. The version matches the Gradle
-          # container image the adapter's README documents building in.
+          # Pinned rather than taking the runner's floating preinstall, and to the same version the
+          # `test` job pins: this job's assertions are about resolution and publication, the two
+          # things a Gradle major is most likely to change the behaviour of. The version matches the
+          # Gradle container image the adapter's README documents building in.
           gradle-version: "8.12"
 
       # The PDP is a container the runner starts from demo/docker-compose.yml, pinned to

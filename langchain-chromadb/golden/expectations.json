@@ -10,6 +10,22 @@
         }
       }
     },
+    "double-huge-gt": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "aDouble": {
+          "$gt": -10000000000000000000
+        }
+      }
+    },
+    "double-huge-lt": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "aDouble": {
+          "$lt": -10000000000000000000
+        }
+      }
+    },
     "double-negation": {
       "kind": "KIND_CONDITIONAL",
       "filters": {
@@ -46,6 +62,17 @@
     "in-empty": {
       "note": "The plan kind, not a filter: `x in []` is false for every document, so the planner folds it to ALWAYS_DENIED and the caller short-circuits without querying Chroma at all. There is no `filters` key to emit.",
       "kind": "KIND_ALWAYS_DENIED"
+    },
+    "in-map-keys": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "aString": {
+          "$in": [
+            "one",
+            "same"
+          ]
+        }
+      }
     },
     "in-single": {
       "note": "The planner folds a single-element `in` to an equality before the adapter ever sees it, so this is `$eq` rather than a one-element `$in`. Pinned because it is a shape a reader would otherwise expect to be `$in` and reach for the wrong assertion.",

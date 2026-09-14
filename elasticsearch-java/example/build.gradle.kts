@@ -53,12 +53,12 @@ dependencies {
     // cerbos-sdk-java at RUNTIME scope, which is correct (a consumer that never names an SDK type
     // should not compile against one) and is why this line is not redundant. It is also the exact
     // shape of coupling a composite build papers over.
-    implementation("dev.cerbos:cerbos-sdk-java:0.19.0")
+    implementation("dev.cerbos:cerbos-sdk-java:0.20.1")
 
     // The Elasticsearch Java client — the "ORM" for this adapter, and the thing the adapter's
     // README tells a consumer to hand the emitted map to. Matched to the server major this example
     // runs (../ELASTICSEARCH_IMAGE); the adapter supports Elasticsearch 8.x.
-    implementation("co.elastic.clients:elasticsearch-java:8.15.3")
+    implementation("co.elastic.clients:elasticsearch-java:8.19.21")
 
     // Two jobs, both real. `JacksonJsonpMapper` is how the client is given a jakarta.json
     // implementation without pulling in Parsson, and the same ObjectMapper serialises the adapter's

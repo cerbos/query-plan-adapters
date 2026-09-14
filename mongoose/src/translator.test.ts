@@ -43,7 +43,7 @@ import {
  * [ADR 0006](../../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md).
  *
  * **What a pinned filter buys over the harness.** The harness proves the filter returns the right
- * documents *against the 21 it seeds*. Two different filters can agree on all of them and disagree
+ * documents *against the 22 it seeds*. Two different filters can agree on all of them and disagree
  * on the document a consumer has, so a rewrite that quietly changes the emitted query passes there
  * and shows up here as a diff a reviewer reads. It is also the only place a
  * `nullAttributeRepresentation` boundary, a timestamp literal, or a caller-supplied `valueParser`
@@ -515,6 +515,14 @@ const EXPECTED_FILTERS: Record<string, MongooseFilter> = {
       $regex: "^one",
     },
   },
+  // A double literal beyond int64 on a double field: the wire carries -1e19 as a plain number
+  // and it is bound as one, with no narrowing through a 64-bit integer on the way.
+  "double-huge-gt": {
+    $and: [{ aDouble: { $ne: null } }, { aDouble: { $gt: -10000000000000000000 } }],
+  },
+  "double-huge-lt": {
+    $and: [{ aDouble: { $ne: null } }, { aDouble: { $lt: -10000000000000000000 } }],
+  },
   "double-negation": {
     $nor: [
       {
@@ -871,6 +879,13 @@ const EXPECTED_FILTERS: Record<string, MongooseFilter> = {
   "id-f2f-ne": {
     $expr: {
       $ne: ["$aString", "$resourceId"],
+    },
+  },
+  // Membership in a map literal: the planner folds it to its key list, so the filter is the one
+  // a list literal produces.
+  "in-map-keys": {
+    aString: {
+      $in: ["one", "same"],
     },
   },
   "in-null-elem-hasint": {
@@ -2400,6 +2415,28 @@ const EXPECTED_FILTERS: Record<string, MongooseFilter> = {
       ],
     },
   },
+  // size(string) as an emptiness check: the same $strLenCP branch as string-size, so a string
+  // field is never mistaken for an array whose emptiness a `$size` fast path would answer.
+  "string-size-gt0": {
+    $expr: {
+      $gt: [
+        {
+          $cond: [
+            {
+              $isArray: "$aString",
+            },
+            {
+              $size: "$aString",
+            },
+            {
+              $strLenCP: "$aString",
+            },
+          ],
+        },
+        0,
+      ],
+    },
+  },
   "ternary-bare": {
     $expr: {
       $cond: {
@@ -3570,7 +3607,7 @@ describe("corpus shapes", () => {
       filters: filters.length,
       kinds: kinds.length,
       throwing: throwing.length,
-    }).toEqual({ filters: 147, kinds: 2, throwing: 50 });
+    }).toEqual({ filters: 151, kinds: 2, throwing: 52 });
   });
 
   // The mapping-hazard contract in README.md rests on one structural fact: this adapter builds no

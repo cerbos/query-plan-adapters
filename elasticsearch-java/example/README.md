@@ -31,7 +31,7 @@ scope:
 ```xml
 <dependency>
   <groupId>dev.cerbos</groupId><artifactId>cerbos-sdk-java</artifactId>
-  <version>0.19.0</version><scope>runtime</scope>
+  <version>0.20.1</version><scope>runtime</scope>
 </dependency>
 <dependency>
   <groupId>com.google.protobuf</groupId><artifactId>protobuf-java</artifactId>
@@ -79,7 +79,7 @@ build produces a green build and a passing resolution, so nothing except the run
 The protobuf pin's usual justification is that gRPC drags an older `protobuf-java` in transitively
 and an older runtime throws `RuntimeVersion$ProtobufRuntimeVersionException` at first message decode.
 The transitive graph does contain them — the failure above lists `grpc-protobuf` asking for 3.25.8,
-`protovalidate` for 4.34.1, `dev.cel` for 4.33.5 — but at **cerbos-sdk-java 0.19.0 the SDK's own POM
+`protovalidate` for 4.34.1, `dev.cel` for 4.33.5 — but at **cerbos-sdk-java 0.20.1 (as at 0.19.0, where this was first measured) the SDK's own POM
 already requires `protobuf-java:4.35.1` at runtime scope**, and that requirement is what wins. So for
 a consumer who declares the SDK — as this example does, and as anyone calling `cerbos.plan(...)` must
 — the adapter's own declaration changes nothing today. It is a floor against the SDK relaxing that
@@ -115,8 +115,9 @@ holding the two together, which is precisely the hazard that file exists to remo
 It compares **majors**, not exact versions. A major mismatch is the real hazard — an 8.x client
 refuses a 9.x server outright, and the adapter's README declares Elasticsearch 8.x — while within a
 major Elastic supports a client at or below the server's minor. Requiring exact equality would turn
-every client bump red until someone bumped the image too, and `renovate.json` extends
-`docker:disable`, so image bumps are made by hand: that is a gate failing for a reason that is not the
+every client bump red until the image bump landed too, and the two arrive as separate Renovate PRs
+(`renovate.json` manages [`../ELASTICSEARCH_IMAGE`](../ELASTICSEARCH_IMAGE) through a regex custom
+manager, apart from the client literal here): that is a gate failing for a reason that is not the
 bump, the same state the lockfile argument below rejects.
 
 ## The example stays out of the published artifact

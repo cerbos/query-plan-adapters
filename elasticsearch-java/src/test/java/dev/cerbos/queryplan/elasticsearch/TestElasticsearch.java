@@ -1,3 +1,8 @@
+/*
+ * Copyright 2021-2026 Zenauth Ltd.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package dev.cerbos.queryplan.elasticsearch;
 
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -70,12 +75,29 @@ final class TestElasticsearch {
      *
      * <p>{@code searchPath} is the whole path rather than an index name, because the harness has to
      * raise {@code size} past Elasticsearch's default page of 10 to see all its seeds.
+     *
+     * <p>A partial response is raised, not returned. Elasticsearch answers HTTP 200 with whatever
+     * hits it has when a search times out ({@code timed_out: true}) or a shard fails
+     * ({@code _shards.failed > 0}), and a truncated hit list is indistinguishable from a filter
+     * that matched fewer documents — on the harness side that reads as an adapter under-grant,
+     * and on the oracle side of a {@code must_not} as an over-grant. Neither is a fact about the
+     * adapter, so neither is allowed to reach an assertion.
      */
     @SuppressWarnings("unchecked")
     List<Map<String, Object>> hits(String searchPath, Map<String, Object> body) throws Exception {
         Map<String, Object> response = MAPPER.readValue(
                 request("POST", searchPath, MAPPER.writeValueAsString(body)),
                 new TypeReference<>() {});
+        if (Boolean.TRUE.equals(response.get("timed_out"))) {
+            throw new IllegalStateException(
+                    "Elasticsearch search timed out and returned partial hits: " + response);
+        }
+        Map<String, Object> shards = (Map<String, Object>) response.get("_shards");
+        int failed = shards == null ? 0 : ((Number) shards.getOrDefault("failed", 0)).intValue();
+        if (failed > 0) {
+            throw new IllegalStateException("Elasticsearch search failed on " + failed
+                    + " shard(s) and returned partial hits: " + response);
+        }
         return (List<Map<String, Object>>) ((Map<String, Object>) response.get("hits")).get("hits");
     }
 

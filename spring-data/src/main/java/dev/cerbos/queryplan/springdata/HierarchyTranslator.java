@@ -175,6 +175,18 @@ final class HierarchyTranslator {
                 throw new IllegalArgumentException("hierarchy delimiter must be a value");
             }
             String delimiter = String.valueOf(PlanValues.protoValueToJava(delimOp.getValue()));
+            if (delimiter.isEmpty()) {
+                // Cerbos splits a path on an empty delimiter into one segment per CHARACTER, so
+                // the relation becomes a strict string-prefix test. The descendant lowering
+                // here is `LIKE prefix + delimiter + '%'`, which with an empty delimiter
+                // matches the path ITSELF (never its own descendant) as well as every string
+                // extension of it — the corpus's hier-empty-delim over-granted a2 that way —
+                // so the shape is refused rather than emitted with the wrong boundary.
+                throw new IllegalArgumentException(
+                        "hierarchy delimiter must be a non-empty string: an empty delimiter splits "
+                                + "the path per character, and the prefix LIKE this adapter emits "
+                                + "would also match the path itself");
+            }
             if (strOp.getNodeCase() == Operand.NodeCase.VALUE) {
                 String raw = String.valueOf(PlanValues.protoValueToJava(strOp.getValue()));
                 return new Hierarchy.Constant(splitLiteral(raw, delimiter), delimiter);
