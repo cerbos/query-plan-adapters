@@ -16,10 +16,36 @@ defaults:
     working-directory: spring-data
 
 jobs:
+  # Every suite runs in this one job — the translator unit test, which needs nothing, the two
+  # H2-backed suites, and the adversarial suite on H2, which starts a pinned PDP through
+  # Testcontainers. There is no separate adversarial job (CLAUDE.md, "CI").
   test:
     strategy:
+      # The ORM dimension only discriminates the renderer, and a failed forward-compatibility leg
+      # is a finding of its own; the default fail-fast would cancel the baseline leg mid-corpus and
+      # report it as neither a pass nor a failure.
+      fail-fast: false
       matrix:
         java-version: ["17", "21"]
+        # The ORM version set build.gradle.kts resolves — both sets are declared there, once, and
+        # this dimension is a list of NAMES, so no version is restated here.
+        #
+        # `baseline` is Hibernate 6.6 / Spring Data JPA 3.5: the line the golden asset was rendered
+        # under, and the line example/ runs on Spring Boot 3.5. `next` is the next major of each
+        # (Hibernate 7 / Spring Data JPA 4, the pair Spring Boot 4 manages) — the forward-
+        # compatibility leg, test-only until example/ moves to Boot 4, and the spring-data analogue
+        # of elasticsearch-java's ELASTICSEARCH_NEXT_IMAGE. It exists because `hibernate-core` is
+        # `compileOnly`: a consumer brings their own renderer, and before this leg a consumer on
+        # Hibernate 7 was proved nowhere. On it the translator suite asserts a pinned divergence
+        # list rather than the asset's bytes (SpringDataTranslatorTest,
+        # `theAssetDeclaresTheRendererThatWroteIt`).
+        orm: [baseline, next]
+        # The ORM dimension discriminates the renderer, not the JDK: off the baseline JDK the
+        # second ORM leg would replay byte-identical translator work against a renderer the
+        # baseline JDK leg already covers. Excluding it keeps the coverage and drops a runner.
+        exclude:
+          - orm: next
+            java-version: "21"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -35,9 +61,21 @@ jobs:
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+        with:
+          # Pinned rather than taking the runner's floating preinstall, and to the same version
+          # the `example` job below pins and the adapter's README documents building with — so a
+          # Gradle major landing on the runner image cannot turn this job red for a reason that is
+          # not the change under review, and a failure here reproduces locally on that version.
+          gradle-version: "8.12"
 
-      - name: Build and test
+      # ADAPTER_TEST_ORM names a version set in build.gradle.kts, which forwards it to the suites as
+      # the `adapter.test.orm` system property and declares it as a task input — so the two legs run
+      # the same build against different renderers, and neither can be reported UP-TO-DATE on the
+      # other's result.
+      - name: Build and test (${{ matrix.orm }})
         run: gradle build --no-daemon
+        env:
+          ADAPTER_TEST_ORM: ${{ matrix.orm }}
 
   # Runs the full suite with AdversarialConformanceTest (the differential check()-oracle)
   # backed by a real database via Testcontainers instead of in-memory H2. Guards against
@@ -54,6 +92,10 @@ jobs:
   # useServerPrepStmts=true (typed binds — the mode customers may opt into).
   test-database:
     strategy:
+      # Each store leg is a finding of its own — a MySQL collation over-grant says nothing about
+      # PostgreSQL — and the default fail-fast would cancel the other legs mid-corpus and report
+      # them as neither a pass nor a failure.
+      fail-fast: false
       matrix:
         include:
           - database: postgres
@@ -78,6 +120,11 @@ jobs:
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+        with:
+          # Pinned for the same reason as in `test`: the runner's preinstall floats, and a Gradle
+          # major landing there must not turn a store leg red for a reason that is not the change
+          # under review. Same version the README documents building with.
+          gradle-version: "8.12"
 
       - name: Build and test (${{ matrix.database }})
         run: gradle build --no-daemon

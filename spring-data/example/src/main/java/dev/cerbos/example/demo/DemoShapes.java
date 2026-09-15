@@ -190,7 +190,7 @@ class DemoShapes {
         return cerbos.plan(
                 Principal.newInstance(principal.id(), principal.roles().toArray(String[]::new)),
                 Resource.newInstance(RESOURCE_KIND),
-                action);
+                List.of(action));
     }
 
     private Specification<DemoDocument> authorization(PlanResourcesResult plan) {

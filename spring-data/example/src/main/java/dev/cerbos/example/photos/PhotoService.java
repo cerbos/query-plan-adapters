@@ -89,7 +89,7 @@ public class PhotoService {
         PlanResourcesResult plan = cerbos.plan(
                 context.toPrincipal(),
                 Resource.newInstance("photo"),
-                action);
+                List.of(action));
 
         Specification<Photo> allowed = SpringDataQueryPlanAdapter.toSpecification(plan, PHOTO_ATTRS);
         Specification<Photo> tenantBoundary = (root, query, cb) ->

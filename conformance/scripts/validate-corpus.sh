@@ -339,6 +339,10 @@ fi
 # to route around: a repository nothing scans is a repository nothing keeps pinned. ghcr.io/cerbos/
 # cerbos is deliberately absent — the scan above already holds it to a stricter rule (the exact
 # version and digest the corpus declares), and listing it twice would report each drift twice.
+# `gradle` is absent too, since spring-data's Dockerfile — the one file that pinned it — went the
+# way of elasticsearch-java's (cerbos/query-plan-adapters#454): nothing built either, both Java
+# adapters run their suites in the Gradle image directly, and an entry nothing references trips
+# the vacuity guard below. The workflows pin Gradle by version, not by image.
 IMAGE_REPOSITORIES=(
   "postgres"
   "mysql"
@@ -346,7 +350,6 @@ IMAGE_REPOSITORIES=(
   "chromadb/chroma"
   "docker.elastic.co/elasticsearch/elasticsearch"
   "ghcr.io/get-convex/convex-backend"
-  "gradle"
 )
 
 image_drift=0

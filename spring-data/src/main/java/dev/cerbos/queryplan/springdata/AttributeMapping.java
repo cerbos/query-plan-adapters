@@ -39,8 +39,8 @@ import java.util.Objects;
  *
  * <p>Plan variables that are missing from the mapper, or whose mapping cannot be resolved
  * against the entity model (e.g. a {@code Relation} used where a scalar path is required),
- * cause translation to throw {@link IllegalArgumentException} — the adapter fails closed
- * rather than guessing a column.
+ * cause translation to throw {@link UnmappedAttributeException} (an
+ * {@link IllegalArgumentException}) — the adapter fails closed rather than guessing a column.
  */
 public sealed interface AttributeMapping permits AttributeMapping.Field, AttributeMapping.Relation {
 

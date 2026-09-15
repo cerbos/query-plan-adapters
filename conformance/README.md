@@ -423,6 +423,36 @@ carries any more is a stale entry, not a licence.
     `range` expects a scalar;
   - `anEmptyHierarchyDelimiterIsRefused` — `hierarchy(R.attr.scope, "")`.
 
+**spring-data** (`SpringDataQueryPlanAdapterTest`; the banners in the class are the source, and
+every kind-3 test opens with *Corpus gap.*):
+
+- **Kind 1 — a branch CEL itself cannot reach.** Permanent. An operator CEL does not have
+  (`isSet`), a comparison the type checker rejects (a fractional `size()` equality, a timestamp
+  against a number), an operand shape the planner never emits (a wrong arity, a bare string where
+  `timestamp()` always wraps one, a leaf with a third operand), and constant-only sub-expressions
+  the planner folds before the wire — for which the proof is the corpus's own fixtures rather than
+  the adapter's code: `p-startswith-concat` arrives with `"100" + "%"` already folded and `in-empty`
+  arrives as `ALWAYS_DENIED`.
+- **Kind 2 — a caller-supplied argument the corpus structurally cannot vary.** Permanent. An
+  `OperatorFunction` override on every scalar-leaf path, the macro-depth bound (the `Options` value
+  and the system property it falls back to), the call-level and per-attribute
+  `NullAttributeRepresentation`, a mapping the corpus does not use (an `OffsetDateTime` or
+  `LocalDateTime` column, an unmapped reference), the bulk-delete guard, the null-predicate contract
+  with Spring Data, the defensive copies, and — in `RefusalTypesTest` and `OptionsTest` — the three
+  typed refusals and the immutability of `Options`.
+- **Kind 3 — a corpus gap wearing a unit test.** Bridges tracked by
+  [#414](https://github.com/cerbos/query-plan-adapters/issues/414), grouped as the banners group
+  them: `size(collection)` against an arbitrary threshold and the fractional and out-of-int-range
+  thresholds; `except(list, list)` in every arrival shape (the lambda-form assertion that once sat
+  beside them was a phantom no plan produces and is gone); the empty-list intersection
+  short-circuit; `eq`/`ne` against a list or map constant; the `add` solve forms; the CEL primitive
+  and minor-operator shapes; collection-macro composition; value-first operand orders beyond the
+  ones the corpus carries; the ternary rewrite's nested, negated and value-first forms; the
+  error-message context and no-value-leak discipline; the SQL Server `[` escaping (a gap of the
+  *store* dimension — no leg executes on SQL Server); the constant-receiver string matches;
+  arithmetic as a comparison operand; constant NaN and infinity ordering; and the
+  `timestamp(field)` operator cells the corpus does not reach.
+
 ### The real to-one relation
 
 The corpus carries exactly one **real** to-one join: `parent`, and `parent.inner` one hop further

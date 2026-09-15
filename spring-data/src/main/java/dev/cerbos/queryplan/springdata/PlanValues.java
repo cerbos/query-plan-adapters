@@ -40,9 +40,9 @@ final class PlanValues {
                         .forEach((k, v) -> struct.put(k, protoValueToJava(v)));
                 yield struct;
             }
-            case KIND_NOT_SET -> throw new IllegalArgumentException(
+            case KIND_NOT_SET -> throw Refusals.malformed(
                     "Protobuf Value has no kind set — the planner emitted a malformed operand");
-            default -> throw new IllegalArgumentException(
+            default -> throw Refusals.malformed(
                     "Unsupported protobuf value type: " + value.getKindCase());
         };
     }
@@ -58,7 +58,9 @@ final class PlanValues {
             // explicitly rather than NPE'ing on `.getClass()` below. Report TYPES only:
             // plan constants can carry folded principal-attribute values (PII), and every
             // other error site in the adapter deliberately keeps values out of messages.
-            throw new IllegalArgumentException(
+            // Malformed rather than unsupported: `null + x` and `true + x` are CEL no-overload
+            // errors whatever `x` is, so a planner folding constants never emits them.
+            throw Refusals.malformed(
                     "add requires non-null operands, got " + typeName(left) + " + "
                             + typeName(right));
         }
@@ -71,7 +73,7 @@ final class PlanValues {
             }
             return ln.doubleValue() + rn.doubleValue();
         }
-        throw new IllegalArgumentException(
+        throw Refusals.malformed(
                 "add requires string or numeric operands, got " + typeName(left) + " + "
                         + typeName(right));
     }
@@ -154,11 +156,15 @@ final class PlanValues {
                     && isExactLongSolve(t, c)) {
                 return t - c;
             }
-            throw new IllegalArgumentException(
+            // The dispatch site routes every inexact pair away before calling here
+            // (requiresSqlLowering), so this is a routing invariant, not a plan refusal.
+            throw Refusals.internal(
                     "Numeric add-solve is only exact for integer constants within ±2^53; "
                             + "this shape must be lowered to SQL double arithmetic instead");
         }
-        throw new IllegalArgumentException(
+        // `R.attr.x + 1 == "abc"` is well-formed CEL over a dyn attribute — a string x errors,
+        // a numeric x compares false — and neither outcome has a column translation here.
+        throw Refusals.unsupported(
                 "add comparison type mismatch: " + comparisonValue.getClass() + " vs " + addConstant.getClass());
     }
 

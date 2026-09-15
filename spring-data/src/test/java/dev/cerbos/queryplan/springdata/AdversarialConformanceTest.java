@@ -46,11 +46,11 @@ import org.slf4j.LoggerFactory;
 import org.springframework.data.jpa.domain.Specification;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.JdbcDatabaseContainer;
-import org.testcontainers.containers.MySQLContainer;
-import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.images.builder.Transferable;
+import org.testcontainers.mysql.MySQLContainer;
+import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -449,20 +449,35 @@ class AdversarialConformanceTest {
                 .withEnv("CERBOS_NO_TELEMETRY", "1")
                 .withLogConsumer(new Slf4jLogConsumer(LoggerFactory.getLogger("cerbos-adversarial-pdp")))
                 .waitingFor(Wait.forLogMessage(".*Starting gRPC server.*", 1));
-        try {
-            byte[] policy = Files.readAllBytes(conformance.resolve("policies").resolve("adversarial.yaml"));
-            cerbos.withCopyToContainer(Transferable.of(policy), "/policies/adversarial.yaml");
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
+        // The WHOLE policy directory, not the one file the corpus carries today. A second policy
+        // file — a derived-roles or exported-variables file a future action depends on — would
+        // otherwise be silently absent from the PDP, and every action reaching it would plan
+        // against a policy that never loaded.
+        List<Path> policies = policyFiles(conformance.resolve("policies"));
+        assertFalse(policies.isEmpty(), "conformance/policies/ holds no policy file");
+        for (Path policy : policies) {
+            String relative = conformance.resolve("policies").relativize(policy).toString();
+            try {
+                cerbos.withCopyToContainer(
+                        Transferable.of(Files.readAllBytes(policy)), "/policies/" + relative);
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
         }
         cerbos.start();
-        System.out.printf("==> Adversarial-oracle Cerbos PDP image: %s (digest %s)%n",
-                CerbosTestImage.IMAGE, CerbosTestImage.resolvedDigest(cerbos));
+        CerbosTestImage.assertPinned(cerbos);
         client = new CerbosClientBuilder(cerbos.getHost() + ":" + cerbos.getMappedPort(3593))
                 .withPlaintext().buildBlockingClient();
 
         emf = createEntityManagerFactory();
         seed();
+    }
+
+    /** Every regular file under the policy directory, in a stable order. */
+    private static List<Path> policyFiles(Path directory) throws IOException {
+        try (Stream<Path> files = Files.walk(directory)) {
+            return files.filter(Files::isRegularFile).sorted().toList();
+        }
     }
 
     /**
@@ -477,7 +492,7 @@ class AdversarialConformanceTest {
             case "h2":
                 return Persistence.createEntityManagerFactory("adversarial-pu");
             case "postgres": {
-                PostgreSQLContainer<?> pg = new PostgreSQLContainer<>(DatabaseTestImages.POSTGRES);
+                PostgreSQLContainer pg = new PostgreSQLContainer(DatabaseTestImages.POSTGRES);
                 pg.start();
                 database = pg;
                 return Persistence.createEntityManagerFactory(
@@ -490,7 +505,7 @@ class AdversarialConformanceTest {
                 // mixed-case seeds (c1/c2) then diverge from the check() oracle.
                 String collation = System.getProperty(
                         "adapter.test.mysql.collation", "utf8mb4_0900_as_cs");
-                MySQLContainer<?> my = new MySQLContainer<>(DatabaseTestImages.MYSQL)
+                MySQLContainer my = new MySQLContainer(DatabaseTestImages.MYSQL)
                         .withCommand("--character-set-server=utf8mb4",
                                 "--collation-server=" + collation);
                 // The leg runs with Connector/J's DEFAULT client-side prepared statements,
@@ -818,6 +833,16 @@ class AdversarialConformanceTest {
                 .toList();
     }
 
+    /**
+     * The plan the PDP produces for one action. The SDK's single-action {@code plan} overload is
+     * deprecated in favour of the multi-action one; one action in the list is the same request,
+     * and the result's filter is that action's.
+     */
+    private static PlanResourcesResult plan(String action) {
+        return client.plan(
+                principal(), Resource.newInstance(seedsFile.resourceKind()), List.of(action));
+    }
+
     // -- adapter execution through the public Specification path --
 
     private static List<String> adapterFilteredIds(String action) {
@@ -832,19 +857,25 @@ class AdversarialConformanceTest {
     private static List<String> adapterFilteredIds(
             String action, NullAttributeRepresentation representation,
             Map<String, AttributeMapping> mapping) {
-        PlanResourcesResult plan = client.plan(
-                principal(), Resource.newInstance(seedsFile.resourceKind()), action);
         Specification<ResourceEntity> spec =
                 SpringDataQueryPlanAdapter.toSpecification(
-                        plan, mapping, Map.of(), representation);
+                        plan(action), mapping, Map.of(), representation);
+        return idsSelectedBy(spec);
+    }
 
+    /**
+     * The ids the repository's query returns under {@code spec} — or, when {@code spec} is
+     * null, with no authorization clause at all, which is the query a caller runs for an
+     * always-allowed plan.
+     */
+    private static List<String> idsSelectedBy(Specification<ResourceEntity> spec) {
         EntityManager em = emf.createEntityManager();
         try {
             CriteriaBuilder cb = em.getCriteriaBuilder();
             CriteriaQuery<String> cq = cb.createQuery(String.class);
             Root<ResourceEntity> root = cq.from(ResourceEntity.class);
             cq.select(root.get("id")).distinct(true);
-            Predicate p = spec.toPredicate(root, cq, cb);
+            Predicate p = spec == null ? null : spec.toPredicate(root, cq, cb);
             if (p != null) {
                 cq.where(p);
             }
@@ -954,9 +985,7 @@ class AdversarialConformanceTest {
 
         List<String> nullCarrying = new ArrayList<>();
         for (String action : manifest.stream().sorted().toList()) {
-            PlanResourcesResult plan = client.plan(
-                    principal(), Resource.newInstance(seedsFile.resourceKind()), action);
-            plan.getCondition()
+            plan(action).getCondition()
                     .filter(AdversarialConformanceTest::planCarriesNullLiteral)
                     .ifPresent(c -> nullCarrying.add(action));
         }
@@ -1053,8 +1082,7 @@ class AdversarialConformanceTest {
      */
     @Test
     void upstreamHasFoldOverGrantTripwire() {
-        PlanResourcesResult plan =
-                client.plan(principal(), Resource.newInstance("adversarial"), "p-has");
+        PlanResourcesResult plan = plan("p-has");
         List<String> allIds = SEEDS.stream().map(Seed::id).sorted().toList();
         List<String> oracle = oracleAllowedIds("p-has");
 
@@ -1099,9 +1127,23 @@ class AdversarialConformanceTest {
                 "sanity: check() must still allow rows whose aOptionalString is set; oracle="
                         + oracle);
 
-        // Executable record of the over-grant itself: the adapter translates the always-allowed
-        // plan faithfully, so the filtered set is EVERY row — including the ones check() denies.
-        assertEquals(allIds, adapterFilteredIds("p-has"),
+        // The over-grant itself, measured. `allIds == adapterFilteredIds("p-has")` on its own is
+        // a tautology — an always-allowed Specification adds no WHERE clause, so the query
+        // returns every row by construction whatever the PDP or the table held. What makes it
+        // an over-grant is the set the PDP DENIES being non-empty and every one of those ids
+        // coming back from the unfiltered query a caller runs for this plan.
+        Set<String> denied = new TreeSet<>(allIds);
+        denied.removeAll(oracle);
+        assertFalse(denied.isEmpty(), "p-has: check() must deny at least one seed, or there is"
+                + " no over-grant for this tripwire to see");
+        List<String> unfiltered = idsSelectedBy(null);
+        assertTrue(unfiltered.containsAll(denied), "the unfiltered query must return every"
+                + " row the PDP denies for p-has; denied " + denied + ", got " + unfiltered);
+        assertEquals(allIds, unfiltered);
+
+        // And the adapter translates the always-allowed plan faithfully into that same
+        // unfiltered query rather than second-guessing the plan kind.
+        assertEquals(unfiltered, adapterFilteredIds("p-has"),
                 "the adapter is expected to translate KIND_ALWAYS_ALLOWED faithfully into all "
                         + "rows — if this fails the adapter started second-guessing plan kinds");
     }
@@ -1287,65 +1329,85 @@ class AdversarialConformanceTest {
     }
 
     /**
-     * A representative sample of the actions this adapter ORACLE-COMPARES, one per hostile group
-     * it can express. Asserted against {@link #conformanceActions()} so moving one into
-     * {@code adapterUnsupported} fails here rather than silently going inert
-     * (cerbos/query-plan-adapters#324).
+     * Oracle-compared actions whose oracle is degenerate BY CONSTRUCTION, each with the reason.
      *
-     * <p>{@code w1-size-zero-chain}, {@code w1-not-size-chain}, {@code w1-size-frac-chain} and
-     * the two string-cast actions are deliberately absent: their oracles are empty by
-     * CONSTRUCTION (no seed holds a to-one parent with zero children, nor one with two or more;
-     * every seed's aString raises in {@code int()}/{@code double()}), so they cannot satisfy
-     * this guard.
+     * <p>The guard below sweeps EVERY oracle-compared action, so this is the only way out of it,
+     * and each entry is asserted to be degenerate as claimed: an entry whose oracle stopped being
+     * trivial fails, so the list cannot rot into a blanket exemption. This adapter is the
+     * reference and compares most of the corpus, so it carries more of these than a harness that
+     * refuses the shapes outright: the three chain-count spellings below are refused by
+     * elasticsearch-java and never reach its comparison at all. {@code filter-as-conjunct} and
+     * {@code null-eq-missing} are also empty by construction, but this adapter throws or
+     * rejects them, so they never reach the comparison either and carry their own anti-vacuity
+     * assertions above.
      */
-    private static final List<String> DEGENERACY_GUARD_ACTIONS = List.of(
-            "vf-le", "like-percent", "all-on-empty", "null-eq", "null-ne",
-            // The explicit-null convention against a non-null operand (#308). All five are
-            // compared rather than thrown, because the mapper declares the convention per
-            // attribute; every one of them under-granted by exactly the NULL-column rows
-            // before that declaration existed.
-            "null-value-ne-const", "null-value-not-eq-const", "null-value-not-in-const",
-            "null-value-f2f", "null-value-pv-not-exists",
-            // The absent to-one parent (#309/#315/#316/#333/#334).
-            "w1-all-chain", "w1-not-exists-chain", "w1-size-nonneg-chain",
-            "w1-not-in-chain", "w1-not-hasint-chain",
-            "w1-ternary-chain-cond", "w1-size-frac-le-chain",
-            // Column arithmetic under a division (#311). The two shapes that nest further
-            // arithmetic on top of the division are liveness probes below.
-            "cr-div-neg-zero", "cr-div-other-column",
-            // The real to-one join (#375): one per hazard — the negated hop, the null comparison,
-            // two-level depth, the root conjunction, and the disjunction, whose failure
-            // direction is an under-grant.
-            "rel-not-bool-hop", "rel-ne-null-hop", "rel-bool-hop2",
-            "rel-hop-and-root", "rel-hop2-or-exists",
-            // Case sensitivity in STRING MATCHING, a different mechanism from cs-eq: collation
-            // governs `=`, and on SQLite only `PRAGMA case_sensitive_like` governs LIKE.
-            "cs-contains",
-            // The primary key as a filterable attribute (#376): against a constant, against a
-            // column under negation, the value-first concatenation solved back to a key
-            // equality, and the key inside a constructed hierarchy path. The field-first
-            // concatenation is the group's one rejection and is a probe below.
-            "id-eq-const", "id-f2f-ne", "id-concat-vf", "hier-list-id",
-            // Root position and bare operand forms (#388): one per hazard — the negation over a
-            // bare ordering (every other negated ordering in the corpus wraps a size() or a
-            // ternary), the bare boolean at the ROOT of the condition, and the collection
-            // subquery disjoined with a scalar predicate rather than conjoined with one.
-            "not-lt", "root-bare-bool", "or-eq-exists",
-            // Hazard classes the corpus missed (#387). The negated LIKE against a COLUMN needle is
-            // the load-bearing one: the null guard was a definite-FALSE `needle IS NOT NULL AND
-            // ...`, so `NOT` flipped it to TRUE and every NULL-needle row the PDP denies came back.
-            // Beside it, the De Morgan branch over a conjunction, the value-first hasIntersection,
-            // and the BELOW-cliff unroll of a principal collection.
-            "not-and", "not-contains", "vf-hasint", "pv-exists-unrolled",
-            // The shapes an Elasticsearch audit found unguarded: size(string) as an emptiness
-            // check, membership in a map literal (the planner folds it to its key list), and a
-            // double literal beyond int64 on a double field. double-huge-lt has an EMPTY oracle
-            // by construction and sits in neither list; its sibling carries the group.
-            "string-size-gt0", "in-map-keys", "double-huge-gt");
+    private static final Map<String, String> DEGENERATE_BY_CONSTRUCTION = Map.ofEntries(
+            // `R.attr.aString in []`: nothing is a member of the empty list, so the planner folds
+            // the plan to ALWAYS_DENIED and check() denies every seed. The comparison is still
+            // made — an adapter that emitted an empty IN list and let the database match nothing
+            // would agree by accident — which is why it stays oracle-compared rather than
+            // excluded.
+            Map.entry("in-empty", "statically false membership: the plan is ALWAYS_DENIED and"
+                    + " the oracle is empty"),
+            // `R.attr.aDouble < -1e19`: no seed lies below the literal (g1, at -9.5e18, is the
+            // closest), so check() denies every seed. The shape exists to catch a translator that
+            // narrows the literal to Long.MIN, which would return g1; the mirrored
+            // `double-huge-gt` carries the non-empty oracle, so this half is compared for
+            // liveness only.
+            Map.entry("double-huge-lt", "no seed lies below -1e19: the oracle is empty, and the"
+                    + " mirrored double-huge-gt is the compared half"),
+            // `size(R.attr.aString) > 4294967296` and its `<` mirror. No string's length leaves
+            // int range, and every seed carries a non-null aString, so the `>` half denies every
+            // seed and the `<` half allows every seed. The pair exists to catch an unguarded
+            // (int) narrowing cast that wrapped the threshold (2^32 -> 0), which turned `>` into
+            // `LENGTH > 0` and `<` into `LENGTH < 0` — each half is the other's witness, and
+            // neither can be non-degenerate while the corpus holds no NULL aString.
+            Map.entry("size-huge-gt", "no string's length exceeds 2^32: the oracle is empty, and"
+                    + " the int-narrowing wrap it catches would return every non-empty aString"),
+            Map.entry("size-huge-lt", "every seed carries a non-null aString shorter than 2^32:"
+                    + " the oracle is total, and the int-narrowing wrap it catches would return"
+                    + " nothing"),
+            // The three chain-count spellings over `R.attr.mainCategory.subCategories`
+            // (#316/#333): every seed that HOLDS a mainCategory holds exactly one subCategory,
+            // and every seed without one is a CEL missing-path error (deny) — so a count of
+            // zero, a negated count above zero, and a count of 1.5 or more each hold for no seed.
+            // The corpus keeps them because the absent-parent guard fails in the OTHER
+            // direction: a two-valued guard readmits the parentless rows under the negation,
+            // and `w1-size-nonneg-chain` / `w1-size-frac-le-chain` carry the discriminating
+            // oracles for the same chain.
+            Map.entry("w1-size-zero-chain", "no seed holds a mainCategory with zero"
+                    + " subCategories, and a seed with none is a missing-path error: the oracle"
+                    + " is empty"),
+            Map.entry("w1-not-size-chain", "the negation of a count every present chain"
+                    + " satisfies, over rows whose absent chain is a missing-path error: the"
+                    + " oracle is empty"),
+            Map.entry("w1-size-frac-chain", "no seed holds a mainCategory with two or more"
+                    + " subCategories, so a count of 1.5 or more holds for none: the oracle is"
+                    + " empty"),
+            // Three IEEE traps whose EMPTY oracle is the whole point: each denies every seed in
+            // double space, and each has a sibling or a store that returns rows for it.
+            // `R.attr.aNumber * 0.1 == 0.3` never holds in binary floating point, and the MySQL
+            // leg's decimal arithmetic makes it hold for aNumber=3 (the README's IEEE gotcha).
+            Map.entry("p-double-frac", "3 * 0.1 is not 0.3 in IEEE double: the oracle is empty,"
+                    + " and exact-decimal arithmetic on the store would return the aNumber=3"
+                    + " seeds"),
+            // `R.attr.aDouble + 0.7 == 0.1`: a1 holds -0.6, EXACTLY what solving the equation
+            // in Java yields, and check() still denies it (-0.6 + 0.7 is 0.09999999999999998).
+            // `arith-add-ne-frac` is the mirrored half with the non-empty oracle.
+            Map.entry("arith-add-eq-frac", "no double satisfies aDouble + 0.7 == 0.1 in IEEE"
+                    + " arithmetic: the oracle is empty, and an algebraic pre-solve would return"
+                    + " a1"),
+            // `(aBool ? 1.0/1.0 : 1.0/2.0) <= (aBool ? 0.5 : 0.0/0.0)`: the true arm compares
+            // 1.0 <= 0.5 and the false arm orders against NaN, both false for every seed. A
+            // total-order comparison (Double.compare) ranks NaN above every number and would
+            // return every aBool=false seed.
+            Map.entry("nan-ord-le", "1.0 <= 0.5 is false and every ordering against NaN is"
+                    + " false: the oracle is empty, and a total-order comparison would return the"
+                    + " aBool=false seeds"));
 
     /**
      * Shapes this adapter refuses to translate: they have no oracle comparison to guard, and stay
-     * here as PDP/policy liveness probes for a group the list above cannot cover.
+     * here as PDP/policy liveness probes for a group the sweep above cannot cover.
      */
     private static final List<String> DEGENERACY_LIVENESS_PROBES = List.of(
             // A division nested inside further arithmetic fails closed: SQL has no value that
@@ -1371,27 +1433,55 @@ class AdversarialConformanceTest {
             // matches(), which the reference never translates.
             "hier-empty-delim", "matches-alt");
 
+    /**
+     * Guard the guard, over the WHOLE oracle set. The comparison in
+     * {@link #adapterMatchesCheckOracle} passes vacuously when the oracle is trivial — the PDP
+     * denying every seed, or allowing every seed, whatever the adapter emitted — so every
+     * oracle-compared action must produce a non-empty, non-total oracle, minus the entries
+     * {@link #DEGENERATE_BY_CONSTRUCTION} accounts for. A representative sample used to stand
+     * here (cerbos/query-plan-adapters#324); a sample leaves the actions it does not name free
+     * to go degenerate unnoticed.
+     */
     @Test
-    void oracleIsNotDegenerate() {
-        // Guard the guard: each of these actions must produce a non-empty, non-total oracle set,
-        // otherwise the differential comparison could pass vacuously (e.g. PDP denying all).
-        Set<String> compared = conformanceActions().collect(Collectors.toSet());
-        Map<String, List<String>> samples = new LinkedHashMap<>();
-        for (String action : DEGENERACY_GUARD_ACTIONS) {
+    void everyOracleComparedActionHasANonDegenerateOracle() {
+        List<String> oracleActions = conformanceActions().toList();
+        Set<String> compared = Set.copyOf(oracleActions);
+        List<String> degenerate = new ArrayList<>();
+        for (String action : oracleActions) {
+            if (DEGENERATE_BY_CONSTRUCTION.containsKey(action)) {
+                continue;
+            }
+            List<String> ids = oracleAllowedIds(action);
+            if (ids.isEmpty() || ids.size() >= SEEDS.size()) {
+                degenerate.add(action + ": " + ids);
+            }
+        }
+        assertEquals(List.of(), degenerate,
+                "these oracle-compared actions have a degenerate oracle: the differential cannot"
+                        + " fail for them, so either the corpus lost its discriminating seed or"
+                        + " the action belongs in DEGENERATE_BY_CONSTRUCTION with a reason");
+
+        // The allowlist is asserted in both directions: each entry is oracle-compared (an entry
+        // this adapter refuses exempts nothing), and each is degenerate as it claims (an entry
+        // whose oracle became discriminating is a guard entry wearing an exemption).
+        for (Map.Entry<String, String> entry : DEGENERATE_BY_CONSTRUCTION.entrySet()) {
+            String action = entry.getKey();
             assertTrue(compared.contains(action),
-                    "'" + action + "' guards nothing: this adapter does not oracle-compare it");
-            samples.put(action, oracleAllowedIds(action));
+                    "'" + action + "' exempts nothing: this adapter does not oracle-compare it");
+            List<String> ids = oracleAllowedIds(action);
+            assertTrue(ids.isEmpty() || ids.size() >= SEEDS.size(),
+                    "'" + action + "' is allowlisted as degenerate (" + entry.getValue()
+                            + ") but its oracle discriminates: " + ids);
         }
         // Asserting the complement keeps the split honest — an action this adapter gains support
-        // for must move up into the guard proper.
+        // for must move out of the liveness probes and into the total sweep above.
         for (String action : DEGENERACY_LIVENESS_PROBES) {
             assertFalse(compared.contains(action),
-                    "'" + action + "' is now oracle-compared: move it into the guard proper");
-            samples.put(action, oracleAllowedIds(action));
+                    "'" + action + "' is now oracle-compared: remove it from the liveness probes");
+            List<String> ids = oracleAllowedIds(action);
+            assertTrue(!ids.isEmpty() && ids.size() < SEEDS.size(),
+                    "oracle for '" + action + "' is degenerate: " + ids);
         }
-        samples.forEach((action, ids) -> assertTrue(
-                !ids.isEmpty() && ids.size() < SEEDS.size(),
-                "oracle for '" + action + "' is degenerate: " + ids));
     }
 
     /**

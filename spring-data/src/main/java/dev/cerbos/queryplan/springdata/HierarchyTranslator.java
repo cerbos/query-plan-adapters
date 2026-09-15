@@ -71,12 +71,13 @@ final class HierarchyTranslator {
 
         if (valid.isEmpty()) {
             // Neither side can be a prefix of the other. If a field is involved the overlap is
-            // simply never satisfiable (always-false); two incompatible constants are a planner bug.
+            // simply never satisfiable (always-false); two incompatible constants are a planner
+            // bug — a constant comparison it should have folded away.
             boolean hasField = containsFieldSegment(leftSegs) || containsFieldSegment(rightSegs);
             if (hasField) {
                 return cb.disjunction();
             }
-            throw new IllegalArgumentException("Cannot determine hierarchy overlap: no field references found");
+            throw Refusals.malformed("Cannot determine hierarchy overlap: no field references found");
         }
         // An empty condition list means every compared segment was a matching constant — overlap
         // holds unconditionally.
@@ -93,12 +94,12 @@ final class HierarchyTranslator {
 
     private Predicate handleFieldOverlaps(Hierarchy left, Hierarchy right) {
         if (left instanceof Hierarchy.FieldRef && right instanceof Hierarchy.FieldRef) {
-            throw new IllegalArgumentException("overlaps: cannot compare two field-reference hierarchies");
+            throw Refusals.unsupported("overlaps: cannot compare two field-reference hierarchies");
         }
         Hierarchy.FieldRef field = (left instanceof Hierarchy.FieldRef f) ? f : (Hierarchy.FieldRef) right;
         Hierarchy other = (left instanceof Hierarchy.FieldRef) ? right : left;
         if (!(other instanceof Hierarchy.Constant constant)) {
-            throw new IllegalArgumentException(
+            throw Refusals.unsupported(
                     "overlaps: segmented hierarchies with field hierarchies are not supported");
         }
 
@@ -145,16 +146,19 @@ final class HierarchyTranslator {
                     && isPrefix(a.segments(), d.segments())) {
                 return cb.conjunction();
             }
-            throw new IllegalArgumentException(
+            // Two constants that fail the relationship are a comparison the planner folds to
+            // false before it ever reaches an adapter.
+            throw Refusals.malformed(
                     opName + ": constant operands do not satisfy the " + (isAncestor ? "ancestor" : "descendant")
                             + " relationship");
         }
-        throw new IllegalArgumentException(opName + ": unsupported hierarchy operand combination");
+        // Two field-reference hierarchies, or a list() with field segments on either side.
+        throw Refusals.unsupported(opName + ": unsupported hierarchy operand combination");
     }
 
     private Hierarchy[] extractHierarchyOperands(String opName, List<Operand> operands, Scope scope) {
         if (operands.size() != 2) {
-            throw new IllegalArgumentException(opName + " requires exactly 2 operands");
+            throw Refusals.malformed(opName + " requires exactly 2 operands");
         }
         return new Hierarchy[]{
                 normalizeHierarchy(resolveHierarchy(opName, operands.get(0), scope)),
@@ -165,14 +169,16 @@ final class HierarchyTranslator {
     private Hierarchy resolveHierarchy(String opName, Operand operand, Scope scope) {
         if (operand.getNodeCase() != Operand.NodeCase.EXPRESSION
                 || !"hierarchy".equals(operand.getExpression().getOperator())) {
-            throw new IllegalArgumentException(opName + " requires hierarchy(...) operands");
+            throw Refusals.malformed(opName + " requires hierarchy(...) operands");
         }
         List<Operand> ops = operand.getExpression().getOperandsList();
         if (ops.size() == 2) {
             Operand strOp = ops.get(0);
             Operand delimOp = ops.get(1);
             if (delimOp.getNodeCase() != Operand.NodeCase.VALUE) {
-                throw new IllegalArgumentException("hierarchy delimiter must be a value");
+                // A delimiter read from a column is legal CEL; the prefixes below are built
+                // in Java from a delimiter known at translation time.
+                throw Refusals.unsupported("hierarchy delimiter must be a value");
             }
             String delimiter = String.valueOf(PlanValues.protoValueToJava(delimOp.getValue()));
             if (delimiter.isEmpty()) {
@@ -182,7 +188,7 @@ final class HierarchyTranslator {
                 // matches the path ITSELF (never its own descendant) as well as every string
                 // extension of it — the corpus's hier-empty-delim over-granted a2 that way —
                 // so the shape is refused rather than emitted with the wrong boundary.
-                throw new IllegalArgumentException(
+                throw Refusals.unsupported(
                         "hierarchy delimiter must be a non-empty string: an empty delimiter splits "
                                 + "the path per character, and the prefix LIKE this adapter emits "
                                 + "would also match the path itself");
@@ -194,7 +200,9 @@ final class HierarchyTranslator {
             if (strOp.getNodeCase() == Operand.NodeCase.VARIABLE) {
                 return new Hierarchy.FieldRef(scope.path(strOp.getVariable()), delimiter);
             }
-            throw new IllegalArgumentException("hierarchy(string, delimiter) requires a value or field operand");
+            // A path computed by an expression (a concatenation, a ternary) has no prefix the
+            // LIKE below can be built from.
+            throw Refusals.unsupported("hierarchy(string, delimiter) requires a value or field operand");
         }
         if (ops.size() == 1) {
             Operand inner = ops.get(0);
@@ -204,7 +212,7 @@ final class HierarchyTranslator {
                 case VARIABLE -> new Hierarchy.FieldRef(scope.path(inner.getVariable()), ".");
                 case EXPRESSION -> {
                     if (!"list".equals(inner.getExpression().getOperator())) {
-                        throw new IllegalArgumentException("hierarchy requires a value, field, or list operand");
+                        throw Refusals.unsupported("hierarchy requires a value, field, or list operand");
                     }
                     List<Seg> segs = new ArrayList<>();
                     for (Operand seg : inner.getExpression().getOperandsList()) {
@@ -212,17 +220,18 @@ final class HierarchyTranslator {
                             case VALUE -> segs.add(new Seg.Const(
                                     String.valueOf(PlanValues.protoValueToJava(seg.getValue()))));
                             case VARIABLE -> segs.add(new Seg.FieldSeg(scope.path(seg.getVariable())));
-                            default -> throw new IllegalArgumentException(
+                            // A computed segment: legal CEL, no prefix to build from.
+                            default -> throw Refusals.unsupported(
                                     "hierarchy list segment must be a value or field, got " + seg.getNodeCase());
                         }
                     }
                     yield new Hierarchy.Segmented(segs);
                 }
-                default -> throw new IllegalArgumentException(
+                default -> throw Refusals.malformed(
                         "hierarchy requires a value, field, or list operand, got " + inner.getNodeCase());
             };
         }
-        throw new IllegalArgumentException("hierarchy requires 1 or 2 operands");
+        throw Refusals.malformed("hierarchy requires 1 or 2 operands");
     }
 
     /** Collapse an all-constant segmented hierarchy to a plain Constant (default delimiter). */
@@ -248,7 +257,8 @@ final class HierarchyTranslator {
         if (h instanceof Hierarchy.Segmented s) {
             return s.segments();
         }
-        throw new IllegalArgumentException("Cannot enumerate segments of a field-reference hierarchy");
+        // handleOverlaps routes every FieldRef to handleFieldOverlaps before calling here.
+        throw Refusals.internal("Cannot enumerate segments of a field-reference hierarchy");
     }
 
     /**
@@ -273,7 +283,7 @@ final class HierarchyTranslator {
             } else if (s instanceof Seg.Const sc && l instanceof Seg.FieldSeg lf) {
                 conditions.add(cb.equal(lf.path(), sc.value()));
             } else {
-                throw new IllegalArgumentException(
+                throw Refusals.unsupported(
                         "Cannot compare two field references in a hierarchy overlap");
             }
         }

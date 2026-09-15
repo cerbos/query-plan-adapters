@@ -60,13 +60,14 @@ it binds, which the two dialects are asserted to share. That also makes the ORM 
 the asset rather than only to the tests: SQLAlchemy 1.4 and 2.x render some trees differently, so the
 file declares the major it was generated under, `golden:update` refuses to run under the other one,
 and the other CI leg asserts a pinned list of exactly which shapes diverge. Spring-data is the same
-case in another language and shows what happens when the build has only ONE version of that
-generator: it emits a JPA `Specification`, so its entry records that Specification rendered — the
-root joins and the `WHERE` clause on H2, PostgreSQL and MySQL, all three of which its CI executes —
-with criteria literals inlined so the operands are in the asset rather than behind a `?`. The file
-declares `"hibernate": "6.6"` and the suite asserts the running Hibernate matches, but there is no
-second leg and so no divergence list; the header is load-bearing because `hibernate-core` is a
-`compileOnly` dependency and a consumer brings their own renderer. Elasticsearch-java is the second
+case in another language: it emits a JPA `Specification`, so its entry records that Specification
+rendered — the root joins and the `WHERE` clause on H2, PostgreSQL and MySQL, all three of which its
+CI executes — with criteria literals inlined so the operands are in the asset rather than behind a
+`?`. The file declares `"hibernate": "6.6"`, `gradle goldenUpdate` refuses to run under another
+major, and a second leg (`ADAPTER_TEST_ORM=next`, Hibernate 7 / Spring Data JPA 4) asserts a pinned
+divergence list in both directions, exactly as the sqlalchemy and activerecord legs do; the header
+is load-bearing because `hibernate-core` is a `compileOnly` dependency and a consumer brings their
+own renderer. Elasticsearch-java is the second
 adapter, after langchain-chromadb, whose value needs no rendering at all: the Query DSL IS JSON and
 the adapter emits a `Map<String, Object>` of plain JDK values with no client library on the
 classpath, so its entry is the translator's return value verbatim — the plan kind, plus the query
@@ -420,8 +421,9 @@ Three kinds of material legitimately live only in a unit test, and they are not 
    ([#414](https://github.com/cerbos/query-plan-adapters/issues/414) is the open port).
    `ElasticsearchQueryPlanAdapterTest` is the worked example: a `KIND 2 — a policy can reach these,
    and the corpus does not carry them yet` banner over the block, and a `Corpus gap.` lead on every
-   test under it. Not every adapter meets that bar yet — spring-data labels at the class rather
-   than per test — so a shape parked there today is not necessarily findable.
+   test under it; `SpringDataQueryPlanAdapterTest` follows the same layout, with all three kinds
+   under their own banner. `conformance/README.md`, "Shapes that live only in a unit test", is the
+   registry of what each adapter parks this way.
 
 Watch for harnesses that hand-project corpus data into a narrower local shape (a principal
 attribute allowlist, a fixed column list). A projection silently drops anything a new action

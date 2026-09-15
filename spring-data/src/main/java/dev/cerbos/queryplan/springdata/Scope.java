@@ -26,8 +26,9 @@ sealed interface Scope permits Scope.RootScope, Scope.LambdaScope {
      * Classify a Cerbos plan variable and resolve it against this scope.
      *
      * <p>TOTAL: every variable either lands in one of {@link Resolution}'s two arms or throws
-     * {@link IllegalArgumentException} naming why — there is no null return and no second
-     * classifier to consult afterwards. Callers that need a column narrow with {@link #path};
+     * naming why — {@link UnmappedAttributeException} for a name the mapping does not cover,
+     * {@link MalformedPlanException} for a lambda reference the plan never bound — there is no
+     * null return and no second classifier to consult afterwards. Callers that need a column narrow with {@link #path};
      * callers that need a collection pattern-match {@link ResolvedRelation}, and get the
      * unmapped-variable rejection from this throw rather than from a second call made purely
      * for it.
@@ -56,11 +57,11 @@ sealed interface Scope permits Scope.RootScope, Scope.LambdaScope {
     default Path<?> path(String cerbosVar) {
         if (resolve(cerbosVar) instanceof ResolvedScalar scalar) {
             if (scalar.path() == null) {
-                throw new IllegalArgumentException("Unknown attribute: " + cerbosVar);
+                throw Refusals.unknownAttribute(cerbosVar);
             }
             return scalar.path();
         }
-        throw new IllegalArgumentException(
+        throw Refusals.unmapped(
                 "Attribute " + cerbosVar + " is a Relation; cannot resolve as a scalar path");
     }
 
@@ -146,6 +147,9 @@ sealed interface Scope permits Scope.RootScope, Scope.LambdaScope {
             return new LambdaScope(ls.from(), sub, ls.relation(), ls.lambdaVar(),
                     rebaseAt(ls.outer(), target, correlated, sub));
         }
+        // An invariant between resolve() and chainSubquery, not a refusal of the plan: no plan
+        // input reaches it, so it goes through none of the Refusals factories. It stays the
+        // IllegalArgumentException ScopeTest pins rather than becoming Refusals.internal().
         throw new IllegalArgumentException(
                 "Relation owner scope is not on the current resolution chain");
     }
@@ -165,7 +169,7 @@ sealed interface Scope permits Scope.RootScope, Scope.LambdaScope {
             // for "request.resource.attr.categories.subCategories" — walk the chain.
             RelationChain chain = resolveRelationChain(mapper, cerbosVar);
             if (chain == null) {
-                throw new IllegalArgumentException("Unknown attribute: " + cerbosVar);
+                throw Refusals.unknownAttribute(cerbosVar);
             }
             if (chain.tail() == null) {
                 return new ResolvedRelation(this, chain.relations());
@@ -201,8 +205,7 @@ sealed interface Scope permits Scope.RootScope, Scope.LambdaScope {
                 if (outer != null) {
                     return outer.resolve(cerbosVar);
                 }
-                throw new IllegalArgumentException(
-                        "Variable '" + cerbosVar + "' does not start with lambda variable '" + lambdaVar + "'");
+                throw Refusals.notALambdaReference(cerbosVar, lambdaVar);
             }
             String suffix = extractLambdaSuffix(cerbosVar, lambdaVar);
             if (suffix.isEmpty()) {
@@ -395,8 +398,7 @@ sealed interface Scope permits Scope.RootScope, Scope.LambdaScope {
         }
         String prefix = lambdaVar + ".";
         if (!variable.startsWith(prefix)) {
-            throw new IllegalArgumentException(
-                    "Variable '" + variable + "' does not start with lambda variable '" + lambdaVar + "'");
+            throw Refusals.notALambdaReference(variable, lambdaVar);
         }
         return variable.substring(prefix.length());
     }

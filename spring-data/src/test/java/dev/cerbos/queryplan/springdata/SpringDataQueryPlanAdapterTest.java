@@ -43,8 +43,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * What is left when the corpus owns the policy shapes: the adapter's CALL contract, and the
- * shapes a policy can express that the corpus does not carry yet.
+ * What is left when the corpus owns the policy shapes: the adapter's CALL contract, the shapes no
+ * plan can carry, and the shapes a policy can express that the corpus does not carry yet.
  *
  * <p>These tests hand-build protobuf operands and execute the resulting Specification against an
  * H2 schema. A hand-built plan is a BELIEF about what the planner emits, which is exactly why
@@ -54,25 +54,30 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * their belief is a fixture's job to hold, their emitted filter is the golden asset's, and the
  * rows they returned are {@link AdversarialConformanceTest}'s {@code check()} oracle's.
  *
- * <p>What remains hand-built divides in two, and the difference matters when reading a test here:
+ * <p>What remains is of the three kinds {@code CLAUDE.md} ("What a translator unit test may pin")
+ * admits, and every test below sits under the banner of exactly one:
  *
  * <ol>
- *   <li><strong>No policy can reach it.</strong> A malformed or wrong-arity operand the planner
- *       never emits, an operator name CEL does not have, a caller-supplied
+ *   <li><strong>A branch CEL itself cannot reach.</strong> No policy compiles to it, or no plan
+ *       carries it: an operator CEL does not have ({@code isSet}), a comparison CEL's type checker
+ *       rejects (a fractional {@code size()} equality, a timestamp against a number), an operand
+ *       shape the planner never emits (a wrong arity, a bare string where {@code timestamp()}
+ *       always wraps one), or a constant-only sub-expression the planner folds away before the
+ *       wire — the corpus's own fixtures are the proof of that last one: {@code p-startswith-concat}
+ *       arrives with {@code "100" + "%"} already folded and {@code in-empty} arrives as
+ *       {@code ALWAYS_DENIED}. Each test says which. Permanent.
+ *   <li><strong>A caller-supplied argument the corpus structurally cannot vary.</strong>
+ *       {@code actions.json} classifies each action against ONE mapping per adapter, so an
  *       {@link OperatorFunction} override, the {@code maxMacroDepth} system property, the
- *       bulk-delete guard, a mapping the corpus does not use (an {@code OffsetDateTime} or
- *       {@code LocalDateTime} column, a per-attribute OMITTED declaration), or a defensive copy.
- *       A fixture cannot supply any of these, so a hand-built plan is the only way to reach
- *       them, and they stay here permanently.</li>
- *   <li><strong>A policy CAN reach it and the corpus does not carry it yet.</strong> Value-first
- *       {@code gt}, the {@code except} macro, {@code eq}/{@code ne} against a list constant, the
- *       uncovered timestamp operator cells, two-column orderings, and the out-of-int-range
- *       {@code size()} thresholds are the substantive ones. Each is a corpus GAP wearing a unit
- *       test — per the root {@code CLAUDE.md}, a per-adapter unit test is not a substitute for a
- *       corpus action, and only the corpus asks the same question of every other adapter. They
- *       are kept because deleting them would lose the coverage outright, not because this is
- *       where they belong: each one is a shape the corpus should carry, and moving it there is
- *       corpus work rather than a test-file change.</li>
+ *       call-level and per-attribute {@link NullAttributeRepresentation}, a mapping the corpus
+ *       does not use (an {@code OffsetDateTime} or {@code LocalDateTime} column, an unmapped
+ *       reference), the bulk-delete guard, the null-predicate contract with Spring Data, and the
+ *       defensive copies have no corpus spelling. Permanent.
+ *   <li><strong>A corpus gap wearing a unit test.</strong> Policy-reachable, and the corpus does
+ *       not carry it yet. A bridge, not a home: each is pinned in this adapter alone and asked of
+ *       none of the others, which is the condition every bug this repository exists to stop was
+ *       living in. Every test under that banner opens with <em>Corpus gap.</em>, is tracked by
+ *       cerbos/query-plan-adapters#414, and is deleted when the corpus action lands.
  * </ol>
  */
 class SpringDataQueryPlanAdapterTest {
@@ -253,24 +258,212 @@ class SpringDataQueryPlanAdapterTest {
         throw new OverrideInvoked();
     };
 
-    @Test
-    void alwaysAllowedSpecificationReturnsNullPredicate() {
-        // Contract: an always-allowed plan must produce a Specification whose toPredicate
-        // returns null — Spring Data's SimpleJpaRepository skips the WHERE clause entirely
-        // in that case. Pins B2 against regression to cb.conjunction().
-        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_ALWAYS_ALLOWED, null);
+    // -- helpers shared by tests that sit under different banners ------------------------------
+
+    /** Distinctive element values so the no-leak assertions cannot false-negative. */
+    private static final String ELEM_A = "leak-canary-alpha";
+    private static final String ELEM_B = "leak-canary-beta";
+
+    private static IllegalArgumentException assertNamedError(Operand cond, String op,
+                                                             String attribute, String shape) {
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> runCount(cond));
+        String msg = ex.getMessage();
+        assertTrue(msg.contains(op), "expected operator '" + op + "' in: " + msg);
+        assertTrue(msg.contains(attribute), "expected attribute '" + attribute + "' in: " + msg);
+        assertTrue(msg.contains(shape), "expected shape '" + shape + "' in: " + msg);
+        assertTrue(msg.contains("hasIntersection"),
+                "expected the supported alternative in: " + msg);
+        assertFalse(msg.contains(ELEM_A), "element value leaked into: " + msg);
+        assertFalse(msg.contains(ELEM_B), "element value leaked into: " + msg);
+        return ex;
+    }
+
+    /**
+     * The standard scope fixture, chosen so a correct translation and every plausible
+     * regression return DIFFERENT row sets:
+     * <ul>
+     *   <li>{@code "a:b"} — equal to the ancestor constant (strict-vs-inclusive
+     *       discriminator: strict operators must NOT match the equal path),</li>
+     *   <li>{@code "a:b:c"} — equal to the descendant constant (off-by-one strict-prefix
+     *       discriminator: an IN list wrongly including the full path would match it),</li>
+     *   <li>{@code "a:bb:c"} — shares the STRING prefix {@code "a:b"} but not the PATH
+     *       prefix (separator-mishandling discriminator: {@code LIKE 'a:b%'} without the
+     *       trailing delimiter would match it),</li>
+     *   <li>{@code "a:b:c:d"} — multi-level descendant,</li>
+     *   <li>{@code "x:y"} — unrelated control.</li>
+     * </ul>
+     * Verified against a live PDP (Cerbos 0.54.0): {@code check()} treats
+     * ancestorOf/descendentOf as STRICT (the equal path is denied) and overlaps as
+     * inclusive; sibling string prefixes are denied.
+     */
+    private static final List<String> SCOPES =
+            List.of("a", "a:b", "a:b:c", "a:b:c:d", "a:bb:c", "x:y");
+
+    /**
+     * Seed one row per path — the row's ID doubles as its {@code aString} scope path —
+     * run {@code body}, then delete the rows. Row-identity assertions then read
+     * naturally: the expected set IS the set of matching paths.
+     */
+    private static void withScopeRows(List<String> paths, Runnable body) {
+        EntityManager em = emf.createEntityManager();
+        em.getTransaction().begin();
+        for (String path : paths) {
+            ResourceEntity r = new ResourceEntity(path);
+            r.setaString(path);
+            em.persist(r);
+        }
+        em.getTransaction().commit();
+        em.close();
+        try {
+            body.run();
+        } finally {
+            EntityManager cleanup = emf.createEntityManager();
+            cleanup.getTransaction().begin();
+            for (String path : paths) {
+                ResourceEntity managed = cleanup.find(ResourceEntity.class, path);
+                if (managed != null) {
+                    cleanup.remove(managed);
+                }
+            }
+            cleanup.getTransaction().commit();
+            cleanup.close();
+        }
+    }
+
+    /** Translate {@code condition}, run it, and return the matched row IDs (= scope paths). */
+    private static Set<String> scopeIds(Operand condition) {
+        PlanResourcesResponse resp =
+                buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
         Specification<ResourceEntity> spec =
-                SpringDataQueryPlanAdapter.toSpecification(resp, MAPPER);
+                SpringDataQueryPlanAdapter.toSpecification(resp, MAPPER, Map.of());
         EntityManager em = emf.createEntityManager();
         try {
             CriteriaBuilder cb = em.getCriteriaBuilder();
-            CriteriaQuery<ResourceEntity> cq = cb.createQuery(ResourceEntity.class);
+            CriteriaQuery<String> cq = cb.createQuery(String.class);
             Root<ResourceEntity> root = cq.from(ResourceEntity.class);
-            assertNull(spec.toPredicate(root, cq, cb));
+            cq.select(root.get("id"));
+            Predicate p = spec.toPredicate(root, cq, cb);
+            if (p != null) {
+                cq.where(p);
+            }
+            return Set.copyOf(em.createQuery(cq).getResultList());
         } finally {
             em.close();
         }
     }
+
+    private static ResourceEntity orderSeed() {
+        ResourceEntity r = new ResourceEntity("seed-1");
+        r.setaBool(true);
+        r.setaString("seededString");
+        r.setaNumber(5);
+        r.setOwnedBy(new ArrayList<>(List.of("user1")));
+        r.addTag("tagX", "x");
+        return r;
+    }
+
+    private static final String CHAIN = "request.resource.attr.categories.subCategories";
+
+    private static final Map<String, AttributeMapping> CHAIN_MAPPER = Map.ofEntries(
+            Map.entry("request.resource.attr.aString", AttributeMapping.field("aString")),
+            Map.entry("request.resource.attr.tags", AttributeMapping.relation("tags", Map.of(
+                    "id", AttributeMapping.field("id"),
+                    "name", AttributeMapping.field("name")))),
+            Map.entry("request.resource.attr.categories", AttributeMapping.relation("categories", Map.of(
+                    "name", AttributeMapping.field("name"),
+                    "subCategories", AttributeMapping.relation("subCategories", "name", Map.of(
+                            "name", AttributeMapping.field("name")))))));
+
+    private static int runChainCount(Operand condition) {
+        return runCount(condition, CHAIN_MAPPER, Map.of());
+    }
+
+    /**
+     * Persist a resource plus its (non-cascaded) category/sub-category graph, run
+     * {@code body}, then delete everything again — the shared in-memory schema must stay
+     * empty for the other tests.
+     */
+    private static void withCategoryGraph(ResourceEntity resource,
+                                   List<CategoryEntity> categories,
+                                   List<SubCategoryEntity> subCategories,
+                                   Runnable body) {
+        EntityManager em = emf.createEntityManager();
+        em.getTransaction().begin();
+        subCategories.forEach(em::persist);
+        categories.forEach(em::persist);
+        em.persist(resource);
+        em.getTransaction().commit();
+        em.close();
+        try {
+            body.run();
+        } finally {
+            EntityManager cleanup = emf.createEntityManager();
+            cleanup.getTransaction().begin();
+            ResourceEntity managed = cleanup.find(ResourceEntity.class, resource.getId());
+            if (managed != null) {
+                cleanup.remove(managed);
+            }
+            for (CategoryEntity c : categories) {
+                CategoryEntity mc = cleanup.find(CategoryEntity.class, c.getId());
+                if (mc != null) {
+                    cleanup.remove(mc);
+                }
+            }
+            for (SubCategoryEntity s : subCategories) {
+                SubCategoryEntity ms = cleanup.find(SubCategoryEntity.class, s.getId());
+                if (ms != null) {
+                    cleanup.remove(ms);
+                }
+            }
+            cleanup.getTransaction().commit();
+            cleanup.close();
+        }
+    }
+
+    private static ResourceEntity row(String id, String aString) {
+        ResourceEntity r = new ResourceEntity(id);
+        r.setaString(aString);
+        return r;
+    }
+
+    private static final String TS_CONST = "2025-01-01T00:00:00Z";
+
+    private static Operand tsVar(String attr) {
+        return exprOp("timestamp", var("request.resource.attr." + attr));
+    }
+
+    private static Operand tsVal(String iso) {
+        return exprOp("timestamp", sval(iso));
+    }
+
+    /** Seed rows: two before {@link #TS_CONST}, one exactly at it, one after, one NULL. */
+    private static void withTimestampRows(Runnable body) {
+        ResourceEntity old1 = new ResourceEntity("ts-old1");
+        old1.setCreatedAt(java.time.Instant.parse("2024-03-01T00:00:00Z"));
+        old1.setUpdatedAt(java.time.OffsetDateTime.parse("2024-03-01T00:00:00Z"));
+        old1.setaBool(true);
+        ResourceEntity old2 = new ResourceEntity("ts-old2");
+        old2.setCreatedAt(java.time.Instant.parse("2024-06-01T00:00:00.123456Z"));
+        old2.setUpdatedAt(java.time.OffsetDateTime.parse("2024-06-01T00:00:00.123456Z"));
+        old2.setaBool(false);
+        ResourceEntity exact = new ResourceEntity("ts-exact");
+        exact.setCreatedAt(java.time.Instant.parse(TS_CONST));
+        exact.setUpdatedAt(java.time.OffsetDateTime.parse(TS_CONST));
+        exact.setaBool(false);
+        ResourceEntity newer = new ResourceEntity("ts-new");
+        newer.setCreatedAt(java.time.Instant.parse("2026-02-01T00:00:00Z"));
+        newer.setUpdatedAt(java.time.OffsetDateTime.parse("2026-02-01T00:00:00Z"));
+        newer.setaBool(false);
+        ResourceEntity nul = new ResourceEntity("ts-null"); // createdAt/updatedAt NULL
+        nul.setaBool(false);
+        withResource(old1, () -> withResource(old2, () -> withResource(exact,
+                () -> withResource(newer, () -> withResource(nul, body)))));
+    }
+
+    // ============================================================================================
+    // KIND 1 — a branch CEL itself cannot reach
+    // ============================================================================================
 
     /**
      * The planner has no existence operator: {@code isSet} is not a registered CEL function,
@@ -288,67 +481,39 @@ class SpringDataQueryPlanAdapterTest {
                 "unknown operator must be named in the error, got: " + e.getMessage());
     }
 
-    // -- size(collection) compared with arbitrary N → correlated (SELECT COUNT(...)) <op> N.
-    // Seeds a real row because an empty table cannot distinguish count thresholds.
-
-    @Nested
-    class SizeCountComparisons {
-
-        private ResourceEntity seeded() {
-            ResourceEntity r = new ResourceEntity("size-seed-1");
-            r.setOwnedBy(new ArrayList<>(List.of("user1", "user2")));
-            r.addTag("tagX", "x");
-            return r;
-        }
-
-        @Test
-        void sizeComparedWithArbitraryN() {
-            // Seeded row has 2 owners (@ElementCollection) and 1 tag (@OneToMany).
-            withResource(seeded(), () -> {
-                assertEquals(1, runCount(exprOp("eq",
-                        exprOp("size", var("request.resource.attr.ownedBy")), nval(2))));
-                assertEquals(0, runCount(exprOp("eq",
-                        exprOp("size", var("request.resource.attr.ownedBy")), nval(3))));
-                assertEquals(1, runCount(exprOp("gt",
-                        exprOp("size", var("request.resource.attr.ownedBy")), nval(1))));
-                assertEquals(0, runCount(exprOp("gt",
-                        exprOp("size", var("request.resource.attr.ownedBy")), nval(2))));
-                assertEquals(1, runCount(exprOp("le",
-                        exprOp("size", var("request.resource.attr.ownedBy")), nval(2))));
-                assertEquals(0, runCount(exprOp("lt",
-                        exprOp("size", var("request.resource.attr.ownedBy")), nval(2))));
-                assertEquals(0, runCount(exprOp("ge",
-                        exprOp("size", var("request.resource.attr.ownedBy")), nval(3))));
-                assertEquals(0, runCount(exprOp("ne",
-                        exprOp("size", var("request.resource.attr.ownedBy")), nval(2))));
-                // Entity relation (@OneToMany), not just element collections.
-                assertEquals(1, runCount(exprOp("eq",
-                        exprOp("size", var("request.resource.attr.tags")), nval(1))));
-            });
-        }
-
-        @Test
-        void sizeValueFirstWithArbitraryNIsMirrored() {
-            // 3 > size(ownedBy) → size < 3, with 2 owners → match. The naive (unmirrored)
-            // translation `size > 3` would return 0.
-            withResource(seeded(), () -> {
-                assertEquals(1, runCount(exprOp("gt",
-                        nval(3),
-                        exprOp("size", var("request.resource.attr.ownedBy")))));
-                assertEquals(1, runCount(exprOp("lt",
-                        nval(1),
-                        exprOp("size", var("request.resource.attr.ownedBy")))));
-            });
-        }
+    @Test
+    void unknownOperatorThrows() {
+        Operand cond = exprOp("unsupported_op",
+                var("request.resource.attr.aString"), sval("v"));
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> runCount(cond));
+        assertTrue(ex.getMessage().contains("Unsupported operator"));
     }
 
-    // -- Fractional size() thresholds: COUNT/LENGTH are integral, so a fractional constant f
-    // can never be hit exactly. Correct semantics: eq → always-false; ne → always-true (but a
-    // NULL string column is a missing attribute → CEL error → deny); ge/gt f → ge ceil(f);
-    // le/lt f → le floor(f). Truncation (`>= 1.5` becoming `>= 1`) over-included.
+    @Test
+    void isSetReportsUnsupportedOperator() {
+        // isSet had bespoke operand-shape diagnostics; it is not a wire operator at all
+        // (#261), so every shape of it must now surface as a plain unsupported-operator
+        // error rather than a message implying the adapter was close to translating it.
+        assertConditionThrows(
+                exprOp("isSet",
+                        var("request.resource.attr.aString"),
+                        var("request.resource.attr.createdBy")),
+                "isSet");
+        assertConditionThrows(
+                exprOp("isSet", bval(true), bval(false)),
+                "isSet");
+    }
 
+    /**
+     * The equality half of the fractional {@code size()} thresholds. CEL rejects {@code ==} and
+     * {@code !=} between an int and a double ("found no matching overload for '_==_' applied to
+     * '(int, double)'"), so no policy can make the planner emit these; the ordering half is
+     * reachable — cross-type numeric ORDERING compiles — and sits under the corpus-gap banner
+     * as {@link FractionalSizeThresholds}.
+     */
     @Nested
-    class FractionalSizeThresholds {
+    class FractionalSizeEquality {
 
         private ResourceEntity seeded() {
             ResourceEntity r = new ResourceEntity("size-frac-seed-1");
@@ -375,33 +540,6 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         @Test
-        void gtFractionalRoundsUp() {
-            // gt f ⇔ ge ceil(f) for integral counts.
-            withResource(seeded(), () -> {
-                assertEquals(1, runCount(sizeCmp("gt", 1.5)));
-                assertEquals(0, runCount(sizeCmp("gt", 2.5)));
-            });
-        }
-
-        @Test
-        void ltFractionalRoundsDown() {
-            // size < 2.5 ⇔ size <= 2; truncation made it lt 2 (under-inclusive).
-            withResource(seeded(), () -> {
-                assertEquals(1, runCount(sizeCmp("lt", 2.5)));
-                assertEquals(0, runCount(sizeCmp("lt", 1.5)));
-            });
-        }
-
-        @Test
-        void fractionalEmptinessShortcutsStillRoute() {
-            // ge 0.5 ⇔ ge 1 → EXISTS; lt 0.5 ⇔ le 0 → NOT EXISTS.
-            withResource(seeded(), () -> {
-                assertEquals(1, runCount(sizeCmp("ge", 0.5)));
-                assertEquals(0, runCount(sizeCmp("lt", 0.5)));
-            });
-        }
-
-        @Test
         void stringSizeFractionalNeExcludesNullColumn() {
             // size(string) != 1.5 is vacuously true for any PRESENT string, but a NULL
             // column is a missing attribute → CEL error → deny. Always-true would leak it.
@@ -422,194 +560,376 @@ class SpringDataQueryPlanAdapterTest {
             another.setaOptionalString("ab");
             withResource(another, () -> assertEquals(0, runCount(eqCond)));
         }
+
     }
 
-    // -- size(string) thresholds outside int range: cb.length is Expression<Integer>, so an
-    // unguarded (int) narrowing cast wrapped them (2147483648 → −2147483648, 4294967296 → 0),
-    // silently flipping the filter: `size(s) > 4294967296` became `LENGTH(s) > 0` — always-true
-    // over-inclusion while check() denies every row. No string's length leaves int range, so
-    // these comparisons must fold statically: gt/ge/eq huge → always-false; lt/le/ne huge →
-    // true for a PRESENT string only (NULL column = missing attribute → CEL error → deny).
+    /**
+     * The FRACTIONAL threshold over a chain. CEL rejects {@code ==}/{@code !=} between an
+     * int and a double ("found no matching overload for '_==_' applied to '(int, double)'"),
+     * so no policy can make the planner emit these and no corpus action reaches them — the
+     * collapse branch is defensive code a consumer can still drive with a hand-built plan,
+     * and this is its only proving ground (cerbos/query-plan-adapters#333).
+     *
+     * <p>A COUNT is never fractional, so the comparison is statically decided — but not
+     * UNCONDITIONALLY. An absent to-one parent is a CEL missing-path error, which denies
+     * under both polarities, so the collapse has to be tri-state like every other chained
+     * comparison. Spelling it {@code hops AND constant} is two-valued: the negations below
+     * were TRUE for the parentless row and returned it.
+     */
+    @Test
+    void fractionalCollapseOverTwoHopChainStaysUnknownForAnAbsentParent() {
+        var fin = new SubCategoryEntity("chain-sub-f1", "finance");
+        var biz = new CategoryEntity("chain-cat-f1", "business");
+        biz.setSubCategories(List.of(fin));
+        ResourceEntity parented = new ResourceEntity("chain-r-f1");
+        parented.setCategories(List.of(biz));
+        // No categories at all: the chain's leading hop is absent, so CEL denies this row
+        // whatever the collapse decides.
+        ResourceEntity orphan = new ResourceEntity("chain-r-f2");
 
-    @Nested
-    class HugeStringSizeThresholds {
+        Operand size = exprOp("size", var(CHAIN));
+        Operand matching = exprOp("size",
+                exprOp("filter", var(CHAIN),
+                        lambda("s", exprOp("eq", var("s.name"), sval("finance")))));
 
-        private static final double TWO_POW_31 = 2147483648.0; // Integer.MAX_VALUE + 1
-        private static final double TWO_POW_32 = 4294967296.0;
+        withCategoryGraph(parented, List.of(biz), List.of(fin), () ->
+                withResource(orphan, () -> {
+                    // ne f collapses to always-TRUE: the parented row only, never the orphan.
+                    assertEquals(1, runChainCount(exprOp("ne", size, nval(1.5))));
+                    assertEquals(1, runChainCount(exprOp("ne", matching, nval(1.5))));
+                    // eq f collapses to always-FALSE: neither row.
+                    assertEquals(0, runChainCount(exprOp("eq", size, nval(1.5))));
+                    assertEquals(0, runChainCount(exprOp("eq", matching, nval(1.5))));
 
-        private Operand strSize(String op, double threshold) {
-            return exprOp(op,
-                    exprOp("size", var("request.resource.attr.aOptionalString")),
-                    nval(threshold));
-        }
-
-        private ResourceEntity present() {
-            ResourceEntity r = new ResourceEntity("size-huge-1");
-            r.setaOptionalString("abc");
-            return r;
-        }
-
-        private ResourceEntity emptyString() {
-            ResourceEntity r = new ResourceEntity("size-huge-2");
-            r.setaOptionalString("");
-            return r;
-        }
-
-        private ResourceEntity nullString() {
-            ResourceEntity r = new ResourceEntity("size-huge-3");
-            r.setaOptionalString(null);
-            return r;
-        }
-
-        @Test
-        void gtGeEqAboveIntMaxAreAlwaysFalse() {
-            // No string has >= 2^31 chars, so gt/ge/eq can never hold. The wrap made
-            // gt 2^32 into LENGTH > 0 (matched every non-empty row) and gt 2^31 into
-            // LENGTH > −2^31 (matched every present row).
-            withResource(present(), () -> {
-                assertEquals(0, runCount(strSize("gt", TWO_POW_32)));
-                assertEquals(0, runCount(strSize("gt", TWO_POW_31)));
-                assertEquals(0, runCount(strSize("ge", TWO_POW_32)));
-                assertEquals(0, runCount(strSize("ge", TWO_POW_31)));
-            });
-            // eq 2^32 wrapped to LENGTH = 0, wrongly matching the empty string.
-            withResource(emptyString(), () ->
-                    assertEquals(0, runCount(strSize("eq", TWO_POW_32))));
-        }
-
-        @Test
-        void ltLeAboveIntMaxIncludePresentAndExcludeNull() {
-            // Every present string satisfies lt/le a huge threshold — but a NULL column is
-            // a missing attribute → CEL error → deny. The wrap made lt 2^32 into
-            // LENGTH < 0 (excluded everything).
-            withResource(present(), () -> withResource(nullString(), () -> {
-                assertEquals(1, runCount(strSize("lt", TWO_POW_32)));
-                assertEquals(1, runCount(strSize("le", TWO_POW_32)));
-                assertEquals(1, runCount(strSize("lt", TWO_POW_31)));
-            }));
-        }
-
-        @Test
-        void neAboveIntMaxIncludesEmptyStringAndExcludesNull() {
-            // size("") != 2^32 is TRUE in CEL. The wrap made it LENGTH <> 0, wrongly
-            // excluding the empty string; NULL must stay excluded either way.
-            withResource(emptyString(), () -> withResource(nullString(), () ->
-                    assertEquals(1, runCount(strSize("ne", TWO_POW_32)))));
-        }
-
-        @Test
-        void belowIntMinThresholdsFoldMirrored() {
-            // LENGTH(s) >= 0 > any threshold below int range: gt/ge/ne always hold for a
-            // present string (incl. the empty string — the wrap made gt −2^32 into
-            // LENGTH > 0, wrongly excluding it); eq/lt/le can never hold.
-            withResource(emptyString(), () -> withResource(nullString(), () -> {
-                assertEquals(1, runCount(strSize("gt", -TWO_POW_32)));
-                assertEquals(1, runCount(strSize("ge", -TWO_POW_32)));
-                assertEquals(1, runCount(strSize("ne", -TWO_POW_32)));
-                assertEquals(0, runCount(strSize("lt", -TWO_POW_32)));
-                assertEquals(0, runCount(strSize("le", -TWO_POW_32)));
-                assertEquals(0, runCount(strSize("eq", -TWO_POW_32)));
-            }));
-        }
-
-        @Test
-        void fractionalHugeThresholdRoundsThenFolds() {
-            // ge 2^32 + 0.5 → ceil → 4294967297 → still above int range → always-false;
-            // le → floor → 4294967296 → present strings satisfy it.
-            withResource(present(), () -> {
-                assertEquals(0, runCount(strSize("ge", TWO_POW_32 + 0.5)));
-                assertEquals(1, runCount(strSize("le", TWO_POW_32 + 0.5)));
-            });
-        }
-
-        @Test
-        void boundaryIntegerMaxStillComparesExactly() {
-            // Integer.MAX_VALUE itself is in range and must keep producing a real LENGTH
-            // comparison, not a fold.
-            withResource(present(), () -> {
-                assertEquals(0, runCount(strSize("gt", 2147483647.0)));
-                assertEquals(1, runCount(strSize("lt", 2147483647.0)));
-                assertEquals(1, runCount(strSize("le", 2147483647.0)));
-                assertEquals(0, runCount(strSize("ge", 2147483647.0)));
-            });
-        }
+                    // The discriminating arms. A two-valued `hops AND constant` makes both
+                    // negations TRUE for the orphan; the tri-state form leaves them UNKNOWN.
+                    assertEquals(0, runChainCount(
+                            exprOp("not", exprOp("ne", size, nval(1.5)))));
+                    assertEquals(0, runChainCount(
+                            exprOp("not", exprOp("ne", matching, nval(1.5)))));
+                    assertEquals(1, runChainCount(
+                            exprOp("not", exprOp("eq", size, nval(1.5)))));
+                    assertEquals(1, runChainCount(
+                            exprOp("not", exprOp("eq", matching, nval(1.5)))));
+                }));
     }
-
-    // -- except: a two-list function with no JPA translation — every arrival shape throws --
-    //
-    // PDP-verified wire shapes (Cerbos latest, 2026-07): `size(R.attr.tags.except(["archived"]))
-    // > 0` arrives as gt(size(except(variable, value-list)), 0), and `R.attr.tags.except(
-    // ["archived"]) == []` as eq(except(variable, value-list), value-list). except NEVER
-    // arrives with a lambda operand — a previous lambda-except translation here was
-    // unreachable from any real plan and has been removed.
 
     @Test
-    void sizeOfExceptThrowsNamedError() {
+    void eqFieldAgainstStructConstantThrowsNamedError() {
+        // Defensive: the planner emits map literals as struct() expressions (which throw a
+        // named error via leafOperandError), but protoValueToJava can produce a Map from a
+        // STRUCT_VALUE — pin the same contract for that shape.
+        Operand structConstant = Operand.newBuilder()
+                .setValue(Value.newBuilder().setStructValue(Struct.newBuilder()
+                        .putFields("k", Value.newBuilder().setStringValue(ELEM_A).build())))
+                .build();
+        assertNamedError(
+                exprOp("eq", var("request.resource.attr.aString"), structConstant),
+                "eq", "request.resource.attr.aString", "map of 1 entry");
+    }
+
+    @Test
+    void nonListCollectionValueFailsClosed() {
+        assertConditionThrows(exprOp("exists", sval("not-a-list"),
+                lambda("t", exprOp("eq", var("request.resource.attr.aString"), var("t")))),
+                "exists over a literal collection requires a list value");
+    }
+
+    /**
+     * Hierarchy shapes no plan carries. Four compare two CONSTANT hierarchies, which the planner
+     * evaluates itself — a condition with no attribute reference folds to ALWAYS_ALLOWED or
+     * ALWAYS_DENIED before the wire, exactly as {@code in-empty} does — and one calls
+     * {@code overlaps} on a string, which CEL's type checker rejects: {@code overlaps} is declared
+     * on the hierarchy type alone. The adapter still has to answer them, because a caller can
+     * hand it any operand, and this is the only place that answer is pinned.
+     */
+    @Nested
+    class HierarchyShapesNoPlanCarries {
+
+        // Helpers: a hierarchy(...) wrapper and a list(...) of segments.
+        private Operand hierarchy(Operand inner, String delimiter) {
+            return exprOp("hierarchy", inner, sval(delimiter));
+        }
+
+        private Operand hierarchy(Operand inner) {
+            return exprOp("hierarchy", inner);
+        }
+
+        @Test
+        void overlapsConstantsMatchingPrefixIsAlwaysTrue() {
+            // overlaps("a", "a:b") — "a" is a prefix of "a:b", all constant → unconditionally
+            // true: EVERY seeded row must come back (a regression to always-false returns none).
+            Operand cond = exprOp("overlaps",
+                    hierarchy(sval("a"), ":"),
+                    hierarchy(sval("a:b"), ":"));
+            withScopeRows(SCOPES, () ->
+                    assertEquals(Set.copyOf(SCOPES), scopeIds(cond)));
+        }
+
+        @Test
+        void ancestorOfConstantsSatisfied() {
+            // ancestorOf("a", "a:b") — satisfied by constants alone → unconditionally true:
+            // every seeded row comes back regardless of its own scope value.
+            Operand cond = exprOp("ancestorOf",
+                    hierarchy(sval("a"), ":"),
+                    hierarchy(sval("a:b"), ":"));
+            withScopeRows(SCOPES, () ->
+                    assertEquals(Set.copyOf(SCOPES), scopeIds(cond)));
+
+            // A trailing delimiter is a real (empty) segment: "a:b:" splits to ["a","b",""],
+            // so "a:b" is still a strict prefix. If splitLiteral dropped trailing empties this
+            // would throw "do not satisfy" instead of translating to always-true.
+            Operand trailing = exprOp("ancestorOf",
+                    hierarchy(sval("a:b"), ":"),
+                    hierarchy(sval("a:b:"), ":"));
+            withScopeRows(SCOPES, () ->
+                    assertEquals(Set.copyOf(SCOPES), scopeIds(trailing)));
+        }
+
+        @Test
+        void overlapsIncompatibleConstantsWithoutFieldThrows() {
+            // overlaps("a:b", "x:y") — no prefix relationship and no field to constrain → planner bug.
+            assertConditionThrows(
+                    exprOp("overlaps",
+                            hierarchy(sval("a:b"), ":"),
+                            hierarchy(sval("x:y"), ":")),
+                    "Cannot determine hierarchy overlap");
+        }
+
+        @Test
+        void ancestorOfConstantsNotSatisfiedThrows() {
+            assertConditionThrows(
+                    exprOp("ancestorOf",
+                            hierarchy(sval("x"), ":"),
+                            hierarchy(sval("a:b"), ":")),
+                    "ancestorOf", "do not satisfy");
+        }
+
+        @Test
+        void nonHierarchyOperandThrows() {
+            assertConditionThrows(
+                    exprOp("overlaps",
+                            var("request.resource.attr.aString"),
+                            sval("a:b")),
+                    "overlaps", "hierarchy(...) operands");
+        }
+
+    }
+
+    /**
+     * {@code timestamp()} shapes no plan carries. The planner folds {@code now() - duration(...)}
+     * and every other constant to an instant and RE-WRAPS it in {@code timestamp()}, so a bare
+     * string, a malformed literal, a number, or a concatenation never arrives inside one; and
+     * {@code timestamp(x) > 5} and {@code timestamp(x) + 1} are no-overload errors CEL's checker
+     * rejects. The reachable operator cells sit under the corpus-gap banner as
+     * {@link TimestampComparisons}.
+     */
+    @Nested
+    class TimestampShapesNoPlanCarries {
+
+        @Test
+        void bareStringConstantStillThrows() {
+            // The PDP never emits timestamp(variable) vs a bare string (verified against a
+            // live PDP: even folded now()-duration constants are re-wrapped in timestamp()).
+            // Unverifiable shape → keep failing closed.
+            assertConditionThrows(
+                    exprOp("lt", tsVar("createdAt"), sval(TS_CONST)),
+                    "Unexpected timestamp() expression in leaf operand of lt");
+        }
+
+        @Test
+        void numberConstantAgainstTimestampFieldThrows() {
+            assertConditionThrows(
+                    exprOp("gt", tsVar("createdAt"), nval(5)),
+                    "Unexpected timestamp() expression in leaf operand of gt");
+        }
+
+        @Test
+        void timestampOverNestedExpressionThrows() {
+            // timestamp(<expression>) has no verified wire shape → Opaque → named error.
+            assertConditionThrows(
+                    exprOp("lt",
+                            exprOp("timestamp", exprOp("add", sval("a"), sval("b"))),
+                            tsVal(TS_CONST)),
+                    "Unexpected timestamp() expression in leaf operand of lt");
+        }
+
+        @Test
+        void timestampInsideArithmeticStillThrows() {
+            // Nested shapes the numeric machinery routes through resolveNumericOperand keep
+            // their named error — no partial support for shapes the oracle cannot verify.
+            assertConditionThrows(
+                    exprOp("lt",
+                            exprOp("add", tsVar("createdAt"), nval(1)),
+                            nval(5)),
+                    "timestamp() expression inside an arithmetic");
+        }
+
+        @Test
+        void malformedConstantThrowsNamedError() {
+            assertConditionThrows(
+                    exprOp("lt", tsVar("createdAt"), tsVal("not-a-timestamp")),
+                    "timestamp() constant could not be parsed");
+        }
+
+        @Test
+        void nonStringConstantInsideTimestampThrows() {
+            assertConditionThrows(
+                    exprOp("lt", tsVar("createdAt"),
+                            exprOp("timestamp", nval(1735689600))),
+                    "timestamp() constant must be an RFC-3339 string");
+        }
+
+    }
+
+    // -- constant-only sub-expressions the planner folds before the wire: p-startswith-concat and
+    // cr-startswith-concat arrive with their concatenation already a literal --
+
+    @Test
+    void addFoldedTwoConstants() {
+        // eq(R.attr.aString, add("hello", "-world"))  →  field == "hello-world"
+        Operand cond = exprOp("eq",
+                var("request.resource.attr.aString"),
+                exprOp("add", sval("hello"), sval("-world")));
+        assertEquals(0, runCount(cond));
+    }
+
+    @Test
+    void addFoldedConstantValueFirstIsMirrored() {
+        // (1 + 2) < aNumber → aNumber > 3, with aNumber = 5 → match.
+        withResource(orderSeed(), () ->
+                assertEquals(1, runCount(exprOp("lt",
+                        exprOp("add", nval(1), nval(2)),
+                        var("request.resource.attr.aNumber")))));
+    }
+
+    @Test
+    void addFoldedConstantReceiver() {
+        // ("role1," + "role2").contains(aString) — if the planner ever ships the concat
+        // unfolded, the receiver arrives as add(value, value) and must fold into the same
+        // constant-haystack translation, not the inverted column-haystack one.
+        Operand cond = exprOp("contains",
+                exprOp("add", sval("role1,"), sval("role2")),
+                var("request.resource.attr.aString"));
+        withResource(row("cr-11", "role1"), () -> assertEquals(1, runCount(cond)));
+        withResource(row("cr-12", "admin"), () -> assertEquals(0, runCount(cond)));
+    }
+
+    @Test
+    void bothOperandsAddExpressionsReportsShapeNotArity() {
+        // contains(add(...), add(...)): there ARE two operands — the old message
+        // ("add comparison requires a second operand") misstated the problem as arity.
+        assertConditionThrows(
+                exprOp("contains",
+                        exprOp("add", sval("a"), sval("b")),
+                        exprOp("add", sval("c"), sval("d"))),
+                "contains", "two add() expressions");
+    }
+
+    // -- Malformed / hostile operand shapes the planner never emits --
+
+    @Test
+    void mapLambdaWithWrongArityThrowsCleanly() {
+        // A malformed lambda inside map() must produce IllegalArgumentException, not
+        // IndexOutOfBoundsException.
+        Operand mapExpr = exprOp("map",
+                var("request.resource.attr.tags"),
+                exprOp("lambda", var("t")));
+        assertConditionThrows(
+                exprOp("hasIntersection", mapExpr, listOp("x")),
+                "map lambda requires exactly 2 operands");
+    }
+
+    @Test
+    void structValueWithNullEntryDoesNotThrow() {
+        // Struct fields may hold nulls; Collectors.toMap would NPE on them.
+        com.google.protobuf.Struct struct = com.google.protobuf.Struct.newBuilder()
+                .putFields("a", Value.newBuilder().setNullValue(NullValue.NULL_VALUE).build())
+                .putFields("b", Value.newBuilder().setStringValue("x").build())
+                .build();
+        Object converted = PlanValues.protoValueToJava(
+                Value.newBuilder().setStructValue(struct).build());
+        assertInstanceOf(Map.class, converted);
+        Map<?, ?> map = (Map<?, ?>) converted;
+        assertEquals(2, map.size());
+        assertNull(map.get("a"));
+        assertEquals("x", map.get("b"));
+    }
+
+    @Test
+    void ternaryWithWrongOperandCountThrows() {
+        // if() with 2 operands inside a comparison — malformed plan, not a silent drop.
+        assertConditionThrows(
+                exprOp("gt",
+                        exprOp("if", var("request.resource.attr.aBool"), nval(1)),
+                        nval(0)),
+                "if (ternary) requires exactly 3 operands", "got 2");
+        // Same contract for a bare-boolean-position ternary.
+        assertConditionThrows(
+                exprOp("if", var("request.resource.attr.aBool"), bval(true)),
+                "if (ternary) requires exactly 3 operands", "got 2");
+    }
+
+    // -- Leaf operand-count guard: extra operands must fail loudly, not drop silently --
+
+    @Test
+    void leafWithExtraOperandThrows() {
+        // A 3-operand eq previously kept the field-to-field comparison and silently DROPPED
+        // the value operand. Malformed plans must throw instead.
+        assertConditionThrows(
+                exprOp("eq",
+                        var("request.resource.attr.aString"),
+                        var("request.resource.attr.createdBy"),
+                        sval("x")),
+                "eq", "2 operands");
+    }
+
+    @Test
+    void sizeComparisonWithExtraOperandThrows() {
+        // The size() probe used to run BEFORE the arity guard and scan operands
+        // last-match-wins: a malformed eq(size(tags), variable, value) translated to
+        // COUNT(tags) = value, silently discarding the variable constraint. The guard now
+        // fires first, so the size() path shares the loud-failure contract of plain leaves.
+        assertConditionThrows(
+                exprOp("eq",
+                        exprOp("size", var("request.resource.attr.tags")),
+                        var("request.resource.attr.aString"),
+                        nval(2)),
+                "eq", "2 operands");
+    }
+
+    @Test
+    void sizeArityErrorReportsOperandCount() {
         assertConditionThrows(
                 exprOp("gt",
                         exprOp("size",
-                                exprOp("except",
-                                        var("request.resource.attr.tags"), listOp("archived"))),
+                                var("request.resource.attr.tags"),
+                                var("request.resource.attr.tagNames")),
                         nval(0)),
-                "except is not supported", "except(list, list)", "exists");
+                "size() takes exactly 1 argument, got 2");
     }
 
-    @Test
-    void exceptComparedToListThrowsNamedError() {
-        assertConditionThrows(
-                exprOp("eq",
-                        exprOp("except",
-                                var("request.resource.attr.tags"), listOp("archived")),
-                        listOp()),
-                "except is not supported", "except(list, list)");
-    }
+    // ============================================================================================
+    // KIND 2 — a caller-supplied argument the corpus structurally cannot vary
+    // ============================================================================================
 
     @Test
-    void bareExceptThrowsNamedError() {
-        // Top-level except in boolean position — including the old synthetic lambda shape —
-        // must fail closed with the named error, not translate invented semantics.
-        assertConditionThrows(
-                exprOp("except",
-                        var("request.resource.attr.tags"),
-                        lambda("t", exprOp("eq", var("t.name"), sval("public")))),
-                "except is not supported", "except(list, list)");
-        assertConditionThrows(
-                exprOp("except",
-                        var("request.resource.attr.tags"), listOp("archived")),
-                "except is not supported", "except(list, list)");
-    }
-
-    @Test
-    void existsOneWithCompoundBody() {
-        assertEquals(0, runCount(exprOp("exists_one",
-                var("request.resource.attr.tags"),
-                lambda("t",
-                        exprOp("or",
-                                exprOp("eq", var("t.id"), sval("tag1")),
-                                exprOp("eq", var("t.name"), sval("public")))))));
-    }
-
-    // -- empty-list intersection short-circuits (no dialect-dependent `IN ()`) --
-
-    @Test
-    void hasIntersectionScalarEmptyListCompiles() {
-        // hasIntersection(field, []) is always false and must not emit an empty `IN ()`.
-        assertEquals(0, runCount(exprOp("hasIntersection",
-                var("request.resource.attr.aString"), listOp())));
-    }
-
-    @Test
-    void hasIntersectionRelationEmptyListCompiles() {
-        assertEquals(0, runCount(exprOp("hasIntersection",
-                var("request.resource.attr.tags"), listOp())));
-    }
-
-    @Test
-    void hasIntersectionMapEmptyListCompiles() {
-        Operand mapExpr = exprOp("map",
-                var("request.resource.attr.tags"),
-                lambda("t", var("t.name")));
-        assertEquals(0, runCount(exprOp("hasIntersection", mapExpr, listOp())));
+    void alwaysAllowedSpecificationReturnsNullPredicate() {
+        // Contract: an always-allowed plan must produce a Specification whose toPredicate
+        // returns null — Spring Data's SimpleJpaRepository skips the WHERE clause entirely
+        // in that case. Pins B2 against regression to cb.conjunction().
+        PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_ALWAYS_ALLOWED, null);
+        Specification<ResourceEntity> spec =
+                SpringDataQueryPlanAdapter.toSpecification(resp, MAPPER);
+        EntityManager em = emf.createEntityManager();
+        try {
+            CriteriaBuilder cb = em.getCriteriaBuilder();
+            CriteriaQuery<ResourceEntity> cq = cb.createQuery(ResourceEntity.class);
+            Root<ResourceEntity> root = cq.from(ResourceEntity.class);
+            assertNull(spec.toPredicate(root, cq, cb));
+        } finally {
+            em.close();
+        }
     }
 
     // -- override hook is consulted on every scalar-leaf path, not just the direct comparison --
@@ -670,6 +990,44 @@ class SpringDataQueryPlanAdapterTest {
     }
 
     @Test
+    void operatorOverrideIsUsed() {
+        Operand cond = exprOp("eq", var("request.resource.attr.aString"), sval("foo"));
+        // Override eq to always produce IS NULL — result count stays 0 and the override path
+        // is exercised end-to-end (runCount asserts the Conditional kind internally).
+        Map<String, OperatorFunction> overrides = Map.of(
+                "eq", (cb, field, value) -> cb.isNull(field));
+        assertEquals(0, runCount(cond, overrides));
+    }
+
+    @Test
+    void overrideStillOwnsInWithNullElement() {
+        // A registered override must keep receiving the RAW list (nulls included).
+        Operand cond = exprOp("in",
+                var("request.resource.attr.aOptionalString"), listOpNullable("a", null));
+        assertThrows(OverrideInvoked.class,
+                () -> runCount(cond, Map.of("in", THROWING_OVERRIDE)));
+    }
+
+    @Test
+    void overrideIsConsultedUnderMirroredOperator() {
+        // 3 < aNumber builds a gt predicate — the override must be looked up as "gt".
+        Operand cond = exprOp("lt", nval(3), var("request.resource.attr.aNumber"));
+        assertThrows(OverrideInvoked.class,
+                () -> runCount(cond, Map.of("gt", THROWING_OVERRIDE)));
+    }
+
+    @Test
+    void overrideAppliesToArithmeticComparison() {
+        // OperatorFunction contract: overrides win on EVERY scalar path. The arithmetic
+        // expression is passed as the field argument; the plan constant as the value.
+        Operand cond = exprOp("gt",
+                exprOp("add", var("request.resource.attr.aNumber"), nval(1.0)),
+                nval(2.0));
+        assertThrows(OverrideInvoked.class,
+                () -> runCount(cond, Map.of("gt", THROWING_OVERRIDE)));
+    }
+
+    @Test
     void unknownAttributeThrows() {
         Operand cond = exprOp("eq", var("request.resource.attr.nonexistent"), sval("v"));
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
@@ -678,221 +1036,12 @@ class SpringDataQueryPlanAdapterTest {
     }
 
     @Test
-    void unknownOperatorThrows() {
-        Operand cond = exprOp("unsupported_op",
-                var("request.resource.attr.aString"), sval("v"));
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> runCount(cond));
-        assertTrue(ex.getMessage().contains("Unsupported operator"));
-    }
-
-    // -- eq/ne against a structured (list/map) constant: named error, not a raw Hibernate one --
-
-    /**
-     * PDP-verified wire shapes (Cerbos {@code :latest}, 2026-07-23): {@code R.attr.tags ==
-     * ["a", "b"]} arrives as {@code eq(variable, value-list)} verbatim — in BOTH operand
-     * orders — and {@code ne} likewise. Without the guard, {@code cb.equal(stringPath, List)}
-     * dies inside Hibernate with a raw coercion error ("Could not convert
-     * java.util.ImmutableCollections$ListN to java.lang.String"), violating the README's
-     * contract that unsupported constructs throw {@link IllegalArgumentException} naming the
-     * operator. These tests pin the named error AND that no element values leak into it.
-     */
-    @Nested
-    class StructuredConstantComparison {
-
-        /** Distinctive element values so the no-leak assertions cannot false-negative. */
-        private static final String ELEM_A = "leak-canary-alpha";
-        private static final String ELEM_B = "leak-canary-beta";
-
-        private static IllegalArgumentException assertNamedError(Operand cond, String op,
-                                                                 String attribute, String shape) {
-            IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                    () -> runCount(cond));
-            String msg = ex.getMessage();
-            assertTrue(msg.contains(op), "expected operator '" + op + "' in: " + msg);
-            assertTrue(msg.contains(attribute), "expected attribute '" + attribute + "' in: " + msg);
-            assertTrue(msg.contains(shape), "expected shape '" + shape + "' in: " + msg);
-            assertTrue(msg.contains("hasIntersection"),
-                    "expected the supported alternative in: " + msg);
-            assertFalse(msg.contains(ELEM_A), "element value leaked into: " + msg);
-            assertFalse(msg.contains(ELEM_B), "element value leaked into: " + msg);
-            return ex;
-        }
-
-        @Test
-        void eqFieldAgainstListConstantThrowsNamedError() {
-            assertNamedError(
-                    exprOp("eq", var("request.resource.attr.aString"), listOp(ELEM_A, ELEM_B)),
-                    "eq", "request.resource.attr.aString", "list of 2 elements");
-        }
-
-        @Test
-        void neFieldAgainstListConstantThrowsNamedError() {
-            assertNamedError(
-                    exprOp("ne", var("request.resource.attr.aString"), listOp(ELEM_A, ELEM_B)),
-                    "ne", "request.resource.attr.aString", "list of 2 elements");
-        }
-
-        @Test
-        void eqValueFirstListConstantThrowsNamedError() {
-            // ["a", "b"] == R.attr.x — source order is preserved on the wire; NormalizedBinary
-            // mirrors it back to field-first, so the same named error must surface.
-            assertNamedError(
-                    exprOp("eq", listOp(ELEM_A), var("request.resource.attr.aString")),
-                    "eq", "request.resource.attr.aString", "list of 1 element");
-        }
-
-        @Test
-        void neValueFirstListConstantThrowsNamedError() {
-            assertNamedError(
-                    exprOp("ne", listOp(ELEM_A, ELEM_B), var("request.resource.attr.aString")),
-                    "ne", "request.resource.attr.aString", "list of 2 elements");
-        }
-
-        @Test
-        void eqRelationAgainstListConstantThrowsNamedError() {
-            // Relation-mapped attribute: previously surfaced the generic "is a Relation;
-            // cannot resolve as a scalar path" — the structured-constant guard runs before
-            // path resolution so this shape gets the same actionable message.
-            assertNamedError(
-                    exprOp("eq", var("request.resource.attr.tags"), listOp(ELEM_A, ELEM_B)),
-                    "eq", "request.resource.attr.tags", "list of 2 elements");
-        }
-
-        @Test
-        void eqFieldAgainstStructConstantThrowsNamedError() {
-            // Defensive: the planner emits map literals as struct() expressions (which throw a
-            // named error via leafOperandError), but protoValueToJava can produce a Map from a
-            // STRUCT_VALUE — pin the same contract for that shape.
-            Operand structConstant = Operand.newBuilder()
-                    .setValue(Value.newBuilder().setStructValue(Struct.newBuilder()
-                            .putFields("k", Value.newBuilder().setStringValue(ELEM_A).build())))
-                    .build();
-            assertNamedError(
-                    exprOp("eq", var("request.resource.attr.aString"), structConstant),
-                    "eq", "request.resource.attr.aString", "map of 1 entry");
-        }
-    }
-
-    // -- add operator --
-
-    @Test
-    void addFoldedTwoConstants() {
-        // eq(R.attr.aString, add("hello", "-world"))  →  field == "hello-world"
-        Operand cond = exprOp("eq",
-                var("request.resource.attr.aString"),
-                exprOp("add", sval("hello"), sval("-world")));
-        assertEquals(0, runCount(cond));
-    }
-
-    @Test
-    void addSolveStringSuffixStrip() {
-        // eq("foo.bar", add(R.attr.aString, ".bar"))
-        //   → "foo.bar".stripSuffix(".bar") == "foo"
-        //   → aString == "foo"
-        Operand cond = exprOp("eq",
-                sval("foo.bar"),
-                exprOp("add", var("request.resource.attr.aString"), sval(".bar")));
-        assertEquals(0, runCount(cond));
-    }
-
-    @Test
-    void addSolveNumeric() {
-        // eq(10, add(3, R.attr.aNumber))  →  aNumber == 7. Long/long solves within ±2^53 are
-        // algebraically exact and must keep solving in Java: seeded rows prove the filter
-        // keeps the aNumber=7 row and drops the aNumber=8 row.
-        Operand cond = exprOp("eq",
-                nval(10),
-                exprOp("add", nval(3), var("request.resource.attr.aNumber")));
-        assertEquals(0, runCount(cond));
-
-        ResourceEntity match = new ResourceEntity("add-long-1");
-        match.setaNumber(7);
-        ResourceEntity miss = new ResourceEntity("add-long-2");
-        miss.setaNumber(8);
-        withResource(match, () -> withResource(miss, () -> assertEquals(1, runCount(cond))));
-    }
-
-    @Test
-    void addSolveOversizedLongRoutesToSqlArithmetic() {
-        // 2^54 is outside the ±2^53 exactly-representable range: the check-time double
-        // arithmetic has gaps there, so the long-space solve must NOT fire — the shape
-        // routes through SQL double arithmetic instead (and must not throw).
-        Operand cond = exprOp("eq",
-                exprOp("add", var("request.resource.attr.aNumber"), nval(1)),
-                nval(0x1p54));
-
-        ResourceEntity row = new ResourceEntity("add-big-1");
-        row.setaNumber(5);
-        withResource(row, () -> assertEquals(0, runCount(cond)));
-    }
-
-    @Test
-    void addNoSolutionEqProducesImpossibleFilter() {
-        // eq("nope", add("projects:", R.attr.aString))
-        //   "nope" doesn't start with "projects:" → no solution → eq becomes 1=0
-        Operand cond = exprOp("eq",
-                sval("nope"),
-                exprOp("add", sval("projects:"), var("request.resource.attr.aString")));
-        // 1=0 filter → 0 results expected (table is empty anyway, this just confirms no exception)
-        assertEquals(0, runCount(cond));
-    }
-
-    @Test
-    void addNoSolutionNeExcludesNullRows() {
-        // ne("abc", add("users:", R.attr.aOptionalString)): no field value can make the
-        // concatenation equal "abc", BUT a missing attribute makes `"users:" + null` a CEL
-        // evaluation error → deny. An always-true collapse would leak the NULL row; the
-        // correct translation is IS NOT NULL (non-NULL rows in, NULL rows out).
-        Operand neCond = exprOp("ne",
-                sval("abc"),
-                exprOp("add", sval("users:"), var("request.resource.attr.aOptionalString")));
-        Operand eqCond = exprOp("eq",
-                sval("abc"),
-                exprOp("add", sval("users:"), var("request.resource.attr.aOptionalString")));
-
-        ResourceEntity withValue = new ResourceEntity("ne-add-1");
-        withValue.setaOptionalString("x");
-        ResourceEntity withNull = new ResourceEntity("ne-add-2");
-        withNull.setaOptionalString(null);
-
-        withResource(withValue, () -> withResource(withNull, () -> {
-            // Only the non-NULL row survives ne; the NULL row is a CEL error → deny.
-            assertEquals(1, runCount(neCond));
-            // eq stays always-false: neither row matches (NULL row denied there too).
-            assertEquals(0, runCount(eqCond));
-        }));
-    }
-
-    // -- CEL primitives (PR #223): only empty-collection is natively supported; the rest throw --
-
-    @Nested
-    class CelPrimitives {
-
-        // add/sub/mult/div appearing as a comparison operand are supported (double-space SQL
-        // arithmetic) — see ArithmeticComparisons. Only mod remains rejected.
-
-        @Test
-        void stringSizeComparesLength() {
-            // size(aString) on a Field mapping → LENGTH(a_string) <op> N.
-            // Seeded aString = "seededString" (12 chars).
-            ResourceEntity r = new ResourceEntity("string-size-seed-1");
-            r.setaString("seededString");
-            withResource(r, () -> {
-                assertEquals(1, runCount(exprOp("eq",
-                        exprOp("size", var("request.resource.attr.aString")), nval(12))));
-                assertEquals(0, runCount(exprOp("eq",
-                        exprOp("size", var("request.resource.attr.aString")), nval(5))));
-                assertEquals(1, runCount(exprOp("gt",
-                        exprOp("size", var("request.resource.attr.aString")), nval(0))));
-                assertEquals(0, runCount(exprOp("gt",
-                        exprOp("size", var("request.resource.attr.aString")), nval(20))));
-                // Value-first is mirrored: 5 < size(aString) → length > 5 → match.
-                assertEquals(1, runCount(exprOp("lt",
-                        nval(5),
-                        exprOp("size", var("request.resource.attr.aString")))));
-            });
-        }
+    void unknownCollectionAttributeThrows() {
+        assertConditionThrows(
+                exprOp("in",
+                        var("request.resource.attr.aString"),
+                        var("request.resource.attr.nonexistent")),
+                "Unknown attribute");
     }
 
     // -- NULL attribute representation (issue #302) --
@@ -998,192 +1147,12 @@ class SpringDataQueryPlanAdapterTest {
 
     }
 
-    // -- Minor operator/comparison shapes (PR #234) --
-
-    @Nested
-    class MinorOperators {
-
-        @Test
-        void fieldToFieldOrderingKeepsOperandDirection() {
-            // lt/gt over two variables must honor source order: createdBy < aString
-            // with createdBy = "abc", aString = "xyz" → match; the swapped form must not.
-            ResourceEntity r = new ResourceEntity("f2f-seed-2");
-            r.setaString("xyz");
-            r.setCreatedBy("abc");
-            r.setaNumber(5);
-            withResource(r, () -> {
-                assertEquals(1, runCount(exprOp("lt",
-                        var("request.resource.attr.createdBy"),
-                        var("request.resource.attr.aString"))));
-                assertEquals(0, runCount(exprOp("lt",
-                        var("request.resource.attr.aString"),
-                        var("request.resource.attr.createdBy"))));
-                assertEquals(1, runCount(exprOp("le",
-                        var("request.resource.attr.aNumber"),
-                        var("request.resource.attr.aNumber"))));
-                assertEquals(0, runCount(exprOp("gt",
-                        var("request.resource.attr.aNumber"),
-                        var("request.resource.attr.aNumber"))));
-            });
-        }
-
-        @Test
-        void fieldToFieldUnsupportedOperatorStillThrows() {
-            // contains/startsWith/endsWith(var, var) are supported (see FieldToFieldStringMatch);
-            // anything else without a column-to-column translation keeps the specific message.
-            assertConditionThrows(
-                    exprOp("matches",
-                            var("request.resource.attr.aString"),
-                            var("request.resource.attr.createdBy")),
-                    "Field-to-field", "matches");
-        }
-
-        @Test
-        void equalBoolFalse() {
-            assertEquals(0, runCount(exprOp("eq",
-                    var("request.resource.attr.aBool"), bval(false))));
-        }
-
-        @Test
-        void inNumberList() {
-            assertEquals(0, runCount(exprOp("in",
-                    var("request.resource.attr.aNumber"),
-                    listOpNumbers(1, 2, 3))));
-        }
-
-    }
-
-    // -- Collection macro composition (PR #235) --
-
-    @Nested
-    class CollectionMacroComposition {
-
-        @Test
-        void allWithNestedAnd() {
-            // tags.all(t, t.name == "public" && t.id != "tag1")
-            Operand cond = exprOp("all",
-                    var("request.resource.attr.tags"),
-                    lambda("t", exprOp("and",
-                            exprOp("eq", var("t.name"), sval("public")),
-                            exprOp("ne", var("t.id"), sval("tag1")))));
-            assertEquals(0, runCount(cond));
-        }
-
-        @Test
-        void sizeOfFilterCountsMatchingElements() {
-            // size(tags.filter(t, t.name == "public")) <op> N → correlated
-            // (SELECT COUNT(...) WHERE lambda) <op> N. Seeded row: tags [public, public, x].
-            ResourceEntity r = new ResourceEntity("size-filter-seed-1");
-            r.addTag("tagA", "public");
-            r.addTag("tagB", "public");
-            r.addTag("tagC", "x");
-            Operand filterExpr = exprOp("filter",
-                    var("request.resource.attr.tags"),
-                    lambda("t", exprOp("eq", var("t.name"), sval("public"))));
-            withResource(r, () -> {
-                assertEquals(1, runCount(exprOp("eq", exprOp("size", filterExpr), nval(2))));
-                assertEquals(0, runCount(exprOp("eq", exprOp("size", filterExpr), nval(3))));
-                assertEquals(1, runCount(exprOp("gt", exprOp("size", filterExpr), nval(1))));
-                assertEquals(0, runCount(exprOp("gt", exprOp("size", filterExpr), nval(2))));
-                // Emptiness checks work through the same path.
-                assertEquals(1, runCount(exprOp("gt", exprOp("size", filterExpr), nval(0))));
-                assertEquals(0, runCount(exprOp("eq", exprOp("size", filterExpr), nval(0))));
-                // Value-first is mirrored: 3 > size(filter) → count < 3 → match.
-                assertEquals(1, runCount(exprOp("gt", nval(3), exprOp("size", filterExpr))));
-            });
-        }
-    }
-
     // -- collection-macro nesting depth guard --
     // Each nesting level multiplies the correlated-subquery count of the translated filter, so
     // plans nested beyond the configured limit must fail loudly at translation time instead of
     // silently emitting a filter that times out on production-sized tables. The property name is
     // spelled out literally here (not via the adapter constant) so this suite compiles — and
     // demonstrably FAILS — against the pre-guard adapter.
-
-    /**
-     * exists/all whose collection operand is a literal value list — the wire shape the planner
-     * emits when a known collection (e.g. a folded principal attribute) exceeds the 10-element
-     * unroll cap of cerbos/cerbos#2570/#2817. The adapter folds the macro into the same or/and
-     * chain the planner produces below the cap, so the translated filter does not depend on
-     * which side of that threshold the collection lands.
-     */
-    @Nested
-    class KnownValueCollections {
-
-        private static Value structElement(String field, String value) {
-            return Value.newBuilder().setStructValue(
-                    Struct.newBuilder().putFields(field,
-                            Value.newBuilder().setStringValue(value).build())).build();
-        }
-
-        private static Operand structListOp(String field, String... values) {
-            ListValue.Builder list = ListValue.newBuilder();
-            for (String v : values) list.addValues(structElement(field, v));
-            return Operand.newBuilder().setValue(Value.newBuilder().setListValue(list)).build();
-        }
-
-        @Test
-        void emptyValueListKeepsCelIdentitySemantics() {
-            ResourceEntity r = new ResourceEntity("kvc-empty");
-            r.setaString("alpha");
-            withResource(r, () -> {
-                // exists over [] is false; all over [] is true.
-                assertEquals(0, runCount(exprOp("exists", listOp(),
-                        lambda("t", exprOp("eq", var("request.resource.attr.aString"), var("t"))))));
-                assertEquals(1, runCount(exprOp("all", listOp(),
-                        lambda("t", exprOp("ne", var("request.resource.attr.aString"), var("t"))))));
-            });
-        }
-
-        @Test
-        void structElementPathSubstitution() {
-            ResourceEntity r = new ResourceEntity("kvc-struct");
-            r.setaString("alpha");
-            withResource(r, () -> {
-                assertEquals(1, runCount(exprOp("exists", structListOp("name", "alpha", "beta"),
-                        lambda("t", exprOp("eq",
-                                var("request.resource.attr.aString"), var("t.name"))))));
-                assertEquals(0, runCount(exprOp("exists", structListOp("name", "x"),
-                        lambda("t", exprOp("eq",
-                                var("request.resource.attr.aString"), var("t.name"))))));
-            });
-        }
-
-        /**
-         * A nested lambda rebinding the variable shadows it: the inner {@code t.name} must stay
-         * symbolic. An incorrect substitution would try to drill {@code .name} into the outer
-         * string element and fail translation.
-         */
-        @Test
-        void nestedLambdaShadowsOuterVariable() {
-            assertEquals(0, runCount(exprOp("exists", listOp("outer1", "outer2"),
-                    lambda("t", exprOp("exists", var("request.resource.attr.tags"),
-                            lambda("t", exprOp("eq", var("t.name"), sval("public"))))))));
-        }
-
-        @Test
-        void existsOneOverValueListFailsClosed() {
-            assertConditionThrows(exprOp("exists_one", listOp("a"),
-                    lambda("t", exprOp("eq", var("request.resource.attr.aString"), var("t")))),
-                    "exists_one over a literal collection value is not supported");
-        }
-
-        @Test
-        void nonListCollectionValueFailsClosed() {
-            assertConditionThrows(exprOp("exists", sval("not-a-list"),
-                    lambda("t", exprOp("eq", var("request.resource.attr.aString"), var("t")))),
-                    "exists over a literal collection requires a list value");
-        }
-
-        @Test
-        void missingElementFieldFailsClosed() {
-            assertConditionThrows(exprOp("exists", structListOp("name", "alpha"),
-                    lambda("t", exprOp("eq",
-                            var("request.resource.attr.aString"), var("t.missing")))),
-                    "Cannot resolve \"t.missing\"", "has no field \"missing\"");
-        }
-    }
 
     @Nested
     class MacroDepthGuard {
@@ -1304,849 +1273,53 @@ class SpringDataQueryPlanAdapterTest {
     }
 
     /**
-     * {@code in}-lists containing {@code null} — PDP-verified wire facts (Cerbos latest,
-     * 2026-07): {@code R.attr.owner in ["a", null]} compiles and the planner emits
-     * {@code in(variable, value ["a", null])} VERBATIM, and {@code check()} ALLOWS an
-     * explicitly-null attribute (CEL {@code null in ["a", null]} is true). The planner itself
-     * folds the degenerate {@code x in [null]} to {@code eq(x, null)} — which this adapter
-     * already translates as IS NULL — so a null list element must become an IS NULL disjunct:
-     * {@code path IN (nonNulls) OR path IS NULL}. Passing the raw null-bearing list to
-     * {@code path.in} instead produces SQL {@code IN ('a', NULL)}, whose three-valued
-     * semantics silently EXCLUDE null rows check() allows (under-return), and whose negation
-     * is UNKNOWN for every non-matching row (the negated filter returns nothing at all).
-     * The Relation side mirrors this: a null element of a mapped collection is a related row
-     * whose member column IS NULL, so the null needle/element becomes an IS NULL disjunct
-     * inside the membership EXISTS.
+     * Column types the corpus does not map. The corpus maps {@code createdAt} to an
+     * {@link java.time.Instant}; an {@code OffsetDateTime} column, a {@code LocalDateTime} column
+     * and the override that reaches past the column-type check are caller-supplied arguments.
      */
     @Nested
-    class InListNullElements {
-
-        /** Seed three rows keyed by aOptionalString content: "a", "b", and NULL. */
-        private void withOwnerRows(Runnable body) {
-            ResourceEntity a = new ResourceEntity("in-null-a");
-            a.setaOptionalString("a");
-            ResourceEntity b = new ResourceEntity("in-null-b");
-            b.setaOptionalString("b");
-            ResourceEntity nul = new ResourceEntity("in-null-nul");
-            nul.setaOptionalString(null);
-            withResource(a, () -> withResource(b, () -> withResource(nul, body)));
-        }
-
-        /** Seed rows with tag collections: a null-name member, an "x" member, and no tags. */
-        private void withTagRows(Runnable body) {
-            ResourceEntity withX = new ResourceEntity("in-null-tag-x");
-            withX.addTag("int1", "x");
-            ResourceEntity withNullName = new ResourceEntity("in-null-tag-nul");
-            withNullName.addTag("int2", null);
-            ResourceEntity noTags = new ResourceEntity("in-null-tag-none");
-            withResource(withX, () -> withResource(withNullName, () -> withResource(noTags, body)));
-        }
-
-        /** Translate {@code condition}, run it, and return the matched row IDs. */
-        private Set<String> runIds(Operand condition) {
-            PlanResourcesResponse resp =
-                    buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
-            Specification<ResourceEntity> spec =
-                    SpringDataQueryPlanAdapter.toSpecification(resp, MAPPER, Map.of());
-            EntityManager em = emf.createEntityManager();
-            try {
-                CriteriaBuilder cb = em.getCriteriaBuilder();
-                CriteriaQuery<String> cq = cb.createQuery(String.class);
-                Root<ResourceEntity> root = cq.from(ResourceEntity.class);
-                cq.select(root.get("id")).distinct(true);
-                Predicate p = spec.toPredicate(root, cq, cb);
-                if (p != null) {
-                    cq.where(p);
-                }
-                return Set.copyOf(em.createQuery(cq).getResultList());
-            } finally {
-                em.close();
-            }
-        }
+    class TimestampColumnMappings {
 
         @Test
-        void nullNeedleAgainstScalarFieldIsIsNull() {
-            // `null in R.attr.x` over a Field mapping: scalar membership is equality, and
-            // equality against the null constant is IS NULL (mirrors the eq-null leaf).
-            Operand cond = exprOp("in",
-                    nullVal(), var("request.resource.attr.aOptionalString"));
-            withOwnerRows(() ->
-                    assertEquals(Set.of("in-null-nul"), runIds(cond)));
-        }
-
-        @Test
-        void mapIntersectionNullElementIsInertAndNullProjectionStaysUnknown() {
-            // For map(t, t.name) member ACCESS — unlike the scalar tagNames projection — a
-            // NULL member column is a MISSING element attribute (CEL error): check() denies
-            // tags=[{}] under BOTH polarities even with a null element in the constant list
-            // (PDP-verified), and only an explicitly-null projection (unrepresentable in the
-            // column model) could match that element. The null element must be inert and the
-            // NULL-projection row must stay UNKNOWN.
-            java.util.function.Supplier<Operand> cond = () -> exprOp("hasIntersection",
-                    exprOp("map", var("request.resource.attr.tags"),
-                            lambda("t", var("t.name"))),
-                    listOpNullable("x", null));
-            withTagRows(() -> {
-                assertEquals(Set.of("in-null-tag-x"), runIds(cond.get()));
-                assertEquals(Set.of("in-null-tag-none"),
-                        runIds(exprOp("not", cond.get())));
+        void offsetDateTimeColumnSupportsAllSixOperators() {
+            withTimestampRows(() -> {
+                assertEquals(2, runCount(exprOp("lt", tsVar("updatedAt"), tsVal(TS_CONST))));
+                assertEquals(3, runCount(exprOp("le", tsVar("updatedAt"), tsVal(TS_CONST))));
+                assertEquals(1, runCount(exprOp("gt", tsVar("updatedAt"), tsVal(TS_CONST))));
+                assertEquals(2, runCount(exprOp("ge", tsVar("updatedAt"), tsVal(TS_CONST))));
+                assertEquals(1, runCount(exprOp("eq", tsVar("updatedAt"), tsVal(TS_CONST))));
+                assertEquals(3, runCount(exprOp("ne", tsVar("updatedAt"), tsVal(TS_CONST))));
+                // Value-first mirror on the OffsetDateTime column too.
+                assertEquals(1, runCount(exprOp("lt", tsVal(TS_CONST), tsVar("updatedAt"))));
             });
         }
 
         @Test
-        void overrideStillOwnsInWithNullElement() {
-            // A registered override must keep receiving the RAW list (nulls included).
-            Operand cond = exprOp("in",
-                    var("request.resource.attr.aOptionalString"), listOpNullable("a", null));
-            assertThrows(OverrideInvoked.class,
-                    () -> runCount(cond, Map.of("in", THROWING_OVERRIDE)));
-        }
-    }
-
-    @Nested
-    class HierarchyOperators {
-
-        // Helpers: a hierarchy(...) wrapper and a list(...) of segments.
-        private Operand hierarchy(Operand inner, String delimiter) {
-            return exprOp("hierarchy", inner, sval(delimiter));
-        }
-
-        private Operand hierarchy(Operand inner) {
-            return exprOp("hierarchy", inner);
-        }
-
-        /**
-         * The standard scope fixture, chosen so a correct translation and every plausible
-         * regression return DIFFERENT row sets:
-         * <ul>
-         *   <li>{@code "a:b"} — equal to the ancestor constant (strict-vs-inclusive
-         *       discriminator: strict operators must NOT match the equal path),</li>
-         *   <li>{@code "a:b:c"} — equal to the descendant constant (off-by-one strict-prefix
-         *       discriminator: an IN list wrongly including the full path would match it),</li>
-         *   <li>{@code "a:bb:c"} — shares the STRING prefix {@code "a:b"} but not the PATH
-         *       prefix (separator-mishandling discriminator: {@code LIKE 'a:b%'} without the
-         *       trailing delimiter would match it),</li>
-         *   <li>{@code "a:b:c:d"} — multi-level descendant,</li>
-         *   <li>{@code "x:y"} — unrelated control.</li>
-         * </ul>
-         * Verified against a live PDP (Cerbos 0.54.0): {@code check()} treats
-         * ancestorOf/descendentOf as STRICT (the equal path is denied) and overlaps as
-         * inclusive; sibling string prefixes are denied.
-         */
-        private static final List<String> SCOPES =
-                List.of("a", "a:b", "a:b:c", "a:b:c:d", "a:bb:c", "x:y");
-
-        /**
-         * Seed one row per path — the row's ID doubles as its {@code aString} scope path —
-         * run {@code body}, then delete the rows. Row-identity assertions then read
-         * naturally: the expected set IS the set of matching paths.
-         */
-        private void withScopeRows(List<String> paths, Runnable body) {
-            EntityManager em = emf.createEntityManager();
-            em.getTransaction().begin();
-            for (String path : paths) {
-                ResourceEntity r = new ResourceEntity(path);
-                r.setaString(path);
-                em.persist(r);
-            }
-            em.getTransaction().commit();
-            em.close();
-            try {
-                body.run();
-            } finally {
-                EntityManager cleanup = emf.createEntityManager();
-                cleanup.getTransaction().begin();
-                for (String path : paths) {
-                    ResourceEntity managed = cleanup.find(ResourceEntity.class, path);
-                    if (managed != null) {
-                        cleanup.remove(managed);
-                    }
-                }
-                cleanup.getTransaction().commit();
-                cleanup.close();
-            }
-        }
-
-        /** Translate {@code condition}, run it, and return the matched row IDs (= scope paths). */
-        private Set<String> runIds(Operand condition) {
-            PlanResourcesResponse resp =
-                    buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
-            Specification<ResourceEntity> spec =
-                    SpringDataQueryPlanAdapter.toSpecification(resp, MAPPER, Map.of());
-            EntityManager em = emf.createEntityManager();
-            try {
-                CriteriaBuilder cb = em.getCriteriaBuilder();
-                CriteriaQuery<String> cq = cb.createQuery(String.class);
-                Root<ResourceEntity> root = cq.from(ResourceEntity.class);
-                cq.select(root.get("id"));
-                Predicate p = spec.toPredicate(root, cq, cb);
-                if (p != null) {
-                    cq.where(p);
-                }
-                return Set.copyOf(em.createQuery(cq).getResultList());
-            } finally {
-                em.close();
-            }
-        }
-
-        @Test
-        void ancestorOfSingleSegmentConstantMatchesNothing() {
-            // ancestorOf(field, "a") — a single-segment path has NO strict ancestors, so the
-            // translation is always-false: even the row whose scope is exactly "a" must not
-            // match (a path is not its own ancestor).
-            Operand cond = exprOp("ancestorOf",
-                    hierarchy(var("request.resource.attr.aString"), ":"),
-                    hierarchy(sval("a"), ":"));
-            withScopeRows(SCOPES, () ->
-                    assertEquals(Set.of(), runIds(cond)));
-        }
-
-        @Test
-        void descendentOfSingleSegmentConstant() {
-            // descendentOf(field, "a") → field LIKE 'a:%': every path under the root —
-            // including the sibling branch "a:bb:c" (a genuine descendant of "a") — but not
-            // the root itself and not "x:y".
-            Operand cond = exprOp("descendentOf",
-                    hierarchy(var("request.resource.attr.aString"), ":"),
-                    hierarchy(sval("a"), ":"));
-            withScopeRows(SCOPES, () ->
-                    assertEquals(Set.of("a:b", "a:b:c", "a:b:c:d", "a:bb:c"), runIds(cond)));
-        }
-
-        @Test
-        void overlapsConstantsMatchingPrefixIsAlwaysTrue() {
-            // overlaps("a", "a:b") — "a" is a prefix of "a:b", all constant → unconditionally
-            // true: EVERY seeded row must come back (a regression to always-false returns none).
-            Operand cond = exprOp("overlaps",
-                    hierarchy(sval("a"), ":"),
-                    hierarchy(sval("a:b"), ":"));
-            withScopeRows(SCOPES, () ->
-                    assertEquals(Set.copyOf(SCOPES), runIds(cond)));
-        }
-
-        @Test
-        void ancestorOfConstantsSatisfied() {
-            // ancestorOf("a", "a:b") — satisfied by constants alone → unconditionally true:
-            // every seeded row comes back regardless of its own scope value.
-            Operand cond = exprOp("ancestorOf",
-                    hierarchy(sval("a"), ":"),
-                    hierarchy(sval("a:b"), ":"));
-            withScopeRows(SCOPES, () ->
-                    assertEquals(Set.copyOf(SCOPES), runIds(cond)));
-
-            // A trailing delimiter is a real (empty) segment: "a:b:" splits to ["a","b",""],
-            // so "a:b" is still a strict prefix. If splitLiteral dropped trailing empties this
-            // would throw "do not satisfy" instead of translating to always-true.
-            Operand trailing = exprOp("ancestorOf",
-                    hierarchy(sval("a:b"), ":"),
-                    hierarchy(sval("a:b:"), ":"));
-            withScopeRows(SCOPES, () ->
-                    assertEquals(Set.copyOf(SCOPES), runIds(trailing)));
-        }
-
-        @Test
-        void overlapsIncompatibleConstantsWithoutFieldThrows() {
-            // overlaps("a:b", "x:y") — no prefix relationship and no field to constrain → planner bug.
+        void localDateTimeColumnThrowsNamedError() {
+            // LocalDateTime has no zone: the stored wall-clock could denote any instant, and
+            // guessing UTC could silently include rows check() denies. Fail closed, by name.
             assertConditionThrows(
-                    exprOp("overlaps",
-                            hierarchy(sval("a:b"), ":"),
-                            hierarchy(sval("x:y"), ":")),
-                    "Cannot determine hierarchy overlap");
+                    exprOp("lt", tsVar("localCreatedAt"), tsVal(TS_CONST)),
+                    "timestamp() comparison", "LocalDateTime", "localCreatedAt");
         }
 
         @Test
-        void ancestorOfConstantsNotSatisfiedThrows() {
-            assertConditionThrows(
-                    exprOp("ancestorOf",
-                            hierarchy(sval("x"), ":"),
-                            hierarchy(sval("a:b"), ":")),
-                    "ancestorOf", "do not satisfy");
+        void overrideIsConsultedBeforeColumnTypeCheck() {
+            // The README's OperatorFunction escape hatch must be REACHABLE for timestamp
+            // comparisons — including on column types the default translation rejects.
+            assertThrows(OverrideInvoked.class, () -> runCount(
+                    exprOp("lt", tsVar("localCreatedAt"), tsVal(TS_CONST)),
+                    Map.of("lt", THROWING_OVERRIDE)));
         }
 
         @Test
-        void nonHierarchyOperandThrows() {
-            assertConditionThrows(
-                    exprOp("overlaps",
-                            var("request.resource.attr.aString"),
-                            sval("a:b")),
-                    "overlaps", "hierarchy(...) operands");
+        void valueFirstOverrideIsConsultedUnderTheMirroredOperator() {
+            // Same contract as NormalizedBinary: a value-first lt is looked up as gt.
+            assertThrows(OverrideInvoked.class, () -> runCount(
+                    exprOp("lt", tsVal(TS_CONST), tsVar("createdAt")),
+                    Map.of("gt", THROWING_OVERRIDE)));
         }
 
-        @Test
-        void twoFieldHierarchiesInOverlapThrows() {
-            assertConditionThrows(
-                    exprOp("overlaps",
-                            hierarchy(var("request.resource.attr.aString"), ":"),
-                            hierarchy(var("request.resource.attr.createdBy"), ":")),
-                    "two field-reference hierarchies");
-        }
-    }
-
-    // -- Operand order: the planner preserves policy source order, so a value (or folded
-    // constant) can appear BEFORE the field. Directional operators must mirror or results are
-    // silently inverted. These tests seed a real row because an empty table cannot distinguish
-    // `x < 3` from `x > 3`.
-
-    @Nested
-    class OperandOrderSemantics {
-
-        private ResourceEntity seeded() {
-            ResourceEntity r = new ResourceEntity("seed-1");
-            r.setaBool(true);
-            r.setaString("seededString");
-            r.setaNumber(5);
-            r.setOwnedBy(new ArrayList<>(List.of("user1")));
-            r.addTag("tagX", "x");
-            return r;
-        }
-
-        @Test
-        void gtValueFirstMeansFieldLessThan() {
-            // 10 > aNumber, with aNumber = 5 → match.
-            withResource(seeded(), () ->
-                    assertEquals(1, runCount(exprOp("gt", nval(10), var("request.resource.attr.aNumber")))));
-        }
-
-        @Test
-        void sizeValueFirstEmptinessCheck() {
-            // 1 > size(ownedBy) → size < 1 → NOT EXISTS; seeded row is non-empty → 0.
-            withResource(seeded(), () ->
-                    assertEquals(0, runCount(exprOp("gt",
-                            nval(1),
-                            exprOp("size", var("request.resource.attr.ownedBy"))))));
-        }
-
-        @Test
-        void addFoldedConstantValueFirstIsMirrored() {
-            // (1 + 2) < aNumber → aNumber > 3, with aNumber = 5 → match.
-            withResource(seeded(), () ->
-                    assertEquals(1, runCount(exprOp("lt",
-                            exprOp("add", nval(1), nval(2)),
-                            var("request.resource.attr.aNumber")))));
-        }
-
-        @Test
-        void hasIntersectionSnakeCaseAliasIsAccepted() {
-            // The PDP still accepts the deprecated has_intersection spelling in policies.
-            withResource(seeded(), () ->
-                    assertEquals(1, runCount(exprOp("has_intersection",
-                            var("request.resource.attr.ownedBy"),
-                            listOp("user1")))));
-        }
-
-        @Test
-        void overrideIsConsultedUnderMirroredOperator() {
-            // 3 < aNumber builds a gt predicate — the override must be looked up as "gt".
-            Operand cond = exprOp("lt", nval(3), var("request.resource.attr.aNumber"));
-            assertThrows(OverrideInvoked.class,
-                    () -> runCount(cond, Map.of("gt", THROWING_OVERRIDE)));
-        }
-    }
-
-    // -- CEL ternary: `if(cond, then, else)` is rewritten into pure
-    // predicates — cmp(if(c,a,b), other) → (c AND cmp(a, other)) OR (NOT c AND cmp(b, other)).
-    // Seeds real rows because an empty table cannot distinguish the branch predicates.
-
-    @Nested
-    class TernaryIfExpressions {
-
-        @Test
-        void bareBooleanTernaryWithConstantBranch() {
-            // aBool ? true : aNumber > 5 — a boolean VALUE branch folds to 1=1 / 1=0.
-            Operand plan = exprOp("if",
-                    var("request.resource.attr.aBool"),
-                    bval(true),
-                    exprOp("gt", var("request.resource.attr.aNumber"), nval(5)));
-
-            ResourceEntity thenMatch = new ResourceEntity("ternary-bare-const-1");
-            thenMatch.setaBool(true);
-            thenMatch.setaNumber(0);
-            withResource(thenMatch, () -> assertEquals(1, runCount(plan)));
-
-            ResourceEntity elseMiss = new ResourceEntity("ternary-bare-const-2");
-            elseMiss.setaBool(false);
-            elseMiss.setaNumber(1);
-            withResource(elseMiss, () -> assertEquals(0, runCount(plan)));
-
-            // aBool ? false : aNumber > 5 — a false then-branch excludes matching-condition rows.
-            Operand planFalse = exprOp("if",
-                    var("request.resource.attr.aBool"),
-                    bval(false),
-                    exprOp("gt", var("request.resource.attr.aNumber"), nval(5)));
-            ResourceEntity falseThen = new ResourceEntity("ternary-bare-const-3");
-            falseThen.setaBool(true);
-            falseThen.setaNumber(10);
-            withResource(falseThen, () -> assertEquals(0, runCount(planFalse)));
-        }
-
-        @Test
-        void ternaryUnderLogicalOperators() {
-            // The rewrite produces an OR-of-ANDs; it must compose under not/and/or like any
-            // other predicate (negation goes through the junction-barrier helper).
-            Operand comparison = exprOp("gt",
-                    exprOp("if",
-                            var("request.resource.attr.aBool"),
-                            var("request.resource.attr.aNumber"),
-                            nval(0)),
-                    nval(0));
-
-            ResourceEntity truthy = new ResourceEntity("ternary-logic-1");
-            truthy.setaBool(true);
-            truthy.setaString("x");
-            truthy.setaNumber(10);
-            withResource(truthy, () -> {
-                assertEquals(0, runCount(exprOp("not", comparison)));
-                // Double negation must toggle back (junction barrier, not raw cb.not).
-                assertEquals(1, runCount(exprOp("not", exprOp("not", comparison))));
-                assertEquals(1, runCount(exprOp("and", comparison,
-                        exprOp("eq", var("request.resource.attr.aString"), sval("x")))));
-                assertEquals(0, runCount(exprOp("and", comparison,
-                        exprOp("eq", var("request.resource.attr.aString"), sval("z")))));
-                assertEquals(1, runCount(exprOp("or", comparison,
-                        exprOp("eq", var("request.resource.attr.aString"), sval("z")))));
-            });
-
-            // Row where the ternary comparison is false: NOT must select it, OR must rescue it
-            // only through the other arm.
-            ResourceEntity falsy = new ResourceEntity("ternary-logic-2");
-            falsy.setaBool(false);
-            falsy.setaString("x");
-            falsy.setaNumber(10);
-            withResource(falsy, () -> {
-                assertEquals(1, runCount(exprOp("not", comparison)));
-                assertEquals(0, runCount(exprOp("not", exprOp("not", comparison))));
-                assertEquals(1, runCount(exprOp("or", comparison,
-                        exprOp("eq", var("request.resource.attr.aString"), sval("x")))));
-                assertEquals(0, runCount(exprOp("or", comparison,
-                        exprOp("eq", var("request.resource.attr.aString"), sval("z")))));
-            });
-        }
-
-        @Test
-        void eqNeWithTernary() {
-            // (aBool ? aString : "none") == "x"  /  != "x"
-            Operand ternary = exprOp("if",
-                    var("request.resource.attr.aBool"),
-                    var("request.resource.attr.aString"),
-                    sval("none"));
-            Operand eqPlan = exprOp("eq", ternary, sval("x"));
-            Operand nePlan = exprOp("ne", ternary, sval("x"));
-
-            ResourceEntity thenX = new ResourceEntity("ternary-eqne-1");
-            thenX.setaBool(true);
-            thenX.setaString("x");
-            withResource(thenX, () -> {
-                assertEquals(1, runCount(eqPlan));
-                assertEquals(0, runCount(nePlan));
-            });
-
-            ResourceEntity thenY = new ResourceEntity("ternary-eqne-2");
-            thenY.setaBool(true);
-            thenY.setaString("y");
-            withResource(thenY, () -> {
-                assertEquals(0, runCount(eqPlan));
-                assertEquals(1, runCount(nePlan));
-            });
-
-            // else branch folds: eq("none", "x") → always false; ne("none", "x") → always true.
-            ResourceEntity elseRow = new ResourceEntity("ternary-eqne-3");
-            elseRow.setaBool(false);
-            elseRow.setaString("x");
-            withResource(elseRow, () -> {
-                assertEquals(0, runCount(eqPlan));
-                assertEquals(1, runCount(nePlan));
-            });
-        }
-
-        @Test
-        void constantVersusConstantComparisonsFold() {
-            // (aBool ? 1 : 0) > 0 — BOTH branches collapse to constant comparisons, leaving
-            // only the condition predicate. Seeded row: matches iff aBool is true.
-            Operand allConstBranches = exprOp("gt",
-                    exprOp("if", var("request.resource.attr.aBool"), nval(1), nval(0)),
-                    nval(0));
-
-            ResourceEntity boolTrue = new ResourceEntity("ternary-const-1");
-            boolTrue.setaBool(true);
-            withResource(boolTrue, () -> {
-                assertEquals(1, runCount(allConstBranches));
-
-                // Direct value-vs-value plans exercise the fold through the public seam:
-                // numbers compare in double space (1.0 == 1, 0.5 < 1), strings via compareTo,
-                // mixed incomparable types are eq → false / ne → true.
-                assertEquals(1, runCount(exprOp("eq", nval(1.0), nval(1))));
-                assertEquals(1, runCount(exprOp("lt", nval(0.5), nval(1))));
-                assertEquals(0, runCount(exprOp("gt", nval(0), nval(0))));
-                assertEquals(1, runCount(exprOp("ge", nval(2), nval(2))));
-                assertEquals(1, runCount(exprOp("lt", sval("a"), sval("b"))));
-                assertEquals(0, runCount(exprOp("eq", sval("a"), nval(1))));
-                assertEquals(1, runCount(exprOp("ne", sval("a"), nval(1))));
-                assertEquals(1, runCount(exprOp("eq", bval(true), bval(true))));
-                // Whole-number constants beyond the long range must stay doubles: a
-                // saturating (long) cast collapses 1.0e19 and 9.3e18 both to
-                // Long.MAX_VALUE, inverting these comparisons.
-                assertEquals(1, runCount(exprOp("gt", nval(1.0e19), nval(9.3e18))));
-                assertEquals(1, runCount(exprOp("ne", nval(1.0e19), nval(9.3e18))));
-                assertEquals(0, runCount(exprOp("eq", nval(-1.0e19), nval(-9.3e18))));
-                // Ordering incomparable constant types is a planner bug and must throw.
-                assertConditionThrows(exprOp("lt", sval("a"), nval(1)),
-                        "Cannot order", "lt");
-            });
-
-            ResourceEntity boolFalse = new ResourceEntity("ternary-const-2");
-            boolFalse.setaBool(false);
-            withResource(boolFalse, () -> assertEquals(0, runCount(allConstBranches)));
-        }
-
-        @Test
-        void negatedBareTernaryWithNullConditionExcludesRow() {
-            // aOptionalString != "x" ? aNumber > 1 : aBool — bare boolean-position ternary
-            // with a NULL condition column: same UNKNOWN-not-FALSE contract as above.
-            Operand plan = exprOp("if",
-                    exprOp("ne", var("request.resource.attr.aOptionalString"), sval("x")),
-                    exprOp("gt", var("request.resource.attr.aNumber"), nval(1)),
-                    var("request.resource.attr.aBool"));
-
-            ResourceEntity nullCondition = new ResourceEntity("ternary-barenull-1");
-            nullCondition.setaOptionalString(null);
-            nullCondition.setaNumber(0);
-            nullCondition.setaBool(false);
-            withResource(nullCondition, () -> {
-                assertEquals(0, runCount(plan));
-                assertEquals(0, runCount(exprOp("not", plan)));
-            });
-        }
-
-        @Test
-        void ternaryWithWrongOperandCountThrows() {
-            // if() with 2 operands inside a comparison — malformed plan, not a silent drop.
-            assertConditionThrows(
-                    exprOp("gt",
-                            exprOp("if", var("request.resource.attr.aBool"), nval(1)),
-                            nval(0)),
-                    "if (ternary) requires exactly 3 operands", "got 2");
-            // Same contract for a bare-boolean-position ternary.
-            assertConditionThrows(
-                    exprOp("if", var("request.resource.attr.aBool"), bval(true)),
-                    "if (ternary) requires exactly 3 operands", "got 2");
-        }
-
-        @Test
-        void ternaryUnderUnsupportedWrapperNamesOperator() {
-            // contains(if(...), "x") — only eq/ne/lt/gt/le/ge accept a ternary operand; the
-            // error must name the offending wrapper operator.
-            assertConditionThrows(
-                    exprOp("contains",
-                            exprOp("if",
-                                    var("request.resource.attr.aBool"),
-                                    var("request.resource.attr.aString"),
-                                    sval("none")),
-                            sval("x")),
-                    "if()", "contains");
-        }
-    }
-
-    /**
-     * Structural join-anchoring defects:
-     *
-     * <p>W1 — a dotted relation CHAIN ({@code categories.subCategories}) must join through
-     * every intermediate hop. Resolving only the tail Relation and joining its attribute off
-     * the root either fails at query-build time (the root has no such attribute) or — worse —
-     * silently joins a same-named collection on the wrong entity. Chain semantics are the
-     * FLATTENED union of tail elements across all intermediate hops, which is exactly what a
-     * correlated join chain expresses for exists/in/hasIntersection and a JOIN-through COUNT
-     * expresses for size().
-     *
-     * <p>W2 — a subquery for a relation referenced inside a lambda body must correlate the
-     * From that OWNS the relation attribute. {@code R.attr.tags} inside a
-     * {@code categories.exists(c, ...)} lambda resolves through the outer scope against the
-     * ROOT entity; anchoring the tags join to the lambda's category join instead is a wrong
-     * From — build-time failure or a silent wrong join if the element entity had a same-named
-     * collection.
-     */
-    @Nested
-    class MultiHopRelationChains {
-
-        private static final String CHAIN = "request.resource.attr.categories.subCategories";
-
-        private final Map<String, AttributeMapping> chainMapper = Map.ofEntries(
-                Map.entry("request.resource.attr.aString", AttributeMapping.field("aString")),
-                Map.entry("request.resource.attr.tags", AttributeMapping.relation("tags", Map.of(
-                        "id", AttributeMapping.field("id"),
-                        "name", AttributeMapping.field("name")))),
-                Map.entry("request.resource.attr.categories", AttributeMapping.relation("categories", Map.of(
-                        "name", AttributeMapping.field("name"),
-                        "subCategories", AttributeMapping.relation("subCategories", "name", Map.of(
-                                "name", AttributeMapping.field("name")))))));
-
-        private int runChainCount(Operand condition) {
-            return runCount(condition, chainMapper, Map.of());
-        }
-
-        /**
-         * Persist a resource plus its (non-cascaded) category/sub-category graph, run
-         * {@code body}, then delete everything again — the shared in-memory schema must stay
-         * empty for the other tests.
-         */
-        private void withCategoryGraph(ResourceEntity resource,
-                                       List<CategoryEntity> categories,
-                                       List<SubCategoryEntity> subCategories,
-                                       Runnable body) {
-            EntityManager em = emf.createEntityManager();
-            em.getTransaction().begin();
-            subCategories.forEach(em::persist);
-            categories.forEach(em::persist);
-            em.persist(resource);
-            em.getTransaction().commit();
-            em.close();
-            try {
-                body.run();
-            } finally {
-                EntityManager cleanup = emf.createEntityManager();
-                cleanup.getTransaction().begin();
-                ResourceEntity managed = cleanup.find(ResourceEntity.class, resource.getId());
-                if (managed != null) {
-                    cleanup.remove(managed);
-                }
-                for (CategoryEntity c : categories) {
-                    CategoryEntity mc = cleanup.find(CategoryEntity.class, c.getId());
-                    if (mc != null) {
-                        cleanup.remove(mc);
-                    }
-                }
-                for (SubCategoryEntity s : subCategories) {
-                    SubCategoryEntity ms = cleanup.find(SubCategoryEntity.class, s.getId());
-                    if (ms != null) {
-                        cleanup.remove(ms);
-                    }
-                }
-                cleanup.getTransaction().commit();
-                cleanup.close();
-            }
-        }
-
-        @Test
-        void sizeOverTwoHopChainCountsFlattenedElements() {
-            // Two categories with one sub-category each: the FLATTENED chain count is 2 — a
-            // tail join anchored to the wrong parent could never produce it.
-            var s1 = new SubCategoryEntity("chain-sub-s1", "finance");
-            var s2 = new SubCategoryEntity("chain-sub-s2", "tech");
-            var c1 = new CategoryEntity("chain-cat-s1", "business");
-            var c2 = new CategoryEntity("chain-cat-s2", "development");
-            c1.setSubCategories(List.of(s1));
-            c2.setSubCategories(List.of(s2));
-            ResourceEntity r = new ResourceEntity("chain-r-s1");
-            r.setCategories(List.of(c1, c2));
-
-            withCategoryGraph(r, List.of(c1, c2), List.of(s1, s2), () -> {
-                // Non-empty shortcut (EXISTS through the chain).
-                assertEquals(1, runChainCount(
-                        exprOp("gt", exprOp("size", var(CHAIN)), nval(0))));
-                // Arbitrary-N JOIN-through COUNT: 2 flattened elements.
-                assertEquals(1, runChainCount(
-                        exprOp("ge", exprOp("size", var(CHAIN)), nval(2))));
-                assertEquals(0, runChainCount(
-                        exprOp("gt", exprOp("size", var(CHAIN)), nval(2))));
-            });
-        }
-
-        /**
-         * The FRACTIONAL threshold over a chain. CEL rejects {@code ==}/{@code !=} between an
-         * int and a double ("found no matching overload for '_==_' applied to '(int, double)'"),
-         * so no policy can make the planner emit these and no corpus action reaches them — the
-         * collapse branch is defensive code a consumer can still drive with a hand-built plan,
-         * and this is its only proving ground (cerbos/query-plan-adapters#333).
-         *
-         * <p>A COUNT is never fractional, so the comparison is statically decided — but not
-         * UNCONDITIONALLY. An absent to-one parent is a CEL missing-path error, which denies
-         * under both polarities, so the collapse has to be tri-state like every other chained
-         * comparison. Spelling it {@code hops AND constant} is two-valued: the negations below
-         * were TRUE for the parentless row and returned it.
-         */
-        @Test
-        void fractionalCollapseOverTwoHopChainStaysUnknownForAnAbsentParent() {
-            var fin = new SubCategoryEntity("chain-sub-f1", "finance");
-            var biz = new CategoryEntity("chain-cat-f1", "business");
-            biz.setSubCategories(List.of(fin));
-            ResourceEntity parented = new ResourceEntity("chain-r-f1");
-            parented.setCategories(List.of(biz));
-            // No categories at all: the chain's leading hop is absent, so CEL denies this row
-            // whatever the collapse decides.
-            ResourceEntity orphan = new ResourceEntity("chain-r-f2");
-
-            Operand size = exprOp("size", var(CHAIN));
-            Operand matching = exprOp("size",
-                    exprOp("filter", var(CHAIN),
-                            lambda("s", exprOp("eq", var("s.name"), sval("finance")))));
-
-            withCategoryGraph(parented, List.of(biz), List.of(fin), () ->
-                    withResource(orphan, () -> {
-                        // ne f collapses to always-TRUE: the parented row only, never the orphan.
-                        assertEquals(1, runChainCount(exprOp("ne", size, nval(1.5))));
-                        assertEquals(1, runChainCount(exprOp("ne", matching, nval(1.5))));
-                        // eq f collapses to always-FALSE: neither row.
-                        assertEquals(0, runChainCount(exprOp("eq", size, nval(1.5))));
-                        assertEquals(0, runChainCount(exprOp("eq", matching, nval(1.5))));
-
-                        // The discriminating arms. A two-valued `hops AND constant` makes both
-                        // negations TRUE for the orphan; the tri-state form leaves them UNKNOWN.
-                        assertEquals(0, runChainCount(
-                                exprOp("not", exprOp("ne", size, nval(1.5)))));
-                        assertEquals(0, runChainCount(
-                                exprOp("not", exprOp("ne", matching, nval(1.5)))));
-                        assertEquals(1, runChainCount(
-                                exprOp("not", exprOp("eq", size, nval(1.5)))));
-                        assertEquals(1, runChainCount(
-                                exprOp("not", exprOp("eq", matching, nval(1.5)))));
-                    }));
-        }
-
-    }
-
-    // -- Malformed / hostile operand shapes --
-
-    @Test
-    void mapLambdaWithWrongArityThrowsCleanly() {
-        // A malformed lambda inside map() must produce IllegalArgumentException, not
-        // IndexOutOfBoundsException.
-        Operand mapExpr = exprOp("map",
-                var("request.resource.attr.tags"),
-                exprOp("lambda", var("t")));
-        assertConditionThrows(
-                exprOp("hasIntersection", mapExpr, listOp("x")),
-                "map lambda requires exactly 2 operands");
-    }
-
-    @Test
-    void structValueWithNullEntryDoesNotThrow() {
-        // Struct fields may hold nulls; Collectors.toMap would NPE on them.
-        com.google.protobuf.Struct struct = com.google.protobuf.Struct.newBuilder()
-                .putFields("a", Value.newBuilder().setNullValue(NullValue.NULL_VALUE).build())
-                .putFields("b", Value.newBuilder().setStringValue("x").build())
-                .build();
-        Object converted = PlanValues.protoValueToJava(
-                Value.newBuilder().setStructValue(struct).build());
-        assertInstanceOf(Map.class, converted);
-        Map<?, ?> map = (Map<?, ?>) converted;
-        assertEquals(2, map.size());
-        assertNull(map.get("a"));
-        assertEquals("x", map.get("b"));
-    }
-
-    @Test
-    void operatorOverrideIsUsed() {
-        Operand cond = exprOp("eq", var("request.resource.attr.aString"), sval("foo"));
-        // Override eq to always produce IS NULL — result count stays 0 and the override path
-        // is exercised end-to-end (runCount asserts the Conditional kind internally).
-        Map<String, OperatorFunction> overrides = Map.of(
-                "eq", (cb, field, value) -> cb.isNull(field));
-        assertEquals(0, runCount(cond, overrides));
-    }
-
-    // -- SQL Server '[' LIKE escaping --
-    // T-SQL LIKE treats '[...]' as a character class EVEN WITH an ESCAPE clause declared, so
-    // every '[' in a generated pattern must arrive as '\['. On H2 (and PostgreSQL/MySQL —
-    // covered by the differential oracle legs) '[' is inert and '\[' under ESCAPE '\' is
-    // still a literal '[', so the escape is a semantic no-op there: the row-behavior tests
-    // below pin that no-op, while the pattern assertions pin the escape itself (they are the
-    // tests that FAIL when the '[' rewrite is removed — H2 row behavior cannot distinguish).
-
-    @Nested
-    class BracketLikeEscaping {
-
-        @Test
-        void escapeLikeEscapesOpeningBracket() {
-            // The pattern-level contract for the constant contains/startsWith/endsWith forms
-            // AND the hierarchy prefix LIKE (both build their patterns via escapeLike).
-            assertEquals("\\[SEC]", PlanValues.escapeLike("[SEC]"));
-            assertEquals("50\\%\\[a]\\_b", PlanValues.escapeLike("50%[a]_b"));
-            // Backslash is escaped FIRST, so a literal '\[' becomes '\\' + '\['.
-            assertEquals("\\\\\\[", PlanValues.escapeLike("\\["));
-            // ']' is intentionally unescaped: it is only special on SQL Server as the closer
-            // of a character class, and no class can open once every '[' is escaped.
-            assertEquals("]", PlanValues.escapeLike("]"));
-        }
-
-        private ResourceEntity row(String id, String aString) {
-            ResourceEntity r = new ResourceEntity(id);
-            r.setaString(aString);
-            return r;
-        }
-
-    }
-
-    // -- Constant-receiver string matches: `"a,b".contains(R.attr.x)` --
-    // CEL string-match methods are receiver-sensitive and the planner preserves policy source
-    // order, so the constant RECEIVER arrives FIRST: contains(value, variable). The constant is
-    // the haystack and the COLUMN is the needle — operand-order normalization must not swap
-    // them (that silently inverts the match), and the column needle's LIKE metacharacters must
-    // be escaped dynamically.
-
-    @Nested
-    class ConstantReceiverStringMatch {
-
-        private ResourceEntity row(String id, String aString) {
-            ResourceEntity r = new ResourceEntity(id);
-            r.setaString(aString);
-            return r;
-        }
-
-        private Operand plan(String op, String constant) {
-            // Receiver (constant) first — exactly as the planner emits it.
-            return exprOp(op, sval(constant), var("request.resource.attr.aString"));
-        }
-
-        @Test
-        void nullColumnNeedleExcludesRow() {
-            // A NULL column is a missing attribute → CEL error → deny for all three ops.
-            withResource(row("cr-9", null), () -> {
-                assertEquals(0, runCount(plan("contains", "anything")));
-                assertEquals(0, runCount(plan("startsWith", "anything")));
-                assertEquals(0, runCount(plan("endsWith", "anything")));
-            });
-        }
-
-        @Test
-        void addFoldedConstantReceiver() {
-            // ("role1," + "role2").contains(aString) — if the planner ever ships the concat
-            // unfolded, the receiver arrives as add(value, value) and must fold into the same
-            // constant-haystack translation, not the inverted column-haystack one.
-            Operand cond = exprOp("contains",
-                    exprOp("add", sval("role1,"), sval("role2")),
-                    var("request.resource.attr.aString"));
-            withResource(row("cr-11", "role1"), () -> assertEquals(1, runCount(cond)));
-            withResource(row("cr-12", "admin"), () -> assertEquals(0, runCount(cond)));
-        }
-    }
-
-    /**
-     * {@code in(variable, variable)} — attribute-in-attribute membership. PDP-verified wire
-     * shape (Cerbos latest, 2026-07): {@code R.attr.createdBy in R.attr.ownedBy} arrives as
-     * {@code in(variable, variable)} verbatim, member first. Translated as a correlated EXISTS
-     * comparing the collection's member column to the outer scalar column, with a NULL scalar
-     * matching a NULL member element (CEL {@code null in [..., null]} is TRUE — check()
-     * verified for every branch below; see the translator Javadoc for the truth table).
-     */
-    @Nested
-    class InVariableVariable {
-
-        @Test
-        void scalarSecondOperandThrowsNamedError() {
-            assertConditionThrows(
-                    exprOp("in",
-                            var("request.resource.attr.aString"),
-                            var("request.resource.attr.createdBy")),
-                    "request.resource.attr.createdBy", "Relation", "scalar Field mapping");
-        }
-
-        @Test
-        void unknownCollectionAttributeThrows() {
-            assertConditionThrows(
-                    exprOp("in",
-                            var("request.resource.attr.aString"),
-                            var("request.resource.attr.nonexistent")),
-                    "Unknown attribute");
-        }
     }
 
     /**
@@ -2227,278 +1400,6 @@ class SpringDataQueryPlanAdapterTest {
         }
     }
 
-    // -- Leaf operand-count guard: extra operands must fail loudly, not drop silently --
-
-    @Test
-    void leafWithExtraOperandThrows() {
-        // A 3-operand eq previously kept the field-to-field comparison and silently DROPPED
-        // the value operand. Malformed plans must throw instead.
-        assertConditionThrows(
-                exprOp("eq",
-                        var("request.resource.attr.aString"),
-                        var("request.resource.attr.createdBy"),
-                        sval("x")),
-                "eq", "2 operands");
-    }
-
-    @Test
-    void sizeComparisonWithExtraOperandThrows() {
-        // The size() probe used to run BEFORE the arity guard and scan operands
-        // last-match-wins: a malformed eq(size(tags), variable, value) translated to
-        // COUNT(tags) = value, silently discarding the variable constraint. The guard now
-        // fires first, so the size() path shares the loud-failure contract of plain leaves.
-        assertConditionThrows(
-                exprOp("eq",
-                        exprOp("size", var("request.resource.attr.tags")),
-                        var("request.resource.attr.aString"),
-                        nval(2)),
-                "eq", "2 operands");
-    }
-
-    // -- Error-message context and the no-value-leak discipline --
-
-    @Test
-    void foldAddNullOperandErrorDoesNotLeakConstantValues() {
-        // eq(field, add(null, "<folded principal attr>")) — PDP-reachable when a policy
-        // concatenates principal attributes and one is null: the folded value can carry PII
-        // and consuming apps log translation errors at ERROR. The message must report operand
-        // TYPES only, never the values.
-        Operand cond = exprOp("eq",
-                var("request.resource.attr.aString"),
-                exprOp("add", nullVal(), sval("canary-secret-value")));
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> runCount(cond));
-        assertTrue(ex.getMessage().contains("add requires non-null operands"),
-                "unexpected message: " + ex.getMessage());
-        assertTrue(ex.getMessage().contains("null") && ex.getMessage().contains("String"),
-                "expected operand types in message: " + ex.getMessage());
-        assertFalse(ex.getMessage().contains("canary-secret-value"),
-                "constant value leaked into the error message: " + ex.getMessage());
-
-        // Mirrored shape: the null on the right.
-        IllegalArgumentException ex2 = assertThrows(IllegalArgumentException.class,
-                () -> runCount(exprOp("eq",
-                        var("request.resource.attr.aString"),
-                        exprOp("add", sval("canary-secret-value"), nullVal()))));
-        assertFalse(ex2.getMessage().contains("canary-secret-value"),
-                "constant value leaked into the error message: " + ex2.getMessage());
-    }
-
-    @Test
-    void bothOperandsAddExpressionsReportsShapeNotArity() {
-        // contains(add(...), add(...)): there ARE two operands — the old message
-        // ("add comparison requires a second operand") misstated the problem as arity.
-        assertConditionThrows(
-                exprOp("contains",
-                        exprOp("add", sval("a"), sval("b")),
-                        exprOp("add", sval("c"), sval("d"))),
-                "contains", "two add() expressions");
-    }
-
-    @Test
-    void isSetReportsUnsupportedOperator() {
-        // isSet had bespoke operand-shape diagnostics; it is not a wire operator at all
-        // (#261), so every shape of it must now surface as a plain unsupported-operator
-        // error rather than a message implying the adapter was close to translating it.
-        assertConditionThrows(
-                exprOp("isSet",
-                        var("request.resource.attr.aString"),
-                        var("request.resource.attr.createdBy")),
-                "isSet");
-        assertConditionThrows(
-                exprOp("isSet", bval(true), bval(false)),
-                "isSet");
-    }
-
-    @Test
-    void hasIntersectionVariableVariableReportsBothOperands() {
-        // The PDP can emit hasIntersection(variable, variable); the error must name BOTH
-        // operands (the old message printed only the first node case — "VARIABLE" — which is
-        // individually a supported shape) and point at the supported shapes.
-        assertConditionThrows(
-                exprOp("hasIntersection",
-                        var("request.resource.attr.tagNames"),
-                        var("request.resource.attr.ownedBy")),
-                "VARIABLE 'request.resource.attr.tagNames'",
-                "VARIABLE 'request.resource.attr.ownedBy'",
-                "Supported shapes");
-    }
-
-    @Test
-    void sizeArityErrorReportsOperandCount() {
-        assertConditionThrows(
-                exprOp("gt",
-                        exprOp("size",
-                                var("request.resource.attr.tags"),
-                                var("request.resource.attr.tagNames")),
-                        nval(0)),
-                "size() takes exactly 1 argument, got 2");
-    }
-
-    @Test
-    void sizeBadArgumentErrorNamesTheOffendingShape() {
-        assertConditionThrows(
-                exprOp("gt", exprOp("size", sval("x")), nval(0)),
-                "size() argument must be a collection attribute or filter(...)",
-                "VALUE (STRING_VALUE)");
-        assertConditionThrows(
-                exprOp("gt",
-                        exprOp("size", exprOp("map",
-                                var("request.resource.attr.tags"), lambda("t", var("t.name")))),
-                        nval(0)),
-                "size() argument must be a collection attribute or filter(...)",
-                "EXPRESSION map()");
-    }
-
-    // -- Arithmetic (add/sub/mult/div) as a comparison operand --
-    // Cerbos attribute values are ALWAYS CEL doubles (protobuf Value numbers), so the only
-    // arithmetic that can evaluate at check time is double-typed — verified against a live
-    // PDP: `R.attr.n + 1 > 2` (int literal) is a no-overload error → deny, `+ 1.0` works,
-    // and `/ 2.0` is true double division (5/2.0 == 2.5). The adapter therefore computes
-    // the whole comparison in double space; integer truncation is never observable.
-    // `mod` stays unsupported: CEL `%` is int-only, so it always errors on attributes.
-
-    @Nested
-    class ArithmeticComparisons {
-
-        private ResourceEntity seeded() {
-            ResourceEntity r = new ResourceEntity("arith-seed-1");
-            r.setaNumber(5);
-            return r;
-        }
-
-        private Operand numVar() {
-            return var("request.resource.attr.aNumber");
-        }
-
-        @Test
-        void subInLtComparison() {
-            withResource(seeded(), () -> {
-                assertEquals(1, runCount(exprOp("lt",
-                        exprOp("sub", numVar(), nval(1)), nval(10))));
-                assertEquals(0, runCount(exprOp("lt",
-                        exprOp("sub", numVar(), nval(1)), nval(2))));
-                // Constant-minus-field keeps direction: 10 - 5 = 5 <= 5.
-                assertEquals(1, runCount(exprOp("le",
-                        exprOp("sub", nval(10), numVar()), nval(5))));
-            });
-        }
-
-        @Test
-        void nestedArithmetic() {
-            // (aNumber + 1) * 2 > 11 → 12 > 11.
-            withResource(seeded(), () -> {
-                assertEquals(1, runCount(exprOp("gt",
-                        exprOp("mult", exprOp("add", numVar(), nval(1)), nval(2)),
-                        nval(11))));
-                assertEquals(0, runCount(exprOp("gt",
-                        exprOp("mult", exprOp("add", numVar(), nval(1)), nval(2)),
-                        nval(12))));
-            });
-        }
-
-        @Test
-        void overrideAppliesToArithmeticComparison() {
-            // OperatorFunction contract: overrides win on EVERY scalar path. The arithmetic
-            // expression is passed as the field argument; the plan constant as the value.
-            Operand cond = exprOp("gt",
-                    exprOp("add", numVar(), nval(1.0)),
-                    nval(2.0));
-            assertThrows(OverrideInvoked.class,
-                    () -> runCount(cond, Map.of("gt", THROWING_OVERRIDE)));
-        }
-
-    }
-
-    // -- Constant NaN / ±Infinity ordering --
-    // CEL/IEEE define EVERY ordering comparison involving NaN as false. The planner does
-    // NOT fold div(0,0) (verified vs live PDP: `(R.attr.aBool ? 1.0 : 0.0/0.0) > 0.5`
-    // arrives as gt(if(aBool, 1, div(0,0)), 0.5)), so resolveNumericOperand folds it to
-    // NaN in Java and constantComparison must order with primitive IEEE operators.
-    // Double.compare's total order ranks NaN above every number (and -0.0 below 0.0),
-    // which would collapse gt/ge against a NaN constant to always-true — over-inclusion.
-
-    @Nested
-    class ConstantNanInfinityOrdering {
-
-        /** {@code div(0, 0)} — folds to NaN in Java, exactly as delivered on the wire. */
-        private Operand nan() {
-            return exprOp("div", nval(0), nval(0));
-        }
-
-        private Operand posInf() {
-            return exprOp("div", nval(1), nval(0));
-        }
-
-        private Operand negInf() {
-            return exprOp("div", nval(-1), nval(0));
-        }
-
-        /** An arithmetic subtree folding to 0.5, so both sides rank as expressions. */
-        private Operand half() {
-            return exprOp("div", nval(1), nval(2));
-        }
-
-        @Test
-        void nanOnLeftExcludesForAllOrderingOperators() {
-            // Expression-vs-value keeps source order: constantComparison sees (NaN, 0.5).
-            ResourceEntity r = new ResourceEntity("nan-ord-1");
-            withResource(r, () -> {
-                for (String op : List.of("gt", "ge", "lt", "le")) {
-                    assertEquals(0, runCount(exprOp(op, nan(), nval(0.5))),
-                            op + "(NaN, 0.5) must exclude every row");
-                }
-            });
-        }
-
-        @Test
-        void nanOnRightExcludesForAllOrderingOperators() {
-            // Arithmetic on BOTH sides so normalization cannot mirror the NaN to the left:
-            // constantComparison sees (0.5, NaN).
-            ResourceEntity r = new ResourceEntity("nan-ord-2");
-            withResource(r, () -> {
-                for (String op : List.of("gt", "ge", "lt", "le")) {
-                    assertEquals(0, runCount(exprOp(op, half(), nan())),
-                            op + "(0.5, NaN) must exclude every row");
-                }
-            });
-        }
-
-        @Test
-        void infinityOrderingFollowsIeee() {
-            // ±Infinity is ORDERED normally in IEEE space — it must NOT be excluded the
-            // way NaN is.
-            ResourceEntity r = new ResourceEntity("nan-ord-3");
-            withResource(r, () -> {
-                assertEquals(1, runCount(exprOp("gt", posInf(), nval(0.5))));
-                assertEquals(1, runCount(exprOp("ge", posInf(), nval(0.5))));
-                assertEquals(0, runCount(exprOp("lt", posInf(), nval(0.5))));
-                assertEquals(0, runCount(exprOp("le", posInf(), nval(0.5))));
-                assertEquals(1, runCount(exprOp("lt", negInf(), nval(0.5))));
-                assertEquals(1, runCount(exprOp("le", negInf(), nval(0.5))));
-                assertEquals(0, runCount(exprOp("gt", negInf(), nval(0.5))));
-                assertEquals(1, runCount(exprOp("lt", negInf(), posInf())));
-            });
-        }
-
-        @Test
-        void negativeZeroOrderingFollowsIeee() {
-            // mult(-1, 0) folds to -0.0 in Java. IEEE: -0.0 == 0.0, so lt is false and
-            // ge is true — Double.compare(-0.0, 0.0) = -1 would invert both (the same
-            // total-order defect as NaN, on the same line).
-            Operand negZero = exprOp("mult", nval(-1), nval(0));
-            Operand zero = exprOp("mult", nval(1), nval(0));
-            ResourceEntity r = new ResourceEntity("nan-ord-4");
-            withResource(r, () -> {
-                assertEquals(0, runCount(exprOp("lt", negZero, zero)));
-                assertEquals(1, runCount(exprOp("le", negZero, zero)));
-                assertEquals(1, runCount(exprOp("ge", negZero, zero)));
-                assertEquals(0, runCount(exprOp("gt", negZero, zero)));
-            });
-        }
-
-    }
-
     /**
      * {@code repository.delete(Specification)} guard. Relation-mapped operators translate to
      * correlated subqueries over collection tables; Hibernate's multi-table bulk delete first
@@ -2527,8 +1428,55 @@ class SpringDataQueryPlanAdapterTest {
             return SpringDataQueryPlanAdapter.toSpecification(resp, MAPPER, Map.of());
         }
 
+        /**
+         * {@code JpaSpecificationExecutor.delete(Specification)} is a Spring Data JPA 3.x method:
+         * 4.0 replaced it with {@code delete(PredicateSpecification)} and
+         * {@code delete(DeleteSpecification)}, so a direct call does not compile on the
+         * forward-compatibility leg ({@code ADAPTER_TEST_ORM=next}). Resolved reflectively so one
+         * source compiles against both majors, and the two tests that need the 3.x method are
+         * SKIPPED where it is absent rather than reported as passing — the guard they pin is
+         * about an invocation shape that major no longer has.
+         */
+        private static java.lang.reflect.Method specificationDelete() {
+            try {
+                return SimpleJpaRepository.class.getMethod("delete", Specification.class);
+            } catch (NoSuchMethodException e) {
+                return null;
+            }
+        }
+
+        /** Skips the calling test where the 3.x method is absent; call it before any assertThrows. */
+        private static void assumeSpecificationDeleteIsOnTheClasspath() {
+            org.junit.jupiter.api.Assumptions.assumeTrue(specificationDelete() != null,
+                    "JpaSpecificationExecutor.delete(Specification) is a Spring Data JPA 3.x "
+                            + "method and is not on this classpath");
+        }
+
+        private static long deleteBySpecification(
+                SimpleJpaRepository<ResourceEntity, String> repository,
+                Specification<ResourceEntity> spec) {
+            assumeSpecificationDeleteIsOnTheClasspath();
+            java.lang.reflect.Method delete = specificationDelete();
+            try {
+                return (long) delete.invoke(repository, spec);
+            } catch (java.lang.reflect.InvocationTargetException e) {
+                if (e.getCause() instanceof RuntimeException runtime) {
+                    throw runtime;
+                }
+                if (e.getCause() instanceof Error error) {
+                    throw error;
+                }
+                throw new IllegalStateException(e.getCause());
+            } catch (IllegalAccessException e) {
+                throw new IllegalStateException(e);
+            }
+        }
+
         @Test
         void deleteWithRelationSpecThrowsBeforeAnyDeletion() {
+            // Before the assertThrows below, which would otherwise report the skip as a wrong
+            // exception type.
+            assumeSpecificationDeleteIsOnTheClasspath();
             ResourceEntity r = new ResourceEntity("bulk-del-1");
             r.setOwnedBy(new ArrayList<>(List.of("user1", "user2")));
             withResource(r, () -> {
@@ -2546,7 +1494,7 @@ class SpringDataQueryPlanAdapterTest {
                     try {
                         UnsupportedOperationException ex = assertThrows(
                                 UnsupportedOperationException.class,
-                                () -> repository.delete(spec));
+                                () -> deleteBySpecification(repository, spec));
                         assertTrue(ex.getMessage().contains("ownedBy"),
                                 "message should name the relation, was: " + ex.getMessage());
                         assertTrue(ex.getMessage().contains("SELECT"),
@@ -2589,7 +1537,7 @@ class SpringDataQueryPlanAdapterTest {
                     SimpleJpaRepository<ResourceEntity, String> repository =
                             new SimpleJpaRepository<>(ResourceEntity.class, em);
                     em.getTransaction().begin();
-                    long deleted = repository.delete(spec);
+                    long deleted = deleteBySpecification(repository, spec);
                     em.getTransaction().commit();
                     assertEquals(1, deleted);
                 } finally {
@@ -2650,6 +1598,1592 @@ class SpringDataQueryPlanAdapterTest {
         }
     }
 
+    // ============================================================================================
+    // KIND 3 — a policy can reach these, and the corpus does not carry them yet
+    //
+    // Every test here is a corpus gap, tracked by cerbos/query-plan-adapters#414, and is deleted
+    // when its corpus action lands.
+    // ============================================================================================
+
+    // -- size(collection) compared with arbitrary N → correlated (SELECT COUNT(...)) <op> N.
+    // Seeds a real row because an empty table cannot distinguish count thresholds.
+
+    @Nested
+    class SizeCountComparisons {
+
+        private ResourceEntity seeded() {
+            ResourceEntity r = new ResourceEntity("size-seed-1");
+            r.setOwnedBy(new ArrayList<>(List.of("user1", "user2")));
+            r.addTag("tagX", "x");
+            return r;
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> The corpus counts a collection against 1 alone ({@code
+         * size-threshold}, {@code size-filter-count}); an arbitrary threshold under every operator,
+         * over an element collection and an entity relation, is not carried.
+         */
+        @Test
+        void sizeComparedWithArbitraryN() {
+            // Seeded row has 2 owners (@ElementCollection) and 1 tag (@OneToMany).
+            withResource(seeded(), () -> {
+                assertEquals(1, runCount(exprOp("eq",
+                        exprOp("size", var("request.resource.attr.ownedBy")), nval(2))));
+                assertEquals(0, runCount(exprOp("eq",
+                        exprOp("size", var("request.resource.attr.ownedBy")), nval(3))));
+                assertEquals(1, runCount(exprOp("gt",
+                        exprOp("size", var("request.resource.attr.ownedBy")), nval(1))));
+                assertEquals(0, runCount(exprOp("gt",
+                        exprOp("size", var("request.resource.attr.ownedBy")), nval(2))));
+                assertEquals(1, runCount(exprOp("le",
+                        exprOp("size", var("request.resource.attr.ownedBy")), nval(2))));
+                assertEquals(0, runCount(exprOp("lt",
+                        exprOp("size", var("request.resource.attr.ownedBy")), nval(2))));
+                assertEquals(0, runCount(exprOp("ge",
+                        exprOp("size", var("request.resource.attr.ownedBy")), nval(3))));
+                assertEquals(0, runCount(exprOp("ne",
+                        exprOp("size", var("request.resource.attr.ownedBy")), nval(2))));
+                // Entity relation (@OneToMany), not just element collections.
+                assertEquals(1, runCount(exprOp("eq",
+                        exprOp("size", var("request.resource.attr.tags")), nval(1))));
+            });
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> {@code vf-size} mirrors the emptiness check alone; a
+         * value-first arbitrary threshold is not carried.
+         */
+        @Test
+        void sizeValueFirstWithArbitraryNIsMirrored() {
+            // 3 > size(ownedBy) → size < 3, with 2 owners → match. The naive (unmirrored)
+            // translation `size > 3` would return 0.
+            withResource(seeded(), () -> {
+                assertEquals(1, runCount(exprOp("gt",
+                        nval(3),
+                        exprOp("size", var("request.resource.attr.ownedBy")))));
+                assertEquals(1, runCount(exprOp("lt",
+                        nval(1),
+                        exprOp("size", var("request.resource.attr.ownedBy")))));
+            });
+        }
+    }
+
+    // -- Fractional size() thresholds: COUNT/LENGTH are integral, so a fractional constant f
+    // can never be hit exactly. Correct semantics: eq → always-false; ne → always-true (but a
+    // NULL string column is a missing attribute → CEL error → deny); ge/gt f → ge ceil(f);
+    // le/lt f → le floor(f). Truncation (`>= 1.5` becoming `>= 1`) over-included.
+
+    @Nested
+    class FractionalSizeThresholds {
+
+        private ResourceEntity seeded() {
+            ResourceEntity r = new ResourceEntity("size-frac-seed-1");
+            r.setOwnedBy(new ArrayList<>(List.of("user1", "user2")));
+            return r;
+        }
+
+        private Operand sizeCmp(String op, double threshold) {
+            return exprOp(op,
+                    exprOp("size", var("request.resource.attr.ownedBy")),
+                    nval(threshold));
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> {@code cr-size-frac-ge} and {@code w1-size-frac-chain} carry
+         * the inclusive {@code >=}; the strict {@code >} rounding is not carried.
+         */
+        @Test
+        void gtFractionalRoundsUp() {
+            // gt f ⇔ ge ceil(f) for integral counts.
+            withResource(seeded(), () -> {
+                assertEquals(1, runCount(sizeCmp("gt", 1.5)));
+                assertEquals(0, runCount(sizeCmp("gt", 2.5)));
+            });
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> {@code w1-size-frac-le-chain} carries the inclusive {@code
+         * <=}; the strict {@code <} rounding is not carried.
+         */
+        @Test
+        void ltFractionalRoundsDown() {
+            // size < 2.5 ⇔ size <= 2; truncation made it lt 2 (under-inclusive).
+            withResource(seeded(), () -> {
+                assertEquals(1, runCount(sizeCmp("lt", 2.5)));
+                assertEquals(0, runCount(sizeCmp("lt", 1.5)));
+            });
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> A fractional threshold below 1 folds into the emptiness
+         * shortcuts, which no corpus action reaches.
+         */
+        @Test
+        void fractionalEmptinessShortcutsStillRoute() {
+            // ge 0.5 ⇔ ge 1 → EXISTS; lt 0.5 ⇔ le 0 → NOT EXISTS.
+            withResource(seeded(), () -> {
+                assertEquals(1, runCount(sizeCmp("ge", 0.5)));
+                assertEquals(0, runCount(sizeCmp("lt", 0.5)));
+            });
+        }
+
+    }
+
+    // -- size(string) thresholds outside int range: cb.length is Expression<Integer>, so an
+    // unguarded (int) narrowing cast wrapped them (2147483648 → −2147483648, 4294967296 → 0),
+    // silently flipping the filter: `size(s) > 4294967296` became `LENGTH(s) > 0` — always-true
+    // over-inclusion while check() denies every row. No string's length leaves int range, so
+    // these comparisons must fold statically: gt/ge/eq huge → always-false; lt/le/ne huge →
+    // true for a PRESENT string only (NULL column = missing attribute → CEL error → deny).
+
+    @Nested
+    class HugeStringSizeThresholds {
+
+        private static final double TWO_POW_31 = 2147483648.0; // Integer.MAX_VALUE + 1
+        private static final double TWO_POW_32 = 4294967296.0;
+
+        private Operand strSize(String op, double threshold) {
+            return exprOp(op,
+                    exprOp("size", var("request.resource.attr.aOptionalString")),
+                    nval(threshold));
+        }
+
+        private ResourceEntity present() {
+            ResourceEntity r = new ResourceEntity("size-huge-1");
+            r.setaOptionalString("abc");
+            return r;
+        }
+
+        private ResourceEntity emptyString() {
+            ResourceEntity r = new ResourceEntity("size-huge-2");
+            r.setaOptionalString("");
+            return r;
+        }
+
+        private ResourceEntity nullString() {
+            ResourceEntity r = new ResourceEntity("size-huge-3");
+            r.setaOptionalString(null);
+            return r;
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> {@code size-huge-gt} carries {@code >} at 2^32 alone; {@code
+         * ge}, {@code eq} and the 2^31 boundary are not carried.
+         */
+        @Test
+        void gtGeEqAboveIntMaxAreAlwaysFalse() {
+            // No string has >= 2^31 chars, so gt/ge/eq can never hold. The wrap made
+            // gt 2^32 into LENGTH > 0 (matched every non-empty row) and gt 2^31 into
+            // LENGTH > −2^31 (matched every present row).
+            withResource(present(), () -> {
+                assertEquals(0, runCount(strSize("gt", TWO_POW_32)));
+                assertEquals(0, runCount(strSize("gt", TWO_POW_31)));
+                assertEquals(0, runCount(strSize("ge", TWO_POW_32)));
+                assertEquals(0, runCount(strSize("ge", TWO_POW_31)));
+            });
+            // eq 2^32 wrapped to LENGTH = 0, wrongly matching the empty string.
+            withResource(emptyString(), () ->
+                    assertEquals(0, runCount(strSize("eq", TWO_POW_32))));
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> {@code size-huge-lt} carries {@code <} at 2^32 over a corpus
+         * whose aString is never NULL, so the NULL exclusion this pins has no discriminating seed
+         * there.
+         */
+        @Test
+        void ltLeAboveIntMaxIncludePresentAndExcludeNull() {
+            // Every present string satisfies lt/le a huge threshold — but a NULL column is
+            // a missing attribute → CEL error → deny. The wrap made lt 2^32 into
+            // LENGTH < 0 (excluded everything).
+            withResource(present(), () -> withResource(nullString(), () -> {
+                assertEquals(1, runCount(strSize("lt", TWO_POW_32)));
+                assertEquals(1, runCount(strSize("le", TWO_POW_32)));
+                assertEquals(1, runCount(strSize("lt", TWO_POW_31)));
+            }));
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> {@code ne} above int range is not carried.
+         */
+        @Test
+        void neAboveIntMaxIncludesEmptyStringAndExcludesNull() {
+            // size("") != 2^32 is TRUE in CEL. The wrap made it LENGTH <> 0, wrongly
+            // excluding the empty string; NULL must stay excluded either way.
+            withResource(emptyString(), () -> withResource(nullString(), () ->
+                    assertEquals(1, runCount(strSize("ne", TWO_POW_32)))));
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> Thresholds below int range are not carried.
+         */
+        @Test
+        void belowIntMinThresholdsFoldMirrored() {
+            // LENGTH(s) >= 0 > any threshold below int range: gt/ge/ne always hold for a
+            // present string (incl. the empty string — the wrap made gt −2^32 into
+            // LENGTH > 0, wrongly excluding it); eq/lt/le can never hold.
+            withResource(emptyString(), () -> withResource(nullString(), () -> {
+                assertEquals(1, runCount(strSize("gt", -TWO_POW_32)));
+                assertEquals(1, runCount(strSize("ge", -TWO_POW_32)));
+                assertEquals(1, runCount(strSize("ne", -TWO_POW_32)));
+                assertEquals(0, runCount(strSize("lt", -TWO_POW_32)));
+                assertEquals(0, runCount(strSize("le", -TWO_POW_32)));
+                assertEquals(0, runCount(strSize("eq", -TWO_POW_32)));
+            }));
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> A fractional threshold outside int range is not carried.
+         */
+        @Test
+        void fractionalHugeThresholdRoundsThenFolds() {
+            // ge 2^32 + 0.5 → ceil → 4294967297 → still above int range → always-false;
+            // le → floor → 4294967296 → present strings satisfy it.
+            withResource(present(), () -> {
+                assertEquals(0, runCount(strSize("ge", TWO_POW_32 + 0.5)));
+                assertEquals(1, runCount(strSize("le", TWO_POW_32 + 0.5)));
+            });
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> The exact {@code Integer.MAX_VALUE} boundary is not carried.
+         */
+        @Test
+        void boundaryIntegerMaxStillComparesExactly() {
+            // Integer.MAX_VALUE itself is in range and must keep producing a real LENGTH
+            // comparison, not a fold.
+            withResource(present(), () -> {
+                assertEquals(0, runCount(strSize("gt", 2147483647.0)));
+                assertEquals(1, runCount(strSize("lt", 2147483647.0)));
+                assertEquals(1, runCount(strSize("le", 2147483647.0)));
+                assertEquals(0, runCount(strSize("ge", 2147483647.0)));
+            });
+        }
+    }
+
+    // -- except: a two-list function with no JPA translation — every arrival shape throws --
+    //
+    // PDP-verified wire shapes (Cerbos latest, 2026-07): `size(R.attr.tags.except(["archived"]))
+    // > 0` arrives as gt(size(except(variable, value-list)), 0), and `R.attr.tags.except(
+    // ["archived"]) == []` as eq(except(variable, value-list), value-list). except NEVER
+    // arrives with a lambda operand — a previous lambda-except translation here was
+    // unreachable from any real plan and has been removed.
+
+    /**
+     * <strong>Corpus gap.</strong> {@code size(R.attr.tags.except([...])) > 0} is a policy any
+     * application can write, and Cerbos {@code except(list, list)} arrives as a two-list
+     * expression; the corpus carries no {@code except} action.
+     */
+    @Test
+    void sizeOfExceptThrowsNamedError() {
+        assertConditionThrows(
+                exprOp("gt",
+                        exprOp("size",
+                                exprOp("except",
+                                        var("request.resource.attr.tags"), listOp("archived"))),
+                        nval(0)),
+                "except is not supported", "except(list, list)", "exists");
+    }
+
+    /**
+     * <strong>Corpus gap.</strong> The same two-list {@code except}, compared to a list constant.
+     */
+    @Test
+    void exceptComparedToListThrowsNamedError() {
+        assertConditionThrows(
+                exprOp("eq",
+                        exprOp("except",
+                                var("request.resource.attr.tags"), listOp("archived")),
+                        listOp()),
+                "except is not supported", "except(list, list)");
+    }
+
+    /**
+     * <strong>Corpus gap.</strong> The same two-list {@code except}, in boolean position.
+     */
+    @Test
+    void bareExceptThrowsNamedError() {
+        // The lambda-form except(collection, lambda) once asserted here was a phantom no plan carries.
+        assertConditionThrows(
+                exprOp("except",
+                        var("request.resource.attr.tags"), listOp("archived")),
+                "except is not supported", "except(list, list)");
+    }
+
+    /**
+     * <strong>Corpus gap.</strong> {@code exists-one-multi} carries a single-equality body; a
+     * disjunctive body is not carried.
+     */
+    @Test
+    void existsOneWithCompoundBody() {
+        assertEquals(0, runCount(exprOp("exists_one",
+                var("request.resource.attr.tags"),
+                lambda("t",
+                        exprOp("or",
+                                exprOp("eq", var("t.id"), sval("tag1")),
+                                exprOp("eq", var("t.name"), sval("public")))))));
+    }
+
+    // -- empty-list intersection short-circuits (no dialect-dependent `IN ()`) --
+
+    /**
+     * <strong>Corpus gap.</strong> {@code hasIntersection(x, [])} against a scalar column is not
+     * carried; whether the planner folds it as it folds {@code in-empty} is unrecorded.
+     */
+    @Test
+    void hasIntersectionScalarEmptyListCompiles() {
+        // hasIntersection(field, []) is always false and must not emit an empty `IN ()`.
+        assertEquals(0, runCount(exprOp("hasIntersection",
+                var("request.resource.attr.aString"), listOp())));
+    }
+
+    /**
+     * <strong>Corpus gap.</strong> The same empty constant list, over a relation.
+     */
+    @Test
+    void hasIntersectionRelationEmptyListCompiles() {
+        assertEquals(0, runCount(exprOp("hasIntersection",
+                var("request.resource.attr.tags"), listOp())));
+    }
+
+    /**
+     * <strong>Corpus gap.</strong> The same empty constant list, over a {@code map()} projection.
+     */
+    @Test
+    void hasIntersectionMapEmptyListCompiles() {
+        Operand mapExpr = exprOp("map",
+                var("request.resource.attr.tags"),
+                lambda("t", var("t.name")));
+        assertEquals(0, runCount(exprOp("hasIntersection", mapExpr, listOp())));
+    }
+
+    // -- eq/ne against a structured (list/map) constant: named error, not a raw Hibernate one --
+
+    /**
+     * PDP-verified wire shapes (Cerbos {@code :latest}, 2026-07-23): {@code R.attr.tags ==
+     * ["a", "b"]} arrives as {@code eq(variable, value-list)} verbatim — in BOTH operand
+     * orders — and {@code ne} likewise. Without the guard, {@code cb.equal(stringPath, List)}
+     * dies inside Hibernate with a raw coercion error ("Could not convert
+     * java.util.ImmutableCollections$ListN to java.lang.String"), violating the README's
+     * contract that unsupported constructs throw {@link IllegalArgumentException} naming the
+     * operator. These tests pin the named error AND that no element values leak into it.
+     */
+    @Nested
+    class StructuredConstantComparison {
+
+        /**
+         * <strong>Corpus gap.</strong> {@code R.attr.x == ["a", "b"]} is a policy any application
+         * can write; the corpus carries no list-constant equality.
+         */
+        @Test
+        void eqFieldAgainstListConstantThrowsNamedError() {
+            assertNamedError(
+                    exprOp("eq", var("request.resource.attr.aString"), listOp(ELEM_A, ELEM_B)),
+                    "eq", "request.resource.attr.aString", "list of 2 elements");
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> The {@code ne} half of the same gap.
+         */
+        @Test
+        void neFieldAgainstListConstantThrowsNamedError() {
+            assertNamedError(
+                    exprOp("ne", var("request.resource.attr.aString"), listOp(ELEM_A, ELEM_B)),
+                    "ne", "request.resource.attr.aString", "list of 2 elements");
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> The value-first spelling of the same gap.
+         */
+        @Test
+        void eqValueFirstListConstantThrowsNamedError() {
+            // ["a", "b"] == R.attr.x — source order is preserved on the wire; NormalizedBinary
+            // mirrors it back to field-first, so the same named error must surface.
+            assertNamedError(
+                    exprOp("eq", listOp(ELEM_A), var("request.resource.attr.aString")),
+                    "eq", "request.resource.attr.aString", "list of 1 element");
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> The value-first {@code ne} spelling of the same gap.
+         */
+        @Test
+        void neValueFirstListConstantThrowsNamedError() {
+            assertNamedError(
+                    exprOp("ne", listOp(ELEM_A, ELEM_B), var("request.resource.attr.aString")),
+                    "ne", "request.resource.attr.aString", "list of 2 elements");
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> The same gap over a relation-mapped attribute.
+         */
+        @Test
+        void eqRelationAgainstListConstantThrowsNamedError() {
+            // Relation-mapped attribute: previously surfaced the generic "is a Relation;
+            // cannot resolve as a scalar path" — the structured-constant guard runs before
+            // path resolution so this shape gets the same actionable message.
+            assertNamedError(
+                    exprOp("eq", var("request.resource.attr.tags"), listOp(ELEM_A, ELEM_B)),
+                    "eq", "request.resource.attr.tags", "list of 2 elements");
+        }
+
+    }
+
+    // -- add operator --
+
+    /**
+     * <strong>Corpus gap.</strong> {@code id-concat-vf} solves a PREFIX concatenation back to a key
+     * equality; the suffix form is not carried.
+     */
+    @Test
+    void addSolveStringSuffixStrip() {
+        // eq("foo.bar", add(R.attr.aString, ".bar"))
+        //   → "foo.bar".stripSuffix(".bar") == "foo"
+        //   → aString == "foo"
+        Operand cond = exprOp("eq",
+                sval("foo.bar"),
+                exprOp("add", var("request.resource.attr.aString"), sval(".bar")));
+        assertEquals(0, runCount(cond));
+    }
+
+    /**
+     * <strong>Corpus gap.</strong> {@code arith-add-eq-frac} and its siblings solve fractional
+     * constants through SQL arithmetic; the exact integer solve in Java is not carried. Note that a
+     * policy spelling this with int literals is a CEL no-overload error at check time (attribute
+     * values are doubles), which a row-level test against the adapter alone cannot see — the corpus
+     * action is what would settle it.
+     */
+    @Test
+    void addSolveNumeric() {
+        // eq(10, add(3, R.attr.aNumber))  →  aNumber == 7. Long/long solves within ±2^53 are
+        // algebraically exact and must keep solving in Java: seeded rows prove the filter
+        // keeps the aNumber=7 row and drops the aNumber=8 row.
+        Operand cond = exprOp("eq",
+                nval(10),
+                exprOp("add", nval(3), var("request.resource.attr.aNumber")));
+        assertEquals(0, runCount(cond));
+
+        ResourceEntity match = new ResourceEntity("add-long-1");
+        match.setaNumber(7);
+        ResourceEntity miss = new ResourceEntity("add-long-2");
+        miss.setaNumber(8);
+        withResource(match, () -> withResource(miss, () -> assertEquals(1, runCount(cond))));
+    }
+
+    /**
+     * <strong>Corpus gap.</strong> A constant beyond 2^53 is not carried.
+     */
+    @Test
+    void addSolveOversizedLongRoutesToSqlArithmetic() {
+        // 2^54 is outside the ±2^53 exactly-representable range: the check-time double
+        // arithmetic has gaps there, so the long-space solve must NOT fire — the shape
+        // routes through SQL double arithmetic instead (and must not throw).
+        Operand cond = exprOp("eq",
+                exprOp("add", var("request.resource.attr.aNumber"), nval(1)),
+                nval(0x1p54));
+
+        ResourceEntity row = new ResourceEntity("add-big-1");
+        row.setaNumber(5);
+        withResource(row, () -> assertEquals(0, runCount(cond)));
+    }
+
+    /**
+     * <strong>Corpus gap.</strong> A concatenation no column value can satisfy is not carried.
+     */
+    @Test
+    void addNoSolutionEqProducesImpossibleFilter() {
+        // eq("nope", add("projects:", R.attr.aString))
+        //   "nope" doesn't start with "projects:" → no solution → eq becomes 1=0
+        Operand cond = exprOp("eq",
+                sval("nope"),
+                exprOp("add", sval("projects:"), var("request.resource.attr.aString")));
+        // 1=0 filter → 0 results expected (table is empty anyway, this just confirms no exception)
+        assertEquals(0, runCount(cond));
+    }
+
+    /**
+     * <strong>Corpus gap.</strong> The negation of a concatenation no column value can satisfy,
+     * which must still exclude the NULL row, is not carried.
+     */
+    @Test
+    void addNoSolutionNeExcludesNullRows() {
+        // ne("abc", add("users:", R.attr.aOptionalString)): no field value can make the
+        // concatenation equal "abc", BUT a missing attribute makes `"users:" + null` a CEL
+        // evaluation error → deny. An always-true collapse would leak the NULL row; the
+        // correct translation is IS NOT NULL (non-NULL rows in, NULL rows out).
+        Operand neCond = exprOp("ne",
+                sval("abc"),
+                exprOp("add", sval("users:"), var("request.resource.attr.aOptionalString")));
+        Operand eqCond = exprOp("eq",
+                sval("abc"),
+                exprOp("add", sval("users:"), var("request.resource.attr.aOptionalString")));
+
+        ResourceEntity withValue = new ResourceEntity("ne-add-1");
+        withValue.setaOptionalString("x");
+        ResourceEntity withNull = new ResourceEntity("ne-add-2");
+        withNull.setaOptionalString(null);
+
+        withResource(withValue, () -> withResource(withNull, () -> {
+            // Only the non-NULL row survives ne; the NULL row is a CEL error → deny.
+            assertEquals(1, runCount(neCond));
+            // eq stays always-false: neither row matches (NULL row denied there too).
+            assertEquals(0, runCount(eqCond));
+        }));
+    }
+
+    // -- CEL primitives (PR #223): only empty-collection is natively supported; the rest throw --
+
+    @Nested
+    class CelPrimitives {
+
+        // add/sub/mult/div appearing as a comparison operand are supported (double-space SQL
+        // arithmetic) — see ArithmeticComparisons. Only mod remains rejected.
+
+        /**
+         * <strong>Corpus gap.</strong> {@code string-size} and {@code string-size-gt0} carry {@code
+         * >}; equality and the value-first mirror over a string length are not carried.
+         */
+        @Test
+        void stringSizeComparesLength() {
+            // size(aString) on a Field mapping → LENGTH(a_string) <op> N.
+            // Seeded aString = "seededString" (12 chars).
+            ResourceEntity r = new ResourceEntity("string-size-seed-1");
+            r.setaString("seededString");
+            withResource(r, () -> {
+                assertEquals(1, runCount(exprOp("eq",
+                        exprOp("size", var("request.resource.attr.aString")), nval(12))));
+                assertEquals(0, runCount(exprOp("eq",
+                        exprOp("size", var("request.resource.attr.aString")), nval(5))));
+                assertEquals(1, runCount(exprOp("gt",
+                        exprOp("size", var("request.resource.attr.aString")), nval(0))));
+                assertEquals(0, runCount(exprOp("gt",
+                        exprOp("size", var("request.resource.attr.aString")), nval(20))));
+                // Value-first is mirrored: 5 < size(aString) → length > 5 → match.
+                assertEquals(1, runCount(exprOp("lt",
+                        nval(5),
+                        exprOp("size", var("request.resource.attr.aString")))));
+            });
+        }
+    }
+
+    // -- Minor operator/comparison shapes (PR #234) --
+
+    @Nested
+    class MinorOperators {
+
+        /**
+         * <strong>Corpus gap.</strong> The corpus orders a column against a constant ({@code
+         * rel-lt-hop} and siblings) and compares two columns for equality ({@code field-to-field});
+         * a two-column ORDERING is not carried.
+         */
+        @Test
+        void fieldToFieldOrderingKeepsOperandDirection() {
+            // lt/gt over two variables must honor source order: createdBy < aString
+            // with createdBy = "abc", aString = "xyz" → match; the swapped form must not.
+            ResourceEntity r = new ResourceEntity("f2f-seed-2");
+            r.setaString("xyz");
+            r.setCreatedBy("abc");
+            r.setaNumber(5);
+            withResource(r, () -> {
+                assertEquals(1, runCount(exprOp("lt",
+                        var("request.resource.attr.createdBy"),
+                        var("request.resource.attr.aString"))));
+                assertEquals(0, runCount(exprOp("lt",
+                        var("request.resource.attr.aString"),
+                        var("request.resource.attr.createdBy"))));
+                assertEquals(1, runCount(exprOp("le",
+                        var("request.resource.attr.aNumber"),
+                        var("request.resource.attr.aNumber"))));
+                assertEquals(0, runCount(exprOp("gt",
+                        var("request.resource.attr.aNumber"),
+                        var("request.resource.attr.aNumber"))));
+            });
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> {@code matches()} between two columns is not carried; {@code
+         * p-matches} refuses the constant form.
+         */
+        @Test
+        void fieldToFieldUnsupportedOperatorStillThrows() {
+            // contains/startsWith/endsWith(var, var) are supported (see FieldToFieldStringMatch);
+            // anything else without a column-to-column translation keeps the specific message.
+            assertConditionThrows(
+                    exprOp("matches",
+                            var("request.resource.attr.aString"),
+                            var("request.resource.attr.createdBy")),
+                    "Field-to-field", "matches");
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> {@code R.attr.aBool == false} is not carried; the corpus
+         * reaches the boolean column bare ({@code root-bare-bool}).
+         */
+        @Test
+        void equalBoolFalse() {
+            assertEquals(0, runCount(exprOp("eq",
+                    var("request.resource.attr.aBool"), bval(false))));
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> {@code in} over a numeric list is not carried; {@code
+         * in-single} is a string.
+         */
+        @Test
+        void inNumberList() {
+            assertEquals(0, runCount(exprOp("in",
+                    var("request.resource.attr.aNumber"),
+                    listOpNumbers(1, 2, 3))));
+        }
+
+    }
+
+    // -- Collection macro composition (PR #235) --
+
+    @Nested
+    class CollectionMacroComposition {
+
+        /**
+         * <strong>Corpus gap.</strong> {@code all} with a conjunctive body is not carried.
+         */
+        @Test
+        void allWithNestedAnd() {
+            // tags.all(t, t.name == "public" && t.id != "tag1")
+            Operand cond = exprOp("all",
+                    var("request.resource.attr.tags"),
+                    lambda("t", exprOp("and",
+                            exprOp("eq", var("t.name"), sval("public")),
+                            exprOp("ne", var("t.id"), sval("tag1")))));
+            assertEquals(0, runCount(cond));
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> {@code size-filter-count} carries {@code == 1}; the other
+         * operators and the value-first mirror are not carried.
+         */
+        @Test
+        void sizeOfFilterCountsMatchingElements() {
+            // size(tags.filter(t, t.name == "public")) <op> N → correlated
+            // (SELECT COUNT(...) WHERE lambda) <op> N. Seeded row: tags [public, public, x].
+            ResourceEntity r = new ResourceEntity("size-filter-seed-1");
+            r.addTag("tagA", "public");
+            r.addTag("tagB", "public");
+            r.addTag("tagC", "x");
+            Operand filterExpr = exprOp("filter",
+                    var("request.resource.attr.tags"),
+                    lambda("t", exprOp("eq", var("t.name"), sval("public"))));
+            withResource(r, () -> {
+                assertEquals(1, runCount(exprOp("eq", exprOp("size", filterExpr), nval(2))));
+                assertEquals(0, runCount(exprOp("eq", exprOp("size", filterExpr), nval(3))));
+                assertEquals(1, runCount(exprOp("gt", exprOp("size", filterExpr), nval(1))));
+                assertEquals(0, runCount(exprOp("gt", exprOp("size", filterExpr), nval(2))));
+                // Emptiness checks work through the same path.
+                assertEquals(1, runCount(exprOp("gt", exprOp("size", filterExpr), nval(0))));
+                assertEquals(0, runCount(exprOp("eq", exprOp("size", filterExpr), nval(0))));
+                // Value-first is mirrored: 3 > size(filter) → count < 3 → match.
+                assertEquals(1, runCount(exprOp("gt", nval(3), exprOp("size", filterExpr))));
+            });
+        }
+    }
+
+    /**
+     * exists/all whose collection operand is a literal value list — the wire shape the planner
+     * emits when a known collection (e.g. a folded principal attribute) exceeds the 10-element
+     * unroll cap of cerbos/cerbos#2570/#2817. The adapter folds the macro into the same or/and
+     * chain the planner produces below the cap, so the translated filter does not depend on
+     * which side of that threshold the collection lands.
+     */
+    @Nested
+    class KnownValueCollections {
+
+        private static Value structElement(String field, String value) {
+            return Value.newBuilder().setStructValue(
+                    Struct.newBuilder().putFields(field,
+                            Value.newBuilder().setStringValue(value).build())).build();
+        }
+
+        private static Operand structListOp(String field, String... values) {
+            ListValue.Builder list = ListValue.newBuilder();
+            for (String v : values) list.addValues(structElement(field, v));
+            return Operand.newBuilder().setValue(Value.newBuilder().setListValue(list)).build();
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> The corpus principal's collections are never empty, so no
+         * action reaches the empty literal collection.
+         */
+        @Test
+        void emptyValueListKeepsCelIdentitySemantics() {
+            ResourceEntity r = new ResourceEntity("kvc-empty");
+            r.setaString("alpha");
+            withResource(r, () -> {
+                // exists over [] is false; all over [] is true.
+                assertEquals(0, runCount(exprOp("exists", listOp(),
+                        lambda("t", exprOp("eq", var("request.resource.attr.aString"), var("t"))))));
+                assertEquals(1, runCount(exprOp("all", listOp(),
+                        lambda("t", exprOp("ne", var("request.resource.attr.aString"), var("t"))))));
+            });
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> The corpus's principal collections are lists of scalars, so
+         * no action substitutes a lambda variable into a struct element.
+         */
+        @Test
+        void structElementPathSubstitution() {
+            ResourceEntity r = new ResourceEntity("kvc-struct");
+            r.setaString("alpha");
+            withResource(r, () -> {
+                assertEquals(1, runCount(exprOp("exists", structListOp("name", "alpha", "beta"),
+                        lambda("t", exprOp("eq",
+                                var("request.resource.attr.aString"), var("t.name"))))));
+                assertEquals(0, runCount(exprOp("exists", structListOp("name", "x"),
+                        lambda("t", exprOp("eq",
+                                var("request.resource.attr.aString"), var("t.name"))))));
+            });
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> No corpus action rebinds an outer macro's iteration variable
+         * inside a nested macro.
+         *
+         * A nested lambda rebinding the variable shadows it: the inner {@code t.name} must stay
+         * symbolic. An incorrect substitution would try to drill {@code .name} into the outer
+         * string element and fail translation.
+         */
+        @Test
+        void nestedLambdaShadowsOuterVariable() {
+            assertEquals(0, runCount(exprOp("exists", listOp("outer1", "outer2"),
+                    lambda("t", exprOp("exists", var("request.resource.attr.tags"),
+                            lambda("t", exprOp("eq", var("t.name"), sval("public"))))))));
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> {@code exists_one} over a literal collection is not carried.
+         */
+        @Test
+        void existsOneOverValueListFailsClosed() {
+            assertConditionThrows(exprOp("exists_one", listOp("a"),
+                    lambda("t", exprOp("eq", var("request.resource.attr.aString"), var("t")))),
+                    "exists_one over a literal collection value is not supported");
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> A struct element path the element does not carry is not
+         * carried.
+         */
+        @Test
+        void missingElementFieldFailsClosed() {
+            assertConditionThrows(exprOp("exists", structListOp("name", "alpha"),
+                    lambda("t", exprOp("eq",
+                            var("request.resource.attr.aString"), var("t.missing")))),
+                    "Cannot resolve \"t.missing\"", "has no field \"missing\"");
+        }
+
+    }
+
+    /**
+     * {@code in}-lists containing {@code null} — PDP-verified wire facts (Cerbos latest,
+     * 2026-07): {@code R.attr.owner in ["a", null]} compiles and the planner emits
+     * {@code in(variable, value ["a", null])} VERBATIM, and {@code check()} ALLOWS an
+     * explicitly-null attribute (CEL {@code null in ["a", null]} is true). The planner itself
+     * folds the degenerate {@code x in [null]} to {@code eq(x, null)} — which this adapter
+     * already translates as IS NULL — so a null list element must become an IS NULL disjunct:
+     * {@code path IN (nonNulls) OR path IS NULL}. Passing the raw null-bearing list to
+     * {@code path.in} instead produces SQL {@code IN ('a', NULL)}, whose three-valued
+     * semantics silently EXCLUDE null rows check() allows (under-return), and whose negation
+     * is UNKNOWN for every non-matching row (the negated filter returns nothing at all).
+     * The Relation side mirrors this: a null element of a mapped collection is a related row
+     * whose member column IS NULL, so the null needle/element becomes an IS NULL disjunct
+     * inside the membership EXISTS.
+     */
+    @Nested
+    class InListNullElements {
+
+        /** Seed three rows keyed by aOptionalString content: "a", "b", and NULL. */
+        private void withOwnerRows(Runnable body) {
+            ResourceEntity a = new ResourceEntity("in-null-a");
+            a.setaOptionalString("a");
+            ResourceEntity b = new ResourceEntity("in-null-b");
+            b.setaOptionalString("b");
+            ResourceEntity nul = new ResourceEntity("in-null-nul");
+            nul.setaOptionalString(null);
+            withResource(a, () -> withResource(b, () -> withResource(nul, body)));
+        }
+
+        /** Seed rows with tag collections: a null-name member, an "x" member, and no tags. */
+        private void withTagRows(Runnable body) {
+            ResourceEntity withX = new ResourceEntity("in-null-tag-x");
+            withX.addTag("int1", "x");
+            ResourceEntity withNullName = new ResourceEntity("in-null-tag-nul");
+            withNullName.addTag("int2", null);
+            ResourceEntity noTags = new ResourceEntity("in-null-tag-none");
+            withResource(withX, () -> withResource(withNullName, () -> withResource(noTags, body)));
+        }
+
+        /** Translate {@code condition}, run it, and return the matched row IDs. */
+        private Set<String> runIds(Operand condition) {
+            PlanResourcesResponse resp =
+                    buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
+            Specification<ResourceEntity> spec =
+                    SpringDataQueryPlanAdapter.toSpecification(resp, MAPPER, Map.of());
+            EntityManager em = emf.createEntityManager();
+            try {
+                CriteriaBuilder cb = em.getCriteriaBuilder();
+                CriteriaQuery<String> cq = cb.createQuery(String.class);
+                Root<ResourceEntity> root = cq.from(ResourceEntity.class);
+                cq.select(root.get("id")).distinct(true);
+                Predicate p = spec.toPredicate(root, cq, cb);
+                if (p != null) {
+                    cq.where(p);
+                }
+                return Set.copyOf(em.createQuery(cq).getResultList());
+            } finally {
+                em.close();
+            }
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> {@code null in R.attr.x} over a scalar column is not
+         * carried; the corpus's null needles are over relations ({@code in-null-elem-rel}).
+         */
+        @Test
+        void nullNeedleAgainstScalarFieldIsIsNull() {
+            // `null in R.attr.x` over a Field mapping: scalar membership is equality, and
+            // equality against the null constant is IS NULL (mirrors the eq-null leaf).
+            Operand cond = exprOp("in",
+                    nullVal(), var("request.resource.attr.aOptionalString"));
+            withOwnerRows(() ->
+                    assertEquals(Set.of("in-null-nul"), runIds(cond)));
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> {@code in-null-elem-hasint} pins a null element against the
+         * scalar {@code tagNames} projection; the {@code map()} projection is not carried.
+         */
+        @Test
+        void mapIntersectionNullElementIsInertAndNullProjectionStaysUnknown() {
+            // For map(t, t.name) member ACCESS — unlike the scalar tagNames projection — a
+            // NULL member column is a MISSING element attribute (CEL error): check() denies
+            // tags=[{}] under BOTH polarities even with a null element in the constant list
+            // (PDP-verified), and only an explicitly-null projection (unrepresentable in the
+            // column model) could match that element. The null element must be inert and the
+            // NULL-projection row must stay UNKNOWN.
+            java.util.function.Supplier<Operand> cond = () -> exprOp("hasIntersection",
+                    exprOp("map", var("request.resource.attr.tags"),
+                            lambda("t", var("t.name"))),
+                    listOpNullable("x", null));
+            withTagRows(() -> {
+                assertEquals(Set.of("in-null-tag-x"), runIds(cond.get()));
+                assertEquals(Set.of("in-null-tag-none"),
+                        runIds(exprOp("not", cond.get())));
+            });
+        }
+
+    }
+
+    @Nested
+    class HierarchyOperators {
+
+        // Helpers: a hierarchy(...) wrapper and a list(...) of segments.
+        private Operand hierarchy(Operand inner, String delimiter) {
+            return exprOp("hierarchy", inner, sval(delimiter));
+        }
+
+        private Operand hierarchy(Operand inner) {
+            return exprOp("hierarchy", inner);
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> The corpus's hierarchy constants are two segments or more; a
+         * single-segment ancestor, which has no strict ancestors at all, is not carried.
+         */
+        @Test
+        void ancestorOfSingleSegmentConstantMatchesNothing() {
+            // ancestorOf(field, "a") — a single-segment path has NO strict ancestors, so the
+            // translation is always-false: even the row whose scope is exactly "a" must not
+            // match (a path is not its own ancestor).
+            Operand cond = exprOp("ancestorOf",
+                    hierarchy(var("request.resource.attr.aString"), ":"),
+                    hierarchy(sval("a"), ":"));
+            withScopeRows(SCOPES, () ->
+                    assertEquals(Set.of(), scopeIds(cond)));
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> A single-segment descendant prefix, under which the sibling
+         * branch is a genuine descendant, is not carried.
+         */
+        @Test
+        void descendentOfSingleSegmentConstant() {
+            // descendentOf(field, "a") → field LIKE 'a:%': every path under the root —
+            // including the sibling branch "a:bb:c" (a genuine descendant of "a") — but not
+            // the root itself and not "x:y".
+            Operand cond = exprOp("descendentOf",
+                    hierarchy(var("request.resource.attr.aString"), ":"),
+                    hierarchy(sval("a"), ":"));
+            withScopeRows(SCOPES, () ->
+                    assertEquals(Set.of("a:b", "a:b:c", "a:b:c:d", "a:bb:c"), scopeIds(cond)));
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> {@code overlaps} between two column hierarchies is not
+         * carried.
+         */
+        @Test
+        void twoFieldHierarchiesInOverlapThrows() {
+            assertConditionThrows(
+                    exprOp("overlaps",
+                            hierarchy(var("request.resource.attr.aString"), ":"),
+                            hierarchy(var("request.resource.attr.createdBy"), ":")),
+                    "two field-reference hierarchies");
+        }
+
+    }
+
+    // -- Operand order: the planner preserves policy source order, so a value (or folded
+    // constant) can appear BEFORE the field. Directional operators must mirror or results are
+    // silently inverted. These tests seed a real row because an empty table cannot distinguish
+    // `x < 3` from `x > 3`.
+
+    @Nested
+    class OperandOrderSemantics {
+
+        /**
+         * <strong>Corpus gap.</strong> The corpus carries {@code vf-le}, {@code vf-ge}, {@code
+         * vf-lt} and {@code vf-ne}; value-first {@code gt} is not carried.
+         */
+        @Test
+        void gtValueFirstMeansFieldLessThan() {
+            // 10 > aNumber, with aNumber = 5 → match.
+            withResource(orderSeed(), () ->
+                    assertEquals(1, runCount(exprOp("gt", nval(10), var("request.resource.attr.aNumber")))));
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> {@code vf-size} spells {@code 0 < size(...)}; the {@code 1 >
+         * size(...)} mirror, which lowers to NOT EXISTS, is not carried.
+         */
+        @Test
+        void sizeValueFirstEmptinessCheck() {
+            // 1 > size(ownedBy) → size < 1 → NOT EXISTS; seeded row is non-empty → 0.
+            withResource(orderSeed(), () ->
+                    assertEquals(0, runCount(exprOp("gt",
+                            nval(1),
+                            exprOp("size", var("request.resource.attr.ownedBy"))))));
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> The deprecated {@code has_intersection} spelling the PDP
+         * still accepts is not carried.
+         */
+        @Test
+        void hasIntersectionSnakeCaseAliasIsAccepted() {
+            // The PDP still accepts the deprecated has_intersection spelling in policies.
+            withResource(orderSeed(), () ->
+                    assertEquals(1, runCount(exprOp("has_intersection",
+                            var("request.resource.attr.ownedBy"),
+                            listOp("user1")))));
+        }
+
+    }
+
+    // -- CEL ternary: `if(cond, then, else)` is rewritten into pure
+    // predicates — cmp(if(c,a,b), other) → (c AND cmp(a, other)) OR (NOT c AND cmp(b, other)).
+    // Seeds real rows because an empty table cannot distinguish the branch predicates.
+
+    @Nested
+    class TernaryIfExpressions {
+
+        /**
+         * <strong>Corpus gap.</strong> {@code ternary-bare} has two comparison branches; a constant
+         * boolean branch is not carried.
+         */
+        @Test
+        void bareBooleanTernaryWithConstantBranch() {
+            // aBool ? true : aNumber > 5 — a boolean VALUE branch folds to 1=1 / 1=0.
+            Operand plan = exprOp("if",
+                    var("request.resource.attr.aBool"),
+                    bval(true),
+                    exprOp("gt", var("request.resource.attr.aNumber"), nval(5)));
+
+            ResourceEntity thenMatch = new ResourceEntity("ternary-bare-const-1");
+            thenMatch.setaBool(true);
+            thenMatch.setaNumber(0);
+            withResource(thenMatch, () -> assertEquals(1, runCount(plan)));
+
+            ResourceEntity elseMiss = new ResourceEntity("ternary-bare-const-2");
+            elseMiss.setaBool(false);
+            elseMiss.setaNumber(1);
+            withResource(elseMiss, () -> assertEquals(0, runCount(plan)));
+
+            // aBool ? false : aNumber > 5 — a false then-branch excludes matching-condition rows.
+            Operand planFalse = exprOp("if",
+                    var("request.resource.attr.aBool"),
+                    bval(false),
+                    exprOp("gt", var("request.resource.attr.aNumber"), nval(5)));
+            ResourceEntity falseThen = new ResourceEntity("ternary-bare-const-3");
+            falseThen.setaBool(true);
+            falseThen.setaNumber(10);
+            withResource(falseThen, () -> assertEquals(0, runCount(planFalse)));
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> {@code ternary-negated} carries the negation; the ternary
+         * comparison under {@code and}, {@code or} and a double negation is not carried.
+         */
+        @Test
+        void ternaryUnderLogicalOperators() {
+            // The rewrite produces an OR-of-ANDs; it must compose under not/and/or like any
+            // other predicate (negation goes through the junction-barrier helper).
+            Operand comparison = exprOp("gt",
+                    exprOp("if",
+                            var("request.resource.attr.aBool"),
+                            var("request.resource.attr.aNumber"),
+                            nval(0)),
+                    nval(0));
+
+            ResourceEntity truthy = new ResourceEntity("ternary-logic-1");
+            truthy.setaBool(true);
+            truthy.setaString("x");
+            truthy.setaNumber(10);
+            withResource(truthy, () -> {
+                assertEquals(0, runCount(exprOp("not", comparison)));
+                // Double negation must toggle back (junction barrier, not raw cb.not).
+                assertEquals(1, runCount(exprOp("not", exprOp("not", comparison))));
+                assertEquals(1, runCount(exprOp("and", comparison,
+                        exprOp("eq", var("request.resource.attr.aString"), sval("x")))));
+                assertEquals(0, runCount(exprOp("and", comparison,
+                        exprOp("eq", var("request.resource.attr.aString"), sval("z")))));
+                assertEquals(1, runCount(exprOp("or", comparison,
+                        exprOp("eq", var("request.resource.attr.aString"), sval("z")))));
+            });
+
+            // Row where the ternary comparison is false: NOT must select it, OR must rescue it
+            // only through the other arm.
+            ResourceEntity falsy = new ResourceEntity("ternary-logic-2");
+            falsy.setaBool(false);
+            falsy.setaString("x");
+            falsy.setaNumber(10);
+            withResource(falsy, () -> {
+                assertEquals(1, runCount(exprOp("not", comparison)));
+                assertEquals(0, runCount(exprOp("not", exprOp("not", comparison))));
+                assertEquals(1, runCount(exprOp("or", comparison,
+                        exprOp("eq", var("request.resource.attr.aString"), sval("x")))));
+                assertEquals(0, runCount(exprOp("or", comparison,
+                        exprOp("eq", var("request.resource.attr.aString"), sval("z")))));
+            });
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> {@code eq}/{@code ne} against a ternary with a string branch
+         * is not carried; the corpus compares its ternaries by ordering.
+         */
+        @Test
+        void eqNeWithTernary() {
+            // (aBool ? aString : "none") == "x"  /  != "x"
+            Operand ternary = exprOp("if",
+                    var("request.resource.attr.aBool"),
+                    var("request.resource.attr.aString"),
+                    sval("none"));
+            Operand eqPlan = exprOp("eq", ternary, sval("x"));
+            Operand nePlan = exprOp("ne", ternary, sval("x"));
+
+            ResourceEntity thenX = new ResourceEntity("ternary-eqne-1");
+            thenX.setaBool(true);
+            thenX.setaString("x");
+            withResource(thenX, () -> {
+                assertEquals(1, runCount(eqPlan));
+                assertEquals(0, runCount(nePlan));
+            });
+
+            ResourceEntity thenY = new ResourceEntity("ternary-eqne-2");
+            thenY.setaBool(true);
+            thenY.setaString("y");
+            withResource(thenY, () -> {
+                assertEquals(0, runCount(eqPlan));
+                assertEquals(1, runCount(nePlan));
+            });
+
+            // else branch folds: eq("none", "x") → always false; ne("none", "x") → always true.
+            ResourceEntity elseRow = new ResourceEntity("ternary-eqne-3");
+            elseRow.setaBool(false);
+            elseRow.setaString("x");
+            withResource(elseRow, () -> {
+                assertEquals(0, runCount(eqPlan));
+                assertEquals(1, runCount(nePlan));
+            });
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> {@code nan-ord-inf} reaches the constant fold through a
+         * ternary with two constant branches; the fold's other cells — mixed types, whole-number
+         * constants beyond the long range, an incomparable ordering — are reached here through
+         * direct constant comparisons the planner would itself fold away, so only the ternary
+         * spelling is a shape the corpus could carry.
+         */
+        @Test
+        void constantVersusConstantComparisonsFold() {
+            // (aBool ? 1 : 0) > 0 — BOTH branches collapse to constant comparisons, leaving
+            // only the condition predicate. Seeded row: matches iff aBool is true.
+            Operand allConstBranches = exprOp("gt",
+                    exprOp("if", var("request.resource.attr.aBool"), nval(1), nval(0)),
+                    nval(0));
+
+            ResourceEntity boolTrue = new ResourceEntity("ternary-const-1");
+            boolTrue.setaBool(true);
+            withResource(boolTrue, () -> {
+                assertEquals(1, runCount(allConstBranches));
+
+                // Direct value-vs-value plans exercise the fold through the public seam:
+                // numbers compare in double space (1.0 == 1, 0.5 < 1), strings via compareTo,
+                // mixed incomparable types are eq → false / ne → true.
+                assertEquals(1, runCount(exprOp("eq", nval(1.0), nval(1))));
+                assertEquals(1, runCount(exprOp("lt", nval(0.5), nval(1))));
+                assertEquals(0, runCount(exprOp("gt", nval(0), nval(0))));
+                assertEquals(1, runCount(exprOp("ge", nval(2), nval(2))));
+                assertEquals(1, runCount(exprOp("lt", sval("a"), sval("b"))));
+                assertEquals(0, runCount(exprOp("eq", sval("a"), nval(1))));
+                assertEquals(1, runCount(exprOp("ne", sval("a"), nval(1))));
+                assertEquals(1, runCount(exprOp("eq", bval(true), bval(true))));
+                // Whole-number constants beyond the long range must stay doubles: a
+                // saturating (long) cast collapses 1.0e19 and 9.3e18 both to
+                // Long.MAX_VALUE, inverting these comparisons.
+                assertEquals(1, runCount(exprOp("gt", nval(1.0e19), nval(9.3e18))));
+                assertEquals(1, runCount(exprOp("ne", nval(1.0e19), nval(9.3e18))));
+                assertEquals(0, runCount(exprOp("eq", nval(-1.0e19), nval(-9.3e18))));
+                // Ordering incomparable constant types is a planner bug and must throw.
+                assertConditionThrows(exprOp("lt", sval("a"), nval(1)),
+                        "Cannot order", "lt");
+            });
+
+            ResourceEntity boolFalse = new ResourceEntity("ternary-const-2");
+            boolFalse.setaBool(false);
+            withResource(boolFalse, () -> assertEquals(0, runCount(allConstBranches)));
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> {@code p-not-ternary-null} negates a ternary COMPARISON; the
+         * negated bare ternary with a NULL condition column is not carried.
+         */
+        @Test
+        void negatedBareTernaryWithNullConditionExcludesRow() {
+            // aOptionalString != "x" ? aNumber > 1 : aBool — bare boolean-position ternary
+            // with a NULL condition column: same UNKNOWN-not-FALSE contract as above.
+            Operand plan = exprOp("if",
+                    exprOp("ne", var("request.resource.attr.aOptionalString"), sval("x")),
+                    exprOp("gt", var("request.resource.attr.aNumber"), nval(1)),
+                    var("request.resource.attr.aBool"));
+
+            ResourceEntity nullCondition = new ResourceEntity("ternary-barenull-1");
+            nullCondition.setaOptionalString(null);
+            nullCondition.setaNumber(0);
+            nullCondition.setaBool(false);
+            withResource(nullCondition, () -> {
+                assertEquals(0, runCount(plan));
+                assertEquals(0, runCount(exprOp("not", plan)));
+            });
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> A ternary as the receiver of a string match is not carried.
+         */
+        @Test
+        void ternaryUnderUnsupportedWrapperNamesOperator() {
+            // contains(if(...), "x") — only eq/ne/lt/gt/le/ge accept a ternary operand; the
+            // error must name the offending wrapper operator.
+            assertConditionThrows(
+                    exprOp("contains",
+                            exprOp("if",
+                                    var("request.resource.attr.aBool"),
+                                    var("request.resource.attr.aString"),
+                                    sval("none")),
+                            sval("x")),
+                    "if()", "contains");
+        }
+
+    }
+
+    /**
+     * Structural join-anchoring defects:
+     *
+     * <p>W1 — a dotted relation CHAIN ({@code categories.subCategories}) must join through
+     * every intermediate hop. Resolving only the tail Relation and joining its attribute off
+     * the root either fails at query-build time (the root has no such attribute) or — worse —
+     * silently joins a same-named collection on the wrong entity. Chain semantics are the
+     * FLATTENED union of tail elements across all intermediate hops, which is exactly what a
+     * correlated join chain expresses for exists/in/hasIntersection and a JOIN-through COUNT
+     * expresses for size().
+     *
+     * <p>W2 — a subquery for a relation referenced inside a lambda body must correlate the
+     * From that OWNS the relation attribute. {@code R.attr.tags} inside a
+     * {@code categories.exists(c, ...)} lambda resolves through the outer scope against the
+     * ROOT entity; anchoring the tags join to the lambda's category join instead is a wrong
+     * From — build-time failure or a silent wrong join if the element entity had a same-named
+     * collection.
+     */
+    @Nested
+    class MultiHopRelationChains {
+
+        /**
+         * <strong>Corpus gap.</strong> {@code w1-size-chain} carries the emptiness shortcut over
+         * the chain; an arbitrary count of flattened elements is not carried.
+         */
+        @Test
+        void sizeOverTwoHopChainCountsFlattenedElements() {
+            // Two categories with one sub-category each: the FLATTENED chain count is 2 — a
+            // tail join anchored to the wrong parent could never produce it.
+            var s1 = new SubCategoryEntity("chain-sub-s1", "finance");
+            var s2 = new SubCategoryEntity("chain-sub-s2", "tech");
+            var c1 = new CategoryEntity("chain-cat-s1", "business");
+            var c2 = new CategoryEntity("chain-cat-s2", "development");
+            c1.setSubCategories(List.of(s1));
+            c2.setSubCategories(List.of(s2));
+            ResourceEntity r = new ResourceEntity("chain-r-s1");
+            r.setCategories(List.of(c1, c2));
+
+            withCategoryGraph(r, List.of(c1, c2), List.of(s1, s2), () -> {
+                // Non-empty shortcut (EXISTS through the chain).
+                assertEquals(1, runChainCount(
+                        exprOp("gt", exprOp("size", var(CHAIN)), nval(0))));
+                // Arbitrary-N JOIN-through COUNT: 2 flattened elements.
+                assertEquals(1, runChainCount(
+                        exprOp("ge", exprOp("size", var(CHAIN)), nval(2))));
+                assertEquals(0, runChainCount(
+                        exprOp("gt", exprOp("size", var(CHAIN)), nval(2))));
+            });
+        }
+
+    }
+
+    // -- Error-message context and the no-value-leak discipline --
+
+    /**
+     * <strong>Corpus gap.</strong> A concatenation of a null principal attribute is a policy any
+     * application can write; the corpus principal has no null attribute.
+     */
+    @Test
+    void foldAddNullOperandErrorDoesNotLeakConstantValues() {
+        // eq(field, add(null, "<folded principal attr>")) — PDP-reachable when a policy
+        // concatenates principal attributes and one is null: the folded value can carry PII
+        // and consuming apps log translation errors at ERROR. The message must report operand
+        // TYPES only, never the values.
+        Operand cond = exprOp("eq",
+                var("request.resource.attr.aString"),
+                exprOp("add", nullVal(), sval("canary-secret-value")));
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> runCount(cond));
+        assertTrue(ex.getMessage().contains("add requires non-null operands"),
+                "unexpected message: " + ex.getMessage());
+        assertTrue(ex.getMessage().contains("null") && ex.getMessage().contains("String"),
+                "expected operand types in message: " + ex.getMessage());
+        assertFalse(ex.getMessage().contains("canary-secret-value"),
+                "constant value leaked into the error message: " + ex.getMessage());
+
+        // Mirrored shape: the null on the right.
+        IllegalArgumentException ex2 = assertThrows(IllegalArgumentException.class,
+                () -> runCount(exprOp("eq",
+                        var("request.resource.attr.aString"),
+                        exprOp("add", sval("canary-secret-value"), nullVal()))));
+        assertFalse(ex2.getMessage().contains("canary-secret-value"),
+                "constant value leaked into the error message: " + ex2.getMessage());
+    }
+
+    /**
+     * <strong>Corpus gap.</strong> {@code hasIntersection} between two attributes is not carried.
+     */
+    @Test
+    void hasIntersectionVariableVariableReportsBothOperands() {
+        // The PDP can emit hasIntersection(variable, variable); the error must name BOTH
+        // operands (the old message printed only the first node case — "VARIABLE" — which is
+        // individually a supported shape) and point at the supported shapes.
+        assertConditionThrows(
+                exprOp("hasIntersection",
+                        var("request.resource.attr.tagNames"),
+                        var("request.resource.attr.ownedBy")),
+                "VARIABLE 'request.resource.attr.tagNames'",
+                "VARIABLE 'request.resource.attr.ownedBy'",
+                "Supported shapes");
+    }
+
+    /**
+     * <strong>Corpus gap.</strong> {@code size()} over a {@code map()} projection is not carried.
+     * The string-literal half is a shape the planner folds away, kept beside it because both name
+     * the same refusal.
+     */
+    @Test
+    void sizeBadArgumentErrorNamesTheOffendingShape() {
+        assertConditionThrows(
+                exprOp("gt", exprOp("size", sval("x")), nval(0)),
+                "size() argument must be a collection attribute or filter(...)",
+                "VALUE (STRING_VALUE)");
+        assertConditionThrows(
+                exprOp("gt",
+                        exprOp("size", exprOp("map",
+                                var("request.resource.attr.tags"), lambda("t", var("t.name")))),
+                        nval(0)),
+                "size() argument must be a collection attribute or filter(...)",
+                "EXPRESSION map()");
+    }
+
+    // -- SQL Server '[' LIKE escaping --
+    // T-SQL LIKE treats '[...]' as a character class EVEN WITH an ESCAPE clause declared, so
+    // every '[' in a generated pattern must arrive as '\['. On H2 (and PostgreSQL/MySQL —
+    // covered by the differential oracle legs) '[' is inert and '\[' under ESCAPE '\' is
+    // still a literal '[', so the escape is a semantic no-op there: the row-behavior tests
+    // below pin that no-op, while the pattern assertions pin the escape itself (they are the
+    // tests that FAIL when the '[' rewrite is removed — H2 row behavior cannot distinguish).
+
+    @Nested
+    class BracketLikeEscaping {
+
+        /**
+         * <strong>Corpus gap.</strong> {@code like-bracket} and {@code hier-bracket} carry the
+         * shape, but no CI leg executes SQL Server, the one dialect where {@code [} opens a
+         * character class even under an ESCAPE clause, so the rewrite is pinned at pattern level
+         * here.
+         */
+        @Test
+        void escapeLikeEscapesOpeningBracket() {
+            // The pattern-level contract for the constant contains/startsWith/endsWith forms
+            // AND the hierarchy prefix LIKE (both build their patterns via escapeLike).
+            assertEquals("\\[SEC]", PlanValues.escapeLike("[SEC]"));
+            assertEquals("50\\%\\[a]\\_b", PlanValues.escapeLike("50%[a]_b"));
+            // Backslash is escaped FIRST, so a literal '\[' becomes '\\' + '\['.
+            assertEquals("\\\\\\[", PlanValues.escapeLike("\\["));
+            // ']' is intentionally unescaped: it is only special on SQL Server as the closer
+            // of a character class, and no class can open once every '[' is escaped.
+            assertEquals("]", PlanValues.escapeLike("]"));
+        }
+
+        private ResourceEntity row(String id, String aString) {
+            ResourceEntity r = new ResourceEntity(id);
+            r.setaString(aString);
+            return r;
+        }
+
+    }
+
+    // -- Constant-receiver string matches: `"a,b".contains(R.attr.x)` --
+    // CEL string-match methods are receiver-sensitive and the planner preserves policy source
+    // order, so the constant RECEIVER arrives FIRST: contains(value, variable). The constant is
+    // the haystack and the COLUMN is the needle — operand-order normalization must not swap
+    // them (that silently inverts the match), and the column needle's LIKE metacharacters must
+    // be escaped dynamically.
+
+    @Nested
+    class ConstantReceiverStringMatch {
+
+        private Operand plan(String op, String constant) {
+            // Receiver (constant) first — exactly as the planner emits it.
+            return exprOp(op, sval(constant), var("request.resource.attr.aString"));
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> {@code cr-contains} and its siblings run over a corpus whose
+         * aString is never NULL, so the NULL-needle denial has no discriminating seed there.
+         */
+        @Test
+        void nullColumnNeedleExcludesRow() {
+            // A NULL column is a missing attribute → CEL error → deny for all three ops.
+            withResource(row("cr-9", null), () -> {
+                assertEquals(0, runCount(plan("contains", "anything")));
+                assertEquals(0, runCount(plan("startsWith", "anything")));
+                assertEquals(0, runCount(plan("endsWith", "anything")));
+            });
+        }
+
+    }
+
+    /**
+     * {@code in(variable, variable)} — attribute-in-attribute membership. PDP-verified wire
+     * shape (Cerbos latest, 2026-07): {@code R.attr.createdBy in R.attr.ownedBy} arrives as
+     * {@code in(variable, variable)} verbatim, member first. Translated as a correlated EXISTS
+     * comparing the collection's member column to the outer scalar column, with a NULL scalar
+     * matching a NULL member element (CEL {@code null in [..., null]} is TRUE — check()
+     * verified for every branch below; see the translator Javadoc for the truth table).
+     */
+    @Nested
+    class InVariableVariable {
+
+        /**
+         * <strong>Corpus gap.</strong> {@code in} whose second attribute is a scalar is not
+         * carried; {@code in-var-var} maps a relation.
+         */
+        @Test
+        void scalarSecondOperandThrowsNamedError() {
+            assertConditionThrows(
+                    exprOp("in",
+                            var("request.resource.attr.aString"),
+                            var("request.resource.attr.createdBy")),
+                    "request.resource.attr.createdBy", "Relation", "scalar Field mapping");
+        }
+
+    }
+
+    // -- Arithmetic (add/sub/mult/div) as a comparison operand --
+    // Cerbos attribute values are ALWAYS CEL doubles (protobuf Value numbers), so the only
+    // arithmetic that can evaluate at check time is double-typed — verified against a live
+    // PDP: `R.attr.n + 1 > 2` (int literal) is a no-overload error → deny, `+ 1.0` works,
+    // and `/ 2.0` is true double division (5/2.0 == 2.5). The adapter therefore computes
+    // the whole comparison in double space; integer truncation is never observable.
+    // `mod` stays unsupported: CEL `%` is int-only, so it always errors on attributes.
+
+    @Nested
+    class ArithmeticComparisons {
+
+        private ResourceEntity seeded() {
+            ResourceEntity r = new ResourceEntity("arith-seed-1");
+            r.setaNumber(5);
+            return r;
+        }
+
+        private Operand numVar() {
+            return var("request.resource.attr.aNumber");
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> {@code arith-sub} carries one subtraction;
+         * constant-minus-column under an ordering is not carried.
+         */
+        @Test
+        void subInLtComparison() {
+            withResource(seeded(), () -> {
+                assertEquals(1, runCount(exprOp("lt",
+                        exprOp("sub", numVar(), nval(1)), nval(10))));
+                assertEquals(0, runCount(exprOp("lt",
+                        exprOp("sub", numVar(), nval(1)), nval(2))));
+                // Constant-minus-field keeps direction: 10 - 5 = 5 <= 5.
+                assertEquals(1, runCount(exprOp("le",
+                        exprOp("sub", nval(10), numVar()), nval(5))));
+            });
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> Arithmetic nested inside arithmetic is not carried; {@code
+         * arith-both} puts one operation on each side.
+         */
+        @Test
+        void nestedArithmetic() {
+            // (aNumber + 1) * 2 > 11 → 12 > 11.
+            withResource(seeded(), () -> {
+                assertEquals(1, runCount(exprOp("gt",
+                        exprOp("mult", exprOp("add", numVar(), nval(1)), nval(2)),
+                        nval(11))));
+                assertEquals(0, runCount(exprOp("gt",
+                        exprOp("mult", exprOp("add", numVar(), nval(1)), nval(2)),
+                        nval(12))));
+            });
+        }
+
+    }
+
+    // -- Constant NaN / ±Infinity ordering --
+    // CEL/IEEE define EVERY ordering comparison involving NaN as false. The planner does
+    // NOT fold div(0,0) (verified vs live PDP: `(R.attr.aBool ? 1.0 : 0.0/0.0) > 0.5`
+    // arrives as gt(if(aBool, 1, div(0,0)), 0.5)), so resolveNumericOperand folds it to
+    // NaN in Java and constantComparison must order with primitive IEEE operators.
+    // Double.compare's total order ranks NaN above every number (and -0.0 below 0.0),
+    // which would collapse gt/ge against a NaN constant to always-true — over-inclusion.
+
+    @Nested
+    class ConstantNanInfinityOrdering {
+
+        /** {@code div(0, 0)} — folds to NaN in Java, exactly as delivered on the wire. */
+        private Operand nan() {
+            return exprOp("div", nval(0), nval(0));
+        }
+
+        private Operand posInf() {
+            return exprOp("div", nval(1), nval(0));
+        }
+
+        private Operand negInf() {
+            return exprOp("div", nval(-1), nval(0));
+        }
+
+        /** An arithmetic subtree folding to 0.5, so both sides rank as expressions. */
+        private Operand half() {
+            return exprOp("div", nval(1), nval(2));
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> {@code nan-ord-ternary} reaches {@code gt} with NaN on the
+         * left through a ternary; {@code ge}, {@code lt} and {@code le} are not carried. Spelled
+         * here as a direct constant comparison the planner would fold away, which only the ternary
+         * form could put on the wire.
+         */
+        @Test
+        void nanOnLeftExcludesForAllOrderingOperators() {
+            // Expression-vs-value keeps source order: constantComparison sees (NaN, 0.5).
+            ResourceEntity r = new ResourceEntity("nan-ord-1");
+            withResource(r, () -> {
+                for (String op : List.of("gt", "ge", "lt", "le")) {
+                    assertEquals(0, runCount(exprOp(op, nan(), nval(0.5))),
+                            op + "(NaN, 0.5) must exclude every row");
+                }
+            });
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> {@code nan-ord-le} carries {@code le} with NaN on the right;
+         * the other three operators are not carried.
+         */
+        @Test
+        void nanOnRightExcludesForAllOrderingOperators() {
+            // Arithmetic on BOTH sides so normalization cannot mirror the NaN to the left:
+            // constantComparison sees (0.5, NaN).
+            ResourceEntity r = new ResourceEntity("nan-ord-2");
+            withResource(r, () -> {
+                for (String op : List.of("gt", "ge", "lt", "le")) {
+                    assertEquals(0, runCount(exprOp(op, half(), nan())),
+                            op + "(0.5, NaN) must exclude every row");
+                }
+            });
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> {@code nan-ord-inf} carries {@code gt} against an infinity;
+         * the remaining operators and the infinity-versus-infinity ordering are not carried.
+         */
+        @Test
+        void infinityOrderingFollowsIeee() {
+            // ±Infinity is ORDERED normally in IEEE space — it must NOT be excluded the
+            // way NaN is.
+            ResourceEntity r = new ResourceEntity("nan-ord-3");
+            withResource(r, () -> {
+                assertEquals(1, runCount(exprOp("gt", posInf(), nval(0.5))));
+                assertEquals(1, runCount(exprOp("ge", posInf(), nval(0.5))));
+                assertEquals(0, runCount(exprOp("lt", posInf(), nval(0.5))));
+                assertEquals(0, runCount(exprOp("le", posInf(), nval(0.5))));
+                assertEquals(1, runCount(exprOp("lt", negInf(), nval(0.5))));
+                assertEquals(1, runCount(exprOp("le", negInf(), nval(0.5))));
+                assertEquals(0, runCount(exprOp("gt", negInf(), nval(0.5))));
+                assertEquals(1, runCount(exprOp("lt", negInf(), posInf())));
+            });
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> A negative zero constant is not carried.
+         */
+        @Test
+        void negativeZeroOrderingFollowsIeee() {
+            // mult(-1, 0) folds to -0.0 in Java. IEEE: -0.0 == 0.0, so lt is false and
+            // ge is true — Double.compare(-0.0, 0.0) = -1 would invert both (the same
+            // total-order defect as NaN, on the same line).
+            Operand negZero = exprOp("mult", nval(-1), nval(0));
+            Operand zero = exprOp("mult", nval(1), nval(0));
+            ResourceEntity r = new ResourceEntity("nan-ord-4");
+            withResource(r, () -> {
+                assertEquals(0, runCount(exprOp("lt", negZero, zero)));
+                assertEquals(1, runCount(exprOp("le", negZero, zero)));
+                assertEquals(1, runCount(exprOp("ge", negZero, zero)));
+                assertEquals(0, runCount(exprOp("gt", negZero, zero)));
+            });
+        }
+
+    }
+
     // -- timestamp(field) vs timestamp(constant) comparisons --
     // Wire shape (PDP-verified): `timestamp(R.attr.createdAt) < now() - duration("24h")`
     // arrives as lt(timestamp(variable), timestamp(value "<RFC-3339>")) — the planner folds
@@ -2660,82 +3194,46 @@ class SpringDataQueryPlanAdapterTest {
     @Nested
     class TimestampComparisons {
 
-        private static final String CONST = "2025-01-01T00:00:00Z";
-
-        private Operand tsVar(String attr) {
-            return exprOp("timestamp", var("request.resource.attr." + attr));
-        }
-
-        private Operand tsVal(String iso) {
-            return exprOp("timestamp", sval(iso));
-        }
-
-        /** Seed rows: two before {@link #CONST}, one exactly at it, one after, one NULL. */
-        private void withTimestampRows(Runnable body) {
-            ResourceEntity old1 = new ResourceEntity("ts-old1");
-            old1.setCreatedAt(java.time.Instant.parse("2024-03-01T00:00:00Z"));
-            old1.setUpdatedAt(java.time.OffsetDateTime.parse("2024-03-01T00:00:00Z"));
-            old1.setaBool(true);
-            ResourceEntity old2 = new ResourceEntity("ts-old2");
-            old2.setCreatedAt(java.time.Instant.parse("2024-06-01T00:00:00.123456Z"));
-            old2.setUpdatedAt(java.time.OffsetDateTime.parse("2024-06-01T00:00:00.123456Z"));
-            old2.setaBool(false);
-            ResourceEntity exact = new ResourceEntity("ts-exact");
-            exact.setCreatedAt(java.time.Instant.parse(CONST));
-            exact.setUpdatedAt(java.time.OffsetDateTime.parse(CONST));
-            exact.setaBool(false);
-            ResourceEntity newer = new ResourceEntity("ts-new");
-            newer.setCreatedAt(java.time.Instant.parse("2026-02-01T00:00:00Z"));
-            newer.setUpdatedAt(java.time.OffsetDateTime.parse("2026-02-01T00:00:00Z"));
-            newer.setaBool(false);
-            ResourceEntity nul = new ResourceEntity("ts-null"); // createdAt/updatedAt NULL
-            nul.setaBool(false);
-            withResource(old1, () -> withResource(old2, () -> withResource(exact,
-                    () -> withResource(newer, () -> withResource(nul, body)))));
-        }
-
+        /**
+         * <strong>Corpus gap.</strong> {@code ts-window}, {@code ts-eq}, {@code ts-eq-offset} and
+         * {@code ts-ne} carry {@code lt}, {@code eq} and {@code ne}; {@code le}, {@code gt} and
+         * {@code ge} are not carried.
+         */
         @Test
         void allSixOperatorsFieldFirstOnInstantColumn() {
             withTimestampRows(() -> {
-                // Row set: old1, old2 < CONST; exact == CONST; new > CONST; null excluded
+                // Row set: old1, old2 < TS_CONST; exact == TS_CONST; new > TS_CONST; null excluded
                 // everywhere (SQL three-valued logic == CEL missing-attribute deny).
-                assertEquals(2, runCount(exprOp("lt", tsVar("createdAt"), tsVal(CONST))));
-                assertEquals(3, runCount(exprOp("le", tsVar("createdAt"), tsVal(CONST))));
-                assertEquals(1, runCount(exprOp("gt", tsVar("createdAt"), tsVal(CONST))));
-                assertEquals(2, runCount(exprOp("ge", tsVar("createdAt"), tsVal(CONST))));
-                assertEquals(1, runCount(exprOp("eq", tsVar("createdAt"), tsVal(CONST))));
-                assertEquals(3, runCount(exprOp("ne", tsVar("createdAt"), tsVal(CONST))));
+                assertEquals(2, runCount(exprOp("lt", tsVar("createdAt"), tsVal(TS_CONST))));
+                assertEquals(3, runCount(exprOp("le", tsVar("createdAt"), tsVal(TS_CONST))));
+                assertEquals(1, runCount(exprOp("gt", tsVar("createdAt"), tsVal(TS_CONST))));
+                assertEquals(2, runCount(exprOp("ge", tsVar("createdAt"), tsVal(TS_CONST))));
+                assertEquals(1, runCount(exprOp("eq", tsVar("createdAt"), tsVal(TS_CONST))));
+                assertEquals(3, runCount(exprOp("ne", tsVar("createdAt"), tsVal(TS_CONST))));
             });
         }
 
+        /**
+         * <strong>Corpus gap.</strong> {@code ts-vf} carries value-first {@code gt} alone.
+         */
         @Test
         void allSixOperatorsValueFirstAreMirroredNotInverted() {
             withTimestampRows(() -> {
-                // `CONST < field` selects rows AFTER the instant (1 row) — an inversion bug
-                // (treating it as `field < CONST`) would return the 2 older rows instead.
-                assertEquals(1, runCount(exprOp("lt", tsVal(CONST), tsVar("createdAt"))));
-                assertEquals(2, runCount(exprOp("le", tsVal(CONST), tsVar("createdAt"))));
-                assertEquals(2, runCount(exprOp("gt", tsVal(CONST), tsVar("createdAt"))));
-                assertEquals(3, runCount(exprOp("ge", tsVal(CONST), tsVar("createdAt"))));
-                assertEquals(1, runCount(exprOp("eq", tsVal(CONST), tsVar("createdAt"))));
-                assertEquals(3, runCount(exprOp("ne", tsVal(CONST), tsVar("createdAt"))));
+                // `TS_CONST < field` selects rows AFTER the instant (1 row) — an inversion bug
+                // (treating it as `field < TS_CONST`) would return the 2 older rows instead.
+                assertEquals(1, runCount(exprOp("lt", tsVal(TS_CONST), tsVar("createdAt"))));
+                assertEquals(2, runCount(exprOp("le", tsVal(TS_CONST), tsVar("createdAt"))));
+                assertEquals(2, runCount(exprOp("gt", tsVal(TS_CONST), tsVar("createdAt"))));
+                assertEquals(3, runCount(exprOp("ge", tsVal(TS_CONST), tsVar("createdAt"))));
+                assertEquals(1, runCount(exprOp("eq", tsVal(TS_CONST), tsVar("createdAt"))));
+                assertEquals(3, runCount(exprOp("ne", tsVal(TS_CONST), tsVar("createdAt"))));
             });
         }
 
-        @Test
-        void offsetDateTimeColumnSupportsAllSixOperators() {
-            withTimestampRows(() -> {
-                assertEquals(2, runCount(exprOp("lt", tsVar("updatedAt"), tsVal(CONST))));
-                assertEquals(3, runCount(exprOp("le", tsVar("updatedAt"), tsVal(CONST))));
-                assertEquals(1, runCount(exprOp("gt", tsVar("updatedAt"), tsVal(CONST))));
-                assertEquals(2, runCount(exprOp("ge", tsVar("updatedAt"), tsVal(CONST))));
-                assertEquals(1, runCount(exprOp("eq", tsVar("updatedAt"), tsVal(CONST))));
-                assertEquals(3, runCount(exprOp("ne", tsVar("updatedAt"), tsVal(CONST))));
-                // Value-first mirror on the OffsetDateTime column too.
-                assertEquals(1, runCount(exprOp("lt", tsVal(CONST), tsVar("updatedAt"))));
-            });
-        }
-
+        /**
+         * <strong>Corpus gap.</strong> The corpus's timestamp constants are whole seconds; a
+         * sub-second threshold splitting a5's microseconds is not carried.
+         */
         @Test
         void subSecondPrecisionConstantDiscriminates() {
             // The folded now()-duration constant carries nanosecond precision on the wire.
@@ -2748,6 +3246,9 @@ class SpringDataQueryPlanAdapterTest {
             });
         }
 
+        /**
+         * <strong>Corpus gap.</strong> A ternary over two timestamp constants is not carried.
+         */
         @Test
         void constantVsConstantFoldsViaTernarySubstitution() {
             // (aBool ? timestamp(A) : timestamp(B)) == timestamp(A) — substitution yields
@@ -2761,83 +3262,6 @@ class SpringDataQueryPlanAdapterTest {
                     tsVal("2024-01-01T00:00:00Z")))));
         }
 
-        @Test
-        void localDateTimeColumnThrowsNamedError() {
-            // LocalDateTime has no zone: the stored wall-clock could denote any instant, and
-            // guessing UTC could silently include rows check() denies. Fail closed, by name.
-            assertConditionThrows(
-                    exprOp("lt", tsVar("localCreatedAt"), tsVal(CONST)),
-                    "timestamp() comparison", "LocalDateTime", "localCreatedAt");
-        }
-
-        @Test
-        void overrideIsConsultedBeforeColumnTypeCheck() {
-            // The README's OperatorFunction escape hatch must be REACHABLE for timestamp
-            // comparisons — including on column types the default translation rejects.
-            assertThrows(OverrideInvoked.class, () -> runCount(
-                    exprOp("lt", tsVar("localCreatedAt"), tsVal(CONST)),
-                    Map.of("lt", THROWING_OVERRIDE)));
-        }
-
-        @Test
-        void valueFirstOverrideIsConsultedUnderTheMirroredOperator() {
-            // Same contract as NormalizedBinary: a value-first lt is looked up as gt.
-            assertThrows(OverrideInvoked.class, () -> runCount(
-                    exprOp("lt", tsVal(CONST), tsVar("createdAt")),
-                    Map.of("gt", THROWING_OVERRIDE)));
-        }
-
-        @Test
-        void bareStringConstantStillThrows() {
-            // The PDP never emits timestamp(variable) vs a bare string (verified against a
-            // live PDP: even folded now()-duration constants are re-wrapped in timestamp()).
-            // Unverifiable shape → keep failing closed.
-            assertConditionThrows(
-                    exprOp("lt", tsVar("createdAt"), sval(CONST)),
-                    "Unexpected timestamp() expression in leaf operand of lt");
-        }
-
-        @Test
-        void numberConstantAgainstTimestampFieldThrows() {
-            assertConditionThrows(
-                    exprOp("gt", tsVar("createdAt"), nval(5)),
-                    "Unexpected timestamp() expression in leaf operand of gt");
-        }
-
-        @Test
-        void timestampOverNestedExpressionThrows() {
-            // timestamp(<expression>) has no verified wire shape → Opaque → named error.
-            assertConditionThrows(
-                    exprOp("lt",
-                            exprOp("timestamp", exprOp("add", sval("a"), sval("b"))),
-                            tsVal(CONST)),
-                    "Unexpected timestamp() expression in leaf operand of lt");
-        }
-
-        @Test
-        void timestampInsideArithmeticStillThrows() {
-            // Nested shapes the numeric machinery routes through resolveNumericOperand keep
-            // their named error — no partial support for shapes the oracle cannot verify.
-            assertConditionThrows(
-                    exprOp("lt",
-                            exprOp("add", tsVar("createdAt"), nval(1)),
-                            nval(5)),
-                    "timestamp() expression inside an arithmetic");
-        }
-
-        @Test
-        void malformedConstantThrowsNamedError() {
-            assertConditionThrows(
-                    exprOp("lt", tsVar("createdAt"), tsVal("not-a-timestamp")),
-                    "timestamp() constant could not be parsed");
-        }
-
-        @Test
-        void nonStringConstantInsideTimestampThrows() {
-            assertConditionThrows(
-                    exprOp("lt", tsVar("createdAt"),
-                            exprOp("timestamp", nval(1735689600))),
-                    "timestamp() constant must be an RFC-3339 string");
-        }
     }
+
 }

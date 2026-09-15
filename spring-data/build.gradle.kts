@@ -18,14 +18,51 @@ version = "0.1.0-alpha.1"
 // a JDK 17 runtime.
 tasks.withType<JavaCompile> {
     options.release = 17
+    options.compilerArgs.add("-Xlint:deprecation")
 }
 
 repositories {
     mavenCentral()
 }
 
+// The ORM version set this build compiles and tests against: `baseline` unless ADAPTER_TEST_ORM
+// (or -Dadapter.test.orm) says `next`. Both sets are declared here, once, and nothing below
+// restates a version.
+//
+// `baseline` is the Hibernate 6.6 / Spring Data JPA 3.5 line the golden asset was rendered under
+// (golden/expectations.json declares `"hibernate": "6.6"`) and the line example/ runs on Spring
+// Boot 3.5. `next` is the next major of each — Hibernate 7 and Spring Data JPA 4, the pair Spring
+// Boot 4 manages — and is a TEST-ONLY forward-compatibility leg, the spring-data analogue of
+// elasticsearch-java/ELASTICSEARCH_NEXT_IMAGE: `hibernate-core` is `compileOnly`, a consumer brings
+// their own, and until this leg a consumer on Hibernate 7 was proved nowhere. Hibernate renders
+// every statement the golden asset records, so on this leg the translator suite asserts a pinned
+// divergence list instead of the asset's bytes (SpringDataTranslatorTest,
+// `theAssetDeclaresTheRendererThatWroteIt`), and `goldenUpdate` refuses to run.
+//
+// An unknown value fails rather than falling back: a typo that quietly ran the baseline would
+// report the forward-compatibility leg green without executing it, the same shape of failure
+// `ADAPTER_TEST_DB` guards against in the harness.
+val ormVersionSets = mapOf(
+    "baseline" to mapOf(
+        "springDataJpa" to "3.5.13",
+        "jakartaPersistence" to "3.2.0",
+        "hibernate" to "6.6.54.Final",
+    ),
+    "next" to mapOf(
+        "springDataJpa" to "4.1.1",
+        "jakartaPersistence" to "3.2.0",
+        "hibernate" to "7.4.8.Final",
+    ),
+)
+val adapterTestOrm = System.getProperty("adapter.test.orm")
+    ?: System.getenv("ADAPTER_TEST_ORM")
+    ?: "baseline"
+val orm = ormVersionSets[adapterTestOrm]
+    ?: throw GradleException("ADAPTER_TEST_ORM / -Dadapter.test.orm must be one of "
+        + "${ormVersionSets.keys}, got '$adapterTestOrm'")
+
 dependencies {
-    implementation("dev.cerbos:cerbos-sdk-java:0.19.0")
+    implementation("dev.cerbos:cerbos-sdk-java:0.20.1")
     // Must match the gencode version cerbos-sdk-java was generated against (see the README
     // "Pin protobuf-java" gotcha) — older runtimes throw ProtobufRuntimeVersionException.
     implementation("com.google.protobuf:protobuf-java:4.35.1")
@@ -41,28 +78,35 @@ dependencies {
     // tests against 3.5.2 itself, so the floor is a documented claim rather than a checked one:
     // if you change what API the adapter uses, re-derive it. The other two statements of it are
     // README.md "Install" and the Javadoc on SpringDataQueryPlanAdapter.alwaysAllowed().
-    compileOnly("org.springframework.data:spring-data-jpa:3.5.13")
-    compileOnly("jakarta.persistence:jakarta.persistence-api:3.2.0")
+    //
+    // The `compileOnly` set follows the selected ORM set rather than staying on the baseline, on
+    // purpose: the `next` leg exists to prove that MySqlDoubleCastFunctionContributor and the
+    // adapter's classpath-guarded Hibernate probe COMPILE against the next major as well as run
+    // on it, and a main source set compiled against 6.6 and merely executed on 7.x would prove
+    // half of that. The published POM carries none of these, so the choice never reaches a
+    // consumer.
+    compileOnly("org.springframework.data:spring-data-jpa:${orm["springDataJpa"]}")
+    compileOnly("jakarta.persistence:jakarta.persistence-api:${orm["jakartaPersistence"]}")
     // Hibernate is needed only to compile MySqlDoubleCastFunctionContributor (the MySQL
     // IEEE double-cast registration) and the adapter's classpath-guarded probe for it.
     // `compileOnly` for the same reason as Spring Data JPA above: the consuming
     // application provides its own Hibernate, and the adapter degrades gracefully (plain
     // cb.toDouble casts) when Hibernate is absent at runtime.
-    compileOnly("org.hibernate.orm:hibernate-core:6.6.54.Final")
+    compileOnly("org.hibernate.orm:hibernate-core:${orm["hibernate"]}")
 
-    testImplementation("org.springframework.data:spring-data-jpa:3.5.13")
-    testImplementation("jakarta.persistence:jakarta.persistence-api:3.2.0")
-    testImplementation(platform("org.junit:junit-bom:5.14.4"))
+    testImplementation("org.springframework.data:spring-data-jpa:${orm["springDataJpa"]}")
+    testImplementation("jakarta.persistence:jakarta.persistence-api:${orm["jakartaPersistence"]}")
+    testImplementation(platform("org.junit:junit-bom:6.1.2"))
     testImplementation("org.junit.jupiter:junit-jupiter")
-    testImplementation("org.testcontainers:testcontainers:1.21.4")
-    testImplementation("org.testcontainers:junit-jupiter:1.21.4")
+    testImplementation("org.testcontainers:testcontainers:2.0.5")
+    testImplementation("org.testcontainers:testcontainers-junit-jupiter:2.0.5")
     // Real-database legs for AdversarialConformanceTest (selected via ADAPTER_TEST_DB /
     // -Dadapter.test.db): PostgreSQL and MySQL containers + their JDBC drivers.
-    testImplementation("org.testcontainers:postgresql:1.21.4")
-    testImplementation("org.testcontainers:mysql:1.21.4")
+    testImplementation("org.testcontainers:testcontainers-postgresql:2.0.5")
+    testImplementation("org.testcontainers:testcontainers-mysql:2.0.5")
     testRuntimeOnly("org.postgresql:postgresql:42.7.13")
     testRuntimeOnly("com.mysql:mysql-connector-j:9.7.0")
-    testImplementation("org.hibernate.orm:hibernate-core:6.6.54.Final")
+    testImplementation("org.hibernate.orm:hibernate-core:${orm["hibernate"]}")
     testImplementation("com.h2database:h2:2.4.240")
     // Parses seeds.json/actions.json from the shared ../conformance/ corpus (see
     // AdversarialConformanceTest and conformance/README.md).
@@ -101,6 +145,25 @@ tasks.test {
     inputs.dir(project.file("golden"))
         .withPathSensitivity(PathSensitivity.RELATIVE)
         .withPropertyName("goldenExpectations")
+    // The two database pins are read by DatabaseTestImages from `user.dir` at runtime, for the
+    // same reason as the corpus. Undeclared, bumping a server would leave `:test` UP-TO-DATE and
+    // the real-database leg would report a pass it never ran against the new build. Both are
+    // declared whichever leg runs: the harness reads both, and tracking only the selected leg's
+    // pin would replay a stale pass after the other one moved.
+    inputs.file(project.file("POSTGRES_IMAGE"))
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+        .withPropertyName("postgresImage")
+    inputs.file(project.file("MYSQL_IMAGE"))
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+        .withPropertyName("mysqlImage")
+
+    // Which ORM set the classpath resolved, forwarded so the translator suite can assert the
+    // Hibernate it runs IS the one this build selected rather than infer the leg from the
+    // classpath alone — a resolution that drifted to another major would otherwise read as
+    // whichever leg it happened to match. An input too, so switching sets re-runs the task
+    // rather than replaying the other leg's pass.
+    systemProperty("adapter.test.orm", adapterTestOrm)
+    inputs.property("adapterTestOrm", adapterTestOrm)
 
     // Select the database backing AdversarialConformanceTest: h2 (default), postgres, or
     // mysql. The MySQL leg creates its schema with a case-sensitive collation by default
@@ -142,6 +205,10 @@ tasks.register<Test>("goldenUpdate") {
     useJUnitPlatform()
     filter { includeTestsMatching("dev.cerbos.queryplan.springdata.SpringDataTranslatorTest") }
     systemProperty("golden.update", "true")
+    // Forwarded for the same reason as on `test`. Under the `next` set Corpus.writeGoldenExpectations
+    // refuses before the write (conformance/README.md, "When the generator is an input", rule 2):
+    // the asset declares the Hibernate minor that rendered it, and the bytes would be another's.
+    systemProperty("adapter.test.orm", adapterTestOrm)
     // The asset this task writes is also an input Gradle tracks for `test`; declaring it as an
     // output here would make the two tasks fight over it, so the task is simply never up to date.
     outputs.upToDateWhen { false }

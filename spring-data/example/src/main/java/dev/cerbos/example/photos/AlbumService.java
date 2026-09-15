@@ -31,7 +31,7 @@ public class AlbumService {
 
     public List<Album> listAllowed(AccessContext context, String action) {
         PlanResourcesResult plan = cerbos.plan(
-                context.toPrincipal(), Resource.newInstance("album"), action);
+                context.toPrincipal(), Resource.newInstance("album"), List.of(action));
         Specification<Album> allowed = SpringDataQueryPlanAdapter.toSpecification(plan, ALBUM_ATTRS);
         Specification<Album> tenantBoundary = (root, query, cb) ->
                 cb.equal(root.get("tenantId"), context.tenantId());
