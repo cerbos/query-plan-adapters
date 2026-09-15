@@ -29,6 +29,7 @@ import org.hibernate.query.spi.QueryOptions;
 import org.hibernate.query.spi.QueryParameterBindings;
 import org.hibernate.query.sqm.internal.DomainParameterXref;
 import org.hibernate.query.sqm.tree.select.SqmSelectStatement;
+import org.hibernate.sql.ast.spi.SqlAstCreationContext;
 import org.hibernate.sql.ast.tree.select.SelectStatement;
 import org.hibernate.sql.exec.spi.JdbcParameterBindings;
 
@@ -55,6 +56,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -293,6 +295,25 @@ class SpringDataTranslatorTest {
         }
     }
 
+    /**
+     * The {@code SqlAstCreationContext} the SQM translator renders under. On Hibernate 6.6 the
+     * {@code SessionFactoryImplementor} IS that context; Hibernate 7 moved the role to
+     * {@code SqlTranslationEngine}, reached through {@code getSqlTranslationEngine()}, a method 6.6
+     * does not have. Resolved reflectively so one source compiles against both majors — this
+     * suite runs under both ({@code ADAPTER_TEST_ORM}), and a second copy of the renderer per
+     * major would be the drift the divergence list exists to catch.
+     */
+    private static SqlAstCreationContext sqlAstCreationContext(SessionFactoryImplementor sf) {
+        try {
+            return (SqlAstCreationContext) SessionFactoryImplementor.class
+                    .getMethod("getSqlTranslationEngine").invoke(sf);
+        } catch (NoSuchMethodException e) {
+            return (SqlAstCreationContext) sf;
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("cannot resolve Hibernate's SqlAstCreationContext", e);
+        }
+    }
+
     private static String render(EntityManagerFactory factory, CriteriaQuery<?> query) {
         SessionFactoryImplementor sf = factory.unwrap(SessionFactoryImplementor.class);
         SelectStatement ast = sf.getQueryEngine().getSqmTranslatorFactory()
@@ -300,9 +321,9 @@ class SpringDataTranslatorTest {
                         (SqmSelectStatement<?>) query,
                         QueryOptions.NONE,
                         DomainParameterXref.EMPTY,
-                        QueryParameterBindings.NO_PARAM_BINDINGS,
+                        QueryParameterBindings.empty(),
                         new LoadQueryInfluencers(sf),
-                        sf,
+                        sqlAstCreationContext(sf),
                         true)
                 .translate()
                 .getSqlAst();
@@ -359,6 +380,16 @@ class SpringDataTranslatorTest {
         Map<String, String> statements = emitted.get(action);
         assertNotNull(statements, () -> "the asset records '" + action + "', which this adapter "
                 + "refuses or the corpus no longer carries — see the completeness guard");
+        if (!onTheRendererThatWroteTheAsset() && RENDERING_DIFFERS_ON_HIBERNATE_7.contains(action)) {
+            // On the forward-compatibility leg a listed shape is asserted to DIFFER from the asset
+            // (divergesFromTheAssetOnExactlyTheShapesTheListNames pins the set and its shape); a
+            // byte match here would mean the list is stale in the other direction.
+            assertNotEquals(recorded.get(action), expectationOf(statements),
+                    () -> "'" + action + "' is listed as diverging on Hibernate "
+                            + org.hibernate.Version.getVersionString()
+                            + " but renders byte-identically; shrink the list deliberately");
+            return;
+        }
         assertEquals(recorded.get(action), expectationOf(statements),
                 () -> "the SQL emitted for '" + action + "' is not the SQL "
                         + Corpus.goldenFile() + " pins; run `" + Corpus.GOLDEN_REGENERATE_COMMAND
@@ -640,6 +671,173 @@ class SpringDataTranslatorTest {
     }
 
     /**
+     * Where in the walk each rejection happens, and how many corpus shapes reach each site.
+     *
+     * <p>{@code actions.json} pins a substring of the message per action, so the throw suite above
+     * proves every refusal is the declared one. It cannot say anything about the SHAPE of the
+     * refusals taken together: whether the 21 shapes this reference refuses land on a dozen
+     * distinct mechanisms or on one catch-all, and whether a translator change moved a shape from
+     * one to another. That is a property no corpus action can state, because a corpus action asks
+     * which rows come back.
+     *
+     * <p>Three things are asserted. <strong>Total</strong> — every refusal matches a site this
+     * adapter actually has, so a shape rejected by an accident cannot pass as a declared
+     * limitation, which is the #326 trap at corpus scale. <strong>Pinned counts</strong> — a
+     * translator change that moves a shape from one site to another shows up as a diff even though
+     * both sites throw and {@code actions.json} is unchanged; a later split of the translator
+     * ({@code SpringDataQueryPlanAdapter} is one file today) has this table to prove it moved
+     * nothing. <strong>No unmapped field</strong> — {@code Scope}'s "Unknown attribute" and
+     * "Cannot resolve" family is not a limitation of the Criteria API at all, it is this suite's
+     * own mapping coming up short, and it is the exact accident #326 was filed for.
+     */
+    @Nested
+    class WhereTheRefusalsHappen {
+
+        /**
+         * One entry per {@code throw} site the corpus reaches, named for the mechanism rather
+         * than for the message. The substrings are the ones {@code actions.json} pins, narrowed
+         * to the part that identifies the site rather than the action.
+         */
+        private final Map<String, String> sites = Map.ofEntries(
+                // leafOperandError: the operand slot of a comparison holds a computed
+                // sub-expression the resolver has no case for — a cast, a positional read, a
+                // struct member access, a lambda. A Criteria predicate compares a path against a
+                // literal, another path, or the arithmetic and ternary forms the resolver does
+                // lower; everything else is Opaque and refused here by the operator it sits in.
+                Map.entry("computed leaf operand", " expression in leaf operand of "),
+                // The operator dispatch's default: an operator the reference never translates.
+                // The corpus reaches it through matches() alone — regular expressions have no
+                // dialect-independent SQL form.
+                Map.entry("operator the reference never translates", "Unsupported operator: "),
+                // filter() at the root of the condition or one conjunct below it: a list where a
+                // boolean is required, refused by name before any predicate is built (#387).
+                Map.entry("filter() in boolean position", "filter() returns a list, not a boolean"),
+                // resolveNumericOperand: CEL's `+` over strings arrives as the same `add` node as
+                // numeric addition, and the reference lowers `add` as arithmetic only, so a
+                // string operand — a constant, the primary key, or a second column — is refused
+                // rather than concatenated (#376, #391).
+                Map.entry("non-numeric arithmetic operand",
+                        "Arithmetic comparison requires numeric operands"),
+                // Arithmetic composed on top of a division whose denominator may be zero: CEL
+                // carries the NaN or infinity through the outer operation and SQL has no value
+                // that does (#311).
+                Map.entry("division inside further arithmetic",
+                        "arithmetic composed on a division whose denominator may be zero"),
+                // CEL `%` is integer-only while attribute values are doubles, and the int() cast
+                // that would make it satisfiable has no faithful lowering.
+                Map.entry("modulo", "mod is not supported in comparisons"),
+                // map() translates only as the collection operand of hasIntersection; compared
+                // directly to a value it is a whole-list equality no scalar column can answer.
+                Map.entry("map projection compared directly",
+                        "Direct comparison of map(...) to a value is not supported"),
+                // HierarchyTranslator: an empty delimiter splits the path per character, and the
+                // prefix LIKE this adapter emits would then match the path itself.
+                Map.entry("empty hierarchy delimiter",
+                        "hierarchy delimiter must be a non-empty string"),
+                // Two columns under different null conventions: the omitted side is UNKNOWN for
+                // a NULL column and the explicit side is definite, and no single predicate is
+                // both (#308).
+                Map.entry("mixed null conventions across two columns",
+                        "between two columns under mixed null conventions"),
+                // timestamp() over a column whose Java type does not denote an absolute instant:
+                // the adapter would have to guess a zone to compare it.
+                Map.entry("ambiguous temporal column",
+                        "timestamp() comparison requires a column mapped to java.time.Instant"));
+
+        private String siteOf(String action) {
+            String raised;
+            try {
+                statementOf("h2", specificationFor(action));
+                return "<did not throw>";
+            } catch (IllegalArgumentException error) {
+                raised = String.valueOf(error.getMessage());
+            }
+            String message = raised;
+            List<String> matched = sites.entrySet().stream()
+                    .filter(site -> message.contains(site.getValue()))
+                    .map(Map.Entry::getKey)
+                    .toList();
+            assertEquals(1, matched.size(),
+                    () -> action + " is refused with \"" + message + "\", which matches "
+                            + matched.size() + " of this adapter's known rejection sites");
+            return matched.get(0);
+        }
+
+        @Test
+        void everyRefusedShapeLandsOnExactlyOneOfThemInTheseNumbers() {
+            Map<String, Integer> counts = new TreeMap<>();
+            for (String action : THROWING.keySet()) {
+                counts.merge(siteOf(action), 1, Integer::sum);
+            }
+
+            assertEquals(new TreeMap<>(Map.ofEntries(
+                            Map.entry("computed leaf operand", 8),
+                            Map.entry("operator the reference never translates", 2),
+                            Map.entry("filter() in boolean position", 2),
+                            Map.entry("non-numeric arithmetic operand", 2),
+                            Map.entry("division inside further arithmetic", 2),
+                            Map.entry("modulo", 1),
+                            Map.entry("map projection compared directly", 1),
+                            Map.entry("empty hierarchy delimiter", 1),
+                            Map.entry("mixed null conventions across two columns", 1),
+                            Map.entry("ambiguous temporal column", 1))),
+                    counts);
+            assertEquals(THROWING.size(),
+                    counts.values().stream().mapToInt(Integer::intValue).sum());
+        }
+
+        /**
+         * The substrings raised when the MAPPING or the DATA, not the plan shape, is what fell
+         * short: a reference the mapping does not name, a scalar reference to a Relation (both
+         * from {@code Scope}), and a struct element of a literal collection that lacks the field
+         * a lambda reads. None of them is a limitation of the Criteria API, so none may be the
+         * reason a corpus shape is refused.
+         */
+        private static final List<String> MAPPING_SHORTFALLS =
+                List.of("Unknown attribute", "cannot resolve as a scalar path", "Cannot resolve");
+
+        /**
+         * The #326 assertion, stated over the whole corpus. An unmapped field makes an action throw
+         * from {@code Scope} — which is the mapping coming up short, not a limitation of the
+         * Criteria API — and on elasticsearch-java it once let six actions pass the throw suite
+         * while never reaching the mechanism their {@code actions.json} reasons claim.
+         */
+        @Test
+        void noRefusalIsTheMappingComingUpShort() {
+            List<String> unmapped = new ArrayList<>();
+            for (String action : THROWING.keySet()) {
+                try {
+                    statementOf("h2", specificationFor(action));
+                } catch (IllegalArgumentException error) {
+                    String message = String.valueOf(error.getMessage());
+                    if (MAPPING_SHORTFALLS.stream().anyMatch(message::contains)) {
+                        unmapped.add(action + ": " + message);
+                    }
+                }
+            }
+            assertEquals(List.of(), unmapped);
+
+            // Anti-vacuity: the detector must recognise the messages it is looking for, built
+            // here rather than hoped for — the corpus mapping with one entry removed, and a bare
+            // boolean whose attribute is redirected at a Relation (an equality against one would
+            // translate as membership instead). The third substring needs a literal collection
+            // of struct elements, which no wire fixture carries; it is pinned by
+            // SpringDataQueryPlanAdapterTest.missingElementFieldFailsClosed.
+            assertTrue(refusal("cs-eq", Map.of()).contains("Unknown attribute"));
+            assertTrue(refusal("root-bare-bool", Map.of("request.resource.attr.aBool",
+                            AttributeMapping.relation("tags")))
+                    .contains("cannot resolve as a scalar path"));
+        }
+
+        private String refusal(String action, Map<String, AttributeMapping> mapping) {
+            IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                    () -> statementOf("h2", specificationFor(action, mapping,
+                            NullAttributeRepresentation.EXPLICIT, Corpus.PLANNED_AT)));
+            return String.valueOf(ex.getMessage());
+        }
+    }
+
+    /**
      * The properties a regenerated asset must not silently accept.
      *
      * <p>Pinned bytes do not survive {@code gradle goldenUpdate} being run and committed unread;
@@ -670,6 +868,13 @@ class SpringDataTranslatorTest {
             // into exactly the statement the adapter emitted, preamble included. Without this the
             // asset could be a faithful record of something the adapter never built.
             for (String action : recordedActions) {
+                if (!onTheRendererThatWroteTheAsset()
+                        && RENDERING_DIFFERS_ON_HIBERNATE_7.contains(action)) {
+                    // The asset holds the 6.6 rendering; on the other major a listed shape
+                    // reassembles into the statement 6.6 emitted, not this one. The invariant is
+                    // still asserted for every shape the two renderers agree on.
+                    continue;
+                }
                 ObjectNode expectation = recorded.get(action);
                 for (String dialect : DIALECTS.keySet()) {
                     JsonNode where = expectation.path("where").get(dialect);

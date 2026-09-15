@@ -46,6 +46,21 @@ Terms used by this adapter's code, tests, and reviews. Architecture vocabulary
   compared row-by-row against `check()` with attributes mirroring the DB rows
   exactly. DB NULL is a *missing* attribute on the check side. No
   hand-computed expectations; a degeneracy guard prevents vacuous passes.
+- **Degenerate by construction** — an oracle-compared corpus action whose
+  `check()` oracle is empty or total *by the corpus's own design* (no seed
+  holds a chain with zero children; every seed's `aString` is shorter than
+  2^32). The degeneracy guard sweeps every compared action and forbids such
+  an oracle, so each of these is allowlisted with the reason, and the
+  allowlist is asserted in both directions: the entry must still be compared,
+  and must still be degenerate.
+- **Refusal site** — the `throw` in the translator's walk that a fail-closed
+  corpus shape actually reaches, named by mechanism ("computed leaf operand",
+  "modulo") rather than by message wording. `actions.json` pins the message
+  per action; the translator unit test pins the site per action and the
+  count per site, so a change that moves a shape between two sites that both
+  throw is a visible diff, and a refusal raised because the *mapping* fell
+  short (`Scope`'s "Unknown attribute" / "Cannot resolve" family) can never
+  pass as a declared limitation.
 - **Double space** — all numeric work happens in IEEE doubles, because Cerbos
   attribute numbers are CEL doubles and the wire plan erases `1` vs `1.0`.
   Constants fold in Java; columns get a real `CAST(... AS DOUBLE)`.
