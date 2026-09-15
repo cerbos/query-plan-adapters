@@ -137,6 +137,50 @@ a supported path.
 > contactRepository.deleteAllById(ids);
 > ```
 
+### Declaring the translation: `Options`
+
+The two-argument call above is the convenience form. Everything the adapter can be told lives in
+one immutable record, `SpringDataQueryPlanAdapter.Options`, and the positional overloads
+(`mapper`, `overrides`, `nullAttributeRepresentation`) are exactly that record with the rest left
+at its defaults:
+
+```java
+import dev.cerbos.queryplan.springdata.SpringDataQueryPlanAdapter.Options;
+
+Options options = Options.of(MAPPING)
+    .withOperatorOverrides(overrides)                              // see "Supported operators"
+    .withNullAttributeRepresentation(NullAttributeRepresentation.OMITTED)
+    .withMaxMacroDepth(8);                                         // see Gotchas
+
+Specification<Contact> allowed = SpringDataQueryPlanAdapter.toSpecification(planResult, options);
+```
+
+Every collection is copied on construction and each `with…` returns a new instance, so an
+`Options` can be built once and shared across calls and threads; the map you passed in can be
+mutated afterwards without changing which columns an already-built filter resolves.
+`withMaxMacroDepth` is the per-call form of the
+`dev.cerbos.queryplan.springdata.maxMacroDepth` system property, and it wins: a value declared
+here applies, otherwise the property when set, otherwise the default of 5. The property keeps
+working — it is the one knob a caller who cannot reach every `toSpecification` call has.
+
+### Handling refusals
+
+A shape the adapter cannot translate throws rather than emitting a best-effort filter, and the
+throw is one of three types so a caller can route on it without matching the message:
+
+| Exception | Meaning | What to do |
+|---|---|---|
+| `UnsupportedPlanShapeException` | The plan is well-formed but the JPA Criteria API cannot express it faithfully — a regex match, a cast, a list index, `mod`, `except()`, a macro nested past the depth bound | Rewrite the policy, register an `OperatorFunction` where the "Not yet supported" table says one reaches, or answer that request another way (a per-row `check()`) |
+| `UnmappedAttributeException` | The plan uses an attribute in a way the mapping does not cover — a variable it does not name, a `Relation` where a scalar is needed or a `Field` where a collection is, a temporal column whose Java type does not pin the instant it stores, two sides of one comparison under different NULL conventions | Change the mapping |
+| `MalformedPlanException` | The plan violates the planner's wire contract — wrong arity, a lambda without a variable, a conditional plan with no condition, a literal CEL itself would reject | A hand-built plan, or an upstream bug to report |
+
+All three extend `IllegalArgumentException`, which remains the documented base type; a caller
+catching that keeps working unchanged. Translation of a conditional plan is deferred to the
+Specification's first evaluation, so that is where they are raised — except the
+`NullAttributeRepresentation.OMITTED` scan, which runs from `toSpecification` itself. The
+bulk-delete guard above is deliberately not one of these: it is an `UnsupportedOperationException`
+about the invocation context, not about the plan.
+
 ## Database collation requirements
 
 > **⚠️ Hard requirement: every string column referenced by an `AttributeMapping` MUST use a
@@ -208,6 +252,11 @@ Map each `request.resource.attr.<name>` to a JPA path or a relation:
 
 `relation(...)` names a JPA association, so the correlated subquery is a criteria association join and Hibernate applies the association's own `@SQLRestriction` and discriminator to it. That is why there is no option here to declare a store-side predicate — see [Mapping hazards](#mapping-hazards).
 
+A plan variable the mapping does not name, or names the wrong way round for the operator that
+uses it — a `relation(...)` compared as a scalar, a `field(...)` walked by a collection macro — is
+refused with `UnmappedAttributeException` rather than resolved to a guessed column (see
+[Handling refusals](#handling-refusals)).
+
 ## Supported operators
 
 | Cerbos operator                  | JPA Criteria translation                                            |
@@ -242,8 +291,9 @@ Map each `request.resource.attr.<name>` to a JPA path or a relation:
 | `hierarchy(...).overlaps / ancestorOf / descendentOf` | Segment/prefix predicates (`IN` over ancestor prefixes, `LIKE 'a:b:%'` for descendants), mirroring the Prisma adapter |
 | Value-first comparisons (`5 < R.attr.x`) | Normalized field-first with the operator mirrored (`x > 5`) |
 
-Unsupported constructs raise `IllegalArgumentException`. Some — but not all — can be
-overridden with an `OperatorFunction`:
+Unsupported constructs raise `UnsupportedPlanShapeException` (an `IllegalArgumentException` —
+see [Handling refusals](#handling-refusals)). Some — but not all — can be overridden with an
+`OperatorFunction`:
 
 ```java
 Map<String, OperatorFunction> overrides = Map.of(
@@ -257,17 +307,30 @@ Specification<Contact> allowed =
 
 An override is consulted only where the adapter has already resolved a `(field, value)`
 pair for a top-level operator — the plain comparisons (`eq`/`ne`/`lt`/`gt`/`le`/`ge`,
-consulted under the mirrored name for value-first forms), the LIKE family, unknown
+consulted under the mirrored name for value-first forms, and including the `add`-folded and
+null-RHS forms and an arithmetic expression compared against a constant), the LIKE family with
+a **column** receiver, the scalar `in`, the bare boolean attribute (as `eq`), unknown
 top-level leaf operators such as `matches`, and timestamp comparisons (the override
 receives the parsed `java.time.Instant` as the value, including for column types the
-default translation rejects). Constructs rejected **while resolving an operand** — `mod`,
-`int()`/type casts, list indexing — throw before any override lookup and **cannot be
-intercepted**; the "Not yet supported" table below marks each row.
+default translation rejects). Negation does not change this: `not` is applied around the
+built predicate, so an override reaches its operator under both polarities. Constructs
+rejected **while resolving an operand** — `mod`, `int()`/type casts, list indexing — throw
+before any override lookup and **cannot be intercepted**; the "Not yet supported" table below
+marks each row. Nor is an override consulted where there is no `(field, value)` pair: every
+correlated-subquery shape (the collection macros, `size(...)`, `hasIntersection` and `in` over
+a `Relation`, and the attribute-in-attribute `in(R.attr.x, R.attr.coll)`), field-to-field
+comparisons, the constant-receiver string matches (`"a,b".contains(R.attr.x)`), and
+`hasIntersection` over a plain `Field`, which is built as `path IN (values)` directly rather
+than through the `in` hook (see
+[Database collation requirements](#database-collation-requirements)). The Javadoc on
+`OperatorFunction` is the authoritative list.
 
 ## Not yet supported
 
 The Criteria-based predicate builder has no shape for these CEL constructs; they
-throw `IllegalArgumentException` with a message naming the operator. The
+throw `UnsupportedPlanShapeException` with a message naming the operator — except the
+ambiguous-column-type timestamp row, which is `UnmappedAttributeException`, because a
+different mapping resolves it (see [Handling refusals](#handling-refusals)). The
 "Overridable" column says whether a registered `OperatorFunction` can intercept
 the construct: rows marked **no** are rejected while resolving an operand,
 *before* any override consultation, so an override genuinely cannot fire for them.
@@ -298,13 +361,19 @@ and has to be told which one you use.
 
 `NullAttributeRepresentation` defaults to `EXPLICIT`, preserving the historical `IS NULL`
 translation. If your application omits attributes for NULL columns, pass `OMITTED`: the adapter
-then rejects every null comparison operand instead of emitting a filter that returns rows the PDP
-denies. Unlike the rest of the translation, this check runs eagerly from `toSpecification` rather
-than when the Specification is first evaluated.
+then rejects every null comparison operand — with `UnsupportedPlanShapeException`, since the plan
+is well-formed and it is the convention that makes every NULL-selecting rendering an over-grant —
+instead of emitting a filter that returns rows the PDP denies. Unlike the rest of the
+translation, this check runs eagerly from `toSpecification` rather than when the Specification is
+first evaluated.
 
 ```java
 Specification<ResourceEntity> allowed = SpringDataQueryPlanAdapter.toSpecification(
-        planResult, mapper, Map.of(), NullAttributeRepresentation.OMITTED);
+        planResult, Options.of(mapper)
+                .withNullAttributeRepresentation(NullAttributeRepresentation.OMITTED));
+// or, positionally:
+//     SpringDataQueryPlanAdapter.toSpecification(
+//             planResult, mapper, Map.of(), NullAttributeRepresentation.OMITTED);
 ```
 
 The rejection is deliberately wider than the shapes that actually over-grant — `x != null` and
@@ -342,7 +411,8 @@ it.
 
 **Declare both sides of a field-to-field comparison, or neither.** Mixing the conventions across one
 comparison has no faithful rendering — the declared side needs a definite answer for its NULL, the
-undeclared side needs UNKNOWN — so the adapter throws rather than picking a direction. See
+undeclared side needs UNKNOWN — so the adapter throws `UnmappedAttributeException` rather than
+picking a direction: the two declarations conflict, and one of them is what changes. See
 [#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
 [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
 
@@ -570,15 +640,24 @@ the benchmark suite (`MacroNestingBenchmarkTest`, H2, ~3 000 rows across the cha
 
 To keep a legal-but-degenerate deeply nested policy from silently timing out on
 production-sized tables, the translator bounds macro nesting depth at **5** by default
-and throws `IllegalArgumentException` beyond it (fail closed, at translation time). If
-your policies intentionally nest deeper, raise the limit via a system property:
+and throws `UnsupportedPlanShapeException` beyond it (fail closed, at translation time). If
+your policies intentionally nest deeper, raise the limit per call —
+
+```java
+Options.of(MAPPING).withMaxMacroDepth(8)
+```
+
+— or process-wide via a system property:
 
 ```
 -Ddev.cerbos.queryplan.springdata.maxMacroDepth=8
 ```
 
-The property is read per translation, must be a positive integer, and applies to
-`exists`/`exists_one`/`all`/`filter` and `size(filter(...))` nesting.
+A value declared on the call's `Options` wins; the property applies when none is, and the
+default when neither is. The property is read per translation, must be a positive integer
+(anything else is a configuration error and a plain `IllegalArgumentException`, not a refusal
+of the plan), and both apply to `exists`/`exists_one`/`all`/`filter` and `size(filter(...))`
+nesting.
 
 ### Division by a column is guarded with `NULLIF` — zero divisors deny
 

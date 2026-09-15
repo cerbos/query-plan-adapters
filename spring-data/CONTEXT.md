@@ -55,6 +55,32 @@ Terms used by this adapter's code, tests, and reviews. Architecture vocabulary
   inlined. It records what the differential oracle cannot see — two queries can
   agree on all 22 seeds and disagree on the row a consumer has. Regenerated
   with `gradle goldenUpdate`, never by CI, and reviewed as a diff.
+- **Options** — the one immutable record holding everything a caller tells the
+  adapter: the mapping, the operator overrides, the call-level NULL convention,
+  and the macro-depth bound. Collections are copied on construction and each
+  `with…` returns a new instance, so it can be built once and shared. The
+  positional `toSpecification` overloads are this record with the rest at its
+  defaults. Macro depth has a precedence: a value declared here wins, the
+  `maxMacroDepth` system property applies when none is, the default when neither.
+- **Refusal** — the adapter declining to translate, as opposed to translating
+  wrongly: a wrong filter is an authorization bug, a throw is a bug report. Every
+  refusal goes through the package-private `Refusals` factory, which makes its
+  classification a property of the walk site rather than of the message text. A
+  branch only an adapter bug can reach (a switch default under a guard that
+  already enumerated its cases) is `Refusals.internal`, an
+  `IllegalStateException`, and deliberately not a refusal.
+- **UnsupportedPlanShapeException / UnmappedAttributeException /
+  MalformedPlanException** — the three refusal types, all extending the
+  documented `IllegalArgumentException` base. *Unsupported*: a well-formed plan
+  the Criteria API has no faithful shape for (a cast, `mod`, a macro past the
+  depth bound); the fix is the policy, an override, or a per-row `check()`.
+  *Unmapped*: the plan uses an attribute in a way the mapping does not cover — an
+  unknown variable, a Relation where a scalar is needed or a Field where a
+  collection is, a temporal column whose Java type does not pin an instant, two
+  sides of one comparison under different NULL conventions; the fix is a
+  declaration. *Malformed*: the planner's wire contract violated — arity, a
+  lambda without a variable, a literal CEL would reject; no planner output
+  produces one, which `RefusalTypesTest` pins over the corpus.
 - **The renderer as an input** — a golden expectation is the adapter's Criteria
   tree *plus* Hibernate's rendering of it, so the asset declares the Hibernate
   minor that wrote it. `hibernate-core` is `compileOnly`, meaning a consumer

@@ -28,13 +28,26 @@ import jakarta.persistence.criteria.Predicate;
  *
  * <p>Overrides are <em>not</em> consulted for operators that translate to correlated {@code EXISTS}
  * subqueries against a {@code Relation} mapping — {@code exists}/{@code exists_one}/{@code all}/
- * {@code except}/{@code filter}, {@code hasIntersection} over a relation, {@code size(...)}, and the
- * relation form of {@code in} — because those have no single resolved (field, value) pair. The same
- * applies to {@code size(string)} length comparisons, field-to-field comparisons
+ * {@code except}/{@code filter}, {@code hasIntersection} over a relation, {@code size(...)}, the
+ * relation form of {@code in} and the attribute-in-attribute form
+ * ({@code R.attr.x in R.attr.coll}) — because those have no single resolved (field, value) pair.
+ * The same applies to {@code size(string)} length comparisons, field-to-field comparisons
  * ({@code R.attr.a == R.attr.b}) and arithmetic-vs-expression comparisons, where the right-hand
  * side is a column or composed expression, not a value, and to constant-receiver string matches
  * ({@code "a,b".contains(R.attr.x)}), where the COLUMN is the needle and the constant the
  * haystack — invoking a {@code contains} override there would silently invert the semantics.
+ * Nor is {@code hasIntersection} over a scalar {@code Field} mapping consulted: it is built as
+ * {@code path IN (values)} directly, not through the {@code in} hook, so an {@code in} override
+ * does not reach it (the README's "Database collation requirements" section says why that
+ * matters). Negation never changes any of this: {@code not} is applied around the built
+ * predicate, so an override reaches its operator under both polarities.
+ *
+ * <p>An operator with no default translation — {@code matches} is the policy-reachable one —
+ * is consulted under its own name before the adapter refuses it with
+ * {@link UnsupportedPlanShapeException}, as is a {@code timestamp()} comparison over a column
+ * type the default translation rejects (the override receives the parsed
+ * {@link java.time.Instant}); the constructs the README's "Not yet supported" table marks as
+ * not overridable are refused while an operand is being resolved, before any lookup.
  */
 @FunctionalInterface
 public interface OperatorFunction {

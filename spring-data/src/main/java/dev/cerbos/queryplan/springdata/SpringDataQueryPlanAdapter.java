@@ -26,6 +26,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.OptionalInt;
 import java.util.Set;
 import java.util.function.Supplier;
 
@@ -44,6 +45,17 @@ import java.util.function.Supplier;
  *
  * <p>Hand the Specification to a repository method and let Spring Data invoke it. Calling
  * {@link Specification#toPredicate} yourself is not a supported path.
+ *
+ * <p>Everything a caller tells the adapter lives in one immutable record, {@link Options}; the
+ * positional overloads are that record with the rest left at its defaults. The adapter fails
+ * closed: a shape the Criteria API cannot express faithfully throws
+ * {@link UnsupportedPlanShapeException} rather than emitting a best-effort filter, an attribute
+ * the mapping does not cover throws {@link UnmappedAttributeException}, and a plan that
+ * violates the planner's wire contract throws {@link MalformedPlanException}. All three extend
+ * {@link IllegalArgumentException}, which remains the documented base type. Translation of a
+ * conditional plan is deferred to the Specification's first evaluation, so that is where the
+ * three are raised — except the {@link NullAttributeRepresentation#OMITTED} scan, which runs
+ * from {@code toSpecification} itself.
  *
  * <p><strong>The returned Specification is SELECT-only.</strong> Never pass it to
  * {@code JpaSpecificationExecutor.delete(Specification)} or any other criteria bulk
@@ -71,9 +83,15 @@ public final class SpringDataQueryPlanAdapter {
      * number of correlated subqueries in the translated filter (×2 for the {@code exists} family,
      * ×3 for {@code exists_one}/{@code size(filter(...))} — see the collection-macro Javadoc in
      * the translator), so unbounded nesting can silently degrade query latency on large tables.
-     * Plans nested deeper than the limit throw {@link IllegalArgumentException} at translation
-     * time (fail closed). Defaults to {@value #DEFAULT_MAX_MACRO_DEPTH}; set the property to a
-     * positive integer to raise or lower the limit.
+     * Plans nested deeper than the limit throw {@link UnsupportedPlanShapeException} at
+     * translation time (fail closed).
+     *
+     * <p>Precedence, resolved once per translation: a limit declared on the call's
+     * {@link Options#withMaxMacroDepth(int) Options} wins; otherwise this property, when set;
+     * otherwise {@value #DEFAULT_MAX_MACRO_DEPTH}. The property is the process-wide default
+     * for callers that cannot reach every {@code toSpecification} call; a value it holds that is
+     * not a positive integer is a configuration error and throws a plain
+     * {@link IllegalArgumentException} — it is not a refusal of the plan.
      */
     public static final String MAX_MACRO_DEPTH_PROPERTY =
             "dev.cerbos.queryplan.springdata.maxMacroDepth";
@@ -81,7 +99,169 @@ public final class SpringDataQueryPlanAdapter {
     /** Default value of {@link #MAX_MACRO_DEPTH_PROPERTY}. */
     public static final int DEFAULT_MAX_MACRO_DEPTH = 5;
 
+    /**
+     * Everything a caller tells the adapter about the translation.
+     *
+     * <p>Immutable: every collection is defensively copied on construction, and each
+     * {@code with…} method returns a new instance, so an {@code Options} can be built once and
+     * shared across calls and threads. Start from {@link #of(Map)} — the mapping is the one
+     * declaration every plan needs — and add the rest as the application requires. The
+     * positional {@code toSpecification} overloads are exactly this record with the remaining
+     * components at their defaults.
+     *
+     * @param mapping maps each plan variable ({@code request.resource.attr.<name>},
+     *        {@code request.resource.id}) to a JPA path or relation — see
+     *        {@link AttributeMapping}; a variable the map does not cover throws
+     *        {@link UnmappedAttributeException}
+     * @param operatorOverrides per-operator replacement translations, keyed by Cerbos operator
+     *        name and consulted only for resolved scalar (field, value) leaves — see
+     *        {@link OperatorFunction} for exactly which translation sites are (and are not)
+     *        overridable
+     * @param nullAttributeRepresentation the caller's NULL-column convention for attributes
+     *        whose mapping does not declare one — see
+     *        {@link SpringDataQueryPlanAdapter#toSpecification(PlanResourcesResult, Map, Map,
+     *        NullAttributeRepresentation)}
+     * @param maxMacroDepth the collection-macro nesting bound for this call, or empty to fall
+     *        back to {@link #MAX_MACRO_DEPTH_PROPERTY} and then {@link #DEFAULT_MAX_MACRO_DEPTH}
+     */
+    public record Options(
+            Map<String, AttributeMapping> mapping,
+            Map<String, OperatorFunction> operatorOverrides,
+            NullAttributeRepresentation nullAttributeRepresentation,
+            OptionalInt maxMacroDepth) {
+
+        public Options {
+            mapping = Map.copyOf(Objects.requireNonNull(mapping, "mapping"));
+            operatorOverrides = Map.copyOf(
+                    Objects.requireNonNull(operatorOverrides, "operatorOverrides"));
+            Objects.requireNonNull(nullAttributeRepresentation, "nullAttributeRepresentation");
+            Objects.requireNonNull(maxMacroDepth, "maxMacroDepth");
+            if (maxMacroDepth.isPresent() && maxMacroDepth.getAsInt() < 1) {
+                throw new IllegalArgumentException(
+                        "maxMacroDepth must be a positive integer, got " + maxMacroDepth.getAsInt());
+            }
+        }
+
+        /**
+         * Options holding only a mapping: no overrides, the
+         * {@link NullAttributeRepresentation#EXPLICIT} convention, and no macro-depth
+         * declaration of their own.
+         */
+        public static Options of(Map<String, AttributeMapping> mapping) {
+            return new Options(mapping, Map.of(), NullAttributeRepresentation.EXPLICIT,
+                    OptionalInt.empty());
+        }
+
+        public Options withMapping(Map<String, AttributeMapping> mapping) {
+            return new Options(mapping, operatorOverrides, nullAttributeRepresentation, maxMacroDepth);
+        }
+
+        public Options withOperatorOverrides(Map<String, OperatorFunction> operatorOverrides) {
+            return new Options(mapping, operatorOverrides, nullAttributeRepresentation, maxMacroDepth);
+        }
+
+        public Options withNullAttributeRepresentation(
+                NullAttributeRepresentation nullAttributeRepresentation) {
+            return new Options(mapping, operatorOverrides, nullAttributeRepresentation, maxMacroDepth);
+        }
+
+        /**
+         * Bound collection-macro nesting for this call. An explicit value here wins over
+         * {@link #MAX_MACRO_DEPTH_PROPERTY}; the property and then
+         * {@link #DEFAULT_MAX_MACRO_DEPTH} apply only when none is declared.
+         *
+         * @param maxMacroDepth a positive integer
+         * @throws IllegalArgumentException if {@code maxMacroDepth} is less than 1
+         */
+        public Options withMaxMacroDepth(int maxMacroDepth) {
+            return new Options(mapping, operatorOverrides, nullAttributeRepresentation,
+                    OptionalInt.of(maxMacroDepth));
+        }
+
+        /**
+         * The macro-depth bound in force for a translation: the declared value, else the
+         * system property, else the default. Read per translation, like the property always was.
+         */
+        int effectiveMaxMacroDepth() {
+            return maxMacroDepth.orElseGet(SpringDataQueryPlanAdapter::readMaxMacroDepth);
+        }
+    }
+
     private SpringDataQueryPlanAdapter() {}
+
+    // -- Options overloads --
+
+    /**
+     * Translates a Cerbos query plan (as returned by the Java SDK's
+     * {@code CerbosBlockingClient.plan(...)}) into a Spring Data JPA {@link Specification}
+     * under the caller's {@link Options}. Every positional overload delegates here.
+     *
+     * @param <T> the entity type the Specification will be executed against
+     * @param planResult the SDK plan result ({@code KIND_ALWAYS_ALLOWED},
+     *        {@code KIND_ALWAYS_DENIED}, or a conditional plan)
+     * @param options the caller's declarations — mapping, overrides, NULL convention, macro
+     *        depth
+     * @return a SELECT-only Specification selecting exactly the rows the plan permits — see
+     *         {@link #toSpecification(PlanResourcesResult, Map)}
+     * @throws MalformedPlanException if the conditional plan carries no condition
+     * @throws UnsupportedPlanShapeException if the plan carries a null comparison operand
+     *         under {@link NullAttributeRepresentation#OMITTED}; every other refusal is
+     *         deferred to the Specification's first evaluation — see the class documentation
+     */
+    public static <T> Specification<T> toSpecification(
+            PlanResourcesResult planResult, Options options) {
+        Objects.requireNonNull(options, "options");
+        if (planResult.isAlwaysAllowed()) {
+            return alwaysAllowed();
+        }
+        if (planResult.isAlwaysDenied()) {
+            return alwaysDenied();
+        }
+        Operand condition = planResult.getCondition()
+                .orElseThrow(() -> Refusals.malformed("Conditional plan has no condition"));
+        // Always: the call-level option is only the fallback now, and an attribute can declare
+        // OMITTED while the call declares EXPLICIT.
+        assertNoNullComparisonOperands(
+                condition, options.mapping(), options.nullAttributeRepresentation());
+        return conditional(condition, options);
+    }
+
+    /**
+     * Translates a raw {@link PlanResourcesResponse} protobuf into a Spring Data JPA
+     * {@link Specification} under the caller's {@link Options}. Every positional
+     * {@code PlanResourcesResponse} overload delegates here.
+     *
+     * @param <T> the entity type the Specification will be executed against
+     * @param response the raw {@code PlanResources} RPC response
+     * @param options the caller's declarations — mapping, overrides, NULL convention, macro
+     *        depth
+     * @return a SELECT-only Specification selecting exactly the rows the plan permits — see
+     *         {@link #toSpecification(PlanResourcesResult, Map)}
+     * @throws MalformedPlanException if the filter kind is unknown or a conditional filter
+     *         carries no condition
+     * @throws UnsupportedPlanShapeException if the plan carries a null comparison operand
+     *         under {@link NullAttributeRepresentation#OMITTED}; every other refusal is
+     *         deferred to the Specification's first evaluation — see the class documentation
+     */
+    public static <T> Specification<T> toSpecification(
+            PlanResourcesResponse response, Options options) {
+        Objects.requireNonNull(options, "options");
+        PlanResourcesFilter filter = response.getFilter();
+        return switch (filter.getKind()) {
+            case KIND_ALWAYS_ALLOWED -> alwaysAllowed();
+            case KIND_ALWAYS_DENIED -> alwaysDenied();
+            case KIND_CONDITIONAL -> {
+                Operand cond = filter.getCondition();
+                if (cond.getNodeCase() == Operand.NodeCase.NODE_NOT_SET) {
+                    throw Refusals.malformed("Conditional plan has no condition");
+                }
+                assertNoNullComparisonOperands(
+                        cond, options.mapping(), options.nullAttributeRepresentation());
+                yield conditional(cond, options);
+            }
+            default -> throw Refusals.malformed("Unknown filter kind: " + filter.getKind());
+        };
+    }
 
     // -- PlanResourcesResult overloads --
 
@@ -107,11 +287,13 @@ public final class SpringDataQueryPlanAdapter {
      *         {@code KIND_ALWAYS_ALLOWED} ({@link Specification#unrestricted()}), no row for
      *         {@code KIND_ALWAYS_DENIED} ({@code 1=0}), the translated predicate tree
      *         otherwise
-     * @throws IllegalArgumentException if the conditional plan carries no condition.
-     *         Translation of the condition itself is deferred: unsupported operators,
-     *         unmapped attributes, and unresolvable paths throw
-     *         {@code IllegalArgumentException} (fail closed) when the Specification is first
-     *         evaluated by the repository, not from this call.
+     * @throws MalformedPlanException if the conditional plan carries no condition.
+     *         Translation of the condition itself is deferred: unsupported shapes
+     *         ({@link UnsupportedPlanShapeException}), unmapped attributes
+     *         ({@link UnmappedAttributeException}) and wire-contract violations
+     *         ({@link MalformedPlanException}) throw (fail closed) when the Specification is
+     *         first evaluated by the repository, not from this call. All three extend
+     *         {@link IllegalArgumentException}.
      */
     public static <T> Specification<T> toSpecification(
             PlanResourcesResult planResult, Map<String, AttributeMapping> mapper) {
@@ -139,7 +321,7 @@ public final class SpringDataQueryPlanAdapter {
      *        overridable
      * @return a SELECT-only Specification selecting exactly the rows the plan permits — see
      *         {@link #toSpecification(PlanResourcesResult, Map)}
-     * @throws IllegalArgumentException if the conditional plan carries no condition; see
+     * @throws MalformedPlanException if the conditional plan carries no condition; see
      *         {@link #toSpecification(PlanResourcesResult, Map)} for the deferred
      *         fail-closed contract covering the translation itself
      */
@@ -169,27 +351,18 @@ public final class SpringDataQueryPlanAdapter {
      * @param nullAttributeRepresentation the caller's NULL-column convention
      * @return a SELECT-only Specification selecting exactly the rows the plan permits — see
      *         {@link #toSpecification(PlanResourcesResult, Map)}
-     * @throws IllegalArgumentException if the conditional plan carries no condition, or if the
-     *         plan carries a null comparison operand under
-     *         {@link NullAttributeRepresentation#OMITTED}
+     * @throws MalformedPlanException if the conditional plan carries no condition
+     * @throws UnsupportedPlanShapeException if the plan carries a null comparison operand
+     *         under {@link NullAttributeRepresentation#OMITTED}
      */
     public static <T> Specification<T> toSpecification(
             PlanResourcesResult planResult,
             Map<String, AttributeMapping> mapper,
             Map<String, OperatorFunction> overrides,
             NullAttributeRepresentation nullAttributeRepresentation) {
-        if (planResult.isAlwaysAllowed()) {
-            return alwaysAllowed();
-        }
-        if (planResult.isAlwaysDenied()) {
-            return alwaysDenied();
-        }
-        Operand condition = planResult.getCondition()
-                .orElseThrow(() -> new IllegalArgumentException("Conditional plan has no condition"));
-        // Always: the call-level option is only the fallback now, and an attribute can declare
-        // OMITTED while the call declares EXPLICIT.
-        assertNoNullComparisonOperands(condition, mapper, nullAttributeRepresentation);
-        return conditional(condition, mapper, overrides);
+        return toSpecification(planResult, Options.of(mapper)
+                .withOperatorOverrides(overrides)
+                .withNullAttributeRepresentation(nullAttributeRepresentation));
     }
 
     // -- PlanResourcesResponse overloads --
@@ -210,7 +383,7 @@ public final class SpringDataQueryPlanAdapter {
      *        {@link AttributeMapping}
      * @return a SELECT-only Specification selecting exactly the rows the plan permits — see
      *         {@link #toSpecification(PlanResourcesResult, Map)}
-     * @throws IllegalArgumentException if the filter kind is unknown or a conditional filter
+     * @throws MalformedPlanException if the filter kind is unknown or a conditional filter
      *         carries no condition; see {@link #toSpecification(PlanResourcesResult, Map)}
      *         for the deferred fail-closed contract covering the translation itself
      */
@@ -233,7 +406,7 @@ public final class SpringDataQueryPlanAdapter {
      *        overridable
      * @return a SELECT-only Specification selecting exactly the rows the plan permits — see
      *         {@link #toSpecification(PlanResourcesResult, Map)}
-     * @throws IllegalArgumentException if the filter kind is unknown or a conditional filter
+     * @throws MalformedPlanException if the filter kind is unknown or a conditional filter
      *         carries no condition; see {@link #toSpecification(PlanResourcesResult, Map)}
      *         for the deferred fail-closed contract covering the translation itself
      */
@@ -260,29 +433,19 @@ public final class SpringDataQueryPlanAdapter {
      * @param nullAttributeRepresentation the caller's NULL-column convention
      * @return a SELECT-only Specification selecting exactly the rows the plan permits — see
      *         {@link #toSpecification(PlanResourcesResult, Map)}
-     * @throws IllegalArgumentException if the filter kind is unknown, a conditional filter
-     *         carries no condition, or the plan carries a null comparison operand under
-     *         {@link NullAttributeRepresentation#OMITTED}
+     * @throws MalformedPlanException if the filter kind is unknown or a conditional filter
+     *         carries no condition
+     * @throws UnsupportedPlanShapeException if the plan carries a null comparison operand
+     *         under {@link NullAttributeRepresentation#OMITTED}
      */
     public static <T> Specification<T> toSpecification(
             PlanResourcesResponse response,
             Map<String, AttributeMapping> mapper,
             Map<String, OperatorFunction> overrides,
             NullAttributeRepresentation nullAttributeRepresentation) {
-        PlanResourcesFilter filter = response.getFilter();
-        return switch (filter.getKind()) {
-            case KIND_ALWAYS_ALLOWED -> alwaysAllowed();
-            case KIND_ALWAYS_DENIED -> alwaysDenied();
-            case KIND_CONDITIONAL -> {
-                Operand cond = filter.getCondition();
-                if (cond.getNodeCase() == Operand.NodeCase.NODE_NOT_SET) {
-                    throw new IllegalArgumentException("Conditional plan has no condition");
-                }
-                assertNoNullComparisonOperands(cond, mapper, nullAttributeRepresentation);
-                yield conditional(cond, mapper, overrides);
-            }
-            default -> throw new IllegalArgumentException("Unknown filter kind: " + filter.getKind());
-        };
+        return toSpecification(response, Options.of(mapper)
+                .withOperatorOverrides(overrides)
+                .withNullAttributeRepresentation(nullAttributeRepresentation));
     }
 
     // -- The three plan kinds --
@@ -311,19 +474,14 @@ public final class SpringDataQueryPlanAdapter {
      * and Hibernate 6 rejects a {@code Predicate} built against a different {@code Root}
      * ({@code SqlTreeCreationException: Could not locate TableGroup}).
      *
-     * <p>The caller's maps are defensively copied because of that re-invocation: capturing them
-     * by reference would let post-translation mutation silently change which columns the
-     * authorization filter resolves.
+     * <p>The caller's maps were defensively copied when {@link Options} was built, because of
+     * that re-invocation: capturing them by reference would let post-translation mutation
+     * silently change which columns the authorization filter resolves.
      */
-    private static <T> Specification<T> conditional(
-            Operand condition,
-            Map<String, AttributeMapping> mapper,
-            Map<String, OperatorFunction> overrides) {
-        Map<String, AttributeMapping> mapperCopy = Map.copyOf(mapper);
-        Map<String, OperatorFunction> overridesCopy = Map.copyOf(overrides);
+    private static <T> Specification<T> conditional(Operand condition, Options options) {
         return (root, query, cb) ->
-                new Translator(cb, overridesCopy, isSelectInvocation(root, query))
-                        .traverse(condition, Scope.root(root, query, mapperCopy));
+                new Translator(cb, options, isSelectInvocation(root, query))
+                        .traverse(condition, Scope.root(root, query, options.mapping()));
     }
 
     // -- NULL representation guard --
@@ -384,14 +542,8 @@ public final class SpringDataQueryPlanAdapter {
 
     private static final Set<String> EQUALITY_FAMILY = Set.of("eq", "ne", "in");
 
-    private static IllegalArgumentException nullOperandUnderOmitted(String operator) {
-        return new IllegalArgumentException(
-                "Cannot translate `" + operator + "` against a null operand"
-                        + " under NullAttributeRepresentation.OMITTED: a NULL column sends no"
-                        + " attribute, so Cerbos evaluates the comparison as a"
-                        + " missing-attribute error (deny) while a NULL-selecting filter"
-                        + " would return those rows. Send NULL columns as explicit nulls and"
-                        + " use EXPLICIT, or keep this shape out of the policy.");
+    private static UnsupportedPlanShapeException nullOperandUnderOmitted(String operator) {
+        return Refusals.nullOperandUnderOmitted(operator);
     }
 
     /**
@@ -453,6 +605,30 @@ public final class SpringDataQueryPlanAdapter {
         return query != null && query.getRoots().contains(root);
     }
 
+    /**
+     * {@link #MAX_MACRO_DEPTH_PROPERTY} as an integer, or the default when unset. A value that
+     * is not a positive integer is a misconfigured JVM, not a plan the adapter refuses, so it is
+     * a plain {@link IllegalArgumentException} rather than one of the {@link Refusals}.
+     */
+    private static int readMaxMacroDepth() {
+        String raw = System.getProperty(MAX_MACRO_DEPTH_PROPERTY);
+        if (raw == null) {
+            return DEFAULT_MAX_MACRO_DEPTH;
+        }
+        int value;
+        try {
+            value = Integer.parseInt(raw.trim());
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException(
+                    MAX_MACRO_DEPTH_PROPERTY + " must be a positive integer, got '" + raw + "'", e);
+        }
+        if (value < 1) {
+            throw new IllegalArgumentException(
+                    MAX_MACRO_DEPTH_PROPERTY + " must be a positive integer, got " + value);
+        }
+        return value;
+    }
+
     private static final class Translator {
         private final CriteriaBuilder cb;
         private final TriPredicate tri;
@@ -460,49 +636,31 @@ public final class SpringDataQueryPlanAdapter {
         private final HierarchyTranslator hierarchy;
         private final ComparisonTranslator comparisons = new ComparisonTranslator();
         private final boolean selectInvocation;
-        private final int maxMacroDepth = readMaxMacroDepth();
+        private final int maxMacroDepth;
         /** Current collection-macro nesting depth; maintained by {@link #enterMacro}. */
         private int macroDepth;
 
-        Translator(CriteriaBuilder cb, Map<String, OperatorFunction> overrides, boolean selectInvocation) {
+        Translator(CriteriaBuilder cb, Options options, boolean selectInvocation) {
             this.cb = cb;
             this.tri = new TriPredicate(cb);
-            this.overrides = overrides;
+            this.overrides = options.operatorOverrides();
             this.hierarchy = new HierarchyTranslator(cb);
             this.selectInvocation = selectInvocation;
-        }
-
-        private static int readMaxMacroDepth() {
-            String raw = System.getProperty(MAX_MACRO_DEPTH_PROPERTY);
-            if (raw == null) {
-                return DEFAULT_MAX_MACRO_DEPTH;
-            }
-            int value;
-            try {
-                value = Integer.parseInt(raw.trim());
-            } catch (NumberFormatException e) {
-                throw new IllegalArgumentException(
-                        MAX_MACRO_DEPTH_PROPERTY + " must be a positive integer, got '" + raw + "'", e);
-            }
-            if (value < 1) {
-                throw new IllegalArgumentException(
-                        MAX_MACRO_DEPTH_PROPERTY + " must be a positive integer, got " + value);
-            }
-            return value;
+            this.maxMacroDepth = options.effectiveMaxMacroDepth();
         }
 
         /**
          * Track one collection-macro nesting level around {@code body}, failing closed when the
-         * plan nests deeper than {@link #MAX_MACRO_DEPTH_PROPERTY} allows. Each macro level
-         * multiplies the correlated-subquery count of the translated filter (one subquery per
-         * body polarity), so a runaway-deep policy must throw a clear error at translation time
-         * instead of silently emitting a filter that times out on production-sized tables.
+         * plan nests deeper than {@link Options#effectiveMaxMacroDepth()} allows. Each macro
+         * level multiplies the correlated-subquery count of the translated filter (one subquery
+         * per body polarity), so a runaway-deep policy must throw a clear error at translation
+         * time instead of silently emitting a filter that times out on production-sized tables.
          */
         private Predicate enterMacro(String op, Supplier<Predicate> body) {
             macroDepth++;
             try {
                 if (macroDepth > maxMacroDepth) {
-                    throw new IllegalArgumentException(
+                    throw Refusals.unsupported(
                             "Collection-macro nesting depth " + macroDepth + " exceeds the maximum of "
                             + maxMacroDepth + " (reached via operator '" + op + "'). Each nesting "
                             + "level multiplies the number of correlated subqueries in the "
@@ -520,7 +678,7 @@ public final class SpringDataQueryPlanAdapter {
             return switch (operand.getNodeCase()) {
                 case EXPRESSION -> traverseExpression(operand.getExpression(), scope);
                 case VARIABLE -> handleBareVariable(operand.getVariable(), scope);
-                default -> throw new IllegalArgumentException("Unexpected operand type: " + operand.getNodeCase());
+                default -> throw Refusals.malformed("Unexpected operand type: " + operand.getNodeCase());
             };
         }
 
@@ -529,20 +687,9 @@ public final class SpringDataQueryPlanAdapter {
             return applyLeaf("eq", path, true);
         }
 
-        /**
-         * The shared named error for Cerbos {@code except()} — a two-list function
-         * ({@code list.except(list)}) whose list-difference result has no JPA Criteria
-         * translation. PDP-verified arrival shapes: inside {@code size()}
-         * ({@code gt(size(except(variable, value-list)), 0)}) and as a comparison operand
-         * ({@code eq(except(variable, value-list), value-list)}).
-         */
-        private static IllegalArgumentException exceptUnsupported() {
-            return new IllegalArgumentException(
-                    "except is not supported: Cerbos except(list, list) computes a list "
-                            + "difference, which has no JPA Criteria translation. Rewrite the "
-                            + "policy with a collection macro instead — e.g. "
-                            + "size(R.attr.tags.except([\"x\"])) > 0 is equivalent to "
-                            + "R.attr.tags.exists(t, !(t in [\"x\"])).");
+        /** The shared named error for Cerbos {@code except()} — see {@link Refusals#exceptUnsupported}. */
+        private static UnsupportedPlanShapeException exceptUnsupported() {
+            return Refusals.exceptUnsupported();
         }
 
         /**
@@ -572,7 +719,7 @@ public final class SpringDataQueryPlanAdapter {
                         .map(o -> traverse(o, scope)).toArray(Predicate[]::new));
                 case "not" -> {
                     if (operands.size() != 1) {
-                        throw new IllegalArgumentException("not requires exactly 1 operand");
+                        throw Refusals.malformed("not requires exactly 1 operand");
                     }
                     yield tri.not(traverse(operands.get(0), scope));
                 }
@@ -582,7 +729,7 @@ public final class SpringDataQueryPlanAdapter {
                 // as a predicate, and there is no meaning to pick — `filter(...)` is not
                 // `size(filter(...)) > 0` (cerbos/query-plan-adapters#313). The legitimate
                 // size(filter(...)) form is intercepted by the size handler before this.
-                case "filter" -> throw new IllegalArgumentException(
+                case "filter" -> throw Refusals.unsupported(
                         "filter() returns a list, not a boolean, so it cannot be a condition on "
                                 + "its own; only size(filter(...)) has a boolean meaning");
                 // Cerbos except() is a two-list function — PDP-verified wire shape:
@@ -753,7 +900,9 @@ public final class SpringDataQueryPlanAdapter {
                         PlanValues.escapeLike(String.valueOf(value)) + "%", '\\');
                 case "endsWith" -> cb.like(path.as(String.class),
                         "%" + PlanValues.escapeLike(String.valueOf(value)), '\\');
-                default -> throw new IllegalArgumentException("Unsupported operator: " + op);
+                // An operator no leaf case knows — `matches` is the policy-reachable one. An
+                // OperatorFunction override registered under that name is consulted first.
+                default -> throw Refusals.unsupported("Unsupported operator: " + op);
             };
         }
 
@@ -835,7 +984,7 @@ public final class SpringDataQueryPlanAdapter {
                 // comparison (e.g. eq(size(coll), variable, value) as COUNT = value, silently
                 // discarding the variable constraint).
                 if (nb.operands().size() != 2) {
-                    throw new IllegalArgumentException(
+                    throw Refusals.malformed(
                             nb.op() + " requires exactly 2 operands, got " + nb.operands().size());
                 }
                 Predicate sizePred = trySizeComparison(nb.op(), nb.operands(), scope);
@@ -917,7 +1066,7 @@ public final class SpringDataQueryPlanAdapter {
                                                java.util.function.Function<Operand, Predicate> branchTranslator,
                                                Scope scope) {
                 if (ifOps.size() != 3) {
-                    throw new IllegalArgumentException(
+                    throw Refusals.malformed(
                             "if (ternary) requires exactly 3 operands (condition, then, else), got "
                                     + ifOps.size());
                 }
@@ -928,7 +1077,9 @@ public final class SpringDataQueryPlanAdapter {
                 if (condition.getNodeCase() == Operand.NodeCase.VALUE) {
                     Boolean known = constantBooleanOrNull(condition);
                     if (known == null) {
-                        throw new IllegalArgumentException(
+                        // A non-boolean literal condition is a CEL type error the planner
+                        // never emits; a column condition is translated below.
+                        throw Refusals.malformed(
                                 "if (ternary) condition must be a boolean expression");
                     }
                     return branchTranslator.apply(known ? thenBranch : elseBranch);
@@ -959,7 +1110,7 @@ public final class SpringDataQueryPlanAdapter {
                 if (branch.getNodeCase() == Operand.NodeCase.VALUE) {
                     Boolean constant = constantBooleanOrNull(branch);
                     if (constant == null) {
-                        throw new IllegalArgumentException(
+                        throw Refusals.malformed(
                                 "if (ternary) branch in boolean position must be a boolean");
                     }
                     return constant ? cb.conjunction() : cb.disjunction();
@@ -1060,8 +1211,10 @@ public final class SpringDataQueryPlanAdapter {
                 record TimestampConstant(Operand operand) implements Resolved {
                     Instant instant() {
                         Object raw = PlanValues.protoValueToJava(operand.getValue());
+                        // CEL's own timestamp() rejects a non-string or unparseable literal, so
+                        // the planner cannot emit one: both are malformed, not unsupported.
                         if (!(raw instanceof String s)) {
-                            throw new IllegalArgumentException(
+                            throw Refusals.malformed(
                                     "timestamp() constant must be an RFC-3339 string, got "
                                             + (raw == null ? "null" : raw.getClass().getSimpleName()));
                         }
@@ -1071,7 +1224,7 @@ public final class SpringDataQueryPlanAdapter {
                             try {
                                 return OffsetDateTime.parse(s).toInstant();
                             } catch (DateTimeParseException e2) {
-                                throw new IllegalArgumentException(
+                                throw Refusals.malformed(
                                         "timestamp() constant could not be parsed as an RFC-3339 instant", e2);
                             }
                         }
@@ -1182,7 +1335,8 @@ public final class SpringDataQueryPlanAdapter {
                             : null;
                     if (receiver != null) {
                         if (!(receiver instanceof String haystack)) {
-                            throw new IllegalArgumentException(
+                            // `5.contains(x)` has no overload in CEL; the planner never folds one.
+                            throw Refusals.malformed(
                                     op + " requires a string receiver, got " + typeName(receiver));
                         }
                         Path<?> needle = scope.path(needleField.variable());
@@ -1192,7 +1346,7 @@ public final class SpringDataQueryPlanAdapter {
                             case "contains" -> fieldToFieldLike(cb.literal(haystack), needle, true, true);
                             case "startsWith" -> fieldToFieldLike(cb.literal(haystack), needle, false, true);
                             case "endsWith" -> fieldToFieldLike(cb.literal(haystack), needle, true, false);
-                            default -> throw new IllegalArgumentException(
+                            default -> throw Refusals.internal(
                                     "Unsupported string-match operator: " + op);
                         };
                     }
@@ -1288,7 +1442,7 @@ public final class SpringDataQueryPlanAdapter {
                 // generic "is a Relation" resolution error. Reports the shape only — element
                 // values never leak into the message.
                 if (value instanceof List<?> || value instanceof Map<?, ?>) {
-                    throw new IllegalArgumentException(
+                    throw Refusals.unsupported(
                             op + " comparison against a " + constantShape(value)
                                     + " constant is not supported for attribute "
                                     + field.variable() + ". Whole-" + kindWord(value)
@@ -1304,7 +1458,9 @@ public final class SpringDataQueryPlanAdapter {
                     return withOverride(op, path, null, () -> switch (op) {
                         case "eq" -> cb.isNull(path);
                         case "ne" -> cb.isNotNull(path);
-                        default -> throw new IllegalArgumentException(
+                        // `x < null` is legal CEL over a dyn attribute (it errors at check time,
+                        // which denies); no ordering predicate reproduces that, so refuse it.
+                        default -> throw Refusals.unsupported(
                                 "Null values are only supported with eq and ne operators (got " + op + ")");
                     });
                 }
@@ -1362,7 +1518,11 @@ public final class SpringDataQueryPlanAdapter {
                     } else if (OffsetDateTime.class.equals(javaType)) {
                         bound = instant.atOffset(ZoneOffset.UTC);
                     } else {
-                        throw new IllegalArgumentException(
+                        // Unmapped rather than unsupported: the plan is fine and the Criteria
+                        // API could compare the column, but the MAPPING does not say which
+                        // instant a LocalDateTime/Date/String holds. The caller resolves it by
+                        // remapping the column or registering an override — a declaration.
+                        throw Refusals.unmapped(
                                 "timestamp() comparison requires a column mapped to java.time.Instant "
                                         + "or java.time.OffsetDateTime, but '" + field.variable()
                                         + "' maps to " + javaType.getSimpleName()
@@ -1389,7 +1549,7 @@ public final class SpringDataQueryPlanAdapter {
                     case "gt" -> cmp > 0;
                     case "le" -> cmp <= 0;
                     case "ge" -> cmp >= 0;
-                    default -> throw new IllegalArgumentException(
+                    default -> throw Refusals.internal(
                             "Unsupported constant timestamp comparison operator: " + op);
                 };
                 return result ? cb.conjunction() : cb.disjunction();
@@ -1457,7 +1617,7 @@ public final class SpringDataQueryPlanAdapter {
                 if (otherOperand == null) {
                     // Both operands are add() expressions — there IS a second operand, it just
                     // isn't a scalar to fold against, so say that instead of misreporting arity.
-                    throw new IllegalArgumentException(
+                    throw Refusals.unsupported(
                             op + " between two add() expressions is not supported: got "
                                     + describeOperand(operands.get(0)) + " and "
                                     + describeOperand(operands.get(1))
@@ -1465,7 +1625,7 @@ public final class SpringDataQueryPlanAdapter {
                 }
                 List<Operand> addOperands = addExprOperand.getExpression().getOperandsList();
                 if (addOperands.size() != 2) {
-                    throw new IllegalArgumentException("add requires exactly 2 operands");
+                    throw Refusals.malformed("add requires exactly 2 operands");
                 }
                 Operand addLeft = addOperands.get(0);
                 Operand addRight = addOperands.get(1);
@@ -1475,12 +1635,12 @@ public final class SpringDataQueryPlanAdapter {
                             PlanValues.protoValueToJava(addLeft.getValue()),
                             PlanValues.protoValueToJava(addRight.getValue()));
                     if (otherOperand.getNodeCase() != Operand.NodeCase.VARIABLE) {
-                        throw new IllegalArgumentException(
+                        throw Refusals.unsupported(
                                 "add(const, const) compared to a non-field operand is not supported");
                     }
                     return applyLeaf(op, scope.path(otherOperand.getVariable()), folded);
                 }
-                throw new IllegalArgumentException(
+                throw Refusals.unsupported(
                         "add comparison with a field reference only supports eq/ne (got " + op + ")");
             }
 
@@ -1504,7 +1664,7 @@ public final class SpringDataQueryPlanAdapter {
                             // at the supported shape rather than throwing a generic operand error.
                             String innerOp = o.getExpression().getOperator();
                             if ("map".equals(innerOp)) {
-                                throw new IllegalArgumentException(
+                                throw Refusals.unsupported(
                                         "Direct comparison of map(...) to a value is not supported "
                                                 + "(operator: " + op + "). Wrap the map() expression in "
                                                 + "hasIntersection(map(...), [...]) instead.");
@@ -1514,17 +1674,21 @@ public final class SpringDataQueryPlanAdapter {
                             if ("except".equals(innerOp)) {
                                 throw exceptUnsupported();
                             }
-                            throw new IllegalArgumentException(
+                            // A computed operand — a cast, an index, a lambda, a nested
+                            // timestamp(): legal CEL the leaf cases have no column shape for.
+                            throw Refusals.unsupported(
                                     "Unexpected " + innerOp + "() expression in leaf operand of " + op);
                         }
-                        default -> throw new IllegalArgumentException(
+                        default -> throw Refusals.malformed(
                                 "Unexpected operand type in leaf expression: " + o.getNodeCase());
                     }
                 }
+                // Two constants under an operator the constant fold does not cover: a
+                // comparison the planner evaluates itself and never ships.
                 if (variable == null) {
-                    return new IllegalArgumentException("Missing variable operand for " + op);
+                    return Refusals.malformed("Missing variable operand for " + op);
                 }
-                return new IllegalArgumentException("Missing value operand for " + op);
+                return Refusals.malformed("Missing value operand for " + op);
             }
 
             /**
@@ -1559,7 +1723,7 @@ public final class SpringDataQueryPlanAdapter {
                         case "gt" -> l > r;
                         case "le" -> l <= r;
                         case "ge" -> l >= r;
-                        default -> throw new IllegalArgumentException(
+                        default -> throw Refusals.internal(
                                 "Unsupported constant comparison operator: " + op);
                     };
                 } else if (left instanceof String ls && right instanceof String rs) {
@@ -1569,11 +1733,13 @@ public final class SpringDataQueryPlanAdapter {
                         case "gt" -> cmp > 0;
                         case "le" -> cmp <= 0;
                         case "ge" -> cmp >= 0;
-                        default -> throw new IllegalArgumentException(
+                        default -> throw Refusals.internal(
                                 "Unsupported constant comparison operator: " + op);
                     };
                 } else {
-                    throw new IllegalArgumentException(
+                    // Ordering two booleans, or a string against a number, has no CEL
+                    // overload: the planner would have rejected the policy.
+                    throw Refusals.malformed(
                             "Cannot order constant operands of " + op + ": "
                                     + typeName(left) + " vs " + typeName(right));
                 }
@@ -1602,7 +1768,9 @@ public final class SpringDataQueryPlanAdapter {
                 // PDP refuses; a plain one drops rows the PDP allows. Refuse it rather than pick
                 // a direction — declare both attributes, or neither.
                 if (("eq".equals(op) || "ne".equals(op)) && leftExplicit != rightExplicit) {
-                    throw new IllegalArgumentException(
+                    // Unmapped: the two declarations conflict, and the message tells the
+                    // caller which declaration to change.
+                    throw Refusals.unmapped(
                             "Cannot translate `" + op + "` between two columns under mixed null"
                                     + " conventions: cannot compare an attribute declared"
                                     + " explicit-null with one on the omitted convention: the"
@@ -1619,7 +1787,7 @@ public final class SpringDataQueryPlanAdapter {
                     case "contains" -> fieldToFieldLike(left, right, true, true);
                     case "startsWith" -> fieldToFieldLike(left, right, false, true);
                     case "endsWith" -> fieldToFieldLike(left, right, true, false);
-                    default -> throw new IllegalArgumentException(
+                    default -> throw Refusals.unsupported(
                             "Field-to-field comparison is not supported for operator '" + op + "': "
                                     + leftVar + " vs " + rightVar);
                 };
@@ -1642,7 +1810,7 @@ public final class SpringDataQueryPlanAdapter {
                     case "gt" -> cb.greaterThan(left, right);
                     case "le" -> cb.lessThanOrEqualTo(left, right);
                     case "ge" -> cb.greaterThanOrEqualTo(left, right);
-                    default -> throw new IllegalArgumentException(
+                    default -> throw Refusals.internal(
                             "Unsupported arithmetic comparison operator: " + op);
                 };
             }
@@ -1780,7 +1948,7 @@ public final class SpringDataQueryPlanAdapter {
                         case "gt" -> cb.gt(lhs, v);
                         case "le" -> cb.le(lhs, v);
                         case "ge" -> cb.ge(lhs, v);
-                        default -> throw new IllegalArgumentException(
+                        default -> throw Refusals.internal(
                                 "Unsupported arithmetic comparison operator: " + cmpOp);
                     });
                 }
@@ -1822,7 +1990,7 @@ public final class SpringDataQueryPlanAdapter {
                         && isZeroCapableDivisionOperand(operands.get(1), scope)) {
                     // Only one side can be folded into IEEE arms; the other would still lower to
                     // NULL, turning `NaN != NaN` (TRUE in CEL) into UNKNOWN. Fail closed.
-                    throw new IllegalArgumentException(
+                    throw Refusals.unsupported(
                             "a comparison with a zero-capable division on BOTH sides is not "
                                     + "supported: only one side can be folded into IEEE arms and "
                                     + "the other would lower to SQL NULL");
@@ -1936,7 +2104,7 @@ public final class SpringDataQueryPlanAdapter {
                         case "gt" -> cb.gt(lhs, v);
                         case "le" -> cb.le(lhs, v);
                         case "ge" -> cb.ge(lhs, v);
-                        default -> throw new IllegalArgumentException(
+                        default -> throw Refusals.internal(
                                 "Unsupported arithmetic comparison operator: " + cmpOp);
                     });
                 }
@@ -2057,7 +2225,9 @@ public final class SpringDataQueryPlanAdapter {
                         }
                         Object v = PlanValues.protoValueToJava(operand.getValue());
                         if (!(v instanceof Number n)) {
-                            throw new IllegalArgumentException(
+                            // `R.attr.aString + "x" < "y"` is legal CEL (concatenation, then a
+                            // string ordering); this path lowers to double arithmetic only.
+                            throw Refusals.unsupported(
                                     "Arithmetic comparison requires numeric operands, got "
                                             + typeName(v));
                         }
@@ -2074,7 +2244,7 @@ public final class SpringDataQueryPlanAdapter {
                             // (cerbos/query-plan-adapters#387). The rejection stands either way,
                             // because the cast that makes it satisfiable is itself unlowerable —
                             // the same limitation that refuses cast-int-double.
-                            throw new IllegalArgumentException(
+                            throw Refusals.unsupported(
                                     "mod is not supported in comparisons: CEL % is integer-only "
                                             + "while attribute values are always doubles at check "
                                             + "time, so a satisfiable policy must cast with int() "
@@ -2090,19 +2260,20 @@ public final class SpringDataQueryPlanAdapter {
                             // dropped. The rewrite in tryDivisionByZeroComparison only reaches a
                             // division that IS the comparison operand, so fail closed rather than
                             // emit the under-granting filter (cerbos/query-plan-adapters#312).
-                            throw new IllegalArgumentException(
+                            throw Refusals.unsupported(
                                     "arithmetic composed on a division whose denominator may be "
                                             + "zero is not supported: CEL carries the resulting NaN "
                                             + "or infinity through the surrounding arithmetic and "
                                             + "SQL has no value that does");
                         }
                         if (!ARITHMETIC_OPS.contains(op)) {
-                            throw new IllegalArgumentException(
+                            // A cast or a size() inside arithmetic: legal CEL, no lowering.
+                            throw Refusals.unsupported(
                                     "Unexpected " + op + "() expression inside an arithmetic "
                                             + "comparison operand");
                         }
                         if (expr.getOperandsCount() != 2) {
-                            throw new IllegalArgumentException(op + " requires exactly 2 operands");
+                            throw Refusals.malformed(op + " requires exactly 2 operands");
                         }
                         NumericOperand l = resolveNumericOperand(expr.getOperands(0), scope);
                         NumericOperand r = resolveNumericOperand(expr.getOperands(1), scope);
@@ -2113,13 +2284,13 @@ public final class SpringDataQueryPlanAdapter {
                                 case "sub" -> lc.value() - rc.value();
                                 case "mult" -> lc.value() * rc.value();
                                 case "div" -> lc.value() / rc.value(); // IEEE: ±Infinity, 0/0 = NaN
-                                default -> throw new IllegalArgumentException(
+                                default -> throw Refusals.internal(
                                         "Unsupported arithmetic operator: " + op);
                             });
                         }
                         return new NumericOperand.Sql(arithmeticSql(op, l, r));
                     }
-                    default -> throw new IllegalArgumentException(
+                    default -> throw Refusals.malformed(
                             "Unexpected operand type in arithmetic comparison: "
                                     + operand.getNodeCase());
                 }
@@ -2166,7 +2337,7 @@ public final class SpringDataQueryPlanAdapter {
                     case "mult" -> le == null ? cb.prod(lc, re)
                             : re == null ? cb.prod(le, rc) : cb.prod(le, re);
                     case "div" -> divisionSql(le, lc, re, rc);
-                    default -> throw new IllegalArgumentException(
+                    default -> throw Refusals.internal(
                             "Unsupported arithmetic operator: " + op);
                 };
             }
@@ -2237,7 +2408,9 @@ public final class SpringDataQueryPlanAdapter {
                         case "ne" -> fractionalCollapse = Boolean.TRUE;
                         case "gt", "ge" -> cmpOp = "ge";
                         case "lt", "le" -> cmpOp = "le";
-                        default -> throw new IllegalArgumentException(
+                        // size() yields an int; anything but a comparison over it is a CEL
+                        // type error the planner would not have shipped.
+                        default -> throw Refusals.malformed(
                                 "Unsupported size comparison operator: " + op);
                     }
                     numValue = "ge".equals(cmpOp)
@@ -2248,7 +2421,7 @@ public final class SpringDataQueryPlanAdapter {
                 }
                 List<Operand> sizeOps = sizeExpr.getOperandsList();
                 if (sizeOps.size() != 1) {
-                    throw new IllegalArgumentException(
+                    throw Refusals.malformed(
                             "Unsupported size() expression: size() takes exactly 1 argument, got "
                                     + sizeOps.size());
                 }
@@ -2262,9 +2435,13 @@ public final class SpringDataQueryPlanAdapter {
                         && "filter".equals(sizeArg.getExpression().getOperator())) {
                     // size(coll.filter(x, pred)) — count only the elements matching the lambda.
                     List<Operand> filterOps = sizeArg.getExpression().getOperandsList();
-                    if (filterOps.size() != 2
-                            || filterOps.get(0).getNodeCase() != Operand.NodeCase.VARIABLE) {
-                        throw new IllegalArgumentException("Unsupported size(filter(...)) expression");
+                    if (filterOps.size() != 2) {
+                        throw Refusals.malformed("Unsupported size(filter(...)) expression");
+                    }
+                    if (filterOps.get(0).getNodeCase() != Operand.NodeCase.VARIABLE) {
+                        // filter() over a computed collection (a map() projection, a nested
+                        // filter): legal CEL with no join chain to count over.
+                        throw Refusals.unsupported("Unsupported size(filter(...)) expression");
                     }
                     var = filterOps.get(0).getVariable();
                     ParsedLambda lambda = parseLambda(filterOps.get(1),
@@ -2280,7 +2457,8 @@ public final class SpringDataQueryPlanAdapter {
                     // named error points at the equivalent exists(...) rewrite.
                     throw exceptUnsupported();
                 } else {
-                    throw new IllegalArgumentException(
+                    // size() of a computed collection (a map() projection, a literal list).
+                    throw Refusals.unsupported(
                             "Unsupported size() expression: size() argument must be a collection "
                                     + "attribute or filter(...), got " + describeOperand(sizeArg));
                 }
@@ -2291,12 +2469,12 @@ public final class SpringDataQueryPlanAdapter {
                     // Relation it came from — size() of a relation element is not a length.
                     Scope.ResolvedScalar scalar = (Scope.ResolvedScalar) resolved;
                     if (!(scalar.mapping() instanceof AttributeMapping.Field)) {
-                        throw new IllegalArgumentException(
+                        throw Refusals.unmapped(
                                 "size() requires a collection (Relation) mapping for " + var);
                     }
                     // size(string) — CEL string length → LENGTH(column) <op> N.
                     if (lambdaBody != null) {
-                        throw new IllegalArgumentException(
+                        throw Refusals.unmapped(
                                 "size(filter(...)) requires a collection (Relation) mapping for " + var);
                     }
                     Path<?> path = scope.path(var);
@@ -2320,7 +2498,7 @@ public final class SpringDataQueryPlanAdapter {
                         return switch (cmpOp) {
                             case "eq", "gt", "ge" -> cb.disjunction();
                             case "lt", "le", "ne" -> cb.isNotNull(path);
-                            default -> throw new IllegalArgumentException(
+                            default -> throw Refusals.malformed(
                                     "Unsupported size comparison operator: " + cmpOp);
                         };
                     }
@@ -2330,7 +2508,7 @@ public final class SpringDataQueryPlanAdapter {
                         return switch (cmpOp) {
                             case "gt", "ge", "ne" -> cb.isNotNull(path);
                             case "eq", "lt", "le" -> cb.disjunction();
-                            default -> throw new IllegalArgumentException(
+                            default -> throw Refusals.malformed(
                                     "Unsupported size comparison operator: " + cmpOp);
                         };
                     }
@@ -2432,7 +2610,7 @@ public final class SpringDataQueryPlanAdapter {
                     case "gt" -> cb.greaterThan(count, n);
                     case "le" -> cb.lessThanOrEqualTo(count, n);
                     case "ge" -> cb.greaterThanOrEqualTo(count, n);
-                    default -> throw new IllegalArgumentException(
+                    default -> throw Refusals.malformed(
                             "Unsupported size comparison operator: " + op);
                 };
             }
@@ -2452,7 +2630,7 @@ public final class SpringDataQueryPlanAdapter {
 
         private Predicate handleIn(List<Operand> rawOperands, Scope scope) {
             if (rawOperands.size() != 2) {
-                throw new IllegalArgumentException("in requires exactly 2 operands");
+                throw Refusals.malformed("in requires exactly 2 operands");
             }
             // Both shapes — `field in [values]` and `value in collection-field` — resolve the
             // same way once normalized field-first: the mapping kind (Relation vs Field) decides
@@ -2471,7 +2649,9 @@ public final class SpringDataQueryPlanAdapter {
             }
             if (fieldOp.getNodeCase() != Operand.NodeCase.VARIABLE
                     || valueOp.getNodeCase() != Operand.NodeCase.VALUE) {
-                throw new IllegalArgumentException("Unsupported in operand combination: "
+                // Membership in a computed collection (`x in R.attr.tags.map(...)`) or of a
+                // computed member: legal CEL, no column pair to compare.
+                throw Refusals.unsupported("Unsupported in operand combination: "
                         + describeOperand(rawOperands.get(0)) + " / "
                         + describeOperand(rawOperands.get(1)));
             }
@@ -2548,7 +2728,7 @@ public final class SpringDataQueryPlanAdapter {
             // resolve() is total, so an unmapped collectionVar throws "Unknown attribute" here
             // rather than needing a separate call made purely for its throw.
             if (!(scope.resolve(collectionVar) instanceof Scope.ResolvedRelation ref)) {
-                throw new IllegalArgumentException(
+                throw Refusals.unmapped(
                         "in(" + memberVar + ", " + collectionVar + ") requires the second "
                                 + "attribute to be mapped as a Relation (collection membership), "
                                 + "but " + collectionVar + " resolves to a scalar Field mapping");
@@ -2596,7 +2776,7 @@ public final class SpringDataQueryPlanAdapter {
 
         private Predicate handleHasIntersection(List<Operand> rawOperands, Scope scope) {
             if (rawOperands.size() != 2) {
-                throw new IllegalArgumentException("hasIntersection requires exactly 2 operands");
+                throw Refusals.malformed("hasIntersection requires exactly 2 operands");
             }
             // Intersection is symmetric, and the planner preserves policy source order —
             // `hasIntersection(P.attr.tags, R.attr.tags)` folds the principal side to a value
@@ -2625,14 +2805,17 @@ public final class SpringDataQueryPlanAdapter {
             if (first.getNodeCase() == Operand.NodeCase.EXPRESSION
                     && "map".equals(first.getExpression().getOperator())) {
                 if (second.getNodeCase() != Operand.NodeCase.VALUE) {
-                    throw new IllegalArgumentException(
+                    // An intersection of a projection with another column: legal CEL, no
+                    // constant list for the projected IN.
+                    throw Refusals.unsupported(
                             "hasIntersection second operand must be a value list when used with map()");
                 }
                 Object val = PlanValues.protoValueToJava(second.getValue());
                 return handleMapIntersection(first.getExpression(), asList(val), scope);
             }
 
-            throw new IllegalArgumentException(
+            // Two collection attributes, or a computed collection on either side.
+            throw Refusals.unsupported(
                     "Unsupported hasIntersection operand shape: " + describeOperand(first) + " / "
                             + describeOperand(second) + ". Supported shapes are "
                             + "hasIntersection(collection-attribute, [values...]) and "
@@ -2645,21 +2828,23 @@ public final class SpringDataQueryPlanAdapter {
         /**
          * Validate and unpack a {@code lambda(body, var)} operand — an EXPRESSION with operator
          * {@code lambda}, exactly two operands, the second a VARIABLE. Error messages are
-         * caller-supplied so each operator keeps its exact wording.
+         * caller-supplied so each operator keeps its exact wording; the classification is not,
+         * because every failure here is the wire contract ({@code lambda(body, variable)})
+         * being violated.
          */
         private static ParsedLambda parseLambda(Operand lambdaOperand, String notLambdaMessage,
                                                 String arityMessage, String varMessage) {
             if (lambdaOperand.getNodeCase() != Operand.NodeCase.EXPRESSION
                     || !"lambda".equals(lambdaOperand.getExpression().getOperator())) {
-                throw new IllegalArgumentException(notLambdaMessage);
+                throw Refusals.malformed(notLambdaMessage);
             }
             List<Operand> lambdaOps = lambdaOperand.getExpression().getOperandsList();
             if (lambdaOps.size() != 2) {
-                throw new IllegalArgumentException(arityMessage);
+                throw Refusals.malformed(arityMessage);
             }
             Operand varOp = lambdaOps.get(1);
             if (varOp.getNodeCase() != Operand.NodeCase.VARIABLE) {
-                throw new IllegalArgumentException(varMessage);
+                throw Refusals.malformed(varMessage);
             }
             return new ParsedLambda(lambdaOps.get(0), varOp.getVariable());
         }
@@ -2674,13 +2859,14 @@ public final class SpringDataQueryPlanAdapter {
 
             List<Operand> mapOperands = mapExpr.getOperandsList();
             if (mapOperands.size() != 2) {
-                throw new IllegalArgumentException("map requires exactly 2 operands");
+                throw Refusals.malformed("map requires exactly 2 operands");
             }
             Operand collectionOperand = mapOperands.get(0);
             Operand lambdaOperand = mapOperands.get(1);
 
             if (collectionOperand.getNodeCase() != Operand.NodeCase.VARIABLE) {
-                throw new IllegalArgumentException("map first operand must be a variable");
+                // A chained projection (`tags.filter(...).map(...)`): legal CEL, no chain.
+                throw Refusals.unsupported("map first operand must be a variable");
             }
             String collectionVar = collectionOperand.getVariable();
 
@@ -2691,7 +2877,8 @@ public final class SpringDataQueryPlanAdapter {
             // map()'s extra shape constraint: the body must project a plain member variable.
             Operand projection = lambda.body();
             if (projection.getNodeCase() != Operand.NodeCase.VARIABLE) {
-                throw new IllegalArgumentException("map lambda body must be a simple variable projection");
+                // A computed projection (`map(t, t.a + "x")`): legal CEL, no column to IN over.
+                throw Refusals.unsupported("map lambda body must be a simple variable projection");
             }
             String memberField = Scope.extractLambdaSuffix(projection.getVariable(), lambda.varName());
 
@@ -2700,7 +2887,7 @@ public final class SpringDataQueryPlanAdapter {
             // the subquery correlates the OWNING From and joins through every hop, so the
             // projection ranges over the flattened tail elements.
             if (!(scope.resolve(collectionVar) instanceof Scope.ResolvedRelation ref)) {
-                throw new IllegalArgumentException(
+                throw Refusals.unmapped(
                         "map can only be applied to a collection mapped as Relation: " + collectionVar);
             }
             // CEL map() has no error absorption: a NULL projected column is a missing element
@@ -2797,7 +2984,7 @@ public final class SpringDataQueryPlanAdapter {
          */
         private Predicate handleCollectionOperator(String op, List<Operand> operands, Scope scope) {
             if (operands.size() != 2) {
-                throw new IllegalArgumentException(op + " requires exactly 2 operands");
+                throw Refusals.malformed(op + " requires exactly 2 operands");
             }
             Operand listOperand = operands.get(0);
             Operand lambdaOperand = operands.get(1);
@@ -2813,18 +3000,20 @@ public final class SpringDataQueryPlanAdapter {
             }
 
             if (listOperand.getNodeCase() != Operand.NodeCase.VARIABLE) {
-                throw new IllegalArgumentException(op + " first operand must be a variable");
+                // A macro over a computed collection (`tags.map(...).exists(...)`): legal
+                // CEL, no join chain to range over.
+                throw Refusals.unsupported(op + " first operand must be a variable");
             }
             if (lambdaOperand.getNodeCase() != Operand.NodeCase.EXPRESSION
                     || !"lambda".equals(lambdaOperand.getExpression().getOperator())) {
-                throw new IllegalArgumentException(op + " second operand must be a lambda");
+                throw Refusals.malformed(op + " second operand must be a lambda");
             }
 
             String collectionVar = listOperand.getVariable();
             // Owner-anchored chain resolution: multi-hop chains join through every hop, and a
             // relation referenced from inside a lambda anchors to the scope that owns it.
             if (!(scope.resolve(collectionVar) instanceof Scope.ResolvedRelation ref)) {
-                throw new IllegalArgumentException(
+                throw Refusals.unmapped(
                         op + " requires a Relation mapping for " + collectionVar);
             }
 
@@ -2859,7 +3048,7 @@ public final class SpringDataQueryPlanAdapter {
                 case "exists_one" ->
                         cb.equal(requireLeadingHops(scope, ref,
                                 strictMatchCountSubquery(scope, ref, bodyBuilder), Long.class), 1L);
-                default -> throw new IllegalArgumentException("Unsupported collection operator: " + op);
+                default -> throw Refusals.internal("Unsupported collection operator: " + op);
             });
         }
 
@@ -2884,12 +3073,14 @@ public final class SpringDataQueryPlanAdapter {
         private Predicate handleKnownValueCollection(String op, Value collectionValue,
                                                      Operand lambdaOperand, Scope scope) {
             if (!"exists".equals(op) && !"all".equals(op)) {
-                throw new IllegalArgumentException(op
+                throw Refusals.unsupported(op
                         + " over a literal collection value is not supported. "
                         + "Only exists() and all() can be folded into a flat filter.");
             }
             if (collectionValue.getKindCase() != Value.KindCase.LIST_VALUE) {
-                throw new IllegalArgumentException(op
+                // CEL refuses a scalar as a comprehension range, so the planner never folds
+                // a macro over one.
+                throw Refusals.malformed(op
                         + " over a literal collection requires a list value");
             }
             ParsedLambda lambda = parseLambda(lambdaOperand,
@@ -2978,7 +3169,9 @@ public final class SpringDataQueryPlanAdapter {
             for (String segment : path.split("\\.")) {
                 if (current.getKindCase() != Value.KindCase.STRUCT_VALUE
                         || !current.getStructValue().containsFields(segment)) {
-                    throw new IllegalArgumentException("Cannot resolve \"" + fullRef
+                    // That element's CEL evaluation would error and deny; a fold has no
+                    // per-element UNKNOWN to carry, so the whole shape is refused.
+                    throw Refusals.unsupported("Cannot resolve \"" + fullRef
                             + "\": collection element has no field \"" + segment + "\"");
                 }
                 current = current.getStructValue().getFieldsOrThrow(segment);
@@ -3105,7 +3298,8 @@ public final class SpringDataQueryPlanAdapter {
             if (outerFrom instanceof Join<?, ?> j) {
                 return sub.correlate((Join<Object, Object>) j);
             }
-            throw new IllegalArgumentException("Cannot correlate from non-Root, non-Join scope: " + outerFrom);
+            // Every Scope is rooted at a Root or a Join; no plan input reaches this.
+            throw Refusals.internal("Cannot correlate from non-Root, non-Join scope: " + outerFrom);
         }
 
         /**
