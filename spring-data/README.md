@@ -48,6 +48,9 @@ You'll also need the Cerbos Java SDK (`dev.cerbos:cerbos-sdk-java`) to call the 
 Data JPA (`org.springframework.data:spring-data-jpa`) **3.5.2 or later** — an always-allowed plan
 is translated to `Specification.unrestricted()`, which arrived in 3.5.2. If you take Spring Data
 JPA from the Spring Boot BOM, that means **Boot 3.5.4 or later** (3.5.0–3.5.3 manage 3.5.0/3.5.1).
+The adapter is developed against Spring Data JPA 3.5 / Hibernate 6.6, and CI also replays every
+suite under Spring Data JPA 4 / Hibernate 7 — the pair Spring Boot 4 manages — as a
+forward-compatibility leg (see [Build](#build)).
 
 ## Quick start
 
@@ -678,17 +681,33 @@ character class, and no class can open once every `[` is escaped.
 
 ## Build
 
-From the `spring-data/` directory:
+JDK 17 or later and Gradle 8.x — CI pins Gradle 8.12, and so does the container below. There is no
+Gradle wrapper and no Dockerfile: run Gradle from this directory, or run the same build in the
+official Gradle image with the **repository root** mounted (every suite reads the shared corpus at
+`../conformance/`) and the Docker socket passed through (the differential suite starts a pinned
+PDP through Testcontainers):
 
 ```bash
-# With Docker (recommended — matches CI):
-docker run --rm -v "$(pwd)/..":/app -v /var/run/docker.sock:/var/run/docker.sock \
-  -e TESTCONTAINERS_RYUK_DISABLED=true --network host -w /app/spring-data gradle:8.12-jdk17 \
+# From the repository root:
+docker run --rm -v "$(pwd)":/repo -v /var/run/docker.sock:/var/run/docker.sock \
+  -e TESTCONTAINERS_RYUK_DISABLED=true --network host -w /repo/spring-data gradle:8.12-jdk17 \
   gradle build --no-daemon
 
-# Or with a local Gradle 8.x + JDK 17+:
+# Or with a local Gradle 8.x + JDK 17+, from spring-data/:
 gradle build --no-daemon
 ```
+
+Two environment variables select what the build runs against, and CI runs every combination it
+documents:
+
+- `ADAPTER_TEST_DB` — `h2` (default), `postgres` or `mysql`: the database the differential suite
+  executes against (see [Testing](#testing)).
+- `ADAPTER_TEST_ORM` — `baseline` (default) or `next`: the ORM version set, declared once in
+  [`build.gradle.kts`](build.gradle.kts). `baseline` is Hibernate 6.6 / Spring Data JPA 3.5, the
+  line the golden asset was rendered under; `next` is Hibernate 7 / Spring Data JPA 4, the pair
+  Spring Boot 4 manages, run as a forward-compatibility leg (see
+  [The golden expectations](#the-golden-expectations)). An unknown value fails rather than falling
+  back to the baseline.
 
 ## Testing
 
@@ -704,7 +723,19 @@ Four suites, with distinct roles. Only the differential one needs Docker.
 ```bash
 gradle test           # all four
 gradle goldenUpdate   # rewrite golden/expectations.json from what the translator emits today
+
+ADAPTER_TEST_DB=postgres gradle test   # the differential suite on a real PostgreSQL
+ADAPTER_TEST_DB=mysql gradle test      # … on a real MySQL (see "Database collation requirements")
+ADAPTER_TEST_ORM=next gradle test      # every suite under Hibernate 7 / Spring Data JPA 4
 ```
+
+The PostgreSQL and MySQL servers the differential suite starts are pinned by tag **and** digest in
+[`POSTGRES_IMAGE`](POSTGRES_IMAGE) and [`MYSQL_IMAGE`](MYSQL_IMAGE), read by
+`DatabaseTestImages` at runtime and declared as inputs of `gradle test`. Files rather than Java
+constants for one reason: `renovate.json`'s custom manager bumps `<SERVICE>_IMAGE` files and
+nothing else, so a reference held in source would never get a Renovate PR.
+`conformance/scripts/validate-corpus.sh` scans the same files, holds every reference to one digest
+per tag, and refuses a tag without a digest.
 
 ### The golden expectations
 
@@ -736,5 +767,24 @@ minus that preamble, leaving the root joins and the filter.
   placeholder survives.
 - **The file declares the Hibernate minor that rendered it.** The SQL is the adapter's Criteria
   tree plus Hibernate's renderer, and `hibernate-core` is a `compileOnly` dependency — a consumer
-  brings their own. See `conformance/README.md`, "When the generator is an input".
+  brings their own. See `conformance/README.md`, "When the generator is an input". CI therefore
+  runs the suite under two Hibernate majors (`ADAPTER_TEST_ORM`, see [Build](#build)): on the
+  `baseline` the asset declares, every recorded byte is asserted and `gradle goldenUpdate` is the
+  only way to move one; on `next` — Hibernate 7 / Spring Data JPA 4, a test-only
+  forward-compatibility leg until `example/` moves to Spring Boot 4 — `goldenUpdate` refuses to
+  run, and `SpringDataTranslatorTest` asserts a pinned divergence list in **both** directions
+  instead of the bytes. That list is one renderer change, and the suite asserts the
+  characterisation rather than leaving it to a comment: Hibernate 7's `MySQLDialect` renders a
+  boolean literal as `true` where 6.6 rendered `1`, so exactly the shapes whose MySQL statement
+  compares a boolean column diverge, on MySQL only. Every one of them is still an oracle
+  comparison on both majors, so what the bytes do not cover there, the rows do.
+
+**Hibernate 7 / Spring Data JPA 4.** The adapter's own sources compile against both majors
+(`MySqlDoubleCastFunctionContributor`, the classpath-guarded Hibernate probe, and
+`Specification.unrestricted()` are unchanged), and the differential suite passes on Hibernate 7
+with no translation change. One consumer-visible difference is Spring Data's, not the adapter's:
+Spring Data JPA 4 removed `JpaSpecificationExecutor.delete(Specification)` in favour of
+`delete(DeleteSpecification)`, so the bulk-delete hazard the adapter guards against (the warning
+under [Quick start](#quick-start)) can no longer be reached through that overload at all — the
+guard still fires on any `CriteriaDelete` invocation.
 

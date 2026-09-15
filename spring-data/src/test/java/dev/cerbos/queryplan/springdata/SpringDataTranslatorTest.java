@@ -449,21 +449,155 @@ class SpringDataTranslatorTest {
         assertTrue(ACTIONS.skippedDivergences(Corpus.ADAPTER).contains("p-has"));
     }
 
+    // -- the renderer, and the other one -------------------------------------------------------
+
+    /**
+     * The Hibernate major the forward-compatibility leg runs: the one after the major the asset
+     * was rendered under, by definition, so it is derived from {@link Corpus#HIBERNATE_MINOR}
+     * rather than declared a second time. {@code build.gradle.kts} selects the leg
+     * ({@code ADAPTER_TEST_ORM=next}) and forwards the choice as {@code adapter.test.orm}.
+     */
+    private static final int NEXT_HIBERNATE_MAJOR =
+            Integer.parseInt(Corpus.HIBERNATE_MINOR.substring(0, Corpus.HIBERNATE_MINOR.indexOf('.')))
+                    + 1;
+
+    /**
+     * Corpus actions Hibernate 7 renders differently from the 6.6 the asset is generated under,
+     * from the SAME Criteria tree — which is why they are pinned as a list rather than as a
+     * second asset.
+     *
+     * <p>ONE renderer change accounts for every one of them, and it is asserted below rather than
+     * left to this comment: Hibernate 7's {@code MySQLDialect} renders a boolean literal as
+     * {@code true}/{@code false} where 6.6 rendered {@code 1}/{@code 0}, so every action whose
+     * MySQL statement compares a boolean column diverges and nothing else does. H2 and PostgreSQL
+     * render every recorded shape byte-identically on both majors. It is not a translation
+     * decision: {@link AdversarialConformanceTest} runs the same corpus against a real PDP on both
+     * majors, and every one of these actions is an oracle comparison there.
+     *
+     * <p>The list is asserted in BOTH directions, so an action that stops diverging fails just as
+     * loudly as one that starts: a shrinking list is a renderer change worth knowing about, and a
+     * growing one lands here rather than silently widening an exemption.
+     */
+    static final List<String> RENDERING_DIFFERS_ON_HIBERNATE_7 = List.of(
+            "double-negation",
+            "nan-ord-inf",
+            "nan-ord-le",
+            "nan-ord-ternary",
+            "nan-ord-ternary-vf",
+            "nary-and",
+            "not-and",
+            "or-eq-exists",
+            "or-eq-in",
+            "outer-attr-depth2",
+            "p-deep-nest",
+            "p-ternary-in-exists",
+            "p-ternary-of-ternaries",
+            "p-ternary-under-all",
+            "p-ternary-vs-ternary",
+            "rel-bool-hop",
+            "rel-bool-hop2",
+            "rel-hop-and-root",
+            "rel-hop2-or-exists",
+            "rel-not-bool-hop",
+            "root-bare-bool",
+            "root-or",
+            "ternary-bare",
+            "ternary-cmp",
+            "ternary-negated",
+            "ternary-nested",
+            "ternary-value-first",
+            "triple-negation",
+            "w1-ternary-chain-cond");
+
+    /** True on the leg the asset was generated under; false on the forward-compatibility leg. */
+    static boolean onTheRendererThatWroteTheAsset() {
+        return org.hibernate.Version.getVersionString().startsWith(Corpus.HIBERNATE_MINOR + ".");
+    }
+
     /**
      * The asset is one renderer's rendering of the adapter's Criteria trees, so it records which
-     * one — {@code conformance/README.md}, "When the generator is an input". Unlike SQLAlchemy's
-     * two majors there is only ever one Hibernate on this classpath, so there is no second leg to
-     * assert a divergence list against; what there is instead is this, which fails the moment a
-     * dependency bump makes the recorded bytes somebody else's.
+     * one — {@code conformance/README.md}, "When the generator is an input". CI runs this suite
+     * under two Hibernate majors ({@code build.gradle.kts}, {@code ADAPTER_TEST_ORM}): the one the
+     * asset was rendered under, where every recorded byte is asserted, and the next one, where
+     * {@link #RENDERING_DIFFERS_ON_HIBERNATE_7} is asserted instead. Which leg this is comes from
+     * the build, not the classpath: a resolution that quietly drifted to a third major would
+     * otherwise read as whichever leg it happened to match, and a dependency bump that makes the
+     * recorded bytes somebody else's fails here before it fails on the shapes.
      */
     @Test
     void theAssetDeclaresTheRendererThatWroteIt() throws Exception {
         assertEquals(Corpus.HIBERNATE_MINOR,
                 JSON.readTree(Corpus.goldenFile().toFile()).get("hibernate").asText());
-        assertTrue(org.hibernate.Version.getVersionString().startsWith(Corpus.HIBERNATE_MINOR + "."),
-                () -> "golden/expectations.json was rendered by Hibernate " + Corpus.HIBERNATE_MINOR
-                        + " and this build runs " + org.hibernate.Version.getVersionString()
-                        + ": re-record the asset deliberately rather than editing the header");
+        String running = org.hibernate.Version.getVersionString();
+        String selected = System.getProperty("adapter.test.orm", "baseline");
+        switch (selected) {
+            case "baseline" -> assertTrue(running.startsWith(Corpus.HIBERNATE_MINOR + "."),
+                    () -> "golden/expectations.json was rendered by Hibernate "
+                            + Corpus.HIBERNATE_MINOR + " and the baseline build runs " + running
+                            + ": re-record the asset deliberately rather than editing the header");
+            case "next" -> assertTrue(running.startsWith(NEXT_HIBERNATE_MAJOR + "."),
+                    () -> "the `next` ORM set must resolve Hibernate " + NEXT_HIBERNATE_MAJOR
+                            + ".x, the major after the " + Corpus.HIBERNATE_MINOR
+                            + " the asset declares; this build runs " + running);
+            default -> throw new AssertionError(
+                    "adapter.test.orm must be `baseline` or `next`, got `" + selected + "`");
+        }
+        assertEquals(selected.equals("baseline"), onTheRendererThatWroteTheAsset());
+    }
+
+    /**
+     * The other half of the divergence list. On the leg the asset was NOT generated under, every
+     * action outside the list must still render byte-identically — otherwise the list is stale in
+     * the other direction and that leg is proving nothing about the emitted SQL — and every action
+     * inside it must differ, in the one way the list's javadoc claims.
+     */
+    @Test
+    void divergesFromTheAssetOnExactlyTheShapesTheListNames() {
+        // A name in the list that is not a recorded action can never fire, on either leg. Checked
+        // before the leg split because the baseline is the leg that runs on every push.
+        assertTrue(recordedActions.containsAll(RENDERING_DIFFERS_ON_HIBERNATE_7),
+                () -> "not recorded actions: " + RENDERING_DIFFERS_ON_HIBERNATE_7.stream()
+                        .filter(action -> !recordedActions.contains(action)).toList());
+        assertEquals(new ArrayList<>(new TreeSet<>(RENDERING_DIFFERS_ON_HIBERNATE_7)),
+                RENDERING_DIFFERS_ON_HIBERNATE_7,
+                "the divergence list must stay sorted and free of duplicates");
+        // The reason the list is allowed to be a list rather than a second pinned asset: an entry
+        // on it is a shape whose ROWS the harness proves against check() on both majors, so what
+        // the bytes do not cover, the oracle does. Runs on both legs, since the claim is about the
+        // list rather than about either renderer.
+        Set<String> oracle = Corpus.oracleActions(ACTIONS, Corpus.ADAPTER)
+                .collect(java.util.stream.Collectors.toSet());
+        assertEquals(List.of(), RENDERING_DIFFERS_ON_HIBERNATE_7.stream()
+                .filter(action -> !oracle.contains(action)).toList(),
+                "every shape the renderers disagree on must still be an oracle comparison");
+
+        org.junit.jupiter.api.Assumptions.assumeFalse(onTheRendererThatWroteTheAsset(),
+                "the divergence set is empty on the renderer the asset was generated under");
+
+        List<String> diverging = recordedActions.stream()
+                .filter(action -> !recorded.get(action).equals(expectationOf(emitted.get(action))))
+                .toList();
+        assertEquals(RENDERING_DIFFERS_ON_HIBERNATE_7, diverging,
+                "Hibernate " + org.hibernate.Version.getVersionString() + " diverges from the asset"
+                        + " on a different set of shapes than the list pins");
+
+        // The characterisation, not just the membership: MySQL differs, H2 and PostgreSQL do not.
+        // A listed shape whose H2 or PostgreSQL rendering moved is a second renderer change, and
+        // it has to be triaged into the javadoc above rather than absorbed by the list.
+        for (String action : RENDERING_DIFFERS_ON_HIBERNATE_7) {
+            ObjectNode pinned = recorded.get(action);
+            ObjectNode rendered = expectationOf(emitted.get(action));
+            for (String dialect : List.of("h2", "postgresql")) {
+                assertEquals(pinned.path("joins").path(dialect), rendered.path("joins").path(dialect),
+                        action + " (" + dialect + " joins)");
+                assertEquals(pinned.path("where").path(dialect), rendered.path("where").path(dialect),
+                        action + " (" + dialect + " where)");
+            }
+            assertEquals(pinned.path("joins").path("mysql"), rendered.path("joins").path("mysql"),
+                    action + " (mysql joins)");
+            assertFalse(pinned.path("where").path("mysql").equals(rendered.path("where").path("mysql")),
+                    action + " (mysql where) no longer diverges; shrink the list deliberately");
+        }
     }
 
     /**

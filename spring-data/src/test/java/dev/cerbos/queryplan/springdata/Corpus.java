@@ -384,15 +384,18 @@ final class Corpus {
     static final String NOTE_KEY = "note";
 
     /**
-     * The Hibernate minor this asset's SQL was rendered by, and the one this build compiles and
-     * tests against.
+     * The Hibernate minor this asset's SQL was rendered by, and the one the {@code baseline} ORM
+     * set in {@code build.gradle.kts} compiles and tests against.
      *
      * <p>The adapter emits a Criteria tree; the SQL in the asset is HIBERNATE'S rendering of that
      * tree, so the renderer is an input to the recorded value the same way the SQLAlchemy major is
-     * to that adapter's ({@code conformance/README.md}, "When the generator is an input"). Unlike
-     * SQLAlchemy this build has exactly one Hibernate on the classpath, so there is no second leg
-     * to assert a divergence list against — but a consumer brings their own (the dependency is
-     * {@code compileOnly}), so which one wrote these bytes has to be answerable from the file.
+     * to that adapter's ({@code conformance/README.md}, "When the generator is an input"). A
+     * consumer brings their own (the dependency is {@code compileOnly}), so which one wrote these
+     * bytes has to be answerable from the file — and CI's {@code next} leg runs the same suite
+     * under the next Hibernate major, where {@code SpringDataTranslatorTest} asserts a pinned
+     * divergence list instead of these bytes and {@link #writeGoldenExpectations} refuses to
+     * regenerate. "Next" is derived from this value rather than declared twice: the leg is the
+     * major after the one recorded here, by definition.
      */
     static final String HIBERNATE_MINOR = "6.6";
 
