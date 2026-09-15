@@ -1,5 +1,7 @@
 package dev.cerbos.queryplan.springdata;
 
+import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand;
+
 /**
  * The exception factories, and the refusals more than one collaborator raises by name.
  *
@@ -87,5 +89,21 @@ final class Refusals {
                         + " missing-attribute error (deny) while a NULL-selecting filter"
                         + " would return those rows. Send NULL columns as explicit nulls and"
                         + " use EXPLICIT, or keep this shape out of the policy.");
+    }
+
+    /**
+     * Shape-only description of an operand for error messages: node case plus the attribute
+     * name (VARIABLE) or inner operator (EXPRESSION). Constant VALUES report their type
+     * only — never their content — matching the adapter's no-value-leak discipline.
+     */
+    static String describeOperand(Operand o) {
+        return switch (o.getNodeCase()) {
+            case VARIABLE -> "VARIABLE '" + o.getVariable() + "'";
+            case EXPRESSION -> "EXPRESSION " + o.getExpression().getOperator() + "()";
+            // The protobuf kind, not the converted value: conversion could itself throw on
+            // a malformed VALUE, and this helper must stay safe inside error paths.
+            case VALUE -> "VALUE (" + o.getValue().getKindCase() + ")";
+            default -> o.getNodeCase().toString();
+        };
     }
 }

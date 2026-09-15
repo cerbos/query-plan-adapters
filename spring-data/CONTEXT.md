@@ -12,14 +12,38 @@ Terms used by this adapter's code, tests, and reviews. Architecture vocabulary
   negation (Hibernate 6 collapses `cb.not(cb.not(p))`), and the macro truth
   tables. Inputs consumed in more than one polarity are `Supplier`s, so
   "translate fresh per occurrence" cannot be violated by callers. `cb.not` has
-  exactly one call site: inside this module.
+  exactly one call site: inside this module — `LeafTranslator.definiteEquality`
+  negates through it too, since `tri.not(p)` IS `cb.not(cb.and(p))`.
 - **ComparisonTranslator / Resolved** — the single comparison-translation seam.
   Every binary leaf comparison resolves each operand to a typed `Resolved` case
   (`Constant`, `Field`, `ConstantAdd`, `FieldPlusConstant`, `Arithmetic`,
   `Opaque`) and dispatches on the pair. New operand types (e.g. `timestamp()`)
   are one resolver case + dispatch pairings — see the extension recipe in the
   module Javadoc. Classification is structural; conversion is lazy, because
-  which error fires is part of the pinned interface.
+  which error fires is part of the pinned interface. Two of its pipeline steps
+  are collaborators of their own because their shapes are not operand
+  resolutions: **TernaryTranslator** (the CEL `if` rewrite, on the RAW operands
+  before mirroring) and **SizeTranslator** (`size(x) op N` as LENGTH, COUNT or
+  the strict `size(filter(...))` count). **ArithmeticTranslator** is where the
+  `Arithmetic` case lowers (see *Double space*); it reaches back to the seam for
+  the constant fold and the raw expression comparison so each is spelled once.
+- **PlanWalker** — the one walk over the plan tree. It lowers `and`/`or`/`not`
+  and the bare boolean variable, owns the macro-depth counter (`enterMacro`),
+  and dispatches every other operator by name: the collection macros to
+  **CollectionTranslator**, `in`/`hasIntersection` to **MembershipTranslator**,
+  `if` to TernaryTranslator, the hierarchy operators to HierarchyTranslator, and
+  everything else to ComparisonTranslator. Scope is a walk parameter; polarity is
+  NOT — negation is junction-barriered in TriPredicate and applied around a
+  built predicate, and pushing it down the walk would change the emitted SQL.
+  One instance per Specification evaluation, built by the public facade.
+- **LeafTranslator** — the scalar leaf: one mapped column against one plan
+  constant. The default lowering of each leaf operator, the one place a
+  registered `OperatorFunction` override is consulted (`withOverride`), and the
+  two rules of the explicit-null convention (`isExplicitNull`,
+  `definiteEquality`).
+- **ParsedLambda** — a `lambda(body, var)` operand unpacked once; the three
+  operator families that unpack one keep their own wording for the same three
+  wire-contract violations, so the messages are caller-supplied.
 - **NormalizedBinary** — planner operands arrive in policy source order
   (`1 < R.attr.x` is value-first); this normalizes field-first and mirrors
   directional operators (`lt`↔`gt`). Receiver-sensitive operators
@@ -38,9 +62,15 @@ Terms used by this adapter's code, tests, and reviews. Architecture vocabulary
   correlates the root's `From`. Getting this wrong is silent rather than loud:
   the element entity can carry a collection of the same name, so the query
   still builds and returns the wrong rows.
-- **ChainSubquery** — the one correlated-subquery skeleton. It anchors
-  correlation at the scope that owns the relation and joins through every hop
-  of a multi-hop chain; all collection operators compose over it.
+- **ChainSubquery / ChainSubqueries** — the one correlated-subquery skeleton
+  (the record: the subquery, its tail join, the rebased outer scope) and the
+  module that builds it and every shape over it — EXISTS, the COUNT seed, the
+  tri-state macro score, the strict match counter with its undetermined-poison
+  term, and the leading-hop guards. It anchors correlation at the scope that owns
+  the relation and joins through every hop of a multi-hop chain; all collection
+  operators compose over it, and the SELECT-only guard fires here. A body is
+  handed in as a **SubqueryBodyBuilder**, never a Predicate, because the macro
+  shapes consume it in both polarities.
 - **Differential oracle** — the adversarial conformance suite: hostile policy
   shapes planned against a real PDP, translated, executed on H2, and the id set
   compared row-by-row against `check()` with attributes mirroring the DB rows
@@ -63,7 +93,9 @@ Terms used by this adapter's code, tests, and reviews. Architecture vocabulary
   pass as a declared limitation.
 - **Double space** — all numeric work happens in IEEE doubles, because Cerbos
   attribute numbers are CEL doubles and the wire plan erases `1` vs `1.0`.
-  Constants fold in Java; columns get a real `CAST(... AS DOUBLE)`.
+  Constants fold in Java; columns get a real `CAST(... AS DOUBLE)`. Owned by
+  **ArithmeticTranslator**, including the zero-divisor story (`NULLIF` guard,
+  IEEE-arm rewrite) and the MySQL cast probe (**IeeeDoubleCast**).
 - **Golden expectation** — the SQL this adapter is pinned to emit for one
   corpus action, in `golden/expectations.json`: the root joins and the `WHERE`
   clause on each of the three dialects CI executes, with criteria literals
