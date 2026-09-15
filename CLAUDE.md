@@ -421,8 +421,9 @@ Three kinds of material legitimately live only in a unit test, and they are not 
    ([#414](https://github.com/cerbos/query-plan-adapters/issues/414) is the open port).
    `ElasticsearchQueryPlanAdapterTest` is the worked example: a `KIND 2 — a policy can reach these,
    and the corpus does not carry them yet` banner over the block, and a `Corpus gap.` lead on every
-   test under it. Not every adapter meets that bar yet — spring-data labels at the class rather
-   than per test — so a shape parked there today is not necessarily findable.
+   test under it; `SpringDataQueryPlanAdapterTest` follows the same layout, with all three kinds
+   under their own banner. `conformance/README.md`, "Shapes that live only in a unit test", is the
+   registry of what each adapter parks this way.
 
 Watch for harnesses that hand-project corpus data into a narrower local shape (a principal
 attribute allowlist, a fixed column list). A projection silently drops anything a new action
