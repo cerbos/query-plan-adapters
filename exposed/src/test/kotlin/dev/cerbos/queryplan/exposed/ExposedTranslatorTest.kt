@@ -6,6 +6,7 @@ import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand
 import org.jetbrains.exposed.v1.core.LikeEscapeOp
+import org.jetbrains.exposed.v1.core.Op
 import org.jetbrains.exposed.v1.core.stringParam
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -318,6 +319,23 @@ class ExposedTranslatorTest {
             plannedAt: String = Corpus.PLANNED_AT,
         ): QueryPlanFilter = OfflineRenderer.translate {
             ExposedQueryPlanAdapter.toFilter(Corpus.planFromWireFixture(action, plannedAt), options)
+        }
+
+        /**
+         * How many aliases [action]'s translation allocated.
+         *
+         * The one place in this file that reaches past `ExposedQueryPlanAdapter`, and deliberately:
+         * the count is an internal property of ONE translation, and putting it on
+         * [QueryPlanFilter] so a test could read it would be a test's needs in the published
+         * surface. The steps below are `ExposedQueryPlanAdapter.conditional`'s, in its order, and
+         * the caller asserts that the predicate this produces renders exactly as the entry point's
+         * does — so a translation step added there and missed here fails rather than drifting.
+         */
+        private fun aliasesAllocatedBy(action: String): Pair<Op<Boolean>, Int> = OfflineRenderer.translate {
+            val condition = Corpus.planFromWireFixture(action).filter.condition
+            NullOperandScan.assertTranslatable(condition, OPTIONS)
+            val translation = Translation(OPTIONS)
+            translation.walker.traverse(condition, translation.rootScope()) to translation.aliases.calls
         }
 
         /** The golden entry for [action]: the whole handover, plan to recorded document. */
@@ -758,64 +776,119 @@ class ExposedTranslatorTest {
          * `FROM <other table> cerbos_1` inside an enclosing `cerbos_1` re-binds every correlation
          * under it, and the subquery then answers about the wrong rows.
          *
+         * **The assertion is a count against a count**: the DISTINCT aliases a statement carries
+         * must equal the number of `allocate` CALLS that translation made. An allocator that
+         * regressed to one alias per TABLE would still number densely from 1 and still bind each
+         * name to one table — every weaker check passes, and the inner subquery captures the outer
+         * correlation — but it would ask for three aliases and render two, and only these two
+         * counts disagreeing says so. An alias allocated and then dropped fails it from the other
+         * side. [AliasAllocator.calls] counts invocations rather than the numbering precisely so it
+         * cannot collapse along with it.
+         *
+         * Density is asserted beside it and is a different claim: the numbers being exactly `1..n`
+         * is what makes the recorded SQL a function of how many subqueries a plan has rather than
+         * of how many times something happened to call the allocator, which is what keeps the asset
+         * from churning on an unrelated translator change.
+         *
          * Two weaker-looking facts are deliberately NOT asserted, because neither is a property of
          * the allocator:
          *
          * - **The numbers need not appear in ascending order.** Allocation is in WALK order and the
          *   renderer nests, so a chained macro emits its inner subquery inside the outer's select
          *   list and the text reads `cerbos_3` before `cerbos_2` before `cerbos_1`.
-         * - **One number may be declared several times.** Exposed expression trees are immutable, so
-         *   `TriLogic` shares one node between a positive and a negated occurrence and a ternary
+         * - **One number may be introduced several times.** Exposed expression trees are immutable,
+         *   so `TriLogic` shares one node between a positive and a negated occurrence and a ternary
          *   rewrite renders the same subquery in each arm. Each rendering is a self-contained
-         *   correlated subquery whose alias is scoped to it, which is why the invariant is the
-         *   TABLE the number is bound to rather than how often it appears.
+         *   correlated subquery whose alias is scoped to it, so the same `FROM … cerbos_1` appearing
+         *   twice is one allocation, not two.
          */
         @Test
-        fun `every subquery alias is numbered densely and always names one table`() {
+        fun `every subquery alias rendered is one the allocator handed out`() {
             val offenders = mutableListOf<String>()
             val withAliases = TreeSet<String>()
-            var sharedAcrossOccurrences = 0
-            conditionalRenderings().forEach { (action, dialect, one) ->
-                // H2 folds an unquoted identifier to upper case, so the whole statement is read in
-                // one case rather than every pattern below being written twice.
-                val sql = one.sql.lowercase()
-                val occurrences = ALIAS.findAll(sql).toList()
-                if (occurrences.isEmpty()) return@forEach
-                withAliases.add(action)
+            var nodesRenderedTwice = 0
 
-                val stray = occurrences.map { it.value }.filterNot { NUMBERED_ALIAS.matches(it) }.distinct()
-                if (stray.isNotEmpty()) offenders.add("$action ($dialect): $stray")
-
-                occurrences.groupBy { it.value }.forEach { (name, uses) ->
-                    // A use reads THROUGH the alias (`cerbos_1.a_bool`); anything else introduces
-                    // it, and what it introduces is the identifier just before it.
-                    val tables = uses.filter { sql.getOrNull(it.range.last + 1) != '.' }
-                        .map { sql.take(it.range.first).trimEnd().substringAfterLast(' ') }
-                        .distinct()
-                    if (tables.size != 1) {
-                        offenders.add("$action ($dialect): $name is bound to $tables")
+            conditionalActions().forEach { action ->
+                val (op, allocated) = aliasesAllocatedBy(action)
+                OfflineRenderer.DIALECTS.forEach { dialect ->
+                    val emitted = renderingOf(action, dialect)
+                    // The walk above is a copy of the entry point's steps, so it has to keep
+                    // producing what the entry point produces or the count belongs to some other
+                    // translation than the one the asset records.
+                    assertEquals(emitted.sql, OfflineRenderer.renderOn(dialect, op).sql) {
+                        "$action ($dialect) translates differently through the adapter than through" +
+                            " the alias-counting copy of its steps"
                     }
-                    if (uses.size > tables.size + 1) sharedAcrossOccurrences++
-                }
 
-                val distinct = occurrences.map { it.value }
-                    .filter { NUMBERED_ALIAS.matches(it) }
-                    .map { it.removePrefix(AliasAllocator.PREFIX).toInt() }
-                    .distinct()
-                if (distinct.sorted() != (1..distinct.size).toList()) {
-                    offenders.add("$action ($dialect): aliases are numbered ${distinct.sorted()}")
+                    // H2 folds an unquoted identifier to upper case, so the statement is read in one
+                    // case rather than every pattern below being written twice.
+                    val sql = emitted.sql.lowercase()
+                    val occurrences = ALIAS.findAll(sql).toList()
+                    if (occurrences.isEmpty()) {
+                        if (allocated != 0) offenders.add("$action ($dialect): $allocated allocated, none rendered")
+                        return@forEach
+                    }
+                    withAliases.add(action)
+
+                    val stray = occurrences.map { it.value }.filterNot { NUMBERED_ALIAS.matches(it) }.distinct()
+                    if (stray.isNotEmpty()) offenders.add("$action ($dialect): $stray")
+
+                    // THE assertion. A collapse asks for more aliases than it renders; an alias
+                    // allocated and then dropped renders fewer than it asked for, from the other
+                    // direction.
+                    val distinct = occurrences.map { it.value }.distinct()
+                    if (distinct.size != allocated) {
+                        offenders.add(
+                            "$action ($dialect): $allocated aliases asked for but ${distinct.size}" +
+                                " rendered (${distinct.sorted()})",
+                        )
+                    }
+
+                    // …and they are exactly 1..n, so the recorded SQL is a function of the plan
+                    // rather than of the call count.
+                    val numbers = distinct.filter { NUMBERED_ALIAS.matches(it) }
+                        .map { it.removePrefix(AliasAllocator.PREFIX).toInt() }
+                        .sorted()
+                    if (numbers != (1..numbers.size).toList()) {
+                        offenders.add("$action ($dialect): aliases are numbered $numbers")
+                    }
+
+                    // …and each of them introduces exactly one table, which names the hazard in the
+                    // failure rather than leaving a reader to work it out from two numbers. A use
+                    // reads THROUGH the alias (`cerbos_1.a_bool`); anything else introduces it, and
+                    // what it introduces is the identifier just before it.
+                    occurrences.groupBy { it.value }.forEach { (name, uses) ->
+                        val introductions = uses.filter { sql.getOrNull(it.range.last + 1) != '.' }
+                        val tables = introductions
+                            .map { sql.take(it.range.first).trimEnd().substringAfterLast(' ') }
+                            .distinct()
+                        if (tables.size != 1) offenders.add("$action ($dialect): $name is bound to $tables")
+                        if (introductions.size > 1) nodesRenderedTwice++
+                    }
                 }
             }
             assertEquals(emptyList<String>(), offenders)
 
-            // Anti-vacuity, in three parts: the detector rejects the shapes it is looking for…
+            // Anti-vacuity, in four parts: the alias detector rejects the shapes it looks for…
             assertFalse(NUMBERED_ALIAS.matches("cerbos_outer"))
             assertTrue(NUMBERED_ALIAS.matches("cerbos_12"))
             // …the corpus emits subqueries at all, pinned in both directions…
             assertEquals(ACTIONS_EMITTING_A_SUBQUERY_ALIAS, withAliases.toList())
-            // …and one node really is rendered in more than one place, which is what makes "one
-            // table per number" the invariant rather than "declared once".
-            assertTrue(sharedAcrossOccurrences > 0, "no subquery node is shared, so the rule is untested")
+            // …a node really is rendered in more than one place, so "one number may be introduced
+            // several times" is a fact about this corpus and not a hedge…
+            assertTrue(nodesRenderedTwice > 0, "no subquery node is rendered twice, so that claim is untested")
+            // …and, the one that makes the count comparison bite, the corpus really does enter one
+            // table twice in a single plan. `p-hasintersection-map` reads adversarial_tags through
+            // two independent subqueries, which is exactly the shape a per-table allocator would
+            // collapse into one and the shape AliasAllocator exists for.
+            val (_, allocatedForTwoEntries) = aliasesAllocatedBy("p-hasintersection-map")
+            assertEquals(2, allocatedForTwoEntries)
+            val sql = renderingOf("p-hasintersection-map", OfflineRenderer.POSTGRESQL).sql.lowercase()
+            assertEquals(
+                listOf("adversarial_tags cerbos_1", "adversarial_tags cerbos_2"),
+                Regex("adversarial_tags cerbos_\\d+").findAll(sql).map { it.value }.distinct().sorted().toList(),
+                "the one corpus shape that enters a table twice no longer does",
+            )
         }
 
         /**

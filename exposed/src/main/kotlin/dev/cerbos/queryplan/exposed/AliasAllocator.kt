@@ -15,7 +15,25 @@ import org.jetbrains.exposed.v1.core.alias
 internal class AliasAllocator {
     private var next = 0
 
-    fun <T : Table> allocate(table: T): Alias<T> = table.alias("$PREFIX${++next}")
+    /**
+     * How many times [allocate] has been called: how many subquery instances this translation asked
+     * for an alias, counted INDEPENDENTLY of the numbering.
+     *
+     * The independence is the whole point, and it is why this is a second counter rather than
+     * [next]. The translator unit test asserts this against the number of DISTINCT aliases the
+     * rendered statement carries, and that comparison is what catches the capture bug this class
+     * exists to prevent: an allocator that handed one alias per TABLE rather than per subquery would
+     * still number densely from 1 and still bind each name to one table — every weaker check passes
+     * — and only "asked 3 times, rendered 2" says a subquery lost its own alias. A counter derived
+     * from the numbering would collapse with it and report the two as equal.
+     */
+    var calls: Int = 0
+        private set
+
+    fun <T : Table> allocate(table: T): Alias<T> {
+        calls++
+        return table.alias("$PREFIX${++next}")
+    }
 
     companion object {
         const val PREFIX = "cerbos_"
