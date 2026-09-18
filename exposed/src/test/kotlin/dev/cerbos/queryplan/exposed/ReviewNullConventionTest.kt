@@ -25,6 +25,10 @@ import java.nio.file.Path
  * `NullAttributeRepresentation.EXPLICIT`. Which convention an UNDECLARED member attribute gets is
  * therefore a caller-supplied argument the corpus structurally cannot vary, and it is the argument
  * that decides whether the emitted subquery matches a NULL member against a NULL element.
+ *
+ * KIND 2, and therefore permanent: the convention is a property of the MAPPING and of `Options`,
+ * and `actions.json` classifies every action against one of each per adapter. Nothing here is
+ * waiting on [#414](https://github.com/cerbos/query-plan-adapters/issues/414).
  */
 class ReviewNullConventionTest {
 

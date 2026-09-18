@@ -30,6 +30,12 @@ import org.junit.jupiter.api.assertThrows
  * parsed to the INSTANT it names — offsets normalised away, nanoseconds kept — and the constant
  * has to be bound through the mapped column's OWN column type, so the comparison reads the same
  * conversion the application's insert wrote.
+ *
+ * The cases are not all of one kind and each says which. Most turn on a COLUMN TYPE the corpus's
+ * mapping does not carry — an `OffsetDateTime` column, an `exposed-kotlin-datetime` one, a DAO id
+ * over an instant, a local date-time — and are KIND 2: `actions.json` classifies every action
+ * against one mapping per adapter, so they have no corpus spelling and are permanent. The literal
+ * spellings CEL's own `timestamp()` rejects are KIND 1. The rest replay corpus actions.
  */
 class ComparisonTimestampTest {
 
@@ -113,11 +119,15 @@ class ComparisonTimestampTest {
 
     @Test
     fun `a timestamp() pair is refused when EITHER column does not pin an absolute instant`() {
-        // Corpus gap. CEL: `timestamp(R.attr.a) < timestamp(R.attr.b)` over two mapped columns —
-        // the `timestamp()` spelling of `ColumnTypeGuardTest`'s field-to-field pair, which the
-        // corpus reaches with a constant on one side only. A local date-time, a date and a text
-        // column each carry no zone, so the reading they hold could mean any instant, and the pair
-        // is refused on whichever side the ambiguous column lands.
+        // Corpus gap for the TEXT row. CEL: `timestamp(R.attr.createdBy) < timestamp(R.attr.createdAt)`
+        // — the corpus already maps `createdBy` to a varchar and wraps it in `timestamp()`
+        // (`p-timestamp`), but only ever against a constant, so the PAIR is an action waiting to be
+        // written ([#414](https://github.com/cerbos/query-plan-adapters/issues/414)). The local
+        // date-time and date rows beside it are KIND 2 — the corpus maps no column of either type,
+        // so they have no action to become and stay when the text one is ported.
+        //
+        // All three carry no zone, so the reading they hold could mean any instant, and the pair is
+        // refused on whichever side the ambiguous column lands.
         listOf(
             "a local date-time" to Ambiguous.local,
             "a date" to Ambiguous.day,
@@ -141,8 +151,9 @@ class ComparisonTimestampTest {
 
     @Test
     fun `two instant columns of different representations are refused, naming the session time zone`() {
-        // Corpus gap. CEL: `timestamp(R.attr.createdAt) < timestamp(R.attr.zonedAt)` over a
-        // `timestamp()` column and a `timestampWithTimeZone()` one. Both pin an absolute instant,
+        // KIND 2, permanent: the corpus maps no `timestampWithTimeZone()` column, and a
+        // representation is a property of the MAPPING, so no action can pair two of them. CEL:
+        // `timestamp(R.attr.createdAt) < timestamp(R.attr.zonedAt)`. Both pin an absolute instant,
         // so nothing CEL does is wrong here — the divergence is the store's, which resolves the
         // pairing through the session's time zone.
         val error = assertThrows<UnmappedAttributeException> { translatePair("lt", MixedModules.at, Zoned.at) }
@@ -156,10 +167,11 @@ class ComparisonTimestampTest {
 
     @Test
     fun `two instant columns declared by DIFFERENT datetime modules compare, and select the right rows`() {
-        // Corpus gap (and the case the old `describe`-based check refused for no reason).
-        // `exposed-java-time`'s `timestamp()` and `exposed-kotlin-datetime`'s declare different
-        // column-type CLASSES for one plain instant, so comparing the class names called this a
-        // mismatch — while the two hold exactly the same values and H2 orders them correctly.
+        // KIND 2, permanent, and the case the old `describe`-based check refused for no reason: the
+        // corpus maps no `exposed-kotlin-datetime` column, so only a mapping written here pairs the
+        // two modules. Their `timestamp()`s declare different column-type CLASSES for one plain
+        // instant, so comparing the class names called this a mismatch — while the two hold exactly
+        // the same values and H2 orders them correctly.
         assertEquals(
             listOf("before"),
             idsOfMixedPair("lt"),

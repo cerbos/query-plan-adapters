@@ -152,6 +152,10 @@ class ArithmeticTranslatorTest {
 
         @Test
         fun `every shape putting a division where a constant was expected is REFUSED, by name`() {
+            // Corpus gap for the first three of the four — `R.attr.aNumber / (0.0/0.0) > 0` is
+            // policy-reachable and the corpus carries no action for it. Delete them when it lands
+            // (https://github.com/cerbos/query-plan-adapters/issues/414).
+            //
             // The four ways a non-finite value reaches an operand that is not a fold, none of them
             // in the corpus and none needing a hand-built NON-plan: the inner `div(0, 0)` the
             // planner ships UNFOLDED (`conformance/wire-fixtures/nan-ord-le.json` is the proof),
@@ -163,10 +167,6 @@ class ArithmeticTranslatorTest {
             // All three refusal types extend that, so the weaker assertion also passed for a
             // `MalformedPlanException` from a plan that had stopped being well formed, and the
             // sweep it belonged to never reached a rendered statement to check in the first place.
-            //
-            // CORPUS GAP for the first three — `R.attr.aNumber / (0.0/0.0) > 0` is policy-reachable
-            // and the corpus carries no action for it. Delete them when it lands
-            // (https://github.com/cerbos/query-plan-adapters/issues/414).
             val aNumber = ReviewPlans.variable("request.resource.attr.aNumber")
             val aDouble = ReviewPlans.variable("request.resource.attr.aDouble")
             val zeroOverZero = ReviewPlans.expression("div", ReviewPlans.value(0), ReviewPlans.value(0))
@@ -287,7 +287,7 @@ class ArithmeticTranslatorTest {
 
         @Test
         fun `a non-finite arm meeting a COLUMN is refused rather than folded or bound`() {
-            // CORPUS GAP. `R.attr.aNumber / R.attr.aNumber + R.attr.aDouble > 1.0` is
+            // Corpus gap. `R.attr.aNumber / R.attr.aNumber + R.attr.aDouble > 1.0` is
             // policy-reachable and no corpus action carries it, so the plan is hand-built here.
             // Delete this test when the corpus action lands (cerbos/query-plan-adapters#414).
             //

@@ -229,7 +229,7 @@ class ComparisonSqlShapeTest {
 
     @Test
     fun `a list or map constant against a scalar column is refused, and its elements never leak`() {
-        // CORPUS GAP. `R.attr.tags == ["a", "b"]` is policy-reachable and the corpus carries no
+        // Corpus gap. `R.attr.tags == ["a", "b"]` is policy-reachable and the corpus carries no
         // action for it: `map-eq-list` reaches the refusal through a map() projection instead, so
         // this exact shape is pinned in one adapter and asked of none of the others. Delete this
         // test when the corpus action lands (cerbos/query-plan-adapters#414).

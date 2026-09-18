@@ -30,6 +30,13 @@ import org.testcontainers.mysql.MySQLContainer
  *
  * It now refuses. [ColumnTypeGuardTest] is the whole rule, across every operator and both operand
  * orders; what stays here is the store evidence that made the rule necessary.
+ *
+ * KIND 3 — a policy can reach these, and the corpus does not carry them yet. The corpus compares
+ * every attribute against a value of its own type, so no action discriminates any of it; each case
+ * names the CEL that reaches it and opens with *Corpus gap.* Delete them when the actions land
+ * ([#414](https://github.com/cerbos/query-plan-adapters/issues/414)) — the MySQL leg included,
+ * because an oracle-compared action on the MySQL store says the same thing and says it of every
+ * adapter.
  */
 class ReviewOperandTypeTest {
 

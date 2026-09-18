@@ -25,15 +25,28 @@ import org.junit.jupiter.api.assertThrows
  * raises a no-overload error for every one of them, which DENIES, so every match is a row the PDP
  * refuses.
  *
- * KIND 3 — a policy can reach these, and the corpus does not carry them yet. Every attribute the
- * corpus compares with a string is already a text column and every one it counts is already a
- * string, so no corpus action discriminates any of this. Each case below names the CEL that
- * reaches it; the plans are hand-built because there is no fixture to read. Delete these when the
- * corpus actions land (https://github.com/cerbos/query-plan-adapters/issues/414).
- * `ReviewPlannerShapeTest` records that the pinned PDP really does ship the
+ * The cases below are NOT all of one kind, and the banner over each block says which. Most are
+ * KIND 3 corpus gaps and are deleted when their action lands; a few are KIND 2 — the column type is
+ * a caller-supplied MAPPING, and `actions.json` classifies every action against ONE mapping per
+ * adapter, so those have no corpus spelling and are permanent. Deleting a KIND 2 case on the KIND 3
+ * trigger would remove coverage the corpus can never supply. Two more are neither: they are the
+ * CONTROLS for the guard, over shapes the corpus already carries.
+ *
+ * Every case names the CEL that reaches it; the plans are hand-built because there is no fixture to
+ * read. `ReviewPlannerShapeTest` records that the pinned PDP really does ship the
  * `R.attr.aString == P.attr.level` shape rather than folding it away.
  */
 class ColumnTypeGuardTest {
+
+    // ============================================================================================
+    // KIND 3 — a policy can reach these, and the corpus does not carry them yet
+    //
+    // Every attribute the corpus compares with a string is already a text column and every one it
+    // counts is already a string, so no corpus action discriminates any of this. Every test here
+    // opens with `Corpus gap.`, is tracked by cerbos/query-plan-adapters#414, and is deleted when
+    // its action lands — EXCEPT the two named `the CONTROL for …`, which are the guard's cost over
+    // shapes the corpus already carries and stay behind when the refusals are ported.
+    // ============================================================================================
 
     // -- a string match needs a text column, on whichever side the column lands ------------------
 
@@ -136,9 +149,9 @@ class ColumnTypeGuardTest {
     }
 
     @Test
-    fun `the text-column forms of every one of those still translate`() {
-        // Corpus gap (the control for it). The guard must cost nothing a text column can do, which is what every
-        // corpus string-match and size() action already is.
+    fun `the CONTROL for those refusals - the text-column forms of every one of them still translate`() {
+        // NOT a corpus gap: this is the guard's cost, and what every corpus string-match and size()
+        // action already is. It stays when the refusals above are ported.
         listOf(
             ReviewPlans.expression(
                 "contains",
@@ -260,46 +273,27 @@ class ColumnTypeGuardTest {
     }
 
     @Test
-    fun `a null element cannot suppress the refusal a column with no CEL reading earns`() {
-        // Corpus gap. CEL: `!(request.resource.id in P.attr.allowedIds)` for a principal whose
-        // `allowedIds` holds one real id and a null. A null inside a principal list is legal data
-        // the corpus itself carries, and the DEFAULT null convention admits it — the pre-walk scan
-        // only refuses a null-carrying list under OMITTED.
+    fun `a null element cannot suppress the refusal a temporal column earns`() {
+        // Corpus gap. CEL: `!(R.attr.createdAt in P.attr.allowedStamps)` for a principal whose list
+        // holds one instant string and a null. `createdAt` is already a temporal column in the
+        // corpus's own mapping, so this is a shape a corpus action could reach today; a null inside
+        // a principal list is legal data the corpus itself carries (`in-null-elem-mixed`), and the
+        // DEFAULT null convention admits it — the pre-walk scan only refuses a null-carrying list
+        // under OMITTED.
         //
-        // THE OVER-GRANT. While a mismatched element was dropped rather than refused, the drop ran
-        // for every column kind — including the ones `familyOf` reads as unrecognised, where
-        // `accepts` is false for EVERY value and the adapter has no CEL reading at all. A
-        // `UUIDTable` id is `EntityIDColumnType(UUIDColumnType)`, so it unwraps to exactly that
-        // bucket: the id element was dropped, the null survived alone, `id IS NULL` was emitted,
-        // and `NOT (id IS NULL)` handed back every row — including the one whose id IS in the list
-        // and whose `check()` therefore denies it.
-        //
-        // Both polarities, both a temporal column and a UUID DAO key, and the element-column site
-        // as well as the scalar one — all three read the same `accepts`.
-        listOf(
-            UUID_MAPPING to ReviewPlans.expression(
-                "in",
-                ReviewPlans.variable("request.resource.id"),
-                ReviewPlans.value(listOf("6d1f2c4e-0000-4000-8000-000000000000", null)),
-            ),
-            MAPPING to ReviewPlans.expression(
+        // THE OVER-GRANT, in the one column kind the corpus already maps. While a mismatched
+        // element was dropped rather than refused, the drop ran for every column kind — including
+        // the ones `familyOf` reads as unrecognised, where `accepts` is false for EVERY value and
+        // the adapter has no CEL reading at all. The instant string was dropped, the null survived
+        // alone, `created_at IS NULL` was emitted, and `NOT (…)` handed back every row.
+        assertRefusesNullCarryingList(
+            MAPPING,
+            ReviewPlans.expression(
                 "in",
                 ReviewPlans.variable("request.resource.attr.createdAt"),
                 ReviewPlans.value(listOf("2024-01-01T00:00:00Z", null)),
             ),
-            MAPPING to ReviewPlans.expression(
-                "hasIntersection",
-                ReviewPlans.variable("request.resource.attr.stamps"),
-                ReviewPlans.value(listOf("2024-01-01T00:00:00Z", null)),
-            ),
-        ).forEach { (mapping, condition) ->
-            listOf(condition, ReviewPlans.expression("not", condition)).forEach { polarity ->
-                val error = assertThrows<UnmappedAttributeException>(polarity.toString()) {
-                    translateWith(mapping, polarity)
-                }
-                assertTrue(error.message!!.contains("against a String constant"), error.message)
-            }
-        }
+        )
     }
 
     @Test
@@ -329,26 +323,11 @@ class ColumnTypeGuardTest {
     }
 
     @Test
-    fun `a member column and an element column of different kinds are refused`() {
-        // Corpus gap. CEL: `R.attr.aNumber in R.attr.tagNames` — the `in-var-var` shape with the two sides
-        // mapped onto columns of different types, which is a mapping the corpus cannot vary.
-        val error = assertThrows<UnmappedAttributeException> {
-            translate(
-                ReviewPlans.expression(
-                    "in",
-                    ReviewPlans.variable("request.resource.attr.aNumber"),
-                    ReviewPlans.variable("request.resource.attr.tagNames"),
-                ),
-            )
-        }
-        assertTrue(error.message!!.contains("which map to a IntegerColumnType and a VarCharColumnType"), error.message)
-    }
-
-    @Test
-    fun `numeric with numeric keeps translating, including a fractional constant`() {
-        // Corpus gap (the control for it). The one shape here the corpus DOES carry (`double-threshold`, `p-double-frac`): an integer
-        // column against a fractional double is numeric-with-numeric, and the double cast that
-        // keeps it in CEL's arithmetic is the whole point of it still being translatable.
+    fun `the CONTROL for those - numeric with numeric keeps translating, fractional constant and all`() {
+        // NOT a corpus gap: this is the one shape here the corpus DOES carry (`double-threshold`,
+        // `p-double-frac`). An integer column against a fractional double is numeric-with-numeric,
+        // and the double cast that keeps it in CEL's arithmetic is the whole point of it still
+        // being translatable.
         val op = translate(
             ReviewPlans.expression(
                 "ge",
@@ -367,53 +346,6 @@ class ColumnTypeGuardTest {
     }
 
     // -- what the DECLARED column is, when the expression is not the column ----------------------
-
-    @Test
-    fun `an EntityID column is read through its id column, so a text key still matches`() {
-        // Corpus gap. `request.resource.id` maps to a DAO id column in every real application, and the corpus's
-        // `id-eq-const`, `id-concat` and hierarchy actions all compare it with strings. Reading the
-        // WRAPPER type would classify a varchar key as unrecognised and refuse all of them.
-        translate(
-            ReviewPlans.expression(
-                "eq",
-                ReviewPlans.variable("request.resource.id"),
-                ReviewPlans.value("doc-1"),
-            ),
-        )
-        val error = assertThrows<UnmappedAttributeException> {
-            translate(
-                ReviewPlans.expression(
-                    "eq",
-                    ReviewPlans.variable("request.resource.id"),
-                    ReviewPlans.value(1),
-                ),
-            )
-        }
-        assertTrue(error.message!!.contains("maps to a VarCharColumnType column"), error.message)
-    }
-
-    @Test
-    fun `a column reached through a to-one hop is checked by its DECLARED type`() {
-        // Corpus gap. `Resolution.Scalar.expression` is a correlated scalar subquery there, and `column` is
-        // still the declared column — which is what the guard reads.
-        translate(
-            ReviewPlans.expression(
-                "contains",
-                ReviewPlans.variable("request.resource.attr.parent.aString"),
-                ReviewPlans.value("x"),
-            ),
-        )
-        val error = assertThrows<UnmappedAttributeException> {
-            translate(
-                ReviewPlans.expression(
-                    "contains",
-                    ReviewPlans.variable("request.resource.attr.parent.aNumber"),
-                    ReviewPlans.value("x"),
-                ),
-            )
-        }
-        assertTrue(error.message!!.contains("requires a text column"), error.message)
-    }
 
     @Test
     fun `a column type the adapter has no CEL reading for fails closed`() {
@@ -544,6 +476,124 @@ class ColumnTypeGuardTest {
             )
         }
         assertEquals("add comparison type mismatch: String vs Long", error.message)
+    }
+
+    // ============================================================================================
+    // KIND 2 — a caller-supplied mapping the corpus structurally cannot vary
+    //
+    // `actions.json` classifies every action against ONE mapping per adapter, and the column a
+    // reference resolves to IS the mapping — so a DAO key, a to-one hop's declared type, a member
+    // column and an element column of different kinds, and an element column the adapter has no
+    // CEL reading for have no corpus spelling however many actions are added. PERMANENT: these do
+    // not go when #414 lands, and deleting them on that trigger would remove coverage the corpus
+    // can never supply.
+    // ============================================================================================
+
+    @Test
+    fun `an EntityID column is read through its id column, so a text key still matches`() {
+        // `request.resource.id` maps to a DAO id column in every real application, and the corpus's
+        // `id-eq-const`, `id-concat` and hierarchy actions all compare it with strings. Reading the
+        // WRAPPER type would classify a varchar key as unrecognised and refuse all of them — which
+        // only a mapping that HAS the wrapper can show, and the corpus's maps a bare varchar.
+        translate(
+            ReviewPlans.expression(
+                "eq",
+                ReviewPlans.variable("request.resource.id"),
+                ReviewPlans.value("doc-1"),
+            ),
+        )
+        val error = assertThrows<UnmappedAttributeException> {
+            translate(
+                ReviewPlans.expression(
+                    "eq",
+                    ReviewPlans.variable("request.resource.id"),
+                    ReviewPlans.value(1),
+                ),
+            )
+        }
+        assertTrue(error.message!!.contains("maps to a VarCharColumnType column"), error.message)
+    }
+
+    @Test
+    fun `a column reached through a to-one hop is checked by its DECLARED type`() {
+        // `Resolution.Scalar.expression` is a correlated scalar subquery there, and `column` is
+        // still the declared column — which is what the guard reads. The corpus maps every hop
+        // member onto a column of the type its actions compare it with, so only a mapping written
+        // here puts a numeric column where a string match will land.
+        translate(
+            ReviewPlans.expression(
+                "contains",
+                ReviewPlans.variable("request.resource.attr.parent.aString"),
+                ReviewPlans.value("x"),
+            ),
+        )
+        val error = assertThrows<UnmappedAttributeException> {
+            translate(
+                ReviewPlans.expression(
+                    "contains",
+                    ReviewPlans.variable("request.resource.attr.parent.aNumber"),
+                    ReviewPlans.value("x"),
+                ),
+            )
+        }
+        assertTrue(error.message!!.contains("requires a text column"), error.message)
+    }
+
+    @Test
+    fun `a member column and an element column of different kinds are refused`() {
+        // CEL: `R.attr.aNumber in R.attr.tagNames` — the `in-var-var` shape with the two sides
+        // mapped onto columns of different types, which is a mapping the corpus cannot vary.
+        val error = assertThrows<UnmappedAttributeException> {
+            translate(
+                ReviewPlans.expression(
+                    "in",
+                    ReviewPlans.variable("request.resource.attr.aNumber"),
+                    ReviewPlans.variable("request.resource.attr.tagNames"),
+                ),
+            )
+        }
+        assertTrue(error.message!!.contains("which map to a IntegerColumnType and a VarCharColumnType"), error.message)
+    }
+
+    @Test
+    fun `a null element cannot rescue a DAO key or an element column with no CEL reading`() {
+        // The other two columns the null-suppression over-grant reaches, and the two the corpus
+        // cannot map: a `UUIDTable` id — `EntityIDColumnType(UUIDColumnType)`, which unwraps into
+        // the unrecognised bucket — and a temporal ELEMENT column, which asks `matchesAnyOf` the
+        // same question `scalarIsAnyOf` is asked above. Whatever #414 ports, the corpus maps
+        // `request.resource.id` to a varchar and `tagNames`'s element to one, so neither half of
+        // this can become an action.
+        assertRefusesNullCarryingList(
+            UUID_MAPPING,
+            ReviewPlans.expression(
+                "in",
+                ReviewPlans.variable("request.resource.id"),
+                ReviewPlans.value(listOf("6d1f2c4e-0000-4000-8000-000000000000", null)),
+            ),
+        )
+        assertRefusesNullCarryingList(
+            MAPPING,
+            ReviewPlans.expression(
+                "hasIntersection",
+                ReviewPlans.variable("request.resource.attr.stamps"),
+                ReviewPlans.value(listOf("2024-01-01T00:00:00Z", null)),
+            ),
+        )
+    }
+
+    /**
+     * [condition] is refused under BOTH polarities, on the constant's type.
+     *
+     * Both, because the over-grant this pins is a negation's: the suppressed refusal emitted a lone
+     * `IS NULL`, which is merely wrong unnegated and hands back every row under `not(…)`.
+     */
+    private fun assertRefusesNullCarryingList(mapping: AttributeMappings, condition: Operand) {
+        listOf(condition, ReviewPlans.expression("not", condition)).forEach { polarity ->
+            val error = assertThrows<UnmappedAttributeException>(polarity.toString()) {
+                translateWith(mapping, polarity)
+            }
+            assertTrue(error.message!!.contains("against a String constant"), error.message)
+        }
     }
 
     companion object {

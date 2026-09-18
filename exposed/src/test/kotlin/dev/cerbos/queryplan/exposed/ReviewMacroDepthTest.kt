@@ -15,8 +15,11 @@ import org.junit.jupiter.api.assertThrows
  * multiplies the correlated subqueries the filter carries, so the bound is a cost guard, and a plan
  * nested past it is refused rather than emitted."
  *
- * `maxMacroDepth` is a caller-supplied argument the corpus structurally cannot vary, so nothing in
- * `conformance/` asks what it bounds.
+ * KIND 2 — a caller-supplied argument the corpus structurally cannot vary, and therefore permanent.
+ * `actions.json` classifies every action against ONE `Options` per adapter, and `maxMacroDepth` is
+ * an `Options` value, so nothing in `conformance/` asks what it bounds however many actions are
+ * added. Nothing here is waiting on
+ * [#414](https://github.com/cerbos/query-plan-adapters/issues/414).
  */
 class ReviewMacroDepthTest {
 
