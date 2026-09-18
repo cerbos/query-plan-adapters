@@ -96,10 +96,7 @@ internal class MembershipTranslator(private val translation: Translation) {
             if (translation.leaf.isExplicitNull(target)) return Op.FALSE
             return TriLogic.baseUnlessUnknown(Op.FALSE, IsNullOp(target.expression))
         }
-        // The same drop [matchable] applies to an element column: an element of a type this column
-        // cannot hold is a definite FALSE in CEL, so it contributes nothing to the disjunction.
-        val matchable = matchable(target.variable, target.column, values)
-        return TriLogic.or(matchable.map { translation.leaf.applyLeaf("eq", target, it) })
+        return TriLogic.or(values.map { translation.leaf.applyLeaf("eq", target, it) })
     }
 
     /**
@@ -246,37 +243,30 @@ internal class MembershipTranslator(private val translation: Translation) {
     /**
      * The subquery body of a membership test: the element column against each constant.
      *
-     * Each element is type-checked against the column for the reason
-     * [ScalarRefusals.constantTypeMismatch] gives — a list of numbers tested against a text element
-     * column is a definite FALSE in CEL and an almost-total match on MySQL. A null element is inert
-     * to the check: it renders as `IS NULL`, which coerces nothing.
+     * EVERY element is type-checked against the column, and one mismatch refuses the WHOLE
+     * membership, for the reason [ScalarRefusals.constantTypeMismatch] gives — a number tested
+     * against a text element column is a definite FALSE in CEL and an almost-total match on MySQL.
+     * A null element is inert to the check: it renders as `IS NULL`, which coerces nothing.
+     *
+     * Dropping a mismatched element instead — on the argument that CEL answers that one equality
+     * `false`, so `x OR false` is `x` under either polarity — was tried and reverted. The argument
+     * only holds where the adapter KNOWS what CEL would answer, and it does not for the column
+     * kinds [ScalarColumnTypes.familyOf] reads as unrecognised: there `accepts` is false for
+     * EVERY value, so `["<uuid>", null]` against a `UUIDTable` id kept the null alone, emitted
+     * `IS NULL` by itself, and `NOT (id IS NULL)` handed back every row the PDP denies.
      */
     private fun matchesAnyOf(reference: String, element: Column<*>, values: List<Any?>): Op<Boolean> = TriLogic.or(
-        matchable(reference, element, values).map { value ->
-            if (value == null) IsNullOp(element) else EqOp(element, Params.of(value))
+        values.map { value ->
+            if (value == null) {
+                IsNullOp(element)
+            } else {
+                if (!ScalarColumnTypes.accepts(element, value)) {
+                    throw ScalarRefusals.constantTypeMismatch("in", reference, element, value)
+                }
+                EqOp(element, Params.of(value))
+            }
         },
     )
-
-    /**
-     * [values] with the elements the column cannot hold DROPPED, or a refusal when that leaves
-     * nothing.
-     *
-     * A heterogeneous list is legal principal data — `P.attr.groups` can be `["a", 1]` — and CEL
-     * evaluates membership as the disjunction of the element equalities, where `stringColumn == 1`
-     * is a definite FALSE that contributes nothing. So dropping it is EXACT under both polarities:
-     * the term it would have added is false, and `x OR false` is `x` whichever way the enclosing
-     * negation reads it. A null element is never dropped — it is not a type mismatch, it renders
-     * `IS NULL`, and coerces nothing.
-     *
-     * Dropping EVERY element is different, and refuses: a list whose values are all of the wrong
-     * type is the mapping error [ScalarRefusals.constantTypeMismatch] exists to name, and folding
-     * it to a silent FALSE would hide exactly that.
-     */
-    private fun matchable(reference: String, element: Column<*>, values: List<Any?>): List<Any?> {
-        val kept = values.filter { it == null || ScalarColumnTypes.accepts(element, it) }
-        if (kept.isNotEmpty()) return kept
-        throw ScalarRefusals.constantTypeMismatch("in", reference, element, values.first()!!)
-    }
 
     /**
      * A plan constant as the list of elements the operator ranges over.

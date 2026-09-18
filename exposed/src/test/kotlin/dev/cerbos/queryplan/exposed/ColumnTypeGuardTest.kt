@@ -6,6 +6,7 @@ import org.jetbrains.exposed.v1.core.Op
 import org.jetbrains.exposed.v1.core.Table
 import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.core.dao.id.IdTable
+import org.jetbrains.exposed.v1.core.dao.id.java.UUIDTable
 import org.jetbrains.exposed.v1.javatime.timestamp
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -220,28 +221,31 @@ class ColumnTypeGuardTest {
     }
 
     @Test
-    fun `every element of an in-list is checked, and a null element stays legal`() {
+    fun `every element of an in-list is checked, and one mismatch refuses the whole membership`() {
         // Corpus gap. `hasIntersection(R.attr.tagNames, P.attr.groups)` for a principal whose
         // groups are `["a", 1]` — legal principal data, and the list shape a principal attribute
         // really lands in.
         //
-        // The mismatched element is DROPPED rather than refusing the whole membership, which is
-        // exact: CEL evaluates membership as the disjunction of the element equalities, and
-        // `textColumn == 1` is a definite FALSE contributing nothing, so `x OR false` is `x` under
-        // either polarity. The emitted filter therefore carries ONE bound argument, the survivor.
-        val mixed = render(
-            translate(
-                ReviewPlans.expression(
-                    "hasIntersection",
-                    ReviewPlans.variable("request.resource.attr.tagNames"),
-                    ReviewPlans.value(listOf("a", 1)),
-                ),
-            ),
-        )
-        assertEquals(1, Regex("\\?").findAll(mixed).count(), mixed)
+        // The mismatched element refuses the WHOLE membership rather than being dropped from the
+        // disjunction. Dropping it was tried, on the argument that CEL answers `textColumn == 1`
+        // with a definite FALSE and `x OR false` is `x` under either polarity — and the argument
+        // is only available where the adapter KNOWS CEL's answer, which the test below is the
+        // over-grant for. Refusing needs no such knowledge.
+        listOf(listOf("a", 1), listOf(1, "a"), listOf(1, 2)).forEach { groups ->
+            val error = assertThrows<UnmappedAttributeException>(groups.toString()) {
+                translate(
+                    ReviewPlans.expression(
+                        "hasIntersection",
+                        ReviewPlans.variable("request.resource.attr.tagNames"),
+                        ReviewPlans.value(groups),
+                    ),
+                )
+            }
+            assertTrue(error.message!!.contains("against a Long constant"), error.message)
+        }
 
-        // A null element is never dropped: it is not a type mismatch, it renders IS NULL, and it
-        // coerces nothing.
+        // A null element is still never refused: it is not a type mismatch, it renders IS NULL,
+        // and it coerces nothing.
         val withNull = render(
             translate(
                 ReviewPlans.expression(
@@ -252,18 +256,50 @@ class ColumnTypeGuardTest {
             ),
         )
         assertTrue(withNull.contains("IS NULL"), withNull)
+        assertEquals(1, Regex("\\?").findAll(withNull).count(), withNull)
+    }
 
-        // Dropping EVERY element is the mapping error the refusal exists to name, so that refuses.
-        val error = assertThrows<UnmappedAttributeException> {
-            translate(
-                ReviewPlans.expression(
-                    "hasIntersection",
-                    ReviewPlans.variable("request.resource.attr.tagNames"),
-                    ReviewPlans.value(listOf(1, 2)),
-                ),
-            )
+    @Test
+    fun `a null element cannot suppress the refusal a column with no CEL reading earns`() {
+        // Corpus gap. CEL: `!(request.resource.id in P.attr.allowedIds)` for a principal whose
+        // `allowedIds` holds one real id and a null. A null inside a principal list is legal data
+        // the corpus itself carries, and the DEFAULT null convention admits it — the pre-walk scan
+        // only refuses a null-carrying list under OMITTED.
+        //
+        // THE OVER-GRANT. While a mismatched element was dropped rather than refused, the drop ran
+        // for every column kind — including the ones `familyOf` reads as unrecognised, where
+        // `accepts` is false for EVERY value and the adapter has no CEL reading at all. A
+        // `UUIDTable` id is `EntityIDColumnType(UUIDColumnType)`, so it unwraps to exactly that
+        // bucket: the id element was dropped, the null survived alone, `id IS NULL` was emitted,
+        // and `NOT (id IS NULL)` handed back every row — including the one whose id IS in the list
+        // and whose `check()` therefore denies it.
+        //
+        // Both polarities, both a temporal column and a UUID DAO key, and the element-column site
+        // as well as the scalar one — all three read the same `accepts`.
+        listOf(
+            UUID_MAPPING to ReviewPlans.expression(
+                "in",
+                ReviewPlans.variable("request.resource.id"),
+                ReviewPlans.value(listOf("6d1f2c4e-0000-4000-8000-000000000000", null)),
+            ),
+            MAPPING to ReviewPlans.expression(
+                "in",
+                ReviewPlans.variable("request.resource.attr.createdAt"),
+                ReviewPlans.value(listOf("2024-01-01T00:00:00Z", null)),
+            ),
+            MAPPING to ReviewPlans.expression(
+                "hasIntersection",
+                ReviewPlans.variable("request.resource.attr.stamps"),
+                ReviewPlans.value(listOf("2024-01-01T00:00:00Z", null)),
+            ),
+        ).forEach { (mapping, condition) ->
+            listOf(condition, ReviewPlans.expression("not", condition)).forEach { polarity ->
+                val error = assertThrows<UnmappedAttributeException>(polarity.toString()) {
+                    translateWith(mapping, polarity)
+                }
+                assertTrue(error.message!!.contains("against a String constant"), error.message)
+            }
         }
-        assertTrue(error.message!!.contains("against a Long constant"), error.message)
     }
 
     @Test
@@ -534,6 +570,19 @@ class ColumnTypeGuardTest {
             val name = varchar("name", 64).nullable()
         }
 
+        /** An ELEMENT column in the unrecognised bucket, so `matchesAnyOf` is asked the same question. */
+        object TypedStamps : Table("column_type_stamps") {
+            val resourceId = varchar("resource_id", 32)
+            val at = timestamp("at").nullable()
+        }
+
+        /**
+         * A DAO key in the unrecognised bucket. `UUIDTable.id` is
+         * `EntityIDColumnType(UUIDColumnType)`, which `ScalarColumnTypes.unwrap` looks through to a
+         * type `kindOf` answers OTHER for — the shape the null-suppression over-grant was found on.
+         */
+        object UuidDocs : UUIDTable("column_type_uuid_docs")
+
         val MAPPING: AttributeMappings = cerbosMapping {
             "request.resource.id" to TypedDocs.id
             "request.resource.attr.aString" to TypedDocs.aString
@@ -549,10 +598,18 @@ class ColumnTypeGuardTest {
                 }
             "request.resource.attr.tagNames" to
                 many(TypedTags, from = TypedDocs.id, to = TypedTags.resourceId, element = TypedTags.name)
+            "request.resource.attr.stamps" to
+                many(TypedStamps, from = TypedDocs.id, to = TypedStamps.resourceId, element = TypedStamps.at)
         }
 
-        fun translate(condition: Operand): Op<Boolean> = OfflineRenderer.translate {
-            ExposedQueryPlanAdapter.toFilter(ReviewPlans.conditional(condition), Options.of(MAPPING)).toOp()
+        val UUID_MAPPING: AttributeMappings = cerbosMapping {
+            "request.resource.id" to UuidDocs.id
+        }
+
+        fun translate(condition: Operand): Op<Boolean> = translateWith(MAPPING, condition)
+
+        fun translateWith(mapping: AttributeMappings, condition: Operand): Op<Boolean> = OfflineRenderer.translate {
+            ExposedQueryPlanAdapter.toFilter(ReviewPlans.conditional(condition), Options.of(mapping)).toOp()
         }
 
         fun render(op: Op<Boolean>): String = OfflineRenderer.renderOn(OfflineRenderer.H2, op).sql
