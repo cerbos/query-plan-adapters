@@ -54,9 +54,10 @@ You'll also need:
   JDBC `Query`. R2DBC is a follow-up module behind that one seam, not a rewrite. DAO is JDBC-only
   regardless.
 - **`exposed-java-time` or `exposed-kotlin-datetime`**, but only if your policies compare
-  timestamps, and only whichever one already declares your temporal columns. The adapter itself
-  references neither: it matches on `InstantColumnType` and `OffsetDateTimeColumnType`, the abstract
-  bases that live in `exposed-core` and that both modules' column types extend. See
+  timestamps, and only whichever one already declares your temporal columns. The adapter declares
+  **neither**, not even at `compileOnly`: it matches on `InstantColumnType` and
+  `OffsetDateTimeColumnType`, the abstract bases that live in `exposed-core` and that both modules'
+  column types extend, so it compiles against neither and loads without either. See
   [Timestamp columns](#timestamp-columns).
 
 ### Pin `protobuf-java` to the SDK's gencode version
@@ -171,10 +172,23 @@ val options = Options.of(mapping)
     .withMaxMacroDepth(8)
 ```
 
-`maxMacroDepth` bounds how deeply collection macros (`exists`, `all`, `exists_one`, …) may nest, and
-defaults to 5. Each level multiplies the correlated subqueries the filter carries, so the bound is a
-cost guard: a plan nested past it is refused rather than emitted. `Options` is a class with withers
-rather than a positional constructor so a setting can be added later without breaking your call.
+`maxMacroDepth` bounds how deeply collection macros (`exists`, `all`, `exists_one`, …) may nest
+before a plan is refused rather than translated, and defaults to 5. It counts **macro levels of
+both kinds the walk distinguishes**, because both multiply:
+
+- A macro over a **mapped relation** costs a level because it emits a correlated subquery, and a
+  nested one emits that subquery once per enclosing level.
+- A macro over a **literal list** emits no subquery at all — it substitutes each element into the
+  lambda body and walks the resulting `or`/`and` chain — but it duplicates everything under it once
+  per element, so it costs a level too. Two three-element folds over one relation macro emit nine
+  correlated subqueries; an eleven-element pair emits 121. The bound is on the size of the emitted
+  expression, not only on its subquery count.
+
+It bounds nothing else. A relation **chain** is one level however many hops it has, and so is a
+`size()`, a membership test or a hierarchy relation over one.
+
+`Options` is a class with withers rather than a positional constructor so a setting can be added
+later without breaking your call.
 
 ## Mapping attributes
 
@@ -223,6 +237,55 @@ val mapping = cerbosMapping {
 - **A relation is validated where it is built.** `to` must be a column of `table`, `element` must be
   a column of `table`, and every nested entry must read `table` — each is an
   `IllegalArgumentException` at mapping-construction time, not a wrong join at query time.
+- **A top-level relation's `from` is the one key nothing can check.** The adapter is never told
+  which table you select from: a mapping names columns, and the root scope reads them bare. So
+  `from` naming a column of some other table is accepted at construction and fails at *execution*,
+  exactly the way [an aliased root table](#aliased-root-tables) does — a rejected statement, never a
+  wrong row set. A nested relation's `from` *is* checked, because the enclosing relation declares
+  its table.
+- **`one(...)` is a promise the database has to keep.** The mapping declares the cardinality; only a
+  unique index on `to` enforces it. Without one the scalar subquery can return several rows, which
+  PostgreSQL, MySQL and H2 raise on and **SQLite silently answers from the first row** — so a schema
+  that passes your SQLite tests can fail, or quietly answer from an arbitrary row, in production.
+
+### The operand's type has to match the column's
+
+> [!IMPORTANT]
+> A comparison is translated only when the mapped column and the thing it is compared with are in
+> the **same CEL value family** — text, numeric or boolean. A mismatch raises
+> `UnmappedAttributeException` before any SQL exists.
+
+| What is compared | Requirement |
+| --- | --- |
+| A mapped column against a plan constant | Same family. `R.attr.aString == 0` is refused. A `null` constant is exempt: it renders as `IS NULL` / `IS NOT NULL`, which coerces nothing |
+| Two mapped columns | Same family. `R.attr.aString == R.attr.aNumber` is refused |
+| A member column against a relation's `element` column, and every element of an `in` list | Same family, element by element. A `null` element is exempt for the same reason |
+| `contains`, `startsWith`, `endsWith` — haystack **and** column needle | A **text** column, on whichever side the column lands |
+| `size()` over a string attribute, and every hierarchy operator's path column | A **text** column. `size()` over a *relation* counts rows and needs none |
+| A column type the adapter has no CEL reading for — temporal, binary, array, enum, a custom `ColumnType` | Refused against any constant. Two columns of **one** such type still compare: there is nothing for a store to coerce |
+
+A DAO id column and a `transform`ed column are read through the type underneath, so a `varchar`
+primary key is text; a column reached through a to-one hop is checked by its **declared** type, not
+by the subquery that reads it.
+
+**Why this is a refusal and not a `FALSE`.** `R.attr.aString == P.attr.level` is legal CEL and
+arrives as `eq(variable, value)` with nothing in it naming a type. CEL answers it from the *values*:
+equality is a definite `false`, and every ordering raises a no-overload error, which denies. Either
+way `check()` refuses the row. SQL has to coerce one side instead, and **MySQL coerces the string** —
+`'abc' = 0` is TRUE there. Against the pinned MySQL server, the predicate the adapter used to emit
+returned *every* seeded row for a policy the PDP allows none of. H2 raises a conversion error and
+PostgreSQL aborts the statement, which is exactly why four green store legs never showed it.
+Folding the comparison to `Op.FALSE` instead would be right unnegated and wrong under `not(...)`,
+where CEL denies a row whose attribute is *missing*; and a three-valued fold would have to guess the
+null convention of an attribute the policy never names. So the adapter refuses.
+
+The same hole existed for the string matches, `size()` and the hierarchy operators over a non-text
+column: CEL has no overload there either, so it raises and denies, while `a_number LIKE '%2%'` is
+TRUE for `123` on MySQL and SQLite and `CHAR_LENGTH(1)` is `1`.
+
+**What to do about it.** Map the attribute onto a column of the constant's type, or compare it
+against a value of the column's type. It is an `UnmappedAttributeException` rather than an
+`UnsupportedPlanShapeException` for that reason: the plan is fine, and the fix is in your mapping.
 
 ### A resolver instead of a table
 
@@ -306,8 +369,8 @@ Rejecting every null operand is correct under any nesting. See
 
 The option above is a whole-call default, and one policy suite can legitimately use both
 conventions: the same column mapped twice, sent as an explicit null under one attribute name and
-omitted under another. Declare it per attribute and the call-level option only covers what the
-mapping does not:
+omitted under another. Declare it per attribute, and every part of the walk that asks — `eq`, `ne`,
+an `in` against a constant list and the membership subquery alike — reads that one declaration:
 
 ```kotlin
 val mapping = cerbosMapping {
@@ -328,7 +391,8 @@ in CEL, which denies exactly as UNKNOWN does.
 **Leaving an attribute undeclared is not the same as inheriting the call-level option.** An
 undeclared column renders exactly as it always has, **as if it were `NOT NULL`**, and the call-level
 `nullAttributeRepresentation` then decides one thing only: whether a null *operand* in the plan is
-refused. It never turns the definite rendering on. The asymmetry is deliberate — the call-level
+refused. It never turns the definite rendering on, anywhere in the walk — not in a leaf comparison,
+not in the membership subquery. The asymmetry is deliberate — the call-level
 default is `EXPLICIT`, so inheriting it would hand definite equality to every undeclared column and
 return NULL rows the PDP denies for an attribute the caller in fact omits. The cost is that `!=`
 against a constant under-grants those rows until you declare the convention on that column, which
@@ -343,7 +407,7 @@ is one of three types so you can route on it without matching the message:
 | Exception | Meaning | What to do |
 |---|---|---|
 | `UnsupportedPlanShapeException` | The plan is well-formed, and SQL as this adapter builds it cannot express it faithfully | Rewrite the policy, or answer that request another way (a per-row `check()`, another store) |
-| `UnmappedAttributeException` | The mapping came up short — a variable nothing maps, a relation where a scalar is needed, a column where a collection operator needs a relation, a temporal column whose type does not pin an absolute instant | Change the mapping |
+| `UnmappedAttributeException` | The mapping came up short — a variable nothing maps, a relation where a scalar is needed, a column where a collection operator needs a relation, a temporal column whose type does not pin an absolute instant, or [an operand whose type the mapped column does not hold](#the-operands-type-has-to-match-the-columns) | Change the mapping |
 | `MalformedPlanException` | The plan violates the planner's wire contract — wrong arity, a lambda whose second operand is not a variable, a conditional plan with no condition, an unknown filter kind | A hand-built plan, or an upstream bug to report |
 
 All three extend `IllegalArgumentException`, so catching that catches every refusal. A branch only an
@@ -472,6 +536,17 @@ arm with IEEE rules at translation time, and sends only the guarded quotient to 
 NaN or infinity is ever bound. The one case that stays refused is a non-finite arm meeting another
 **column** under further arithmetic, whose sign no plan can state.
 
+**The second thing the column type buys is not a translation at all — it is a refusal.** Knowing
+that `aString` is a `varchar` is what lets this adapter see that `R.attr.aString == P.attr.level`
+compares a text column with a number, and refuse it. A type-blind query builder has nothing to see
+it with: the plan names no operand types, so the comparison is emitted and the **store** decides
+what it means, which on MySQL means coercing the string and matching every row the PDP denies. That
+is a whole class of silent over-grant that the declaration-free mapping here closes by construction
+and that `ValueString`-style declarations close only for the attributes someone remembered to
+declare. [The operand's type has to match the column's](#the-operands-type-has-to-match-the-columns)
+is the rule; the over-grant it prevents was reproduced against the pinned MySQL server before it
+was.
+
 ### `size(string)` counts characters, and astral characters count differently
 
 CEL's `size(string)` counts Unicode code points. The adapter lowers it to `CHAR_LENGTH`, and to
@@ -484,6 +559,14 @@ outside the Basic Multilingual Plane — emoji, some CJK extensions — counts a
 `size("héllo🚀")` is 6 in CEL and 7 there. Keep length thresholds away from values that straddle
 that difference, or keep `size(string)` out of policies over data that carries astral characters.
 The Spring Data adapter documents the same caveat.
+
+Two more rules about `size()`, whatever it counts. Its argument has to be a **text column** or a
+mapped relation — counting the characters of a number or a boolean is a CEL no-overload error, so it
+denies, while `CHAR_LENGTH(1)` is `1`. And a **NaN threshold** is refused: `size(x) > NaN` is false
+under IEEE for every length, and the rounding the threshold arithmetic does has no answer for a NaN
+at all. The **infinities** are deliberately not refused — IEEE orders them totally, so
+`size(x) > +Infinity` is false and `size(x) < +Infinity` is true for every present value, which is
+what a threshold past `Int.MAX_VALUE` already answers correctly.
 
 ### Mapping hazards
 
@@ -524,6 +607,15 @@ subquery, and restricting the scan turns it into "every visible row satisfies th
 "every row in the table does". It applies to every shape built on the relation — the macros, the
 counts, membership and the existence guards alike.
 
+> [!WARNING]
+> **The lambda runs at translation time, outside any transaction** — it is called while the `Op` is
+> being built, not while it is rendered. So it must be **pure**: build a predicate out of the alias
+> it is handed and nothing else. It must not read `currentDialect` (there is no transaction to read
+> one from), must not run a query, and must not depend on request state, because the predicate it
+> returns is baked into the `Op` and rendered later, possibly against a different dialect from the
+> one you had in mind. It is called once per subquery instance, so a relation entered twice in one
+> plan calls it twice, with a different alias each time.
+
 One consequence of a bare-table subquery is worth stating plainly: this adapter is only as correct
 as the mapping is honest. A predicate you apply on the read path that builds the resource attributes
 but not in `visibleWhen` makes the two disagree, and no conformance action can see it — the oracle
@@ -537,7 +629,7 @@ relation contains.
 | H2 | the default (`ADAPTER_TEST_DB=h2`), in process, on both the baseline and the floor Exposed release | Case-sensitive by default; the store the floor leg is proved against |
 | SQLite | `ADAPTER_TEST_DB=sqlite`, in process | Needs `PRAGMA case_sensitive_like = ON`; no boolean and no temporal type, so both are stored as text or integers; a multi-row scalar subquery does not raise |
 | PostgreSQL | `ADAPTER_TEST_DB=postgres`, Testcontainers | Real `boolean` and `timestamptz`; cannot type a bound `NULL` (`$1 IS NULL` is an error), which is why the adapter renders NULL as a literal |
-| MySQL | `ADAPTER_TEST_DB=mysql`, Testcontainers | Needs a case- and accent-sensitive collation; no boolean type; `LIKE` backslash handling and cast spellings differ |
+| MySQL | `ADAPTER_TEST_DB=mysql`, Testcontainers, **twice** — once per Connector/J prepared-statement mode | Needs a case- and accent-sensitive collation; no boolean type; `LIKE` backslash handling and cast spellings differ; coerces a *string* when a comparison mixes types |
 
 These are not the same test four times, which is the point: collation, LIKE escaping, cast targets
 and parameter typing are all translator behaviour, so a dialect the harness does not execute is a
@@ -547,13 +639,28 @@ declared as inputs of `gradle test`. Files rather than Kotlin constants for one 
 `renovate.json`'s custom manager bumps `<SERVICE>_IMAGE` files and nothing else, so a reference held
 in source would never get a Renovate PR.
 
-**The four legs found no store-specific divergence.** Every oracle-tested action returns the same
-ids on all four, and every fail-closed one raises the same message, so nothing in the classification
-is conditional on a store. That is a result, not a reason to run fewer legs: it says the emitted SQL
-means the same thing on each engine *today*, and each leg is what would notice the next translator
-change where it stops doing so. Two of the four are also the only place some of the choices above
-are executed at all — the MySQL `CONCAT()` arm and the MySQL `CHAR` cast target are dead code on
-every other engine.
+**MySQL is executed twice**, once per Connector/J prepared-statement mode, as the Spring Data
+adapter's MySQL leg is. The driver's default is *client*-side prepared statements, which interpolate
+a double bind into the statement as an exact `DECIMAL` literal — and decimal arithmetic is not IEEE
+double arithmetic: `3 * 0.1 == 0.3` is true in decimal and false in CEL. An adapter that relied on
+the bind's type would over-grant there and nowhere else. This one casts explicitly instead, both
+modes match the oracle, and running both is what keeps that true, because the mode is chosen in
+*your* JDBC URL and the adapter never sees which.
+
+**No corpus action diverges by store.** Every oracle-tested action returns the same ids on all four
+(and under both MySQL modes), and every fail-closed one raises the same message, so nothing in the
+classification is conditional on a store. That is a result, not a reason to run fewer legs: it says
+the emitted SQL means the same thing on each engine *today*, and each leg is what would notice the
+next translator change where it stops doing so. Two of the four are also the only place some of the
+choices above are executed at all — the MySQL `CONCAT()` arm and the MySQL `CHAR` cast target are
+dead code on every other engine.
+
+It is not a claim that no store-specific divergence exists, only that no *corpus shape* has one. A
+code review found one the corpus cannot reach: a comparison mixing a text column with a number,
+which MySQL answered by coercing the string and matching every row. The corpus compares every
+attribute against a value of its own type, so no action discriminates it. It is refused now — see
+[The operand's type has to match the column's](#the-operands-type-has-to-match-the-columns) — and
+the shape belongs in the corpus, where every adapter would be asked it.
 
 MariaDB is not proved and is therefore not claimed.
 
@@ -604,13 +711,22 @@ default:
   [The golden expectations](#the-golden-expectations).
 
 `ExposedTranslatorTest` reads its plans from the shared corpus's wire fixtures and needs no PDP and
-no database server at all; so do the surface, mapping and seam suites, which run on in-process H2
-and SQLite. Two things reach for Docker. `AdversarialConformanceTest` requires it — it starts a
-pinned PDP, and on the `postgres` and `mysql` stores the database too. `OfflineRendererTest`'s two
-`@Tag("docker")` cases use it when it is there and are skipped when it is not: they start the pinned
-PostgreSQL and MySQL images and assert that the SQL the offline renderer's stub connections produce
-is byte-identical to the SQL the real drivers produce, which is the one check that keeps "offline"
-honest.
+no database server at all; so do the surface, mapping, seam and review suites, which run on
+in-process H2 and SQLite. Three things reach for Docker inside a plain `gradle test`:
+
+- **`AdversarialConformanceTest`** requires it — it starts a pinned PDP, and on the `postgres` and
+  `mysql` stores the database too.
+- **`ReviewPlannerShapeTest`** requires it as well. It loads a policy of its own into the pinned PDP
+  and asserts the planner really ships the wire shapes the review suites hand-build, so a finding
+  that rests on one of them fails here rather than quietly becoming a claim about a plan nobody can
+  produce.
+- **`OfflineRendererTest`'s two `server-cross-check` cases** use Docker when it is there and skip
+  when it is not. They start the pinned PostgreSQL and MySQL images and assert the SQL the offline
+  renderer's stub connections produce is byte-identical to the real drivers' — the one check that
+  keeps "offline" honest. The build **excludes that tag whenever `ADAPTER_TEST_DB` is set**: the
+  question is a property of the Exposed release and the server image, not of the store the harness
+  runs on, so asking it once per Exposed leg is enough and the store legs do not start two more
+  containers to re-ask it.
 
 ## The golden expectations
 
