@@ -122,7 +122,11 @@ public sealed interface AttributeMapping {
     }
 
     public companion object {
-        /** A column that follows the call-level NULL convention. */
+        /**
+         * A column that declares NO null convention, and so renders as if it were NOT NULL. See
+         * [Field.nullAttributeRepresentation]: the call-level [Options.nullAttributeRepresentation]
+         * decides only whether a null OPERAND against it is refused, never how it renders.
+         */
         @JvmStatic
         public fun field(column: Column<*>): Field = Field(column, null)
 
@@ -173,7 +177,10 @@ public fun cerbosMapping(block: MappingBuilder.() -> Unit): AttributeMappings =
 public open class MappingBuilder internal constructor() {
     internal val entries: MutableMap<String, AttributeMapping> = LinkedHashMap()
 
-    /** Maps [this] reference onto a column that follows the call-level NULL convention. */
+    /**
+     * Maps [this] reference onto a column that declares no null convention, and so renders as if
+     * it were NOT NULL ([AttributeMapping.Field.nullAttributeRepresentation]).
+     */
     public infix fun String.to(column: Column<*>) {
         put(this, AttributeMapping.Field(column, null))
     }

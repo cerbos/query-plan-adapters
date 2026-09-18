@@ -1,8 +1,11 @@
 package dev.cerbos.queryplan.exposed
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.google.protobuf.NullValue
+import com.google.protobuf.Value
 import com.google.protobuf.util.JsonFormat
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter
+import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand
 import org.jetbrains.exposed.v1.core.EqOp
 import org.jetbrains.exposed.v1.core.Op
 import org.jetbrains.exposed.v1.core.Table
@@ -99,7 +102,7 @@ class MappingDslTest {
     // -- a column entry ---------------------------------------------------------------------------
 
     @Test
-    fun `a bare column follows the call-level NULL convention and a declared one overrides it`() {
+    fun `a bare column declares no NULL convention, and a declared one says which`() {
         val mapping = cerbosMapping {
             "request.resource.attr.aString" to Docs.aString
             "request.resource.attr.owner" to field(Docs.owner, nulls = NullAttributeRepresentation.OMITTED)
@@ -110,6 +113,38 @@ class MappingDslTest {
 
         val declared = mapping.resolve("request.resource.attr.owner") as AttributeMapping.Field
         assertEquals(NullAttributeRepresentation.OMITTED, declared.nullAttributeRepresentation)
+    }
+
+    @Test
+    fun `an undeclared attribute is read under BOTH conventions in one call, and that is accepted`() {
+        // KIND 2 — a caller-supplied argument the corpus structurally cannot vary: actions.json
+        // classifies each action against ONE mapping per adapter, and the corpus declares `owner`
+        // EXPLICIT, so nothing in `conformance/` reaches this combination.
+        //
+        // A DECISION, recorded rather than fixed. Under the default call-level EXPLICIT, an
+        // attribute that declares nothing gets:
+        //
+        //  - `== null` rendered as a definite `IS NULL`, because the pre-walk NullOperandScan takes
+        //    the call-level option at its word about what the caller SENDS for a null operand;
+        //  - `!= "x"` rendered as the plain three-valued `<>`, because ADR 0004 says an undeclared
+        //    column RENDERS as if NOT NULL.
+        //
+        // So one attribute is read under both conventions within one call. It is left alone because
+        // it errs the safe way: `<>` EXCLUDES the NULL rows that a declared EXPLICIT attribute would
+        // include, so the asymmetry under-grants. Making `== null` follow the undeclared rendering
+        // instead would have to answer UNKNOWN for every row, which is a filter no caller asked for;
+        // making `!=` follow the option would hand definite equality to every column a caller never
+        // thought about, which is exactly what ADR 0004 exists to prevent. Declaring the attribute
+        // makes both halves definite.
+        val mapping = cerbosMapping { "request.resource.attr.aOptionalString" to Docs.owner }
+        val options = Options.of(mapping)
+
+        val isNull = render(options, "eq", Operand.newBuilder().setValue(NULL_VALUE).build())
+        assertTrue(isNull.contains("IS NULL"), isNull)
+
+        val notEqual = render(options, "ne", Operand.newBuilder().setValue(STRING_VALUE).build())
+        assertFalse(notEqual.contains("IS NULL"), notEqual)
+        assertFalse(notEqual.contains("IS NOT NULL"), notEqual)
     }
 
     @Test
@@ -298,6 +333,26 @@ class MappingDslTest {
 
     private fun AttributeMapping.Relation.visibleWhenFor(alias: String): Op<Boolean> =
         checkNotNull(visibleWhen)(table.alias(alias))
+
+    private val NULL_VALUE: Value = Value.newBuilder().setNullValue(NullValue.NULL_VALUE).build()
+    private val STRING_VALUE: Value = Value.newBuilder().setStringValue("x").build()
+
+    /** `request.resource.attr.aOptionalString <op> <constant>`, rendered under one dialect. */
+    private fun render(options: Options, operator: String, constant: Operand): String {
+        val condition = PlanResourcesFilter.newBuilder()
+            .setKind(PlanResourcesFilter.Kind.KIND_CONDITIONAL)
+            .setCondition(
+                Operand.newBuilder().setExpression(
+                    PlanResourcesFilter.Expression.newBuilder()
+                        .setOperator(operator)
+                        .addOperands(Operand.newBuilder().setVariable("request.resource.attr.aOptionalString"))
+                        .addOperands(constant),
+                ),
+            )
+            .build()
+        val op = OfflineRenderer.translate { ExposedQueryPlanAdapter.toFilter(condition, options).toOp() }
+        return OfflineRenderer.renderOn(OfflineRenderer.H2, op).sql
+    }
 
     /** The one plan every case here shares: `request.resource.attr.aString == "one"`. */
     private fun translate(resolver: AttributeResolver): Op<Boolean> =

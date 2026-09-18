@@ -10,7 +10,24 @@ package dev.cerbos.queryplan.exposed
 public class Options private constructor(
     /** Resolves the plan's attribute references onto columns and relations. */
     public val mapping: AttributeResolver,
-    /** The call-level NULL convention; an [AttributeMapping.Field] may override it. */
+    /**
+     * How the caller sends a NULL column that no [AttributeMapping.Field] declares a convention
+     * for — and, for those, ONLY whether a null OPERAND is refused.
+     *
+     * It is not a default for how an undeclared column RENDERS. An undeclared column renders as if
+     * it were NOT NULL, which is the historical behaviour and what
+     * [AttributeMapping.Field.nullAttributeRepresentation] documents; inheriting this setting there
+     * would hand definite equality to every column a caller never thought about
+     * (docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
+     *
+     * One consequence is deliberate and worth knowing. Under the default, an UNDECLARED attribute
+     * compared against a null literal renders `IS NULL` — the pre-walk scan takes the caller at
+     * their word that NULLs are sent explicitly — while `!= "x"` over the same attribute keeps the
+     * undeclared rendering and excludes its NULL rows. So one attribute can be read under both
+     * conventions within one call. It UNDER-grants rather than over-grants (the `!=` drops rows a
+     * declared attribute would keep) and is pinned in `MappingDslTest`; declare the attribute to
+     * make both halves definite.
+     */
     public val nullAttributeRepresentation: NullAttributeRepresentation,
     /**
      * How deeply collection macros (`exists`, `all`, `exists_one`, …) may nest before a plan is
