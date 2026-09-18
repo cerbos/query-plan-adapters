@@ -349,13 +349,37 @@ class GoldenTest {
     // -- the committed asset -----------------------------------------------------------------------
 
     @Test
-    fun `the committed asset parses, and declares the Exposed the tests are running`() {
+    fun `the committed asset parses`() {
+        // The one thing this suite asks of the committed file, since every other case here works on
+        // a temp directory: pointing them at the real asset would make the suite rewrite what
+        // ExposedTranslatorTest asserts against. WHICH Exposed the running leg is, and what that
+        // implies, is that suite's question — `the asset declares the renderer that wrote it`.
         val golden = Golden()
         assertTrue(Files.exists(golden.file), "${golden.file} is missing")
         golden.read()
-        assertEquals(
-            Golden.runningExposedVersion().startsWith("${Golden.EXPOSED_MINOR}."),
-            golden.rendersUnderRunningExposed,
-        )
+    }
+
+    /**
+     * Rules 2 and 3 of "When the generator is an input" (`conformance/README.md`), as one pair.
+     *
+     * An asset whose header names another minor is still READ — otherwise the floor leg would have
+     * nothing to compare its divergence list against — and refused for WRITING, so a regeneration
+     * can never relabel another renderer's bytes. The two have to hold together: a loader strict
+     * enough to refuse the read would take the floor leg's assertion away with it, and a writer
+     * lax enough to accept the write would present a toolchain swap as a translation change.
+     */
+    @Test
+    fun `an asset from another minor is readable and not writable`(@TempDir directory: Path) {
+        val recorded = mapOf("cs-eq" to conditional("a_string = ?"))
+        golden(directory).write(recorded)
+
+        // The running Exposed is the OTHER one now: the same file, read through a Golden that
+        // reports it was rendered elsewhere.
+        val onAnotherMinor = golden(directory, exposed = "9.9.9")
+        assertFalse(onAnotherMinor.rendersUnderRunningExposed)
+        assertEquals(recorded, onAnotherMinor.read())
+
+        val error = assertThrows(IllegalStateException::class.java) { onAnotherMinor.write(recorded) }
+        assertTrue(error.message!!.contains("9.9.9 is on the classpath"), error.message)
     }
 }
