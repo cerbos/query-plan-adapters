@@ -30,6 +30,24 @@ import java.nio.file.Path
 class SubquerySupportTest {
 
     @Test
+    fun `a universal over a chain emits one guarded scoring scan`() {
+        // Pinned whole, because the SHAPE is what is being asserted and every part of it is
+        // load-bearing: the guard with no ELSE, the scores that keep the three CEL states apart,
+        // NULLIF turning "only undetermined elements" into SQL NULL, COALESCE folding the empty
+        // collection to 0, and the INNER JOIN that makes the scan range over the flattened tail.
+        assertEquals(
+            "(CASE WHEN EXISTS (SELECT 1 FROM REL_CATEGORIES cerbos_3 " +
+                "WHERE cerbos_3.RESOURCE_ID = REL_RESOURCES.ID) " +
+                "THEN (SELECT NULLIF(COALESCE(MAX(CASE WHEN (cerbos_2.\"name\" = 'finance') THEN 0 " +
+                "WHEN NOT (cerbos_2.\"name\" = 'finance') THEN 2 ELSE 1 END), 0), 1) " +
+                "FROM REL_CATEGORIES cerbos_1 INNER JOIN REL_SUB_CATEGORIES cerbos_2 " +
+                "ON cerbos_1.ID = cerbos_2.CATEGORY_ID " +
+                "WHERE cerbos_1.RESOURCE_ID = REL_RESOURCES.ID) END) = 0",
+            render(translate("w1-all-chain")),
+        )
+    }
+
+    @Test
     fun `every subquery is aliased, and the aliases are numbered in walk order`() {
         val sql = render(translate("w1-all-chain"))
         // The scan the score ranges over, then the guard that requires the leading hop: two scans
@@ -118,12 +136,20 @@ class SubquerySupportTest {
             override val primaryKey = PrimaryKey(id)
         }
 
+        object RelLabels : Table("rel_labels") {
+            val id = varchar("id", 32)
+            val subCategoryId = varchar("sub_category_id", 32)
+            val name = varchar("name", 64)
+            override val primaryKey = PrimaryKey(id)
+        }
+
         object RelParents : Table("rel_parents") {
             val id = varchar("id", 32)
 
             /** Unique: nothing else makes the database enforce the single row a to-one promises. */
             val resourceId = varchar("resource_id", 32).uniqueIndex()
             val aString = varchar("a_string", 64).nullable()
+            val aNumber = double("a_number")
             val aBool = bool("a_bool")
             override val primaryKey = PrimaryKey(id)
         }
@@ -209,6 +235,7 @@ class SubquerySupportTest {
                 to = RelParents.resourceId,
             ) {
                 "aString" to RelParents.aString
+                "aNumber" to RelParents.aNumber
                 "aBool" to RelParents.aBool
                 "inner" to one(RelInners, from = RelParents.id, to = RelInners.parentId) {
                     "aString" to RelInners.aString
@@ -231,6 +258,14 @@ class SubquerySupportTest {
                 element = RelSubCategories.name,
             ) {
                 "name" to RelSubCategories.name
+                "labels" to many(
+                    RelLabels,
+                    from = RelSubCategories.id,
+                    to = RelLabels.subCategoryId,
+                    element = RelLabels.name,
+                ) {
+                    "name" to RelLabels.name
+                }
             }
             "subNames" to many(
                 RelSubCategories,
@@ -273,18 +308,26 @@ class SubquerySupportTest {
          * | id | tags                     | categories               | parent                  |
          * |----|--------------------------|--------------------------|-------------------------|
          * | r1 | none                     | none                     | none                    |
-         * | r2 | public                   | business -> finance      | "One", no inner         |
+         * | r2 | public                   | business -> finance      | "One", 2.0, no inner    |
          * | r3 | private                  | other -> tech            | none                    |
-         * | r4 | NULL name                | none                     | NULL string, inner      |
+         * | r4 | NULL name                | none                     | NULL, 1.0, inner        |
          * | r5 | public, NULL             | business -> finance,tech | none                    |
          * | r6 | public, public, private* | none                     | none                    |
          * | r7 | none                     | other, no children       | none                    |
-         * | r8 | none                     | none                     | "Two", inner            |
+         * | r8 | none                     | none                     | "Two", 5.0, inner       |
          *
          * `*` is deleted, so it is in the table and not in the attributes the application sent.
          */
         private fun seed() {
-            SchemaUtils.create(RelResources, RelTags, RelCategories, RelSubCategories, RelParents, RelInners)
+            SchemaUtils.create(
+                RelResources,
+                RelTags,
+                RelCategories,
+                RelSubCategories,
+                RelLabels,
+                RelParents,
+                RelInners,
+            )
             listOf(
                 Resource("r1", "one", true, "same", "set"),
                 Resource("r2", "two", false, "public", "public"),
@@ -346,15 +389,25 @@ class SubquerySupportTest {
                     it[name] = row.name
                 }
             }
+            // s5a carries none, so a universal one level up has a determined-false element.
+            listOf(Label("l2", "s2", "gold"), Label("l3", "s3", "silver"), Label("l5", "s5b", "gold"))
+                .forEach { row ->
+                    RelLabels.insert {
+                        it[id] = row.id
+                        it[subCategoryId] = row.subCategoryId
+                        it[name] = row.name
+                    }
+                }
             listOf(
-                Parent("p2", "r2", "One", true),
-                Parent("p4", "r4", null, false),
-                Parent("p8", "r8", "Two", false),
+                Parent("p2", "r2", "One", 2.0, true),
+                Parent("p4", "r4", null, 1.0, false),
+                Parent("p8", "r8", "Two", 5.0, false),
             ).forEach { row ->
                 RelParents.insert {
                     it[id] = row.id
                     it[resourceId] = row.resourceId
                     it[aString] = row.aString
+                    it[aNumber] = row.aNumber
                     it[aBool] = row.aBool
                 }
             }
@@ -379,7 +432,14 @@ class SubquerySupportTest {
         private class Tag(val id: String, val resourceId: String, val name: String?, val deleted: Boolean)
         private class Category(val id: String, val resourceId: String, val name: String, val visible: Boolean)
         private class SubCategory(val id: String, val categoryId: String, val name: String)
-        private class Parent(val id: String, val resourceId: String, val aString: String?, val aBool: Boolean)
+        private class Label(val id: String, val subCategoryId: String, val name: String)
+        private class Parent(
+            val id: String,
+            val resourceId: String,
+            val aString: String?,
+            val aNumber: Double,
+            val aBool: Boolean,
+        )
         private class Inner(val id: String, val parentId: String, val aString: String, val aBool: Boolean)
     }
 }

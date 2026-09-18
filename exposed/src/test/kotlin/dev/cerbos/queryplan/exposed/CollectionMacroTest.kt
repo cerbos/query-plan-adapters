@@ -107,8 +107,37 @@ class CollectionMacroTest {
     }
 
     @Test
+    fun `a macro three levels deep resolves each level against its own element`() {
+        // `categories.exists(c, c.subCategories.exists(s, s.labels.exists(l, l.name == "gold")))`.
+        // r5's second sub-category carries the label; its first carries none, which is what the
+        // universal spelling below turns into a determined FALSE.
+        assertEquals(listOf("r2", "r5"), ids(translate("macro-depth3-exists")))
+        assertEquals(listOf("r1", "r3", "r4", "r6", "r7", "r8"), ids(translate("macro-depth3-not-exists")))
+        // r7's category has no sub-categories at all, so the middle universal is vacuously TRUE.
+        assertEquals(listOf("r2", "r7"), ids(translate("macro-depth3-all")))
+    }
+
+    @Test
+    fun `a size comparison inside a lambda counts the element's own children`() {
+        // `categories.exists(c, size(c.subCategories) == 1)` — the count has to correlate against
+        // the categories ALIAS, not against the resource row.
+        assertEquals(listOf("r2", "r3"), ids(translate("p-size-nested")))
+    }
+
+    @Test
+    fun `a macro inside a lambda over an outer relation stays anchored to the outer scope`() {
+        // `categories.exists(c, size(c.subCategories) == 1 && R.attr.tags.exists(t, …))`.
+        assertEquals(listOf("r2"), ids(translate("w2-outer-relation")))
+    }
+
+    @Test
     fun `a membership test inside a lambda reads the element column`() {
         assertEquals(listOf("r2", "r5", "r6"), ids(translate("lambda-in-principal")))
+    }
+
+    @Test
+    fun `a negated existential over an empty collection returns the empty rows`() {
+        assertEquals(listOf("r1", "r3", "r7", "r8"), ids(translate("p-not-exists-empty")))
     }
 
     @Test
