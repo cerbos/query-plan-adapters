@@ -1,0 +1,6 @@
+{
+  "adapter": "exposed",
+  "exposed": "1.5",
+  "regenerate": "gradle goldenUpdate",
+  "expectations": {}
+}
