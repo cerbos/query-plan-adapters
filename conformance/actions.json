@@ -1,6 +1,6 @@
 {
   "description": "Every action defined in policies/adversarial.yaml, grouped against the Spring Data reference harness. 'conformance' actions must match the check() oracle. 'adapterUnsupported' lists conformance actions an adapter cannot express and must reject loudly. 'expectedUnsupported' lists shapes rejected by the reference; 'adapterSupportedExpected' records adapters that intentionally translate one of those shapes. 'nullRepresentationOmitted' lists actions that probe a `== null` comparison against an attribute the oracle OMITS for NULL columns; every adapter must translate these with its null representation set to 'omitted' and reject them. 'knownDivergences' records upstream planner behavior that prevents an oracle comparison. 'adapters' is the canonical adapter roster: every key of 'adapterUnsupported' and 'adapterSupportedExpected', and every key of an 'expectedUnsupported' entry's 'messages' map, must name one of these. Every throwing classification carries the substring that adapter's error must contain — 'message' on an 'adapterUnsupported' entry, 'messages.<adapter>' on an 'expectedUnsupported' one — so a harness proves the throw is the declared mechanism rather than a mapper typo or an unrelated validation.",
-  "adapters": ["prisma", "mongoose", "drizzle", "convex", "langchain-chromadb", "sqlalchemy", "ent", "pgx", "elasticsearch-java", "spring-data", "activerecord"],
+  "adapters": ["prisma", "mongoose", "drizzle", "convex", "langchain-chromadb", "sqlalchemy", "ent", "pgx", "elasticsearch-java", "spring-data", "activerecord", "exposed"],
   "conformance": [
     "vf-le", "vf-ge", "vf-ne",
     "in-single", "in-empty",
@@ -499,7 +499,8 @@
       { "action": "map-eq-list", "reason": "map() is held as a projected relation until size() or hasIntersection() gives it a scalar meaning as an aggregate or an EXISTS subquery. Comparing the ordered projection itself to a literal list gives it neither, and a correlated subquery has no ordering to compare element-wise against, so the held projection reaches a plain value position and is refused there", "message": "eq cannot take a collection operand (a projected relation)" },
       { "action": "cast-string-bool", "reason": "The translator lowers CEL `string()` to a SQL CAST, and a CAST over a boolean is not portable: SQLite and MySQL store 1/0 so it yields \"1\", while CEL and PostgreSQL yield \"true\", and the filter would then drop every row the PDP permits. So the cast path refuses a boolean column rather than emit one rendering on three engines that disagree. The limitation is the CAST, not the dialect — this adapter does branch per dialect elsewhere (`Dialect#concat`, `#char_length`, `#double_type`), and a three-valued `CASE WHEN col IS NULL THEN NULL WHEN col THEN 'true' ELSE 'false' END` would sidestep the disagreement on every engine at once. Writing it changes what the adapter can translate, so it is tracked in cerbos/query-plan-adapters#418 rather than folded into a rebase", "message": "string() over a boolean column is not supported" },
       { "action": "hier-empty-delim", "reason": "An empty delimiter is refused when the hierarchy operand is parsed, before the descendant LIKE is built: the adapter emits `prefix + delimiter + '%'`, which with an empty delimiter is a bare string-prefix LIKE that also matches the path itself (a2, never its own descendant)", "message": "hierarchy() delimiter must be a non-empty string" }
-    ]
+    ],
+    "exposed": []
   },
   "adapterSupportedExpected": {
     "mongoose": [
@@ -536,7 +537,8 @@
         "pgx": "under mixed null conventions",
         "langchain-chromadb": "Variable-to-variable comparisons are not supported by ChromaDB filters",
         "elasticsearch-java": "Elasticsearch Query DSL cannot compare two document fields without scripts",
-        "activerecord": "between two columns under mixed null conventions"
+        "activerecord": "between two columns under mixed null conventions",
+        "exposed": "under mixed null conventions"
       }
     },
     {
@@ -550,7 +552,8 @@
         "ent": "timestamp() over a column requires that column to be mapped with a timestamp value type",
         "pgx": "timestamp() over a column requires that column to be mapped with a timestamp value type",
         "spring-data": "timestamp() comparison requires a column mapped to java.time.Instant or java.time.OffsetDateTime, but 'request.resource.attr.createdBy' maps to String. Other temporal representations (LocalDateTime, java.util.Date, String) are ambiguous about the absolute instant they store; remap the column or register an OperatorFunction override for 'lt'.",
-        "activerecord": "must map to a datetime column rather than to a column holding a formatted timestamp string"
+        "activerecord": "must map to a datetime column rather than to a column holding a formatted timestamp string",
+        "exposed": "pins an absolute instant"
       }
     },
     {
@@ -564,7 +567,8 @@
         "ent": "unsupported operator: matches. CEL's regex dialect (RE2) is not the dialect any SQL engine implements, so a translated pattern would accept or reject different strings than the PDP",
         "pgx": "unsupported operator: matches. CEL's regex dialect (RE2) is not the dialect any SQL engine implements, so a translated pattern would accept or reject different strings than the PDP",
         "spring-data": "Unsupported operator: matches",
-        "activerecord": "Unsupported operator: matches"
+        "activerecord": "Unsupported operator: matches",
+        "exposed": "Unsupported operator: matches"
       }
     },
     {
@@ -581,7 +585,8 @@
         "activerecord": "Unsupported operator: matches",
         "mongoose": "matches pattern is outside the supported common RE2/PCRE2 subset",
         "convex": "matches requires a constant RE2-compatible pattern in the supported literal, anchor, and trailing .* subset",
-        "elasticsearch-java": "matches regex has a top-level alternation at index 1: RE2 reads ^a|b$ as two separately anchored alternatives, while Lucene matches the whole field against a|b, so the alternation must be parenthesised as ^(a|b)$"
+        "elasticsearch-java": "matches regex has a top-level alternation at index 1: RE2 reads ^a|b$ as two separately anchored alternatives, while Lucene matches the whole field against a|b, so the alternation must be parenthesised as ^(a|b)$",
+        "exposed": "Unsupported operator: matches"
       }
     },
     {
@@ -596,7 +601,8 @@
         "pgx": "unsupported operator: get-field",
         "elasticsearch-java": "Unexpected get-field expression in leaf operand",
         "spring-data": "Unexpected get-field() expression in leaf operand of eq",
-        "activerecord": "Unsupported operator: index"
+        "activerecord": "Unsupported operator: index",
+        "exposed": "get-field"
       }
     },
     {
@@ -612,7 +618,8 @@
         "pgx": "'int()' cannot be lowered to SQL CAST: CAST reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero",
         "elasticsearch-java": "Unexpected int expression in leaf operand",
         "spring-data": "Unexpected int() expression in leaf operand of gt",
-        "activerecord": "int() applied to a :string column"
+        "activerecord": "int() applied to a :string column",
+        "exposed": "int()"
       }
     },
     {
@@ -628,7 +635,8 @@
         "pgx": "'double()' cannot be lowered to SQL CAST: CAST reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero",
         "elasticsearch-java": "Unexpected double expression in leaf operand",
         "spring-data": "Unexpected double() expression in leaf operand of gt",
-        "activerecord": "double() needs a numeric column"
+        "activerecord": "double() needs a numeric column",
+        "exposed": "double()"
       }
     },
     {
@@ -644,7 +652,8 @@
         "pgx": "'int()' cannot be lowered to SQL CAST: CAST reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero",
         "elasticsearch-java": "Unexpected int expression in leaf operand",
         "spring-data": "Unexpected int() expression in leaf operand of eq",
-        "activerecord": "int() applied to a double column is not portable"
+        "activerecord": "int() applied to a double column is not portable",
+        "exposed": "int()"
       }
     },
     {
@@ -661,7 +670,8 @@
         "pgx": "'filter' produces a collection rather than a boolean; it only translates inside size() or hasIntersection(), which give the collection a scalar meaning",
         "elasticsearch-java": "Unexpected lambda expression in leaf operand",
         "spring-data": "filter() returns a list, not a boolean, so it cannot be a condition on its own; only size(filter(...)) has a boolean meaning",
-        "activerecord": "a filtered relation cannot be used as a condition"
+        "activerecord": "a filtered relation cannot be used as a condition",
+        "exposed": "filter() returns a list and cannot be used as a condition"
       }
     },
     {
@@ -678,7 +688,8 @@
         "pgx": "'filter' produces a collection rather than a boolean; it only translates inside size() or hasIntersection(), which give the collection a scalar meaning",
         "elasticsearch-java": "Unexpected lambda expression in leaf operand",
         "spring-data": "filter() returns a list, not a boolean, so it cannot be a condition on its own; only size(filter(...)) has a boolean meaning",
-        "activerecord": "a filtered relation cannot be used as a condition"
+        "activerecord": "a filtered relation cannot be used as a condition",
+        "exposed": "filter() returns a list and cannot be used as a condition"
       }
     },
     {
@@ -695,7 +706,8 @@
         "pgx": "'map' produces a collection rather than a boolean; it only translates inside size() or hasIntersection(), which give the collection a scalar meaning",
         "elasticsearch-java": "Unexpected lambda expression in leaf operand",
         "spring-data": "Unexpected lambda() expression in leaf operand of map",
-        "activerecord": "a projected relation cannot be used as a condition"
+        "activerecord": "a projected relation cannot be used as a condition",
+        "exposed": "map() returns a list and cannot be used as a condition"
       }
     }
   ],
@@ -714,7 +726,8 @@
         "pgx": "missing-attribute error",
         "elasticsearch-java": "explicit null value from a missing field",
         "spring-data": "missing-attribute error",
-        "activerecord": "missing-attribute error"
+        "activerecord": "missing-attribute error",
+        "exposed": "missing-attribute error"
       },
       "relatedIssue": "https://github.com/cerbos/query-plan-adapters/issues/302"
     }
@@ -722,7 +735,7 @@
   "knownDivergences": [
     {
       "action": "p-has",
-      "adapters": ["spring-data", "prisma", "drizzle", "sqlalchemy", "mongoose", "langchain-chromadb", "elasticsearch-java", "convex", "ent", "pgx", "activerecord"],
+      "adapters": ["spring-data", "prisma", "drizzle", "sqlalchemy", "mongoose", "langchain-chromadb", "elasticsearch-java", "convex", "ent", "pgx", "activerecord", "exposed"],
       "reason": "The planner folds has(unknown attr) to KIND_ALWAYS_ALLOWED (a Cerbos planner bug, not an adapter bug), so the adapter returns all rows while check() denies rows where the attribute is missing. Excluded from the oracle run rather than asserted against.",
       "relatedIssue": null
     }
