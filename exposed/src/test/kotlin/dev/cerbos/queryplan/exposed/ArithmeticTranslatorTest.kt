@@ -95,17 +95,14 @@ class ArithmeticTranslatorTest {
             assertSelects("cr-div-other-column", "r1", "r5", "r6", "r7", "f1", "c1")
 
         @Test
-        fun `arithmetic COMPOSED on a zero-capable division is refused, not under-granted`() {
-            // CEL carries the NaN through the surrounding sum; SQL has no value that does, and the
-            // NULLIF guard would turn the whole sum into NULL. `NaN + 1.0 != 2.0` is TRUE for the
-            // zero row, so the row the PDP allows would be dropped.
-            listOf("cr-div-then-add", "cr-div-then-add-ne").forEach { action ->
-                val error = assertThrows<UnsupportedPlanShapeException>(action) { Scalars.ids(action) }
-                assertTrue(
-                    error.message!!.contains("arithmetic composed on a division whose denominator may be zero"),
-                    "$action: ${error.message}",
-                )
-            }
+        fun `arithmetic COMPOSED on a zero-capable division keeps the non-finite arm`() {
+            // CEL carries the NaN through the surrounding sum, so the division stays symbolic and
+            // the `+ 1.0` is applied to each IEEE arm instead: the sum reaching SQL is the finite
+            // arm alone. `NaN + 1.0 != 2.0` is TRUE for the zero row — the one row the PDP allows —
+            // while lowering the division to NULL gives `NULL + 1 <> 2`, UNKNOWN, and returns
+            // nothing. The ORDERED spelling is the control: NaN and NULL agree there.
+            assertSelects("cr-div-then-add", "r1", "r2", "r4", "r5", "r6", "r7", "f1", "c1")
+            assertSelects("cr-div-then-add-ne", "r3")
         }
     }
 
@@ -124,7 +121,10 @@ class ArithmeticTranslatorTest {
 
         @Test
         fun `no NaN or infinity reaches the bound arguments`() {
-            listOf("nan-ord-ternary", "nan-ord-inf", "cr-div-neg-zero", "cr-div-zero").forEach { action ->
+            listOf(
+                "nan-ord-ternary", "nan-ord-inf", "cr-div-neg-zero", "cr-div-zero",
+                "cr-div-then-add", "cr-div-then-add-ne",
+            ).forEach { action ->
                 val args = Scalars.rendered(Scalars.op(action)).args
                 assertTrue(
                     args.none { it is Double && (it.isNaN() || it.isInfinite()) },
@@ -140,6 +140,38 @@ class ArithmeticTranslatorTest {
         fun `mod is refused, because the cast that makes it satisfiable is itself unlowerable`() {
             val error = assertThrows<UnsupportedPlanShapeException> { Scalars.ids("arith-mod") }
             assertTrue(error.message!!.startsWith("mod is not supported in comparisons"), error.message)
+        }
+
+        @Test
+        fun `a non-finite arm meeting a COLUMN is refused rather than folded or bound`() {
+            // CORPUS GAP. `R.attr.aNumber / R.attr.aNumber + R.attr.aDouble > 1.0` is
+            // policy-reachable and no corpus action carries it, so the plan is hand-built here.
+            // Delete this test when the corpus action lands (cerbos/query-plan-adapters#414).
+            //
+            // Every other composition folds: a division arm is NaN or an infinity, and `+ 1.0`
+            // over either is exact in Kotlin. A COLUMN ends that. SQL has no literal for the arm,
+            // and it does not collapse to one constant either — an infinity times or divided by a
+            // column is +Infinity, -Infinity or NaN according to a sign no plan can state.
+            val composed = comparison(
+                "gt",
+                operand {
+                    it.expression = expression(
+                        "add",
+                        operand { inner -> inner.expression = expression("div", variable(NUMBER), variable(NUMBER)) },
+                        variable("request.resource.attr.aDouble"),
+                    )
+                },
+                number(1.0),
+            )
+            val error = assertThrows<UnsupportedPlanShapeException> {
+                ExposedQueryPlanAdapter.toFilter(composed, Options.of(Scalars.MAPPING))
+            }
+            assertTrue(
+                error.message!!.startsWith(
+                    "arithmetic between a column and the NaN or infinity a zero denominator produces",
+                ),
+                error.message,
+            )
         }
 
         @Test

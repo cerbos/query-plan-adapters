@@ -914,7 +914,7 @@ class AdversarialConformanceTest {
          * Shapes this adapter refuses to translate: they have no oracle comparison to guard, and
          * stay here as PDP/policy liveness probes for a group the sweep above cannot cover.
          *
-         * The first six are this adapter's own `adapterUnsupported` entries, one per refusal
+         * The first four are this adapter's own `adapterUnsupported` entries, one per refusal
          * mechanism and every one with an oracle that discriminates, so each refused family still
          * proves its policy is live. The last two are `expectedUnsupported` shapes: `int()` over a
          * numeric column, where CEL truncates toward zero and PostgreSQL and MySQL round, and a
@@ -923,8 +923,6 @@ class AdversarialConformanceTest {
          */
         private val DEGENERACY_LIVENESS_PROBES = listOf(
             "arith-mod",
-            "cr-div-then-add",
-            "cr-div-then-add-ne",
             "hier-empty-delim",
             "index-scalar-list",
             "map-eq-list",
@@ -1309,7 +1307,7 @@ class AdversarialConformanceTest {
         assertEquals(22, seeds.size, "seed count changed")
         // Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
         // lost has to be re-triaged here rather than joining the throw suite unnoticed.
-        assertEquals(17, throwing.size, "throwing action count changed")
+        assertEquals(15, throwing.size, "throwing action count changed")
         assertEquals(
             throwing.size.toLong(),
             adapterUnsupportedActions().count() + unsupportedShapes().count(),
