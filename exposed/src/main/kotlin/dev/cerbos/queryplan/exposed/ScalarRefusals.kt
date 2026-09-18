@@ -168,6 +168,21 @@ internal object ScalarRefusals {
      * infinity times a column is +Infinity, -Infinity or NaN according to that column's sign, and
      * the sign is not known until the row is read.
      */
+    /**
+     * A NaN or an infinity that reached the one place this adapter binds a constant.
+     *
+     * The backstop under [nonFiniteInArithmetic], which is where a non-finite value is actually
+     * produced. This one makes "no statement this adapter emits binds a non-finite double" true at
+     * the binder rather than only along the paths that were audited: SQL has no literal for either
+     * value, PostgreSQL accepts `'NaN'` and then orders it ABOVE every number where CEL orders it
+     * below nothing, and MySQL's driver rejects the parameter and fails the query outright.
+     */
+    fun nonFiniteConstant(): UnsupportedPlanShapeException = Refusals.unsupported(
+        "a NaN or infinity constant cannot be bound into SQL: no store has a literal for either, " +
+            "PostgreSQL orders NaN above every number where CEL orders it below none, and MySQL's " +
+            "driver rejects the parameter outright.",
+    )
+
     fun nonFiniteInArithmetic(): UnsupportedPlanShapeException = Refusals.unsupported(
         "arithmetic between a column and the NaN or infinity a zero denominator produces is not " +
             "supported: SQL has no literal for either value, and neither folds to one constant " +

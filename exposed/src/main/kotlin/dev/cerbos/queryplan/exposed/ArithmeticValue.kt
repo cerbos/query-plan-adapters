@@ -129,8 +129,15 @@ internal class ArithmeticValues(private val comparisons: ComparisonTranslator) {
                 if (dividend is ArithmeticValue.Constant) {
                     return ArithmeticValue.Constant(dividend.value / divisor.value)
                 }
+                // Through [sqlOf], never `doubleParam` directly: `NaN != 0.0` is TRUE under IEEE,
+                // so a NaN or an infinite DIVISOR reaches here — `R.attr.aNumber / (0.0/0.0)` and
+                // the arms of `a / (b / c)` both do — and binding one is the over-grant this
+                // adapter's every other arm routes through [sqlOf] to prevent. PostgreSQL accepts
+                // `x / 'NaN'`, answers NaN, and orders NaN ABOVE every number, so `> 0` is TRUE
+                // where CEL says FALSE; MySQL's driver rejects the parameter outright, failing a
+                // filter the adapter reported as translatable.
                 return ArithmeticValue.Sql(
-                    CustomOperator("/", DoubleColumnType(), sqlOf(dividend), doubleParam(divisor.value)),
+                    CustomOperator("/", DoubleColumnType(), sqlOf(dividend), sqlOf(divisor)),
                 )
             }
             // IEEE-754 keeps the sign of a zero, so `n / -0.0` is the OPPOSITE infinity from

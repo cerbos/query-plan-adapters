@@ -1,6 +1,7 @@
 package dev.cerbos.queryplan.exposed.sql
 
 import dev.cerbos.queryplan.exposed.Refusals
+import dev.cerbos.queryplan.exposed.ScalarRefusals
 import org.jetbrains.exposed.v1.core.Expression
 import org.jetbrains.exposed.v1.core.QueryBuilder
 import org.jetbrains.exposed.v1.core.booleanParam
@@ -22,7 +23,14 @@ internal object Params {
         is String -> stringParam(value)
         is Long -> longParam(value)
         is Int -> longParam(value.toLong())
-        is Double -> doubleParam(value)
+        // A NaN or an infinity is refused here rather than bound, so "no statement this adapter
+        // emits binds a non-finite double" is true BY CONSTRUCTION at the one place that binds
+        // one, instead of resting on an argument about what the planner can ship. It is the same
+        // rule `ArithmeticValues.sqlOf` applies on the arithmetic path, which is the path that can
+        // actually produce one: PostgreSQL accepts `x > 'NaN'` and orders NaN above every number,
+        // while MySQL's driver rejects the parameter outright.
+        is Double ->
+            if (value.isFinite()) doubleParam(value) else throw ScalarRefusals.nonFiniteConstant()
         is Boolean -> booleanParam(value)
         else -> throw Refusals.internal("No SQL parameter type for a ${value::class.simpleName} constant")
     }

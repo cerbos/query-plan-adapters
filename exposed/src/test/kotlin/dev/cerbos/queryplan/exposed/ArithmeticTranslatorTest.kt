@@ -120,15 +120,107 @@ class ArithmeticTranslatorTest {
         }
 
         @Test
-        fun `no NaN or infinity reaches the bound arguments`() {
-            listOf(
-                "nan-ord-ternary", "nan-ord-inf", "cr-div-neg-zero", "cr-div-zero",
-                "cr-div-then-add", "cr-div-then-add-ne",
-            ).forEach { action ->
-                val args = Scalars.rendered(Scalars.op(action)).args
+        fun `no plan in the whole corpus binds a non-finite double, under any dialect`() {
+            // A PROPERTY, not a list. The list this replaced named six single-level actions and so
+            // held only for the shapes someone had thought of: a NaN DIVISOR walked straight past
+            // it, because `NaN != 0.0` is TRUE and that arm bound its constant directly instead of
+            // routing it through `ArithmeticValues.sqlOf`. Every wire fixture is swept here, under
+            // every dialect, and a refusal counts as passing — what must never happen is a
+            // STATEMENT carrying one.
+            Corpus.wireFixtureActions().forEach { action ->
+                val plan = Corpus.planFromWireFixture(action).filter
+                assertNoNonFiniteBind(action) { ExposedQueryPlanAdapter.toFilter(plan, Options.of(MAPPING)) }
+            }
+        }
+
+        @Test
+        fun `nor does any shape that puts a division where a constant was expected`() {
+            // The four ways a non-finite value reaches an operand that is not a fold, none of them
+            // in the corpus and none needing a hand-built NON-plan: the inner `div(0, 0)` the
+            // planner ships UNFOLDED (`conformance/wire-fixtures/nan-ord-le.json` is the proof),
+            // a division whose own divisor is a division, one on each side, and a constant
+            // dividend that is itself non-finite.
+            //
+            // CORPUS GAP for the first three — `R.attr.aNumber / (0.0/0.0) > 0` is policy-reachable
+            // and the corpus carries no action for it. Delete them when it lands
+            // (https://github.com/cerbos/query-plan-adapters/issues/414).
+            val aNumber = ReviewPlans.variable("request.resource.attr.aNumber")
+            val aDouble = ReviewPlans.variable("request.resource.attr.aDouble")
+            val zeroOverZero = ReviewPlans.expression("div", ReviewPlans.value(0), ReviewPlans.value(0))
+            mapOf(
+                "divisor folds to NaN" to ReviewPlans.expression("div", aNumber, zeroOverZero),
+                "divisor is a column division" to
+                    ReviewPlans.expression("div", aNumber, ReviewPlans.expression("div", aDouble, aNumber)),
+                "a division on each side" to ReviewPlans.expression(
+                    "div",
+                    ReviewPlans.expression("div", aNumber, aDouble),
+                    ReviewPlans.expression("div", aDouble, aNumber),
+                ),
+                "a non-finite constant dividend" to
+                    ReviewPlans.expression("div", ReviewPlans.value(Double.NaN), aNumber),
+            ).forEach { (name, arithmetic) ->
+                listOf("gt", "ge", "lt", "le", "eq", "ne").forEach { operator ->
+                    val condition = ReviewPlans.expression(operator, arithmetic, ReviewPlans.value(0))
+                    assertNoNonFiniteBind("$name under $operator") {
+                        ExposedQueryPlanAdapter.toFilter(
+                            ReviewPlans.conditional(condition),
+                            Options.of(Scalars.MAPPING),
+                        )
+                    }
+                    // …and under a negation, where a wrongly-bound NaN would leak the other way.
+                    assertNoNonFiniteBind("$name under not($operator)") {
+                        ExposedQueryPlanAdapter.toFilter(
+                            ReviewPlans.conditional(ReviewPlans.expression("not", condition)),
+                            Options.of(Scalars.MAPPING),
+                        )
+                    }
+                }
+            }
+        }
+
+        @Test
+        fun `a non-finite divisor is refused by the same factory as every other non-finite operand`() {
+            // The defect itself, pinned. Before the fix this bound `NaN` and PostgreSQL — which
+            // orders NaN ABOVE every number — answered `x / 'NaN' > 0` TRUE for every present row,
+            // while MySQL's driver rejected the parameter and failed the query.
+            val error = assertThrows<UnsupportedPlanShapeException> {
+                ExposedQueryPlanAdapter.toFilter(
+                    ReviewPlans.conditional(
+                        ReviewPlans.expression(
+                            "gt",
+                            ReviewPlans.expression(
+                                "div",
+                                ReviewPlans.variable("request.resource.attr.aNumber"),
+                                ReviewPlans.expression("div", ReviewPlans.value(0), ReviewPlans.value(0)),
+                            ),
+                            ReviewPlans.value(0),
+                        ),
+                    ),
+                    Options.of(Scalars.MAPPING),
+                )
+            }
+            assertTrue(
+                error.message!!.startsWith("arithmetic between a column and the NaN or infinity"),
+                error.message,
+            )
+        }
+
+        /** [build] either refuses, or emits a statement whose every bound double is finite. */
+        private fun assertNoNonFiniteBind(label: String, build: () -> QueryPlanFilter) {
+            val filter = runCatching { OfflineRenderer.translate(build) }.getOrElse { error ->
+                // A refusal is the fail-closed outcome this property allows; an adapter BUG is not.
                 assertTrue(
-                    args.none { it is Double && (it.isNaN() || it.isInfinite()) },
-                    "$action bound a non-finite double: $args",
+                    error is IllegalArgumentException,
+                    "$label failed with ${error::class.simpleName}: ${error.message}",
+                )
+                return
+            }
+            if (filter !is QueryPlanFilter.Conditional) return
+            OfflineRenderer.render(filter.op).forEach { (dialect, rendered) ->
+                val nonFinite = rendered.params.filter { it.normalisedFrom in NON_FINITE }
+                assertTrue(
+                    nonFinite.isEmpty(),
+                    "$label bound $nonFinite under $dialect: ${rendered.sql}",
                 )
             }
         }
@@ -196,6 +288,9 @@ class ArithmeticTranslatorTest {
 
     private companion object {
         const val NUMBER = "request.resource.attr.aNumber"
+
+        /** What `RenderedParam` records for a double JSON cannot hold; `-0.0` is finite and fine. */
+        val NON_FINITE = setOf("NaN", "Infinity", "-Infinity")
 
         /**
          * A hand-built conditional filter, for the ONE operand protobuf's canonical JSON mapping
