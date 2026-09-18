@@ -144,9 +144,11 @@ class ArithmeticTranslatorTest {
 
         @Test
         fun `arithmetic over a non-numeric column is refused rather than cast`() {
-            // A plan cannot say what type a column holds; the mapping can. Emitting the cast
-            // anyway aborts the query on PostgreSQL and reads a numeric prefix on SQLite, which is
-            // a wrong answer rather than an error.
+            // A CALLER-SUPPLIED MAPPING the corpus structurally cannot vary: actions.json
+            // classifies each action against one mapping per adapter, so a column type that
+            // settles nothing has no corpus spelling. A plan cannot say what type a column holds;
+            // the mapping can. Emitting the cast anyway aborts the query on PostgreSQL and reads a
+            // numeric prefix on SQLite, which is a wrong answer rather than an error.
             // A temporal column is neither text nor numeric, so nothing settles CEL's `+`
             // overload and the arithmetic path owns the refusal. (A TEXT column would make it a
             // concatenation instead, which is a different — and also refused — shape.)
