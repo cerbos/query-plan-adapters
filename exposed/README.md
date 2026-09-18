@@ -1,9 +1,8 @@
 # cerbos-exposed
 
 > **Alpha release — `0.1.0-alpha.1`.** The API and the mapping shapes may still change before
-> `1.0`, and the [Conformance contract](#conformance-contract) below is not filled in yet: every
-> figure in it is an output of the differential harness, and it is written
-> `TBD-AFTER-CONFORMANCE-RUN` until that run has happened rather than estimated. We'd love feedback
+> `1.0`. The [Conformance contract](#conformance-contract) below is filled in from the differential
+> harness, which now runs against a live PDP on every store this adapter claims. We'd love feedback
 > while it's still alpha.
 
 [Cerbos](https://cerbos.dev) query plan adapter for
@@ -37,8 +36,9 @@ You'll also need:
 - **The Cerbos Java SDK** (`dev.cerbos:cerbos-sdk-java`) to call the PDP.
 - **Exposed 1.0.0 or later**, which you bring yourself. `exposed-core` and `exposed-jdbc` are
   `compileOnly` here, so installing the adapter cannot move your ORM version. The published jar is
-  compiled against **1.0.0** and CI runs every suite — including the differential conformance
-  harness — against both **1.0.0** and **1.5.0**. That direction is deliberate: JetBrains promises
+  compiled against **1.0.0** and CI runs every suite against both **1.0.0** and **1.5.0** — the
+  floor leg including the differential conformance harness on H2, so the floor is proved against
+  the `check()` oracle rather than only against compilation. That direction is deliberate: JetBrains promises
   that code built against an older 1.x keeps working on a newer one and promises nothing in the
   other direction, so compiling against the floor is the only arrangement where a green build proves
   the claim for the artifact you actually install
@@ -53,8 +53,11 @@ You'll also need:
   `@InternalApi` accessor this adapter will not opt into, so every subquery is built through the
   JDBC `Query`. R2DBC is a follow-up module behind that one seam, not a rewrite. DAO is JDBC-only
   regardless.
-- **`exposed-java-time` or `exposed-kotlin-datetime`**, whichever declares your temporal columns.
-  Both are probed for on the classpath; you need only the one you already use.
+- **`exposed-java-time` or `exposed-kotlin-datetime`**, but only if your policies compare
+  timestamps, and only whichever one already declares your temporal columns. The adapter itself
+  references neither: it matches on `InstantColumnType` and `OffsetDateTimeColumnType`, the abstract
+  bases that live in `exposed-core` and that both modules' column types extend. See
+  [Timestamp columns](#timestamp-columns).
 
 ### Pin `protobuf-java` to the SDK's gencode version
 
@@ -138,6 +141,25 @@ Build the filter **once per request** and hand it to the query. It renders insid
 for that transaction's dialect — the adapter never reads the dialect while translating, precisely so
 the same `Op` is correct wherever you run it.
 
+### Where the predicate works
+
+`ExposedSurfaceTest` executes the emitted `Op` in each of these against H2, and the two write
+statements against SQLite as well. None of them is a shape a conformance harness reaches: every
+harness in this repository runs one flat `SELECT … WHERE`.
+
+| Shape | Notes |
+| --- | --- |
+| `where { }`, `andWhere { }` | Including the load-bearing one: the adapter's predicate as a conjunct beside the application's own |
+| `count()` | `count()` rewrites the query into a `COUNT` projection, so the predicate survives a rewrite rather than only the `SELECT` it was first attached to |
+| `orderBy(...).limit(n).offset(m)` | Pagination over the filtered query |
+| DAO `find` | `EntityClass.find(op)` takes the same value `where { }` does |
+| A query that joins another table | The adapter adds no join of its own; yours is untouched |
+| `deleteWhere { }` and `update({ }) { }` | Including a predicate carrying a correlated `EXISTS` |
+
+**The `deleteWhere` / `update` proof stops at H2 and SQLite.** No leg executes a write statement on
+PostgreSQL or MySQL, so treat those two as read-proved and write-untested: the `SELECT` path is
+replayed on all four stores, a `DELETE` or `UPDATE` carrying a correlated subquery is not.
+
 ### Declaring the translation: `Options`
 
 Everything the adapter can be told lives in one immutable `Options`. Build it with `Options.of(...)`
@@ -214,9 +236,47 @@ val mapping = AttributeResolver { reference ->
 ```
 
 Returning `null` is the fail-closed answer and raises `UnmappedAttributeException`. Longest-prefix
-resolution works the same way here: a function-style resolver is asked for progressively shorter
-prefixes of the same reference, so answer for the prefix you own and return `null` for the rest.
+resolution works the same way here: the reference is offered whole first, and then as progressively
+**shorter** prefixes, longest first, until something answers.
 `AttributeMappings.of(map)` assembles the static form without the Kotlin DSL.
+
+> [!WARNING]
+> **A resolver that answers every name short-circuits the walk.** The first prefix that resolves
+> wins, and the whole reference is the first prefix tried — so a resolver built on a map with a
+> default, or one that strips a prefix and hands back a column for anything left over, never lets
+> the chain walk begin. `request.resource.attr.mainCategory.subCategories` then resolves as a
+> *scalar column* rather than as a relation reached through `mainCategory`, and `size()` of it
+> becomes a string length instead of a count. Nothing is wrong enough to raise. **Return `null` for
+> every name you do not map**, including the dotted paths that reach through a relation you do map.
+
+### Timestamp columns
+
+`timestamp(R.attr.createdAt) > timestamp("2024-06-01T00:00:00Z")` translates only when the mapped
+column's own Exposed type says which **absolute instant** a stored value denotes:
+
+| Mapped column | Result |
+| --- | --- |
+| `timestamp(...)` from `exposed-java-time` or `exposed-kotlin-datetime` | Translated |
+| `timestampWithTimeZone(...)` from either module | Translated; the literal is normalised to UTC, because CEL timestamp equality is equality of the instant and the offset a literal was written in must not reach the comparison |
+| `datetime(...)` (a `LocalDateTime`), a date column, a text column | `UnmappedAttributeException` — remap the column |
+
+A local date-time and a date carry no zone, so the same stored reading could mean any instant; a
+text column orders lexicographically, which agrees with chronology only for one fixed-width
+zone-normalised layout. Guessing a zone would silently include rows the PDP denies, so each of them
+fails closed — and as a **mapping** error, because the plan is fine and the mapping does not say
+enough.
+
+The literal is bound through the mapped column's **own column type**, which is the one converter
+guaranteed to agree with what your application wrote: binding a `java.time.Instant` against a column
+you declared with `exposed-kotlin-datetime` would otherwise go through a different conversion from
+the insert's. Neither datetime module is a dependency of the adapter — `InstantColumnType` and
+`OffsetDateTimeColumnType` are the abstract bases in `exposed-core`, and both modules' column types
+extend them — so this works with whichever one you already use, and with neither on the classpath
+the class still loads.
+
+Sub-millisecond thresholds are **not** fail-closed here. Cerbos folds `now()` into a window at
+nanosecond precision, and `java.time.Instant` carries nanoseconds, so the corpus's `ts-window` and
+`ts-vf` translate exactly — the precision the Python and TypeScript adapters have to refuse.
 
 ## NULL attribute representation
 
@@ -265,9 +325,14 @@ then rendered so it can never be SQL UNKNOWN — CEL holds a null *value* under 
 polarities. Ordering and string operators are left alone: a null receiver raises a no-overload error
 in CEL, which denies exactly as UNKNOWN does.
 
-Leaving an attribute undeclared keeps the conservative rendering, so `!=` against a constant
-under-grants those rows until you declare it. See
-[#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
+**Leaving an attribute undeclared is not the same as inheriting the call-level option.** An
+undeclared column renders exactly as it always has, **as if it were `NOT NULL`**, and the call-level
+`nullAttributeRepresentation` then decides one thing only: whether a null *operand* in the plan is
+refused. It never turns the definite rendering on. The asymmetry is deliberate — the call-level
+default is `EXPLICIT`, so inheriting it would hand definite equality to every undeclared column and
+return NULL rows the PDP denies for an attribute the caller in fact omits. The cost is that `!=`
+against a constant under-grants those rows until you declare the convention on that column, which
+fails closed. See [#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
 [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
 
 ## Handling refusals
@@ -311,8 +376,18 @@ val mapping = cerbosMapping {
 d.selectAll().where { ExposedQueryPlanAdapter.toFilter(plan, Options.of(mapping)).toOp() }
 ```
 
-The aliases the adapter allocates for its own subqueries are prefixed (`cerbos_1`, `cerbos_2`, …),
-so they are deterministic and cannot collide with yours.
+Mapping the un-aliased columns instead **fails loudly at execution, never with a wrong row set.**
+The predicate names `documents`, the query renamed it to `d`, and the base table is then out of
+scope, so the statement is rejected by the database — on H2 an `ExposedSQLException` reading
+`Column "DOCUMENTS.OWNER_ID" not found`. That exact wording is one engine's; what the suite pins is
+the shape of the failure, which is what matters: the predicate cannot quietly bind to some other
+copy of the table and return rows the PDP denies.
+
+The aliases the adapter allocates for **its own** subqueries are `cerbos_1`, `cerbos_2`, … numbered
+in walk order, so the emitted SQL is deterministic. Every subquery is aliased, never only on
+collision — one relation can be entered twice in one plan, and an unaliased inner table would
+capture the outer correlation. **Do not give a table in your own query an alias beginning
+`cerbos_`**: that prefix is what keeps the two sets apart.
 
 ## Database collation and case sensitivity
 
@@ -346,14 +421,13 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `check()` decisio
 seed rows, on H2, SQLite, PostgreSQL and MySQL. The Spring Data adapter defines the reference
 semantics this one follows.
 
-The figures below are an **output** of that harness. They are filled in from the first full
-conformance run and are written as a marker until then, rather than estimated — a number nobody
-measured is worse than no number.
+The figures below are an **output** of that harness, not an estimate, and the same figures hold on
+every one of the four stores.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | `TBD-AFTER-CONFORMANCE-RUN` of the 192 reference conformance actions, on H2, SQLite, PostgreSQL and MySQL |
-| Fail-closed corpus shapes | `TBD-AFTER-CONFORMANCE-RUN` — the list of refused shapes, each with the mechanism it names (`TBD-AFTER-CONFORMANCE-RUN` actions) |
+| Oracle-tested | 186 of the 192 reference conformance actions, on H2, SQLite, PostgreSQL and MySQL |
+| Fail-closed corpus shapes | The shapes `expectedUnsupported` pins for every adapter: regex `matches()` (CEL matches with RE2, which no SQL engine implements — `LIKE` has no alternation or anchors, and each engine's own regex operator differs from RE2), a positional read of an ordered list / `get-field`, `timestamp()` over a column whose type does not pin an absolute instant, the `int()` and `double()` casts (SQL `CAST` reads the numeric prefix of a string where CEL demands the whole string, and PostgreSQL and MySQL round where CEL truncates toward zero), `filter()` and `map()` used as a condition (both return a list, not a boolean), and equality between two columns under **mixed** null conventions (the declared side needs a definite answer for its NULL while the undeclared side needs UNKNOWN, and no single predicate is both). Plus this adapter's own, in `adapterUnsupported.exposed`: `mod` (CEL `%` is integer-only while an attribute value is always a double at check time, and the `int()` cast that would make it satisfiable has no faithful lowering), arithmetic **composed on** a division whose denominator may be zero (CEL carries the NaN or signed infinity through the sum and SQL has no value that does, so the `NULLIF` guard turns the whole expression into NULL: `cr-div-then-add` under-grants and its mirrored `ne` spelling over-grants, so both are refused), a hierarchy with an **empty** delimiter (Cerbos splits the path into one segment per character, making the relation a strict string-prefix test, while the prefix `LIKE` this adapter emits would also match the path itself), a positional read of a scalar list (a to-many relation is a correlated subquery and the rows a SQL relation returns carry no order to index into), and list equality over a `map()` projection (a correlated subquery cannot be compared to a list value) (17 actions) |
 | Representation-dependent | `null-eq-missing` — rejected under `NullAttributeRepresentation.OMITTED`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute the caller sends as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare it per attribute — `field(column, nulls = EXPLICIT)` — or the conservative rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute rows. Until the planner is fixed, write `R.attr.x != null` rather than `has(R.attr.x)` for database-backed attributes |
@@ -367,6 +441,41 @@ asserts the emitted SQL against [`golden/expectations.json`](golden/expectations
 second buys over the first is the rows nobody seeded: two queries can agree on all 22 seeds and
 disagree on the row you have, so a rewrite that quietly changes the emitted SQL passes the oracle
 and shows up there as a diff.
+
+### What a column type buys over a query plan
+
+A query plan names no operand types. That is why the adapters built on a type-blind query builder
+need the caller to declare something like `ValueString` or `ValueBool` before they can tell CEL's
+two `+` overloads apart, and why the reference fails closed on shapes that need a cast at all. An
+Exposed `Column` carries its own type, and the dialect is known at render time, so the same
+questions are answered from the mapping you already wrote — with **no per-column type declarations
+of any kind**. Five corpus actions translate here that the reference or most other SQL adapters
+refuse:
+
+| Action | What it is, and what settles it |
+| --- | --- |
+| `cast-string-bool` | `string()` over a boolean column. Deliberately not a `CAST`: SQLite and MySQL store a boolean as 1/0 and would render `"1"` where CEL and PostgreSQL render `"true"`. It is lowered to a `CASE` with an explicit NULL arm, so a NULL column stays NULL rather than falling through to the `ELSE`, and every engine says the same thing |
+| `cast-string-double` | `string()` over a floating-point column, which CEL renders as the shortest round-tripping decimal. A `DECIMAL` column is still refused, because it renders its declared scale (`1.50`) where CEL renders `1.5`; the cast target itself is spelled per dialect (`CHAR` on MySQL, `VARCHAR` elsewhere) inside the rendered expression |
+| `id-concat`, `concat-f2f` | CEL's `+` over strings — against a constant, and between two columns. One text operand, a string constant or a text column, settles the whole expression, because CEL has no mixed-type `+`. The emitted operator **propagates** NULL: `||`, and `CONCAT()` on MySQL alone, where `||` is logical OR outside `PIPES_AS_CONCAT`. Exposed's own `Concat` and PostgreSQL's `CONCAT()` *skip* a NULL argument, which would compare a partial string and match rows `check()` denies |
+| `hier-list-id` | A hierarchy path constructed by `list()` rather than read from a column — a shape several SQL adapters refuse |
+
+Guessing arithmetic for `+` is wrong in the dangerous direction: `text + text` is a hard error on
+PostgreSQL, `0` on SQLite, and on MySQL an over-grant matching almost every row
+([#391](https://github.com/cerbos/query-plan-adapters/issues/391)). The mapped column types are what
+make the guess unnecessary.
+
+### `size(string)` counts characters, and astral characters count differently
+
+CEL's `size(string)` counts Unicode code points. The adapter lowers it to `CHAR_LENGTH`, and to
+`LENGTH` on SQLite, which has no `CHAR_LENGTH` and whose `LENGTH` already counts characters for a
+text value. MySQL's `LENGTH` counts **bytes** and is never emitted: measuring a multibyte string in
+bytes would compare it against the wrong threshold and return rows the PDP denies.
+
+What remains is the unit each engine calls a character. H2 counts UTF-16 units, so a character
+outside the Basic Multilingual Plane — emoji, some CJK extensions — counts as 2 where CEL counts 1:
+`size("héllo🚀")` is 6 in CEL and 7 there. Keep length thresholds away from values that straddle
+that difference, or keep `size(string)` out of policies over data that carries astral characters.
+The Spring Data adapter documents the same caveat.
 
 ### Mapping hazards
 
@@ -430,6 +539,14 @@ declared as inputs of `gradle test`. Files rather than Kotlin constants for one 
 `renovate.json`'s custom manager bumps `<SERVICE>_IMAGE` files and nothing else, so a reference held
 in source would never get a Renovate PR.
 
+**The four legs found no store-specific divergence.** Every oracle-tested action returns the same
+ids on all four, and every fail-closed one raises the same message, so nothing in the classification
+is conditional on a store. That is a result, not a reason to run fewer legs: it says the emitted SQL
+means the same thing on each engine *today*, and each leg is what would notice the next translator
+change where it stops doing so. Two of the four are also the only place some of the choices above
+are executed at all — the MySQL `CONCAT()` arm and the MySQL `CHAR` cast target are dead code on
+every other engine.
+
 MariaDB is not proved and is therefore not claimed.
 
 ## Development
@@ -462,8 +579,14 @@ default:
   is the release the published jar is compiled against. See
   [The golden expectations](#the-golden-expectations).
 
-Only the differential suite needs Docker. `ExposedTranslatorTest` reads its plans from the shared
-corpus's wire fixtures and needs no PDP and no database server at all.
+`ExposedTranslatorTest` reads its plans from the shared corpus's wire fixtures and needs no PDP and
+no database server at all; so do the surface, mapping and seam suites, which run on in-process H2
+and SQLite. Two things reach for Docker. `AdversarialConformanceTest` requires it — it starts a
+pinned PDP, and on the `postgres` and `mysql` stores the database too. `OfflineRendererTest`'s two
+`@Tag("docker")` cases use it when it is there and are skipped when it is not: they start the pinned
+PostgreSQL and MySQL images and assert that the SQL the offline renderer's stub connections produce
+is byte-identical to the SQL the real drivers produce, which is the one check that keeps "offline"
+honest.
 
 ## The golden expectations
 
@@ -479,12 +602,48 @@ types are the point: a double bound as a decimal evaluates the adapter's deliber
 exactly — `3 * 0.1 == 0.3` is true in decimal and false in CEL — so it admits rows the PDP denies,
 and no amount of statement text would show it.
 
+One entry per action:
+
+```jsonc
+"cs-eq": {
+  // Optional, human, never compared, carried across regeneration.
+  "note": "why this shape is worth reading",
+  "kind": "KIND_CONDITIONAL",          // or KIND_ALWAYS_ALLOWED / KIND_ALWAYS_DENIED
+  // Present on a KIND_CONDITIONAL entry and on no other: a plan the planner folded to a
+  // constant has no SQL, and recording an empty rendering would make the two read alike.
+  // All four dialect keys, always, in this order.
+  "rendered": {
+    "sqlite": {
+      "sql": "adversarial_resources.a_string = ?",
+      // In bind order. `type` is the Exposed column type the constant was bound THROUGH.
+      "params": [{ "type": "TextColumnType", "value": "one" }]
+    },
+    "h2": { "…": "…" }, "postgresql": { "…": "…" }, "mysql": { "…": "…" }
+  }
+}
+```
+
+Rendering is **prepared**, so every constant lands in `params` rather than in the statement text.
+A double JSON cannot hold — `-0.0`, `NaN`, the infinities — is recorded as its own text instead, so
+the asset stays lossless and a reader can never mistake a recorded `0.0` for the negative zero an
+IEEE division depends on. `sqlite` and `h2` are rendered through real in-process drivers;
+`postgresql` and `mysql` through stub connections whose answers were read from the pinned images and
+are re-checked against them by `OfflineRendererTest`.
+
 Exposed's own renderer is therefore an input to the recorded bytes, and `exposed-core` is a
-`compileOnly` dependency, so a consumer brings their own. The three rules that follow from that
-(`conformance/README.md`, "When the generator is an input") all apply: the file declares the Exposed
-minor that rendered it, `gradle goldenUpdate` refuses to run under another one, and the `floor` leg
-asserts a pinned divergence list in **both** directions instead of the bytes. Where the floor and the
-baseline render identically that list is empty, and the assertion is that it stays empty.
+`compileOnly` dependency, so a consumer brings their own. That makes the file's header load-bearing
+rather than decorative — which one wrote these bytes has to be answerable from the file — and all
+three of the rules in `conformance/README.md`, "When the generator is an input", apply:
+
+1. **The header is checked by the loader**, not ignored. The file declares `"exposed": "1.5"`
+   beside `"adapter": "exposed"`, and a read under any other value fails naming both.
+2. **`gradle goldenUpdate` refuses to run under another Exposed minor**, and refuses *before* the
+   write. Otherwise regeneration would rewrite every entry the two renderers spell differently and
+   label the result `1.5` — a toolchain swap presented as a translation change.
+3. **The `floor` leg asserts a pinned divergence list instead of the bytes**, in *both* directions,
+   so a shape that stops diverging fails as loudly as one that starts. Where 1.0.0 and 1.5.0 render
+   identically that list is empty, and the assertion is that it stays empty. Skipping the
+   comparison there would leave the leg proving nothing about the emitted SQL.
 
 `gradle test` never regenerates the asset, so a translator change that moves the emitted SQL fails
 CI whatever anyone ran locally.
