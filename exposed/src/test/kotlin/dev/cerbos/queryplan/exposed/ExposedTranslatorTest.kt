@@ -748,10 +748,13 @@ class ExposedTranslatorTest {
                 withAliases.add(action)
                 val stray = names.filterNot { NUMBERED_ALIAS.matches(it) }
                 if (stray.isNotEmpty()) offenders.add("$action ($dialect): $stray")
+                // `distinct` keeps first-appearance order, so this one comparison says both things
+                // the rule claims: dense (nothing missing, nothing repeated with a gap) and in the
+                // order the statement reads.
                 val numbers = names.filter { NUMBERED_ALIAS.matches(it) }
                     .map { it.removePrefix(AliasAllocator.PREFIX).toInt() }
                     .distinct()
-                if (numbers != numbers.sorted() || numbers != (1..numbers.size).toList()) {
+                if (numbers != (1..numbers.size).toList()) {
                     offenders.add("$action ($dialect): aliases appear as $numbers")
                 }
             }
