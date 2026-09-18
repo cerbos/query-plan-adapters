@@ -9,97 +9,64 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 
 /**
- * Rules over the EMITTED SQL, where the shape is the point rather than the rows.
+ * Rules over the EMITTED SQL that the corpus-wide translator suite does not state.
  *
- * Each of these is a property no single action's row set can state: "every LIKE this adapter can
- * emit carries an ESCAPE clause" is a claim about the whole surface, and a row set that happens to
- * agree proves nothing about the next needle.
+ * Each of these is a property no single action's row set can state: what a cast target is, which
+ * concatenation operator a dialect gets, what a refusal names. A row set that happens to agree
+ * proves nothing about the next needle.
+ *
+ * It used to open with a hand-maintained list of "every corpus action this side translates", and
+ * sweep that list for the ESCAPE clause, for bound NULLs and for the two null-guard spellings.
+ * Nothing enforced the list — an action that started translating simply fell out of every sweep,
+ * which is what happened to the two division-then-add actions — and
+ * `ExposedTranslatorTest.WhatTheEmittedSqlContains` now sweeps the WHOLE corpus for the first two.
+ * The list and the sweeps that depended on it are gone; what stayed is what that suite does not
+ * ask, plus the one property below, restated so it needs no list at all.
  */
 class ComparisonSqlShapeTest {
 
-    /** Every corpus action this side translates, which is what makes the sweeps below exhaustive. */
-    private val translated = listOf(
-        "cs-eq", "cs-contains", "cs-startswith", "cs-endswith", "empty-string-eq", "unicode-eq",
-        "vf-ne", "vf-ge", "vf-le", "vf-lt", "gt-bare", "le-bare", "not-gt", "not-lt", "neg-number",
-        "double-threshold", "double-huge-gt", "double-huge-lt",
-        "like-percent", "like-underscore", "like-bracket", "like-backslash",
-        "cr-contains", "cr-startswith", "cr-endswith", "cr-startswith-concat", "p-startswith-concat",
-        "f2f-contains", "f2f-startswith", "f2f-endswith", "not-contains", "not-startswith",
-        "field-to-field", "null-eq", "null-ne", "null-not-eq", "vf-null-ne", "optional-ne",
-        "null-value-ne-const", "null-value-not-eq-const", "null-value-f2f",
-        "root-bare-bool", "root-or", "not-and", "double-negation", "triple-negation",
-        "id-eq-const", "id-f2f", "id-f2f-ne", "id-concat", "id-concat-vf", "concat-f2f",
-        "cast-string-bool", "cast-string-double",
-        "arith-add", "arith-sub", "arith-mult-neg", "arith-div", "arith-div-frac", "arith-vf",
-        "arith-both", "arith-add-eq-frac", "arith-add-ne-frac", "arith-add-eq-frac-exact",
-        "p-double-frac", "cr-div-zero", "cr-div-zero-ne", "cr-div-zero-eq-neg", "cr-div-neg-zero",
-        "cr-div-then-add", "cr-div-then-add-ne",
-        "cr-div-other-column", "nan-ord-ternary", "nan-ord-ternary-vf", "nan-ord-inf", "nan-ord-le",
-        "ternary-bare", "ternary-cmp", "ternary-negated", "ternary-nested", "ternary-null-cond",
-        "ternary-value-first", "ternary-expr-cond", "p-not-ternary-null", "p-ternary-of-ternaries",
-        "p-ternary-vs-ternary",
-        "hier-ancestor-cf", "hier-ancestor-ff", "hier-descendent-cf", "hier-descendent-ff",
-        "hier-overlaps-cf", "hier-overlaps-ff", "hier-list-id", "hier-meta-in", "hier-meta-like",
-        "hier-overlaps-meta", "hier-bracket",
-        "ts-eq", "ts-ne", "ts-eq-offset",
-    )
-
     @Test
-    fun `every LIKE carries an ESCAPE clause`() {
-        // The escape character is what makes the adapter's own metacharacter escaping mean
-        // anything. Exposed BINDS it rather than inlining it, so no dialect's string-literal
-        // backslash handling can change what it means.
-        translated.forEach { action ->
-            val sql = Scalars.rendered(Scalars.op(action)).sql
-            assertEquals(
-                sql.occurrencesOf(" LIKE "),
-                sql.occurrencesOf(" ESCAPE "),
-                "$action emitted a LIKE without an ESCAPE: $sql",
+    fun `IS NOT NULL has exactly two sources, and no corpus action reaches a third`() {
+        // A presence test is the over-grant direction: emitted where the plan did not ask for one,
+        // it readmits exactly the rows an omitted-convention comparison has to drop. It has two
+        // legitimate origins and no third —
+        //
+        //  - the asymmetric expansion an attribute DECLARED explicit-null earns, which is what
+        //    makes its equality definite (`null-ne`, `vf-null-ne`, `null-value-*`);
+        //  - `x != null` itself, whose whole meaning is a presence test, and which the pre-walk
+        //    scan has already admitted under the call-level convention (`rel-ne-null-hop`).
+        //
+        // Stated WITHOUT a list of actions, which is what let the old sweep go stale: a new action
+        // cannot fall out of a property quantified over the corpus.
+        Corpus.wireFixtureActions().forEach { action ->
+            val plan = Corpus.planFromWireFixture(action).filter
+            val filter = runCatching {
+                OfflineRenderer.translate { ExposedQueryPlanAdapter.toFilter(plan, Options.of(MAPPING)) }
+            }.getOrNull() as? QueryPlanFilter.Conditional ?: return@forEach
+            if (!OfflineRenderer.renderOn(OfflineRenderer.H2, filter.op).sql.contains("IS NOT NULL")) return@forEach
+            val declaresExplicitNull = variablesOf(plan.condition).any { reference ->
+                (MAPPING.resolve(reference) as? AttributeMapping.Field)
+                    ?.nullAttributeRepresentation == NullAttributeRepresentation.EXPLICIT
+            }
+            assertTrue(
+                declaresExplicitNull || carriesNullLiteral(plan.condition),
+                "$action emits IS NOT NULL with neither a declared explicit-null attribute nor a null literal",
             )
         }
     }
 
-    @Test
-    fun `NULL is never a bound argument`() {
-        // PostgreSQL cannot infer a type for a bare parameter with nothing around it to infer
-        // from, and a NULL keyword needs no dialect knowledge. Nothing this side emits binds one.
-        translated.forEach { action ->
-            val args = Scalars.rendered(Scalars.op(action)).args
-            assertTrue(args.none { it == null }, "$action bound a NULL: $args")
-        }
+    /** Every attribute reference in a plan subtree. */
+    private fun variablesOf(operand: Operand): List<String> = when (operand.nodeCase) {
+        Operand.NodeCase.VARIABLE -> listOf(operand.variable)
+        Operand.NodeCase.EXPRESSION -> operand.expression.operandsList.flatMap(::variablesOf)
+        else -> emptyList()
     }
 
-    @Test
-    fun `IS NULL appears only where a null operand or a declared guard puts it`() {
-        // Three sources, and no fourth: the null-constant leaf, the two-sided definite equality an
-        // explicit-null declaration entitles the mapping to, and the NULL-yielding guard around a
-        // column-valued LIKE pattern. Anywhere else it would be an assumption about a column the
-        // plan never made.
-        val nullTest = setOf(
-            "null-eq", "null-not-eq", "null-value-f2f",
-            "f2f-contains", "f2f-startswith", "f2f-endswith", "not-contains", "not-startswith",
-            "cr-contains", "cr-startswith", "cr-endswith", "cr-startswith-concat",
-            "cast-string-bool",
-        )
-        assertEquals(
-            nullTest,
-            translated.filter { Scalars.rendered(Scalars.op(it)).sql.contains("IS NULL") }.toSet(),
-        )
-    }
-
-    @Test
-    fun `IS NOT NULL appears only where the explicit-null convention was declared`() {
-        // The asymmetric expansion that makes an explicit-null attribute compare DEFINITELY.
-        // Emitting it for an undeclared column would readmit exactly the rows an omitted-convention
-        // comparison has to drop.
-        val presence = setOf(
-            "null-ne", "vf-null-ne",
-            "null-value-ne-const", "null-value-not-eq-const", "null-value-f2f",
-        )
-        assertEquals(
-            presence,
-            translated.filter { Scalars.rendered(Scalars.op(it)).sql.contains("IS NOT NULL") }.toSet(),
-        )
+    /** Whether a plan subtree carries a null constant anywhere. */
+    private fun carriesNullLiteral(operand: Operand): Boolean = when (operand.nodeCase) {
+        Operand.NodeCase.VALUE -> operand.value.kindCase == Value.KindCase.NULL_VALUE
+        Operand.NodeCase.EXPRESSION -> operand.expression.operandsList.any(::carriesNullLiteral)
+        else -> false
     }
 
     @Test
@@ -225,6 +192,4 @@ class ComparisonSqlShapeTest {
             )
         }
     }
-
-    private fun String.occurrencesOf(needle: String): Int = split(needle).size - 1
 }

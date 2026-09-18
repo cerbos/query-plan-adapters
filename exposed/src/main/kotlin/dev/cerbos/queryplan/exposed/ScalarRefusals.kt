@@ -101,8 +101,7 @@ internal object ScalarRefusals {
             "maps to a ${ScalarColumnTypes.describe(column)} column. CEL decides a comparison " +
             "between those from the values alone — equality is false and an ordering raises a " +
             "no-overload error — while SQL coerces one side, and MySQL coerces the column, so the " +
-            "filter returns rows the PDP denies. Map the attribute onto a column of the " +
-            "constant's type, or compare it against a value of the column's type.",
+            "filter returns rows the PDP denies. $TRANSLATABLE_KINDS",
     )
 
     /** [constantTypeMismatch] between two mapped columns: the same coercion, neither side constant. */
@@ -118,8 +117,21 @@ internal object ScalarRefusals {
             "${ScalarColumnTypes.describe(rightColumn)} column. CEL decides a comparison between " +
             "those from the values alone — equality is false and an ordering raises a no-overload " +
             "error — while SQL coerces one side, and MySQL coerces the text one, so the filter " +
-            "returns rows the PDP denies. Map both attributes onto columns of one type.",
+            "returns rows the PDP denies. $TRANSLATABLE_KINDS",
     )
+
+    /**
+     * What to do about a type mismatch, in terms of the kinds this adapter actually compares.
+     *
+     * "Map the attribute onto a column of the constant's type" was not actionable for a column
+     * whose kind is unrecognised — a `UUIDTable` id is an `EntityIDColumnType(UUIDColumnType)`, so
+     * `request.resource.id == "…"` refuses and there is no "column of the constant's type" to reach
+     * for. Naming the kinds says which remappings exist, the way [textCastUnsupported] does.
+     */
+    private const val TRANSLATABLE_KINDS =
+        "Compare it against a value of the column's own type, or map the attribute onto one of the " +
+            "kinds this adapter compares: text, integer, floating-point, decimal or boolean. A " +
+            "temporal column is compared by wrapping both sides in timestamp()."
 
     /**
      * CEL's `int()` and `double()`. SQL `CAST` is not a CEL conversion in either direction: CEL

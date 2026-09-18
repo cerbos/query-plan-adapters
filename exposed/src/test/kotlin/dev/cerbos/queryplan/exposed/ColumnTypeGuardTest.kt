@@ -221,27 +221,49 @@ class ColumnTypeGuardTest {
 
     @Test
     fun `every element of an in-list is checked, and a null element stays legal`() {
-        // Corpus gap. CEL: `R.attr.tagNames.exists(t, t in ["a", 2])` reaches the element column with a mixed
-        // list; `null in R.attr.tagNames` reaches it with a null, which renders IS NULL and coerces
-        // nothing. The list case is the one a principal attribute lands in.
+        // Corpus gap. `hasIntersection(R.attr.tagNames, P.attr.groups)` for a principal whose
+        // groups are `["a", 1]` — legal principal data, and the list shape a principal attribute
+        // really lands in.
+        //
+        // The mismatched element is DROPPED rather than refusing the whole membership, which is
+        // exact: CEL evaluates membership as the disjunction of the element equalities, and
+        // `textColumn == 1` is a definite FALSE contributing nothing, so `x OR false` is `x` under
+        // either polarity. The emitted filter therefore carries ONE bound argument, the survivor.
+        val mixed = render(
+            translate(
+                ReviewPlans.expression(
+                    "hasIntersection",
+                    ReviewPlans.variable("request.resource.attr.tagNames"),
+                    ReviewPlans.value(listOf("a", 1)),
+                ),
+            ),
+        )
+        assertEquals(1, Regex("\\?").findAll(mixed).count(), mixed)
+
+        // A null element is never dropped: it is not a type mismatch, it renders IS NULL, and it
+        // coerces nothing.
+        val withNull = render(
+            translate(
+                ReviewPlans.expression(
+                    "in",
+                    ReviewPlans.value(listOf("a", null)),
+                    ReviewPlans.variable("request.resource.attr.tagNames"),
+                ),
+            ),
+        )
+        assertTrue(withNull.contains("IS NULL"), withNull)
+
+        // Dropping EVERY element is the mapping error the refusal exists to name, so that refuses.
         val error = assertThrows<UnmappedAttributeException> {
             translate(
                 ReviewPlans.expression(
                     "hasIntersection",
                     ReviewPlans.variable("request.resource.attr.tagNames"),
-                    ReviewPlans.value(listOf("a", 2)),
+                    ReviewPlans.value(listOf(1, 2)),
                 ),
             )
         }
         assertTrue(error.message!!.contains("against a Long constant"), error.message)
-
-        translate(
-            ReviewPlans.expression(
-                "in",
-                ReviewPlans.value(listOf("a", null)),
-                ReviewPlans.variable("request.resource.attr.tagNames"),
-            ),
-        )
     }
 
     @Test
@@ -262,8 +284,10 @@ class ColumnTypeGuardTest {
                 "which map to a VarCharColumnType and a IntegerColumnType column. CEL decides a " +
                 "comparison between those from the values alone — equality is false and an " +
                 "ordering raises a no-overload error — while SQL coerces one side, and MySQL " +
-                "coerces the text one, so the filter returns rows the PDP denies. Map both " +
-                "attributes onto columns of one type.",
+                "coerces the text one, so the filter returns rows the PDP denies. Compare it against " +
+                "a value of the column's own type, or map the attribute onto one of the kinds this " +
+                "adapter compares: text, integer, floating-point, decimal or boolean. A temporal " +
+                "column is compared by wrapping both sides in timestamp().",
             error.message,
         )
     }

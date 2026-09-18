@@ -33,16 +33,17 @@ public class Options private constructor(
      * How deeply collection macros (`exists`, `all`, `exists_one`, …) may nest before a plan is
      * refused rather than translated.
      *
-     * The bound counts MACRO LEVELS, of both kinds the walk distinguishes, because both multiply.
-     * A macro over a mapped relation costs a level because it emits a correlated subquery, and a
-     * nested one emits that subquery once per enclosing level. A macro over a LITERAL list emits no
-     * subquery at all — it substitutes each element into the lambda body and walks the resulting
-     * `or`/`and` chain — but it duplicates everything under it once per element, so it costs a
-     * level too: the bound is on the size of the emitted expression, not only on its subquery
-     * count.
+     * What is counted, exactly: one level per COLLECTION MACRO the walk enters — `exists`, `all`,
+     * `exists_one`, and `size(filter(…))` — whether it ranges over a mapped relation or over a
+     * literal list. Both multiply: a relation macro emits its correlated subquery once per
+     * enclosing level, and a literal fold substitutes each element into the lambda body, so an
+     * N-element fold duplicates everything under it N times.
      *
-     * It bounds nothing else. A relation CHAIN is one level however many hops it has, and so is a
-     * `size()`, a membership test or a hierarchy relation over one.
+     * It is NOT a bound on the size of the emitted expression, and must not be read as one. A
+     * single 100-element fold is one level. A ternary doubles its subtree per level and a
+     * zero-capable division branches per level, and neither is counted at all. A relation CHAIN is
+     * one level however many hops it has, and so is a `size()`, a membership test or a hierarchy
+     * relation over one.
      */
     public val maxMacroDepth: Int,
 ) {

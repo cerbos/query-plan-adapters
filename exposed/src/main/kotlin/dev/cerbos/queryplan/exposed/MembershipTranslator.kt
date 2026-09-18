@@ -96,7 +96,10 @@ internal class MembershipTranslator(private val translation: Translation) {
             if (translation.leaf.isExplicitNull(target)) return Op.FALSE
             return TriLogic.baseUnlessUnknown(Op.FALSE, IsNullOp(target.expression))
         }
-        return TriLogic.or(values.map { translation.leaf.applyLeaf("eq", target, it) })
+        // The same drop [matchable] applies to an element column: an element of a type this column
+        // cannot hold is a definite FALSE in CEL, so it contributes nothing to the disjunction.
+        val matchable = matchable(target.variable, target.column, values)
+        return TriLogic.or(matchable.map { translation.leaf.applyLeaf("eq", target, it) })
     }
 
     /**
@@ -249,17 +252,31 @@ internal class MembershipTranslator(private val translation: Translation) {
      * to the check: it renders as `IS NULL`, which coerces nothing.
      */
     private fun matchesAnyOf(reference: String, element: Column<*>, values: List<Any?>): Op<Boolean> = TriLogic.or(
-        values.map { value ->
-            if (value == null) {
-                IsNullOp(element)
-            } else {
-                if (!ScalarColumnTypes.accepts(element, value)) {
-                    throw ScalarRefusals.constantTypeMismatch("in", reference, element, value)
-                }
-                EqOp(element, Params.of(value))
-            }
+        matchable(reference, element, values).map { value ->
+            if (value == null) IsNullOp(element) else EqOp(element, Params.of(value))
         },
     )
+
+    /**
+     * [values] with the elements the column cannot hold DROPPED, or a refusal when that leaves
+     * nothing.
+     *
+     * A heterogeneous list is legal principal data — `P.attr.groups` can be `["a", 1]` — and CEL
+     * evaluates membership as the disjunction of the element equalities, where `stringColumn == 1`
+     * is a definite FALSE that contributes nothing. So dropping it is EXACT under both polarities:
+     * the term it would have added is false, and `x OR false` is `x` whichever way the enclosing
+     * negation reads it. A null element is never dropped — it is not a type mismatch, it renders
+     * `IS NULL`, and coerces nothing.
+     *
+     * Dropping EVERY element is different, and refuses: a list whose values are all of the wrong
+     * type is the mapping error [ScalarRefusals.constantTypeMismatch] exists to name, and folding
+     * it to a silent FALSE would hide exactly that.
+     */
+    private fun matchable(reference: String, element: Column<*>, values: List<Any?>): List<Any?> {
+        val kept = values.filter { it == null || ScalarColumnTypes.accepts(element, it) }
+        if (kept.isNotEmpty()) return kept
+        throw ScalarRefusals.constantTypeMismatch("in", reference, element, values.first()!!)
+    }
 
     /**
      * A plan constant as the list of elements the operator ranges over.
