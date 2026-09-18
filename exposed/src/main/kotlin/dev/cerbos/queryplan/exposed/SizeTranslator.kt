@@ -16,7 +16,6 @@ import org.jetbrains.exposed.v1.core.IntegerColumnType
 import org.jetbrains.exposed.v1.core.IsNullOp
 import org.jetbrains.exposed.v1.core.LessEqOp
 import org.jetbrains.exposed.v1.core.LessOp
-import org.jetbrains.exposed.v1.core.LongColumnType
 import org.jetbrains.exposed.v1.core.Max
 import org.jetbrains.exposed.v1.core.NeqOp
 import org.jetbrains.exposed.v1.core.Op
@@ -24,7 +23,6 @@ import org.jetbrains.exposed.v1.core.PlusOp
 import org.jetbrains.exposed.v1.core.Sum
 import org.jetbrains.exposed.v1.core.Table
 import org.jetbrains.exposed.v1.core.intLiteral
-import org.jetbrains.exposed.v1.core.longLiteral
 import kotlin.math.ceil
 import kotlin.math.floor
 
@@ -131,9 +129,12 @@ internal class SizeTranslator(private val translation: Translation) {
             val empty = (comparison.operator == "eq" && comparison.value == 0L) ||
                 (comparison.operator == "le" && comparison.value == 0L) ||
                 (comparison.operator == "lt" && comparison.value == 1L)
-            val chain = { translation.subqueries.chain(collection.owner, collection.hops) }
-            if (nonEmpty) return translation.subqueries.existsOver(chain())
-            if (empty) return TriLogic.not(translation.subqueries.existsOver(chain()))
+            if (nonEmpty || empty) {
+                val present = translation.subqueries.existsOver(
+                    translation.subqueries.chain(collection.owner, collection.hops),
+                )
+                return if (nonEmpty) present else TriLogic.not(present)
+            }
         }
         return compare(translation.subqueries.chainCount(collection), comparison)
     }
