@@ -234,6 +234,9 @@ internal class ComparisonTranslator(private val translation: Translation) {
             if (left is Resolved.TimestampConstant && right is Resolved.TimestampConstant) {
                 return constantInstantComparison(operator, left.instant(), right.instant())
             }
+            if (left is Resolved.TimestampField && right is Resolved.TimestampField) {
+                return timestampFieldPair(operator, left.variable, right.variable, scope)
+            }
             if (left is Resolved.TextCast || right is Resolved.TextCast) {
                 return textCastComparison(operator, left, right, operands, scope)
             }
@@ -379,6 +382,38 @@ internal class ComparisonTranslator(private val translation: Translation) {
             target.expression
         }
         else -> throw leafOperandError("string", listOf(operand))
+    }
+
+    /**
+     * `timestamp(field) op timestamp(field)` — two mapped columns the policy has SAID are instants.
+     *
+     * This is the ONLY spelling that compares two temporal columns. The bare
+     * `R.attr.createdAt == R.attr.updatedAt` is refused, because Cerbos transports a timestamp
+     * attribute as an RFC 3339 STRING and CEL therefore compares those two as strings, where SQL
+     * compares them as instants and matches spellings CEL does not
+     * ([ScalarColumnTypes.comparable]). Wrapping both in `timestamp()` is the policy saying it
+     * means the instant, which is exactly what makes the SQL comparison the right one.
+     *
+     * Both columns must pin an absolute instant, and must pin it the SAME way: a `timestamp`
+     * against a `timestamptz` is resolved by PostgreSQL through the session's TimeZone, which is
+     * not a property of the filter.
+     */
+    private fun timestampFieldPair(
+        operator: String,
+        leftVariable: String,
+        rightVariable: String,
+        scope: Scope,
+    ): Op<Boolean> {
+        val left = scope.scalar(leftVariable)
+        val right = scope.scalar(rightVariable)
+        if (!TimestampBinder.storesAbsoluteInstant(left.column)) TimestampBinder.ambiguous(left.column, leftVariable)
+        if (!TimestampBinder.storesAbsoluteInstant(right.column)) {
+            TimestampBinder.ambiguous(right.column, rightVariable)
+        }
+        if (ScalarColumnTypes.describe(left.column) != ScalarColumnTypes.describe(right.column)) {
+            throw ScalarRefusals.columnTypeMismatch(operator, leftVariable, left.column, rightVariable, right.column)
+        }
+        return compare(operator, left.expression, right.expression)
     }
 
     /** Two constant instants, decided here. */

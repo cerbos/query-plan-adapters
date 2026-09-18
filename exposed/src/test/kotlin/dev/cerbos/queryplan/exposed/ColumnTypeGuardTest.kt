@@ -369,13 +369,42 @@ class ColumnTypeGuardTest {
                     )
                 }
             }
-        // Two columns of ONE unrecognised type give a store nothing to coerce, so they still
-        // compare: refusing them would be a restriction nothing about the stores asks for.
+    }
+
+    @Test
+    fun `two columns of ONE unrecognised type are refused, because coercion is not the failure`() {
+        // Corpus gap. CEL: `R.attr.createdAt == R.attr.updatedAt`, with no `timestamp()` wrapper,
+        // over two instant columns. It used to translate, on the argument that identical declared
+        // types give a store nothing to coerce — but coercion is not the only divergence and here
+        // it is not the one that matters.
+        //
+        // Cerbos transports a timestamp attribute as an RFC 3339 STRING, so this is a STRING
+        // comparison in CEL and an INSTANT comparison in SQL. `"2020-01-01T00:00:00Z"` against
+        // `"2020-01-01T00:00:00.000Z"`, or against `"2020-01-01T01:00:00+01:00"`, are unequal
+        // strings and the same instant: SQL returns a row check() denies. Two ordinal enum columns
+        // over different enums diverge the same way, and `describe` cannot tell them apart either.
+        val error = assertThrows<UnmappedAttributeException> {
+            translate(
+                ReviewPlans.expression(
+                    "eq",
+                    ReviewPlans.variable("request.resource.attr.createdAt"),
+                    ReviewPlans.variable("request.resource.attr.updatedAt"),
+                ),
+            )
+        }
+        assertTrue(error.message!!.contains("which map to a JavaInstantColumnType and a JavaInstantColumnType"), error.message)
+    }
+
+    @Test
+    fun `the timestamp() path is separate and still compares two instant columns`() {
+        // The control, and the reason refusing above costs nothing a policy needs:
+        // `timestamp(R.attr.createdAt) < timestamp(R.attr.updatedAt)` has SAID it means instants,
+        // goes through the timestamp-field pair rather than the leaf, and still translates.
         translate(
             ReviewPlans.expression(
-                "eq",
-                ReviewPlans.variable("request.resource.attr.createdAt"),
-                ReviewPlans.variable("request.resource.attr.updatedAt"),
+                "lt",
+                ReviewPlans.expression("timestamp", ReviewPlans.variable("request.resource.attr.createdAt")),
+                ReviewPlans.expression("timestamp", ReviewPlans.variable("request.resource.attr.updatedAt")),
             ),
         )
     }
