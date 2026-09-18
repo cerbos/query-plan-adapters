@@ -2,5 +2,1370 @@
   "adapter": "exposed",
   "exposed": "1.5",
   "regenerate": "gradle goldenUpdate",
-  "expectations": {}
+  "expectations": {
+    "cs-eq": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "adversarial_resources.a_string = ?",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "one"
+            }
+          ]
+        },
+        "h2": {
+          "sql": "ADVERSARIAL_RESOURCES.A_STRING = ?",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "one"
+            }
+          ]
+        },
+        "postgresql": {
+          "sql": "adversarial_resources.a_string = ?",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "one"
+            }
+          ]
+        },
+        "mysql": {
+          "sql": "adversarial_resources.a_string = ?",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "one"
+            }
+          ]
+        }
+      }
+    },
+    "double-huge-gt": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "adversarial_resources.a_double > ?",
+          "params": [
+            {
+              "type": "DoubleColumnType",
+              "value": -1.0E19
+            }
+          ]
+        },
+        "h2": {
+          "sql": "ADVERSARIAL_RESOURCES.A_DOUBLE > ?",
+          "params": [
+            {
+              "type": "DoubleColumnType",
+              "value": -1.0E19
+            }
+          ]
+        },
+        "postgresql": {
+          "sql": "adversarial_resources.a_double > ?",
+          "params": [
+            {
+              "type": "DoubleColumnType",
+              "value": -1.0E19
+            }
+          ]
+        },
+        "mysql": {
+          "sql": "adversarial_resources.a_double > ?",
+          "params": [
+            {
+              "type": "DoubleColumnType",
+              "value": -1.0E19
+            }
+          ]
+        }
+      }
+    },
+    "double-huge-lt": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "adversarial_resources.a_double < ?",
+          "params": [
+            {
+              "type": "DoubleColumnType",
+              "value": -1.0E19
+            }
+          ]
+        },
+        "h2": {
+          "sql": "ADVERSARIAL_RESOURCES.A_DOUBLE < ?",
+          "params": [
+            {
+              "type": "DoubleColumnType",
+              "value": -1.0E19
+            }
+          ]
+        },
+        "postgresql": {
+          "sql": "adversarial_resources.a_double < ?",
+          "params": [
+            {
+              "type": "DoubleColumnType",
+              "value": -1.0E19
+            }
+          ]
+        },
+        "mysql": {
+          "sql": "adversarial_resources.a_double < ?",
+          "params": [
+            {
+              "type": "DoubleColumnType",
+              "value": -1.0E19
+            }
+          ]
+        }
+      }
+    },
+    "double-negation": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "NOT (NOT (adversarial_resources.a_bool = ?))",
+          "params": [
+            {
+              "type": "BooleanColumnType",
+              "value": true
+            }
+          ]
+        },
+        "h2": {
+          "sql": "NOT (NOT (ADVERSARIAL_RESOURCES.A_BOOL = ?))",
+          "params": [
+            {
+              "type": "BooleanColumnType",
+              "value": true
+            }
+          ]
+        },
+        "postgresql": {
+          "sql": "NOT (NOT (adversarial_resources.a_bool = ?))",
+          "params": [
+            {
+              "type": "BooleanColumnType",
+              "value": true
+            }
+          ]
+        },
+        "mysql": {
+          "sql": "NOT (NOT (adversarial_resources.a_bool = ?))",
+          "params": [
+            {
+              "type": "BooleanColumnType",
+              "value": true
+            }
+          ]
+        }
+      }
+    },
+    "double-threshold": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "adversarial_resources.a_number >= ?",
+          "params": [
+            {
+              "type": "DoubleColumnType",
+              "value": 1.5
+            }
+          ]
+        },
+        "h2": {
+          "sql": "ADVERSARIAL_RESOURCES.A_NUMBER >= ?",
+          "params": [
+            {
+              "type": "DoubleColumnType",
+              "value": 1.5
+            }
+          ]
+        },
+        "postgresql": {
+          "sql": "adversarial_resources.a_number >= ?",
+          "params": [
+            {
+              "type": "DoubleColumnType",
+              "value": 1.5
+            }
+          ]
+        },
+        "mysql": {
+          "sql": "adversarial_resources.a_number >= ?",
+          "params": [
+            {
+              "type": "DoubleColumnType",
+              "value": 1.5
+            }
+          ]
+        }
+      }
+    },
+    "empty-string-eq": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "adversarial_resources.a_string = ?",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": ""
+            }
+          ]
+        },
+        "h2": {
+          "sql": "ADVERSARIAL_RESOURCES.A_STRING = ?",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": ""
+            }
+          ]
+        },
+        "postgresql": {
+          "sql": "adversarial_resources.a_string = ?",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": ""
+            }
+          ]
+        },
+        "mysql": {
+          "sql": "adversarial_resources.a_string = ?",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": ""
+            }
+          ]
+        }
+      }
+    },
+    "gt-bare": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "adversarial_resources.a_number > ?",
+          "params": [
+            {
+              "type": "LongColumnType",
+              "value": 1
+            }
+          ]
+        },
+        "h2": {
+          "sql": "ADVERSARIAL_RESOURCES.A_NUMBER > ?",
+          "params": [
+            {
+              "type": "LongColumnType",
+              "value": 1
+            }
+          ]
+        },
+        "postgresql": {
+          "sql": "adversarial_resources.a_number > ?",
+          "params": [
+            {
+              "type": "LongColumnType",
+              "value": 1
+            }
+          ]
+        },
+        "mysql": {
+          "sql": "adversarial_resources.a_number > ?",
+          "params": [
+            {
+              "type": "LongColumnType",
+              "value": 1
+            }
+          ]
+        }
+      }
+    },
+    "id-eq-const": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "adversarial_resources.id = ?",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "f1"
+            }
+          ]
+        },
+        "h2": {
+          "sql": "ADVERSARIAL_RESOURCES.ID = ?",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "f1"
+            }
+          ]
+        },
+        "postgresql": {
+          "sql": "adversarial_resources.id = ?",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "f1"
+            }
+          ]
+        },
+        "mysql": {
+          "sql": "adversarial_resources.id = ?",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "f1"
+            }
+          ]
+        }
+      }
+    },
+    "in-empty": {
+      "kind": "KIND_ALWAYS_DENIED"
+    },
+    "in-single": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "adversarial_resources.a_string = ?",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "one"
+            }
+          ]
+        },
+        "h2": {
+          "sql": "ADVERSARIAL_RESOURCES.A_STRING = ?",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "one"
+            }
+          ]
+        },
+        "postgresql": {
+          "sql": "adversarial_resources.a_string = ?",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "one"
+            }
+          ]
+        },
+        "mysql": {
+          "sql": "adversarial_resources.a_string = ?",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "one"
+            }
+          ]
+        }
+      }
+    },
+    "le-bare": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "adversarial_resources.a_number <= ?",
+          "params": [
+            {
+              "type": "LongColumnType",
+              "value": 2
+            }
+          ]
+        },
+        "h2": {
+          "sql": "ADVERSARIAL_RESOURCES.A_NUMBER <= ?",
+          "params": [
+            {
+              "type": "LongColumnType",
+              "value": 2
+            }
+          ]
+        },
+        "postgresql": {
+          "sql": "adversarial_resources.a_number <= ?",
+          "params": [
+            {
+              "type": "LongColumnType",
+              "value": 2
+            }
+          ]
+        },
+        "mysql": {
+          "sql": "adversarial_resources.a_number <= ?",
+          "params": [
+            {
+              "type": "LongColumnType",
+              "value": 2
+            }
+          ]
+        }
+      }
+    },
+    "nary-and": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "(adversarial_resources.a_bool = ?) AND (adversarial_resources.a_number >= ?) AND (adversarial_resources.a_string <> ?)",
+          "params": [
+            {
+              "type": "BooleanColumnType",
+              "value": true
+            },
+            {
+              "type": "LongColumnType",
+              "value": 0
+            },
+            {
+              "type": "TextColumnType",
+              "value": "one"
+            }
+          ]
+        },
+        "h2": {
+          "sql": "(ADVERSARIAL_RESOURCES.A_BOOL = ?) AND (ADVERSARIAL_RESOURCES.A_NUMBER >= ?) AND (ADVERSARIAL_RESOURCES.A_STRING <> ?)",
+          "params": [
+            {
+              "type": "BooleanColumnType",
+              "value": true
+            },
+            {
+              "type": "LongColumnType",
+              "value": 0
+            },
+            {
+              "type": "TextColumnType",
+              "value": "one"
+            }
+          ]
+        },
+        "postgresql": {
+          "sql": "(adversarial_resources.a_bool = ?) AND (adversarial_resources.a_number >= ?) AND (adversarial_resources.a_string <> ?)",
+          "params": [
+            {
+              "type": "BooleanColumnType",
+              "value": true
+            },
+            {
+              "type": "LongColumnType",
+              "value": 0
+            },
+            {
+              "type": "TextColumnType",
+              "value": "one"
+            }
+          ]
+        },
+        "mysql": {
+          "sql": "(adversarial_resources.a_bool = ?) AND (adversarial_resources.a_number >= ?) AND (adversarial_resources.a_string <> ?)",
+          "params": [
+            {
+              "type": "BooleanColumnType",
+              "value": true
+            },
+            {
+              "type": "LongColumnType",
+              "value": 0
+            },
+            {
+              "type": "TextColumnType",
+              "value": "one"
+            }
+          ]
+        }
+      }
+    },
+    "neg-number": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "adversarial_resources.a_number < ?",
+          "params": [
+            {
+              "type": "LongColumnType",
+              "value": -1
+            }
+          ]
+        },
+        "h2": {
+          "sql": "ADVERSARIAL_RESOURCES.A_NUMBER < ?",
+          "params": [
+            {
+              "type": "LongColumnType",
+              "value": -1
+            }
+          ]
+        },
+        "postgresql": {
+          "sql": "adversarial_resources.a_number < ?",
+          "params": [
+            {
+              "type": "LongColumnType",
+              "value": -1
+            }
+          ]
+        },
+        "mysql": {
+          "sql": "adversarial_resources.a_number < ?",
+          "params": [
+            {
+              "type": "LongColumnType",
+              "value": -1
+            }
+          ]
+        }
+      }
+    },
+    "not-and": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "NOT ((adversarial_resources.a_bool = ?) AND (adversarial_resources.a_string <> ?))",
+          "params": [
+            {
+              "type": "BooleanColumnType",
+              "value": true
+            },
+            {
+              "type": "TextColumnType",
+              "value": "one"
+            }
+          ]
+        },
+        "h2": {
+          "sql": "NOT ((ADVERSARIAL_RESOURCES.A_BOOL = ?) AND (ADVERSARIAL_RESOURCES.A_STRING <> ?))",
+          "params": [
+            {
+              "type": "BooleanColumnType",
+              "value": true
+            },
+            {
+              "type": "TextColumnType",
+              "value": "one"
+            }
+          ]
+        },
+        "postgresql": {
+          "sql": "NOT ((adversarial_resources.a_bool = ?) AND (adversarial_resources.a_string <> ?))",
+          "params": [
+            {
+              "type": "BooleanColumnType",
+              "value": true
+            },
+            {
+              "type": "TextColumnType",
+              "value": "one"
+            }
+          ]
+        },
+        "mysql": {
+          "sql": "NOT ((adversarial_resources.a_bool = ?) AND (adversarial_resources.a_string <> ?))",
+          "params": [
+            {
+              "type": "BooleanColumnType",
+              "value": true
+            },
+            {
+              "type": "TextColumnType",
+              "value": "one"
+            }
+          ]
+        }
+      }
+    },
+    "not-gt": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "NOT (adversarial_resources.a_number > ?)",
+          "params": [
+            {
+              "type": "LongColumnType",
+              "value": 1
+            }
+          ]
+        },
+        "h2": {
+          "sql": "NOT (ADVERSARIAL_RESOURCES.A_NUMBER > ?)",
+          "params": [
+            {
+              "type": "LongColumnType",
+              "value": 1
+            }
+          ]
+        },
+        "postgresql": {
+          "sql": "NOT (adversarial_resources.a_number > ?)",
+          "params": [
+            {
+              "type": "LongColumnType",
+              "value": 1
+            }
+          ]
+        },
+        "mysql": {
+          "sql": "NOT (adversarial_resources.a_number > ?)",
+          "params": [
+            {
+              "type": "LongColumnType",
+              "value": 1
+            }
+          ]
+        }
+      }
+    },
+    "not-lt": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "NOT (adversarial_resources.a_number < ?)",
+          "params": [
+            {
+              "type": "LongColumnType",
+              "value": 2
+            }
+          ]
+        },
+        "h2": {
+          "sql": "NOT (ADVERSARIAL_RESOURCES.A_NUMBER < ?)",
+          "params": [
+            {
+              "type": "LongColumnType",
+              "value": 2
+            }
+          ]
+        },
+        "postgresql": {
+          "sql": "NOT (adversarial_resources.a_number < ?)",
+          "params": [
+            {
+              "type": "LongColumnType",
+              "value": 2
+            }
+          ]
+        },
+        "mysql": {
+          "sql": "NOT (adversarial_resources.a_number < ?)",
+          "params": [
+            {
+              "type": "LongColumnType",
+              "value": 2
+            }
+          ]
+        }
+      }
+    },
+    "null-value-ne-const": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "adversarial_resources.a_optional_string <> ?",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "x"
+            }
+          ]
+        },
+        "h2": {
+          "sql": "ADVERSARIAL_RESOURCES.A_OPTIONAL_STRING <> ?",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "x"
+            }
+          ]
+        },
+        "postgresql": {
+          "sql": "adversarial_resources.a_optional_string <> ?",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "x"
+            }
+          ]
+        },
+        "mysql": {
+          "sql": "adversarial_resources.a_optional_string <> ?",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "x"
+            }
+          ]
+        }
+      }
+    },
+    "null-value-not-eq-const": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "NOT (adversarial_resources.a_optional_string = ?)",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "x"
+            }
+          ]
+        },
+        "h2": {
+          "sql": "NOT (ADVERSARIAL_RESOURCES.A_OPTIONAL_STRING = ?)",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "x"
+            }
+          ]
+        },
+        "postgresql": {
+          "sql": "NOT (adversarial_resources.a_optional_string = ?)",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "x"
+            }
+          ]
+        },
+        "mysql": {
+          "sql": "NOT (adversarial_resources.a_optional_string = ?)",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "x"
+            }
+          ]
+        }
+      }
+    },
+    "optional-ne": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "adversarial_resources.a_optional_string <> ?",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "x"
+            }
+          ]
+        },
+        "h2": {
+          "sql": "ADVERSARIAL_RESOURCES.A_OPTIONAL_STRING <> ?",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "x"
+            }
+          ]
+        },
+        "postgresql": {
+          "sql": "adversarial_resources.a_optional_string <> ?",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "x"
+            }
+          ]
+        },
+        "mysql": {
+          "sql": "adversarial_resources.a_optional_string <> ?",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "x"
+            }
+          ]
+        }
+      }
+    },
+    "p-has": {
+      "kind": "KIND_ALWAYS_ALLOWED"
+    },
+    "p-in-null-single": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "adversarial_resources.a_optional_string = ?",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "x"
+            }
+          ]
+        },
+        "h2": {
+          "sql": "ADVERSARIAL_RESOURCES.A_OPTIONAL_STRING = ?",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "x"
+            }
+          ]
+        },
+        "postgresql": {
+          "sql": "adversarial_resources.a_optional_string = ?",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "x"
+            }
+          ]
+        },
+        "mysql": {
+          "sql": "adversarial_resources.a_optional_string = ?",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "x"
+            }
+          ]
+        }
+      }
+    },
+    "p-struct": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "adversarial_resources.a_string = ?",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "one"
+            }
+          ]
+        },
+        "h2": {
+          "sql": "ADVERSARIAL_RESOURCES.A_STRING = ?",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "one"
+            }
+          ]
+        },
+        "postgresql": {
+          "sql": "adversarial_resources.a_string = ?",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "one"
+            }
+          ]
+        },
+        "mysql": {
+          "sql": "adversarial_resources.a_string = ?",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "one"
+            }
+          ]
+        }
+      }
+    },
+    "pv-all-unrolled": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "(adversarial_resources.a_optional_string <> ?) AND ((adversarial_resources.a_optional_string <> ?) AND (adversarial_resources.a_optional_string <> ?))",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "set"
+            },
+            {
+              "type": "TextColumnType",
+              "value": ""
+            },
+            {
+              "type": "TextColumnType",
+              "value": "%_o"
+            }
+          ]
+        },
+        "h2": {
+          "sql": "(ADVERSARIAL_RESOURCES.A_OPTIONAL_STRING <> ?) AND ((ADVERSARIAL_RESOURCES.A_OPTIONAL_STRING <> ?) AND (ADVERSARIAL_RESOURCES.A_OPTIONAL_STRING <> ?))",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "set"
+            },
+            {
+              "type": "TextColumnType",
+              "value": ""
+            },
+            {
+              "type": "TextColumnType",
+              "value": "%_o"
+            }
+          ]
+        },
+        "postgresql": {
+          "sql": "(adversarial_resources.a_optional_string <> ?) AND ((adversarial_resources.a_optional_string <> ?) AND (adversarial_resources.a_optional_string <> ?))",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "set"
+            },
+            {
+              "type": "TextColumnType",
+              "value": ""
+            },
+            {
+              "type": "TextColumnType",
+              "value": "%_o"
+            }
+          ]
+        },
+        "mysql": {
+          "sql": "(adversarial_resources.a_optional_string <> ?) AND ((adversarial_resources.a_optional_string <> ?) AND (adversarial_resources.a_optional_string <> ?))",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "set"
+            },
+            {
+              "type": "TextColumnType",
+              "value": ""
+            },
+            {
+              "type": "TextColumnType",
+              "value": "%_o"
+            }
+          ]
+        }
+      }
+    },
+    "pv-exists-unrolled": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "(adversarial_resources.a_optional_string = ?) OR ((adversarial_resources.a_optional_string = ?) OR (adversarial_resources.a_optional_string = ?))",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "set"
+            },
+            {
+              "type": "TextColumnType",
+              "value": ""
+            },
+            {
+              "type": "TextColumnType",
+              "value": "%_o"
+            }
+          ]
+        },
+        "h2": {
+          "sql": "(ADVERSARIAL_RESOURCES.A_OPTIONAL_STRING = ?) OR ((ADVERSARIAL_RESOURCES.A_OPTIONAL_STRING = ?) OR (ADVERSARIAL_RESOURCES.A_OPTIONAL_STRING = ?))",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "set"
+            },
+            {
+              "type": "TextColumnType",
+              "value": ""
+            },
+            {
+              "type": "TextColumnType",
+              "value": "%_o"
+            }
+          ]
+        },
+        "postgresql": {
+          "sql": "(adversarial_resources.a_optional_string = ?) OR ((adversarial_resources.a_optional_string = ?) OR (adversarial_resources.a_optional_string = ?))",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "set"
+            },
+            {
+              "type": "TextColumnType",
+              "value": ""
+            },
+            {
+              "type": "TextColumnType",
+              "value": "%_o"
+            }
+          ]
+        },
+        "mysql": {
+          "sql": "(adversarial_resources.a_optional_string = ?) OR ((adversarial_resources.a_optional_string = ?) OR (adversarial_resources.a_optional_string = ?))",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "set"
+            },
+            {
+              "type": "TextColumnType",
+              "value": ""
+            },
+            {
+              "type": "TextColumnType",
+              "value": "%_o"
+            }
+          ]
+        }
+      }
+    },
+    "root-bare-bool": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "adversarial_resources.a_bool = ?",
+          "params": [
+            {
+              "type": "BooleanColumnType",
+              "value": true
+            }
+          ]
+        },
+        "h2": {
+          "sql": "ADVERSARIAL_RESOURCES.A_BOOL = ?",
+          "params": [
+            {
+              "type": "BooleanColumnType",
+              "value": true
+            }
+          ]
+        },
+        "postgresql": {
+          "sql": "adversarial_resources.a_bool = ?",
+          "params": [
+            {
+              "type": "BooleanColumnType",
+              "value": true
+            }
+          ]
+        },
+        "mysql": {
+          "sql": "adversarial_resources.a_bool = ?",
+          "params": [
+            {
+              "type": "BooleanColumnType",
+              "value": true
+            }
+          ]
+        }
+      }
+    },
+    "root-or": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "(adversarial_resources.a_bool = ?) OR (adversarial_resources.a_number < ?)",
+          "params": [
+            {
+              "type": "BooleanColumnType",
+              "value": true
+            },
+            {
+              "type": "LongColumnType",
+              "value": 0
+            }
+          ]
+        },
+        "h2": {
+          "sql": "(ADVERSARIAL_RESOURCES.A_BOOL = ?) OR (ADVERSARIAL_RESOURCES.A_NUMBER < ?)",
+          "params": [
+            {
+              "type": "BooleanColumnType",
+              "value": true
+            },
+            {
+              "type": "LongColumnType",
+              "value": 0
+            }
+          ]
+        },
+        "postgresql": {
+          "sql": "(adversarial_resources.a_bool = ?) OR (adversarial_resources.a_number < ?)",
+          "params": [
+            {
+              "type": "BooleanColumnType",
+              "value": true
+            },
+            {
+              "type": "LongColumnType",
+              "value": 0
+            }
+          ]
+        },
+        "mysql": {
+          "sql": "(adversarial_resources.a_bool = ?) OR (adversarial_resources.a_number < ?)",
+          "params": [
+            {
+              "type": "BooleanColumnType",
+              "value": true
+            },
+            {
+              "type": "LongColumnType",
+              "value": 0
+            }
+          ]
+        }
+      }
+    },
+    "triple-negation": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "NOT (NOT (NOT (adversarial_resources.a_bool = ?)))",
+          "params": [
+            {
+              "type": "BooleanColumnType",
+              "value": true
+            }
+          ]
+        },
+        "h2": {
+          "sql": "NOT (NOT (NOT (ADVERSARIAL_RESOURCES.A_BOOL = ?)))",
+          "params": [
+            {
+              "type": "BooleanColumnType",
+              "value": true
+            }
+          ]
+        },
+        "postgresql": {
+          "sql": "NOT (NOT (NOT (adversarial_resources.a_bool = ?)))",
+          "params": [
+            {
+              "type": "BooleanColumnType",
+              "value": true
+            }
+          ]
+        },
+        "mysql": {
+          "sql": "NOT (NOT (NOT (adversarial_resources.a_bool = ?)))",
+          "params": [
+            {
+              "type": "BooleanColumnType",
+              "value": true
+            }
+          ]
+        }
+      }
+    },
+    "unicode-eq": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "adversarial_resources.a_string = ?",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "héllo🚀"
+            }
+          ]
+        },
+        "h2": {
+          "sql": "ADVERSARIAL_RESOURCES.A_STRING = ?",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "héllo🚀"
+            }
+          ]
+        },
+        "postgresql": {
+          "sql": "adversarial_resources.a_string = ?",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "héllo🚀"
+            }
+          ]
+        },
+        "mysql": {
+          "sql": "adversarial_resources.a_string = ?",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "héllo🚀"
+            }
+          ]
+        }
+      }
+    },
+    "vf-ge": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "adversarial_resources.a_number <= ?",
+          "params": [
+            {
+              "type": "LongColumnType",
+              "value": 2
+            }
+          ]
+        },
+        "h2": {
+          "sql": "ADVERSARIAL_RESOURCES.A_NUMBER <= ?",
+          "params": [
+            {
+              "type": "LongColumnType",
+              "value": 2
+            }
+          ]
+        },
+        "postgresql": {
+          "sql": "adversarial_resources.a_number <= ?",
+          "params": [
+            {
+              "type": "LongColumnType",
+              "value": 2
+            }
+          ]
+        },
+        "mysql": {
+          "sql": "adversarial_resources.a_number <= ?",
+          "params": [
+            {
+              "type": "LongColumnType",
+              "value": 2
+            }
+          ]
+        }
+      }
+    },
+    "vf-le": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "adversarial_resources.a_number >= ?",
+          "params": [
+            {
+              "type": "LongColumnType",
+              "value": 3
+            }
+          ]
+        },
+        "h2": {
+          "sql": "ADVERSARIAL_RESOURCES.A_NUMBER >= ?",
+          "params": [
+            {
+              "type": "LongColumnType",
+              "value": 3
+            }
+          ]
+        },
+        "postgresql": {
+          "sql": "adversarial_resources.a_number >= ?",
+          "params": [
+            {
+              "type": "LongColumnType",
+              "value": 3
+            }
+          ]
+        },
+        "mysql": {
+          "sql": "adversarial_resources.a_number >= ?",
+          "params": [
+            {
+              "type": "LongColumnType",
+              "value": 3
+            }
+          ]
+        }
+      }
+    },
+    "vf-lt": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "adversarial_resources.a_number > ?",
+          "params": [
+            {
+              "type": "LongColumnType",
+              "value": 1
+            }
+          ]
+        },
+        "h2": {
+          "sql": "ADVERSARIAL_RESOURCES.A_NUMBER > ?",
+          "params": [
+            {
+              "type": "LongColumnType",
+              "value": 1
+            }
+          ]
+        },
+        "postgresql": {
+          "sql": "adversarial_resources.a_number > ?",
+          "params": [
+            {
+              "type": "LongColumnType",
+              "value": 1
+            }
+          ]
+        },
+        "mysql": {
+          "sql": "adversarial_resources.a_number > ?",
+          "params": [
+            {
+              "type": "LongColumnType",
+              "value": 1
+            }
+          ]
+        }
+      }
+    },
+    "vf-ne": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "adversarial_resources.a_string <> ?",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "one"
+            }
+          ]
+        },
+        "h2": {
+          "sql": "ADVERSARIAL_RESOURCES.A_STRING <> ?",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "one"
+            }
+          ]
+        },
+        "postgresql": {
+          "sql": "adversarial_resources.a_string <> ?",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "one"
+            }
+          ]
+        },
+        "mysql": {
+          "sql": "adversarial_resources.a_string <> ?",
+          "params": [
+            {
+              "type": "TextColumnType",
+              "value": "one"
+            }
+          ]
+        }
+      }
+    }
+  }
 }
