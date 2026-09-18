@@ -156,9 +156,22 @@ internal data class RenderedParam(
             value is String || value is Boolean -> RenderedParam(type, value, null)
             value is Long -> RenderedParam(type, value, null)
             value is Byte || value is Short || value is Int -> RenderedParam(type, (value as Number).toLong(), null)
-            // Anything else — a temporal, a BigDecimal, an EntityID — is recorded as its own text.
-            // The type name beside it is what says which, so the asset never has to guess.
-            else -> RenderedParam(type, value.toString(), null)
+            // A temporal bind is recorded as its own ISO-8601 text, which is lossless: the golden
+            // asset's `ts-window` entries depend on it keeping the nanoseconds the PDP emits.
+            // `kotlin.time.Instant` is matched by name, so this file needs no experimental opt-in.
+            value is java.time.Instant ||
+                value is java.time.OffsetDateTime ||
+                value::class.qualifiedName == "kotlin.time.Instant" ->
+                RenderedParam(type, value.toString(), null)
+            // Nothing else has a recorded form, ON PURPOSE. A universal `toString()` here used to
+            // decide what a fifth of the asset's arguments say with nothing noticing: a BigDecimal,
+            // an EntityID or a date would be stringified silently and pinned as if that were the
+            // bind. The adapter binds plan constants by VALUE type (`sql/Params.kt`), so a new
+            // kind of bind is a translator change, and it should arrive here as a decision.
+            else -> throw IllegalStateException(
+                "No recorded form for a ${value::class.qualifiedName} bind of SQL type $type: decide " +
+                    "how the golden asset should record it, and add it to RenderedParam.of",
+            )
         }
     }
 }
