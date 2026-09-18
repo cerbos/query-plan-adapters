@@ -116,19 +116,6 @@ internal object ScalarRefusals {
         }
 
     /**
-     * `+` between two columns whose types cannot settle CEL's overload. Guessing numeric is wrong
-     * in the dangerous direction: `text + text` is a hard error on PostgreSQL, 0 on SQLite and 0
-     * on MySQL, where the string constant on the other side coerces to 0 with them and the filter
-     * matches almost every row
-     * (https://github.com/cerbos/query-plan-adapters/issues/391).
-     */
-    fun ambiguousAddition(): UnsupportedPlanShapeException = Refusals.unsupported(
-        "Cannot tell numeric addition from string concatenation in `+`: CEL overloads `+` on " +
-            "strings and the plan carries no operand types, so the mapped column types have to " +
-            "settle it and neither of these is text or numeric.",
-    )
-
-    /**
      * A CEL list or map literal compared against a scalar column — `R.attr.tags == ["a", "b"]`
      * arrives as `eq(variable, value-list)` verbatim. No scalar column comparison exists for it,
      * and binding the structure would die inside the JDBC driver with a coercion error instead of
