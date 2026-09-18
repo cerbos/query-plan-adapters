@@ -453,6 +453,39 @@ every kind-3 test opens with *Corpus gap.*):
   arithmetic as a comparison operand; constant NaN and infinity ordering; and the
   `timestamp(field)` operator cells the corpus does not reach.
 
+**exposed** (the unit suites under `exposed/src/test/kotlin/dev/cerbos/queryplan/exposed/`; unlike
+the entries above, this adapter has no single unit-test class, so the comment at each test is the
+source rather than a banner over a block):
+
+- **Kind 1 — a branch CEL itself cannot reach.** Permanent. An operator no leaf case knows
+  (`ComparisonSqlShapeTest`) — an unknown function is an undeclared reference at compile time, so
+  no policy produces one, and the fallback has to be a refusal rather than a nearest-operator
+  guess; a ternary arriving with 2 operands instead of 3, which is a wire-contract violation and
+  raises as one (`TernaryTranslatorTest`); a `timestamp()` literal spelling CEL's own `timestamp()`
+  rejects — a year outside its range, a space where RFC 3339 wants `T`, a missing zone
+  (`ComparisonTimestampTest`); and the two constant-condition folds the planner performs before the
+  wire, a constant boolean ternary condition and a boolean constant in condition position
+  (`TernaryTranslatorTest`), pinned because the fold is what stops an untranslatable dead branch —
+  a bare `matches` — from refusing a plan whose condition never selects it.
+- **Kind 2 — a caller-supplied argument the corpus structurally cannot vary.** Permanent.
+  `actions.json` classifies each action against one `Options` per adapter, so none of these has a
+  corpus spelling: the call-level `NullAttributeRepresentation` and the per-attribute declaration
+  that overrides it (`NullOperandScanTest`); a mapping the corpus does not use — an
+  `OffsetDateTime` column (`ComparisonTimestampTest`) and a temporal column where arithmetic needs
+  a numeric one (`ArithmeticTranslatorTest`), which is the refusal a plan alone could never justify
+  because a plan names no operand types; both mapper forms, the static table and the resolver
+  function, asserted to translate one plan identically (`MappingDslTest`); `visibleWhen` and the
+  subquery alias it is built against (`MappingDslTest`); and `maxMacroDepth`, as the `Options`
+  bound and its own validation (`OptionsTest`) and as the refusal a plan nested past it raises
+  (`CollectionMacroTest`).
+- **Kind 3 — a corpus gap wearing a unit test.** One entry, a bridge tracked by
+  [#414](https://github.com/cerbos/query-plan-adapters/issues/414) and deleted when its corpus
+  action lands: `a list or map constant against a scalar column is refused, and its elements never
+  leak`, in `ComparisonSqlShapeTest`, which opens *CORPUS GAP.* `R.attr.tags == ["a", "b"]` is
+  policy-reachable and arrives as `eq(variable, value-list)` verbatim; the corpus reaches this
+  refusal only through `map-eq-list`, which arrives as a `map()` projection instead. So the direct
+  shape is pinned in this adapter and asked of none of the others.
+
 ### The real to-one relation
 
 The corpus carries exactly one **real** to-one join: `parent`, and `parent.inner` one hop further
@@ -1043,6 +1076,19 @@ wrote the bytes has to be answerable from the file. An adapter in that position 
 it renders under and asserts the running one matches; it does not invent a second CI leg to satisfy
 rule 3.
 
+exposed is the third case, and the one that shows rule 3 turns on having a second leg rather than on
+the language. It emits an Exposed `Op<Boolean>`, so its entry records that predicate **rendered**
+under sqlite, h2, postgresql and mysql, with each bound constant's Exposed column type recorded
+beside its value — a double bound as a decimal and a double bound as a double render to the same
+`?`, and only one of them compares the way CEL does, so the type is part of the observable and the
+statement text alone would not be. Exposed's renderer is therefore the generator, the file declares
+`"exposed": "1.5"`, and `exposed-core` is a `compileOnly` dependency exactly as `hibernate-core` is
+on spring-data, which makes the header load-bearing for the same reason. Unlike spring-data it does
+have a second leg to attach rule 3 to: the `floor` ORM set (`ADAPTER_TEST_ORM=floor`, Exposed 1.0.0,
+the release the published jar is compiled against) reads the asset and asserts a pinned divergence
+list in **both** directions rather than the bytes, as the sqlalchemy and activerecord legs do. Where
+the two renderers agree that list is empty, and the assertion is that it stays empty.
+
 This is not licence to add a key per environment difference. The test for it is whether the
 difference is *outside* the adapter and *inside* the recorded value; a dialect is neither (it is a
 dimension of the value, so it lives in the entry), and a Node version is neither (it changes
@@ -1424,6 +1470,19 @@ the policy suite and classify it like anything else.
     An adapter that does not know its dialect has no portable spelling, so `string()` is now
     `adapterUnsupported` there and throws; `ent` keeps translating it because `WithDialect` tells
     its renderer which target to emit.
+
+  `exposed` is the counter-example, and it is worth recording as one: its four legs found **no**
+  store-specific divergence at all. Every oracle-tested action returns the same ids on H2, SQLite,
+  PostgreSQL and MySQL, every fail-closed one raises the same message, and nothing in its
+  `actions.json` entry is conditional on a store. That is not evidence the legs were unnecessary,
+  and reading it that way is the mistake this paragraph exists to stop. It says the adapter's
+  dialect branches already agree — the MySQL `CONCAT()` arm, the MySQL `CHAR` cast target, SQLite's
+  `LENGTH` standing in for `CHAR_LENGTH`, the NULL rendered as a literal because PostgreSQL cannot
+  type a bound one — which is a claim only a run can make, and each of those branches is dead code
+  on three of the four stores, so exactly one leg executes each. What it does not say is anything
+  about the *next* translator change: a store nobody replays is a store where the next over-grant
+  is silent, and a green leg is the cheapest possible form of the answer rather than the absence of
+  a question.
 
   The MySQL legs also measured what the collation costs, which is a store fact no classification
   records: replayed under MySQL's default `utf8mb4_0900_ai_ci`, **45 of drizzle's 176 and 42 of
