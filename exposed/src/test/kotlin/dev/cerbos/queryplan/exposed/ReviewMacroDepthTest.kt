@@ -57,6 +57,16 @@ class ReviewMacroDepthTest {
     }
 
     @Test
+    fun `one fold is ONE level however many elements it has, so the bound is not one on expression size`() {
+        // The claim `Options.maxMacroDepth` makes and the README used to contradict — it said "the
+        // bound is on the size of the emitted expression", which would have made a long fold the
+        // thing it stops. It is not: a 100-element fold is a single level, so it translates at the
+        // TIGHTEST bound the option accepts while substituting its lambda body 100 times.
+        val op = buildOp(singleFold(100), Options.of(MAPPING).withMaxMacroDepth(1))
+        assertEquals(100, Regex("A_STRING").findAll(render(op)).count(), render(op))
+    }
+
+    @Test
     fun `a relation macro nested one level past the bound is refused, as the guard intends`() {
         // The control: the same nesting depth expressed over MAPPED relations is refused, so the
         // guard works exactly where the fold is not involved.
@@ -89,6 +99,7 @@ class ReviewMacroDepthTest {
     companion object {
         object DepthDocs : Table("review_depth_docs") {
             val id = varchar("id", 32)
+            val aString = varchar("a_string", 64)
             override val primaryKey = PrimaryKey(id)
         }
 
@@ -113,6 +124,7 @@ class ReviewMacroDepthTest {
         }
 
         val MAPPING: AttributeMappings = cerbosMapping {
+            "request.resource.attr.aString" to DepthDocs.aString
             "request.resource.attr.tags" to
                 many(DepthTags, from = DepthDocs.id, to = DepthTags.resourceId, element = DepthTags.name) {
                     "name" to DepthTags.name
@@ -137,6 +149,21 @@ class ReviewMacroDepthTest {
             ExposedQueryPlanAdapter.toFilter(ReviewPlans.conditional(condition), options).toOp()
 
         fun render(op: Op<Boolean>): String = transaction(database) { op.toString() }
+
+        /** `[…N elements…].exists(x, R.attr.aString == x)` — one macro level, N substitutions. */
+        fun singleFold(elements: Int): Operand = ReviewPlans.expression(
+            "exists",
+            ReviewPlans.value((1..elements).map { "e$it" }),
+            ReviewPlans.expression(
+                "lambda",
+                ReviewPlans.expression(
+                    "eq",
+                    ReviewPlans.variable("request.resource.attr.aString"),
+                    ReviewPlans.variable("x"),
+                ),
+                ReviewPlans.variable("x"),
+            ),
+        )
 
         /** `["a","b","c"].exists(x, ["d","e","f"].exists(y, R.attr.tags.exists(t, t.name == x)))`. */
         fun nestedFold(): Operand = ReviewPlans.expression(

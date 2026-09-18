@@ -172,20 +172,24 @@ val options = Options.of(mapping)
     .withMaxMacroDepth(8)
 ```
 
-`maxMacroDepth` bounds how deeply collection macros (`exists`, `all`, `exists_one`, …) may nest
-before a plan is refused rather than translated, and defaults to 5. It counts **macro levels of
-both kinds the walk distinguishes**, because both multiply:
+`maxMacroDepth` bounds how deeply collection macros may nest before a plan is refused rather than
+translated, and defaults to 5. What counts a level is exactly **one per collection macro the walk
+enters** — `exists`, `all`, `exists_one` and `size(filter(…))` — whether it ranges over a mapped
+relation or over a literal list. Both kinds multiply:
 
-- A macro over a **mapped relation** costs a level because it emits a correlated subquery, and a
-  nested one emits that subquery once per enclosing level.
+- A macro over a **mapped relation** emits a correlated subquery, and a nested one emits that
+  subquery once per enclosing level.
 - A macro over a **literal list** emits no subquery at all — it substitutes each element into the
   lambda body and walks the resulting `or`/`and` chain — but it duplicates everything under it once
-  per element, so it costs a level too. Two three-element folds over one relation macro emit nine
-  correlated subqueries; an eleven-element pair emits 121. The bound is on the size of the emitted
-  expression, not only on its subquery count.
+  per element. Two three-element folds over one relation macro emit nine correlated subqueries; an
+  eleven-element pair emits 121.
 
-It bounds nothing else. A relation **chain** is one level however many hops it has, and so is a
-`size()`, a membership test or a hierarchy relation over one.
+> [!IMPORTANT]
+> It is **not** a bound on the size of the emitted expression, and must not be read as one. A
+> single 100-element fold is one level. A ternary doubles its subtree per level and a zero-capable
+> division branches per level, and neither is counted at all. A relation **chain** is one level
+> however many hops it has, and so is a `size()`, a membership test or a hierarchy relation over
+> one.
 
 `Options` is a class with withers rather than a positional constructor so a setting can be added
 later without breaking your call.
