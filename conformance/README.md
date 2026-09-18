@@ -520,7 +520,14 @@ pinned where they were found):
     of what it enumerates, and short-circuiting to `Op.FALSE` skipped the absent-parent guard.
   - **A non-finite arithmetic arm meeting a column** (`ArithmeticTranslatorTest`) — every other
     composition over a zero-denominator division folds, and a column ends that because the sign no
-    plan can state decides which infinity.
+    plan can state decides which infinity. The same suite holds the property that **no emitted
+    statement binds a non-finite double**, over every wire fixture and over the shapes no fixture
+    carries: a division as a DIVISOR (`R.attr.a / (R.attr.b / R.attr.c)`, and `x / (0.0 / 0.0)`,
+    which the planner ships unfolded), under all six operators and under a negation. A bound NaN
+    is an over-grant on PostgreSQL, which orders it above every number.
+  - **Two temporal columns compared without `timestamp()`** (`ColumnTypeGuardTest`) —
+    `R.attr.createdAt == R.attr.updatedAt` compares RFC 3339 STRINGS in CEL and instants in SQL, so
+    one instant written two ways is unequal to `check()` and equal to the store.
   - **A list or map constant compared against a scalar column** (`ComparisonSqlShapeTest`) —
     `R.attr.tags == ["a", "b"]` arrives as `eq(variable, value-list)` verbatim, where the corpus
     reaches the refusal only through `map-eq-list`, a `map()` projection.
