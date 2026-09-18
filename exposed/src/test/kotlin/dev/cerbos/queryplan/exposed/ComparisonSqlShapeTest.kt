@@ -21,7 +21,7 @@ import org.junit.jupiter.api.assertThrows
  * which is what happened to the two division-then-add actions — and
  * `ExposedTranslatorTest.WhatTheEmittedSqlContains` now sweeps the WHOLE corpus for the first two.
  * The list and the sweeps that depended on it are gone; what stayed is what that suite does not
- * ask, plus the one property below, restated so it needs no list at all.
+ * ask, plus the two null-guard properties below, restated so they need no list at all.
  */
 class ComparisonSqlShapeTest {
 
@@ -38,22 +38,86 @@ class ComparisonSqlShapeTest {
         //
         // Stated WITHOUT a list of actions, which is what let the old sweep go stale: a new action
         // cannot fall out of a property quantified over the corpus.
-        Corpus.wireFixtureActions().forEach { action ->
-            val plan = Corpus.planFromWireFixture(action).filter
-            val filter = runCatching {
-                OfflineRenderer.translate { ExposedQueryPlanAdapter.toFilter(plan, Options.of(MAPPING)) }
-            }.getOrNull() as? QueryPlanFilter.Conditional ?: return@forEach
-            if (!OfflineRenderer.renderOn(OfflineRenderer.H2, filter.op).sql.contains("IS NOT NULL")) return@forEach
-            val declaresExplicitNull = variablesOf(plan.condition).any { reference ->
-                (MAPPING.resolve(reference) as? AttributeMapping.Field)
-                    ?.nullAttributeRepresentation == NullAttributeRepresentation.EXPLICIT
-            }
+        val reached = sweepFor("IS NOT NULL") { action, plan ->
             assertTrue(
-                declaresExplicitNull || carriesNullLiteral(plan.condition),
+                declaresExplicitNull(plan) || carriesNullLiteral(plan.condition),
                 "$action emits IS NOT NULL with neither a declared explicit-null attribute nor a null literal",
             )
         }
+        assertAntiVacuous("IS NOT NULL", reached, PRESENCE_TEST_FLOOR)
     }
+
+    @Test
+    fun `IS NULL appears only where a null operand, a declared convention or a named guard puts it`() {
+        // The mirror property, and the one `3989257` retired with the stale list it was written
+        // against. It is the same hazard read the other way: an `IS NULL` the plan never asked for
+        // is an assumption about a column, and under a negation it hands back exactly the rows a
+        // missing attribute makes check() deny. Four legitimate origins, and no fifth —
+        //
+        //  - a NULL OPERAND in the plan: the null-constant leaf, or a null list element;
+        //  - an attribute DECLARED explicit-null, whose equality expands to a definite one and
+        //    whose membership carries a null-element arm;
+        //  - a COLUMN standing where a LIKE needle would otherwise be a constant, which
+        //    `LikeEscaping.columnPattern` guards because a NULL needle must not match everything;
+        //  - an operator whose own lowering is two-valued and therefore carries its own witness:
+        //    `string()`'s portable CASE, `size()`'s out-of-int-range fold, and the `map()`
+        //    projection's NULL-element subquery.
+        //
+        // Every disjunct names an operator or a declaration IN THE PLAN, never an action, so an
+        // action added tomorrow is covered and one that reaches a fifth source fails here.
+        val reached = sweepFor("IS NULL") { action, plan ->
+            assertTrue(
+                carriesNullLiteral(plan.condition) ||
+                    declaresExplicitNull(plan) ||
+                    hasColumnNeedle(plan.condition) ||
+                    operatorsOf(plan.condition).any { it in SELF_GUARDING_OPERATORS },
+                "$action emits IS NULL with no null operand, no declared explicit-null attribute, " +
+                    "no column LIKE needle and none of $SELF_GUARDING_OPERATORS",
+            )
+        }
+        assertAntiVacuous("IS NULL", reached, NULL_TEST_FLOOR)
+    }
+
+    /**
+     * Runs [check] for every corpus action whose H2 rendering contains [needle], and returns how
+     * many did — which is what the caller asserts against a floor.
+     *
+     * The refusal is narrowed to [IllegalArgumentException]: every classified refusal is one, and
+     * anything else is an adapter BUG that a bare `getOrNull` would have swallowed as "this action
+     * does not translate".
+     */
+    private fun sweepFor(needle: String, check: (String, PlanResourcesFilter) -> Unit): Int {
+        var reached = 0
+        Corpus.wireFixtureActions().forEach { action ->
+            val plan = Corpus.planFromWireFixture(action).filter
+            val filter = try {
+                OfflineRenderer.translate { ExposedQueryPlanAdapter.toFilter(plan, Options.of(MAPPING)) }
+            } catch (@Suppress("SwallowedException") refusal: IllegalArgumentException) {
+                return@forEach
+            }
+            if (filter !is QueryPlanFilter.Conditional) return@forEach
+            if (!OfflineRenderer.renderOn(OfflineRenderer.H2, filter.op).sql.contains(needle)) return@forEach
+            reached++
+            check(action, plan)
+        }
+        return reached
+    }
+
+    /**
+     * Anti-vacuity for a sweep whose body only runs where the pattern appears: with none appearing,
+     * every iteration returns early and the sweep passes having asserted nothing.
+     */
+    private fun assertAntiVacuous(needle: String, reached: Int, floor: Int) = assertTrue(
+        reached > floor,
+        "only $reached corpus actions emit $needle, so the property is near-vacuous",
+    )
+
+    /** Whether any attribute the plan names declares the explicit-null convention. */
+    private fun declaresExplicitNull(plan: PlanResourcesFilter): Boolean =
+        variablesOf(plan.condition).any { reference ->
+            (MAPPING.resolve(reference) as? AttributeMapping.Field)
+                ?.nullAttributeRepresentation == NullAttributeRepresentation.EXPLICIT
+        }
 
     /** Every attribute reference in a plan subtree. */
     private fun variablesOf(operand: Operand): List<String> = when (operand.nodeCase) {
@@ -62,10 +126,45 @@ class ComparisonSqlShapeTest {
         else -> emptyList()
     }
 
-    /** Whether a plan subtree carries a null constant anywhere. */
+    /** Every operator name in a plan subtree. */
+    private fun operatorsOf(operand: Operand): Set<String> = when (operand.nodeCase) {
+        Operand.NodeCase.EXPRESSION ->
+            operand.expression.operandsList.flatMapTo(mutableSetOf(), ::operatorsOf) +
+                operand.expression.operator
+        else -> emptySet()
+    }
+
+    /**
+     * Whether a plan subtree carries a null constant anywhere, INCLUDING one inside a list — the
+     * same reading `NullOperandScan` takes, and for the same reason: a null list element is a null
+     * operand, and `in-null-elem-hasint` is the corpus action that is nothing else.
+     */
     private fun carriesNullLiteral(operand: Operand): Boolean = when (operand.nodeCase) {
-        Operand.NodeCase.VALUE -> operand.value.kindCase == Value.KindCase.NULL_VALUE
+        Operand.NodeCase.VALUE -> when (operand.value.kindCase) {
+            Value.KindCase.NULL_VALUE -> true
+            Value.KindCase.LIST_VALUE ->
+                operand.value.listValue.valuesList.any { it.kindCase == Value.KindCase.NULL_VALUE }
+            else -> false
+        }
         Operand.NodeCase.EXPRESSION -> operand.expression.operandsList.any(::carriesNullLiteral)
+        else -> false
+    }
+
+    /**
+     * Whether a string match anywhere in the plan takes its NEEDLE from a column.
+     *
+     * The needle is the second operand whichever side the haystack is on: `x.contains(y)` and
+     * `"a,b".contains(y)` both put `y` in the LIKE pattern, and only a CONSTANT needle can be
+     * escaped at translation time without a guard.
+     */
+    private fun hasColumnNeedle(operand: Operand): Boolean = when (operand.nodeCase) {
+        Operand.NodeCase.EXPRESSION -> {
+            val expression = operand.expression
+            val columnNeedle = expression.operator in ComparisonTranslator.STRING_MATCH_OPERATORS &&
+                expression.operandsCount == 2 &&
+                expression.getOperands(1).nodeCase == Operand.NodeCase.VARIABLE
+            columnNeedle || expression.operandsList.any(::hasColumnNeedle)
+        }
         else -> false
     }
 
@@ -191,5 +290,23 @@ class ComparisonSqlShapeTest {
                 "$action: ${error.message}",
             )
         }
+    }
+
+    private companion object {
+        /**
+         * The operators whose own lowering is two-valued, and which therefore carry an `IS NULL`
+         * witness of their own rather than inheriting one from an operand.
+         *
+         * `string()` lowers a boolean portably through a `CASE`, which needs its own NULL arm or a
+         * NULL column falls through to the `ELSE`; a `size()` threshold outside int range folds to
+         * a constant, which is right only for a row whose column is PRESENT; and a `map()`
+         * projection has no error absorption, so a NULL projected column makes the whole
+         * intersection an evaluation error.
+         */
+        val SELF_GUARDING_OPERATORS = setOf("string", "size", "map")
+
+        /** Anti-vacuity floors. 10 actions emit `IS NOT NULL` today and 27 emit `IS NULL`. */
+        const val PRESENCE_TEST_FLOOR = 5
+        const val NULL_TEST_FLOOR = 15
     }
 }
