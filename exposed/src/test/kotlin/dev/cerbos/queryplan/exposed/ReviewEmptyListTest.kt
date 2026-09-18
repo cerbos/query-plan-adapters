@@ -28,7 +28,7 @@ class ReviewEmptyListTest {
 
     @Test
     fun `an empty intersection over a chain must still deny a row with no parent`() {
-        // CEL: `!hasIntersection(R.attr.mainCategory.subNames, P.attr.allowedTeams)` for a
+        // Corpus gap. CEL: `!hasIntersection(R.attr.mainCategory.subNames, P.attr.allowedTeams)` for a
         // principal whose `allowedTeams` is empty. `w1-not-hasint-chain` is the same shape with a
         // NON-empty list, and it is oracle-compared; nothing in the corpus carries the empty one.
         //
@@ -48,7 +48,7 @@ class ReviewEmptyListTest {
 
     @Test
     fun `the same shape with a non-empty list guards the parentless row, as the corpus pins`() {
-        // The control: one element in the list is enough to route through chainContains, and d3 is
+        // Corpus gap (the control for it). One element in the list is enough to route through chainContains, and d3 is
         // then correctly excluded under the negation. d1 intersects and so is denied by the
         // negation; d2 has a category with no sub-categories, which is a determined FALSE the
         // negation allows. Only the EMPTY list skips the guard.

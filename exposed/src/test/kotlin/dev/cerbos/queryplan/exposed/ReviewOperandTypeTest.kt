@@ -36,7 +36,7 @@ class ReviewOperandTypeTest {
     @Test
     @Tag("docker")
     fun `a numeric constant against a text column never reaches MySQL`() {
-        // CEL: `R.attr.aString == 0`. Legal over a `dyn` attribute — and the shape a policy lands
+        // Corpus gap. CEL: `R.attr.aString == 0`. Legal over a `dyn` attribute — and the shape a policy lands
         // in whenever a principal attribute that folds to a number is compared against a string
         // attribute, e.g. `R.attr.aString == P.attr.level`. CEL's `==` is heterogeneous-safe and
         // answers FALSE for every row.
@@ -75,7 +75,7 @@ class ReviewOperandTypeTest {
 
     @Test
     fun `a constant of the column's own type is still bound by the VALUE's type`() {
-        // The control that keeps the fix honest. Binding by the value's type is what stops
+        // Corpus gap (the control for it). The control that keeps the fix honest. Binding by the value's type is what stops
         // `aNumber >= 1.5` becoming `>= 1`, so the kind check must reject the mismatched constant
         // WITHOUT reaching for the column's type to bind the matching one.
         val rendered = OfflineRenderer.render(

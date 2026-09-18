@@ -25,7 +25,7 @@ class ExceptRefusalTest {
 
     @Test
     fun `every site raises the identical message`() {
-        // CEL, in order: `R.attr.tags.except(["x"])` as a whole condition — not a boolean, but the
+        // Corpus gap. CEL, in order: `R.attr.tags.except(["x"])` as a whole condition — not a boolean, but the
         // walk names except() before it says so; `R.attr.tags.except(["x"]) == []` as a comparison
         // operand; and `size(R.attr.tags.except(["x"])) > 0`, the shape a real policy writes.
         val messages = listOf(

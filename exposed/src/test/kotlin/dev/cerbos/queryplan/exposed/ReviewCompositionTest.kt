@@ -22,6 +22,11 @@ import org.junit.jupiter.api.Test
  * `RootScope.read` returns them BARE. Everything here is a property of that arrangement, and none
  * of it is a question the conformance harness asks — its own query is always
  * `<root>.selectAll().where(filter)`.
+ *
+ * KIND 2, not a corpus gap. The subject is the CALLER's query — the joins and aliases they wrapped
+ * the predicate in — which a corpus action cannot vary, because the harness owns its own query and
+ * writes exactly one shape of it. So nothing here is waiting on
+ * [#414](https://github.com/cerbos/query-plan-adapters/issues/414); it is permanent.
  */
 class ReviewCompositionTest {
 

@@ -38,7 +38,7 @@ class ColumnTypeGuardTest {
 
     @Test
     fun `a string match against a non-text column is refused, whichever operator`() {
-        // CEL: `R.attr.aNumber.contains("2")`, `R.attr.aNumber.startsWith("1")`,
+        // Corpus gap. CEL: `R.attr.aNumber.contains("2")`, `R.attr.aNumber.startsWith("1")`,
         // `R.attr.aBool.endsWith("e")`. All three compile over a `dyn` attribute and raise a
         // no-overload error at check time, which denies; `a_number LIKE '%2%'` is TRUE for 123 on
         // MySQL and on SQLite.
@@ -60,7 +60,7 @@ class ColumnTypeGuardTest {
 
     @Test
     fun `a column NEEDLE is checked as well as the haystack`() {
-        // CEL: `R.attr.aString.contains(R.attr.aNumber)`. The needle is escaped and concatenated
+        // Corpus gap. CEL: `R.attr.aString.contains(R.attr.aNumber)`. The needle is escaped and concatenated
         // into a LIKE pattern, so a numeric needle is coerced by the same stores.
         val error = assertThrows<UnmappedAttributeException> {
             translate(
@@ -82,7 +82,7 @@ class ColumnTypeGuardTest {
 
     @Test
     fun `a constant RECEIVER whose needle is a non-text column is refused`() {
-        // CEL: `"12,34".contains(R.attr.aNumber)` — the CONSTANT is the haystack and the COLUMN is
+        // Corpus gap. CEL: `"12,34".contains(R.attr.aNumber)` — the CONSTANT is the haystack and the COLUMN is
         // the needle, which NormalizedBinary deliberately leaves in source order.
         val error = assertThrows<UnmappedAttributeException> {
             translate(
@@ -98,7 +98,7 @@ class ColumnTypeGuardTest {
 
     @Test
     fun `size() of a non-text column is refused rather than counting its characters`() {
-        // CEL: `size(R.attr.aBool) > 0`. `CHAR_LENGTH(a_bool)` is 1 on MySQL and on SQLite, so
+        // Corpus gap. CEL: `size(R.attr.aBool) > 0`. `CHAR_LENGTH(a_bool)` is 1 on MySQL and on SQLite, so
         // every row came back where check() allows none.
         val error = assertThrows<UnmappedAttributeException> {
             translate(
@@ -117,7 +117,7 @@ class ColumnTypeGuardTest {
 
     @Test
     fun `a hierarchy path read from a non-text column is refused`() {
-        // CEL: `hierarchy(R.attr.aNumber).descendentOf(hierarchy("1.2"))`. Every hierarchy relation
+        // Corpus gap. CEL: `hierarchy(R.attr.aNumber).descendentOf(hierarchy("1.2"))`. Every hierarchy relation
         // is a prefix test lowered to `=` or to a prefix LIKE, so it is the same hole.
         val error = assertThrows<UnmappedAttributeException> {
             translate(
@@ -136,7 +136,7 @@ class ColumnTypeGuardTest {
 
     @Test
     fun `the text-column forms of every one of those still translate`() {
-        // The control. The guard must cost nothing a text column can do, which is what every
+        // Corpus gap (the control for it). The guard must cost nothing a text column can do, which is what every
         // corpus string-match and size() action already is.
         listOf(
             ReviewPlans.expression(
@@ -171,7 +171,7 @@ class ColumnTypeGuardTest {
 
     @Test
     fun `a constant of the wrong type is refused for every comparison operator and both orders`() {
-        // CEL: `R.attr.aString == P.attr.level` for a principal whose level is a number, and the
+        // Corpus gap. CEL: `R.attr.aString == P.attr.level` for a principal whose level is a number, and the
         // value-first spelling of each. CEL answers the equality FALSE from the values alone and
         // raises for every ordering; MySQL coerces the COLUMN, so `'abc' = 0` is TRUE.
         listOf("eq", "ne", "lt", "le", "gt", "ge").forEach { operator ->
@@ -204,7 +204,7 @@ class ColumnTypeGuardTest {
 
     @Test
     fun `the refusal names the constant's TYPE and never its value`() {
-        // A plan constant can carry a folded principal attribute, and an exception message is
+        // Corpus gap. A plan constant can carry a folded principal attribute, and an exception message is
         // logged, so the shape is reported and the value is not.
         val error = assertThrows<UnmappedAttributeException> {
             translate(
@@ -221,7 +221,7 @@ class ColumnTypeGuardTest {
 
     @Test
     fun `every element of an in-list is checked, and a null element stays legal`() {
-        // CEL: `R.attr.tagNames.exists(t, t in ["a", 2])` reaches the element column with a mixed
+        // Corpus gap. CEL: `R.attr.tagNames.exists(t, t in ["a", 2])` reaches the element column with a mixed
         // list; `null in R.attr.tagNames` reaches it with a null, which renders IS NULL and coerces
         // nothing. The list case is the one a principal attribute lands in.
         val error = assertThrows<UnmappedAttributeException> {
@@ -246,7 +246,7 @@ class ColumnTypeGuardTest {
 
     @Test
     fun `two columns of different kinds are refused, with neither side constant`() {
-        // CEL: `R.attr.aString == R.attr.aNumber`. Nothing here is a constant, so the constant
+        // Corpus gap. CEL: `R.attr.aString == R.attr.aNumber`. Nothing here is a constant, so the constant
         // check cannot see it — and MySQL coerces the text column exactly the same way.
         val error = assertThrows<UnmappedAttributeException> {
             translate(
@@ -270,7 +270,7 @@ class ColumnTypeGuardTest {
 
     @Test
     fun `a member column and an element column of different kinds are refused`() {
-        // CEL: `R.attr.aNumber in R.attr.tagNames` — the `in-var-var` shape with the two sides
+        // Corpus gap. CEL: `R.attr.aNumber in R.attr.tagNames` — the `in-var-var` shape with the two sides
         // mapped onto columns of different types, which is a mapping the corpus cannot vary.
         val error = assertThrows<UnmappedAttributeException> {
             translate(
@@ -286,7 +286,7 @@ class ColumnTypeGuardTest {
 
     @Test
     fun `numeric with numeric keeps translating, including a fractional constant`() {
-        // The control the corpus DOES carry (`double-threshold`, `p-double-frac`): an integer
+        // Corpus gap (the control for it). The one shape here the corpus DOES carry (`double-threshold`, `p-double-frac`): an integer
         // column against a fractional double is numeric-with-numeric, and the double cast that
         // keeps it in CEL's arithmetic is the whole point of it still being translatable.
         val op = translate(
@@ -310,7 +310,7 @@ class ColumnTypeGuardTest {
 
     @Test
     fun `an EntityID column is read through its id column, so a text key still matches`() {
-        // `request.resource.id` maps to a DAO id column in every real application, and the corpus's
+        // Corpus gap. `request.resource.id` maps to a DAO id column in every real application, and the corpus's
         // `id-eq-const`, `id-concat` and hierarchy actions all compare it with strings. Reading the
         // WRAPPER type would classify a varchar key as unrecognised and refuse all of them.
         translate(
@@ -334,7 +334,7 @@ class ColumnTypeGuardTest {
 
     @Test
     fun `a column reached through a to-one hop is checked by its DECLARED type`() {
-        // `Resolution.Scalar.expression` is a correlated scalar subquery there, and `column` is
+        // Corpus gap. `Resolution.Scalar.expression` is a correlated scalar subquery there, and `column` is
         // still the declared column — which is what the guard reads.
         translate(
             ReviewPlans.expression(
@@ -357,7 +357,7 @@ class ColumnTypeGuardTest {
 
     @Test
     fun `a column type the adapter has no CEL reading for fails closed`() {
-        // A temporal column stands for the whole unrecognised bucket, which a custom `ColumnType`
+        // Corpus gap. A temporal column stands for the whole unrecognised bucket, which a custom `ColumnType`
         // also lands in: `kindOf` answers OTHER and `familyOf` answers null, so every comparison
         // against a constant is refused rather than guessed at. The `ts-*` corpus actions are
         // unaffected — `timestamp(field)` never reaches the leaf.
@@ -397,7 +397,7 @@ class ColumnTypeGuardTest {
 
     @Test
     fun `the timestamp() path is separate and still compares two instant columns`() {
-        // The control, and the reason refusing above costs nothing a policy needs:
+        // Corpus gap (the control for it). The reason refusing above costs nothing a policy needs:
         // `timestamp(R.attr.createdAt) < timestamp(R.attr.updatedAt)` has SAID it means instants,
         // goes through the timestamp-field pair rather than the leaf, and still translates.
         translate(
@@ -413,7 +413,7 @@ class ColumnTypeGuardTest {
 
     @Test
     fun `a string concatenation over a non-text column is refused`() {
-        // CEL: `R.attr.aString + R.attr.aNumber == "one5"`. One text operand proves the `+` is a
+        // Corpus gap. CEL: `R.attr.aString + R.attr.aNumber == "one5"`. One text operand proves the `+` is a
         // concatenation, because CEL has no mixed-type `+`; the numeric one then has no overload, the
         // check raises and DENIES. `CONCAT(a_string, a_number)` renders the number as text on every
         // store, so the emitted filter would match the row the PDP refuses.
@@ -439,7 +439,7 @@ class ColumnTypeGuardTest {
 
     @Test
     fun `a string concatenation with a non-string constant is refused`() {
-        // CEL: `R.attr.aString + R.attr.aText + 5 == "one5"`. The same no-overload error, reached
+        // Corpus gap. CEL: `R.attr.aString + R.attr.aText + 5 == "one5"`. The same no-overload error, reached
         // with a constant leaf inside a concatenation two text columns have already proved. It is
         // an inexpressible shape rather than a mapping shortfall: no remapping makes `string + int`
         // mean anything, so it is the OTHER refusal type.
@@ -466,7 +466,7 @@ class ColumnTypeGuardTest {
 
     @Test
     fun `one column plus a non-string constant is refused by the add-fold, naming types and no value`() {
-        // CEL: `R.attr.aString + 5 == "one5"`. One column plus one constant is the add-fold's shape,
+        // Corpus gap. CEL: `R.attr.aString + 5 == "one5"`. One column plus one constant is the add-fold's shape,
         // so it is refused there, before the concatenation path is asked, with the message ported
         // from the reference. What matters is that it IS refused and that the message carries the
         // two TYPES: a plan constant can hold a folded principal attribute, and messages are logged.

@@ -30,9 +30,18 @@ import java.nio.file.Path
  * the review assumed. If the planner starts folding one of them away, the finding that rests on it
  * fails here rather than quietly becoming a claim about a plan nobody can produce.
  *
- * It is NOT a substitute for a corpus action, and none of these belongs here permanently: each one
- * is a shape `conformance/policies/adversarial.yaml` should carry, asked of every adapter. The
- * recorded plans are written to `build/reports/review-planner.txt` for the port.
+ * **It proves wire SHAPE, not semantics.** ADR 0008 makes `conformance/policies/` the repository's
+ * ONLY policy suite for semantics, and nothing here asks what a filter RETURNS: each case asserts
+ * what the planner puts on the wire for one expression, which is the reachability evidence the
+ * KIND 3 suites rest on — that the shape they hand-build is one a policy can actually produce, and
+ * not a plan nobody can make. Without it, a finding could quietly become a claim about an
+ * impossible input.
+ *
+ * Every one of the 7 expressions in [POLICY] is a corpus action waiting to be ported under
+ * [#414](https://github.com/cerbos/query-plan-adapters/issues/414). Once they land, the corpus
+ * carries the shapes, its own fixtures carry the wire output, and THIS FILE IS DELETED along with
+ * the unit tests it underwrites — policy suite and all. It is a bridge, exactly as the KIND 3
+ * tests are. The recorded plans are written to `build/reports/review-planner.txt` for the port.
  */
 @Tag("docker")
 class ReviewPlannerShapeTest {

@@ -15,6 +15,12 @@ import org.junit.jupiter.api.Test
  * [OfflineRenderer] and reading the SQL: the cast targets, the concatenation operator, the
  * character-length function, the escape clause, and the two places the adapter emits a bare
  * boolean constant.
+ *
+ * KIND 2, not a corpus gap. The subject is RENDERING — which SQL text one predicate becomes under
+ * four dialects — and a corpus action asks which rows come back. "Every arithmetic subtree is
+ * parenthesised under every dialect this adapter claims" is not a question about rows, and no
+ * action can state it however many are added, so nothing here is waiting on
+ * [#414](https://github.com/cerbos/query-plan-adapters/issues/414).
  */
 class ReviewDialectTest {
 

@@ -18,10 +18,17 @@ import org.junit.jupiter.api.Test
 /**
  * Hand-built plan operands, shared by the review suites.
  *
- * Every shape built here is one the shared corpus does NOT carry, which is the whole reason it is
- * hand-built: finding a corpus gap is the point of this review and there is no fixture to read.
- * Each caller states the CEL a real policy would write to reach its shape. Where a fixture does
- * exist, the review reads it (docs/adr/0006).
+ * Hand-built because the shape has no fixture to read, which is true for two different reasons and
+ * the KIND depends on which:
+ *
+ *  - a shape a policy CAN reach that the corpus does not carry yet is a KIND 3 corpus gap, pinned
+ *    here as a bridge and deleted when the action lands
+ *    ([#414](https://github.com/cerbos/query-plan-adapters/issues/414));
+ *  - a shape about the CALLER's query or about rendering — [ReviewCompositionTest],
+ *    [ReviewDialectTest] — is KIND 2, which no corpus action can state at all, and is permanent.
+ *
+ * Each class says which it is, and each caller states the CEL a real policy would write to reach
+ * its shape. Where a fixture does exist, the review reads it (docs/adr/0006).
  */
 internal object ReviewPlans {
 
@@ -72,7 +79,7 @@ class ReviewNegationTest {
 
     @Test
     fun `an unsolvable string concatenation must stay UNKNOWN for a NULL column`() {
-        // CEL: `!((R.attr.aOptionalString + "!") == "nope")` — no value of the column can satisfy
+        // Corpus gap. CEL: `!((R.attr.aOptionalString + "!") == "nope")` — no value of the column can satisfy
         // the equation, because "nope" does not end in "!".
         //
         // ComparisonTranslator.solveAddComparison answered `Op.FALSE`, which is right under the
@@ -96,7 +103,7 @@ class ReviewNegationTest {
 
     @Test
     fun `a negated unsolvable inequality must not select the NULL rows`() {
-        // CEL: `!((R.attr.aOptionalString + "!") != "nope")`. The `ne` arm of the same fold
+        // Corpus gap. CEL: `!((R.attr.aOptionalString + "!") != "nope")`. The `ne` arm of the same fold
         // returned `IsNotNullOp`, so the negation rendered `NOT (A_OPTIONAL_STRING IS NOT NULL)` —
         // a predicate that selects the NULL rows and nothing else, which is the exact complement
         // of what `check()` allows.
@@ -114,7 +121,7 @@ class ReviewNegationTest {
 
     @Test
     fun `a hierarchy overlap that ignores its column segment must still deny the NULL rows`() {
-        // CEL: `hierarchy("projects", ":").overlaps(hierarchy(["projects", R.attr.scope]))` —
+        // Corpus gap. CEL: `hierarchy("projects", ":").overlaps(hierarchy(["projects", R.attr.scope]))` —
         // the `hier-list-id` corpus shape with a ONE-segment constant, so the constant is a prefix
         // of the list whatever the column holds.
         //
@@ -141,7 +148,7 @@ class ReviewNegationTest {
 
     @Test
     fun `the positive polarity of the unsolvable add-solve is already right`() {
-        // Not a defect, and the reason finding 4 survived the oracle: unnegated, `Op.FALSE` is
+        // Corpus gap (the control for it). Not a defect, and the reason finding 4 survived the oracle: unnegated, `Op.FALSE` is
         // exactly what CEL decides for every row, NULL or not.
         val unsolvable = ReviewPlans.expression(
             "eq",
@@ -157,7 +164,7 @@ class ReviewNegationTest {
 
     @Test
     fun `a solvable concatenation under a negation keeps its NULL rows out`() {
-        // The control: when the solve SUCCEEDS the shape routes through LeafTranslator, whose
+        // Corpus gap (the control for it). When the solve SUCCEEDS the shape routes through LeafTranslator, whose
         // `NeqOp` is three-valued, and the NULL rows stay excluded under both polarities. Only the
         // unsolvable branch short-circuits into a constant.
         val solvable = ReviewPlans.expression(
