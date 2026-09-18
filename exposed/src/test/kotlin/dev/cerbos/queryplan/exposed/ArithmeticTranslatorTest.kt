@@ -127,19 +127,42 @@ class ArithmeticTranslatorTest {
             // routing it through `ArithmeticValues.sqlOf`. Every wire fixture is swept here, under
             // every dialect, and a refusal counts as passing — what must never happen is a
             // STATEMENT carrying one.
+            //
+            // This is the ONE place the refusal set is genuinely open, which is why the helper's
+            // "any IllegalArgumentException" clause lives here and nowhere else: a corpus-wide
+            // sweep meets every refusal this adapter has, and pinning them would be a second,
+            // staler copy of `conformance/actions.json`.
+            var rendered = 0
             Corpus.wireFixtureActions().forEach { action ->
                 val plan = Corpus.planFromWireFixture(action).filter
-                assertNoNonFiniteBind(action) { ExposedQueryPlanAdapter.toFilter(plan, Options.of(MAPPING)) }
+                if (assertNoNonFiniteBind(action) { ExposedQueryPlanAdapter.toFilter(plan, Options.of(MAPPING)) }) {
+                    rendered++
+                }
             }
+            // LIVENESS. Every arm above passes for an action that refuses, so an adapter that
+            // refused the whole corpus would pass this vacuously — the shape of pass a property
+            // like this is most likely to decay into. 188 render a statement today, so the floor
+            // fails on a collapse rather than on an action becoming translatable or a refusal
+            // being added.
+            assertTrue(
+                rendered > STATEMENTS_SWEPT_FLOOR,
+                "only $rendered corpus actions rendered a statement, so the sweep is near-vacuous",
+            )
         }
 
         @Test
-        fun `nor does any shape that puts a division where a constant was expected`() {
+        fun `every shape putting a division where a constant was expected is REFUSED, by name`() {
             // The four ways a non-finite value reaches an operand that is not a fold, none of them
             // in the corpus and none needing a hand-built NON-plan: the inner `div(0, 0)` the
             // planner ships UNFOLDED (`conformance/wire-fixtures/nan-ord-le.json` is the proof),
             // a division whose own divisor is a division, one on each side, and a constant
             // dividend that is itself non-finite.
+            //
+            // Every one of them MUST refuse, and refuse through `ArithmeticValues.sqlOf` — so the
+            // exception TYPE and the MESSAGE are pinned rather than "some IllegalArgumentException".
+            // All three refusal types extend that, so the weaker assertion also passed for a
+            // `MalformedPlanException` from a plan that had stopped being well formed, and the
+            // sweep it belonged to never reached a rendered statement to check in the first place.
             //
             // CORPUS GAP for the first three — `R.attr.aNumber / (0.0/0.0) > 0` is policy-reachable
             // and the corpus carries no action for it. Delete them when it lands
@@ -161,21 +184,39 @@ class ArithmeticTranslatorTest {
             ).forEach { (name, arithmetic) ->
                 listOf("gt", "ge", "lt", "le", "eq", "ne").forEach { operator ->
                     val condition = ReviewPlans.expression(operator, arithmetic, ReviewPlans.value(0))
-                    assertNoNonFiniteBind("$name under $operator") {
-                        ExposedQueryPlanAdapter.toFilter(
-                            ReviewPlans.conditional(condition),
-                            Options.of(Scalars.MAPPING),
-                        )
-                    }
+                    assertRefusedAsNonFiniteArithmetic("$name under $operator", condition)
                     // …and under a negation, where a wrongly-bound NaN would leak the other way.
-                    assertNoNonFiniteBind("$name under not($operator)") {
-                        ExposedQueryPlanAdapter.toFilter(
-                            ReviewPlans.conditional(ReviewPlans.expression("not", condition)),
-                            Options.of(Scalars.MAPPING),
-                        )
-                    }
+                    assertRefusedAsNonFiniteArithmetic(
+                        "$name under not($operator)",
+                        ReviewPlans.expression("not", condition),
+                    )
                 }
             }
+        }
+
+        /**
+         * [condition] is refused by the factory `ArithmeticValues.sqlOf` raises, named.
+         *
+         * The message is the same one `a non-finite divisor is refused by the same factory as every
+         * other non-finite operand` pins, which is the point: one factory for every way a
+         * non-finite value meets a column, so a reader comparing two of these does not conclude the
+         * adapter distinguishes cases it does not.
+         */
+        private fun assertRefusedAsNonFiniteArithmetic(label: String, condition: Operand) {
+            val error = assertThrows<UnsupportedPlanShapeException>(label) {
+                OfflineRenderer.translate {
+                    ExposedQueryPlanAdapter.toFilter(
+                        ReviewPlans.conditional(condition),
+                        Options.of(Scalars.MAPPING),
+                    )
+                }
+            }
+            assertTrue(
+                error.message!!.startsWith(
+                    "arithmetic between a column and the NaN or infinity a zero denominator produces",
+                ),
+                "$label: ${error.message}",
+            )
         }
 
         @Test
@@ -205,24 +246,34 @@ class ArithmeticTranslatorTest {
             )
         }
 
-        /** [build] either refuses, or emits a statement whose every bound double is finite. */
-        private fun assertNoNonFiniteBind(label: String, build: () -> QueryPlanFilter) {
+        /**
+         * [build] either refuses, or emits a statement whose every bound double is finite; returns
+         * whether a statement was rendered at all, which is what the sweep counts for liveness.
+         */
+        private fun assertNoNonFiniteBind(label: String, build: () -> QueryPlanFilter): Boolean {
             val filter = runCatching { OfflineRenderer.translate(build) }.getOrElse { error ->
                 // A refusal is the fail-closed outcome this property allows; an adapter BUG is not.
                 assertTrue(
                     error is IllegalArgumentException,
                     "$label failed with ${error::class.simpleName}: ${error.message}",
                 )
-                return
+                return false
             }
-            if (filter !is QueryPlanFilter.Conditional) return
+            if (filter !is QueryPlanFilter.Conditional) return false
             OfflineRenderer.render(filter.op).forEach { (dialect, rendered) ->
-                val nonFinite = rendered.params.filter { it.normalisedFrom in NON_FINITE }
+                // `RenderedParam.of` is the one owner of which doubles JSON cannot hold, and it
+                // records each as its own text. Reading that text back — rather than listing the
+                // three names here — is what keeps this from being a second copy of that rule; the
+                // fourth stand-in, `-0.0`, is FINITE and belongs in a statement.
+                val nonFinite = rendered.normalisedParams
+                    .map { rendered.params[it] }
+                    .filterNot { it.normalisedFrom!!.toDouble().isFinite() }
                 assertTrue(
                     nonFinite.isEmpty(),
                     "$label bound $nonFinite under $dialect: ${rendered.sql}",
                 )
             }
+            return true
         }
     }
 
@@ -289,8 +340,12 @@ class ArithmeticTranslatorTest {
     private companion object {
         const val NUMBER = "request.resource.attr.aNumber"
 
-        /** What `RenderedParam` records for a double JSON cannot hold; `-0.0` is finite and fine. */
-        val NON_FINITE = setOf("NaN", "Infinity", "-Infinity")
+        /**
+         * The liveness floor for the corpus-wide sweep. Pinned well under what the corpus renders
+         * today so it fails on a collapse — an adapter that started refusing everything — rather
+         * than on one action gaining or losing a statement.
+         */
+        const val STATEMENTS_SWEPT_FLOOR = 150
 
         /**
          * A hand-built conditional filter, for the ONE operand protobuf's canonical JSON mapping
