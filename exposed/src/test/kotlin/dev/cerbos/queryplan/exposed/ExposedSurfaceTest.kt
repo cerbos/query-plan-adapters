@@ -3,7 +3,6 @@ package dev.cerbos.queryplan.exposed
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.google.protobuf.util.JsonFormat
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter
-import dev.cerbos.queryplan.exposed.SurfaceDocs.aString
 import org.jetbrains.exposed.v1.core.EqOp
 import org.jetbrains.exposed.v1.core.Exists
 import org.jetbrains.exposed.v1.core.Op
@@ -28,6 +27,7 @@ import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.jetbrains.exposed.v1.jdbc.update
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
@@ -118,7 +118,7 @@ class ExposedSurfaceTest {
         )
     }
 
-    private val mapping = cerbosMapping { "request.resource.attr.aString" to aString }
+    private val mapping = cerbosMapping { "request.resource.attr.aString" to SurfaceDocs.aString }
 
     private fun filter(action: String): QueryPlanFilter =
         ExposedQueryPlanAdapter.toFilter(wireFixture(action), Options.of(mapping))
@@ -214,7 +214,7 @@ class ExposedSurfaceTest {
         // mapping names columns, and `alias[Table.column]` is a different column from
         // `Table.column`. So the caller maps through the alias, and this is the shape that says so.
         val aliased = SurfaceDocs.alias("d")
-        val aliasedMapping = cerbosMapping { "request.resource.attr.aString" to aliased[aString] }
+        val aliasedMapping = cerbosMapping { "request.resource.attr.aString" to aliased[SurfaceDocs.aString] }
         val aliasedFilter = ExposedQueryPlanAdapter.toFilter(wireFixture("cs-eq"), Options.of(aliasedMapping))
 
         val keys = read {
@@ -233,7 +233,7 @@ class ExposedSurfaceTest {
         // the point of execution, rather than a silently wrong row set. What must NOT happen is the
         // predicate binding to some other copy of the table and returning rows the PDP denies.
         val aliased = SurfaceDocs.alias("d")
-        val error = org.junit.jupiter.api.Assertions.assertThrows(ExposedSQLException::class.java) {
+        val error = assertThrows(ExposedSQLException::class.java) {
             read { aliased.selectAll().where { filter("cs-eq").toOp() }.toList() }
         }
         assertTrue(

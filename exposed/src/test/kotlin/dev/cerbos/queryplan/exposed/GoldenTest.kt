@@ -2,6 +2,9 @@ package dev.cerbos.queryplan.exposed
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.ObjectNode
+import org.jetbrains.exposed.v1.core.EqOp
+import org.jetbrains.exposed.v1.core.Table
+import org.jetbrains.exposed.v1.core.stringParam
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
@@ -278,6 +281,34 @@ class GoldenTest {
             .get("expectations").get("cs-eq").get("rendered").get("sqlite").get("params").get(0)
         assertEquals("VarCharColumnType", param.get(Golden.PARAM_TYPE_KEY).asText())
         assertEquals("one", param.get(Golden.PARAM_VALUE_KEY).asText())
+    }
+
+    // -- the entry a translator unit test writes ----------------------------------------------------
+
+    @Test
+    fun `an entry is built from the filter the translator returned, whichever kind it is`(@TempDir directory: Path) {
+        val docs = object : Table("golden_docs") {
+            val aString = varchar("a_string", 64)
+        }
+        val conditional = QueryPlanFilter.Conditional(EqOp(docs.aString, stringParam("one")))
+
+        val entries = linkedMapOf(
+            "cs-eq" to Golden.entryFor { conditional },
+            "p-has" to Golden.entryFor { QueryPlanFilter.AlwaysAllowed },
+            "in-empty" to Golden.entryFor { QueryPlanFilter.AlwaysDenied },
+        )
+        assertEquals(Golden.KIND_CONDITIONAL, entries.getValue("cs-eq").get(Golden.KIND_KEY).asText())
+        assertEquals(Golden.KIND_ALWAYS_ALLOWED, entries.getValue("p-has").get(Golden.KIND_KEY).asText())
+        assertEquals(Golden.KIND_ALWAYS_DENIED, entries.getValue("in-empty").get(Golden.KIND_KEY).asText())
+        assertEquals(
+            OfflineRenderer.DIALECTS,
+            entries.getValue("cs-eq").get(Golden.RENDERED_KEY).fieldNames().asSequence().toList(),
+        )
+
+        // …and what it builds is exactly what the asset accepts, which is the whole handover.
+        val golden = golden(directory)
+        golden.write(entries)
+        assertEquals(entries.keys.sorted(), golden.read().keys.toList())
     }
 
     // -- the committed asset -----------------------------------------------------------------------

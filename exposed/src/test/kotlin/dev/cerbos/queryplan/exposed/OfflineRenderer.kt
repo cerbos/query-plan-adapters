@@ -3,6 +3,7 @@ package dev.cerbos.queryplan.exposed
 import org.jetbrains.exposed.v1.core.DatabaseConfig
 import org.jetbrains.exposed.v1.core.Op
 import org.jetbrains.exposed.v1.core.QueryBuilder
+import org.jetbrains.exposed.v1.core.vendors.DatabaseDialect
 import org.jetbrains.exposed.v1.core.vendors.MysqlDialect
 import org.jetbrains.exposed.v1.core.vendors.PostgreSQLDialect
 import org.jetbrains.exposed.v1.jdbc.Database
@@ -56,20 +57,21 @@ internal object OfflineRenderer {
     val DIALECTS: List<String> = listOf(SQLITE, H2, POSTGRESQL, MYSQL)
 
     /**
-     * Translates once with [build] and renders the result under every dialect.
-     *
-     * [build] is called with **no transaction open**, which is an assertion and not an accident:
+     * Runs [build] with **no transaction open**, which is an assertion and not an accident:
      * translation must not read the dialect, because the predicate it returns renders later, inside
-     * the caller's transaction, for whatever dialect that transaction has. A translator that
-     * reached for `currentDialect` would fail here rather than quietly pinning four identical
-     * renderings taken from whichever dialect happened to be open.
+     * the caller's transaction, for whatever dialect that transaction has. A translator that reached
+     * for `currentDialect` fails here rather than quietly pinning four identical renderings taken
+     * from whichever dialect happened to be open.
      */
-    fun render(build: () -> Op<Boolean>): Map<String, Rendered> {
+    fun <T> translate(build: () -> T): T {
         check(TransactionManager.currentOrNull() == null) {
-            "OfflineRenderer.render must translate outside any transaction: translation must not read the dialect"
+            "translation must happen outside any transaction: it must not read the dialect"
         }
-        return render(build())
+        return build()
     }
+
+    /** [translate] with [build], then render the result under every dialect. */
+    fun render(build: () -> Op<Boolean>): Map<String, Rendered> = render(translate(build))
 
     /** [render], for a predicate that has already been translated. */
     fun render(op: Op<Boolean>): Map<String, Rendered> =
@@ -130,7 +132,7 @@ internal class Rendered(val sql: String, val params: List<RenderedParam>) {
  * One bound argument: the simple name of the Exposed column type it was bound through, and its
  * value in a form JSON round-trips.
  */
-internal class RenderedParam(
+internal data class RenderedParam(
     val type: String,
     val value: Any?,
     /**
@@ -142,11 +144,6 @@ internal class RenderedParam(
      */
     val normalisedFrom: String?,
 ) {
-    override fun equals(other: Any?): Boolean =
-        other is RenderedParam && other.type == type && other.value == value
-
-    override fun hashCode(): Int = 31 * type.hashCode() + value.hashCode()
-
     override fun toString(): String = "$type=$value"
 
     companion object {
@@ -189,11 +186,13 @@ internal class StubDatabase private constructor(
      * dialect reached it first. Two stubs sharing a URL would therefore share one manager and one
      * dialect's keywords.
      */
-    val url: String,
-    val catalog: String,
-    private val metadataAnswers: Map<String, Any?>,
-    private val newDialect: () -> org.jetbrains.exposed.v1.core.vendors.DatabaseDialect,
+    url: String,
+    private val catalog: String,
+    answers: Map<String, Any?>,
+    private val newDialect: () -> DatabaseDialect,
 ) {
+    private val metadataAnswers: Map<String, Any?> = linkedMapOf<String, Any?>("getURL" to url) + answers
+
     /** The metadata methods this stub answers, for the honesty check in `OfflineRendererTest`. */
     val answeredMetadataMethods: Set<String> get() = metadataAnswers.keys
 
@@ -276,8 +275,7 @@ internal class StubDatabase private constructor(
             key = "postgresql",
             url = "jdbc:postgresql://cerbos-offline-renderer/postgres",
             catalog = "test",
-            metadataAnswers = linkedMapOf(
-                "getURL" to "jdbc:postgresql://cerbos-offline-renderer/postgres",
+            answers = linkedMapOf(
                 "getIdentifierQuoteString" to "\"",
                 "storesUpperCaseIdentifiers" to false,
                 "storesUpperCaseQuotedIdentifiers" to false,
@@ -301,8 +299,7 @@ internal class StubDatabase private constructor(
             key = "mysql",
             url = "jdbc:mysql://cerbos-offline-renderer/mysql",
             catalog = "test",
-            metadataAnswers = linkedMapOf(
-                "getURL" to "jdbc:mysql://cerbos-offline-renderer/mysql",
+            answers = linkedMapOf(
                 "getIdentifierQuoteString" to "`",
                 "storesUpperCaseIdentifiers" to false,
                 "storesUpperCaseQuotedIdentifiers" to false,

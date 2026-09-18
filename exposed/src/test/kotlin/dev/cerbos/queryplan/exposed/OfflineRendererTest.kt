@@ -14,9 +14,11 @@ import org.jetbrains.exposed.v1.core.doubleParam
 import org.jetbrains.exposed.v1.core.stringParam
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.select
+import org.jetbrains.exposed.v1.jdbc.transactions.TransactionManager
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotEquals
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Tag
@@ -24,6 +26,7 @@ import org.junit.jupiter.api.Test
 import org.testcontainers.DockerClientFactory
 import org.testcontainers.containers.GenericContainer
 import org.testcontainers.containers.wait.strategy.Wait
+import org.testcontainers.containers.wait.strategy.WaitStrategy
 import java.nio.file.Files
 import java.nio.file.Path
 import java.sql.DatabaseMetaData
@@ -132,7 +135,7 @@ class OfflineRendererTest {
         // transaction here, and the four renderings below would then all be one dialect's.
         var transactionsSeen = 0
         OfflineRenderer.render {
-            if (org.jetbrains.exposed.v1.jdbc.transactions.TransactionManager.currentOrNull() != null) {
+            if (TransactionManager.currentOrNull() != null) {
                 transactionsSeen++
             }
             predicates().getValue("bound-double")
@@ -264,7 +267,7 @@ class OfflineRendererTest {
         image: String,
         port: Int,
         environment: Map<String, String>,
-        ready: org.testcontainers.containers.wait.strategy.WaitStrategy,
+        ready: WaitStrategy,
         url: (String, Int) -> String,
     ) {
         assumeTrue(dockerAvailable(), "Docker is not available")
@@ -325,5 +328,5 @@ class OfflineRendererTest {
         Files.readString(Path.of(System.getProperty("user.dir"), file)).trim()
 
     private fun assertThrowsUnsupported(body: () -> Unit): UnsupportedOperationException =
-        org.junit.jupiter.api.Assertions.assertThrows(UnsupportedOperationException::class.java) { body() }
+        assertThrows(UnsupportedOperationException::class.java) { body() }
 }

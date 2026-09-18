@@ -219,6 +219,20 @@ internal class Golden(
                     " is being run outside Gradle",
             )
 
+        /**
+         * The entry for one corpus action, from the filter the translator returned for it.
+         *
+         * This is what a translator unit test calls per action. [build] runs outside any
+         * transaction ([OfflineRenderer.translate]), so a translator that read the dialect fails
+         * here rather than pinning one dialect's rendering four times.
+         */
+        fun entryFor(build: () -> QueryPlanFilter): ObjectNode =
+            when (val filter = OfflineRenderer.translate(build)) {
+                QueryPlanFilter.AlwaysAllowed -> entry(KIND_ALWAYS_ALLOWED)
+                QueryPlanFilter.AlwaysDenied -> entry(KIND_ALWAYS_DENIED)
+                is QueryPlanFilter.Conditional -> entry(OfflineRenderer.render(filter.op))
+            }
+
         /** The entry for an action the planner folded to a constant: a kind and nothing else. */
         fun entry(kind: String): ObjectNode = JSON.createObjectNode().put(KIND_KEY, kind)
 
