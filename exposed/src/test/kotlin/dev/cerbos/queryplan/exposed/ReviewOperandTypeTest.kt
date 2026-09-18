@@ -12,6 +12,7 @@ import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -150,6 +151,10 @@ class ReviewOperandTypeTest {
          * accent-sensitive collation, so nothing below can be blamed on MySQL's default.
          */
         fun withMySql(body: (MySqlQueries) -> Unit) {
+            // Skips without Docker rather than failing: the coercion it measures is a property of
+            // a real MySQL server, and the refusal that protects against it is pinned offline in
+            // `ColumnTypeGuardTest` either way.
+            assumeTrue(dockerAvailable(), "Docker is not available")
             val container = MySQLContainer(DatabaseTestImages.MYSQL)
                 .withCommand(
                     "--character-set-server=utf8mb4",

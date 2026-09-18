@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.slf4j.LoggerFactory
 import org.testcontainers.containers.GenericContainer
 import org.testcontainers.containers.output.Slf4jLogConsumer
@@ -103,6 +104,9 @@ class ReviewPlannerShapeTest {
         @BeforeAll
         @JvmStatic
         fun setUp() {
+            // The whole class skips without Docker: it exists to ask the PDP a question, and there
+            // is no PDP to ask. `tearDown` tolerates the container never having started.
+            assumeTrue(dockerAvailable(), "Docker is not available")
             val started = GenericContainer(CerbosTestImage.IMAGE)
                 .withExposedPorts(CerbosTestImage.GRPC_PORT)
                 .withCommand("server", "--set=storage.disk.directory=/policies")

@@ -23,7 +23,6 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
-import org.testcontainers.DockerClientFactory
 import org.testcontainers.containers.GenericContainer
 import org.testcontainers.utility.DockerImageName
 import org.testcontainers.containers.wait.strategy.Wait
@@ -333,9 +332,6 @@ class OfflineRendererTest {
             "${stub.key} stub was pinned against another major version",
         )
     }
-
-    private fun dockerAvailable(): Boolean =
-        runCatching { DockerClientFactory.instance().isDockerAvailable }.getOrDefault(false)
 
     private fun assertThrowsUnsupported(body: () -> Unit): UnsupportedOperationException =
         assertThrows(UnsupportedOperationException::class.java) { body() }
