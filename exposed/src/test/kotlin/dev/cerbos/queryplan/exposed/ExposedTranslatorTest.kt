@@ -1,6 +1,5 @@
 package dev.cerbos.queryplan.exposed
 
-import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.ObjectNode
 import com.google.protobuf.Value
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter
@@ -66,46 +65,48 @@ class ExposedTranslatorTest {
     companion object {
 
         // ==========================================================================================
-        //  PINNED FROM A RUN — the whole block. Everything here is a MEASUREMENT, re-derived by
-        //  running `gradle goldenUpdate` and then `gradle test --tests '*ExposedTranslatorTest'`
-        //  and reading the failure, never reasoned out from the source.
+        //  PINNED FROM A RUN — the whole block, and nothing outside it.
         //
-        //  THE TRANSLATOR IS INCOMPLETE. The scalar and relation sides are still landing, so most
-        //  of the corpus currently raises the scaffolding refusal `Refusals.notYetImplemented`
-        //  rather than a filter. Every constant below carrying `RE-PIN AFTER THE TRANSLATOR LANDS`
-        //  therefore describes the INCOMPLETE translator and has to be measured again once the
-        //  last `Not implemented yet` is gone. The assertions that read them are correct as they
-        //  stand; only the numbers are provisional.
+        //  Everything here is a MEASUREMENT. Re-derive it by running `gradle goldenUpdate` and then
+        //  `gradle test --tests '*ExposedTranslatorTest'` and reading the failures; never reason a
+        //  value out from the source, because a constant derived from the code it guards guards
+        //  nothing. Keeping them together is what makes a deliberate shift — a shape moving from the
+        //  throwing bucket into the asset, say — a one-pass edit rather than a hunt.
         // ==========================================================================================
 
         /**
          * How many recorded actions carry SQL, and how many the planner folded to a constant.
          *
-         * RE-PIN AFTER THE TRANSLATOR LANDS. A count that moves without anyone noticing is how a
-         * shape gets dropped from an asset nobody reads end to end.
+         * A count that moves without anyone noticing is how a shape gets dropped from an asset
+         * nobody reads end to end.
          */
-        private const val CONDITIONAL_ACTIONS = 30
+        private const val CONDITIONAL_ACTIONS = 186
         private const val UNCONDITIONAL_ACTIONS = 2
 
         /**
-         * How many corpus actions this adapter must refuse, from `actions.json`.
-         *
-         * RE-PIN AFTER THE TRANSLATOR LANDS: `adapterUnsupported.exposed` is empty today, so this
-         * is the 11 `expectedUnsupported` shapes alone and will grow as the run classifies shapes
-         * Exposed genuinely cannot express.
+         * How many corpus actions this adapter must refuse, from `actions.json`: the 6
+         * `adapterUnsupported.exposed` entries plus the 11 `expectedUnsupported` shapes.
          */
-        private const val THROWING_ACTIONS = 11
+        private const val THROWING_ACTIONS = 17
 
         /**
          * Where in the walk each rejection happens, and how many corpus shapes reach each site.
          *
-         * RE-PIN AFTER THE TRANSLATOR LANDS. The `SCAFFOLDING` bucket must reach 0 and disappear:
-         * it is not a rejection site at all, it is the gap (see [SCAFFOLDING_SITE]).
+         * One entry per mechanism, not per action — [WhereTheRefusalsHappen] declares the site that
+         * each name stands for and the exception type it raises.
          */
         private val REFUSAL_SITE_COUNTS: Map<String, Int> = sortedMapOf(
+            "ambiguous temporal column" to 1,
+            "CEL numeric cast" to 3,
+            "division inside further arithmetic" to 2,
+            "empty hierarchy delimiter" to 1,
             "list-valued macro in boolean position" to 3,
+            "map projection compared directly" to 1,
+            "modulo" to 1,
+            "mixed null conventions across two columns" to 1,
             "operator the adapter never translates" to 2,
-            SCAFFOLDING_SITE to 153,
+            "positional list access" to 1,
+            "struct member access" to 1,
         )
 
         /**
@@ -114,12 +115,9 @@ class ExposedTranslatorTest {
          * the SAME expression tree.
          *
          * Empty, and asserted to STAY empty: the two releases spell every shape this adapter emits
-         * identically today. The list is asserted in BOTH directions on the floor leg, so an action
-         * that starts diverging lands here rather than silently widening an exemption, and one that
-         * stops diverging fails just as loudly.
-         *
-         * RE-PIN AFTER THE TRANSLATOR LANDS: most of the corpus does not reach a renderer at all
-         * yet, so "identical" is a statement about the 30 shapes that do.
+         * identically. The list is asserted in BOTH directions on the floor leg, so an action that
+         * starts diverging lands here rather than silently widening an exemption, and one that stops
+         * diverging fails just as loudly.
          */
         private val RENDERING_DIFFERS_ON_THE_FLOOR: List<String> = emptyList()
 
@@ -130,40 +128,67 @@ class ExposedTranslatorTest {
          * each one's own text instead ([RenderedParam.normalisedFrom]). The distinction is real —
          * CEL's `x / -0.0` is `-Infinity` where `x / 0.0` is `+Infinity` — so pinning WHERE the
          * asset is a stand-in is what stops the normalisation from hiding a change.
-         *
-         * RE-PIN AFTER THE TRANSLATOR LANDS: the arithmetic that produces these constants
-         * (`cr-div-neg-zero`, the `nan-ord-*` folds) is still scaffolding, so the list is empty for
-         * a reason that has nothing to do with the encoding.
          */
         private val NON_JSON_DOUBLE_PARAMS: List<String> = emptyList()
 
         /**
          * Corpus actions whose SQL carries a `LIKE`, on any dialect.
          *
-         * RE-PIN AFTER THE TRANSLATOR LANDS: string matching is scaffolding, so no action emits one
-         * yet. The rule that every `LIKE` declares an `ESCAPE` holds over whatever this set becomes;
-         * this is its anti-vacuity half, which is why it is pinned in both directions rather than
-         * asserted to be non-empty.
+         * The anti-vacuity half of the rule that every `LIKE` declares an `ESCAPE`: pinned in both
+         * directions, so a translation that stopped emitting one fails here rather than leaving the
+         * rule passing over nothing.
          */
-        private val ACTIONS_EMITTING_LIKE: List<String> = emptyList()
+        private val ACTIONS_EMITTING_LIKE: List<String> = listOf(
+            "cr-contains", "cr-endswith", "cr-startswith", "cr-startswith-concat",
+            "cs-contains", "cs-endswith", "cs-startswith",
+            "f2f-contains", "f2f-endswith", "f2f-startswith",
+            "hier-ancestor-cf", "hier-bracket", "hier-descendent-ff", "hier-meta-like",
+            "hier-overlaps-cf", "hier-overlaps-ff", "hier-overlaps-meta",
+            "like-backslash", "like-bracket", "like-percent", "like-underscore",
+            "not-contains", "not-startswith",
+            "p-deep-nest", "p-lambda-f2f-like", "p-startswith-concat",
+            "rel-contains-hop", "rel-hop-and-root", "rel-startswith-hop2",
+            "ternary-expr-cond",
+        )
 
         /**
          * Corpus actions whose SQL carries a correlated subquery alias.
          *
-         * RE-PIN AFTER THE TRANSLATOR LANDS: the relation side is scaffolding, so nothing allocates
-         * an alias yet, and the alias rule below would otherwise pass over an empty corpus.
+         * The anti-vacuity half of the alias rule, pinned in both directions for the same reason.
          */
-        private val ACTIONS_EMITTING_A_SUBQUERY_ALIAS: List<String> = emptyList()
+        private val ACTIONS_EMITTING_A_SUBQUERY_ALIAS: List<String> = listOf(
+            "all-on-empty", "cr-size-frac-ge", "exists-on-empty", "exists-one-multi",
+            "in-null-elem-hasint", "in-null-elem-rel", "in-null-elem-rel-neg", "in-var-var",
+            "in-var-var-neg", "lambda-field-to-field", "lambda-in-principal", "macro-depth3-all",
+            "macro-depth3-exists", "macro-depth3-not-exists", "n-all-mixed-null", "n-not-all-absorb",
+            "n-not-all-null", "n-not-exists-one-null", "not-empty", "not-exists", "or-eq-exists",
+            "or-eq-in", "outer-attr-depth2", "p-arith-in-lambda", "p-deep-nest",
+            "p-hasintersection-map", "p-lambda-f2f-like", "p-lambda-inner-f2f", "p-not-exists-empty",
+            "p-size-nested", "p-ternary-in-exists", "p-ternary-under-all", "rel-bool-hop",
+            "rel-bool-hop2", "rel-contains-hop", "rel-eq-hop", "rel-eq-num-hop", "rel-ge-hop",
+            "rel-gt-hop", "rel-hop-and-root", "rel-hop2-or-exists", "rel-le-hop", "rel-lt-hop",
+            "rel-ne-null-hop", "rel-not-bool-hop", "rel-range-hop", "rel-startswith-hop2",
+            "size-filter-count", "size-threshold", "vf-hasint", "vf-size", "w1-all-chain",
+            "w1-exists-chain", "w1-in-chain", "w1-not-exists-chain", "w1-not-hasint-chain",
+            "w1-not-in-chain", "w1-not-size-chain", "w1-size-chain", "w1-size-frac-chain",
+            "w1-size-frac-le-chain", "w1-size-nonneg-chain", "w1-size-zero-chain",
+            "w1-ternary-chain-cond", "w2-outer-relation",
+        )
 
         /**
          * The named spellings [DIALECT_SPELLINGS] the corpus actually exercises.
          *
-         * RE-PIN AFTER THE TRANSLATOR LANDS. A spelling that fires nowhere is a rewrite that could
-         * be hiding a real divergence instead of a declared one, so the set is pinned rather than
-         * left to grow silently.
+         * A spelling that fires nowhere is a rewrite that could be hiding a real divergence instead
+         * of a declared one, so the set is pinned rather than left to grow silently.
          */
         private val DIALECT_SPELLINGS_EXERCISED: Set<String> = sortedSetOf(
+            "boolean literal spelling",
+            "character count function",
+            "concatenation spelling",
+            "double cast target",
             "identifier case folding",
+            "identifier quoting",
+            "text cast target",
         )
 
         // ==========================================================================================
@@ -172,19 +197,6 @@ class ExposedTranslatorTest {
 
         /** The corpus key for this adapter — its directory name, as every other suite uses. */
         private const val ADAPTER = Corpus.ADAPTER
-
-        /**
-         * The prefix `Refusals.notYetImplemented` puts on a shape whose translation has not been
-         * written yet. It is NEVER an expected throw: a corpus action the classification says this
-         * adapter translates, refused with this, is the gap rather than a limitation, and the
-         * scaffolding gate below fails on it by name.
-         */
-        private const val SCAFFOLDING = "Not implemented yet: "
-
-        /** The bucket [REFUSAL_SITE_COUNTS] carries for shapes that have not been written yet. */
-        private const val SCAFFOLDING_SITE = "SCAFFOLDING — not a rejection site"
-
-        private val JSON = ObjectMapper()
 
         private val ACTIONS: Corpus.ActionsFile = Corpus.actionsFile()
 
@@ -219,11 +231,16 @@ class ExposedTranslatorTest {
         /** The plan kind each non-throwing action folds to, in [Golden]'s spelling. */
         private lateinit var kinds: Map<String, String>
 
-        /** Actions still raising [SCAFFOLDING], with the message, in corpus order. */
-        private lateinit var scaffolded: Map<String, String>
-
-        /** Actions this adapter translates neither to a filter nor to a declared refusal. */
-        private lateinit var broken: Map<String, Throwable>
+        /**
+         * Every corpus action this adapter refuses although `actions.json` classifies it as an
+         * oracle comparison, with what it raised.
+         *
+         * This is the gate the whole suite stands on, and it must stay empty. A refusal is
+         * indistinguishable from a declared limitation to any assertion that only asks whether
+         * something threw, so an oracle-compared action that refuses has to be named rather than
+         * counted.
+         */
+        private lateinit var refusedAnyway: Map<String, Throwable>
 
         private lateinit var recorded: Map<String, ObjectNode>
         private lateinit var recordedActions: List<String>
@@ -233,7 +250,6 @@ class ExposedTranslatorTest {
         fun setUp() {
             val renderings = LinkedHashMap<String, Map<String, Rendered>>()
             val planKinds = LinkedHashMap<String, String>()
-            val stillScaffolding = LinkedHashMap<String, String>()
             val failures = LinkedHashMap<String, Throwable>()
 
             for (action in Corpus.wireFixtureActions()) {
@@ -259,19 +275,13 @@ class ExposedTranslatorTest {
                         }
                     }
                 } catch (error: RuntimeException) {
-                    val message = error.message.orEmpty()
-                    if (message.startsWith(SCAFFOLDING)) {
-                        stillScaffolding[action] = message
-                    } else {
-                        failures[action] = error
-                    }
+                    failures[action] = error
                 }
             }
 
             rendered = renderings
             kinds = planKinds
-            scaffolded = stillScaffolding
-            broken = failures
+            refusedAnyway = failures
 
             // `gradle goldenUpdate` rewrites the file from what the translator emits today and
             // preserves every note. Skipping the throwing actions above is also what keeps
@@ -311,21 +321,9 @@ class ExposedTranslatorTest {
             ExposedQueryPlanAdapter.toFilter(Corpus.planFromWireFixture(action, plannedAt), options)
         }
 
-        /**
-         * The golden entry for [action], **as the asset stores it**.
-         *
-         * The round trip is not decoration. [Golden.read] hands back what Jackson parsed out of the
-         * file, and Jackson's numeric nodes are typed: a bound `1L` is written as `1` and read back
-         * as an `IntNode`, which is not equal to the `LongNode` a freshly built entry carries.
-         * Encoding the emitted entry the same way compares what the FILE pins rather than two
-         * in-memory spellings of it, and it discriminates exactly as much — `1` and `1.0` still read
-         * back as different nodes, which is the double-versus-integer bind the params exist to catch.
-         */
-        private fun storedEntryFor(action: String): ObjectNode {
-            val entry = Golden.entryFor {
-                ExposedQueryPlanAdapter.toFilter(Corpus.planFromWireFixture(action), OPTIONS)
-            }
-            return JSON.readTree(entry.toString()) as ObjectNode
+        /** The golden entry for [action]: the whole handover, plan to recorded document. */
+        private fun entryFor(action: String): ObjectNode = Golden.entryFor {
+            ExposedQueryPlanAdapter.toFilter(Corpus.planFromWireFixture(action), OPTIONS)
         }
 
         /** [action]'s predicate rendered under [dialect], under a mapping other than the corpus's. */
@@ -342,10 +340,7 @@ class ExposedTranslatorTest {
          * rule that quietly skipped it would report the incomplete translator as compliant.
          */
         private fun renderingOf(action: String, dialect: String): Rendered {
-            scaffolded[action]?.let {
-                throw AssertionError("'$action' is still scaffolding: $it")
-            }
-            broken[action]?.let { throw AssertionError("'$action' did not translate: $it", it) }
+            refusedAnyway[action]?.let { throw AssertionError("'$action' did not translate: $it", it) }
             val one = rendered[action] ?: throw AssertionError("'$action' carries no rendering")
             return one[dialect] ?: throw AssertionError("'$action' folded to ${kinds[action]}, so it renders no SQL")
         }
@@ -382,16 +377,16 @@ class ExposedTranslatorTest {
     @ParameterizedTest(name = "{0}")
     @MethodSource("recordedActions")
     fun `emits the golden expectation`(action: String) {
-        scaffolded[action]?.let {
+        refusedAnyway[action]?.let {
             throw AssertionError(
-                "${GOLDEN.file} records '$action', which this translator no longer emits: $it." +
-                    " A scaffolding refusal is never an expected throw — finish the shape, or" +
-                    " regenerate the asset deliberately.",
+                "${GOLDEN.file} records '$action', which this translator now refuses: $it." +
+                    " A refusal on an oracle-compared action is never an expected throw — fix the" +
+                    " translation, or reclassify the action in actions.json deliberately.",
+                it,
             )
         }
-        broken[action]?.let { throw AssertionError("'$action' did not translate: $it", it) }
 
-        val entry = storedEntryFor(action)
+        val entry = entryFor(action)
 
         if (!GOLDEN.rendersUnderRunningExposed && action in RENDERING_DIFFERS_ON_THE_FLOOR) {
             // On the floor leg a listed shape is asserted to DIFFER from the asset; a byte match
@@ -427,32 +422,20 @@ class ExposedTranslatorTest {
     }
 
     /**
-     * The gate this whole suite is provisional behind.
+     * The gate the whole suite stands on: a shape the corpus says this adapter translates must
+     * produce a filter.
      *
-     * `Refusals.notYetImplemented` fails closed, so an unwritten shape reads as a refusal — and a
-     * refusal is indistinguishable from a declared limitation to every assertion that only asks
-     * whether something threw. Naming the actions is what keeps the incomplete translator from
-     * reporting itself as a translator that refuses a lot.
+     * A refusal fails closed, which is right, and that is exactly what makes it invisible: to any
+     * assertion that only asks whether something threw, a shape nobody has finished and a
+     * documented limitation look the same. Naming the actions is what keeps an adapter that
+     * quietly stopped translating something from reporting itself as an adapter that refuses a lot.
      */
     @Test
-    fun `no oracle-compared action is still scaffolding`() {
-        // Anti-vacuity: the detector must recognise the prefix it is looking for, taken from the
-        // factory that produces it rather than hoped for.
-        assertTrue(Refusals.notYetImplemented("a probe").message!!.startsWith(SCAFFOLDING))
-
-        assertEquals(emptyList<String>(), scaffolded.keys.toList()) {
-            "these corpus actions raise `$SCAFFOLDING…` rather than emitting a filter. Each one is" +
-                " an oracle comparison in actions.json, so the refusal is this adapter's gap and" +
-                " not a limitation: ${scaffolded.entries.joinToString("\n  ", "\n  ")}"
-        }
-    }
-
-    /** Anything that raised for a reason neither the corpus nor the scaffolding accounts for. */
-    @Test
-    fun `no oracle-compared action fails for an undeclared reason`() {
-        assertEquals(emptyList<String>(), broken.keys.toList()) {
+    fun `no oracle-compared action is refused`() {
+        assertEquals(emptyList<String>(), refusedAnyway.keys.toList()) {
             "these corpus actions raised, and `actions.json` classifies every one of them as an" +
-                " oracle comparison: ${broken.entries.joinToString("\n  ", "\n  ")}"
+                " oracle comparison, so each refusal is this adapter coming up short rather than a" +
+                " declared limitation: ${refusedAnyway.entries.joinToString("\n  ", "\n  ")}"
         }
     }
 
@@ -470,9 +453,6 @@ class ExposedTranslatorTest {
         val error = assertThrows(IllegalArgumentException::class.java) { filterFor(action) }
         assertTrue(error.message.orEmpty().contains(message)) {
             "action '$action' was rejected for a reason actions.json does not declare: ${error.message}"
-        }
-        assertFalse(error.message.orEmpty().startsWith(SCAFFOLDING)) {
-            "action '$action' is refused by scaffolding rather than by the mechanism actions.json declares"
         }
     }
 
@@ -522,13 +502,13 @@ class ExposedTranslatorTest {
         )
     }
 
-    /** What the completeness guard's failure is really saying while the translator is unfinished. */
+    /** What the completeness guard's failure is really saying, when it has more to say. */
     private fun unaccountedFor(): String {
         val missing = Corpus.wireFixtureActions().toSet() - recordedActions.toSet() - THROWING.keys
         if (missing.isEmpty()) return ""
         return "; ${missing.size} of them have neither a golden expectation nor a pinned throw," +
-            " ${scaffolded.keys.count { it in missing }} because their translation is still" +
-            " scaffolding — see `no oracle-compared action is still scaffolding`"
+            " ${refusedAnyway.keys.count { it in missing }} because this adapter refused them —" +
+            " see `no oracle-compared action is refused`"
     }
 
     @Test
@@ -561,30 +541,80 @@ class ExposedTranslatorTest {
 
         /**
          * One entry per `throw` site the corpus reaches, named for the MECHANISM rather than for
-         * the message, and carrying the exception type that site raises. The substrings are
-         * narrowed to the part that identifies the site rather than the action.
+         * the message or the action, and carrying the exception type that site raises.
          *
-         * RE-PIN AFTER THE TRANSLATOR LANDS, together with [REFUSAL_SITE_COUNTS]: the sites the
-         * scalar and relation sides introduce are not here yet, and [SCAFFOLDING_SITE] has to go.
+         * Each substring is narrowed to the part that identifies the SITE: `actions.json` pins a
+         * substring per action, and several actions share one mechanism (three casts, two
+         * `matches()`, two nested divisions), so the pins would count actions rather than sites.
          */
         private val sites: List<RefusalSite> = listOf(
             // PlanWalker, by name and before any predicate is built: filter() and map() return a
             // LIST, and `filter(...)` in condition position is not `size(filter(...)) > 0`.
             RefusalSite(
                 "list-valued macro in boolean position",
-                "returns a list and cannot be used as a condition",
+                "returns a list, not a boolean",
                 UnsupportedPlanShapeException::class,
             ),
-            // ComparisonTranslator's dispatch default: an operator this adapter never translates.
+            // The leaf's operator dispatch default. The corpus reaches it through matches() alone:
+            // CEL matches with RE2, which no SQL engine implements.
             RefusalSite(
                 "operator the adapter never translates",
                 "Unsupported operator: ",
                 UnsupportedPlanShapeException::class,
             ),
-            // NOT a mechanism. `Refusals.notYetImplemented` fails closed, so an unwritten shape
-            // arrives here wearing a refusal's clothes; the bucket exists so the map stays total
-            // and the gap stays countable while the translator is finished.
-            RefusalSite(SCAFFOLDING_SITE, SCAFFOLDING, UnsupportedPlanShapeException::class),
+            // ScalarRefusals.numericCastUnsupported, from the leaf operand and from inside an
+            // arithmetic operand alike: SQL CAST is not a CEL conversion in either direction.
+            RefusalSite(
+                "CEL numeric cast",
+                "SQL CAST reads the numeric prefix of a string where CEL requires the whole string",
+                UnsupportedPlanShapeException::class,
+            ),
+            // ArithmeticTranslator: a division whose denominator may be zero, with further
+            // arithmetic composed ON it. CEL carries the NaN or infinity outward; the NULLIF guard
+            // turns the whole sum into NULL, which UNDER-grants (#312).
+            RefusalSite(
+                "division inside further arithmetic",
+                "arithmetic composed on a division whose denominator may be zero",
+                UnsupportedPlanShapeException::class,
+            ),
+            // HierarchyTranslator: an empty delimiter splits the path per character, and the prefix
+            // LIKE this adapter emits would then also match the path itself.
+            RefusalSite(
+                "empty hierarchy delimiter",
+                "hierarchy delimiter must be a non-empty string",
+                UnsupportedPlanShapeException::class,
+            ),
+            // CEL % has no double overload and attribute values are always doubles at check time,
+            // so the satisfiable spelling needs an int() cast that is itself unlowerable.
+            RefusalSite("modulo", "mod is not supported in comparisons", UnsupportedPlanShapeException::class),
+            // A map() projection compared straight to a value: it is held as a deferred projection
+            // until hasIntersection() or size() gives it a scalar meaning.
+            RefusalSite(
+                "map projection compared directly",
+                "Direct comparison of map(...) to a value is not supported",
+                UnsupportedPlanShapeException::class,
+            ),
+            // index(): a list element addressed by position, and the rows a relation subquery
+            // returns carry no CEL list order to index into.
+            RefusalSite("positional list access", "Cannot translate index()", UnsupportedPlanShapeException::class),
+            // get-field(): it projects a member out of a single element, and a relation subquery
+            // has no single element to project from.
+            RefusalSite("struct member access", "Cannot translate get-field()", UnsupportedPlanShapeException::class),
+            // Two columns under different null conventions: the declared side needs a definite
+            // answer for its NULL and the undeclared side needs UNKNOWN, and no predicate is both
+            // (#308). A mapping decision, so an UnmappedAttributeException.
+            RefusalSite(
+                "mixed null conventions across two columns",
+                "between two columns under mixed null conventions",
+                UnmappedAttributeException::class,
+            ),
+            // timestamp() over a column whose type does not pin an absolute instant. Also a mapping
+            // decision: the fix is to remap the column, not to rewrite the policy.
+            RefusalSite(
+                "ambiguous temporal column",
+                "requires a column that stores an absolute instant",
+                UnmappedAttributeException::class,
+            ),
         )
 
         private fun siteOf(action: String): String {
@@ -611,16 +641,8 @@ class ExposedTranslatorTest {
         fun `every refused shape lands on exactly one of them in these numbers`() {
             val counts = TreeMap<String, Int>()
             THROWING.keys.forEach { counts.merge(siteOf(it), 1, Int::plus) }
-            // The scaffolding bucket is a property of the whole corpus, not of the throwing set:
-            // it is what an oracle-compared action's refusal looks like while the shape is unwritten.
-            if (scaffolded.isNotEmpty()) counts.merge(SCAFFOLDING_SITE, scaffolded.size, Int::plus)
-
             assertEquals(REFUSAL_SITE_COUNTS, counts)
-            assertEquals(
-                THROWING.size + scaffolded.size,
-                counts.values.sum(),
-                "every refusal has to be counted exactly once",
-            )
+            assertEquals(THROWING.size, counts.values.sum(), "every refusal has to be counted exactly once")
         }
 
         /**
@@ -641,7 +663,7 @@ class ExposedTranslatorTest {
                 "is mapped as a relation, but this position needs a scalar column",
                 "is mapped as a column, but this position needs a relation",
             )
-            val unmapped = (THROWING.keys + scaffolded.keys + broken.keys).mapNotNull { action ->
+            val unmapped = (THROWING.keys + refusedAnyway.keys).mapNotNull { action ->
                 val message = runCatching { filterFor(action) }.exceptionOrNull()?.message.orEmpty()
                 if (shortfalls.any { message.contains(it) }) "$action: $message" else null
             }
@@ -734,37 +756,75 @@ class ExposedTranslatorTest {
             assertTrue(conditionalRenderings().sumOf { it.third.params.size } > 0)
         }
 
+        /**
+         * `AliasAllocator` gives every subquery instance its own `cerbos_N`, so one relation entered
+         * twice in one plan cannot have its inner table capture the outer correlation, and the
+         * prefix keeps it from colliding with an alias the caller's own query declares.
+         *
+         * Two things are asserted. **Dense** — the numbers used are exactly `1..n`, so an allocation
+         * that went missing shows up as a gap. **One table per number** — every place a statement
+         * declares `cerbos_1` names the same table, which is the shape of the capture bug: a second
+         * `FROM <other table> cerbos_1` inside an enclosing `cerbos_1` re-binds every correlation
+         * under it, and the subquery then answers about the wrong rows.
+         *
+         * Two weaker-looking facts are deliberately NOT asserted, because neither is a property of
+         * the allocator:
+         *
+         * - **The numbers need not appear in ascending order.** Allocation is in WALK order and the
+         *   renderer nests, so a chained macro emits its inner subquery inside the outer's select
+         *   list and the text reads `cerbos_3` before `cerbos_2` before `cerbos_1`.
+         * - **One number may be declared several times.** Exposed expression trees are immutable, so
+         *   `TriLogic` shares one node between a positive and a negated occurrence and a ternary
+         *   rewrite renders the same subquery in each arm. Each rendering is a self-contained
+         *   correlated subquery whose alias is scoped to it, which is why the invariant is the
+         *   TABLE the number is bound to rather than how often it appears.
+         */
         @Test
-        fun `every subquery alias is numbered densely and in order`() {
-            // `AliasAllocator` numbers in walk order so the emitted SQL, and with it this asset, is
-            // deterministic, and prefixes so an alias cannot collide with one the caller's own
-            // query declares. A gap or a repeat in the numbering means two subqueries share an
-            // alias, and the inner one then captures the outer correlation.
+        fun `every subquery alias is numbered densely and always names one table`() {
             val offenders = mutableListOf<String>()
             val withAliases = TreeSet<String>()
+            var sharedAcrossOccurrences = 0
             conditionalRenderings().forEach { (action, dialect, one) ->
-                val names = ALIAS.findAll(one.sql).map { it.value.lowercase() }.toList()
-                if (names.isEmpty()) return@forEach
+                // H2 folds an unquoted identifier to upper case, so the whole statement is read in
+                // one case rather than every pattern below being written twice.
+                val sql = one.sql.lowercase()
+                val occurrences = ALIAS.findAll(sql).toList()
+                if (occurrences.isEmpty()) return@forEach
                 withAliases.add(action)
-                val stray = names.filterNot { NUMBERED_ALIAS.matches(it) }
+
+                val stray = occurrences.map { it.value }.filterNot { NUMBERED_ALIAS.matches(it) }.distinct()
                 if (stray.isNotEmpty()) offenders.add("$action ($dialect): $stray")
-                // `distinct` keeps first-appearance order, so this one comparison says both things
-                // the rule claims: dense (nothing missing, nothing repeated with a gap) and in the
-                // order the statement reads.
-                val numbers = names.filter { NUMBERED_ALIAS.matches(it) }
+
+                occurrences.groupBy { it.value }.forEach { (name, uses) ->
+                    // A use reads THROUGH the alias (`cerbos_1.a_bool`); anything else introduces
+                    // it, and what it introduces is the identifier just before it.
+                    val tables = uses.filter { sql.getOrNull(it.range.last + 1) != '.' }
+                        .map { sql.take(it.range.first).trimEnd().substringAfterLast(' ') }
+                        .distinct()
+                    if (tables.size != 1) {
+                        offenders.add("$action ($dialect): $name is bound to $tables")
+                    }
+                    if (uses.size > tables.size + 1) sharedAcrossOccurrences++
+                }
+
+                val distinct = occurrences.map { it.value }
+                    .filter { NUMBERED_ALIAS.matches(it) }
                     .map { it.removePrefix(AliasAllocator.PREFIX).toInt() }
                     .distinct()
-                if (numbers != (1..numbers.size).toList()) {
-                    offenders.add("$action ($dialect): aliases appear as $numbers")
+                if (distinct.sorted() != (1..distinct.size).toList()) {
+                    offenders.add("$action ($dialect): aliases are numbered ${distinct.sorted()}")
                 }
             }
             assertEquals(emptyList<String>(), offenders)
 
-            // Anti-vacuity, in two parts: the detector rejects the shapes it is looking for…
+            // Anti-vacuity, in three parts: the detector rejects the shapes it is looking for…
             assertFalse(NUMBERED_ALIAS.matches("cerbos_outer"))
             assertTrue(NUMBERED_ALIAS.matches("cerbos_12"))
-            // …and the corpus emits subqueries at all, pinned in both directions.
+            // …the corpus emits subqueries at all, pinned in both directions…
             assertEquals(ACTIONS_EMITTING_A_SUBQUERY_ALIAS, withAliases.toList())
+            // …and one node really is rendered in more than one place, which is what makes "one
+            // table per number" the invariant rather than "declared once".
+            assertTrue(sharedAcrossOccurrences > 0, "no subquery node is shared, so the rule is untested")
         }
 
         /**
@@ -912,7 +972,7 @@ class ExposedTranslatorTest {
                 "the divergence set is empty on the renderer the asset was generated under",
             )
 
-            val diverging = recordedActions.filterNot { recorded.getValue(it) == storedEntryFor(it) }
+            val diverging = recordedActions.filterNot { recorded.getValue(it) == entryFor(it) }
             assertEquals(RENDERING_DIFFERS_ON_THE_FLOOR, diverging) {
                 "Exposed ${Golden.runningExposedVersion()} diverges from the asset on a different" +
                     " set of shapes than the list pins"
@@ -1128,6 +1188,47 @@ private val BOOLEAN_LITERAL = Regex("\\b(TRUE|FALSE)\\b", RegexOption.IGNORE_CAS
 /** The target of a to-double cast, which every store spells differently and no two agree on. */
 private val DOUBLE_CAST_TARGET = Regex("\\bAS (DOUBLE PRECISION|DOUBLE|REAL|FLOAT\\(53\\))\\b", RegexOption.IGNORE_CASE)
 
+/** The target of a to-text cast: `CHAR` on MySQL, `VARCHAR` everywhere else. */
+private val TEXT_CAST_TARGET = Regex("\\bAS (VARCHAR|CHAR)\\b", RegexOption.IGNORE_CASE)
+
+/** SQLite has no `CHAR_LENGTH`; its `LENGTH` already counts characters for a text value. */
+private val CHARACTER_COUNT = Regex("\\bLENGTH\\(", RegexOption.IGNORE_CASE)
+
+/**
+ * `CONCAT(a, b, …)` rewritten to `(a || b || …)`, the spelling every dialect but MySQL uses.
+ *
+ * A textual rewrite rather than a regex, because the arguments nest: a concatenation of a cast of a
+ * concatenation is one statement, and only depth tracking finds the right closing parenthesis and
+ * the right commas. Prepared rendering means there are no string literals to confuse the scan.
+ */
+private fun rewriteConcat(sql: String): String {
+    val open = sql.indexOf(CONCAT_CALL)
+    if (open < 0) return sql
+    var depth = 0
+    val args = mutableListOf(StringBuilder())
+    var index = open + CONCAT_CALL.length
+    while (index < sql.length) {
+        when (val ch = sql[index]) {
+            '(' -> { depth++; args.last().append(ch) }
+            ')' -> if (depth == 0) {
+                val rewritten = args.joinToString(" || ") { it.toString().trim() }
+                return rewriteConcat(sql.substring(0, open) + "(" + rewritten + ")" + sql.substring(index + 1))
+            } else {
+                depth--
+                args.last().append(ch)
+            }
+            ',' -> if (depth == 0) args.add(StringBuilder()) else args.last().append(ch)
+            else -> args.last().append(ch)
+        }
+        index++
+    }
+    // An unbalanced CONCAT( is a rendering this rewrite has no reading of; leave it for the
+    // comparison to report as an unexplained difference rather than silently half-rewriting it.
+    return sql
+}
+
+private const val CONCAT_CALL = "CONCAT("
+
 /**
  * The ways two dialects are allowed to spell ONE translation differently, each named.
  *
@@ -1151,8 +1252,17 @@ private val DIALECT_SPELLINGS: List<Pair<String, (String) -> String>> = listOf(
         BOOLEAN_LITERAL.replace(sql) { if (it.value.equals("TRUE", ignoreCase = true)) "1" else "0" }
     },
     // `DOUBLE PRECISION` on PostgreSQL, `DOUBLE` on MySQL, `REAL` on SQLite, `FLOAT(53)` on H2 —
-    // all 53-bit binary floating point, which is what CEL arithmetic needs.
+    // all 53-bit binary floating point, which is what CEL arithmetic needs (`sql/IeeeDoubleCast`).
     "double cast target" to { sql: String -> DOUBLE_CAST_TARGET.replace(sql, "AS <double>") },
+    // MySQL's CAST accepts CHAR and rejects an unqualified VARCHAR (`sql/TextCastExpression`).
+    "text cast target" to { sql: String -> TEXT_CAST_TARGET.replace(sql, "AS <text>") },
+    // SQLite has no CHAR_LENGTH, and its LENGTH already counts characters rather than bytes
+    // (`sql/CountChars`). `\b` does not match inside CHAR_LENGTH, so this never doubles a prefix.
+    "character count function" to { sql: String -> CHARACTER_COUNT.replace(sql, "CHAR_LENGTH(") },
+    // `||` is logical OR on MySQL outside PIPES_AS_CONCAT, and PostgreSQL's CONCAT() skips NULL
+    // where CEL's `+` propagates it, so the two spellings are not interchangeable in either
+    // direction (`sql/ConcatExpression`).
+    "concatenation spelling" to ::rewriteConcat,
 )
 
 /** [sql] with every declared spelling difference rewritten away, recording which ones fired. */
