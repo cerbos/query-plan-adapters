@@ -14,6 +14,11 @@ PDP; this directory's `run.sh` publishes the adapter to mavenLocal, builds this 
 published coordinate and runs it. The store runs inside the program's own JVM, so there is nothing
 else to start.
 
+Every call this program makes to the PDP carries a **30 second deadline**
+(`CerbosClientBuilder.withTimeout`), because a blocking gRPC stub with no deadline waits for ever
+and a stalled stream would hold the program — and the CI job running it — until something outside
+killed it. A real application wants a deadline on its authorization calls for the same reason.
+
 ## What this example covers that the adapter's own suites cannot
 
 **Packaging.** Every suite under [`../src/test`](../src/test) compiles against the adapter's own
