@@ -25,13 +25,4 @@ internal object Refusals {
 
     fun unknownAttribute(variable: String): UnmappedAttributeException =
         unmapped("Unknown attribute: $variable")
-
-    /**
-     * SCAFFOLDING. Marks a shape whose translation has not been written yet. It fails closed, so
-     * the conformance harness reports the gap honestly. No call to this may survive to a release:
-     * every remaining refusal must name the real mechanism, because its message is pinned in
-     * conformance/actions.json.
-     */
-    fun notYetImplemented(what: String): UnsupportedPlanShapeException =
-        unsupported("Not implemented yet: $what")
 }
