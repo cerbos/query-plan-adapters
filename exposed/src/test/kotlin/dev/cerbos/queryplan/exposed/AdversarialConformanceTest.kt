@@ -270,7 +270,7 @@ class AdversarialConformanceTest {
         // -- the run summary --------------------------------------------------------------------
 
         private fun record(action: String, status: String, detail: String) {
-            results[action] = "$status $detail"
+            results[action] = "$status\u0000$detail"
         }
 
         private fun writeRunSummary() {
@@ -280,11 +280,11 @@ class AdversarialConformanceTest {
             val counts = LinkedHashMap<String, Int>()
             val body = StringBuilder()
             for ((action, value) in results.toSortedMap()) {
-                val status = value.substringBefore(' ')
+                val status = value.substringBefore('\u0000')
                 counts[status] = (counts[status] ?: 0) + 1
                 body.append(action.padEnd(30))
                     .append(status.padEnd(16))
-                    .append(value.substringAfter(' '))
+                    .append(value.substringAfter('\u0000'))
                     .append('\n')
             }
             val banner = testStore?.let { store ->
@@ -914,12 +914,23 @@ class AdversarialConformanceTest {
          * Shapes this adapter refuses to translate: they have no oracle comparison to guard, and
          * stay here as PDP/policy liveness probes for a group the sweep above cannot cover.
          *
-         * Both are `expectedUnsupported` shapes, because this adapter declares nothing of its own
-         * unsupported: `int()` over a numeric column, where CEL truncates toward zero and
-         * PostgreSQL and MySQL round, and a regex with a top-level alternation, which is a
-         * `matches()` no SQL engine implements in CEL's dialect.
+         * The first six are this adapter's own `adapterUnsupported` entries, one per refusal
+         * mechanism and every one with an oracle that discriminates, so each refused family still
+         * proves its policy is live. The last two are `expectedUnsupported` shapes: `int()` over a
+         * numeric column, where CEL truncates toward zero and PostgreSQL and MySQL round, and a
+         * regex with a top-level alternation, which is a `matches()` no SQL engine implements in
+         * CEL's dialect.
          */
-        private val DEGENERACY_LIVENESS_PROBES = listOf("cast-int-double", "matches-alt")
+        private val DEGENERACY_LIVENESS_PROBES = listOf(
+            "arith-mod",
+            "cr-div-then-add",
+            "cr-div-then-add-ne",
+            "hier-empty-delim",
+            "index-scalar-list",
+            "map-eq-list",
+            "cast-int-double",
+            "matches-alt",
+        )
     }
 
     // -- the differential ----------------------------------------------------------------------
@@ -958,13 +969,12 @@ class AdversarialConformanceTest {
      * and must fail loudly instead — the invariant is absolute either way: an inexpressible shape
      * throws before its filter can be used.
      *
-     * `allowZeroInvocations` because this adapter's `adapterUnsupported` list is EMPTY: it aims to
-     * translate every `conformance` action, and a shape it cannot is a triage outcome that has not
-     * happened rather than a case with no arguments. [manifestAssignsEveryActionExactlyOneOutcome]
-     * is what keeps the empty list honest — it asserts the throwing count, so a shape that moves
-     * into this group has to be counted there before it can reach this case.
+     * Deliberately NOT `allowZeroInvocations`: the list is not empty, and a parser change that
+     * dropped this adapter's group would otherwise turn every case here into silence.
+     * [manifestAssignsEveryActionExactlyOneOutcome] pins the throwing count beside it, so a shape
+     * that joins or leaves this group has to be counted there too.
      */
-    @ParameterizedTest(name = "{0}", allowZeroInvocations = true)
+    @ParameterizedTest(name = "{0}")
     @MethodSource("adapterUnsupportedActions")
     fun adapterUnsupportedActionsThrow(action: String, reason: String, expectedMessage: String) {
         assertRefused(action, expectedMessage, reason)
@@ -1299,7 +1309,7 @@ class AdversarialConformanceTest {
         assertEquals(22, seeds.size, "seed count changed")
         // Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
         // lost has to be re-triaged here rather than joining the throw suite unnoticed.
-        assertEquals(11, throwing.size, "throwing action count changed")
+        assertEquals(17, throwing.size, "throwing action count changed")
         assertEquals(
             throwing.size.toLong(),
             adapterUnsupportedActions().count() + unsupportedShapes().count(),

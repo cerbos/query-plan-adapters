@@ -500,7 +500,14 @@
       { "action": "cast-string-bool", "reason": "The translator lowers CEL `string()` to a SQL CAST, and a CAST over a boolean is not portable: SQLite and MySQL store 1/0 so it yields \"1\", while CEL and PostgreSQL yield \"true\", and the filter would then drop every row the PDP permits. So the cast path refuses a boolean column rather than emit one rendering on three engines that disagree. The limitation is the CAST, not the dialect — this adapter does branch per dialect elsewhere (`Dialect#concat`, `#char_length`, `#double_type`), and a three-valued `CASE WHEN col IS NULL THEN NULL WHEN col THEN 'true' ELSE 'false' END` would sidestep the disagreement on every engine at once. Writing it changes what the adapter can translate, so it is tracked in cerbos/query-plan-adapters#418 rather than folded into a rebase", "message": "string() over a boolean column is not supported" },
       { "action": "hier-empty-delim", "reason": "An empty delimiter is refused when the hierarchy operand is parsed, before the descendant LIKE is built: the adapter emits `prefix + delimiter + '%'`, which with an empty delimiter is a bare string-prefix LIKE that also matches the path itself (a2, never its own descendant)", "message": "hierarchy() delimiter must be a non-empty string" }
     ],
-    "exposed": []
+    "exposed": [
+      { "action": "arith-mod", "reason": "CEL `%` is integer-only while an attribute value is always a double at check time, so a satisfiable policy has to cast with int() first, and int() has no faithful SQL lowering: CAST rounds to nearest on PostgreSQL and MySQL where CEL truncates toward zero. The modulo is refused by name before its operands are read, on the same ground that refuses cast-int-double", "message": "mod is not supported in comparisons" },
+      { "action": "cr-div-then-add", "reason": "The adapter lowers a division by a possibly-zero column with a NULLIF guard and rewrites the non-finite result into IEEE arms only where the comparison sits DIRECTLY on the division. With arithmetic composed on top, CEL carries the NaN or signed infinity through the sum and SQL has no value that does: the guard turns the whole expression into NULL. A Kotlin column type tells the adapter an operand is numeric, not that it is non-zero, so the shape is refused where the division is resolved as an arithmetic operand", "message": "arithmetic composed on a division whose denominator may be zero is not supported" },
+      { "action": "cr-div-then-add-ne", "reason": "The same nested-division limitation as cr-div-then-add, and the arm that proves it matters: `NaN != 2.0` is TRUE and the PDP allows the zero row, while `NULL + 1 <> 2` is UNKNOWN and drops it. Emitting the guarded form would under-grant here and the mirrored spelling would over-grant, so both are refused", "message": "arithmetic composed on a division whose denominator may be zero is not supported" },
+      { "action": "hier-empty-delim", "reason": "Cerbos splits a path on an empty delimiter into one segment per character, so the relation is a strict string-prefix test. The adapter lowers descendentOf as `LIKE prefix + delimiter + '%'`, which with an empty delimiter is a bare prefix LIKE that also matches the path itself. The delimiter is refused when the hierarchy operand is parsed, before any LIKE is built", "message": "hierarchy delimiter must be a non-empty string" },
+      { "action": "index-scalar-list", "reason": "Positional access into a scalar list. tagNames is a related table read through a correlated subquery, and the rows a SQL relation returns carry no order for a position to index into, so there is no first element to read. Refused in the leaf operand, by the operator's own name", "message": "Cannot translate index()" },
+      { "action": "map-eq-list", "reason": "map() is held as a deferred projection until hasIntersection() or size() gives it a scalar meaning, as the inner select of an EXISTS or as a count. Comparing the ORDERED projection itself to a literal list gives it neither, and a correlated subquery cannot be compared to a list value", "message": "Direct comparison of map(...) to a value is not supported" }
+    ]
   },
   "adapterSupportedExpected": {
     "mongoose": [
@@ -553,7 +560,7 @@
         "pgx": "timestamp() over a column requires that column to be mapped with a timestamp value type",
         "spring-data": "timestamp() comparison requires a column mapped to java.time.Instant or java.time.OffsetDateTime, but 'request.resource.attr.createdBy' maps to String. Other temporal representations (LocalDateTime, java.util.Date, String) are ambiguous about the absolute instant they store; remap the column or register an OperatorFunction override for 'lt'.",
         "activerecord": "must map to a datetime column rather than to a column holding a formatted timestamp string",
-        "exposed": "pins an absolute instant"
+        "exposed": "requires a column that stores an absolute instant"
       }
     },
     {
@@ -602,7 +609,7 @@
         "elasticsearch-java": "Unexpected get-field expression in leaf operand",
         "spring-data": "Unexpected get-field() expression in leaf operand of eq",
         "activerecord": "Unsupported operator: index",
-        "exposed": "get-field"
+        "exposed": "Cannot translate get-field()"
       }
     },
     {
@@ -619,7 +626,7 @@
         "elasticsearch-java": "Unexpected int expression in leaf operand",
         "spring-data": "Unexpected int() expression in leaf operand of gt",
         "activerecord": "int() applied to a :string column",
-        "exposed": "int()"
+        "exposed": "Cannot translate int()"
       }
     },
     {
@@ -636,7 +643,7 @@
         "elasticsearch-java": "Unexpected double expression in leaf operand",
         "spring-data": "Unexpected double() expression in leaf operand of gt",
         "activerecord": "double() needs a numeric column",
-        "exposed": "double()"
+        "exposed": "Cannot translate double()"
       }
     },
     {
@@ -653,7 +660,7 @@
         "elasticsearch-java": "Unexpected int expression in leaf operand",
         "spring-data": "Unexpected int() expression in leaf operand of eq",
         "activerecord": "int() applied to a double column is not portable",
-        "exposed": "int()"
+        "exposed": "Cannot translate int()"
       }
     },
     {
@@ -671,7 +678,7 @@
         "elasticsearch-java": "Unexpected lambda expression in leaf operand",
         "spring-data": "filter() returns a list, not a boolean, so it cannot be a condition on its own; only size(filter(...)) has a boolean meaning",
         "activerecord": "a filtered relation cannot be used as a condition",
-        "exposed": "filter() returns a list and cannot be used as a condition"
+        "exposed": "filter() returns a list, not a boolean"
       }
     },
     {
@@ -689,7 +696,7 @@
         "elasticsearch-java": "Unexpected lambda expression in leaf operand",
         "spring-data": "filter() returns a list, not a boolean, so it cannot be a condition on its own; only size(filter(...)) has a boolean meaning",
         "activerecord": "a filtered relation cannot be used as a condition",
-        "exposed": "filter() returns a list and cannot be used as a condition"
+        "exposed": "filter() returns a list, not a boolean"
       }
     },
     {
@@ -707,7 +714,7 @@
         "elasticsearch-java": "Unexpected lambda expression in leaf operand",
         "spring-data": "Unexpected lambda() expression in leaf operand of map",
         "activerecord": "a projected relation cannot be used as a condition",
-        "exposed": "map() returns a list and cannot be used as a condition"
+        "exposed": "map() returns a list, not a boolean"
       }
     }
   ],
