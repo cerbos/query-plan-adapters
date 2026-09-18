@@ -1026,12 +1026,8 @@
       "kind": "KIND_CONDITIONAL",
       "rendered": {
         "sqlite": {
-          "sql": "(1 AND (((CAST(adversarial_resources.a_number AS REAL) = ?) AND 0) OR (NOT (CAST(adversarial_resources.a_number AS REAL) = ?) AND (((CAST(adversarial_resources.a_number AS REAL) > ?) AND 1) OR (NOT (CAST(adversarial_resources.a_number AS REAL) > ?) AND 0) OR NOT ((CAST(adversarial_resources.a_number AS REAL) > ?) OR NOT (CAST(adversarial_resources.a_number AS REAL) > ?)))) OR NOT ((CAST(adversarial_resources.a_number AS REAL) = ?) OR NOT (CAST(adversarial_resources.a_number AS REAL) = ?)))) OR (NOT (1) AND (NULL > ?)) OR NOT (1 OR NOT (1))",
+          "sql": "((CAST(adversarial_resources.a_number AS REAL) = ?) AND 0) OR (NOT (CAST(adversarial_resources.a_number AS REAL) = ?) AND (((CAST(adversarial_resources.a_number AS REAL) > ?) AND 1) OR (NOT (CAST(adversarial_resources.a_number AS REAL) > ?) AND 0) OR NOT ((CAST(adversarial_resources.a_number AS REAL) > ?) OR NOT (CAST(adversarial_resources.a_number AS REAL) > ?)))) OR NOT ((CAST(adversarial_resources.a_number AS REAL) = ?) OR NOT (CAST(adversarial_resources.a_number AS REAL) = ?))",
           "params": [
-            {
-              "type": "DoubleColumnType",
-              "value": 0.0
-            },
             {
               "type": "DoubleColumnType",
               "value": 0.0
@@ -1067,12 +1063,8 @@
           ]
         },
         "h2": {
-          "sql": "(TRUE AND (((CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) = ?) AND FALSE) OR (NOT (CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) = ?) AND (((CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) > ?) AND TRUE) OR (NOT (CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) > ?) AND FALSE) OR NOT ((CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) > ?) OR NOT (CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) > ?)))) OR NOT ((CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) = ?) OR NOT (CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) = ?)))) OR (NOT (TRUE) AND (NULL > ?)) OR NOT (TRUE OR NOT (TRUE))",
+          "sql": "((CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) = ?) AND FALSE) OR (NOT (CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) = ?) AND (((CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) > ?) AND TRUE) OR (NOT (CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) > ?) AND FALSE) OR NOT ((CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) > ?) OR NOT (CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) > ?)))) OR NOT ((CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) = ?) OR NOT (CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) = ?))",
           "params": [
-            {
-              "type": "DoubleColumnType",
-              "value": 0.0
-            },
             {
               "type": "DoubleColumnType",
               "value": 0.0
@@ -1108,12 +1100,8 @@
           ]
         },
         "postgresql": {
-          "sql": "(TRUE AND (((CAST(adversarial_resources.a_number AS DOUBLE PRECISION) = ?) AND FALSE) OR (NOT (CAST(adversarial_resources.a_number AS DOUBLE PRECISION) = ?) AND (((CAST(adversarial_resources.a_number AS DOUBLE PRECISION) > ?) AND TRUE) OR (NOT (CAST(adversarial_resources.a_number AS DOUBLE PRECISION) > ?) AND FALSE) OR NOT ((CAST(adversarial_resources.a_number AS DOUBLE PRECISION) > ?) OR NOT (CAST(adversarial_resources.a_number AS DOUBLE PRECISION) > ?)))) OR NOT ((CAST(adversarial_resources.a_number AS DOUBLE PRECISION) = ?) OR NOT (CAST(adversarial_resources.a_number AS DOUBLE PRECISION) = ?)))) OR (NOT (TRUE) AND (NULL > ?)) OR NOT (TRUE OR NOT (TRUE))",
+          "sql": "((CAST(adversarial_resources.a_number AS DOUBLE PRECISION) = ?) AND FALSE) OR (NOT (CAST(adversarial_resources.a_number AS DOUBLE PRECISION) = ?) AND (((CAST(adversarial_resources.a_number AS DOUBLE PRECISION) > ?) AND TRUE) OR (NOT (CAST(adversarial_resources.a_number AS DOUBLE PRECISION) > ?) AND FALSE) OR NOT ((CAST(adversarial_resources.a_number AS DOUBLE PRECISION) > ?) OR NOT (CAST(adversarial_resources.a_number AS DOUBLE PRECISION) > ?)))) OR NOT ((CAST(adversarial_resources.a_number AS DOUBLE PRECISION) = ?) OR NOT (CAST(adversarial_resources.a_number AS DOUBLE PRECISION) = ?))",
           "params": [
-            {
-              "type": "DoubleColumnType",
-              "value": 0.0
-            },
             {
               "type": "DoubleColumnType",
               "value": 0.0
@@ -1149,12 +1137,8 @@
           ]
         },
         "mysql": {
-          "sql": "(TRUE AND (((CAST(adversarial_resources.a_number AS DOUBLE) = ?) AND FALSE) OR (NOT (CAST(adversarial_resources.a_number AS DOUBLE) = ?) AND (((CAST(adversarial_resources.a_number AS DOUBLE) > ?) AND TRUE) OR (NOT (CAST(adversarial_resources.a_number AS DOUBLE) > ?) AND FALSE) OR NOT ((CAST(adversarial_resources.a_number AS DOUBLE) > ?) OR NOT (CAST(adversarial_resources.a_number AS DOUBLE) > ?)))) OR NOT ((CAST(adversarial_resources.a_number AS DOUBLE) = ?) OR NOT (CAST(adversarial_resources.a_number AS DOUBLE) = ?)))) OR (NOT (TRUE) AND (NULL > ?)) OR NOT (TRUE OR NOT (TRUE))",
+          "sql": "((CAST(adversarial_resources.a_number AS DOUBLE) = ?) AND FALSE) OR (NOT (CAST(adversarial_resources.a_number AS DOUBLE) = ?) AND (((CAST(adversarial_resources.a_number AS DOUBLE) > ?) AND TRUE) OR (NOT (CAST(adversarial_resources.a_number AS DOUBLE) > ?) AND FALSE) OR NOT ((CAST(adversarial_resources.a_number AS DOUBLE) > ?) OR NOT (CAST(adversarial_resources.a_number AS DOUBLE) > ?)))) OR NOT ((CAST(adversarial_resources.a_number AS DOUBLE) = ?) OR NOT (CAST(adversarial_resources.a_number AS DOUBLE) = ?))",
           "params": [
-            {
-              "type": "DoubleColumnType",
-              "value": 0.0
-            },
             {
               "type": "DoubleColumnType",
               "value": 0.0
@@ -1427,6 +1411,536 @@
             {
               "type": "DoubleColumnType",
               "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            }
+          ]
+        }
+      }
+    },
+    "cr-div-then-add": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "((CAST(adversarial_resources.a_number AS REAL) = ?) AND (((CAST(adversarial_resources.a_number AS REAL) = ?) AND 0) OR (NOT (CAST(adversarial_resources.a_number AS REAL) = ?) AND (((CAST(adversarial_resources.a_number AS REAL) > ?) AND 1) OR (NOT (CAST(adversarial_resources.a_number AS REAL) > ?) AND 0) OR NOT ((CAST(adversarial_resources.a_number AS REAL) > ?) OR NOT (CAST(adversarial_resources.a_number AS REAL) > ?)))) OR NOT ((CAST(adversarial_resources.a_number AS REAL) = ?) OR NOT (CAST(adversarial_resources.a_number AS REAL) = ?)))) OR (NOT (CAST(adversarial_resources.a_number AS REAL) = ?) AND (((CAST(adversarial_resources.a_number AS REAL) / NULLIF(CAST(adversarial_resources.a_number AS REAL), ?)) + ?) > ?)) OR NOT ((CAST(adversarial_resources.a_number AS REAL) = ?) OR NOT (CAST(adversarial_resources.a_number AS REAL) = ?))",
+          "params": [
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 1.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 1.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            }
+          ]
+        },
+        "h2": {
+          "sql": "((CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) = ?) AND (((CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) = ?) AND FALSE) OR (NOT (CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) = ?) AND (((CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) > ?) AND TRUE) OR (NOT (CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) > ?) AND FALSE) OR NOT ((CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) > ?) OR NOT (CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) > ?)))) OR NOT ((CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) = ?) OR NOT (CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) = ?)))) OR (NOT (CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) = ?) AND (((CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) / NULLIF(CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION), ?)) + ?) > ?)) OR NOT ((CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) = ?) OR NOT (CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) = ?))",
+          "params": [
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 1.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 1.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            }
+          ]
+        },
+        "postgresql": {
+          "sql": "((CAST(adversarial_resources.a_number AS DOUBLE PRECISION) = ?) AND (((CAST(adversarial_resources.a_number AS DOUBLE PRECISION) = ?) AND FALSE) OR (NOT (CAST(adversarial_resources.a_number AS DOUBLE PRECISION) = ?) AND (((CAST(adversarial_resources.a_number AS DOUBLE PRECISION) > ?) AND TRUE) OR (NOT (CAST(adversarial_resources.a_number AS DOUBLE PRECISION) > ?) AND FALSE) OR NOT ((CAST(adversarial_resources.a_number AS DOUBLE PRECISION) > ?) OR NOT (CAST(adversarial_resources.a_number AS DOUBLE PRECISION) > ?)))) OR NOT ((CAST(adversarial_resources.a_number AS DOUBLE PRECISION) = ?) OR NOT (CAST(adversarial_resources.a_number AS DOUBLE PRECISION) = ?)))) OR (NOT (CAST(adversarial_resources.a_number AS DOUBLE PRECISION) = ?) AND (((CAST(adversarial_resources.a_number AS DOUBLE PRECISION) / NULLIF(CAST(adversarial_resources.a_number AS DOUBLE PRECISION), ?)) + ?) > ?)) OR NOT ((CAST(adversarial_resources.a_number AS DOUBLE PRECISION) = ?) OR NOT (CAST(adversarial_resources.a_number AS DOUBLE PRECISION) = ?))",
+          "params": [
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 1.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 1.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            }
+          ]
+        },
+        "mysql": {
+          "sql": "((CAST(adversarial_resources.a_number AS DOUBLE) = ?) AND (((CAST(adversarial_resources.a_number AS DOUBLE) = ?) AND FALSE) OR (NOT (CAST(adversarial_resources.a_number AS DOUBLE) = ?) AND (((CAST(adversarial_resources.a_number AS DOUBLE) > ?) AND TRUE) OR (NOT (CAST(adversarial_resources.a_number AS DOUBLE) > ?) AND FALSE) OR NOT ((CAST(adversarial_resources.a_number AS DOUBLE) > ?) OR NOT (CAST(adversarial_resources.a_number AS DOUBLE) > ?)))) OR NOT ((CAST(adversarial_resources.a_number AS DOUBLE) = ?) OR NOT (CAST(adversarial_resources.a_number AS DOUBLE) = ?)))) OR (NOT (CAST(adversarial_resources.a_number AS DOUBLE) = ?) AND (((CAST(adversarial_resources.a_number AS DOUBLE) / NULLIF(CAST(adversarial_resources.a_number AS DOUBLE), ?)) + ?) > ?)) OR NOT ((CAST(adversarial_resources.a_number AS DOUBLE) = ?) OR NOT (CAST(adversarial_resources.a_number AS DOUBLE) = ?))",
+          "params": [
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 1.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 1.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            }
+          ]
+        }
+      }
+    },
+    "cr-div-then-add-ne": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "((CAST(adversarial_resources.a_number AS REAL) = ?) AND (((CAST(adversarial_resources.a_number AS REAL) = ?) AND 1) OR (NOT (CAST(adversarial_resources.a_number AS REAL) = ?) AND (((CAST(adversarial_resources.a_number AS REAL) > ?) AND 1) OR (NOT (CAST(adversarial_resources.a_number AS REAL) > ?) AND 1) OR NOT ((CAST(adversarial_resources.a_number AS REAL) > ?) OR NOT (CAST(adversarial_resources.a_number AS REAL) > ?)))) OR NOT ((CAST(adversarial_resources.a_number AS REAL) = ?) OR NOT (CAST(adversarial_resources.a_number AS REAL) = ?)))) OR (NOT (CAST(adversarial_resources.a_number AS REAL) = ?) AND (((CAST(adversarial_resources.a_number AS REAL) / NULLIF(CAST(adversarial_resources.a_number AS REAL), ?)) + ?) <> ?)) OR NOT ((CAST(adversarial_resources.a_number AS REAL) = ?) OR NOT (CAST(adversarial_resources.a_number AS REAL) = ?))",
+          "params": [
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 1.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 2.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            }
+          ]
+        },
+        "h2": {
+          "sql": "((CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) = ?) AND (((CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) = ?) AND TRUE) OR (NOT (CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) = ?) AND (((CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) > ?) AND TRUE) OR (NOT (CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) > ?) AND TRUE) OR NOT ((CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) > ?) OR NOT (CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) > ?)))) OR NOT ((CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) = ?) OR NOT (CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) = ?)))) OR (NOT (CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) = ?) AND (((CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) / NULLIF(CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION), ?)) + ?) <> ?)) OR NOT ((CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) = ?) OR NOT (CAST(ADVERSARIAL_RESOURCES.A_NUMBER AS DOUBLE PRECISION) = ?))",
+          "params": [
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 1.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 2.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            }
+          ]
+        },
+        "postgresql": {
+          "sql": "((CAST(adversarial_resources.a_number AS DOUBLE PRECISION) = ?) AND (((CAST(adversarial_resources.a_number AS DOUBLE PRECISION) = ?) AND TRUE) OR (NOT (CAST(adversarial_resources.a_number AS DOUBLE PRECISION) = ?) AND (((CAST(adversarial_resources.a_number AS DOUBLE PRECISION) > ?) AND TRUE) OR (NOT (CAST(adversarial_resources.a_number AS DOUBLE PRECISION) > ?) AND TRUE) OR NOT ((CAST(adversarial_resources.a_number AS DOUBLE PRECISION) > ?) OR NOT (CAST(adversarial_resources.a_number AS DOUBLE PRECISION) > ?)))) OR NOT ((CAST(adversarial_resources.a_number AS DOUBLE PRECISION) = ?) OR NOT (CAST(adversarial_resources.a_number AS DOUBLE PRECISION) = ?)))) OR (NOT (CAST(adversarial_resources.a_number AS DOUBLE PRECISION) = ?) AND (((CAST(adversarial_resources.a_number AS DOUBLE PRECISION) / NULLIF(CAST(adversarial_resources.a_number AS DOUBLE PRECISION), ?)) + ?) <> ?)) OR NOT ((CAST(adversarial_resources.a_number AS DOUBLE PRECISION) = ?) OR NOT (CAST(adversarial_resources.a_number AS DOUBLE PRECISION) = ?))",
+          "params": [
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 1.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 2.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            }
+          ]
+        },
+        "mysql": {
+          "sql": "((CAST(adversarial_resources.a_number AS DOUBLE) = ?) AND (((CAST(adversarial_resources.a_number AS DOUBLE) = ?) AND TRUE) OR (NOT (CAST(adversarial_resources.a_number AS DOUBLE) = ?) AND (((CAST(adversarial_resources.a_number AS DOUBLE) > ?) AND TRUE) OR (NOT (CAST(adversarial_resources.a_number AS DOUBLE) > ?) AND TRUE) OR NOT ((CAST(adversarial_resources.a_number AS DOUBLE) > ?) OR NOT (CAST(adversarial_resources.a_number AS DOUBLE) > ?)))) OR NOT ((CAST(adversarial_resources.a_number AS DOUBLE) = ?) OR NOT (CAST(adversarial_resources.a_number AS DOUBLE) = ?)))) OR (NOT (CAST(adversarial_resources.a_number AS DOUBLE) = ?) AND (((CAST(adversarial_resources.a_number AS DOUBLE) / NULLIF(CAST(adversarial_resources.a_number AS DOUBLE), ?)) + ?) <> ?)) OR NOT ((CAST(adversarial_resources.a_number AS DOUBLE) = ?) OR NOT (CAST(adversarial_resources.a_number AS DOUBLE) = ?))",
+          "params": [
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 0.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 1.0
+            },
+            {
+              "type": "DoubleColumnType",
+              "value": 2.0
             },
             {
               "type": "DoubleColumnType",

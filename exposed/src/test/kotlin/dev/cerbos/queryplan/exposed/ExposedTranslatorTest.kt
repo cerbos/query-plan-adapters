@@ -80,14 +80,14 @@ class ExposedTranslatorTest {
          * A count that moves without anyone noticing is how a shape gets dropped from an asset
          * nobody reads end to end.
          */
-        private const val CONDITIONAL_ACTIONS = 186
+        private const val CONDITIONAL_ACTIONS = 188
         private const val UNCONDITIONAL_ACTIONS = 2
 
         /**
          * How many corpus actions this adapter must refuse, from `actions.json`: the 6
          * `adapterUnsupported.exposed` entries plus the 11 `expectedUnsupported` shapes.
          */
-        private const val THROWING_ACTIONS = 17
+        private const val THROWING_ACTIONS = 15
 
         /**
          * Where in the walk each rejection happens, and how many corpus shapes reach each site.
@@ -98,7 +98,6 @@ class ExposedTranslatorTest {
         private val REFUSAL_SITE_COUNTS: Map<String, Int> = sortedMapOf(
             "ambiguous temporal column" to 1,
             "CEL numeric cast" to 3,
-            "division inside further arithmetic" to 2,
             "empty hierarchy delimiter" to 1,
             "list-valued macro in boolean position" to 3,
             "map projection compared directly" to 1,
@@ -567,14 +566,6 @@ class ExposedTranslatorTest {
             RefusalSite(
                 "CEL numeric cast",
                 "SQL CAST reads the numeric prefix of a string where CEL requires the whole string",
-                UnsupportedPlanShapeException::class,
-            ),
-            // ArithmeticTranslator: a division whose denominator may be zero, with further
-            // arithmetic composed ON it. CEL carries the NaN or infinity outward; the NULLIF guard
-            // turns the whole sum into NULL, which UNDER-grants (#312).
-            RefusalSite(
-                "division inside further arithmetic",
-                "arithmetic composed on a division whose denominator may be zero",
                 UnsupportedPlanShapeException::class,
             ),
             // HierarchyTranslator: an empty delimiter splits the path per character, and the prefix
