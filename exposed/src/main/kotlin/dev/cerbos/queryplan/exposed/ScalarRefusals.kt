@@ -176,16 +176,13 @@ internal object ScalarRefusals {
     )
 
     /**
-     * Cerbos `except()` is a two-list function whose list-difference result has no SQL shape. The
-     * PDP-verified arrival shapes are inside `size()` and as a comparison operand; no lambda form
-     * appears on the wire.
+     * Cerbos `except()`, wherever the scalar side meets it: in condition position, and as a
+     * comparison operand. Delegates, because [RelationRefusals.exceptUnsupported] raises it for
+     * `size(x.except(y))` and one shape must not have three spellings — the message is what a
+     * caller matches on, and a reader comparing two of them would conclude the adapter distinguishes
+     * cases it does not.
      */
-    fun exceptUnsupported(): UnsupportedPlanShapeException = Refusals.unsupported(
-        "except is not supported: Cerbos except(list, list) computes a list difference, which has " +
-            "no SQL translation. Rewrite the policy with a collection macro instead — e.g. " +
-            "size(R.attr.tags.except([\"x\"])) > 0 is equivalent to " +
-            "R.attr.tags.exists(t, !(t in [\"x\"])).",
-    )
+    fun exceptUnsupported(): UnsupportedPlanShapeException = RelationRefusals.exceptUnsupported()
 
     /** A cast, a `size()` or a macro inside an arithmetic operand: legal CEL, no double-space form. */
     fun unexpectedInsideArithmetic(operator: String): UnsupportedPlanShapeException =
