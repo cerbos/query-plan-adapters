@@ -235,15 +235,19 @@ proves shape, not semantics, and goes when those expressions become corpus actio
 operand-type rule on a real server. `OfflineRendererTest`'s two `server-cross-check` cases start the
 pinned PostgreSQL and MySQL images and assert that the offline renderer's stub connections render
 byte-identically to the real drivers, which is what keeps the golden asset's `postgresql` and `mysql`
-entries honest. `build.gradle.kts` excludes both tags on the store legs (any `ADAPTER_TEST_DB` other
-than `h2`), because each question is a property of the Exposed release, the PDP build or a server
-image rather than of the store the harness runs on.
+entries honest. `build.gradle.kts` excludes both tags wherever they would only re-ask a question
+another leg has answered — on the store legs (any `ADAPTER_TEST_DB` other than `h2`) and wherever
+`ADAPTER_TEST_CONTAINER_SUITES=skip`, which the workflow sets on the second JDK leg — because each
+question is a property of the Exposed release, the PDP build or a server image rather than of the
+store the harness runs on or of the JDK. `AdversarialConformanceTest` carries neither tag and runs
+on every leg.
 
-Two environment variables select what the build runs against, both declared once in
-`exposed/build.gradle.kts`, both failing on an unknown value rather than falling back:
+Three environment variables select what the build runs against, each declared once in
+`exposed/build.gradle.kts`, each failing on an unknown value rather than falling back:
 `ADAPTER_TEST_DB` is `h2` (default, in process), `sqlite` (in process), `postgres` or `mysql`
-(containers), and `ADAPTER_TEST_ORM` is `baseline` (the latest Exposed release) or `floor` (the
-release the published jar is compiled against). The floor leg runs the H2 conformance harness too,
+(containers); `ADAPTER_TEST_ORM` is `baseline` (the latest Exposed release) or `floor` (the
+release the published jar is compiled against); and `ADAPTER_TEST_CONTAINER_SUITES` is `run`
+(default) or `skip`. The floor leg runs the H2 conformance harness too,
 so the version the README claims is proved against the oracle rather than against compilation
 ([ADR 0009](docs/adr/0009-the-exposed-adapter-is-jdbc-first-and-returns-a-sealed-result.md)).
 

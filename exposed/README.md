@@ -715,7 +715,7 @@ gradle build --no-daemon
 gradle goldenUpdate   # rewrite golden/expectations.json from what the translator emits today
 ```
 
-Two environment variables select what the build runs against, both declared once in
+Three environment variables select what the build runs against, each declared once in
 [`build.gradle.kts`](build.gradle.kts), and an unknown value fails rather than falling back to the
 default:
 
@@ -725,6 +725,8 @@ default:
   latest release, the one the golden asset was rendered under and the one `example/` pins; `floor`
   is the release the published jar is compiled against. See
   [The golden expectations](#the-golden-expectations).
+- `ADAPTER_TEST_CONTAINER_SUITES` — `run` (default) or `skip`: whether the suites that start
+  containers of their OWN run on this leg. See below.
 
 `ExposedTranslatorTest` reads its plans from the shared corpus's wire fixtures and needs no PDP and
 no database server at all; so do the surface, mapping, seam and review suites, which run on
@@ -746,10 +748,20 @@ first REQUIRES it:
   images and assert the SQL the offline renderer's stub connections produce is byte-identical to
   the real drivers' — the one check that keeps "offline" honest.
 
-The last three use Docker when it is there and **skip when it is not**. The build also **excludes
-both tags on the store legs** (any `ADAPTER_TEST_DB` other than `h2`): each asks a question about
-the Exposed release, the PDP build or a server image, not about the store the harness runs on, so
-it is answered once per Exposed leg and the store legs do not start more containers to re-ask it.
+The last three use Docker when it is there and **skip when it is not**. Each asks a question about
+the Exposed release, the PDP build or a server image — never about the store the harness runs on,
+and never about the JDK — so the build excludes both tags wherever they would start more containers
+to re-ask a question another leg has already answered:
+
+- on the **store legs**, any `ADAPTER_TEST_DB` other than `h2`, keyed off the store the harness
+  resolves to rather than off the variable being set, so `ADAPTER_TEST_DB=h2` is the default leg
+  spelled out and loses nothing a bare `gradle test` has;
+- wherever the caller says so with **`ADAPTER_TEST_CONTAINER_SUITES=skip`**, which the workflow's
+  `test` job sets on its second JDK leg — that matrix crosses the JDK with the Exposed release, and
+  a JDK decides none of these three questions.
+
+`AdversarialConformanceTest` carries neither tag and runs on **every** leg: it is the differential,
+and one that silently did not run reads as a pass.
 
 ## The golden expectations
 

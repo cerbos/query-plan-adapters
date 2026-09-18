@@ -49,6 +49,10 @@ val ormVersionSets = mapOf(
 // of the floor would raise what the published jar compiles against, make the README's support claim
 // false, and collapse the `floor` leg into a second `baseline` leg, all while staying green.
 // Moving the floor is a deliberate, reviewed edit of the map above.
+// Whether the suites that start containers of their OWN — the two tags `tasks.test` excludes — run
+// on this leg. Declared beside the version sets so every value a leg is selected by is in one place.
+val CONTAINER_SUITE_MODES = setOf("run", "skip")
+
 val exposedFloor = ormVersionSets.getValue("floor").getValue("exposed")
 val adapterTestOrm = System.getProperty("adapter.test.orm")
     ?: System.getenv("ADAPTER_TEST_ORM")
@@ -170,15 +174,34 @@ tasks.test {
     // JDBC metadata against real PostgreSQL and MySQL servers) and `docker` (ReviewPlannerShapeTest
     // asking the pinned PDP what wire shape it ships, ReviewOperandTypeTest showing a coercion on a
     // real MySQL). Each is a property of the Exposed release, the PDP build or the server image, so
-    // it is answered once per Exposed leg and excluded on the store legs, where it would start more
-    // containers to re-ask it. Both kinds skip themselves where there is no Docker at all.
+    // it is answered once and excluded everywhere it would only start more containers to re-ask it.
+    // Both kinds skip themselves where there is no Docker at all.
     //
-    // Keyed off the store the harness RESOLVES to, not off the variable being set: `ADAPTER_TEST_DB=h2`
-    // is the default leg spelled out, and must not quietly lose coverage a bare `gradle test` has.
-    // The conformance harness itself carries neither tag and never skips: a differential that
-    // silently did not run would read as a pass.
+    // Two things exclude them, because the matrix has two dimensions that do not discriminate any of
+    // those questions. The STORE, keyed off what the harness RESOLVES to rather than off the
+    // variable being set: `ADAPTER_TEST_DB=h2` is the default leg spelled out, and must not quietly
+    // lose coverage a bare `gradle test` has. And ADAPTER_TEST_CONTAINER_SUITES, which the caller
+    // sets directly — the workflow's `test` job crosses the JDK with the Exposed release, and a JDK
+    // decides none of these either, so the second JDK leg says `skip`.
+    //
+    // The conformance harness itself carries neither tag and never skips, on any leg: a differential
+    // that silently did not run would read as a pass.
     val selectedStore = System.getProperty("adapter.test.db") ?: System.getenv("ADAPTER_TEST_DB")
-    if (selectedStore != null && selectedStore != "h2") {
+    val containerSuites = System.getProperty("adapter.test.containerSuites")
+        ?: System.getenv("ADAPTER_TEST_CONTAINER_SUITES")
+        ?: "run"
+    if (containerSuites !in CONTAINER_SUITE_MODES) {
+        // An unknown value fails rather than falling back, for the reason ADAPTER_TEST_ORM does: a
+        // typo that quietly ran them would report a leg green having answered a question twice, and
+        // a typo that quietly skipped them would report one green having answered it never.
+        throw GradleException(
+            "ADAPTER_TEST_CONTAINER_SUITES / -Dadapter.test.containerSuites must be one of " +
+                "$CONTAINER_SUITE_MODES, got '$containerSuites'",
+        )
+    }
+    // An input, so switching modes re-runs the task rather than replaying the other mode's pass.
+    inputs.property("adapterTestContainerSuites", containerSuites)
+    if (containerSuites == "skip" || (selectedStore != null && selectedStore != "h2")) {
         useJUnitPlatform { excludeTags("server-cross-check", "docker") }
     }
     testLogging {

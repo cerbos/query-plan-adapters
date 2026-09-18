@@ -80,10 +80,21 @@ jobs:
       # the `adapter.test.orm` system property and declares it as a task input — so the two legs run
       # the same build against different renderers, and neither can be reported UP-TO-DATE on the
       # other's result.
-      - name: Build and test (${{ matrix.orm }})
+      #
+      # ADAPTER_TEST_CONTAINER_SUITES turns off the suites that start containers of their OWN — the
+      # pinned PDP that `ReviewPlannerShapeTest` asks for wire shapes, the MySQL that
+      # `ReviewOperandTypeTest` shows a coercion on, and the PostgreSQL and MySQL that
+      # `OfflineRendererTest` cross-checks its stub metadata against. Each of those is a property of
+      # the Exposed release, the PDP build or the server image, and the JDK decides none of them, so
+      # on the second JDK leg they would start three more containers to re-ask a question the
+      # baseline leg has already answered. The conformance harness carries neither tag and still runs
+      # on every leg: it is the differential, and a differential that silently did not run reads as a
+      # pass.
+      - name: Build and test (${{ matrix.orm }}, JDK ${{ matrix.java-version }})
         run: gradle build --no-daemon
         env:
           ADAPTER_TEST_ORM: ${{ matrix.orm }}
+          ADAPTER_TEST_CONTAINER_SUITES: ${{ matrix.java-version == '21' && 'skip' || 'run' }}
 
   # Runs the full suite with AdversarialConformanceTest (the differential check()-oracle) backed by
   # a real database instead of in-memory H2 — SQLite in process, PostgreSQL and MySQL through
