@@ -1,0 +1,208 @@
+name: Exposed Test
+
+on:
+  pull_request:
+    paths:
+      - "exposed/**"
+      - "conformance/**"
+      - "demo/**"
+      - ".github/workflows/exposed.yaml"
+  push:
+    tags:
+      - exposed/v*
+
+defaults:
+  run:
+    working-directory: exposed
+
+jobs:
+  # Every suite runs in this one job — the translator unit test, which needs nothing, the
+  # H2-backed surface and contract suites, and the adversarial suite on H2, which starts a pinned
+  # PDP through Testcontainers. There is no separate adversarial job (CLAUDE.md, "CI"): the corpus
+  # discriminates the translator and the datastore, so a job of its own would cost runner minutes
+  # for no extra coverage — and running it here is what proves the FLOOR against the oracle rather
+  # than only against the offline suites.
+  test:
+    strategy:
+      # The ORM dimension only discriminates the renderer, and a failed floor leg is a finding of
+      # its own; the default fail-fast would cancel the baseline leg mid-corpus and report it as
+      # neither a pass nor a failure.
+      fail-fast: false
+      matrix:
+        java-version: ["17", "21"]
+        # The ORM version set build.gradle.kts resolves — both sets are declared there, once, and
+        # this dimension is a list of NAMES, so no version is restated here.
+        #
+        # `baseline` is the latest Exposed release: the one the golden asset was rendered under,
+        # the one every store leg executes on, and the one example/ pins. `floor` is the release
+        # the PUBLISHED JAR is compiled against, and therefore the version the README claims
+        # support from. It exists because `exposed-core` is `compileOnly`: a consumer brings their
+        # own ORM, and JetBrains' 1.x promise only runs forwards — a jar built against the floor is
+        # covered on every later release, and nothing covers the reverse. Without this leg the
+        # floor would be a claim nothing executes. On it the translator suite asserts a pinned
+        # divergence list rather than the asset's bytes, and `goldenUpdate` refuses to run
+        # (conformance/README.md, "When the generator is an input").
+        orm: [baseline, floor]
+        # The ORM dimension discriminates the renderer, not the JDK: off the baseline JDK the
+        # second ORM leg would replay byte-identical translator work against a renderer the
+        # baseline JDK leg already covers. Excluding it keeps the coverage and drops a runner.
+        exclude:
+          - orm: floor
+            java-version: "21"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate conformance corpus
+        run: ../conformance/scripts/validate-corpus.sh
+
+      - name: Setup JDK
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java-version }}
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+        with:
+          # Pinned rather than taking the runner's floating preinstall, and to the same version
+          # the `example` job below pins and the adapter's README documents building with — so a
+          # Gradle major landing on the runner image cannot turn this job red for a reason that is
+          # not the change under review, and a failure here reproduces locally on that version.
+          gradle-version: "8.12"
+
+      # ADAPTER_TEST_ORM names a version set in build.gradle.kts, which forwards it to the suites as
+      # the `adapter.test.orm` system property and declares it as a task input — so the two legs run
+      # the same build against different renderers, and neither can be reported UP-TO-DATE on the
+      # other's result.
+      - name: Build and test (${{ matrix.orm }})
+        run: gradle build --no-daemon
+        env:
+          ADAPTER_TEST_ORM: ${{ matrix.orm }}
+
+  # Runs the full suite with AdversarialConformanceTest (the differential check()-oracle) backed by
+  # a real database instead of in-memory H2 — SQLite in process, PostgreSQL and MySQL through
+  # Testcontainers. A dialect the harness does not execute is a dialect the adapter does not cover:
+  # collation, LIKE escaping, cast targets and parameter typing are all translator behaviour, and
+  # each of them differs here. The MySQL leg creates its schema with a case- and accent-sensitive
+  # collation, because MySQL's default makes `=` itself case-insensitive while CEL's is byte-exact —
+  # a store misconfiguration, not an adapter limitation, and the mixed-case seeds fail the oracle
+  # comparison under the default.
+  #
+  # Baseline ORM only, on one JDK: the store dimension discriminates the database, not the renderer
+  # or the runtime. The floor is proved against the oracle on H2 in the job above.
+  #
+  # TODO: add a second MySQL leg with ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS: "true" if the leg below
+  # shows Connector/J's default CLIENT-side prepared statements turning the adapter's double binds
+  # into exact DECIMAL literals. Decimal arithmetic is not IEEE double arithmetic — `3 * 0.1 == 0.3`
+  # is true in decimal and false in CEL — so that would be a silent over-grant, and it is what
+  # spring-data found on the same store, which is why it runs its MySQL leg twice.
+  test-database:
+    strategy:
+      # Each store leg is a finding of its own — a MySQL collation over-grant says nothing about
+      # PostgreSQL — and the default fail-fast would cancel the other legs mid-corpus and report
+      # them as neither a pass nor a failure.
+      fail-fast: false
+      matrix:
+        database: [sqlite, postgres, mysql]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # This job runs AdversarialConformanceTest against a real database, so it consumes the
+      # shared corpus exactly as the `test` job does — a corrupt corpus must fail here as a
+      # corpus error, not as an unexplained oracle mismatch on SQLite, Postgres or MySQL.
+      - name: Validate conformance corpus
+        run: ../conformance/scripts/validate-corpus.sh
+
+      - name: Setup JDK
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+        with:
+          # Pinned for the same reason as in `test`: the runner's preinstall floats, and a Gradle
+          # major landing there must not turn a store leg red for a reason that is not the change
+          # under review. Same version the README documents building with.
+          gradle-version: "8.12"
+
+      - name: Build and test (${{ matrix.database }})
+        run: gradle build --no-daemon
+        env:
+          ADAPTER_TEST_DB: ${{ matrix.database }}
+
+  # The example application, against the shared demo domain in demo/. It proves what the jobs above
+  # structurally cannot, and that is exactly two things:
+  #
+  #   1. The PUBLISHED package surface. Every suite in `test` and `test-database` compiles against
+  #      the adapter's own source set, so its POM and Gradle module metadata — dependency scopes
+  #      included — are executed nowhere. This adapter's scopes are load-bearing: Exposed is
+  #      `compileOnly` so installing the adapter cannot move a consumer's ORM version, and
+  #      cerbos-sdk-java and protobuf-java are `implementation` so they do reach a consumer. The
+  #      example resolves `dev.cerbos:cerbos-exposed` from mavenLocal as a real Maven coordinate
+  #      instead, which is why the step below publishes it first. NOT a Gradle composite build:
+  #      that substitutes the local source tree for the coordinate and resolves neither file. See
+  #      docs/adr/0002-examples-install-the-packed-artifact.md; cerbos-sdk-java declaring protobuf
+  #      at runtime-only scope is the shape of bug this exists for.
+  #   2. ORM usage shapes past a single flat filtered query — a DAO `find`, pagination, and the
+  #      adapter's `Op` composed with a predicate the application owns.
+  #
+  # THIS JOB MUST STAY IN THIS WORKFLOW. `renovate.json` sets `automerge: true` for every non-major
+  # bump, and that is the path an Exposed or Cerbos-SDK regression takes into `main` today: the bump
+  # arrives as one PR touching this adapter's manifest and the example's, and this job, being a
+  # check on that PR, is what blocks the automerge when the new version breaks real usage. Moved to
+  # a nightly run or a workflow of its own it would still pass or fail eventually, but not before
+  # the merge, which silently restores the gap it exists to close.
+  #
+  # One language-version leg on purpose: the demo domain discriminates the adapter's packaging and
+  # usage shapes, not the JDK. It runs on 17, the floor the adapter declares, which is the leg where
+  # a post-17 API reference in either the adapter or the example would surface.
+  example:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The example reaches a pinned PDP through demo/docker-compose.yml, and these two scripts are
+      # what assert that pin still equals conformance/CERBOS_VERSION and
+      # conformance/CERBOS_IMAGE_DIGEST. Without them the run below would happily execute the whole
+      # end-to-end flow against a drifted PDP.
+      - name: Validate conformance corpus
+        run: ../conformance/scripts/validate-corpus.sh
+
+      - name: Validate demo domain
+        run: ../demo/scripts/validate-demo.sh
+
+      - name: Setup JDK
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+        with:
+          # Pinned rather than taking the runner's floating preinstall, and to the same version the
+          # `test` job pins: this job's assertions are about resolution and publication, the two
+          # things a Gradle major is most likely to change the behaviour of. The version matches the
+          # Gradle container image the adapter's README documents building in.
+          gradle-version: "8.12"
+
+      # The example resolves the adapter as a coordinate, so it has to exist in mavenLocal before
+      # anything under example/ compiles. run.sh publishes it for itself — it has to, to be one
+      # command on a laptop — and this is the other half of that prerequisite for the bare `gradle`
+      # invocation below.
+      - name: Publish the adapter to mavenLocal
+        run: gradle publishToMavenLocal --no-daemon
+
+      - name: Build example
+        run: gradle -p example build --no-daemon
+
+      # The PDP here is a container the runner starts from demo/docker-compose.yml, pinned to
+      # conformance/CERBOS_VERSION and conformance/CERBOS_IMAGE_DIGEST — an example must reach the
+      # PDP the way a deployed application does.
+      - name: Run the example against the demo domain
+        run: ../demo/scripts/run-example.sh exposed
