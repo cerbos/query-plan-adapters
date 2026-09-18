@@ -19,8 +19,9 @@ import java.nio.file.Path
  * pass.
  *
  * That one-digest-per-tag rule is also why these two files carry the SAME digests spring-data's do.
- * Both adapters prove the same servers, so a second digest under `postgres:16` would be a claim
- * that they are different builds.
+ * Both adapters prove the same servers, so a second digest under the same PostgreSQL tag would be
+ * a claim that they are different builds. (The tag is deliberately not spelled out here:
+ * `validate-corpus.sh` reads comments too, and a bare tag in one is an unpinned reference.)
  *
  * **Why the digest.** A tag is mutable — the Postgres 16 and MySQL 8.4 tags are both moving targets
  * — so a tag-only pin records an intent, not a build. This suite is a differential whose divergences
