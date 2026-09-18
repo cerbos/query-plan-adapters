@@ -157,6 +157,19 @@ internal class Golden(
                 check(param.path(PARAM_TYPE_KEY).isTextual && param.has(PARAM_VALUE_KEY)) {
                     "$file: '$action'.$dialect param $index needs '$PARAM_TYPE_KEY' and '$PARAM_VALUE_KEY'"
                 }
+                val type = param.path(PARAM_TYPE_KEY).asText()
+                check(type in BIND_TYPES) {
+                    "$file: '$action'.$dialect param $index is bound through $type, which is not one" +
+                        " of $BIND_TYPES. A new bind type is a new way a constant reaches the" +
+                        " database, so it is a decision to review rather than to absorb: add it to" +
+                        " BIND_TYPES once someone has read what it does to the comparison."
+                }
+                val value = param.get(PARAM_VALUE_KEY)
+                check(value.isTextual || value.isNumber || value.isBoolean || value.isNull) {
+                    "$file: '$action'.$dialect param $index records a ${value.nodeType} value; the" +
+                        " asset holds JSON scalars, so a structured one means something reached it" +
+                        " that `RenderedParam.of` did not normalise"
+                }
             }
         }
     }
@@ -168,6 +181,27 @@ internal class Golden(
     companion object {
         /** Checked by [read]: the roster key of this adapter, which is its directory name. */
         const val ADAPTER: String = "exposed"
+
+        /**
+         * Every Exposed column type a corpus constant is bound through, by simple name.
+         *
+         * An ALLOWLIST, checked on read and on write, and the reason is the half of a filter a
+         * statement does not show: `=` renders the same `?` whether the value behind it is a double
+         * or a decimal, and only one of those compares the way CEL does. A new name here means a
+         * constant started reaching the database some other way, and that is a decision to review
+         * in a diff rather than one to discover from a store leg.
+         *
+         * `JavaInstantColumnType` is the one whose VALUE is not a JSON scalar to begin with:
+         * `RenderedParam.of` records the instant's own text, and `ExposedTranslatorTest` pins that
+         * text for `ts-window` so the normalisation is asserted rather than assumed.
+         */
+        val BIND_TYPES: Set<String> = linkedSetOf(
+            "BooleanColumnType",
+            "DoubleColumnType",
+            "JavaInstantColumnType",
+            "LongColumnType",
+            "TextColumnType",
+        )
 
         /**
          * The Exposed MINOR this asset's SQL was rendered by, and the `baseline` ORM set in
@@ -271,6 +305,12 @@ internal class Golden(
                         is Boolean -> recordedParam.put(PARAM_VALUE_KEY, value)
                         is Long -> recordedParam.put(PARAM_VALUE_KEY, value)
                         is Double -> recordedParam.put(PARAM_VALUE_KEY, value)
+                        // Unreachable while `RenderedParam.of` normalises everything it does not
+                        // recognise to text, which it does today — so this is a second line, not
+                        // the guard. What actually keeps a library type out of the asset is
+                        // [BIND_TYPES], checked on every read and every write: a temporal, a
+                        // BigDecimal or an EntityID arrives here already stringified, and only its
+                        // recorded TYPE says which.
                         else -> throw IllegalStateException(
                             "RenderedParam.of left a ${value::class.simpleName} in the asset; the" +
                                 " recorded value has to be something JSON round-trips",

@@ -30,7 +30,7 @@ class GoldenTest {
 
     private fun conditional(sql: String): ObjectNode = Golden.entry(
         OfflineRenderer.DIALECTS.associateWith {
-            Rendered("$sql /* $it */", listOf(RenderedParam.of("VarCharColumnType", "one")))
+            Rendered("$sql /* $it */", listOf(RenderedParam.of("TextColumnType", "one")))
         },
     )
 
@@ -314,7 +314,7 @@ class GoldenTest {
         golden.write(mapOf("cs-eq" to conditional("a_string = ?")))
         val param = json.readTree(Files.readString(golden.file))
             .get("expectations").get("cs-eq").get("rendered").get("sqlite").get("params").get(0)
-        assertEquals("VarCharColumnType", param.get(Golden.PARAM_TYPE_KEY).asText())
+        assertEquals("TextColumnType", param.get(Golden.PARAM_TYPE_KEY).asText())
         assertEquals("one", param.get(Golden.PARAM_VALUE_KEY).asText())
     }
 
@@ -347,6 +347,59 @@ class GoldenTest {
     }
 
     // -- the committed asset -----------------------------------------------------------------------
+
+    @Test
+    fun `a bind through a column type the asset does not declare is refused`(@TempDir directory: Path) {
+        // The type beside a recorded value is the half of a filter the statement does not show: `=`
+        // renders the same `?` whether a double or a decimal is behind it, and only one of them
+        // compares the way CEL does. So a NEW bind type is reviewed in a diff rather than absorbed.
+        val golden = golden(directory)
+        val exotic = Golden.entry(
+            OfflineRenderer.DIALECTS.associateWith {
+                Rendered("a_number = ?", listOf(RenderedParam.of("DecimalColumnType", "1.50")))
+            },
+        )
+        val onWrite = assertThrows(IllegalStateException::class.java) { golden.write(mapOf("cs-eq" to exotic)) }
+        assertTrue(onWrite.message!!.contains("bound through DecimalColumnType"), onWrite.message)
+
+        // …and a hand-edit past the writer is refused on the way back in, which is the half that
+        // covers the committed file rather than the regenerator.
+        writeRaw(
+            directory,
+            """
+            {
+              "adapter": "exposed",
+              "exposed": "1.5",
+              "regenerate": "gradle goldenUpdate",
+              "expectations": {
+                "cs-eq": {
+                  "kind": "KIND_CONDITIONAL",
+                  "rendered": {
+                    "sqlite": { "sql": "a = ?", "params": [{ "type": "EntityIDColumnType", "value": "x" }] },
+                    "h2": { "sql": "a = ?", "params": [{ "type": "EntityIDColumnType", "value": "x" }] },
+                    "postgresql": { "sql": "a = ?", "params": [{ "type": "EntityIDColumnType", "value": "x" }] },
+                    "mysql": { "sql": "a = ?", "params": [{ "type": "EntityIDColumnType", "value": "x" }] }
+                  }
+                }
+              }
+            }
+            """.trimIndent(),
+        )
+        val onRead = assertThrows(IllegalStateException::class.java) { golden.read() }
+        assertTrue(onRead.message!!.contains("bound through EntityIDColumnType"), onRead.message)
+
+        // Anti-vacuity: the allowlist is a filter rather than a wall, and every name on it earns its
+        // place — the committed asset uses all of them and nothing else.
+        val used = sortedSetOf<String>()
+        Golden().read().values.forEach { entry ->
+            entry.path(Golden.RENDERED_KEY).forEach { one ->
+                one.path(Golden.PARAMS_KEY).forEach { param ->
+                    used.add(param.path(Golden.PARAM_TYPE_KEY).asText())
+                }
+            }
+        }
+        assertEquals(Golden.BIND_TYPES.toSortedSet(), used)
+    }
 
     @Test
     fun `the committed asset parses`() {

@@ -777,7 +777,7 @@ class ExposedTranslatorTest {
             assertEquals(emptyList<String>(), bound)
 
             // Anti-vacuity, in two parts: the detector recognises a null bind, built here…
-            assertTrue(RenderedParam.of("VarCharColumnType", null).value == null)
+            assertTrue(RenderedParam.of("TextColumnType", null).value == null)
             // …and the corpus binds arguments at all, so the rule is not passing over an empty list.
             assertTrue(conditionalRenderings().sumOf { it.third.params.size } > 0)
         }
@@ -959,6 +959,35 @@ class ExposedTranslatorTest {
                     }
                 }
             }
+        }
+
+        /**
+         * The one bind whose VALUE is not a JSON scalar to begin with.
+         *
+         * Every other constant this adapter binds is already a string, a number or a boolean;
+         * `java.time.Instant` is not, so `RenderedParam.of` records its own text through the
+         * catch-all that stringifies anything it does not recognise. That branch decides what 20 of
+         * the asset's recorded arguments say, and nothing else asserts it — an instant recorded as
+         * epoch millis, or truncated to the precision the encoder found convenient, would still be
+         * a perfectly well-formed entry.
+         */
+        @Test
+        fun `an instant bind is recorded as its own text, at the precision the PDP emits`() {
+            OfflineRenderer.DIALECTS.forEach { dialect ->
+                val bound = renderingOf("ts-window", dialect).params
+                assertEquals(1, bound.size, "$dialect")
+                assertEquals("JavaInstantColumnType", bound[0].type, "$dialect")
+                // The exact text, not a prefix: the mapped column carries nanoseconds and the PDP
+                // emits them, so a bind that rounded or truncated would move the window boundary.
+                assertEquals("2026-08-11T09:13:39.123456789Z", bound[0].value, "$dialect")
+                // Recorded as a value JSON holds directly, so the asset is not a stand-in here the
+                // way it is for a non-finite double.
+                assertTrue(bound[0].value is String, "$dialect")
+                assertEquals(null, bound[0].normalisedFrom, "$dialect")
+            }
+            // …and the instant is the loader's choice for the one operand a fixture cannot pin, so
+            // the two are the same value rather than two constants that happen to agree.
+            assertEquals(Corpus.PLANNED_AT, renderingOf("ts-window", OfflineRenderer.POSTGRESQL).params[0].value)
         }
 
         @Test
