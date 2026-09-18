@@ -173,8 +173,10 @@ class CollectionMacroTest {
 
     @Test
     fun `nesting past maxMacroDepth is refused rather than emitted`() {
-        // Not a corpus shape: maxMacroDepth is a caller-supplied argument, and actions.json
-        // classifies every action against one set of options, so no action can vary it.
+        // KIND 2 — a caller-supplied argument the corpus structurally cannot vary, and therefore
+        // permanent: maxMacroDepth is an `Options` setting, and actions.json classifies every action
+        // against one set of options, so no action can vary it. The PLAN is a corpus wire fixture;
+        // only the option is the test's own.
         val error = runCatching {
             ExposedQueryPlanAdapter.toFilter(
                 wireFixture("outer-attr-depth2"),

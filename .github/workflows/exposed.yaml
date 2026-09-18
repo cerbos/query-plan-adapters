@@ -86,7 +86,7 @@ jobs:
       # `ReviewOperandTypeTest` shows a coercion on, and the PostgreSQL and MySQL that
       # `OfflineRendererTest` cross-checks its stub metadata against. Each of those is a property of
       # the Exposed release, the PDP build or the server image, and the JDK decides none of them, so
-      # on the second JDK leg they would start three more containers to re-ask a question the
+      # on the second JDK leg they would start four more containers to re-ask a question the
       # baseline leg has already answered. The conformance harness carries neither tag and still runs
       # on every leg: it is the differential, and a differential that silently did not run reads as a
       # pass.

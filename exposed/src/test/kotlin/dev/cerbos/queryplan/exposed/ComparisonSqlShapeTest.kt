@@ -40,7 +40,7 @@ class ComparisonSqlShapeTest {
         // cannot fall out of a property quantified over the corpus.
         val reached = sweepFor("IS NOT NULL") { action, plan ->
             assertTrue(
-                declaresExplicitNull(plan) || carriesNullLiteral(plan.condition),
+                declaresExplicitNull(plan) || carriesBareNullOperand(plan.condition),
                 "$action emits IS NOT NULL with neither a declared explicit-null attribute nor a null literal",
             )
         }
@@ -147,6 +147,23 @@ class ComparisonSqlShapeTest {
             else -> false
         }
         Operand.NodeCase.EXPRESSION -> operand.expression.operandsList.any(::carriesNullLiteral)
+        else -> false
+    }
+
+    /**
+     * Whether a plan subtree carries a null constant as an OPERAND OF ITS OWN, not as a list element.
+     *
+     * Deliberately narrower than [carriesNullLiteral], and the two must not be merged. `IS NOT NULL`
+     * has exactly two sources in the adapter: `ne` against a BARE null constant, and definite equality
+     * under a declared explicit-null attribute. A null inside a list can never legitimately produce
+     * one: a null element is an `IS NULL` disjunct. Sharing the wide helper let
+     * `in-null-elem-hasint`, which names no declared attribute and carries no bare null, satisfy the
+     * `IS NOT NULL` property for free, so a spurious presence test emitted for that plan would have
+     * passed.
+     */
+    private fun carriesBareNullOperand(operand: Operand): Boolean = when (operand.nodeCase) {
+        Operand.NodeCase.VALUE -> operand.value.kindCase == Value.KindCase.NULL_VALUE
+        Operand.NodeCase.EXPRESSION -> operand.expression.operandsList.any(::carriesBareNullOperand)
         else -> false
     }
 

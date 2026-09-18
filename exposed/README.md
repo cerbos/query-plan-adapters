@@ -720,9 +720,12 @@ gradle build --no-daemon
 gradle goldenUpdate   # rewrite golden/expectations.json from what the translator emits today
 ```
 
-Three environment variables select what the build runs against, each declared once in
-[`build.gradle.kts`](build.gradle.kts), and an unknown value fails rather than falling back to the
-default:
+Three environment variables select what the build runs against, each read in
+[`build.gradle.kts`](build.gradle.kts). An unknown value fails rather than falling back to the
+default, at the point each one is used: `ADAPTER_TEST_ORM` when the build is configured,
+`ADAPTER_TEST_CONTAINER_SUITES` when the `test` task is (so `gradle test` and `gradle build` catch
+a typo, and a task that runs no suites does not look), and `ADAPTER_TEST_DB` when the harness opens
+its store:
 
 - `ADAPTER_TEST_DB` — `h2` (default), `sqlite`, `postgres` or `mysql`: the store the differential
   suite executes against. See [Dialects](#dialects).

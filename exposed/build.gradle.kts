@@ -49,11 +49,12 @@ val ormVersionSets = mapOf(
 // of the floor would raise what the published jar compiles against, make the README's support claim
 // false, and collapse the `floor` leg into a second `baseline` leg, all while staying green.
 // Moving the floor is a deliberate, reviewed edit of the map above.
+val exposedFloor = ormVersionSets.getValue("floor").getValue("exposed")
+
 // Whether the suites that start containers of their OWN — the two tags `tasks.test` excludes — run
 // on this leg. Declared beside the version sets so every value a leg is selected by is in one place.
 val CONTAINER_SUITE_MODES = setOf("run", "skip")
 
-val exposedFloor = ormVersionSets.getValue("floor").getValue("exposed")
 val adapterTestOrm = System.getProperty("adapter.test.orm")
     ?: System.getenv("ADAPTER_TEST_ORM")
     ?: "baseline"

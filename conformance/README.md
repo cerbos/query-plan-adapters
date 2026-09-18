@@ -481,7 +481,8 @@ pinned where they were found):
   attribute** gets under `in(attribute, collection)` (`ReviewNullConventionTest`) — the corpus
   reaches that translator through one mapping, `in-var-var`, whose member declares EXPLICIT, and the
   undeclared reading is what decides whether the emitted subquery matches a NULL member against a
-  NULL element; a mapping the corpus does not use — an `OffsetDateTime` column
+  NULL element; a mapping the corpus does not use — an `OffsetDateTime` column, a DAO id over an
+  instant, and a local date-time column refused as ambiguous on either side of a `timestamp()` pair
   (`ComparisonTimestampTest`), a temporal column where arithmetic needs a numeric one
   (`ArithmeticTranslatorTest`), and a **nullable** numerator and denominator, and a denominator
   written as a negative zero, pointed at the corpus's own division fixtures (`DivisionLoweringTest`);
@@ -500,7 +501,13 @@ pinned where they were found):
   which between them decide whether a `timestamp()` FIELD PAIR compares two representations or two
   spellings of one (`ComparisonTimestampTest`), and a `UUIDTable` DAO key and a temporal ELEMENT
   column, where a null list element must not rescue a list whose other elements the column cannot
-  hold (`ColumnTypeGuardTest`); the shape of the query the CALLER puts the
+  hold, beside the three mapping facts the operand-type rule reads that no action can vary: an
+  `EntityID` over a text column is read through its id column, a column reached through a to-one hop
+  is checked by its DECLARED type and not by the subquery that reads it, and a member column against
+  an element column of another kind is refused (`ColumnTypeGuardTest`); the same caller contracts
+  asserted once more beside the golden comparison, where a second mapper form, the call-level NULL
+  convention and the macro-depth bound are each run against a corpus wire fixture
+  (`ExposedTranslatorTest.ContractsTheCorpusCannotVary`); the shape of the query the CALLER puts the
   predicate in — an alias of their own that must not collide with `cerbos_`, an aliased root table,
   one relation entered twice (`ReviewCompositionTest`), which the harness cannot vary because its
   own query is always `<root>.selectAll().where(filter)`; and the RENDERING itself — cast targets,

@@ -11,9 +11,9 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 
 /**
- * Review of [Options.maxMacroDepth], which `Options` documents as a cost guard: "Each level
- * multiplies the correlated subqueries the filter carries, so the bound is a cost guard, and a plan
- * nested past it is refused rather than emitted."
+ * Review of [Options.maxMacroDepth], the cost guard `PlanWalker.enterMacro` enforces and describes
+ * in its own words: "each level multiplies the correlated subqueries the filter carries, and the
+ * bound is what keeps that finite."
  *
  * KIND 2 — a caller-supplied argument the corpus structurally cannot vary, and therefore permanent.
  * `actions.json` classifies every action against ONE `Options` per adapter, and `maxMacroDepth` is

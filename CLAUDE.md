@@ -242,8 +242,10 @@ question is a property of the Exposed release, the PDP build or a server image r
 store the harness runs on or of the JDK. `AdversarialConformanceTest` carries neither tag and runs
 on every leg.
 
-Three environment variables select what the build runs against, each declared once in
-`exposed/build.gradle.kts`, each failing on an unknown value rather than falling back:
+Three environment variables select what the build runs against, each read in
+`exposed/build.gradle.kts`, each failing on an unknown value rather than falling back, at the point
+it is used (`ADAPTER_TEST_ORM` when the build is configured, `ADAPTER_TEST_CONTAINER_SUITES` when the
+`test` task is, `ADAPTER_TEST_DB` when the harness opens its store):
 `ADAPTER_TEST_DB` is `h2` (default, in process), `sqlite` (in process), `postgres` or `mysql`
 (containers); `ADAPTER_TEST_ORM` is `baseline` (the latest Exposed release) or `floor` (the
 release the published jar is compiled against); and `ADAPTER_TEST_CONTAINER_SUITES` is `run`

@@ -88,6 +88,11 @@ class TernaryTranslatorTest {
 
     @Test
     fun `a ternary with the wrong arity is a malformed plan, not an unsupported shape`() {
+        // KIND 1 — a branch CEL itself cannot reach, and therefore permanent. `cond ? a : b` always
+        // parses to three operands, so no policy can make the planner ship an `if` with two; the
+        // plan is hand-built because no fixture can exist. It pins input validation on a public
+        // function: a wire-contract violation is a MalformedPlanException, never an
+        // UnsupportedPlanShapeException a caller might route around.
         val truncated = PlanResourcesFilter.Expression.newBuilder()
             .setOperator("if")
             .addOperands(variable("request.resource.attr.aBool"))
