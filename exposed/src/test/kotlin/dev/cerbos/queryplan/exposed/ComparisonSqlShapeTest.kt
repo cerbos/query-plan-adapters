@@ -33,6 +33,7 @@ class ComparisonSqlShapeTest {
         "arith-add", "arith-sub", "arith-mult-neg", "arith-div", "arith-div-frac", "arith-vf",
         "arith-both", "arith-add-eq-frac", "arith-add-ne-frac", "arith-add-eq-frac-exact",
         "p-double-frac", "cr-div-zero", "cr-div-zero-ne", "cr-div-zero-eq-neg", "cr-div-neg-zero",
+        "cr-div-then-add", "cr-div-then-add-ne",
         "cr-div-other-column", "nan-ord-ternary", "nan-ord-ternary-vf", "nan-ord-inf", "nan-ord-le",
         "ternary-bare", "ternary-cmp", "ternary-negated", "ternary-nested", "ternary-null-cond",
         "ternary-value-first", "ternary-expr-cond", "p-not-ternary-null", "p-ternary-of-ternaries",
