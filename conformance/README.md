@@ -486,14 +486,28 @@ pinned where they were found):
   (`ArithmeticTranslatorTest`), and a **nullable** numerator and denominator, and a denominator
   written as a negative zero, pointed at the corpus's own division fixtures (`DivisionLoweringTest`);
   both mapper forms, the static table and the resolver function, asserted to translate one plan
-  identically, and `visibleWhen` with the subquery alias it is built against (`MappingDslTest`);
+  identically, `visibleWhen` with the subquery alias it is built against, and the **asymmetry an
+  UNDECLARED attribute is read under** — `== null` takes the call-level option at its word and
+  renders `IS NULL` while `!= "x"` keeps the undeclared NOT-NULL rendering, so one attribute is read
+  under both conventions in one call; recorded rather than fixed, because it under-grants
+  (`MappingDslTest`);
   `maxMacroDepth`, as the `Options` bound and its own validation (`OptionsTest`), as the refusal a
   plan nested past it raises (`CollectionMacroTest`), and as the question of what it counts —
   a macro over a *literal* list emits no subquery but duplicates everything under it per element, so
-  it costs a level too (`ReviewMacroDepthTest`); and the shape of the query the CALLER puts the
+  it costs a level too, while one 100-element fold is still a single level, which is what makes the
+  bound not a bound on expression size (`ReviewMacroDepthTest`); a **column type the corpus's mapping
+  has no column of** — a `timestampWithTimeZone()` column and an `exposed-kotlin-datetime` one,
+  which between them decide whether a `timestamp()` FIELD PAIR compares two representations or two
+  spellings of one (`ComparisonTimestampTest`), and a `UUIDTable` DAO key and a temporal ELEMENT
+  column, where a null list element must not rescue a list whose other elements the column cannot
+  hold (`ColumnTypeGuardTest`); the shape of the query the CALLER puts the
   predicate in — an alias of their own that must not collide with `cerbos_`, an aliased root table,
   one relation entered twice (`ReviewCompositionTest`), which the harness cannot vary because its
-  own query is always `<root>.selectAll().where(filter)`.
+  own query is always `<root>.selectAll().where(filter)`; and the RENDERING itself — cast targets,
+  the concatenation operator, the character-length function, the escape clause, the parenthesising
+  of nested arithmetic and the two bare boolean constants, under each of the four dialects
+  (`ReviewDialectTest`), which is a question about SQL text rather than about rows and which no
+  action can state however many are added.
 - **Kind 3 — a corpus gap wearing a unit test.** A bridge, not a home: every one of these is
   policy-reachable, pinned in this adapter and asked of none of the others, and each should become a
   `conformance/policies/adversarial.yaml` action put to every adapter. Tracked by
@@ -510,7 +524,15 @@ pinned where they were found):
     any of it. The same suite covers the string matches, `size()` and the hierarchy operators over a
     non-text column, where CEL raises a no-overload error and denies while `a_number LIKE '%2%'` is
     TRUE for `123`, and a string `+` with a non-text leaf: `R.attr.aString + R.attr.aNumber` has no
-    CEL overload either, while `CONCAT` renders the number as text on every store.
+    CEL overload either, while `CONCAT` renders the number as text on every store. The same suite
+    holds the **membership** half of the rule: every element of an `in` list is checked against the
+    element column and one mismatch refuses the whole membership, including where a NULL element
+    sits beside it — dropping the mismatch and keeping the null alone emitted a lone `IS NULL`,
+    which a negation turns into every row.
+  - **A `timestamp()` pair over an ambiguous column** (`ComparisonTimestampTest`) —
+    `timestamp(R.attr.createdBy) < timestamp(R.attr.createdAt)` over the varchar the corpus already
+    maps `createdBy` to. `p-timestamp` carries that column against a CONSTANT; nothing carries the
+    field pair, where the refusal has to fire for whichever side the ambiguous column lands on.
   - **A negated unsolvable concatenation, and a hierarchy `overlaps` whose column segment the prefix
     test never reads** (`ReviewNegationTest`) — both are shapes where a two-valued answer is right
     unnegated and readmits, under `not(...)`, exactly the rows a missing attribute makes `check()`
