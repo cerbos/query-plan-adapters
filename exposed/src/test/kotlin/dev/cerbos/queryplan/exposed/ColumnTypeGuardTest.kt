@@ -380,6 +380,83 @@ class ColumnTypeGuardTest {
         )
     }
 
+    // -- concatenation: every leaf of a string `+` has to be text ---------------------------------
+
+    @Test
+    fun `a string concatenation over a non-text column is refused`() {
+        // CEL: `R.attr.aString + R.attr.aNumber == "one5"`. One text operand proves the `+` is a
+        // concatenation, because CEL has no mixed-type `+`; the numeric one then has no overload, the
+        // check raises and DENIES. `CONCAT(a_string, a_number)` renders the number as text on every
+        // store, so the emitted filter would match the row the PDP refuses.
+        val error = assertThrows<UnmappedAttributeException> {
+            translate(
+                ReviewPlans.expression(
+                    "eq",
+                    ReviewPlans.expression(
+                        "add",
+                        ReviewPlans.variable("request.resource.attr.aString"),
+                        ReviewPlans.variable("request.resource.attr.aNumber"),
+                    ),
+                    ReviewPlans.value("one5"),
+                ),
+            )
+        }
+        assertEquals(
+            "String concatenation over 'request.resource.attr.aNumber' requires a text column, but it " +
+                "maps to a IntegerColumnType column",
+            error.message,
+        )
+    }
+
+    @Test
+    fun `a string concatenation with a non-string constant is refused`() {
+        // CEL: `R.attr.aString + R.attr.aText + 5 == "one5"`. The same no-overload error, reached
+        // with a constant leaf inside a concatenation two text columns have already proved. It is
+        // an inexpressible shape rather than a mapping shortfall: no remapping makes `string + int`
+        // mean anything, so it is the OTHER refusal type.
+        val error = assertThrows<UnsupportedPlanShapeException> {
+            translate(
+                ReviewPlans.expression(
+                    "eq",
+                    ReviewPlans.expression(
+                        "add",
+                        ReviewPlans.expression(
+                            "add",
+                            ReviewPlans.variable("request.resource.attr.aString"),
+                            ReviewPlans.variable("request.resource.attr.aText"),
+                        ),
+                        ReviewPlans.value(5),
+                    ),
+                    ReviewPlans.value("one5"),
+                ),
+            )
+        }
+        assertTrue(error.message!!.startsWith("String concatenation requires string operands, got "), error.message)
+        assertTrue(error.message!!.contains("CEL has no mixed-type `+`"), error.message)
+    }
+
+    @Test
+    fun `one column plus a non-string constant is refused by the add-fold, naming types and no value`() {
+        // CEL: `R.attr.aString + 5 == "one5"`. One column plus one constant is the add-fold's shape,
+        // so it is refused there, before the concatenation path is asked, with the message ported
+        // from the reference. What matters is that it IS refused and that the message carries the
+        // two TYPES: a plan constant can hold a folded principal attribute, and messages are logged.
+        val error = assertThrows<UnsupportedPlanShapeException> {
+            translate(
+                ReviewPlans.expression(
+                    "eq",
+                    ReviewPlans.expression(
+                        "add",
+                        ReviewPlans.variable("request.resource.attr.aString"),
+                        ReviewPlans.value(5),
+                    ),
+                    ReviewPlans.value("one5"),
+                ),
+            )
+        }
+        assertEquals("add comparison type mismatch: String vs Long", error.message)
+    }
+
     companion object {
         /** An `IdTable`, so `request.resource.id` is an `EntityID` over a text column. */
         object TypedDocs : IdTable<String>("column_type_docs") {

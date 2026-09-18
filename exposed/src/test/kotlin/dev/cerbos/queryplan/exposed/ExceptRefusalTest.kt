@@ -16,6 +16,10 @@ import org.junit.jupiter.api.assertThrows
  * comparing two spellings would conclude the adapter distinguishes cases it does not.
  *
  * The corpus carries no `except` action at all, which is why nothing else asks this.
+ *
+ * KIND 3 — a policy can reach these, and the corpus does not carry them yet. Each case names the
+ * CEL that reaches it; the plans are hand-built because there is no fixture to read. Delete these
+ * when the corpus actions land (https://github.com/cerbos/query-plan-adapters/issues/414).
  */
 class ExceptRefusalTest {
 

@@ -63,6 +63,10 @@ internal object ReviewPlans {
  * evaluation error. Two folds in `ComparisonTranslator` and one in `HierarchyTranslator` make that
  * claim while a mapped column is still in the expression, and the corpus carries no negated
  * spelling of either shape.
+ *
+ * KIND 3 — a policy can reach these, and the corpus does not carry them yet. Each case names the
+ * CEL that reaches it; the plans are hand-built because there is no fixture to read. Delete these
+ * when the corpus actions land (https://github.com/cerbos/query-plan-adapters/issues/414).
  */
 class ReviewNegationTest {
 

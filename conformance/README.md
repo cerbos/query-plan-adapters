@@ -509,7 +509,8 @@ pinned where they were found):
     The corpus compares every attribute against a value of its own type, so no action discriminates
     any of it. The same suite covers the string matches, `size()` and the hierarchy operators over a
     non-text column, where CEL raises a no-overload error and denies while `a_number LIKE '%2%'` is
-    TRUE for `123`.
+    TRUE for `123`, and a string `+` with a non-text leaf: `R.attr.aString + R.attr.aNumber` has no
+    CEL overload either, while `CONCAT` renders the number as text on every store.
   - **A negated unsolvable concatenation, and a hierarchy `overlaps` whose column segment the prefix
     test never reads** (`ReviewNegationTest`) — both are shapes where a two-valued answer is right
     unnegated and readmits, under `not(...)`, exactly the rows a missing attribute makes `check()`
