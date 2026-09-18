@@ -455,7 +455,8 @@ every kind-3 test opens with *Corpus gap.*):
 
 **exposed** (the unit suites under `exposed/src/test/kotlin/dev/cerbos/queryplan/exposed/`; unlike
 the entries above, this adapter has no single unit-test class, so the comment at each test is the
-source rather than a banner over a block):
+source rather than a banner over a block, and the `Review*` suites are a code review's findings
+pinned where they were found):
 
 - **Kind 1 — a branch CEL itself cannot reach.** Permanent. An operator no leaf case knows
   (`ComparisonSqlShapeTest`) — an unknown function is an undeclared reference at compile time, so
@@ -463,28 +464,73 @@ source rather than a banner over a block):
   guess; a ternary arriving with 2 operands instead of 3, which is a wire-contract violation and
   raises as one (`TernaryTranslatorTest`); a `timestamp()` literal spelling CEL's own `timestamp()`
   rejects — a year outside its range, a space where RFC 3339 wants `T`, a missing zone
-  (`ComparisonTimestampTest`); and the two constant-condition folds the planner performs before the
+  (`ComparisonTimestampTest`); the two constant-condition folds the planner performs before the
   wire, a constant boolean ternary condition and a boolean constant in condition position
   (`TernaryTranslatorTest`), pinned because the fold is what stops an untranslatable dead branch —
-  a bare `matches` — from refusing a plan whose condition never selects it.
+  a bare `matches` — from refusing a plan whose condition never selects it; and a **NaN `size()`
+  threshold** (`SizeThresholdTest`), which CEL has no literal for and the planner does not fold
+  `div(0, 0)` into. That suite proves the unreachability rather than asserting it: it re-reads the
+  `nan-ord-ternary` wire fixture and shows the else arm still arrives as an unfolded `div` subtree,
+  so if the planner ever starts folding it the claim fails here. The infinities are *not* refused,
+  and that too is pinned: IEEE orders them totally, so an infinite threshold is decided correctly by
+  the out-of-range arms.
 - **Kind 2 — a caller-supplied argument the corpus structurally cannot vary.** Permanent.
-  `actions.json` classifies each action against one `Options` per adapter, so none of these has a
-  corpus spelling: the call-level `NullAttributeRepresentation` and the per-attribute declaration
-  that overrides it (`NullOperandScanTest`); a mapping the corpus does not use — an
-  `OffsetDateTime` column (`ComparisonTimestampTest`) and a temporal column where arithmetic needs
-  a numeric one (`ArithmeticTranslatorTest`), which is the refusal a plan alone could never justify
-  because a plan names no operand types; both mapper forms, the static table and the resolver
-  function, asserted to translate one plan identically (`MappingDslTest`); `visibleWhen` and the
-  subquery alias it is built against (`MappingDslTest`); and `maxMacroDepth`, as the `Options`
-  bound and its own validation (`OptionsTest`) and as the refusal a plan nested past it raises
-  (`CollectionMacroTest`).
-- **Kind 3 — a corpus gap wearing a unit test.** One entry, a bridge tracked by
-  [#414](https://github.com/cerbos/query-plan-adapters/issues/414) and deleted when its corpus
-  action lands: `a list or map constant against a scalar column is refused, and its elements never
-  leak`, in `ComparisonSqlShapeTest`, which opens *CORPUS GAP.* `R.attr.tags == ["a", "b"]` is
-  policy-reachable and arrives as `eq(variable, value-list)` verbatim; the corpus reaches this
-  refusal only through `map-eq-list`, which arrives as a `map()` projection instead. So the direct
-  shape is pinned in this adapter and asked of none of the others.
+  `actions.json` classifies each action against one `Options` and one mapping per adapter, so none
+  of these has a corpus spelling: the call-level `NullAttributeRepresentation` and the per-attribute
+  declaration that overrides it (`NullOperandScanTest`), and which convention an **undeclared member
+  attribute** gets under `in(attribute, collection)` (`ReviewNullConventionTest`) — the corpus
+  reaches that translator through one mapping, `in-var-var`, whose member declares EXPLICIT, and the
+  undeclared reading is what decides whether the emitted subquery matches a NULL member against a
+  NULL element; a mapping the corpus does not use — an `OffsetDateTime` column
+  (`ComparisonTimestampTest`), a temporal column where arithmetic needs a numeric one
+  (`ArithmeticTranslatorTest`), and a **nullable** numerator and denominator, and a denominator
+  written as a negative zero, pointed at the corpus's own division fixtures (`DivisionLoweringTest`);
+  both mapper forms, the static table and the resolver function, asserted to translate one plan
+  identically, and `visibleWhen` with the subquery alias it is built against (`MappingDslTest`);
+  `maxMacroDepth`, as the `Options` bound and its own validation (`OptionsTest`), as the refusal a
+  plan nested past it raises (`CollectionMacroTest`), and as the question of what it counts —
+  a macro over a *literal* list emits no subquery but duplicates everything under it per element, so
+  it costs a level too (`ReviewMacroDepthTest`); and the shape of the query the CALLER puts the
+  predicate in — an alias of their own that must not collide with `cerbos_`, an aliased root table,
+  one relation entered twice (`ReviewCompositionTest`), which the harness cannot vary because its
+  own query is always `<root>.selectAll().where(filter)`.
+- **Kind 3 — a corpus gap wearing a unit test.** A bridge, not a home: every one of these is
+  policy-reachable, pinned in this adapter and asked of none of the others, and each should become a
+  `conformance/policies/adversarial.yaml` action put to every adapter. Tracked by
+  [#414](https://github.com/cerbos/query-plan-adapters/issues/414); delete each when its corpus
+  action lands.
+  - **An operand whose type the mapped column does not hold** — `ColumnTypeGuardTest` is the whole
+    rule across every operator and both operand orders, and `ReviewOperandTypeTest` is the store
+    evidence for it. **This one is a demonstrated over-grant, not a theoretical one**: against the
+    pinned MySQL image, `R.attr.aString == 0` — which is what `R.attr.aString == P.attr.level` folds
+    to — returned every seeded row, because MySQL coerces the *string* and `'abc' = 0` is TRUE
+    there, while CEL answers a definite `false` and `check()` denies all of them. H2 raised and
+    PostgreSQL aborted the statement, which is exactly why four green store legs never showed it.
+    The corpus compares every attribute against a value of its own type, so no action discriminates
+    any of it. The same suite covers the string matches, `size()` and the hierarchy operators over a
+    non-text column, where CEL raises a no-overload error and denies while `a_number LIKE '%2%'` is
+    TRUE for `123`.
+  - **A negated unsolvable concatenation, and a hierarchy `overlaps` whose column segment the prefix
+    test never reads** (`ReviewNegationTest`) — both are shapes where a two-valued answer is right
+    unnegated and readmits, under `not(...)`, exactly the rows a missing attribute makes `check()`
+    deny.
+  - **An empty intersection list over a relation chain** (`ReviewEmptyListTest`) — an empty list is
+    not an authoring mistake but what a principal attribute folds to for a principal who holds none
+    of what it enumerates, and short-circuiting to `Op.FALSE` skipped the absent-parent guard.
+  - **A non-finite arithmetic arm meeting a column** (`ArithmeticTranslatorTest`) — every other
+    composition over a zero-denominator division folds, and a column ends that because the sign no
+    plan can state decides which infinity.
+  - **A list or map constant compared against a scalar column** (`ComparisonSqlShapeTest`) —
+    `R.attr.tags == ["a", "b"]` arrives as `eq(variable, value-list)` verbatim, where the corpus
+    reaches the refusal only through `map-eq-list`, a `map()` projection.
+  - **`except(list, list)` in all three positions the walk meets it** (`ExceptRefusalTest`) — the
+    corpus carries no `except` action at all, so nothing else asks that the three sites raise one
+    message rather than three spellings of it.
+
+  `ReviewPlannerShapeTest` is what keeps the hand-built plans under those bridges honest without
+  editing the corpus: it loads a policy of its own into the pinned PDP and asserts the planner really
+  ships each shape rather than folding it away, and writes the recorded plans to
+  `build/reports/review-planner.txt` for whoever ports them.
 
 ### The real to-one relation
 
@@ -1471,9 +1517,11 @@ the policy suite and classify it like anything else.
     `adapterUnsupported` there and throws; `ent` keeps translating it because `WithDialect` tells
     its renderer which target to emit.
 
-  `exposed` is the counter-example, and it is worth recording as one: its four legs found **no**
-  store-specific divergence at all. Every oracle-tested action returns the same ids on H2, SQLite,
-  PostgreSQL and MySQL, every fail-closed one raises the same message, and nothing in its
+  `exposed` is the counter-example, and it is worth recording as one: **no corpus action diverges by
+  store there.** Every oracle-tested action returns the same ids on H2, SQLite, PostgreSQL and MySQL
+  — the last of those replayed under both of Connector/J's prepared-statement modes, because the
+  client-side default interpolates a double bind as an exact `DECIMAL` literal and decimal
+  arithmetic is not IEEE — every fail-closed one raises the same message, and nothing in its
   `actions.json` entry is conditional on a store. That is not evidence the legs were unnecessary,
   and reading it that way is the mistake this paragraph exists to stop. It says the adapter's
   dialect branches already agree — the MySQL `CONCAT()` arm, the MySQL `CHAR` cast target, SQLite's
@@ -1483,6 +1531,15 @@ the policy suite and classify it like anything else.
   about the *next* translator change: a store nobody replays is a store where the next over-grant
   is silent, and a green leg is the cheapest possible form of the answer rather than the absence of
   a question.
+
+  It says nothing about a divergence the corpus cannot **reach**, either, and a code review of that
+  adapter found one: a comparison mixing a text column with a number, which MySQL answers by
+  coercing the *string* — `'abc' = 0` is TRUE — while H2 raises and PostgreSQL aborts the statement.
+  It returned every seeded row against the pinned MySQL image for a policy the PDP allows none of.
+  Four green store legs never showed it because the corpus compares every attribute against a value
+  of its own type, so no action produces the shape at all. That is the sharper lesson: a store leg
+  can only ever disagree about a shape some action carries, and this one is a `#414` bridge in that
+  adapter's unit tests until it becomes an action every adapter is asked.
 
   The MySQL legs also measured what the collation costs, which is a store fact no classification
   records: replayed under MySQL's default `utf8mb4_0900_ai_ci`, **45 of drizzle's 176 and 42 of
