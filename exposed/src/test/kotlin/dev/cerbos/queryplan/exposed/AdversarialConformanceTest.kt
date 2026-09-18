@@ -1308,6 +1308,13 @@ class AdversarialConformanceTest {
         assertEquals(emptyList<String>(), misclassified) {
             "every manifest action must have exactly one $ADAPTER outcome"
         }
+        // The throwing set derived here and the one [Corpus.throwingActions] derives — the form a
+        // translator unit test consumes offline — must be the same set. Two derivations of one
+        // classification that disagree is how a shape ends up asserted by one suite and by neither.
+        assertEquals(
+            throwing.toCollection(TreeSet()),
+            TreeSet(Corpus.throwingActions(actionsFile, ADAPTER).keys),
+        )
         assertTrue(
             actionsFile.expectedUnsupported.map { it.action }.toSet().containsAll(supportedExpected),
         ) { "every promoted action must exist in expectedUnsupported" }
@@ -1457,5 +1464,14 @@ class AdversarialConformanceTest {
         )
         val action = "cs-eq"
         assertEquals(plan(action).raw.filter, Corpus.planFromWireFixture(action).filter)
+
+        // The one operand a fixture cannot pin: `ts-window` compares against `now() - 24h`, which
+        // the planner folds to a different literal on every capture, so the capture script rewrites
+        // it to a placeholder and reading a fixture back means CHOOSING a value. That choice lands
+        // in a translator unit test's golden expectation, so it is asserted here rather than left
+        // to whichever suite happens to notice a placeholder reaching the translator.
+        val substituted = Corpus.planFromWireFixture("ts-window").filter.toString()
+        assertFalse("__NOW_MINUS_24H__" in substituted, "the placeholder reached the translator")
+        assertTrue(Corpus.PLANNED_AT in substituted, substituted)
     }
 }
