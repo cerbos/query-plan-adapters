@@ -30,7 +30,6 @@ import java.nio.file.Path
 class ReviewNullConventionTest {
 
     @Test
-    @Disabled("REVIEW FINDING 3: in(undeclared-attr, collection) falls back to the call-level null option and matches NULL against NULL, which check() denies")
     fun `membership of an undeclared attribute must not match a NULL element against a NULL member`() {
         // CEL: `R.attr.owner in R.attr.tagNames` (the `in-var-var` corpus action), translated
         // against a mapping where `owner` declares NO convention.
@@ -40,12 +39,12 @@ class ReviewNullConventionTest {
         // missing-attribute error, and `check()` DENIES. `d1` is exactly that row — a NULL member
         // and a NULL-named element — and it must not come back.
         //
-        // MembershipTranslator.kt:129-130 instead reads
+        // MembershipTranslator instead read
         //     member.field.nullAttributeRepresentation ?: translation.options.nullAttributeRepresentation
-        // whose default is EXPLICIT, so the subquery body gains
+        // whose default is EXPLICIT, so the subquery body gained
         //     (cerbos_1.NAME IS NULL AND REVIEW_DOCS.OWNER IS NULL)
-        // and `d1` is returned. Recommended fix: read the declaration the way LeafTranslator does
-        // — `member.field.nullAttributeRepresentation == EXPLICIT` — with no fallback.
+        // and `d1` was returned. It now asks `LeafTranslator.isExplicitNull`, the declared owner of
+        // the question, which does not fall back.
         assertEquals(listOf("d2"), ids("in-var-var", UNDECLARED))
     }
 
@@ -77,18 +76,16 @@ class ReviewNullConventionTest {
     @Test
     fun `the same undeclared attribute is NOT explicit-null anywhere else in the walk`() {
         // The control for findings 2 and 3: one attribute cannot be explicit-null for `in` and
-        // omitted for `eq`. The membership subquery is the only place the two disagree.
+        // omitted for `eq`. The membership subquery was the only place the two disagreed, and the
+        // element column's `IS NULL` is what that disagreement looked like — the null-matching
+        // disjunct only a DECLARED convention earns.
         val undeclared = UNDECLARED.resolve("request.resource.attr.owner") as AttributeMapping.Field
         assertEquals(null, undeclared.nullAttributeRepresentation)
 
         val declaredSql = render(translate("in-var-var", DECLARED))
         val undeclaredSql = render(translate("in-var-var", UNDECLARED))
-        assertTrue(declaredSql.contains("IS NULL"), declaredSql)
-        assertEquals(
-            declaredSql,
-            undeclaredSql,
-            "the undeclared mapping emits the DECLARED reading: same SQL, different convention",
-        )
+        assertTrue(declaredSql.contains("\"name\" IS NULL"), declaredSql)
+        assertFalse(undeclaredSql.contains("\"name\" IS NULL"), undeclaredSql)
     }
 
     @Test
