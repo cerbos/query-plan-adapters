@@ -9,7 +9,6 @@ import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 
 /**
@@ -24,23 +23,22 @@ import org.junit.jupiter.api.Test
 class ReviewEmptyListTest {
 
     @Test
-    @Disabled("REVIEW FINDING 6: hasIntersection against an empty list short-circuits to Op.FALSE before the leading-hop guard, so its negation readmits every parentless row")
     fun `an empty intersection over a chain must still deny a row with no parent`() {
         // CEL: `!hasIntersection(R.attr.mainCategory.subNames, P.attr.allowedTeams)` for a
         // principal whose `allowedTeams` is empty. `w1-not-hasint-chain` is the same shape with a
         // NON-empty list, and it is oracle-compared; nothing in the corpus carries the empty one.
         //
-        // MembershipTranslator.collectionContainsAny (MembershipTranslator.kt:105) returns
-        // `Op.FALSE` before calling Subqueries.chainContains, which is the only place the
-        // leading-hop guard lives. `NOT FALSE` is TRUE, so d3 — which has no category at all, and
-        // whose `check()` is a missing-path deny — comes back.
+        // MembershipTranslator.collectionContainsAny returned `Op.FALSE` before calling
+        // Subqueries.chainContains, which is the only place the leading-hop guard lives.
+        // `NOT FALSE` is TRUE, so d3 — which has no category at all, and whose `check()` is a
+        // missing-path deny — came back.
         //
-        // Recommended fix: keep the constant answer but carry the chain's guard with it, e.g.
-        // `TriLogic.and(Op.FALSE, requireLeadingHops(...))`-style — or simply build the ordinary
-        // `chainContains` with a never-matching body and let the existing guard apply.
-        // MembershipTranslator.kt:163 (projectionIntersects) and :91 (scalarIsAnyOf) hold the same
-        // short circuit; the scalar one is unreachable, because the planner folds `x in []` to
-        // KIND_ALWAYS_DENIED (the `in-empty` corpus fixture).
+        // The empty list is now a never-matching BODY handed to the ordinary `chainContains`, so
+        // the existing guard applies to it like any other body. `projectionIntersects` dropped its
+        // own short circuit for the same reason — its `present.isEmpty()` arm reaches the same
+        // constant from INSIDE the NULL-witness guard — and `scalarIsAnyOf` carries the member's
+        // own `IS NULL` witness, even though the planner folds `x in []` away before it
+        // (`<always-allowed>` in ReviewPlannerShapeTest).
         assertEquals(listOf("d1", "d2"), idsOf(translate(notEmptyIntersection())))
     }
 

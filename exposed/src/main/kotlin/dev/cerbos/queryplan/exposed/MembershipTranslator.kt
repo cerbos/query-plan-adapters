@@ -87,9 +87,15 @@ internal class MembershipTranslator(private val translation: Translation) {
      * every element through the COLUMN's type, and an empty list it rewrites to a constant.
      */
     private fun scalarIsAnyOf(target: Resolution.Scalar, values: List<Any?>): Op<Boolean> {
-        // CEL membership in an empty list is a definite FALSE, and an empty SQL `IN ()` is a
-        // syntax error on every store here.
-        if (values.isEmpty()) return Op.FALSE
+        // CEL membership in an empty list is FALSE for a row whose attribute is PRESENT, and an
+        // empty SQL `IN ()` is a syntax error on every store here. It is not definite, though: a
+        // missing attribute makes CEL raise before it ever looks at the list, so the witness has to
+        // survive into the constant — unless the caller declares the explicit-null convention, in
+        // which case the NULL is a null VALUE and `null in []` really is a definite FALSE.
+        if (values.isEmpty()) {
+            if (translation.leaf.isExplicitNull(target)) return Op.FALSE
+            return TriLogic.baseUnlessUnknown(Op.FALSE, IsNullOp(target.expression))
+        }
         return TriLogic.or(values.map { translation.leaf.applyLeaf("eq", target, it) })
     }
 
@@ -103,11 +109,19 @@ internal class MembershipTranslator(private val translation: Translation) {
      * becomes an `IS NULL` disjunct inside the subquery body.
      */
     private fun collectionContainsAny(collection: Resolution.Collection, values: List<Any?>): Op<Boolean> {
-        if (values.isEmpty()) return Op.FALSE
         val element = collection.tail.element
             ?: throw RelationRefusals.noElementColumn(collection.variable, collection.tail)
+        // An empty list is a NEVER-MATCHING BODY, not a short circuit. `Subqueries.chainContains`
+        // is the only place the absent-parent guard lives, so answering `Op.FALSE` before reaching
+        // it left a row with no parent at all — a missing-path deny — returned by the negation. An
+        // empty list is not an authoring mistake either: it is what `P.attr.<something>` folds to
+        // for a principal who holds none of whatever the list enumerates.
         return translation.subqueries.chainContains(collection) { alias ->
-            matchesAnyOf(collection.variable, alias[element.column], values)
+            if (values.isEmpty()) {
+                Op.FALSE
+            } else {
+                matchesAnyOf(collection.variable, alias[element.column], values)
+            }
         }
     }
 
@@ -184,7 +198,9 @@ internal class MembershipTranslator(private val translation: Translation) {
         values: List<Any?>,
         scope: Scope,
     ): Op<Boolean> {
-        if (values.isEmpty()) return Op.FALSE
+        // No short circuit for the empty list: the `present.isEmpty()` arm below reaches the same
+        // constant, and reaches it INSIDE the NULL-witness guard, which carries the absent-parent
+        // guard with it.
         val operands = projection.operandsList
         if (operands.size != 2) {
             throw Refusals.malformed("map requires exactly 2 operands, got ${operands.size}")
