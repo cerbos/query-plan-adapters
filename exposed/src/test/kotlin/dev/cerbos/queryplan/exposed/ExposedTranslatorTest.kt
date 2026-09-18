@@ -85,8 +85,12 @@ class ExposedTranslatorTest {
         private const val UNCONDITIONAL_ACTIONS = 2
 
         /**
-         * How many corpus actions this adapter must refuse, from `actions.json`: the 6
-         * `adapterUnsupported.exposed` entries plus the 11 `expectedUnsupported` shapes.
+         * How many corpus actions this adapter must refuse, from `actions.json`.
+         *
+         * The two groups it is made of — `adapterUnsupported.exposed` and `expectedUnsupported`
+         * minus this adapter's promotions — are NOT restated here. They were once, in prose, and
+         * the prose went stale the moment the composition moved while the total stayed pinned. The
+         * split is asserted instead, from `Corpus`, beside this total in the completeness guard.
          */
         private const val THROWING_ACTIONS = 15
 
@@ -517,6 +521,19 @@ class ExposedTranslatorTest {
                 "throwing" to THROWING.size,
             ),
         )
+
+        // …and what the throwing total is MADE of, read from actions.json rather than described
+        // beside the number. The composition moves on its own — a shape that starts translating
+        // leaves `adapterUnsupported` while `expectedUnsupported` stays put — so a sentence naming
+        // the two addends goes stale while the total it explains is still right.
+        val promoted = ACTIONS.adapterSupportedExpectedFor(ADAPTER).map { it.action }.toSet()
+        val adapterUnsupported = ACTIONS.adapterUnsupportedFor(ADAPTER).map { it.action }
+        val expectedUnsupported = ACTIONS.expectedUnsupported.map { it.action }.filterNot { it in promoted }
+        assertEquals(THROWING.keys.sorted(), (adapterUnsupported + expectedUnsupported).sorted()) {
+            "the throwing set is `adapterUnsupported[$ADAPTER]` plus `expectedUnsupported` minus this" +
+                " adapter's promotions, and it no longer is"
+        }
+        assertEquals(THROWING_ACTIONS, adapterUnsupported.size + expectedUnsupported.size)
     }
 
     /** What the completeness guard's failure is really saying, when it has more to say. */
