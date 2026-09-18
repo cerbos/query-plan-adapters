@@ -260,6 +260,18 @@ internal class SizeTranslator(private val translation: Translation) {
     private class Threshold(val operator: String, val value: Long, val vacuous: Boolean?) {
         companion object {
             fun of(operator: String, raw: Double): Threshold {
+                // BEFORE the rint test, which NaN fails — `NaN == rint(NaN)` is false — so it fell
+                // into the fractional arms, where `ceil(NaN).toLong()` is 0 and `size(x) > NaN`
+                // became the always-true `size(x) >= 0`.
+                if (!raw.isFinite()) {
+                    if (raw.isNaN()) throw RelationRefusals.nanSizeThreshold()
+                    // An INFINITY is decided, and decided correctly, by the out-of-range arms
+                    // below: IEEE orders the infinities totally, so `size(x) > +Infinity` is false
+                    // and `size(x) < +Infinity` is true for every present value, which is exactly
+                    // what a bound past `Int.MAX_VALUE` already answers. The saturation `toLong`
+                    // performs is the intended step here rather than an accident of narrowing.
+                    return Threshold(operator, raw.toLong(), null)
+                }
                 if (raw == Math.rint(raw)) {
                     return Threshold(operator, raw.toLong(), null)
                 }

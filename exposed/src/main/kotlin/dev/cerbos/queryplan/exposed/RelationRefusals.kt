@@ -79,6 +79,23 @@ internal object RelationRefusals {
             "a mapped attribute or filter(collection, lambda)",
     )
 
+    /**
+     * `size(x) op NaN` — the NaN a zero denominator produces, as a `size()` threshold.
+     *
+     * Not policy-reachable: CEL has no NaN literal and the planner does not fold `div(0, 0)` (the
+     * `nan-ord-*` wire fixtures ship it unfolded), so the only way in is a hand-built plan. It is
+     * refused rather than folded because the fold has no right answer to pick: every rounding of
+     * NaN is a different comparison, and narrowing it silently yields 0, which turned
+     * `size(x) > NaN` into the always-true `size(x) >= 0`.
+     */
+    fun nanSizeThreshold(): UnsupportedPlanShapeException = Refusals.unsupported(
+        "size() compared against a NaN threshold is not supported: a character count and an " +
+            "element count are both integral, and NaN has no integral bound to round to — " +
+            "rounding it is not a number and narrowing that yields 0, which makes every ordering " +
+            "against it a comparison the policy never wrote. CEL denies an ordering against NaN " +
+            "under both polarities, so no bound reproduces it.",
+    )
+
     /** `size(filter(...))` over a collection with no relation mapping. */
     fun sizeFilterNeedsRelation(reference: String): UnmappedAttributeException = Refusals.unmapped(
         "size(filter(...)) counts the elements of $reference, which resolves to a scalar column; " +
