@@ -260,10 +260,16 @@ did, and porting them is not part of
 adversarial suite starts a PDP loaded with it. The shared policy suite that used to sit at the
 repository root is gone: nothing plans against it, and no workflow gates on it
 ([ADR 0008](docs/adr/0008-the-shared-policy-suite-is-absorbed-into-the-conformance-corpus.md)).
-The other policy suites in the repository prove **plumbing**, not semantics, and neither is a place
-to put a new shape: `demo/policies/` feeds every example application, and
-`spring-data/example/policies/` is that adapter's onboarding artifact. A shape worth proving is a
-corpus action.
+The other policy suites in the repository prove something narrower, and none of them is a place to
+put a new shape. Two prove **plumbing**: `demo/policies/` feeds every example application, and
+`spring-data/example/policies/` is that adapter's onboarding artifact. One proves **planner wire
+shape**: `ReviewPlannerShapeTest` embeds a policy of its own and loads it into the pinned PDP, and
+asserts what the planner ships for each expression — never what a filter returns. It exists as
+reachability evidence for the exposed adapter's KIND 3 suites, which hand-build their plans: it is
+what stops a finding from quietly becoming a claim about a plan nobody can produce. Like those
+suites it is a bridge, tracked by
+[#414](https://github.com/cerbos/query-plan-adapters/issues/414) and deleted along with them once
+its expressions are corpus actions. A shape worth proving is a corpus action.
 
 Some adapters need additional services:
 - Mongoose: `npm run mongo` (Docker MongoDB)
