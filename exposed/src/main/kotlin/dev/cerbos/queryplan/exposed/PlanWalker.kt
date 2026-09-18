@@ -45,10 +45,13 @@ internal class PlanWalker(private val translation: Translation) {
             "exists", "exists_one", "all" -> translation.collections.translate(operator, operands, scope)
             // filter() and map() return a LIST, not a boolean. `filter(...)` in condition position is
             // not `size(filter(...)) > 0`, and lowering it as if it were over-grants.
-            "filter", "map" -> throw Refusals.unsupported(
-                "$operator() returns a list, not a boolean, so it cannot be a condition on its " +
-                    "own; only size($operator(...)) and hasIntersection($operator(...), [...]) " +
-                    "give the list a scalar meaning",
+            "filter" -> throw Refusals.unsupported(
+                "filter() returns a list, not a boolean, so it cannot be a condition on its own; " +
+                    "only size(filter(...)) gives the list a scalar meaning",
+            )
+            "map" -> throw Refusals.unsupported(
+                "map() returns a list, not a boolean, so it cannot be a condition on its own; " +
+                    "only hasIntersection(map(...), [...]) gives the list a scalar meaning",
             )
             "except" -> throw ScalarRefusals.exceptUnsupported()
             "hasIntersection", "has_intersection" -> translation.membership.translateHasIntersection(operands, scope)
