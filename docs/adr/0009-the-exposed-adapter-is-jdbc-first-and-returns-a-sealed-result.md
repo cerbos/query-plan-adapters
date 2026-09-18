@@ -1,5 +1,7 @@
 # The Exposed adapter is JDBC-first and returns a sealed result
 
+Accepted.
+
 Four decisions taken before the Kotlin [Exposed](https://github.com/JetBrains/Exposed) adapter had
 a line of translator in it, because each of them is expensive to reverse once the artifact is
 published: the transport it depends on, the shape of what it returns, the ORM version its jar is

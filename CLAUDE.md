@@ -44,9 +44,8 @@ backend nor `convex/_generated`, which is why the mapper it shares with the harn
 generated API. On langchain-chromadb it needs no ChromaDB container, so that server is started for
 the adversarial leg alone.
 
-On drizzle, convex, langchain-chromadb, sqlalchemy, activerecord, spring-data, elasticsearch-java and
-exposed the expected
-filters are **golden expectations** — static data in `<adapter>/golden/expectations.json`, rewritten
+On drizzle, convex, langchain-chromadb, sqlalchemy, activerecord, spring-data, elasticsearch-java
+and exposed the expected filters are **golden expectations** — static data in `<adapter>/golden/expectations.json`, rewritten
 by that adapter's `golden:update` command and reviewed as a diff — which is the format
 [#379](https://github.com/cerbos/query-plan-adapters/issues/379) piloted
 and the remaining adapters copy; prisma and mongoose keep their inline expectations until they are
@@ -391,10 +390,8 @@ Adding a new adversarial job — or dropping the Node gate so the corpus replays
 
 Tag-based publishing: `prisma/v*` -> npm, `sqla/v*` -> PyPI, `activerecord/v*` -> RubyGems; `ent/v*` and `pgx/v*` are Go
 module tags resolved directly from the repository. `elasticsearch-java/v*`, `spring-data/v*` and `exposed/v*` only run that
-adapter's CI
-workflow: none of those builds configures a Maven Central release (all three are `publishToMavenLocal` only, and their
-`publishing` blocks
-say what wiring a release still needs), so no Maven Central publish is wired yet.
+adapter's CI workflow: none of those builds configures a Maven Central release (all three are `publishToMavenLocal` only, and
+their `publishing` blocks say what wiring a release still needs), so no Maven Central publish is wired yet.
 
 ## Changing how a condition is translated
 

@@ -78,8 +78,8 @@ through the adapter's metadata alone.
 
 ### The provenance check runs at build time, because `installDist` would erase it
 
-The other JVM examples assert at startup that the adapter class was loaded from a jar outside the
-adapter's own build directory, which is what tells a mavenLocal artifact apart from a substituted
+The elasticsearch-java example asserts at startup that the adapter class was loaded from a jar
+outside the adapter's own build directory, which is what tells a mavenLocal artifact apart from a substituted
 composite build. That check cannot survive `installDist`: the `application` plugin **copies** every
 dependency into `build/install/demo/lib` before the program runs, so by then every jar on the
 classpath sits under this directory whatever it was resolved from.

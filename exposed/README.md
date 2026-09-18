@@ -426,8 +426,8 @@ every one of the four stores.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 186 of the 192 reference conformance actions, on H2, SQLite, PostgreSQL and MySQL |
-| Fail-closed corpus shapes | The shapes `expectedUnsupported` pins for every adapter: regex `matches()` (CEL matches with RE2, which no SQL engine implements — `LIKE` has no alternation or anchors, and each engine's own regex operator differs from RE2), a positional read of an ordered list / `get-field`, `timestamp()` over a column whose type does not pin an absolute instant, the `int()` and `double()` casts (SQL `CAST` reads the numeric prefix of a string where CEL demands the whole string, and PostgreSQL and MySQL round where CEL truncates toward zero), `filter()` and `map()` used as a condition (both return a list, not a boolean), and equality between two columns under **mixed** null conventions (the declared side needs a definite answer for its NULL while the undeclared side needs UNKNOWN, and no single predicate is both). Plus this adapter's own, in `adapterUnsupported.exposed`: `mod` (CEL `%` is integer-only while an attribute value is always a double at check time, and the `int()` cast that would make it satisfiable has no faithful lowering), arithmetic **composed on** a division whose denominator may be zero (CEL carries the NaN or signed infinity through the sum and SQL has no value that does, so the `NULLIF` guard turns the whole expression into NULL: `cr-div-then-add` under-grants and its mirrored `ne` spelling over-grants, so both are refused), a hierarchy with an **empty** delimiter (Cerbos splits the path into one segment per character, making the relation a strict string-prefix test, while the prefix `LIKE` this adapter emits would also match the path itself), a positional read of a scalar list (a to-many relation is a correlated subquery and the rows a SQL relation returns carry no order to index into), and list equality over a `map()` projection (a correlated subquery cannot be compared to a list value) (17 actions) |
+| Oracle-tested | 188 of the 192 reference conformance actions, on H2, SQLite, PostgreSQL and MySQL |
+| Fail-closed corpus shapes | The shapes `expectedUnsupported` pins for every adapter: regex `matches()` (CEL matches with RE2, which no SQL engine implements — `LIKE` has no alternation or anchors, and each engine's own regex operator differs from RE2), a positional read of an ordered list / `get-field`, `timestamp()` over a column whose type does not pin an absolute instant, the `int()` and `double()` casts (SQL `CAST` reads the numeric prefix of a string where CEL demands the whole string, and PostgreSQL and MySQL round where CEL truncates toward zero), `filter()` and `map()` used as a condition (both return a list, not a boolean), and equality between two columns under **mixed** null conventions (the declared side needs a definite answer for its NULL while the undeclared side needs UNKNOWN, and no single predicate is both). Plus this adapter's own, in `adapterUnsupported.exposed`: `mod` (CEL `%` is integer-only while an attribute value is always a double at check time, and the `int()` cast that would make it satisfiable has no faithful lowering), a hierarchy with an **empty** delimiter (Cerbos splits the path into one segment per character, making the relation a strict string-prefix test, while the prefix `LIKE` this adapter emits would also match the path itself), a positional read of a scalar list (a to-many relation is a correlated subquery and the rows a SQL relation returns carry no order to index into), and list equality over a `map()` projection (a correlated subquery cannot be compared to a list value) (15 actions) |
 | Representation-dependent | `null-eq-missing` — rejected under `NullAttributeRepresentation.OMITTED`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute the caller sends as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare it per attribute — `field(column, nulls = EXPLICIT)` — or the conservative rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute rows. Until the planner is fixed, write `R.attr.x != null` rather than `has(R.attr.x)` for database-backed attributes |
@@ -463,6 +463,14 @@ Guessing arithmetic for `+` is wrong in the dangerous direction: `text + text` i
 PostgreSQL, `0` on SQLite, and on MySQL an over-grant matching almost every row
 ([#391](https://github.com/cerbos/query-plan-adapters/issues/391)). The mapped column types are what
 make the guess unnecessary.
+
+Two further actions the reference refuses translate here for a different reason. `cr-div-then-add`
+and `cr-div-then-add-ne` compose arithmetic on a division whose denominator may be zero, where CEL
+carries a NaN or a signed infinity through the sum and SQL has no value that does. The adapter
+carries the division as a symbolic value that branches on a zero denominator, folds each non-finite
+arm with IEEE rules at translation time, and sends only the guarded quotient to the database, so no
+NaN or infinity is ever bound. The one case that stays refused is a non-finite arm meeting another
+**column** under further arithmetic, whose sign no plan can state.
 
 ### `size(string)` counts characters, and astral characters count differently
 
@@ -548,6 +556,22 @@ are executed at all — the MySQL `CONCAT()` arm and the MySQL `CHAR` cast targe
 every other engine.
 
 MariaDB is not proved and is therefore not claimed.
+
+## Example application
+
+This repository carries a runnable [`example/`](example/), which installs the adapter as a
+**published artifact** (never from source) and uses it against a live PDP over the shared
+[demo domain](../demo/README.md):
+
+```bash
+# from the repository root
+demo/scripts/run-example.sh exposed
+```
+
+It is the only place the published surface is executed: the POM's dependency scopes, a consumer
+bringing their own Exposed, and the predicate composed with an application-owned filter, paginated,
+and handed to a DAO `find`. See [`example/README.md`](example/README.md) for what it proves and what
+it does not.
 
 ## Development
 

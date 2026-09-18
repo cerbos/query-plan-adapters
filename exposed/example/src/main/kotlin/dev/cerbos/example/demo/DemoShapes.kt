@@ -93,8 +93,10 @@ class DemoShapes(private val cerbos: CerbosBlockingClient, private val seeds: De
      * The DAO cross-check is an EXTRA beyond the shared floor, which ADR 0001 explicitly allows.
      * It asserts rather than reports: `demo/expected.json` is diffed exactly, so a sixth key would
      * fail the runner. What it proves is that the adapter returns an ordinary Exposed predicate
-     * — the same value satisfies `Query.where { }` and `EntityClass.find { }` — which no suite
-     * under `../src/test` asks, because none of them builds a DAO entity.
+     * — the same value satisfies `Query.where { }` and `EntityClass.find { }`. The adapter's own
+     * `ExposedSurfaceTest` asks that too, but from SOURCE and with the `exposed-dao` the adapter's
+     * build picked. Here it is asked of the published artifact, with the consumer's own
+     * `exposed-dao`, which is the half only an example can execute.
      */
     private fun filtered(principalId: String, action: String): ShapeResult {
         val filter = authorize(principalId, action)
