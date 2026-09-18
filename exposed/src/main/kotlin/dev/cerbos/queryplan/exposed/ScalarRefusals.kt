@@ -104,6 +104,34 @@ internal object ScalarRefusals {
             "filter returns rows the PDP denies. $TRANSLATABLE_KINDS",
     )
 
+    /**
+     * `timestamp(a) op timestamp(b)` over two columns that both pin an absolute instant but SPELL
+     * it differently: one carries an offset, the other does not.
+     *
+     * Deliberately not [columnTypeMismatch], which this branch used to borrow. Nothing here is a
+     * coercion and nothing here is a CEL problem: CEL compares two timestamps with no overload
+     * error at all, there is no text operand for MySQL to coerce, and its advice — wrap both sides
+     * in `timestamp()` — is what the caller has already done. The divergence is the STORE's own:
+     * a `timestamp` compared with a `timestamptz` is resolved through the session's time zone, so
+     * the same filter selects different rows in two sessions of one application, and a session
+     * setting is not a property of the filter.
+     */
+    fun timestampRepresentationMismatch(
+        operator: String,
+        leftVariable: String,
+        leftColumn: Column<*>,
+        rightVariable: String,
+        rightColumn: Column<*>,
+    ): UnmappedAttributeException = Refusals.unmapped(
+        "$operator compares timestamp('$leftVariable') with timestamp('$rightVariable'), which map " +
+            "to a ${ScalarColumnTypes.describe(leftColumn)} and a " +
+            "${ScalarColumnTypes.describe(rightColumn)} column. Both store an absolute instant, but " +
+            "one carries a zone offset and the other does not, and a store resolves that pairing " +
+            "through the SESSION's time zone — so the same filter selects different rows in two " +
+            "sessions. Map both attributes onto columns of one representation: two timestamp() " +
+            "columns, or two timestampWithTimeZone() ones.",
+    )
+
     /** [constantTypeMismatch] between two mapped columns: the same coercion, neither side constant. */
     fun columnTypeMismatch(
         operator: String,

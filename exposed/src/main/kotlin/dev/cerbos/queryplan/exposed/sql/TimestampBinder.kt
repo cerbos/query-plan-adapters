@@ -37,28 +37,64 @@ import kotlin.time.ExperimentalTime
  */
 internal object TimestampBinder {
 
-    /** Whether [column] unambiguously denotes an absolute instant, by the contract above. */
-    fun storesAbsoluteInstant(column: Column<*>): Boolean =
+    /**
+     * How a column that pins an absolute instant SPELLS it. Two columns of one representation hold
+     * comparable values; two of different ones do not, whichever module declared them.
+     */
+    private enum class Representation { INSTANT, OFFSET_DATE_TIME }
+
+    /**
+     * THE enumeration of the representations, asked by everything else here.
+     *
+     * One `when` rather than one per question: [storesAbsoluteInstant] used to carry its own copy
+     * of the type list beside [bind]'s, so a third representation would have had to be added in two
+     * places and a reader could not tell which of them was authoritative. Adding one here now makes
+     * [bind]'s `when` non-exhaustive, which is a compile error rather than a silent omission.
+     */
+    private fun representationOf(column: Column<*>): Representation? =
         when (ScalarColumnTypes.unwrap(column)) {
-            is InstantColumnType<*>, is OffsetDateTimeColumnType<*> -> true
-            else -> false
+            is InstantColumnType<*> -> Representation.INSTANT
+            is OffsetDateTimeColumnType<*> -> Representation.OFFSET_DATE_TIME
+            else -> null
         }
+
+    /** Whether [column] unambiguously denotes an absolute instant, by the contract above. */
+    fun storesAbsoluteInstant(column: Column<*>): Boolean = representationOf(column) != null
+
+    /**
+     * Whether two columns that both pin an absolute instant pin it the SAME way.
+     *
+     * Compared as REPRESENTATIONS, never as column-type names: `exposed-java-time`'s `timestamp()`
+     * and `exposed-kotlin-datetime`'s declare different classes and both extend
+     * [InstantColumnType], so they store the same thing and compare correctly. Reading the class
+     * name instead refused that pair for no reason while claiming to be about time zones.
+     */
+    fun sameRepresentation(left: Column<*>, right: Column<*>): Boolean {
+        val representation = representationOf(left) ?: return false
+        return representation == representationOf(right)
+    }
 
     @OptIn(ExperimentalTime::class)
     fun bind(instant: java.time.Instant, column: Column<*>, variable: String): Expression<*> {
+        val columnType = ScalarColumnTypes.unwrap(column)
         @Suppress("UNCHECKED_CAST")
-        return when (val columnType = ScalarColumnTypes.unwrap(column)) {
-            is InstantColumnType<*> -> QueryParameter(
-                columnType.fromInstant(kotlin.time.Instant.fromEpochSeconds(instant.epochSecond, instant.nano.toLong())),
-                columnType as IColumnType<Any>,
+        val sqlType = columnType as IColumnType<Any>
+        return when (representationOf(column)) {
+            Representation.INSTANT -> QueryParameter(
+                (columnType as InstantColumnType<*>).fromInstant(
+                    kotlin.time.Instant.fromEpochSeconds(instant.epochSecond, instant.nano.toLong()),
+                ),
+                sqlType,
             )
             // Normalised to UTC: CEL timestamp equality is equality of the absolute instant, so the
             // offset a literal was written in must not reach the comparison.
-            is OffsetDateTimeColumnType<*> -> QueryParameter(
-                columnType.fromOffsetDateTime(OffsetDateTime.ofInstant(instant, ZoneOffset.UTC)),
-                columnType as IColumnType<Any>,
+            Representation.OFFSET_DATE_TIME -> QueryParameter(
+                (columnType as OffsetDateTimeColumnType<*>).fromOffsetDateTime(
+                    OffsetDateTime.ofInstant(instant, ZoneOffset.UTC),
+                ),
+                sqlType,
             )
-            else -> throw ambiguous(column, variable)
+            null -> throw ambiguous(column, variable)
         }
     }
 

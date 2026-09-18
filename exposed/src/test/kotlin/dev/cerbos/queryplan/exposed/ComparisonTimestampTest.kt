@@ -4,12 +4,20 @@ import com.google.protobuf.Value
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand
 import org.jetbrains.exposed.v1.core.Column
+import org.jetbrains.exposed.v1.core.Op
 import org.jetbrains.exposed.v1.core.Table
 import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.core.dao.id.IdTable
 import org.jetbrains.exposed.v1.datetime.timestamp as kotlinTimestamp
+import org.jetbrains.exposed.v1.javatime.date
+import org.jetbrains.exposed.v1.javatime.datetime
 import org.jetbrains.exposed.v1.javatime.timestamp
 import org.jetbrains.exposed.v1.javatime.timestampWithTimeZone
+import org.jetbrains.exposed.v1.jdbc.Database
+import org.jetbrains.exposed.v1.jdbc.SchemaUtils
+import org.jetbrains.exposed.v1.jdbc.insert
+import org.jetbrains.exposed.v1.jdbc.selectAll
+import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -104,6 +112,64 @@ class ComparisonTimestampTest {
     }
 
     @Test
+    fun `a timestamp() pair is refused when EITHER column does not pin an absolute instant`() {
+        // Corpus gap. CEL: `timestamp(R.attr.a) < timestamp(R.attr.b)` over two mapped columns —
+        // the `timestamp()` spelling of `ColumnTypeGuardTest`'s field-to-field pair, which the
+        // corpus reaches with a constant on one side only. A local date-time, a date and a text
+        // column each carry no zone, so the reading they hold could mean any instant, and the pair
+        // is refused on whichever side the ambiguous column lands.
+        listOf(
+            "a local date-time" to Ambiguous.local,
+            "a date" to Ambiguous.day,
+            "a text column" to Ambiguous.text,
+        ).forEach { (label, ambiguous) ->
+            listOf(true, false).forEach { ambiguousFirst ->
+                val error = assertThrows<UnmappedAttributeException>("$label, first=$ambiguousFirst") {
+                    translatePair(
+                        "lt",
+                        if (ambiguousFirst) ambiguous else Zoned.at,
+                        if (ambiguousFirst) Zoned.at else ambiguous,
+                    )
+                }
+                assertTrue(
+                    error.message!!.contains("requires a column that stores an absolute instant"),
+                    "$label: ${error.message}",
+                )
+            }
+        }
+    }
+
+    @Test
+    fun `two instant columns of different representations are refused, naming the session time zone`() {
+        // Corpus gap. CEL: `timestamp(R.attr.createdAt) < timestamp(R.attr.zonedAt)` over a
+        // `timestamp()` column and a `timestampWithTimeZone()` one. Both pin an absolute instant,
+        // so nothing CEL does is wrong here — the divergence is the store's, which resolves the
+        // pairing through the session's time zone.
+        val error = assertThrows<UnmappedAttributeException> { translatePair("lt", MixedModules.at, Zoned.at) }
+        assertTrue(error.message!!.contains("one carries a zone offset and the other does not"), error.message)
+        assertTrue(error.message!!.contains("SESSION's time zone"), error.message)
+        // …and it does NOT borrow the constant-mismatch wording, which is about a coercion that
+        // does not happen here: CEL orders two timestamps perfectly well, there is no text operand
+        // for MySQL to coerce, and "wrap both sides in timestamp()" is what the caller just did.
+        assertTrue(!error.message!!.contains("no-overload error"), error.message)
+    }
+
+    @Test
+    fun `two instant columns declared by DIFFERENT datetime modules compare, and select the right rows`() {
+        // Corpus gap (and the case the old `describe`-based check refused for no reason).
+        // `exposed-java-time`'s `timestamp()` and `exposed-kotlin-datetime`'s declare different
+        // column-type CLASSES for one plain instant, so comparing the class names called this a
+        // mismatch — while the two hold exactly the same values and H2 orders them correctly.
+        assertEquals(
+            listOf("before"),
+            idsOfMixedPair("lt"),
+            "the java-time column really is compared against the kotlin-datetime one",
+        )
+        assertEquals(listOf("same"), idsOfMixedPair("eq"))
+        assertEquals(listOf("after"), idsOfMixedPair("gt"))
+    }
+
+    @Test
     fun `a literal outside CEL's instant range is a malformed plan`() {
         // CEL's own timestamp() rejects these, so the planner cannot emit one: they are wire
         // contract violations rather than shapes this adapter declines to express.
@@ -151,7 +217,80 @@ class ComparisonTimestampTest {
         override val primaryKey = PrimaryKey(id)
     }
 
+    /** The three temporal spellings that pin no instant at all, for the pair's other refusal. */
+    private object Ambiguous : Table("scalar_ambiguous_times") {
+        val local = datetime("local_at")
+        val day = date("day")
+        val text = varchar("text_at", 32)
+    }
+
+    /**
+     * One table, two datetime MODULES: `at` is `exposed-java-time`'s `timestamp()` and `alsoAt` is
+     * `exposed-kotlin-datetime`'s. Both extend `InstantColumnType` and hold the same instants, so
+     * the pair has to translate — which only a table declaring both can show.
+     */
+    @OptIn(kotlin.time.ExperimentalTime::class)
+    private object MixedModules : Table("scalar_mixed_modules") {
+        val id = varchar("id", 32)
+        val at = timestamp("at")
+        val alsoAt = kotlinTimestamp("also_at")
+        override val primaryKey = PrimaryKey(id)
+    }
+
     private companion object {
+        /** `timestamp(R.attr.left) op timestamp(R.attr.right)` over two mapped columns. */
+        fun timestampPair(operator: String): Operand = ReviewPlans.expression(
+            operator,
+            ReviewPlans.expression("timestamp", ReviewPlans.variable("request.resource.attr.left")),
+            ReviewPlans.expression("timestamp", ReviewPlans.variable("request.resource.attr.right")),
+        )
+
+        fun translatePair(operator: String, left: Column<*>, right: Column<*>): Op<Boolean> =
+            OfflineRenderer.translate {
+                ExposedQueryPlanAdapter.toFilter(
+                    ReviewPlans.conditional(timestampPair(operator)),
+                    Options.of(
+                        cerbosMapping {
+                            "request.resource.attr.left" to left
+                            "request.resource.attr.right" to right
+                        },
+                    ),
+                ).toOp()
+            }
+
+        private val mixedDatabase by lazy {
+            val db = Database.connect("jdbc:h2:mem:scalar_mixed_modules;DB_CLOSE_DELAY=-1", driver = "org.h2.Driver")
+            transaction(db) { seedMixed() }
+            db
+        }
+
+        /** The rows [operator] selects, executed on H2 through the two-module pair. */
+        @OptIn(kotlin.time.ExperimentalTime::class)
+        fun idsOfMixedPair(operator: String): List<String> {
+            val op = translatePair(operator, MixedModules.at, MixedModules.alsoAt)
+            return transaction(mixedDatabase) {
+                MixedModules.selectAll().where(op).map { it[MixedModules.id] }.sorted()
+            }
+        }
+
+        @OptIn(kotlin.time.ExperimentalTime::class)
+        private fun seedMixed() {
+            SchemaUtils.create(MixedModules)
+            val noon = "2024-06-01T12:00:00Z"
+            listOf(
+                Triple("before", "2024-06-01T11:00:00Z", noon),
+                Triple("same", noon, noon),
+                Triple("after", "2024-06-01T13:00:00Z", noon),
+            ).forEach { (rowId, javaAt, kotlinAt) ->
+                MixedModules.insert {
+                    it[id] = rowId
+                    it[at] = java.time.Instant.parse(javaAt)
+                    it[alsoAt] = kotlin.time.Instant.parse(kotlinAt)
+                }
+            }
+        }
+
+
         /**
          * `timestamp(R.attr.createdAt) == timestamp("<literal>")`. Hand-built because the literal
          * is the subject: every corpus fixture carries one the planner already validated, so the

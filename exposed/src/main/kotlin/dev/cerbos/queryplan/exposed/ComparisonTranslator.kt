@@ -394,9 +394,11 @@ internal class ComparisonTranslator(private val translation: Translation) {
      * ([ScalarColumnTypes.comparable]). Wrapping both in `timestamp()` is the policy saying it
      * means the instant, which is exactly what makes the SQL comparison the right one.
      *
-     * Both columns must pin an absolute instant, and must pin it the SAME way: a `timestamp`
-     * against a `timestamptz` is resolved by PostgreSQL through the session's TimeZone, which is
-     * not a property of the filter.
+     * Both columns must pin an absolute instant, and must pin it in the same REPRESENTATION: a
+     * `timestamp` against a `timestamptz` is resolved by a store through the session's time zone,
+     * which is not a property of the filter. Representation, not column-type name — the two
+     * datetime modules declare different classes for the same plain instant, and comparing the
+     * names refused that pair while claiming to be about time zones.
      */
     private fun timestampFieldPair(
         operator: String,
@@ -410,8 +412,14 @@ internal class ComparisonTranslator(private val translation: Translation) {
         if (!TimestampBinder.storesAbsoluteInstant(right.column)) {
             TimestampBinder.ambiguous(right.column, rightVariable)
         }
-        if (ScalarColumnTypes.describe(left.column) != ScalarColumnTypes.describe(right.column)) {
-            throw ScalarRefusals.columnTypeMismatch(operator, leftVariable, left.column, rightVariable, right.column)
+        if (!TimestampBinder.sameRepresentation(left.column, right.column)) {
+            throw ScalarRefusals.timestampRepresentationMismatch(
+                operator,
+                leftVariable,
+                left.column,
+                rightVariable,
+                right.column,
+            )
         }
         return compare(operator, left.expression, right.expression)
     }
