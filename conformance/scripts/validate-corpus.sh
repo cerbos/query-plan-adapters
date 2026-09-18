@@ -250,8 +250,8 @@ fi
 # silently unchecked.
 SOURCE_INCLUDES=(
   --include='*.yml' --include='*.yaml' --include='*.sh' --include='*.py' --include='*.go'
-  --include='*.java' --include='*.kts' --include='*.ts' --include='*.js' --include='*.json'
-  --include='Dockerfile' --include='*_IMAGE'
+  --include='*.java' --include='*.kt' --include='*.kts' --include='*.ts' --include='*.js'
+  --include='*.json' --include='Dockerfile' --include='*_IMAGE'
 )
 SOURCE_EXCLUDES=(
   --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=.claude --exclude-dir=lib
@@ -295,6 +295,19 @@ source_grep() {
 if ! source_grep -rl '' "${REPO_ROOT}" 2>/dev/null | grep -q '/lib/.*\.rb$'; then
   echo "The source scan reaches no .rb file under a lib/ directory, so a Ruby adapter's"
   echo "implementation is invisible to every check below. Restore the Ruby scan pass."
+  exit 1
+fi
+
+# And that it reaches Kotlin source. `*.kts` was already in the list and looks like it covers
+# Kotlin, but a build script is not a translator: `--include='*.kts'` matches build.gradle.kts and
+# nothing under src/, so before `--include='*.kt'` was added a hardcoded PDP image or an
+# unpinned service image in a Kotlin adapter's translator, harness or example read as green to
+# both scans below. Asserting the extension the includes actually needed — never `.kts`, which
+# would pass whatever happens to `.kt` — is what keeps that from silently coming back. Stated
+# over any adapter rather than one by name, so it keeps holding for the next Kotlin adapter.
+if ! source_grep -rl '' "${REPO_ROOT}" 2>/dev/null | grep -q '\.kt$'; then
+  echo "The source scan reaches no .kt file, so a Kotlin adapter's implementation is invisible"
+  echo "to every check below. Restore --include='*.kt' to SOURCE_INCLUDES."
   exit 1
 fi
 

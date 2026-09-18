@@ -293,8 +293,8 @@ fi
 # and two scans disagreeing about whether that counts would make one of them wrong.
 SOURCE_INCLUDES=(
   --include='*.yml' --include='*.yaml' --include='*.sh' --include='*.py' --include='*.go'
-  --include='*.java' --include='*.kts' --include='*.ts' --include='*.js' --include='*.json'
-  --include='Dockerfile' --include='*_IMAGE'
+  --include='*.java' --include='*.kt' --include='*.kts' --include='*.ts' --include='*.js'
+  --include='*.json' --include='Dockerfile' --include='*_IMAGE'
 )
 SOURCE_EXCLUDES=(
   --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=lib --exclude-dir=build
@@ -329,6 +329,15 @@ source_grep() {
 # reading none of a Ruby adapter. Stated over any adapter rather than one by name.
 if ! source_grep -rl '' "${REPO_ROOT}" | grep -q '/lib/.*\.rb$'; then
   fail "the source scan reaches no .rb file under a lib/ directory, so a Ruby adapter's source is invisible to every check below"
+fi
+
+# And that it reaches Kotlin source. `*.kts` was already in the list and looks like it covers
+# Kotlin, but it matches build.gradle.kts and nothing under src/ — so before `--include='*.kt'`
+# was added, a Kotlin example's hardcoded PDP address was invisible to the scan below, which is
+# the exact defect this file's own comment says both early examples shipped. The assertion names
+# `.kt` and never `.kts`, or it would pass on a build script while the source stayed unread.
+if ! source_grep -rl '' "${REPO_ROOT}" | grep -q '\.kt$'; then
+  fail "the source scan reaches no .kt file, so a Kotlin adapter's source is invisible to every check below"
 fi
 for adapter in $(jq -r '.adapters[]' "${ACTIONS}"); do
   example_dir="${REPO_ROOT}/${adapter}/example"
