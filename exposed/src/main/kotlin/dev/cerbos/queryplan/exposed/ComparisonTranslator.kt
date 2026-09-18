@@ -13,7 +13,6 @@ import org.jetbrains.exposed.v1.core.EqOp
 import org.jetbrains.exposed.v1.core.Expression
 import org.jetbrains.exposed.v1.core.GreaterEqOp
 import org.jetbrains.exposed.v1.core.GreaterOp
-import org.jetbrains.exposed.v1.core.IsNotNullOp
 import org.jetbrains.exposed.v1.core.IsNullOp
 import org.jetbrains.exposed.v1.core.LessEqOp
 import org.jetbrains.exposed.v1.core.LessOp
@@ -401,9 +400,14 @@ internal class ComparisonTranslator(private val translation: Translation) {
      * Solves `add(field, const) eq/ne constant` for the field.
      *
      * When no solution exists — `"projects:123" == "users:" + R.id` can never be true — `eq` is
-     * always false, and `ne` is NOT always true: a missing attribute makes the concatenation a CEL
-     * evaluation error and denies, so NULL rows must stay excluded. `IS NOT NULL`, never an
-     * unconditional TRUE, which would leak exactly the rows the PDP denies.
+     * false and `ne` is true for every row whose column is PRESENT, and neither is definite: a
+     * missing attribute makes the concatenation a CEL evaluation error and denies under BOTH
+     * polarities, so the answer has to be UNKNOWN for a NULL column.
+     *
+     * Both arms therefore carry the `IS NULL` witness rather than folding to a constant. A bare
+     * `Op.FALSE` is right unnegated and wrong under `not(...)`, which is where every `Op.FALSE`
+     * over a mapped column goes wrong; and `IsNotNullOp` alone is worse still, because `NOT (col
+     * IS NOT NULL)` selects EXACTLY the rows `check()` denies.
      */
     private fun solveAddComparison(
         operator: String,
@@ -418,7 +422,10 @@ internal class ComparisonTranslator(private val translation: Translation) {
             addition.fieldIsLeft,
         )
         if (solved == null) {
-            return if (operator == "eq") Op.FALSE else IsNotNullOp(target.expression)
+            return TriLogic.baseUnlessUnknown(
+                if (operator == "eq") Op.FALSE else Op.TRUE,
+                IsNullOp(target.expression),
+            )
         }
         return translation.leaf.applyLeaf(operator, target, solved)
     }

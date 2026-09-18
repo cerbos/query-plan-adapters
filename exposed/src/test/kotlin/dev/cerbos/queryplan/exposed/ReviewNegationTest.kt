@@ -68,19 +68,17 @@ internal object ReviewPlans {
 class ReviewNegationTest {
 
     @Test
-    @Disabled("REVIEW FINDING 4: an unsolvable add-solve folds to Op.FALSE / IS NOT NULL, both two-valued, so a negation readmits every NULL row")
     fun `an unsolvable string concatenation must stay UNKNOWN for a NULL column`() {
         // CEL: `!((R.attr.aOptionalString + "!") == "nope")` — no value of the column can satisfy
         // the equation, because "nope" does not end in "!".
         //
-        // ComparisonTranslator.solveAddComparison (ComparisonTranslator.kt:416-418) answers
-        // `Op.FALSE`, which is right under the POSITIVE polarity and wrong under this one: for a
-        // row whose column is NULL, CEL evaluates `null + "!"` as a no-overload error, `check()`
-        // denies, and `NOT (FALSE)` hands the row straight back. d1 and d4 are those rows.
+        // ComparisonTranslator.solveAddComparison answered `Op.FALSE`, which is right under the
+        // POSITIVE polarity and wrong under this one: for a row whose column is NULL, CEL
+        // evaluates `null + "!"` as a no-overload error, `check()` denies, and `NOT (FALSE)` hands
+        // the row straight back. d1 and d4 were those rows.
         //
-        // Recommended fix: `TriLogic.baseUnlessUnknown(Op.FALSE, IsNullOp(target.expression))` for
-        // eq, and `TriLogic.baseUnlessUnknown(Op.TRUE, IsNullOp(target.expression))` for ne, which
-        // is the same guard `stringLength` and `overlaps` already use for their vacuous arms.
+        // Both arms now carry `TriLogic.baseUnlessUnknown(<constant>, IsNullOp(target.expression))`,
+        // the same guard `stringLength` and `overlaps` use for their vacuous arms.
         val unsolvable = ReviewPlans.expression(
             "eq",
             ReviewPlans.expression(
@@ -94,12 +92,11 @@ class ReviewNegationTest {
     }
 
     @Test
-    @Disabled("REVIEW FINDING 4 (second arm): the ne spelling folds to IS NOT NULL, and NOT of it selects exactly the rows check() denies")
     fun `a negated unsolvable inequality must not select the NULL rows`() {
         // CEL: `!((R.attr.aOptionalString + "!") != "nope")`. The `ne` arm of the same fold
-        // returns `IsNotNullOp` (ComparisonTranslator.kt:417), so the negation renders
-        // `NOT (A_OPTIONAL_STRING IS NOT NULL)` — a predicate that selects the NULL rows and
-        // nothing else, which is the exact complement of what `check()` allows.
+        // returned `IsNotNullOp`, so the negation rendered `NOT (A_OPTIONAL_STRING IS NOT NULL)` —
+        // a predicate that selects the NULL rows and nothing else, which is the exact complement
+        // of what `check()` allows.
         val unsolvable = ReviewPlans.expression(
             "ne",
             ReviewPlans.expression(
