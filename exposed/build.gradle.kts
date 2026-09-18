@@ -119,7 +119,6 @@ dependencies {
     // replayed against (selected with ADAPTER_TEST_DB / -Dadapter.test.db). H2 and SQLite run in
     // process; PostgreSQL and MySQL are containers.
     testImplementation("org.testcontainers:testcontainers:2.0.5")
-    testImplementation("org.testcontainers:testcontainers-junit-jupiter:2.0.5")
     testImplementation("org.testcontainers:testcontainers-postgresql:2.0.5")
     testImplementation("org.testcontainers:testcontainers-mysql:2.0.5")
     testImplementation("com.h2database:h2:2.4.240")
@@ -166,12 +165,21 @@ fun Test.configureCorpusSuite() {
 tasks.test {
     configureCorpusSuite()
 
-    // OfflineRendererTest cross-checks its stub JDBC metadata against real PostgreSQL and MySQL
-    // servers. That is a property of the Exposed release and the server image, not of the store the
-    // harness runs on, so it runs once per Exposed leg and is excluded on the store legs, where it
-    // would start two more containers to re-ask a question already answered.
-    if ((System.getProperty("adapter.test.db") ?: System.getenv("ADAPTER_TEST_DB")) != null) {
-        useJUnitPlatform { excludeTags("server-cross-check") }
+    // Two tags mark suites that start containers of their OWN to ask a question that does not depend
+    // on the store the harness runs on: `server-cross-check` (OfflineRendererTest checking its stub
+    // JDBC metadata against real PostgreSQL and MySQL servers) and `docker` (ReviewPlannerShapeTest
+    // asking the pinned PDP what wire shape it ships, ReviewOperandTypeTest showing a coercion on a
+    // real MySQL). Each is a property of the Exposed release, the PDP build or the server image, so
+    // it is answered once per Exposed leg and excluded on the store legs, where it would start more
+    // containers to re-ask it. Both kinds skip themselves where there is no Docker at all.
+    //
+    // Keyed off the store the harness RESOLVES to, not off the variable being set: `ADAPTER_TEST_DB=h2`
+    // is the default leg spelled out, and must not quietly lose coverage a bare `gradle test` has.
+    // The conformance harness itself carries neither tag and never skips: a differential that
+    // silently did not run would read as a pass.
+    val selectedStore = System.getProperty("adapter.test.db") ?: System.getenv("ADAPTER_TEST_DB")
+    if (selectedStore != null && selectedStore != "h2") {
+        useJUnitPlatform { excludeTags("server-cross-check", "docker") }
     }
     testLogging {
         events("passed", "skipped", "failed")

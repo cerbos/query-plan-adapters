@@ -622,6 +622,18 @@ but not in `visibleWhen` makes the two disagree, and no conformance action can s
 is computed from the attributes and the adapter reads the store. Keep one definition of what the
 relation contains.
 
+### Known gaps
+
+Real, and not fixed here, because each needs a corpus action first: this repository's rule is that
+a translation change starts in the shared corpus, where the question is put to every adapter, not
+in one of them. Treat them as constraints on the policies you write.
+
+| Gap | Effect |
+| --- | --- |
+| Division by a **stored** negative zero | SQL cannot tell `-0.0` from `0.0`: both satisfy `= 0`, and no portable function reads the sign bit (H2 does not even return the sign over JDBC). So when the denominator is a **column** the adapter reads a zero as positive, and `x / column` is `+Infinity` here where CEL gives `-Infinity` for a stored `-0.0`. On a store that keeps the sign in a floating-point column, such as PostgreSQL, that is a row admitted under `> 0` that the PDP denies. A **constant** denominator is exact: the planner ships the sign and the adapter applies it (`cr-div-neg-zero`). |
+| A NaN or an infinity **stored** in a floating-point column | The adapter folds the non-finite values it produces itself, from a division, with IEEE rules at translation time. A non-finite value already in a column is compared by the database, whose ordering is not IEEE's: PostgreSQL orders NaN above every number. |
+| A **negated** ordering against a NaN | `NaN > 0.5` is folded to FALSE, the reading the shared corpus states. If CEL instead raises for an ordering against NaN, a `!(...)` around it would admit rows the PDP denies. Every `nan-ord-*` corpus action is unnegated, where an error and a FALSE both deny, so neither reading is proved yet. Until a negated action settles it, do not negate a comparison whose operand can be `0.0 / 0.0`. |
+
 ## Dialects
 
 | Dialect | What CI executes | What is distinctive about it |
@@ -712,21 +724,28 @@ default:
 
 `ExposedTranslatorTest` reads its plans from the shared corpus's wire fixtures and needs no PDP and
 no database server at all; so do the surface, mapping, seam and review suites, which run on
-in-process H2 and SQLite. Three things reach for Docker inside a plain `gradle test`:
+in-process H2 and SQLite. Four things reach for Docker inside a plain `gradle test`, and only the
+first REQUIRES it:
 
 - **`AdversarialConformanceTest`** requires it — it starts a pinned PDP, and on the `postgres` and
-  `mysql` stores the database too.
-- **`ReviewPlannerShapeTest`** requires it as well. It loads a policy of its own into the pinned PDP
-  and asserts the planner really ships the wire shapes the review suites hand-build, so a finding
-  that rests on one of them fails here rather than quietly becoming a claim about a plan nobody can
-  produce.
-- **`OfflineRendererTest`'s two `server-cross-check` cases** use Docker when it is there and skip
-  when it is not. They start the pinned PostgreSQL and MySQL images and assert the SQL the offline
-  renderer's stub connections produce is byte-identical to the real drivers' — the one check that
-  keeps "offline" honest. The build **excludes that tag whenever `ADAPTER_TEST_DB` is set**: the
-  question is a property of the Exposed release and the server image, not of the store the harness
-  runs on, so asking it once per Exposed leg is enough and the store legs do not start two more
-  containers to re-ask it.
+  `mysql` stores the database too. It never skips: a differential that silently did not run would
+  read as a pass.
+- **`ReviewPlannerShapeTest`** (tagged `docker`) loads a policy of its own into the pinned PDP and
+  asserts the planner really ships the wire shapes the review suites hand-build, so a finding that
+  rests on one of them fails here rather than quietly becoming a claim about a plan nobody can
+  produce. It proves planner wire SHAPE, not semantics, and goes when those expressions become
+  corpus actions.
+- **`ReviewOperandTypeTest`** (tagged `docker`) starts the pinned MySQL to show the coercion behind
+  the operand-type rule on a real server: the predicate the adapter used to emit matches every
+  seeded row there.
+- **`OfflineRendererTest`'s two `server-cross-check` cases** start the pinned PostgreSQL and MySQL
+  images and assert the SQL the offline renderer's stub connections produce is byte-identical to
+  the real drivers' — the one check that keeps "offline" honest.
+
+The last three use Docker when it is there and **skip when it is not**. The build also **excludes
+both tags on the store legs** (any `ADAPTER_TEST_DB` other than `h2`): each asks a question about
+the Exposed release, the PDP build or a server image, not about the store the harness runs on, so
+it is answered once per Exposed leg and the store legs do not start more containers to re-ask it.
 
 ## The golden expectations
 

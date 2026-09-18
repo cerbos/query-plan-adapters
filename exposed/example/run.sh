@@ -36,6 +36,23 @@ cd "${EXAMPLE_DIR}"
 [[ -f "${REPO_ROOT}/demo/seeds.json" ]] || \
   fail "no demo/seeds.json under ${REPO_ROOT} — run this through demo/scripts/run-example.sh exposed"
 
+# 0b. The example runs the Exposed release the adapter calls its `baseline`.
+#
+#     The adapter's README and workflow both say so, and nothing else holds it true: the adapter's
+#     version sets live in a map Renovate cannot resolve (deliberately, so the support floor cannot be
+#     automerged away), while the versions below are plain literals it bumps and automerges. So a bump
+#     arrives HERE first, and this check is what turns it into a red example job on that pull request
+#     rather than a silent drift: moving the baseline is a reviewed edit of ../build.gradle.kts, with
+#     the golden asset regenerated under the new minor.
+baseline="$(sed -n 's/^ *"baseline" to mapOf("exposed" to "\([^"]*\)").*/\1/p' "${ADAPTER_DIR}/build.gradle.kts")"
+[[ -n "${baseline}" ]] || { echo "could not read the baseline Exposed version from ${ADAPTER_DIR}/build.gradle.kts" >&2; exit 1; }
+pinned="$(sed -n 's/.*"org\.jetbrains\.exposed:exposed-[a-z-]*:\([^"]*\)".*/\1/p' "${EXAMPLE_DIR}/build.gradle.kts" | sort -u)"
+if [[ "${pinned}" != "${baseline}" ]]; then
+  echo "the example pins Exposed '$(tr '\n' ' ' <<<"${pinned}")' but the adapter's baseline is '${baseline}':" \
+    "every exposed-* module here must be the baseline (../build.gradle.kts, ormVersionSets)" >&2
+  exit 1
+fi
+
 # 1. Build the adapter and install it into mavenLocal.
 #
 # This is the Java form of "pack the adapter into a real distributable and install THAT"

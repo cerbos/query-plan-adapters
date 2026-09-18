@@ -225,15 +225,18 @@ docker run --rm -v "$(pwd)":/repo -w /repo/exposed gradle:8.12-jdk17 \
 `conformance/wire-fixtures/`, asserts the emitted predicate against `exposed/golden/expectations.json`
 and the rest of what an adapter can be asked offline ("What a translator unit test may pin", below),
 and needs no PDP and no database server; neither do the surface, mapping, seam and review suites,
-which run on in-process H2 and SQLite. Two suites need Docker and start their own pinned PDP against
-a policy suite: `AdversarialConformanceTest` against `conformance/policies/`, plus the database
-itself on the `postgres` and `mysql` stores, and `ReviewPlannerShapeTest` against a policy suite of
-its own, to assert the planner really ships the wire shapes the review suites hand-build.
-`OfflineRendererTest`'s two `server-cross-check` cases use Docker when it is there and are skipped
-when it is not: they start the pinned PostgreSQL and MySQL images and assert that the offline
-renderer's stub connections render byte-identically to the real drivers, which is what keeps the
-golden asset's `postgresql` and `mysql` entries honest. `build.gradle.kts` excludes that tag whenever
-`ADAPTER_TEST_DB` is set, because the question is a property of the Exposed release and the server
+which run on in-process H2 and SQLite. Only `AdversarialConformanceTest` REQUIRES Docker: it starts
+its own pinned PDP against `conformance/policies/`, plus the database itself on the `postgres` and
+`mysql` stores, and it never skips. Three more things use Docker when it is there and skip when it
+is not. `ReviewPlannerShapeTest` (tagged `docker`) plans a handful of expressions of its own against
+the pinned PDP, to assert the planner really ships the wire SHAPES the review suites hand-build; it
+proves shape, not semantics, and goes when those expressions become corpus actions.
+`ReviewOperandTypeTest` (tagged `docker`) starts the pinned MySQL to show the coercion behind the
+operand-type rule on a real server. `OfflineRendererTest`'s two `server-cross-check` cases start the
+pinned PostgreSQL and MySQL images and assert that the offline renderer's stub connections render
+byte-identically to the real drivers, which is what keeps the golden asset's `postgresql` and `mysql`
+entries honest. `build.gradle.kts` excludes both tags on the store legs (any `ADAPTER_TEST_DB` other
+than `h2`), because each question is a property of the Exposed release, the PDP build or a server
 image rather than of the store the harness runs on.
 
 Two environment variables select what the build runs against, both declared once in
@@ -268,8 +271,8 @@ Some adapters need additional services:
 - LangChain/ChromaDB, adversarial leg only: Docker ChromaDB on port 8234 (`npm run chroma`)
 - Drizzle and Prisma, PostgreSQL adversarial leg only: Docker (testcontainers starts it)
 - Exposed, PostgreSQL and MySQL adversarial legs only: Docker (testcontainers starts it). The `h2`
-  and `sqlite` stores run in process, so on those the only containers are the pinned PDPs the two
-  Docker suites start
+  and `sqlite` stores run in process, so on those the only container the harness needs is its
+  pinned PDP
 
 ## Conformance
 

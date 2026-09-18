@@ -8,8 +8,9 @@ import java.time.Duration
 import org.testcontainers.containers.GenericContainer
 
 /**
- * Pinned Cerbos image used by [AdversarialConformanceTest], the one suite here that starts a PDP.
- * Every other suite in this adapter runs offline.
+ * Pinned Cerbos image for the suites that start a PDP: [AdversarialConformanceTest], which is the
+ * differential, and [ReviewPlannerShapeTest], which asks the same build what wire shape it ships for
+ * a handful of expressions the corpus does not carry yet. Every other suite needs no PDP.
  *
  * The PDP is the oracle for BOTH sides of the differential — it produces the plan under test and
  * the per-row `check()` decisions it is compared against — so which build answered is the one fact
@@ -61,14 +62,6 @@ internal object CerbosTestImage {
         container.dockerClient.inspectImageCmd(container.dockerImageName).exec().repoDigests.orEmpty()
 
     /**
-     * The started container runs the pinned build, or the run is loudly NOT the pinned run.
-     *
-     * Without this the override property changes the oracle silently: the resolved digest was
-     * printed, and a log line is not an assertion. A wrong digest here is a Docker cache holding a
-     * different build under the pinned reference, or a pin whose two halves disagree — either way
-     * the differential would be against a PDP nobody chose, so it fails rather than runs.
-     */
-    /**
      * How long one `plan()` or `check()` call may take before it FAILS.
      *
      * A blocking gRPC stub with no deadline waits for ever. The oracle asks `check()` once per row
@@ -90,6 +83,14 @@ internal object CerbosTestImage {
     /** The PDP's gRPC port inside the container. */
     const val GRPC_PORT: Int = 3593
 
+    /**
+     * The started container runs the pinned build, or the run is loudly NOT the pinned run.
+     *
+     * Without this the override property changes the oracle silently: the resolved digest was
+     * printed, and a log line is not an assertion. A wrong digest here is a Docker cache holding a
+     * different build under the pinned reference, or a pin whose two halves disagree — either way
+     * the differential would be against a PDP nobody chose, so it fails rather than runs.
+     */
     fun assertPinned(container: GenericContainer<*>) {
         val digests = resolvedDigests(container)
         if (OVERRIDDEN) {
