@@ -3,7 +3,12 @@ package dev.cerbos.queryplan.exposed
 import com.google.protobuf.Value
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand
+import org.jetbrains.exposed.v1.core.Column
 import org.jetbrains.exposed.v1.core.Table
+import org.jetbrains.exposed.v1.core.dao.id.EntityID
+import org.jetbrains.exposed.v1.core.dao.id.IdTable
+import org.jetbrains.exposed.v1.datetime.timestamp as kotlinTimestamp
+import org.jetbrains.exposed.v1.javatime.timestamp
 import org.jetbrains.exposed.v1.javatime.timestampWithTimeZone
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -67,6 +72,38 @@ class ComparisonTimestampTest {
     }
 
     @Test
+    @OptIn(kotlin.time.ExperimentalTime::class)
+    fun `a kotlin-datetime column is bound through its own column type too`() {
+        // The third temporal representation, and the one that makes this class's central claim
+        // checkable: NOTHING here references either datetime module, because `InstantColumnType` is
+        // the abstract base in exposed-core that `exposed-java-time`'s `timestamp()` and
+        // `exposed-kotlin-datetime`'s both extend. Only a column declared with the OTHER module can
+        // show that one check really covers both, and the value bound is a `kotlin.time.Instant`
+        // rather than a `java.time.Instant`, which is exactly the conversion the binder exists to
+        // get right.
+        val filter = ExposedQueryPlanAdapter.toFilter(
+            Scalars.wireFixture("ts-eq"),
+            Options.of(cerbosMapping { "request.resource.attr.createdAt" to KotlinTimes.at }),
+        )
+        val rendered = Scalars.rendered(filter.toOp())
+        assertEquals(1, rendered.args.size)
+        assertEquals(kotlin.time.Instant.parse("2024-06-01T00:00:00Z"), rendered.args.single())
+    }
+
+    @Test
+    fun `a DAO id instant column is read through the same unwrap as every other path`() {
+        // `TimestampBinder` used to read `column.columnType` raw, so an `EntityID`-wrapped or
+        // `transform`ed instant was refused here while `ScalarColumnTypes` — the declared owner of
+        // "the type that actually decides the SQL" — accepted it everywhere else. One column, two
+        // answers, and the refusal named the WRAPPER type in its message.
+        val filter = ExposedQueryPlanAdapter.toFilter(
+            Scalars.wireFixture("ts-eq"),
+            Options.of(cerbosMapping { "request.resource.attr.createdAt" to KeyedTimes.id }),
+        )
+        assertEquals(1, Scalars.rendered(filter.toOp()).args.size)
+    }
+
+    @Test
     fun `a literal outside CEL's instant range is a malformed plan`() {
         // CEL's own timestamp() rejects these, so the planner cannot emit one: they are wire
         // contract violations rather than shapes this adapter declines to express.
@@ -100,6 +137,18 @@ class ComparisonTimestampTest {
 
     private object Zoned : Table("scalar_zoned") {
         val at = timestampWithTimeZone("at")
+    }
+
+    /** Declared with `exposed-kotlin-datetime`, so its column type is the OTHER module's. */
+    @OptIn(kotlin.time.ExperimentalTime::class)
+    private object KotlinTimes : Table("scalar_kotlin_times") {
+        val at = kotlinTimestamp("at")
+    }
+
+    /** An instant behind the `EntityID` wrapper a DAO id column puts in front of its type. */
+    private object KeyedTimes : IdTable<java.time.Instant>("scalar_keyed_times") {
+        override val id: Column<EntityID<java.time.Instant>> = timestamp("id").entityId()
+        override val primaryKey = PrimaryKey(id)
     }
 
     private companion object {

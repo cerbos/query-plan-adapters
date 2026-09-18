@@ -30,13 +30,24 @@ import kotlin.time.ExperimentalTime
  * instant; a string column orders lexicographically, which agrees with chronology only for one
  * fixed-width zone-normalised layout. Guessing a zone would silently include rows the PDP denies,
  * so those fail closed with a MAPPING error — the plan is fine, the mapping does not say enough.
+ *
+ * The column type is read through [ScalarColumnTypes.unwrap], the declared owner of "the type that
+ * actually decides the SQL". Reading `column.columnType` raw refused a DAO-id or `transform`ed
+ * instant column here while every other path in the adapter accepted it — one column, two answers.
  */
 internal object TimestampBinder {
+
+    /** Whether [column] unambiguously denotes an absolute instant, by the contract above. */
+    fun storesAbsoluteInstant(column: Column<*>): Boolean =
+        when (ScalarColumnTypes.unwrap(column)) {
+            is InstantColumnType<*>, is OffsetDateTimeColumnType<*> -> true
+            else -> false
+        }
 
     @OptIn(ExperimentalTime::class)
     fun bind(instant: java.time.Instant, column: Column<*>, variable: String): Expression<*> {
         @Suppress("UNCHECKED_CAST")
-        return when (val columnType = column.columnType) {
+        return when (val columnType = ScalarColumnTypes.unwrap(column)) {
             is InstantColumnType<*> -> QueryParameter(
                 columnType.fromInstant(kotlin.time.Instant.fromEpochSeconds(instant.epochSecond, instant.nano.toLong())),
                 columnType as IColumnType<Any>,
@@ -47,13 +58,16 @@ internal object TimestampBinder {
                 columnType.fromOffsetDateTime(OffsetDateTime.ofInstant(instant, ZoneOffset.UTC)),
                 columnType as IColumnType<Any>,
             )
-            else -> throw Refusals.unmapped(
-                "timestamp() comparison requires a column that stores an absolute instant — an " +
-                    "exposed-java-time or exposed-kotlin-datetime timestamp() or " +
-                    "timestampWithTimeZone() column — but '$variable' maps to a " +
-                    "${columnType::class.simpleName} column. A local date-time, a date and a " +
-                    "string are all ambiguous about which instant they hold; remap the column.",
-            )
+            else -> throw ambiguous(column, variable)
         }
     }
+
+    /** The refusal for a column whose type does not pin an absolute instant. */
+    fun ambiguous(column: Column<*>, variable: String): Nothing = throw Refusals.unmapped(
+        "timestamp() comparison requires a column that stores an absolute instant — an " +
+            "exposed-java-time or exposed-kotlin-datetime timestamp() or " +
+            "timestampWithTimeZone() column — but '$variable' maps to a " +
+            "${ScalarColumnTypes.describe(column)} column. A local date-time, a date and a " +
+            "string are all ambiguous about which instant they hold; remap the column.",
+    )
 }

@@ -116,14 +116,26 @@ internal object ScalarColumnTypes {
         return family == familyOf(value)
     }
 
-    /** [accepts], for two mapped columns compared against each other. */
+    /**
+     * [accepts], for two mapped columns compared against each other.
+     *
+     * Both families must be KNOWN, and equal. Two columns of one unrecognised type used to pass
+     * here, on the argument that identical types give a store nothing to coerce — but coercion is
+     * not the only way a comparison diverges, and for a temporal column it is not even the likely
+     * one. Cerbos transports a timestamp attribute as an RFC 3339 STRING, so
+     * `R.attr.createdAt == R.attr.updatedAt` with no `timestamp()` wrapper is a STRING comparison
+     * in CEL and an INSTANT comparison in SQL: `"2020-01-01T00:00:00Z"` against
+     * `"2020-01-01T00:00:00.000Z"`, or against `"2020-01-01T01:00:00+01:00"`, are unequal strings
+     * and the same instant, so the row SQL matches is one `check()` denies. Two ordinal enum
+     * columns over different enums diverge the same way and their declared types are identical.
+     *
+     * `timestamp(a) < timestamp(b)` is a different path — [TimestampBinder] and the timestamp-field
+     * pair in `ComparisonTranslator` — and still translates: there the policy has SAID it means
+     * instants.
+     */
     fun comparable(left: Column<*>, right: Column<*>): Boolean {
-        val leftFamily = familyOf(left)
-        val rightFamily = familyOf(right)
-        // Two types with no CEL reading here — two temporal columns, say. The declared type is the
-        // most this can check, and two columns of ONE type give a store nothing to coerce.
-        if (leftFamily == null && rightFamily == null) return describe(left) == describe(right)
-        return leftFamily != null && leftFamily == rightFamily
+        val leftFamily = familyOf(left) ?: return false
+        return leftFamily == familyOf(right)
     }
 
     /** The name a refusal uses for a column's type; a type, never a value. */
@@ -134,7 +146,13 @@ internal object ScalarColumnTypes {
      * front of it: a DAO id column wraps the real column type, and a `transform`ed column wraps
      * the type it is stored as. Reading the wrapper instead would classify a `varchar` DAO key as
      * [ScalarColumnKind.OTHER] and refuse a shape the store handles perfectly well.
+     *
+     * THE ONE OWNER of that question. Anything else asking what a column's type is — including
+     * [TimestampBinder], which binds through it — asks here, or a DAO-id instant is refused in one
+     * place and accepted in every other.
      */
+    fun unwrap(column: Column<*>): IColumnType<*> = unwrap(column.columnType)
+
     private fun unwrap(columnType: IColumnType<*>): IColumnType<*> = when (columnType) {
         is EntityIDColumnType<*> -> unwrap(columnType.idColumn.columnType)
         is ColumnWithTransform<*, *> -> unwrap(columnType.originalColumnType)
