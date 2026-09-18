@@ -142,7 +142,7 @@ internal class MembershipTranslator(private val translation: Translation) {
         // mapping got the definite reading for `in` and the omitted one for `eq`
         // (docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
         val explicitNulls = translation.leaf.isExplicitNull(member)
-        return translation.subqueries.chainContains(collection) { alias ->
+        val contains = translation.subqueries.chainContains(collection) { alias ->
             val elementColumn = alias[element.column]
             val equality = EqOp(elementColumn, member.expression)
             if (!explicitNulls) {
@@ -154,6 +154,16 @@ internal class MembershipTranslator(private val translation: Translation) {
                 )
             }
         }
+        if (explicitNulls) return contains
+        // A NULL MEMBER under the omitted convention sends no attribute at all, so CEL raises and
+        // `check()` denies under BOTH polarities. Over a chain the count guard already carries
+        // that; over a DIRECT relation the existence test is a plain `EXISTS`, which is two-valued
+        // — it reads the UNKNOWN body as "no element matched" and answers FALSE, and `NOT FALSE`
+        // hands the row back. Only the row-level witness keeps both polarities excluding it, the
+        // same shape [projectionIntersects] uses for its own NULL witness. A NULL ELEMENT needs no
+        // guard: under the scalar-projection view it IS the null element, so CEL's own answer for
+        // it is a definite FALSE and the `EXISTS` collapse is exactly right.
+        return TriLogic.baseUnlessUnknown(contains, IsNullOp(member.expression))
     }
 
     /**

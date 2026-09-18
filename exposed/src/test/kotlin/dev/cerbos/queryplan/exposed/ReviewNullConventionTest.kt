@@ -13,7 +13,6 @@ import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import java.nio.file.Path
@@ -49,7 +48,6 @@ class ReviewNullConventionTest {
     }
 
     @Test
-    @Disabled("REVIEW FINDING 2: !in(attr, collection) is a two-valued NOT EXISTS, so a NULL member readmits every row")
     fun `a negated membership must stay UNKNOWN when the member column is NULL`() {
         // CEL: `!(R.attr.owner in R.attr.tagNames)` (`in-var-var-neg`), under the OMITTED
         // call-level option — a fully supported configuration, and one that makes this finding
@@ -62,9 +60,9 @@ class ReviewNullConventionTest {
         // `check()` is a missing-attribute deny, both come back.
         //
         // d3's owner is "a" and its only element is "b": a determined FALSE, so the negation
-        // genuinely allows it. Recommended fix: when the member is not explicit-null, guard the
-        // existence test with `TriLogic.baseUnlessUnknown(exists, IsNullOp(member.expression))`,
-        // the way projectionIntersects guards its own NULL witness.
+        // genuinely allows it. The existence test is now guarded with
+        // `TriLogic.baseUnlessUnknown(exists, IsNullOp(member.expression))` whenever the member is
+        // not explicit-null, the way projectionIntersects guards its own NULL witness.
         val omitted = Options.of(UNDECLARED)
             .withNullAttributeRepresentation(NullAttributeRepresentation.OMITTED)
         assertEquals(
@@ -90,12 +88,17 @@ class ReviewNullConventionTest {
 
     @Test
     fun `under the OMITTED option the undeclared member gets the plain equality it should`() {
-        // Proof that the fallback is the whole mechanism: flipping the call-level option changes
-        // the SQL of a mapping that declares nothing, which per ADR 0004 it must not.
+        // The two halves of the fix, told apart by WHERE the `IS NULL` is. Inside the subquery it
+        // would be the null-matching disjunct only a DECLARED convention earns (finding 3);
+        // outside it, over the MEMBER column, it is the witness that keeps a missing attribute
+        // UNKNOWN under both polarities (finding 2). The undeclared mapping gets the second and
+        // not the first, and the call-level option no longer moves either.
         val omitted = Options.of(UNDECLARED)
             .withNullAttributeRepresentation(NullAttributeRepresentation.OMITTED)
         val op = ExposedQueryPlanAdapter.toFilter(wireFixture("in-var-var"), omitted).toOp()
-        assertFalse(render(op).contains("IS NULL"), render(op))
+        assertFalse(render(op).contains("\"name\" IS NULL"), render(op))
+        assertTrue(render(op).contains("REVIEW_DOCS.OWNER IS NULL"), render(op))
+        assertEquals(render(translate("in-var-var", UNDECLARED)), render(op))
         assertEquals(listOf("d2"), idsOf(op))
     }
 
