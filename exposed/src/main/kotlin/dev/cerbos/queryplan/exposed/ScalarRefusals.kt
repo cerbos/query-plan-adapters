@@ -199,16 +199,6 @@ internal object ScalarRefusals {
     )
 
     /**
-     * A NaN or a signed infinity — what CEL division by zero produces — that would have to be
-     * combined with a COLUMN by `+`, `-`, `*` or `/`.
-     *
-     * The division itself stays symbolic ([ArithmeticValues]), and every arm folds while the other
-     * operand is a constant: `NaN + 1.0` is NaN, `+Infinity + 1.0` is +Infinity. A column operand
-     * ends that. There is no literal to bind, and no single constant to fold to either — an
-     * infinity times a column is +Infinity, -Infinity or NaN according to that column's sign, and
-     * the sign is not known until the row is read.
-     */
-    /**
      * A NaN or an infinity that reached the one place this adapter binds a constant.
      *
      * The backstop under [nonFiniteInArithmetic], which is where a non-finite value is actually
@@ -223,6 +213,16 @@ internal object ScalarRefusals {
             "driver rejects the parameter outright.",
     )
 
+    /**
+     * A NaN or a signed infinity — what CEL division by zero produces — that would have to be
+     * combined with a COLUMN by `+`, `-`, `*` or `/`.
+     *
+     * The division itself stays symbolic ([ArithmeticValues]), and every arm folds while the other
+     * operand is a constant: `NaN + 1.0` is NaN, `+Infinity + 1.0` is +Infinity. A column operand
+     * ends that. There is no literal to bind, and no single constant to fold to either — an
+     * infinity times a column is +Infinity, -Infinity or NaN according to that column's sign, and
+     * the sign is not known until the row is read.
+     */
     fun nonFiniteInArithmetic(): UnsupportedPlanShapeException = Refusals.unsupported(
         "arithmetic between a column and the NaN or infinity a zero denominator produces is not " +
             "supported: SQL has no literal for either value, and neither folds to one constant " +

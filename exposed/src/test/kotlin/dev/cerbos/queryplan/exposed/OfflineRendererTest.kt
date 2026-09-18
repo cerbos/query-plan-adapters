@@ -31,6 +31,12 @@ import java.sql.DatabaseMetaData
 import java.sql.DriverManager
 
 /**
+ * Tags the cases that start a real database server to cross-check the offline stub. The build
+ * excludes it on the store legs; see the banner above those cases.
+ */
+internal const val SERVER_CROSS_CHECK: String = "server-cross-check"
+
+/**
  * Proves the offline renderer renders what a real server would.
  *
  * Two halves. The first runs everywhere and pins that the four dialects are genuinely four — that
@@ -45,13 +51,6 @@ import java.sql.DriverManager
  * adapter depends on: identifier case folding, keyword quoting, `LIKE … ESCAPE`, a correlated
  * subquery over an alias, the boolean literal, and a bound double.
  */
-
-/**
- * Tags the cases that start a real database server to cross-check the offline stub. The build
- * excludes it on the store legs; see the banner above those cases.
- */
-internal const val SERVER_CROSS_CHECK: String = "server-cross-check"
-
 class OfflineRendererTest {
 
     private object Resources : Table("offline_resources") {
