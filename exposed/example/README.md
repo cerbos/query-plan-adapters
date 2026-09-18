@@ -152,8 +152,10 @@ to.
 
 What it proves is a claim about the adapter's return **type**: that it hands back an ordinary Exposed
 predicate rather than a query it built, so the same value satisfies `Query.where { }` and
-`EntityClass.find { }` alike. No suite under `../src/test` asks it, because none of them builds a DAO
-entity, and `exposed-dao` is not on the adapter's compile classpath at all.
+`EntityClass.find { }` alike. `ExposedSurfaceTest` asks the same question of an in-process H2, so
+what this adds is the *packaged* half: `exposed-dao` is not on the adapter's compile classpath at
+all — it is a test-only dependency there, and a dependency this example brings for itself — so this
+is where a DAO entity meets the adapter as a resolved coordinate rather than as a source set.
 
 ## The mapping
 
