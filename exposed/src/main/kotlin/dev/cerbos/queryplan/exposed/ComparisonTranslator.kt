@@ -362,6 +362,19 @@ internal class ComparisonTranslator(private val translation: Translation) {
             if (value == null) throw Refusals.unsupported("string() cannot be compared against a null constant")
             Params.of(value)
         }
+        // The other side of the comparison may be a plain column, which stands for its own text.
+        // Only a text one: a numeric or temporal column compared against a rendered string would
+        // be coerced by the store rather than compared as CEL compares two strings.
+        is Resolved.Field -> {
+            val target = scope.scalar(resolved.variable)
+            if (ScalarColumnTypes.kindOf(target.column) != ScalarColumnKind.TEXT) {
+                throw Refusals.unmapped(
+                    "string() compared against '${resolved.variable}' requires a text column, but " +
+                        "it maps to a ${ScalarColumnTypes.describe(target.column)} column",
+                )
+            }
+            target.expression
+        }
         else -> throw leafOperandError("string", listOf(operand))
     }
 
