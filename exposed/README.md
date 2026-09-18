@@ -287,9 +287,14 @@ The same hole existed for the string matches, `size()` and the hierarchy operato
 column: CEL has no overload there either, so it raises and denies, while `a_number LIKE '%2%'` is
 TRUE for `123` on MySQL and SQLite and `CHAR_LENGTH(1)` is `1`.
 
-**What to do about it.** Map the attribute onto a column of the constant's type, or compare it
-against a value of the column's type. It is an `UnmappedAttributeException` rather than an
-`UnsupportedPlanShapeException` for that reason: the plan is fine, and the fix is in your mapping.
+**What to do about it**, which is what the message itself says. Compare the attribute against a
+value of the column's own type, or map it onto one of the kinds this adapter compares: text,
+integer, floating-point, decimal or boolean. A temporal column is compared by wrapping both sides in
+`timestamp()`. The remedy is put that way rather than as "map it onto a column of the constant's
+type", because for a column whose kind the adapter has no CEL reading for there is no such column to
+reach for — a `UUIDTable` id is an `EntityIDColumnType(UUIDColumnType)`, so `request.resource.id == "…"`
+is refused and no remapping makes the id a string. It is an `UnmappedAttributeException` rather than
+an `UnsupportedPlanShapeException` all the same: the plan is fine, and the fix is in your mapping.
 
 ### A resolver instead of a table
 
