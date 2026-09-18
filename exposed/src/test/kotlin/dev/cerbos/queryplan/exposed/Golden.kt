@@ -236,6 +236,21 @@ internal class Golden(
         /** The entry for an action the planner folded to a constant: a kind and nothing else. */
         fun entry(kind: String): ObjectNode = JSON.createObjectNode().put(KIND_KEY, kind)
 
+        /**
+         * [node] as the asset stores it: encoded and parsed back.
+         *
+         * A built entry and the one [read] returns have to be `equals`, because that comparison IS
+         * the translator unit test. Jackson's numeric nodes are TYPED, and its parser picks the type
+         * from the value rather than from how the node was built — a bound `1L` written with
+         * `putLong` is an `IntNode` when it comes back, and `LongNode(1) != IntNode(1)`. So every
+         * entry is put through the encoding once here rather than each caller comparing two
+         * in-memory spellings of the same bytes. It costs nothing in discrimination: `1` and `1.0`
+         * still parse to different nodes, which is the integer-versus-double bind the recorded
+         * parameters exist to catch.
+         */
+        private fun storedForm(node: ObjectNode): ObjectNode =
+            JSON.readTree(JSON.writeValueAsString(node)) as ObjectNode
+
         /** The entry for a conditional action: the kind, and the rendering under every dialect. */
         fun entry(rendered: Map<String, Rendered>): ObjectNode {
             require(rendered.keys.toList() == OfflineRenderer.DIALECTS) {
@@ -263,7 +278,7 @@ internal class Golden(
                     }
                 }
             }
-            return node
+            return storedForm(node)
         }
 
         /** Two-space indent, no space before a colon, LF line endings — the other assets' shape. */

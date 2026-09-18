@@ -58,6 +58,41 @@ class GoldenTest {
     }
 
     @Test
+    fun `a numeric bind round-trips, whichever Kotlin type it was bound through`(@TempDir directory: Path) {
+        // The comparison a translator unit test makes is `entry(…) == read()[action]`, so a built
+        // entry and a parsed one have to be equal. Jackson's numeric nodes are typed and its PARSER
+        // picks the type from the value: a `1L` written with `putLong` reads back as an `IntNode`,
+        // and `LongNode(1) != IntNode(1)`. Without `Golden.storedForm` every action binding a small
+        // integer — the whole `gt-bare` / `vf-le` / `neg-number` family — fails the comparison it
+        // has just satisfied byte for byte.
+        val binds = listOf(
+            RenderedParam.of("LongColumnType", 1L),
+            RenderedParam.of("LongColumnType", -7L),
+            // Past Int.MAX_VALUE, where Jackson does parse a LongNode: the fix must not turn every
+            // integer into an int.
+            RenderedParam.of("LongColumnType", 9_000_000_000L),
+            RenderedParam.of("DoubleColumnType", 1.5),
+            // A whole double is the one the two spellings would confuse: `1.0` must stay a double,
+            // because `aNumber = 1` and `aNumber = 1.0` bind different SQL types.
+            RenderedParam.of("DoubleColumnType", 1.0),
+        )
+        val built = Golden.entry(
+            OfflineRenderer.DIALECTS.associateWith { Rendered("a_number > ? AND a_double > ?", binds) },
+        )
+
+        val golden = golden(directory)
+        golden.write(mapOf("gt-bare" to built))
+        assertEquals(built, golden.read().getValue("gt-bare"))
+
+        // …and the types survive as themselves, which is what the recorded parameters are for.
+        val params = json.readTree(Files.readString(golden.file))
+            .get("expectations").get("gt-bare").get("rendered").get("sqlite").get("params")
+        assertTrue(params.get(0).get(Golden.PARAM_VALUE_KEY).isIntegralNumber)
+        assertTrue(params.get(2).get(Golden.PARAM_VALUE_KEY).isIntegralNumber)
+        assertTrue(params.get(4).get(Golden.PARAM_VALUE_KEY).isFloatingPointNumber)
+    }
+
+    @Test
     fun `a missing file is written rather than refused`(@TempDir directory: Path) {
         val golden = golden(directory)
         assertFalse(Files.exists(golden.file))
