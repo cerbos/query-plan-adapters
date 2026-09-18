@@ -121,5 +121,9 @@ echo "==> dev.cerbos:${ARTIFACT_ID} resolved from ${adapter_jar}" >&2
 #    refuses to start without it, so a start script that stopped forwarding would fail loudly
 #    rather than pick a directory of its own. CERBOS_HOST comes from the runner and is inherited;
 #    the program refuses to start without that too.
+#
+#    The value is wrapped in double quotes INSIDE the variable. The generated start script splits
+#    JAVA_OPTS into words itself (through `xargs`, which honours quotes), so an unquoted path
+#    holding a space would arrive as two arguments and the program would be handed half a path.
 echo "==> ${LAUNCHER}" >&2
-JAVA_OPTS="-Ddemo.dir=${REPO_ROOT}/demo" exec "${LAUNCHER}"
+JAVA_OPTS="\"-Ddemo.dir=${REPO_ROOT}/demo\"" exec "${LAUNCHER}"
