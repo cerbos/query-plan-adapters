@@ -13,9 +13,19 @@ public class Options private constructor(
     /** The call-level NULL convention; an [AttributeMapping.Field] may override it. */
     public val nullAttributeRepresentation: NullAttributeRepresentation,
     /**
-     * How deeply collection macros (`exists`, `all`, `exists_one`, …) may nest. Each level
-     * multiplies the correlated subqueries the filter carries, so the bound is a cost guard, and a
-     * plan nested past it is refused rather than emitted.
+     * How deeply collection macros (`exists`, `all`, `exists_one`, …) may nest before a plan is
+     * refused rather than translated.
+     *
+     * The bound counts MACRO LEVELS, of both kinds the walk distinguishes, because both multiply.
+     * A macro over a mapped relation costs a level because it emits a correlated subquery, and a
+     * nested one emits that subquery once per enclosing level. A macro over a LITERAL list emits no
+     * subquery at all — it substitutes each element into the lambda body and walks the resulting
+     * `or`/`and` chain — but it duplicates everything under it once per element, so it costs a
+     * level too: the bound is on the size of the emitted expression, not only on its subquery
+     * count.
+     *
+     * It bounds nothing else. A relation CHAIN is one level however many hops it has, and so is a
+     * `size()`, a membership test or a hierarchy relation over one.
      */
     public val maxMacroDepth: Int,
 ) {

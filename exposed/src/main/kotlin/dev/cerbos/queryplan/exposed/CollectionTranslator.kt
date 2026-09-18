@@ -44,8 +44,16 @@ internal class CollectionTranslator(private val translation: Translation) {
         // itself: at 10 elements or fewer it folds exists/all into an or/and chain, above that the
         // lambda ships with the folded list as its collection operand. Applying the same fold here
         // is what keeps the translation independent of which side of that threshold it landed on.
+        //
+        // It costs a macro level like any other. The fold emits no subquery of its own, but it
+        // DUPLICATES everything under it once per element, so two three-element folds over one
+        // relation macro emit nine correlated subqueries and an eleven-element pair emits 121.
+        // Reaching it before [PlanWalker.enterMacro] left the emitted expression unbounded whatever
+        // [Options.maxMacroDepth] was set to.
         if (collectionOperand.nodeCase == Operand.NodeCase.VALUE) {
-            return foldKnownValues(operator, collectionOperand.value, lambdaOperand, scope)
+            return translation.walker.enterMacro(operator) {
+                foldKnownValues(operator, collectionOperand.value, lambdaOperand, scope)
+            }
         }
         if (collectionOperand.nodeCase != Operand.NodeCase.VARIABLE) {
             throw RelationRefusals.computedCollection(operator)
