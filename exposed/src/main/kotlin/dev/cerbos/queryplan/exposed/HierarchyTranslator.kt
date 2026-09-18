@@ -72,11 +72,32 @@ internal class HierarchyTranslator(private val translation: Translation) {
             throw Refusals.malformed("Cannot determine hierarchy overlap: no field references found")
         }
         // An empty condition list means every compared segment was a matching constant, so the
-        // overlap holds unconditionally.
-        if (valid.any { it.isEmpty() }) return Op.TRUE
-        // Both directions compare the same segment pairs when the lengths are equal, so either
-        // condition set is equivalent.
-        return TriLogic.and(valid.first())
+        // overlap holds for every row that HAS the segments — and the two directions compare the
+        // same segment pairs when the lengths are equal, so either condition set is equivalent.
+        val base = if (valid.any { it.isEmpty() }) Op.TRUE else TriLogic.and(valid.first())
+        return requirePresent(base, leftSegments, rightSegments)
+    }
+
+    /**
+     * [base], made UNKNOWN when a column segment the prefix test never READ is NULL.
+     *
+     * A prefix test only compares the first `min(n, m)` segments, so the longer path's tail is
+     * decided by nothing — and when every compared pair is a matching literal the answer folds to a
+     * constant with that tail still in the expression. The tail is a column read all the same: a
+     * NULL there means the caller sent no attribute, `hierarchy([...])` raises inside CEL and
+     * `check()` denies, while a two-valued `Op.TRUE` returns the row and `NOT (Op.FALSE)` returns
+     * it too. Every segment INSIDE the compared prefix already carries its own three-valued `=`.
+     */
+    private fun requirePresent(
+        base: Op<Boolean>,
+        leftSegments: List<Segment>,
+        rightSegments: List<Segment>,
+    ): Op<Boolean> {
+        val compared = minOf(leftSegments.size, rightSegments.size)
+        val unread = (leftSegments.drop(compared) + rightSegments.drop(compared))
+            .filterIsInstance<Segment.FieldSegment>()
+        if (unread.isEmpty()) return base
+        return TriLogic.baseUnlessUnknown(base, TriLogic.or(unread.map { IsNullOp(it.expression) }))
     }
 
     private fun fieldOverlaps(left: Hierarchy, right: Hierarchy): Op<Boolean> {

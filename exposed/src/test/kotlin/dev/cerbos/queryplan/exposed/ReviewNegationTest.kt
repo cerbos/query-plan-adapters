@@ -13,7 +13,6 @@ import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 
 /**
@@ -110,20 +109,17 @@ class ReviewNegationTest {
     }
 
     @Test
-    @Disabled("REVIEW FINDING 5: an unconditional hierarchy overlap folds to Op.TRUE while a column segment is still in the path")
     fun `a hierarchy overlap that ignores its column segment must still deny the NULL rows`() {
         // CEL: `hierarchy("projects", ":").overlaps(hierarchy(["projects", R.attr.scope]))` —
         // the `hier-list-id` corpus shape with a ONE-segment constant, so the constant is a prefix
         // of the list whatever the column holds.
         //
-        // HierarchyTranslator.overlaps (HierarchyTranslator.kt:76) folds that to `Op.TRUE`
-        // because every COMPARED segment pair was two matching literals. The uncompared segment is
-        // still a column read, though: for a row whose `scope` is NULL the caller sends no
-        // attribute, `hierarchy([...])` raises inside CEL and `check()` denies — and `Op.TRUE`
-        // returns it. Recommended fix: fold to
-        // `TriLogic.baseUnlessUnknown(Op.TRUE, or(<every uncompared FieldSegment> IS NULL))`,
-        // which is the guard the same method already applies on its `valid.isEmpty()` branch
-        // (HierarchyTranslator.kt:69).
+        // HierarchyTranslator.overlaps folded that to `Op.TRUE` because every COMPARED segment
+        // pair was two matching literals. The uncompared segment is still a column read, though:
+        // for a row whose `scope` is NULL the caller sends no attribute, `hierarchy([...])` raises
+        // inside CEL and `check()` denies — and `Op.TRUE` returned it. Both answers now carry
+        // `TriLogic.baseUnlessUnknown(base, or(<every unread FieldSegment> IS NULL))`, which is the
+        // guard the same method already applied on its `valid.isEmpty()` branch.
         val overlap = ReviewPlans.expression(
             "overlaps",
             ReviewPlans.expression("hierarchy", ReviewPlans.value("projects"), ReviewPlans.value(":")),
