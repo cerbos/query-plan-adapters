@@ -1,17 +1,20 @@
 package dev.cerbos.queryplan.exposed
 
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand
+import org.jetbrains.exposed.v1.core.EqOp
 import org.jetbrains.exposed.v1.core.Op
 import org.jetbrains.exposed.v1.core.Table
+import org.jetbrains.exposed.v1.core.longParam
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Disabled
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import org.testcontainers.mysql.MySQLContainer
 
 /**
@@ -20,54 +23,70 @@ import org.testcontainers.mysql.MySQLContainer
  * `ScalarColumnTypes` is described as "the adapter's one advantage over the plan": the column
  * carries the type the plan does not. `ConcatTranslator` uses it to keep `text + text` out of SQL
  * arithmetic, `ArithmeticTranslator` refuses arithmetic over a non-numeric column, and `string()`
- * refuses a column whose SQL rendering is not CEL's. The plain equality family consults it only to
+ * refuses a column whose SQL rendering is not CEL's. The plain equality family consulted it only to
  * decide whether to cast into double space, and never to refuse — so a numeric constant against a
- * text column is bound and compared, and the store decides what that means.
+ * text column was bound and compared, and the store decided what that meant.
+ *
+ * It now refuses. [ColumnTypeGuardTest] is the whole rule, across every operator and both operand
+ * orders; what stays here is the store evidence that made the rule necessary.
  */
 class ReviewOperandTypeTest {
 
     @Test
-    @Disabled("REVIEW FINDING 1: a numeric constant against a text column is emitted rather than refused, and MySQL's implicit coercion makes it match almost every row")
     @Tag("docker")
-    fun `a numeric constant against a text column must not match on MySQL`() {
+    fun `a numeric constant against a text column never reaches MySQL`() {
         // CEL: `R.attr.aString == 0`. Legal over a `dyn` attribute — and the shape a policy lands
         // in whenever a principal attribute that folds to a number is compared against a string
         // attribute, e.g. `R.attr.aString == P.attr.level`. CEL's `==` is heterogeneous-safe and
         // answers FALSE for every row.
         //
-        // LeafTranslator.defaultLeaf (LeafTranslator.kt:123) emits `A_STRING = ?` with the
-        // constant bound by the VALUE's type, so MySQL compares a string against a number by
-        // coercing the STRING: 'abc' becomes 0 and `0 = 0` is TRUE. Every row whose text does not
-        // start with a digit comes back — the same over-grant `conformance/README.md` records for
-        // `concat-f2f` ("MySQL … `0 = 'oneset'` coerces the CONSTANT to 0 too … a silent
-        // over-grant"), reached here without any `add` for ConcatTranslator to catch.
+        // LeafTranslator.defaultLeaf used to emit `A_STRING = ?` with the constant bound by the
+        // VALUE's type, so MySQL compared a string against a number by coercing the STRING: 'abc'
+        // becomes 0 and `0 = 0` is TRUE. Every row whose text does not start with a digit came
+        // back — the same over-grant `conformance/README.md` records for `concat-f2f` ("MySQL …
+        // `0 = 'oneset'` coerces the CONSTANT to 0 too … a silent over-grant"), reached here
+        // without any `add` for ConcatTranslator to catch.
         //
-        // Recommended fix: refuse in LeafTranslator when `ScalarColumnTypes.kindOf(target.column)`
-        // is TEXT and the constant is a Number (or the converse) for the whole comparison family.
-        // CEL decides those comparisons without looking at the column, so the refusal costs
-        // nothing a policy can reach and closes a store-dependent over-grant.
+        // The fix REFUSES rather than folding, which is why this asserts an exception where the
+        // review asked for an empty id list: `Op.FALSE` would be right under the positive polarity
+        // and wrong under a negation, where CEL denies a row whose attribute is MISSING; a
+        // three-valued fold would then have to guess the null convention of an attribute the
+        // policy never mentions. The reviewer's own recommendation was a refusal, and this is it.
+        // The server leg stays because the coercion it demonstrates is the whole justification.
         withMySql { ids ->
-            assertEquals(emptyList<String>(), ids(numericAgainstText()))
+            val error = assertThrows<UnmappedAttributeException> { ids(numericAgainstText()) }
+            assertTrue(error.message!!.contains("maps to a VarCharColumnType column"), error.message)
+            // …and the predicate the adapter USED to emit, built by hand here, still returns every
+            // seeded row against this very server. The refusal is not theoretical.
+            assertEquals(listOf("d1", "d2", "d3"), ids.raw(EqOp(TypedDocs.aString, longParam(0))))
         }
     }
 
     @Test
     fun `the same comparison is a loud failure on H2 rather than a silent over-grant`() {
-        // Not a defect on this store, and the reason the four-store conformance run did not catch
-        // it: H2 raises a conversion error, so the shape is loud here and silent on MySQL. The
-        // corpus carries no action that compares a text attribute with a numeric constant.
+        // Why the four-store conformance run did not catch this: H2 raised a conversion error, so
+        // the shape was loud here and silent on MySQL. It is still a loud failure — now the
+        // adapter's own named refusal, raised before a statement exists, on every store alike.
         val error = runCatching { idsOnH2(numericAgainstText()) }.exceptionOrNull()
         assertEquals(true, error != null, "H2 accepted a numeric constant against a VARCHAR column")
+        assertEquals(UnmappedAttributeException::class, error!!::class)
     }
 
     @Test
-    fun `the emitted predicate binds the constant by its own type, with no column-kind check`() {
-        // The shape behind finding 1, pinned offline: one bare equality, a Long bound through
-        // LongColumnType, and nothing that consults the column's TEXT kind.
+    fun `a constant of the column's own type is still bound by the VALUE's type`() {
+        // The control that keeps the fix honest. Binding by the value's type is what stops
+        // `aNumber >= 1.5` becoming `>= 1`, so the kind check must reject the mismatched constant
+        // WITHOUT reaching for the column's type to bind the matching one.
         val rendered = OfflineRenderer.render(
             OfflineRenderer.translate {
                 ExposedQueryPlanAdapter.toFilter(
-                    ReviewPlans.conditional(numericAgainstText()),
+                    ReviewPlans.conditional(
+                        ReviewPlans.expression(
+                            "eq",
+                            ReviewPlans.variable("request.resource.attr.aString"),
+                            ReviewPlans.value("abc"),
+                        ),
+                    ),
                     Options.of(MAPPING),
                 ).toOp()
             },
@@ -75,8 +94,8 @@ class ReviewOperandTypeTest {
         OfflineRenderer.DIALECTS.forEach { dialect ->
             val one = rendered.getValue(dialect)
             assertEquals(1, one.params.size, "$dialect: ${one.sql}")
-            assertEquals("LongColumnType", one.params[0].type, "$dialect: ${one.sql}")
-            assertEquals(0L, one.params[0].value, "$dialect: ${one.sql}")
+            assertEquals("TextColumnType", one.params[0].type, "$dialect: ${one.sql}")
+            assertEquals("abc", one.params[0].value, "$dialect: ${one.sql}")
         }
     }
 
@@ -112,11 +131,25 @@ class ReviewOperandTypeTest {
         }
 
         /**
+         * The two questions the MySQL leg asks: what the ADAPTER does with a plan, and what the
+         * server does with a predicate handed to it directly.
+         */
+        class MySqlQueries(private val database: Database) {
+            /** Translates [condition] and runs it; the translation may refuse before any SQL. */
+            operator fun invoke(condition: Operand): List<String> = raw(op(condition))
+
+            /** Runs an already-built predicate, adapter-emitted or not. */
+            fun raw(predicate: Op<Boolean>): List<String> = transaction(database) {
+                TypedDocs.selectAll().where(predicate).map { it[TypedDocs.id] }.sorted()
+            }
+        }
+
+        /**
          * Runs [body] against a throwaway MySQL server, pinned by `exposed/MYSQL_IMAGE` and
          * configured exactly as the conformance harness configures its own MySQL leg — a case- and
          * accent-sensitive collation, so nothing below can be blamed on MySQL's default.
          */
-        fun withMySql(body: ((Operand) -> List<String>) -> Unit) {
+        fun withMySql(body: (MySqlQueries) -> Unit) {
             val container = MySQLContainer(DatabaseTestImages.MYSQL)
                 .withCommand(
                     "--character-set-server=utf8mb4",
@@ -131,11 +164,7 @@ class ReviewOperandTypeTest {
                     password = container.password,
                 )
                 transaction(database) { seed() }
-                body { condition ->
-                    transaction(database) {
-                        TypedDocs.selectAll().where(op(condition)).map { it[TypedDocs.id] }.sorted()
-                    }
-                }
+                body(MySqlQueries(database))
             } finally {
                 container.stop()
             }

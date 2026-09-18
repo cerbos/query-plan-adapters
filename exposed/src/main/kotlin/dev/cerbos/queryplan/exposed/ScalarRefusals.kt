@@ -1,6 +1,8 @@
 package dev.cerbos.queryplan.exposed
 
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand
+import dev.cerbos.queryplan.exposed.sql.ScalarColumnTypes
+import org.jetbrains.exposed.v1.core.Column
 
 /**
  * The scalar side's named refusals: the ones raised from more than one place, and the ones whose
@@ -56,6 +58,67 @@ internal object ScalarRefusals {
             "the declared side needs a definite answer for its NULL while the undeclared side " +
             "needs UNKNOWN, and no single predicate is both. Declare the convention on both " +
             "mappings, or on neither.",
+    )
+
+    /**
+     * A column operand of a string match or of `size()` whose declared type is not text.
+     *
+     * THE ONE FACTORY for that requirement: the haystack and the column needle of `contains`,
+     * `startsWith` and `endsWith`, the column a hierarchy path is read from, and the argument of
+     * `size()` all raise it, so the reasoning is stated once.
+     *
+     * CEL has no such overload for a number, a boolean or a timestamp, so at check time the
+     * expression raises a no-overload error and `check()` DENIES. SQL does not agree and does not
+     * agree with itself: MySQL and SQLite coerce the column and MATCH (`123 LIKE '%2%'` is TRUE,
+     * `CHAR_LENGTH(1)` is 1) while PostgreSQL aborts the statement, so the same policy is a silent
+     * over-grant on one store and a runtime failure on another. [ArithmeticTranslator] refuses the
+     * symmetric case — a non-numeric column in arithmetic — for the same reason.
+     */
+    fun textColumnRequired(operator: String, variable: String, column: Column<*>): UnmappedAttributeException =
+        Refusals.unmapped(
+            "$operator over '$variable' requires a text column, but it maps to a " +
+                "${ScalarColumnTypes.describe(column)} column. CEL has no $operator overload for " +
+                "that type, so the expression raises a no-overload error and denies, while SQL " +
+                "coerces the column — MySQL and SQLite match and PostgreSQL aborts the statement.",
+        )
+
+    /**
+     * A plan constant whose TYPE is not one the mapped column holds.
+     *
+     * `R.attr.aString == P.attr.level` is legal CEL and arrives as `eq(variable, value)` with
+     * nothing in it naming a type. CEL answers it from the VALUES alone — equality is a definite
+     * FALSE for a present attribute and every ordering is a no-overload error — where SQL has to
+     * coerce one side, and MySQL coerces the COLUMN: `'abc' = 0` is TRUE there, so the filter
+     * returns every row the PDP denies. Reports the constant's TYPE only; values never leak.
+     */
+    fun constantTypeMismatch(
+        operator: String,
+        variable: String,
+        column: Column<*>,
+        value: Any,
+    ): UnmappedAttributeException = Refusals.unmapped(
+        "$operator compares '$variable' against a ${PlanValues.typeName(value)} constant, but it " +
+            "maps to a ${ScalarColumnTypes.describe(column)} column. CEL decides a comparison " +
+            "between those from the values alone — equality is false and an ordering raises a " +
+            "no-overload error — while SQL coerces one side, and MySQL coerces the column, so the " +
+            "filter returns rows the PDP denies. Map the attribute onto a column of the " +
+            "constant's type, or compare it against a value of the column's type.",
+    )
+
+    /** [constantTypeMismatch] between two mapped columns: the same coercion, neither side constant. */
+    fun columnTypeMismatch(
+        operator: String,
+        leftVariable: String,
+        leftColumn: Column<*>,
+        rightVariable: String,
+        rightColumn: Column<*>,
+    ): UnmappedAttributeException = Refusals.unmapped(
+        "$operator compares '$leftVariable' with '$rightVariable', which map to a " +
+            "${ScalarColumnTypes.describe(leftColumn)} and a " +
+            "${ScalarColumnTypes.describe(rightColumn)} column. CEL decides a comparison between " +
+            "those from the values alone — equality is false and an ordering raises a no-overload " +
+            "error — while SQL coerces one side, and MySQL coerces the text one, so the filter " +
+            "returns rows the PDP denies. Map both attributes onto columns of one type.",
     )
 
     /**

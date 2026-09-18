@@ -49,6 +49,14 @@ internal enum class ScalarColumnKind {
     OTHER,
 }
 
+/**
+ * The CEL value space a column's declared type compares in.
+ *
+ * Coarser than [ScalarColumnKind] on purpose: `string()` and the fractional cast care WHICH numeric
+ * type a column is, and a comparison does not — CEL compares an int and a double numerically.
+ */
+internal enum class ScalarValueFamily { TEXT, NUMERIC, BOOLEAN }
+
 internal object ScalarColumnTypes {
 
     fun kindOf(column: Column<*>): ScalarColumnKind = when (unwrap(column.columnType)) {
@@ -66,6 +74,56 @@ internal object ScalarColumnTypes {
     fun isNumeric(column: Column<*>): Boolean = when (kindOf(column)) {
         ScalarColumnKind.INTEGRAL, ScalarColumnKind.FLOATING, ScalarColumnKind.DECIMAL -> true
         else -> false
+    }
+
+    /** Whether CEL's string matches and `size()` have an overload for this column's values. */
+    fun isText(column: Column<*>): Boolean = kindOf(column) == ScalarColumnKind.TEXT
+
+    /**
+     * The family [column] compares in, or `null` for a type this adapter has no CEL reading for.
+     *
+     * A `null` is FAIL-CLOSED everywhere it is consulted: a temporal, binary, array, enum or custom
+     * column reaching a plain comparison is refused rather than compared, because what a store does
+     * with a mismatched operand is store-specific and silent. Widening this is a deliberate act —
+     * add the type to [kindOf] once its CEL reading is known.
+     */
+    fun familyOf(column: Column<*>): ScalarValueFamily? = when (kindOf(column)) {
+        ScalarColumnKind.TEXT -> ScalarValueFamily.TEXT
+        ScalarColumnKind.INTEGRAL, ScalarColumnKind.FLOATING, ScalarColumnKind.DECIMAL ->
+            ScalarValueFamily.NUMERIC
+        ScalarColumnKind.BOOLEAN -> ScalarValueFamily.BOOLEAN
+        ScalarColumnKind.OTHER -> null
+    }
+
+    /** The family a non-null plan constant compares in, or `null` for a value no column holds. */
+    fun familyOf(value: Any): ScalarValueFamily? = when (value) {
+        is String -> ScalarValueFamily.TEXT
+        is Boolean -> ScalarValueFamily.BOOLEAN
+        is Number -> ScalarValueFamily.NUMERIC
+        else -> null
+    }
+
+    /**
+     * Whether a comparison of [column] against a non-null plan constant is one a store decides the
+     * way CEL does.
+     *
+     * A plan names no operand types, so this is the ONLY thing standing between
+     * `R.attr.aString == P.attr.level` — legal CEL, answered FALSE from the values alone — and
+     * `a_string = 3.0`, which MySQL decides by coercing the COLUMN to a number.
+     */
+    fun accepts(column: Column<*>, value: Any): Boolean {
+        val family = familyOf(column) ?: return false
+        return family == familyOf(value)
+    }
+
+    /** [accepts], for two mapped columns compared against each other. */
+    fun comparable(left: Column<*>, right: Column<*>): Boolean {
+        val leftFamily = familyOf(left)
+        val rightFamily = familyOf(right)
+        // Two types with no CEL reading here — two temporal columns, say. The declared type is the
+        // most this can check, and two columns of ONE type give a store nothing to coerce.
+        if (leftFamily == null && rightFamily == null) return describe(left) == describe(right)
+        return leftFamily != null && leftFamily == rightFamily
     }
 
     /** The name a refusal uses for a column's type; a type, never a value. */

@@ -49,6 +49,16 @@ internal class LeafTranslator(@Suppress("unused") private val translation: Trans
             }
         }
 
+        // The column's DECLARED type against the operand, before anything is emitted. A plan names
+        // no operand types, so this is the only place a comparison CEL decides from the values
+        // alone can be told apart from one a store would decide by coercing the column.
+        if (operator in ComparisonTranslator.STRING_MATCH_OPERATORS) {
+            requireText(operator, target)
+        }
+        if (!ScalarColumnTypes.accepts(target.column, value)) {
+            throw ScalarRefusals.constantTypeMismatch(operator, target.variable, target.column, value)
+        }
+
         // An attribute the caller sends as an explicit null holds a null VALUE in CEL, so equality
         // against a non-null operand is DEFINITE — `null == "x"` is FALSE and `null != "x"` is
         // TRUE — where SQL answers UNKNOWN and excludes the row under both polarities (#308).
@@ -81,6 +91,20 @@ internal class LeafTranslator(@Suppress("unused") private val translation: Trans
      */
     fun isExplicitNull(target: Resolution.Scalar): Boolean =
         target.field.nullAttributeRepresentation == NullAttributeRepresentation.EXPLICIT
+
+    /**
+     * Refuses [target] unless its declared column type is one CEL's string matches and `size()`
+     * have an overload for.
+     *
+     * Public because the same requirement holds wherever a COLUMN reaches a `LIKE` or a character
+     * count without passing through [applyLeaf]: a column needle, a constant receiver's needle, a
+     * hierarchy path, and `size(string)`.
+     */
+    fun requireText(operator: String, target: Resolution.Scalar) {
+        if (!ScalarColumnTypes.isText(target.column)) {
+            throw ScalarRefusals.textColumnRequired(operator, target.variable, target.column)
+        }
+    }
 
     /**
      * An equality that can never be SQL UNKNOWN, for operands the caller sends as explicit nulls.

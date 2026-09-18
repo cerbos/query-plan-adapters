@@ -81,6 +81,9 @@ internal class SizeTranslator(private val translation: Translation) {
      * constant FALSE would return them under a negation.
      */
     private fun stringLength(target: Resolution.Scalar, comparison: Threshold): Op<Boolean> {
+        // `size()` counts characters, and CEL has no overload counting the characters of a number
+        // or a boolean. Checked before the vacuous arms, which are answers about a string's length.
+        translation.leaf.requireText("size()", target)
         val definite = { answer: Boolean ->
             TriLogic.baseUnlessUnknown(if (answer) Op.TRUE else Op.FALSE, IsNullOp(target.expression))
         }

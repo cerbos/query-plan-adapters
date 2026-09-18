@@ -3,6 +3,7 @@ package dev.cerbos.queryplan.exposed
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand
 import dev.cerbos.queryplan.exposed.sql.Params
+import dev.cerbos.queryplan.exposed.sql.ScalarColumnTypes
 import org.jetbrains.exposed.v1.core.Column
 import org.jetbrains.exposed.v1.core.EqOp
 import org.jetbrains.exposed.v1.core.IsNullOp
@@ -106,7 +107,7 @@ internal class MembershipTranslator(private val translation: Translation) {
         val element = collection.tail.element
             ?: throw RelationRefusals.noElementColumn(collection.variable, collection.tail)
         return translation.subqueries.chainContains(collection) { alias ->
-            matchesAnyOf(alias[element.column], values)
+            matchesAnyOf(collection.variable, alias[element.column], values)
         }
     }
 
@@ -126,6 +127,15 @@ internal class MembershipTranslator(private val translation: Translation) {
         val member = scope.scalar(memberVar)
         val element = collection.tail.element
             ?: throw RelationRefusals.noElementColumn(collection.variable, collection.tail)
+        if (!ScalarColumnTypes.comparable(member.column, element.column)) {
+            throw ScalarRefusals.columnTypeMismatch(
+                "in",
+                memberVar,
+                member.column,
+                collectionVar,
+                element.column,
+            )
+        }
         val explicitNulls = (member.field.nullAttributeRepresentation
             ?: translation.options.nullAttributeRepresentation) == NullAttributeRepresentation.EXPLICIT
         return translation.subqueries.chainContains(collection) { alias ->
@@ -190,7 +200,9 @@ internal class MembershipTranslator(private val translation: Translation) {
         val base = if (present.isEmpty()) {
             Op.FALSE
         } else {
-            translation.subqueries.chainContains(collection) { alias -> matchesAnyOf(alias[column], present) }
+            translation.subqueries.chainContains(collection) { alias ->
+                matchesAnyOf(projected, alias[column], present)
+            }
         }
         return TriLogic.baseUnlessUnknown(
             base,
@@ -198,10 +210,24 @@ internal class MembershipTranslator(private val translation: Translation) {
         )
     }
 
-    /** The subquery body of a membership test: the element column against each constant. */
-    private fun matchesAnyOf(element: Column<*>, values: List<Any?>): Op<Boolean> = TriLogic.or(
+    /**
+     * The subquery body of a membership test: the element column against each constant.
+     *
+     * Each element is type-checked against the column for the reason
+     * [ScalarRefusals.constantTypeMismatch] gives — a list of numbers tested against a text element
+     * column is a definite FALSE in CEL and an almost-total match on MySQL. A null element is inert
+     * to the check: it renders as `IS NULL`, which coerces nothing.
+     */
+    private fun matchesAnyOf(reference: String, element: Column<*>, values: List<Any?>): Op<Boolean> = TriLogic.or(
         values.map { value ->
-            if (value == null) IsNullOp(element) else EqOp(element, Params.of(value))
+            if (value == null) {
+                IsNullOp(element)
+            } else {
+                if (!ScalarColumnTypes.accepts(element, value)) {
+                    throw ScalarRefusals.constantTypeMismatch("in", reference, element, value)
+                }
+                EqOp(element, Params.of(value))
+            }
         },
     )
 

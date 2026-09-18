@@ -18,7 +18,7 @@ import org.jetbrains.exposed.v1.core.stringParam
  * a constant or a column. Every relation is decided by PREFIX, and the prefixes are enumerated
  * here from the delimiter, which is why the delimiter has to be known at translation time.
  */
-internal class HierarchyTranslator(@Suppress("unused") private val translation: Translation) {
+internal class HierarchyTranslator(private val translation: Translation) {
 
     fun translate(operator: String, operands: List<Operand>, scope: Scope): Op<Boolean> = when (operator) {
         "overlaps" -> overlaps(operands, scope)
@@ -183,10 +183,10 @@ internal class HierarchyTranslator(@Suppress("unused") private val translation: 
                             "also match the path itself",
                     )
                 }
-                pathOperand(operands[0], delimiter, scope)
+                pathOperand(name, operands[0], delimiter, scope)
             }
             1 -> when (val inner = operands[0].nodeCase) {
-                Operand.NodeCase.VALUE, Operand.NodeCase.VARIABLE -> pathOperand(operands[0], ".", scope)
+                Operand.NodeCase.VALUE, Operand.NodeCase.VARIABLE -> pathOperand(name, operands[0], ".", scope)
                 Operand.NodeCase.EXPRESSION -> {
                     if (operands[0].expression.operator != "list") {
                         throw Refusals.unsupported("hierarchy requires a value, field, or list operand")
@@ -197,7 +197,7 @@ internal class HierarchyTranslator(@Suppress("unused") private val translation: 
                                 Operand.NodeCase.VALUE ->
                                     Segment.Literal(PlanValues.toKotlin(segment.value).toString())
                                 Operand.NodeCase.VARIABLE ->
-                                    Segment.FieldSegment(scope.scalar(segment.variable).expression)
+                                    Segment.FieldSegment(pathColumn(name, segment.variable, scope))
                                 // A computed segment: legal CEL, no prefix to build from.
                                 else -> throw Refusals.unsupported(
                                     "hierarchy list segment must be a value or field, got ${segment.nodeCase}",
@@ -212,14 +212,32 @@ internal class HierarchyTranslator(@Suppress("unused") private val translation: 
         }
     }
 
-    private fun pathOperand(operand: Operand, delimiter: String, scope: Scope): Hierarchy = when (operand.nodeCase) {
+    private fun pathOperand(
+        name: String,
+        operand: Operand,
+        delimiter: String,
+        scope: Scope,
+    ): Hierarchy = when (operand.nodeCase) {
         Operand.NodeCase.VALUE ->
             Hierarchy.Constant(splitLiteral(PlanValues.toKotlin(operand.value).toString(), delimiter), delimiter)
         Operand.NodeCase.VARIABLE ->
-            Hierarchy.FieldRef(scope.scalar(operand.variable).expression, delimiter)
+            Hierarchy.FieldRef(pathColumn(name, operand.variable, scope), delimiter)
         // A path computed by an expression (a concatenation, a ternary) has no prefix the LIKE
         // below can be built from.
         else -> throw Refusals.unsupported("hierarchy(string, delimiter) requires a value or field operand")
+    }
+
+    /**
+     * A column a hierarchy path is read from.
+     *
+     * Every relation below is a prefix test, lowered to `=` against a delimited string or to a
+     * prefix `LIKE`, so a non-text column is the same hole a string match has: CEL's `hierarchy()`
+     * has no overload for it and denies, while MySQL and SQLite coerce the column and match.
+     */
+    private fun pathColumn(name: String, variable: String, scope: Scope): Expression<*> {
+        val target = scope.scalar(variable)
+        translation.leaf.requireText(name, target)
+        return target.expression
     }
 
     /** Collapses an all-constant segmented hierarchy to a plain constant under the default delimiter. */

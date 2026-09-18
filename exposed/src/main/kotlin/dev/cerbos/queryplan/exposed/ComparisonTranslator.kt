@@ -204,7 +204,11 @@ internal class ComparisonTranslator(private val translation: Translation) {
                         "$operator requires a string receiver, got ${PlanValues.typeName(receiver)}",
                     )
                 }
-                val needle = scope.scalar(right.variable).expression
+                val target = scope.scalar(right.variable)
+                // The column is the NEEDLE here, and a needle is escaped and concatenated into a
+                // LIKE pattern, so it has to be text for exactly the reason a haystack does.
+                translation.leaf.requireText(operator, target)
+                val needle = target.expression
                 return when (operator) {
                     "contains" -> columnNeedleMatch(stringParam(receiver), needle, true, true)
                     "startsWith" -> columnNeedleMatch(stringParam(receiver), needle, false, true)
@@ -571,6 +575,20 @@ internal class ComparisonTranslator(private val translation: Translation) {
     ): Op<Boolean> {
         val left = scope.scalar(leftVariable)
         val right = scope.scalar(rightVariable)
+        if (operator in STRING_MATCH_OPERATORS) {
+            translation.leaf.requireText(operator, left)
+            translation.leaf.requireText(operator, right)
+        } else if (!ScalarColumnTypes.comparable(left.column, right.column)) {
+            // `R.attr.aString == R.attr.aNumber` is the constant case with neither side constant,
+            // and MySQL coerces the text column exactly the same way.
+            throw ScalarRefusals.columnTypeMismatch(
+                operator,
+                leftVariable,
+                left.column,
+                rightVariable,
+                right.column,
+            )
+        }
         val leftExplicit = translation.leaf.isExplicitNull(left)
         val rightExplicit = translation.leaf.isExplicitNull(right)
         if ((operator == "eq" || operator == "ne") && leftExplicit != rightExplicit) {
