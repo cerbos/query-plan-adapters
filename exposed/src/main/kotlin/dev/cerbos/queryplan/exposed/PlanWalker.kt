@@ -18,13 +18,21 @@ internal class PlanWalker(private val translation: Translation) {
         Operand.NodeCase.EXPRESSION -> traverseExpression(operand.expression, scope)
         // A bare boolean attribute in condition position: `R.attr.aBool`.
         Operand.NodeCase.VARIABLE -> translation.leaf.applyLeaf("eq", scope.scalar(operand.variable), true)
-        Operand.NodeCase.VALUE ->
-            throw Refusals.notYetImplemented("a constant in condition position")
+        // A boolean constant as a whole condition. The planner never ships one at the root, but a
+        // ternary rewrite substitutes one in: `aBool ? true : false` walks each branch through
+        // here. Folded rather than routed to a leaf, because there is no column to compare.
+        Operand.NodeCase.VALUE -> when (val constant = PlanValues.toKotlin(operand.value)) {
+            true -> Op.TRUE
+            false -> Op.FALSE
+            else -> throw Refusals.malformed(
+                "A constant in condition position must be a boolean, got ${PlanValues.typeName(constant)}",
+            )
+        }
         Operand.NodeCase.NODE_NOT_SET, null ->
             throw Refusals.malformed("Plan operand has no node set")
     }
 
-    private fun traverseExpression(expression: Expression, scope: Scope): Op<Boolean> {
+    fun traverseExpression(expression: Expression, scope: Scope): Op<Boolean> {
         val operator = expression.operator
         val operands = expression.operandsList
         return when (operator) {
@@ -38,9 +46,11 @@ internal class PlanWalker(private val translation: Translation) {
             // filter() and map() return a LIST, not a boolean. `filter(...)` in condition position is
             // not `size(filter(...)) > 0`, and lowering it as if it were over-grants.
             "filter", "map" -> throw Refusals.unsupported(
-                "$operator() returns a list and cannot be used as a condition",
+                "$operator() returns a list, not a boolean, so it cannot be a condition on its " +
+                    "own; only size($operator(...)) and hasIntersection($operator(...), [...]) " +
+                    "give the list a scalar meaning",
             )
-            "except" -> throw Refusals.unsupported("except() is not supported")
+            "except" -> throw ScalarRefusals.exceptUnsupported()
             "hasIntersection", "has_intersection" -> translation.membership.translateHasIntersection(operands, scope)
             "in" -> translation.membership.translateIn(operands, scope)
             "if" -> translation.ternary.translateBare(operands, scope)
