@@ -15,6 +15,11 @@ defaults:
   run:
     working-directory: exposed
 
+# Every job here checks out and builds; none writes to the repository, a package registry or a
+# pull request. A read-only default token is what that needs.
+permissions:
+  contents: read
+
 jobs:
   # Every suite runs in this one job — the translator unit test, which needs nothing, the
   # H2-backed surface and contract suites, and the adversarial suite on H2, which starts a pinned
@@ -92,11 +97,13 @@ jobs:
   # Baseline ORM only, on one JDK: the store dimension discriminates the database, not the renderer
   # or the runtime. The floor is proved against the oracle on H2 in the job above.
   #
-  # TODO: add a second MySQL leg with ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS: "true" if the leg below
-  # shows Connector/J's default CLIENT-side prepared statements turning the adapter's double binds
-  # into exact DECIMAL literals. Decimal arithmetic is not IEEE double arithmetic — `3 * 0.1 == 0.3`
-  # is true in decimal and false in CEL — so that would be a silent over-grant, and it is what
-  # spring-data found on the same store, which is why it runs its MySQL leg twice.
+  # MySQL runs TWICE, as spring-data's does. Connector/J's default is CLIENT-side prepared
+  # statements, which interpolate a double bind into the statement as an exact DECIMAL literal, and
+  # decimal arithmetic is not IEEE double arithmetic: `3 * 0.1 == 0.3` is true in decimal and false
+  # in CEL, so an adapter that relied on the bind's type would over-grant there and nowhere else
+  # (`p-double-frac` is the witness). The adapter casts explicitly rather than relying on it, and
+  # both modes match the oracle today; running both is what keeps that true, because a consumer
+  # picks the mode in their JDBC URL and the adapter never sees which.
   test-database:
     strategy:
       # Each store leg is a finding of its own — a MySQL collation over-grant says nothing about
@@ -104,7 +111,12 @@ jobs:
       # them as neither a pass nor a failure.
       fail-fast: false
       matrix:
-        database: [sqlite, postgres, mysql]
+        include:
+          - database: sqlite
+          - database: postgres
+          - database: mysql
+          - database: mysql
+            server-prep-stmts: "true"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -129,10 +141,11 @@ jobs:
           # under review. Same version the README documents building with.
           gradle-version: "8.12"
 
-      - name: Build and test (${{ matrix.database }})
+      - name: Build and test (${{ matrix.database }}${{ matrix.server-prep-stmts && ', server-side prepared statements' || '' }})
         run: gradle build --no-daemon
         env:
           ADAPTER_TEST_DB: ${{ matrix.database }}
+          ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS: ${{ matrix.server-prep-stmts || '' }}
 
   # The example application, against the shared demo domain in demo/. It proves what the jobs above
   # structurally cannot, and that is exactly two things:

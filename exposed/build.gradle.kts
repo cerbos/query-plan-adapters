@@ -19,14 +19,6 @@ repositories {
     mavenCentral()
 }
 
-// The Exposed release the PUBLISHED JAR is compiled against, and therefore the floor the README
-// claims. It is deliberately not the latest release. JetBrains promises that code built against
-// an older 1.x keeps working on a newer one and promises nothing in the other direction, so a jar
-// compiled against the latest can fail with NoSuchMethodError on the floor even when its source
-// would compile there. Compiling against the floor and TESTING against both is the only
-// arrangement where a green build proves the claim for the artifact a consumer installs.
-val exposedFloor = "1.0.0"
-
 // The Exposed release the TESTS run against: `baseline` unless ADAPTER_TEST_ORM (or
 // -Dadapter.test.orm) says otherwise. Both sets are declared here, once, and nothing below
 // restates a version.
@@ -41,8 +33,23 @@ val exposedFloor = "1.0.0"
 // report the floor leg green without executing it.
 val ormVersionSets = mapOf(
     "baseline" to mapOf("exposed" to "1.5.0"),
-    "floor" to mapOf("exposed" to exposedFloor),
+    "floor" to mapOf("exposed" to "1.0.0"),
 )
+
+// The Exposed release the PUBLISHED JAR is compiled against, and therefore the floor the README
+// claims. It is deliberately not the latest release. JetBrains promises that code built against
+// an older 1.x keeps working on a newer one and promises nothing in the other direction, so a jar
+// compiled against the latest can fail with NoSuchMethodError on the floor even when its source
+// would compile there. Compiling against the floor and TESTING against both is the only
+// arrangement where a green build proves the claim for the artifact a consumer installs.
+//
+// It is read back OUT of the map rather than declared as a version variable of its own and
+// interpolated into the coordinates below. A top-level `val` feeding a coordinate string is the one
+// shape Renovate's Gradle manager resolves, and this repository automerges non-major bumps: a bump
+// of the floor would raise what the published jar compiles against, make the README's support claim
+// false, and collapse the `floor` leg into a second `baseline` leg, all while staying green.
+// Moving the floor is a deliberate, reviewed edit of the map above.
+val exposedFloor = ormVersionSets.getValue("floor").getValue("exposed")
 val adapterTestOrm = System.getProperty("adapter.test.orm")
     ?: System.getenv("ADAPTER_TEST_ORM")
     ?: "baseline"
@@ -91,10 +98,11 @@ dependencies {
     // adapter builds its correlated subqueries with the JDBC `Query`.
     compileOnly("org.jetbrains.exposed:exposed-core:$exposedFloor")
     compileOnly("org.jetbrains.exposed:exposed-jdbc:$exposedFloor")
-    // Only to bind a `timestamp()` literal through the mapped column's own type. Both are probed
-    // for on the classpath at runtime; a consumer needs whichever one declares their columns.
-    compileOnly("org.jetbrains.exposed:exposed-java-time:$exposedFloor")
-    compileOnly("org.jetbrains.exposed:exposed-kotlin-datetime:$exposedFloor")
+    // Neither datetime module is declared here, deliberately. A `timestamp()` literal is bound
+    // through the mapped column's own type, and the adapter matches the abstract `InstantColumnType`
+    // and `OffsetDateTimeColumnType` in exposed-core that both modules' columns extend. So it
+    // compiles against neither and loads without either; a consumer has whichever one declares
+    // their columns. Both are test dependencies below, where real `timestamp()` columns are built.
 
     testImplementation("org.jetbrains.exposed:exposed-core:${orm["exposed"]}")
     testImplementation("org.jetbrains.exposed:exposed-jdbc:${orm["exposed"]}")
@@ -157,6 +165,14 @@ fun Test.configureCorpusSuite() {
 
 tasks.test {
     configureCorpusSuite()
+
+    // OfflineRendererTest cross-checks its stub JDBC metadata against real PostgreSQL and MySQL
+    // servers. That is a property of the Exposed release and the server image, not of the store the
+    // harness runs on, so it runs once per Exposed leg and is excluded on the store legs, where it
+    // would start two more containers to re-ask a question already answered.
+    if ((System.getProperty("adapter.test.db") ?: System.getenv("ADAPTER_TEST_DB")) != null) {
+        useJUnitPlatform { excludeTags("server-cross-check") }
+    }
     testLogging {
         events("passed", "skipped", "failed")
         showStandardStreams = false

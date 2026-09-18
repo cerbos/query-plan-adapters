@@ -25,10 +25,9 @@ import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.testcontainers.DockerClientFactory
 import org.testcontainers.containers.GenericContainer
+import org.testcontainers.utility.DockerImageName
 import org.testcontainers.containers.wait.strategy.Wait
 import org.testcontainers.containers.wait.strategy.WaitStrategy
-import java.nio.file.Files
-import java.nio.file.Path
 import java.sql.DatabaseMetaData
 import java.sql.DriverManager
 
@@ -47,6 +46,13 @@ import java.sql.DriverManager
  * adapter depends on: identifier case folding, keyword quoting, `LIKE … ESCAPE`, a correlated
  * subquery over an alias, the boolean literal, and a bound double.
  */
+
+/**
+ * Tags the cases that start a real database server to cross-check the offline stub. The build
+ * excludes it on the store legs; see the banner above those cases.
+ */
+internal const val SERVER_CROSS_CHECK: String = "server-cross-check"
+
 class OfflineRendererTest {
 
     private object Resources : Table("offline_resources") {
@@ -210,14 +216,22 @@ class OfflineRendererTest {
     }
 
     // -- against the real servers ---------------------------------------------------------------
+    //
+    // The two cases below start the pinned PostgreSQL and MySQL images, read from the same
+    // `*_IMAGE` files and through the same reader the conformance harness uses, and assert the
+    // stub's SQL and every metadata answer it gives against the real driver. They are tagged
+    // [SERVER_CROSS_CHECK] and the build excludes that tag on the store legs (ADAPTER_TEST_DB set):
+    // the question is a property of the Exposed release and the server image, not of which store
+    // the harness runs on, so asking it once per Exposed leg is enough. They skip themselves where
+    // there is no Docker at all.
 
     @Test
-    @Tag("docker")
+    @Tag(SERVER_CROSS_CHECK)
     fun `the PostgreSQL stub renders what PostgreSQL renders`() {
         assertStubMatchesServer(
             stub = StubDatabase.POSTGRESQL,
             dialect = OfflineRenderer.POSTGRESQL,
-            image = image("POSTGRES_IMAGE"),
+            image = DatabaseTestImages.POSTGRES,
             port = 5432,
             environment = mapOf("POSTGRES_USER" to "test", "POSTGRES_PASSWORD" to "test", "POSTGRES_DB" to "test"),
             ready = Wait.forLogMessage(".*database system is ready to accept connections.*\\n", 2),
@@ -226,12 +240,12 @@ class OfflineRendererTest {
     }
 
     @Test
-    @Tag("docker")
+    @Tag(SERVER_CROSS_CHECK)
     fun `the MySQL stub renders what MySQL renders`() {
         assertStubMatchesServer(
             stub = StubDatabase.MYSQL,
             dialect = OfflineRenderer.MYSQL,
-            image = image("MYSQL_IMAGE"),
+            image = DatabaseTestImages.MYSQL,
             port = 3306,
             environment = mapOf(
                 "MYSQL_ROOT_PASSWORD" to "root",
@@ -264,7 +278,7 @@ class OfflineRendererTest {
     private fun assertStubMatchesServer(
         stub: StubDatabase,
         dialect: String,
-        image: String,
+        image: DockerImageName,
         port: Int,
         environment: Map<String, String>,
         ready: WaitStrategy,
@@ -322,10 +336,6 @@ class OfflineRendererTest {
 
     private fun dockerAvailable(): Boolean =
         runCatching { DockerClientFactory.instance().isDockerAvailable }.getOrDefault(false)
-
-    /** The pinned image, read from the file that holds it. Never restated here. */
-    private fun image(file: String): String =
-        Files.readString(Path.of(System.getProperty("user.dir"), file)).trim()
 
     private fun assertThrowsUnsupported(body: () -> Unit): UnsupportedOperationException =
         assertThrows(UnsupportedOperationException::class.java) { body() }
