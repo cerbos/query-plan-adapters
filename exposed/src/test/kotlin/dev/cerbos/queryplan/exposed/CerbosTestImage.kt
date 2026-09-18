@@ -1,8 +1,11 @@
 package dev.cerbos.queryplan.exposed
 
-import org.testcontainers.containers.GenericContainer
+import dev.cerbos.sdk.CerbosBlockingClient
+import dev.cerbos.sdk.CerbosClientBuilder
 import java.nio.file.Files
 import java.nio.file.Path
+import java.time.Duration
+import org.testcontainers.containers.GenericContainer
 
 /**
  * Pinned Cerbos image used by [AdversarialConformanceTest], the one suite here that starts a PDP.
@@ -65,6 +68,28 @@ internal object CerbosTestImage {
      * different build under the pinned reference, or a pin whose two halves disagree — either way
      * the differential would be against a PDP nobody chose, so it fails rather than runs.
      */
+    /**
+     * How long one `plan()` or `check()` call may take before it FAILS.
+     *
+     * A blocking gRPC stub with no deadline waits for ever. The oracle asks `check()` once per row
+     * per action, thousands of calls a run, and one stalled HTTP/2 stream parked a whole leg here
+     * until it was killed by hand: the PDP was healthy and nothing would ever have failed. On a CI
+     * runner that is a job held until the runner's own limit, reported as neither a pass nor a
+     * failure. A deadline turns the stall into a DEADLINE_EXCEEDED naming the call. It is generous
+     * on purpose: a healthy call answers in milliseconds, so this only ever fires on a stall.
+     */
+    val CALL_TIMEOUT: Duration = Duration.ofSeconds(30)
+
+    /** A client for the PDP in [container], every call bounded by [CALL_TIMEOUT]. */
+    fun client(container: GenericContainer<*>): CerbosBlockingClient =
+        CerbosClientBuilder("${container.host}:${container.getMappedPort(GRPC_PORT)}")
+            .withPlaintext()
+            .withTimeout(CALL_TIMEOUT)
+            .buildBlockingClient()
+
+    /** The PDP's gRPC port inside the container. */
+    const val GRPC_PORT: Int = 3593
+
     fun assertPinned(container: GenericContainer<*>) {
         val digests = resolvedDigests(container)
         if (OVERRIDDEN) {

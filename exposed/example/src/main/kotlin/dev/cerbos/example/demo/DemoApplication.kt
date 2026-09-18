@@ -6,11 +6,12 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.SerializationFeature
 import dev.cerbos.sdk.CerbosBlockingClient
 import dev.cerbos.sdk.CerbosClientBuilder
-import org.jetbrains.exposed.v1.jdbc.Database
-import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.io.PrintStream
 import java.nio.file.Files
 import java.nio.file.Path
+import java.time.Duration
+import org.jetbrains.exposed.v1.jdbc.Database
+import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 
 /**
  * The real stdout, captured before [main] redirects `System.out`.
@@ -83,8 +84,16 @@ fun main() {
     REAL_STDOUT.flush()
 }
 
+/**
+ * Every call is bounded. A blocking gRPC stub with no deadline waits for ever, so a stalled stream
+ * would hold this program, and the CI job running it, until something outside killed it. A real
+ * application wants a deadline on its authorization calls for the same reason.
+ */
 private fun cerbosClient(host: String): CerbosBlockingClient =
-    CerbosClientBuilder(host).withPlaintext().buildBlockingClient()
+    CerbosClientBuilder(host)
+        .withPlaintext()
+        .withTimeout(Duration.ofSeconds(30))
+        .buildBlockingClient()
 
 /** The shared corpus directory, passed as `-Ddemo.dir` by `run.sh`. */
 private fun demoDir(): Path {

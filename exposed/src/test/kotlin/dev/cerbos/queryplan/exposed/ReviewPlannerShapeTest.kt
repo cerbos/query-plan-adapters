@@ -2,7 +2,6 @@ package dev.cerbos.queryplan.exposed
 
 import com.google.protobuf.util.JsonFormat
 import dev.cerbos.sdk.CerbosBlockingClient
-import dev.cerbos.sdk.CerbosClientBuilder
 import dev.cerbos.sdk.builders.AttributeValue
 import dev.cerbos.sdk.builders.Principal
 import dev.cerbos.sdk.builders.Resource
@@ -105,7 +104,7 @@ class ReviewPlannerShapeTest {
         @JvmStatic
         fun setUp() {
             val started = GenericContainer(CerbosTestImage.IMAGE)
-                .withExposedPorts(3593)
+                .withExposedPorts(CerbosTestImage.GRPC_PORT)
                 .withCommand("server", "--set=storage.disk.directory=/policies")
                 .withEnv("CERBOS_NO_TELEMETRY", "1")
                 .withLogConsumer(Slf4jLogConsumer(LoggerFactory.getLogger("cerbos-review-pdp")))
@@ -114,8 +113,7 @@ class ReviewPlannerShapeTest {
             started.start()
             container = started
             CerbosTestImage.assertPinned(started)
-            client = CerbosClientBuilder("${started.host}:${started.getMappedPort(3593)}")
-                .withPlaintext().buildBlockingClient()
+            client = CerbosTestImage.client(started)
         }
 
         @AfterAll

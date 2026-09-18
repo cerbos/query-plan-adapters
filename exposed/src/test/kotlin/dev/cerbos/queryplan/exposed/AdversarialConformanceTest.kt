@@ -15,7 +15,6 @@ import dev.cerbos.queryplan.exposed.Corpus.ActionsFile
 import dev.cerbos.queryplan.exposed.Corpus.AdapterUnsupported
 import dev.cerbos.queryplan.exposed.Corpus.NullRepresentationOmitted
 import dev.cerbos.sdk.CerbosBlockingClient
-import dev.cerbos.sdk.CerbosClientBuilder
 import dev.cerbos.sdk.PlanResourcesResult
 import dev.cerbos.sdk.builders.AttributeValue
 import dev.cerbos.sdk.builders.Principal
@@ -223,7 +222,7 @@ class AdversarialConformanceTest {
 
             // Pinned PDP image — see CerbosTestImage for the pin rationale and bump policy.
             val container = GenericContainer(CerbosTestImage.IMAGE)
-                .withExposedPorts(3593)
+                .withExposedPorts(CerbosTestImage.GRPC_PORT)
                 .withCommand("server", "--set=storage.disk.directory=/policies")
                 .withEnv("CERBOS_NO_TELEMETRY", "1")
                 .withLogConsumer(Slf4jLogConsumer(LoggerFactory.getLogger("cerbos-adversarial-pdp")))
@@ -244,8 +243,7 @@ class AdversarialConformanceTest {
             container.start()
             cerbos = container
             CerbosTestImage.assertPinned(container)
-            client = CerbosClientBuilder("${container.host}:${container.getMappedPort(3593)}")
-                .withPlaintext().buildBlockingClient()
+            client = CerbosTestImage.client(container)
 
             testStore = TestStore.open()
             createSchema()
