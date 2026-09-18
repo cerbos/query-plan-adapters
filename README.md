@@ -9,6 +9,7 @@ Current supported adapters:
 - [Drizzle ORM](https://github.com/cerbos/query-plan-adapters/tree/main/drizzle)
 - [Elasticsearch (Java)](https://github.com/cerbos/query-plan-adapters/tree/main/elasticsearch-java)
 - [Ent (Go)](https://github.com/cerbos/query-plan-adapters/tree/main/ent)
+- [Exposed (Kotlin)](https://github.com/cerbos/query-plan-adapters/tree/main/exposed)
 - [LangChain / ChromaDB](https://github.com/cerbos/query-plan-adapters/tree/main/langchain-chromadb)
 - [Mongoose](https://github.com/cerbos/query-plan-adapters/tree/main/mongoose)
 - [pgx (Go)](https://github.com/cerbos/query-plan-adapters/tree/main/pgx)

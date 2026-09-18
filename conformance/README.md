@@ -1347,7 +1347,7 @@ The three classes the adapters fall into determine most of the answers:
 
 | Class | Adapters | What the store applies to the subquery |
 |---|---|---|
-| **1 — bare-table subquery** | drizzle, ent, pgx, prisma, activerecord | nothing |
+| **1 — bare-table subquery** | drizzle, ent, pgx, prisma, activerecord, exposed | nothing |
 | **2 — ORM-association subquery** | spring-data, sqlalchemy | Hibernate applies `@SQLRestriction`/`@Where` — on the entity and on the joined collection — and the single-table discriminator; SQLAlchemy applies `primaryjoin` and the single-table discriminator *only* when the caller's override goes through a mapped `relationship()` |
 | **3 — no subquery** | mongoose, convex, langchain-chromadb, elasticsearch-java | n/a — relations are paths inside the same document |
 
@@ -1358,6 +1358,12 @@ Class 1 adapters expose an **optional** relation predicate the caller attaches t
 declaring nothing emits exactly the filter the adapter emitted before the field existed. Class 2
 adapters deliberately do **not** expose one — a caller who re-declared a filter the ORM already
 applies would have it applied twice, silently removing rows the PDP permits.
+
+exposed spells that predicate `visibleWhen` on the relation mapping, and it takes a **resolver
+lambda** rather than a ready predicate: every subquery instance reads the target table through a
+fresh alias, so the caller is handed that alias (`visibleWhen { t -> t[Tags.deletedAt].isNull() }`)
+and builds against it. The result is ANDed into the subquery's correlation, so it narrows the rows
+the subquery examines rather than the rows it returns, which is what keeps it right under negation.
 
 activerecord is class 1 by what reaches its subquery — it reads the table with a join predicate and
 nothing else — but it is the one class-1 adapter that **rejects** rather than reproduces, and the
@@ -1396,7 +1402,8 @@ the policy suite and classify it like anything else.
   policy contract for exactly this reason. `ent` and `spring-data` run three dialects each, and so
   do `drizzle` and `prisma` — SQLite, PostgreSQL and MySQL, chosen with `ADAPTER_TEST_DB`
   ([#320](https://github.com/cerbos/query-plan-adapters/issues/320) for PostgreSQL,
-  [#340](https://github.com/cerbos/query-plan-adapters/issues/340) for MySQL); the remaining
+  [#340](https://github.com/cerbos/query-plan-adapters/issues/340) for MySQL); `exposed` runs four
+  under the same variable, adding the H2 it defaults to; the remaining
   TypeScript harnesses are still single-store. Those legs are not a formality. Adding them turned
   up four live mechanisms SQLite could not see, only two of them visible in `actions.json`
   afterwards because the other two were fixed in the translator:

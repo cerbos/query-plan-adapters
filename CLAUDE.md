@@ -17,6 +17,7 @@ Multi-language ORM adapters that translate Cerbos query plan responses into data
 | pgx | Go | `github.com/cerbos/query-plan-adapters/pgx` | pgx / PostgreSQL |
 | elasticsearch-java | Java | `cerbos-elasticsearch` | Elasticsearch |
 | spring-data | Java | `cerbos-spring-data` | Spring Data JPA |
+| exposed | Kotlin | `cerbos-exposed` | Exposed 1.x / JDBC |
 
 ## Commands
 
@@ -43,7 +44,8 @@ backend nor `convex/_generated`, which is why the mapper it shares with the harn
 generated API. On langchain-chromadb it needs no ChromaDB container, so that server is started for
 the adversarial leg alone.
 
-On drizzle, convex, langchain-chromadb, sqlalchemy, activerecord, spring-data and elasticsearch-java the expected
+On drizzle, convex, langchain-chromadb, sqlalchemy, activerecord, spring-data, elasticsearch-java and
+exposed the expected
 filters are **golden expectations** — static data in `<adapter>/golden/expectations.json`, rewritten
 by that adapter's `golden:update` command and reviewed as a diff — which is the format
 [#379](https://github.com/cerbos/query-plan-adapters/issues/379) piloted
@@ -67,7 +69,16 @@ CI executes — with criteria literals inlined so the operands are in the asset 
 major, and a second leg (`ADAPTER_TEST_ORM=next`, Hibernate 7 / Spring Data JPA 4) asserts a pinned
 divergence list in both directions, exactly as the sqlalchemy and activerecord legs do; the header
 is load-bearing because `hibernate-core` is a `compileOnly` dependency and a consumer brings their
-own renderer. Elasticsearch-java is the second
+own renderer. Exposed is that case once more, and the one where the BIND matters as much as the
+statement: it emits an Exposed `Op<Boolean>`, so its entry records that predicate rendered — the
+fragment under sqlite, h2, postgresql and mysql, all four of which its CI executes — with the
+parameters recorded beside it as typed arguments rather than inlined, because a double bound as a
+decimal evaluates the adapter's IEEE arithmetic exactly and admits rows CEL denies, which no amount
+of statement text would show. It declares `"exposed": "1.5"`, `gradle goldenUpdate` refuses to run
+under another minor, and the floor leg (`ADAPTER_TEST_ORM=floor`, Exposed 1.0.0) asserts a pinned
+divergence list in both directions; the header is load-bearing for the same reason as spring-data's,
+because `exposed-core` is `compileOnly` and the consumer's Exposed is the renderer.
+Elasticsearch-java is the second
 adapter, after langchain-chromadb, whose value needs no rendering at all: the Query DSL IS JSON and
 the adapter emits a `Map<String, Object>` of plain JDK values with no client library on the
 classpath, so its entry is the translator's return value verbatim — the plan kind, plus the query
@@ -193,6 +204,37 @@ Two suites on elasticsearch-java need Docker, and they need different things:
 server and to measure the store facts most of that adapter's `adapterUnsupported` reasons cite — an
 empty array is not indexed, a JSON null is not indexed, an analyzed field is compared per token. A
 harness can only ever see the refusal, never the mechanism.
+
+### Kotlin (Exposed)
+```bash
+# Run from the REPOSITORY ROOT, not the adapter directory, for the same reason as the Java
+# adapters: the suites read the shared corpus at ../conformance/.
+docker run --rm -v "$(pwd)":/repo -v /var/run/docker.sock:/var/run/docker.sock \
+  -e TESTCONTAINERS_RYUK_DISABLED=true --network host \
+  -w /repo/exposed gradle:8.12-jdk17 gradle build --no-daemon
+
+# The offline suites alone need neither the socket nor the host network.
+docker run --rm -v "$(pwd)":/repo -w /repo/exposed gradle:8.12-jdk17 \
+  gradle test --no-daemon --tests 'dev.cerbos.queryplan.exposed.ExposedTranslatorTest'
+
+# Rewrite golden/expectations.json from what the translator emits today. `gradle test` never
+# regenerates, so a translator change fails CI whatever anyone ran locally.
+#   … -w /repo/exposed gradle:8.12-jdk17 gradle goldenUpdate --no-daemon
+```
+
+`ExposedTranslatorTest` is the **translator unit test**: it reads its plans from
+`conformance/wire-fixtures/`, asserts the emitted predicate against `exposed/golden/expectations.json`
+and the rest of what an adapter can be asked offline ("What a translator unit test may pin", below),
+and needs no PDP and no database server. Only `AdversarialConformanceTest` needs Docker, and it
+starts its own pinned PDP against `conformance/policies/`.
+
+Two environment variables select what the build runs against, both declared once in
+`exposed/build.gradle.kts`, both failing on an unknown value rather than falling back:
+`ADAPTER_TEST_DB` is `h2` (default, in process), `sqlite` (in process), `postgres` or `mysql`
+(containers), and `ADAPTER_TEST_ORM` is `baseline` (the latest Exposed release) or `floor` (the
+release the published jar is compiled against). The floor leg runs the H2 conformance harness too,
+so the version the README claims is proved against the oracle rather than against compilation
+([ADR 0009](docs/adr/0009-the-exposed-adapter-is-jdbc-first-and-returns-a-sealed-result.md)).
 
 ## Testing
 
@@ -321,6 +363,7 @@ usage shapes, the emitted JSON contract, why the expectations are hardcoded here
 - TypeScript: 2-space indent, camelCase functions, PascalCase types, ESM-friendly
 - Python: Black (88 cols, 4-space), isort-controlled imports
 - Java: 4-space indent, Java 17+, sealed interfaces, pattern matching
+- Kotlin: 4-space indent, explicit API mode, tests under `src/test/kotlin`
 - Tests: co-located as `*.test.ts` in `src/` (TS), `tests/test_*.py` (Python), or `src/test/` (Java)
 
 ## Commits & Pull Requests
@@ -339,8 +382,10 @@ Each adapter has its own GitHub Actions workflow triggered by changes in its dir
 Adding a new adversarial job — or dropping the Node gate so the corpus replays on every Node leg — multiplies runner minutes for no extra coverage. Adding a *store* leg does buy coverage; adding a Node leg does not. `conformance.yaml` additionally replans the golden wire fixtures against the pinned PDP and fails on drift.
 
 Tag-based publishing: `prisma/v*` -> npm, `sqla/v*` -> PyPI, `activerecord/v*` -> RubyGems; `ent/v*` and `pgx/v*` are Go
-module tags resolved directly from the repository. `elasticsearch-java/v*` and `spring-data/v*` only run that adapter's CI
-workflow: neither build configures a Maven Central release (both are `publishToMavenLocal` only, and their `publishing` blocks
+module tags resolved directly from the repository. `elasticsearch-java/v*`, `spring-data/v*` and `exposed/v*` only run that
+adapter's CI
+workflow: none of those builds configures a Maven Central release (all three are `publishToMavenLocal` only, and their
+`publishing` blocks
 say what wiring a release still needs), so no Maven Central publish is wired yet.
 
 ## Changing how a condition is translated
@@ -445,7 +490,7 @@ never recompute them in a harness.
 - `conformance/` affects all adapters: a change there re-runs every adapter's CI, and adding an action requires classifying it for every adapter
 - `demo/` likewise re-runs every adapter's example job, and adding a usage shape means implementing it in every example — there is no classification bucket to opt out with
 - Adding a seed row means adding its `conformance/derived-fields.json` entry in the same commit; adding a seed *field* also means widening every harness's declared key set — both are enforced, not optional
-- Adapters share data, not code: the corpus loader each adapter carries (`prisma/src/corpus.ts`, `mongoose/src/corpus.ts`, `drizzle/src/corpus.ts`, `convex/src/corpus.ts`, `langchain-chromadb/src/corpus.ts`, `sqlalchemy/tests/corpus.py`, `activerecord/spec/support/conformance_corpus.rb`, `spring-data/src/test/java/dev/cerbos/queryplan/springdata/Corpus.java`, `elasticsearch-java/src/test/java/dev/cerbos/queryplan/elasticsearch/Corpus.java`, `ent/corpus_test.go`, `pgx/corpus_test.go`, …) is duplicated **deliberately**, so every adapter stays standalone. Do not extract a shared loader, and do not add a drift check between the copies — they are allowed to differ. That is the opposite of the byte-identical rule on the vendored Go *translator* trees, which keeps its exact current scope. See [ADR 0007](docs/adr/0007-adapters-share-data-not-code.md)
+- Adapters share data, not code: the corpus loader each adapter carries (`prisma/src/corpus.ts`, `mongoose/src/corpus.ts`, `drizzle/src/corpus.ts`, `convex/src/corpus.ts`, `langchain-chromadb/src/corpus.ts`, `sqlalchemy/tests/corpus.py`, `activerecord/spec/support/conformance_corpus.rb`, `spring-data/src/test/java/dev/cerbos/queryplan/springdata/Corpus.java`, `elasticsearch-java/src/test/java/dev/cerbos/queryplan/elasticsearch/Corpus.java`, `exposed/src/test/kotlin/dev/cerbos/queryplan/exposed/Corpus.kt`, `ent/corpus_test.go`, `pgx/corpus_test.go`, …) is duplicated **deliberately**, so every adapter stays standalone. Do not extract a shared loader, and do not add a drift check between the copies — they are allowed to differ. That is the opposite of the byte-identical rule on the vendored Go *translator* trees, which keeps its exact current scope. See [ADR 0007](docs/adr/0007-adapters-share-data-not-code.md)
 - A per-adapter **golden expectation** — the filter one adapter is pinned to emit for one corpus action — lives in that adapter's own `golden/expectations.json`, never under `conformance/`; a throwing action carries no entry, because its message is already pinned in `conformance/actions.json`. Schema and rationale: `conformance/README.md`, "Golden expectations"
 - Write "every adapter" / "every harness" / "every example" wherever prose spans the roster — in docs, test-file comments and JSON `description`s alike. `conformance/actions.json` declares `adapters`, so the phrasing stays true when the roster changes and nothing else has to count them. Genuine counts of something else (corpus actions, seed rows) go in digits. `conformance/scripts/check-docs.sh` enforces it across every tracked file
 - Regenerate build artifacts in the same commit as source changes
