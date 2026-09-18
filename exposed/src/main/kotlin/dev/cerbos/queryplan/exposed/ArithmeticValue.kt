@@ -180,9 +180,11 @@ internal class ArithmeticValues(private val comparisons: ComparisonTranslator) {
     /**
      * A NaN or an infinity against a SQL expression.
      *
-     * Both compare the same way against EVERY number a column can hold, so `0.0` stands in for the
-     * value and only its NULL-ness has to survive: [TriLogic.baseUnlessUnknown] drives the arm to
-     * UNKNOWN for a NULL, which keeps the row excluded under BOTH polarities.
+     * Both compare the same way against every FINITE number, so `0.0` stands in for the value and
+     * only its NULL-ness has to survive: [TriLogic.baseUnlessUnknown] drives the arm to UNKNOWN for
+     * a NULL, which keeps the row excluded under BOTH polarities. A stored value that is itself an
+     * infinity is outside what the stand-in states; no engine here produces one from a translated
+     * expression, since every division that could is folded above rather than executed.
      */
     private fun nonFiniteComparison(
         operator: String,
