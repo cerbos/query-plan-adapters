@@ -626,7 +626,7 @@ of "not set".
 
 ### Nested collection macros multiply correlated subqueries — depth is bounded
 
-Every collection macro (`exists`/`exists_one`/`all`/`filter`/
+Every mapped-relation collection macro (`exists`/`exists_one`/`all`/`filter`/
 `size(filter(...))`) translates to a single correlated aggregate subquery, but the
 lambda body inside it is translated once per polarity — positive and negated — because
 Hibernate 6's criteria negation is stateful and a `Predicate` tree cannot be shared
@@ -644,7 +644,15 @@ the benchmark suite (`MacroNestingBenchmarkTest`, H2, ~3 000 rows across the cha
 
 To keep a legal-but-degenerate deeply nested policy from silently timing out on
 production-sized tables, the translator bounds macro nesting depth at **5** by default
-and throws `UnsupportedPlanShapeException` beyond it (fail closed, at translation time). If
+and throws `UnsupportedPlanShapeException` beyond it (fail closed, at translation time).
+Literal-collection folds count as levels too: each element repeats the nested body, so they
+can multiply relation subqueries even though the fold itself adds no subquery. This counts
+macro nesting, not total expression size; list cardinality and non-macro expressions such as
+ternaries can still expand the output.
+
+**Behaviour change ([#457](https://github.com/cerbos/query-plan-adapters/issues/457)).**
+Literal folds previously bypassed this bound. A plan whose total macro depth exceeds the limit
+now throws instead of emitting a filter. The default remains 5. If
 your policies intentionally nest deeper, raise the limit per call —
 
 ```java

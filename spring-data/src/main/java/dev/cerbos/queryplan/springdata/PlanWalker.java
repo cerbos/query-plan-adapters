@@ -61,10 +61,10 @@ final class PlanWalker {
     /**
      * Track one collection-macro nesting level around {@code body}, failing closed when the
      * plan nests deeper than {@link SpringDataQueryPlanAdapter.Options#effectiveMaxMacroDepth()}
-     * allows. Each macro level multiplies the correlated-subquery count of the translated
-     * filter (one subquery per body polarity), so a runaway-deep policy must throw a clear
-     * error at translation time instead of silently emitting a filter that times out on
-     * production-sized tables.
+     * allows, including literal-collection folds. Relation macros translate each body polarity;
+     * literal folds translate the body per element. These multiply nested work, so a runaway-deep
+     * policy must throw a clear error at translation time instead of silently emitting a filter
+     * that times out on production-sized tables.
      */
     Predicate enterMacro(String op, Supplier<Predicate> body) {
         macroDepth++;
@@ -72,9 +72,10 @@ final class PlanWalker {
             if (macroDepth > maxMacroDepth) {
                 throw Refusals.unsupported(
                         "Collection-macro nesting depth " + macroDepth + " exceeds the maximum of "
-                        + maxMacroDepth + " (reached via operator '" + op + "'). Each nesting "
-                        + "level multiplies the number of correlated subqueries in the "
-                        + "translated filter, so deeply nested macros degrade query latency "
+                        + maxMacroDepth + " (reached via operator '" + op + "'). "
+                        + "Nested relation macros and literal folds "
+                        + "multiply translation work and correlated subqueries, so deeply "
+                        + "nested macros degrade query latency "
                         + "sharply. If the policy shape is intentional, raise the limit via "
                         + "the '" + SpringDataQueryPlanAdapter.MAX_MACRO_DEPTH_PROPERTY
                         + "' system property.");

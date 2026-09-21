@@ -6,6 +6,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.time.Duration;
+
 /**
  * The PDP client, shared by both applications in this example.
  *
@@ -16,6 +18,10 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class CerbosClientConfig {
 
+    // Bound stalled PDP calls in this example and in real applications. Healthy calls finish
+    // in milliseconds; this generous deadline fails a stalled stream instead of hanging forever.
+    private static final Duration CERBOS_CALL_TIMEOUT = Duration.ofSeconds(30);
+
     /**
      * {@code cerbos.address} is {@code ${CERBOS_HOST}} with no fallback — see the comment on it
      * in {@code application.yaml} for why a default would be worse than a failure to start.
@@ -25,6 +31,7 @@ public class CerbosClientConfig {
             throws CerbosClientBuilder.InvalidClientConfigurationException {
         return new CerbosClientBuilder(address)
                 .withPlaintext()
+                .withTimeout(CERBOS_CALL_TIMEOUT)
                 .buildBlockingClient();
     }
 }

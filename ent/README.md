@@ -301,7 +301,8 @@ truncates toward zero where PostgreSQL and MySQL round (`cast-int-string`, `cast
 
 CEL string comparison and matching are case-sensitive and byte-exact, while `LIKE` collation is
 controlled by the database. The suite sets `PRAGMA case_sensitive_like = ON` on SQLite, relies on
-PostgreSQL's default deterministic collation, and pins `utf8mb4_bin` on every MySQL string column.
+PostgreSQL's default deterministic collation, and pins the case- and accent-sensitive NO PAD collation `utf8mb4_0900_as_cs` on every MySQL
+string column, so trailing spaces remain significant too.
 On MySQL's **default** `utf8mb4_0900_ai_ci` — which is both case- and accent-insensitive — or a
 `_CI_` SQL Server collation, string predicates will match strings CEL would reject: an over-grant
 the adapter cannot detect. Treat collation as part of your policy contract.

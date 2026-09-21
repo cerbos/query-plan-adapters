@@ -1217,6 +1217,29 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         @Test
+        void literalFoldCountsAgainstTheCallLevelDepthBound() {
+            PlanResourcesResponse plan = Corpus.planFromWireFixture("pv-shadow");
+            EntityManager em = emf.createEntityManager();
+            try {
+                CriteriaBuilder cb = em.getCriteriaBuilder();
+                CriteriaQuery<ResourceEntity> query = cb.createQuery(ResourceEntity.class);
+                Root<ResourceEntity> root = query.from(ResourceEntity.class);
+                SpringDataQueryPlanAdapter.Options options =
+                        SpringDataQueryPlanAdapter.Options.of(MAPPER);
+                Specification<ResourceEntity> shallow = SpringDataQueryPlanAdapter.toSpecification(
+                        plan, options.withMaxMacroDepth(1));
+                UnsupportedPlanShapeException error = assertThrows(UnsupportedPlanShapeException.class,
+                        () -> shallow.toPredicate(root, query, cb));
+                assertTrue(error.getMessage().contains("nesting depth 2 exceeds the maximum of 1"));
+                Specification<ResourceEntity> admitted = SpringDataQueryPlanAdapter.toSpecification(
+                        plan, options.withMaxMacroDepth(2));
+                assertNotNull(admitted.toPredicate(root, query, cb));
+            } finally {
+                em.close();
+            }
+        }
+
+        @Test
         void depthAtDefaultLimitTranslates() {
             assertEquals(0, runDeep(existsChain(5)));
         }

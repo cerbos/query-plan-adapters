@@ -11,7 +11,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.cerbos.queryplan.elasticsearch.ElasticsearchQueryPlanAdapter.Result;
 import dev.cerbos.sdk.CerbosBlockingClient;
-import dev.cerbos.sdk.CerbosClientBuilder;
 import dev.cerbos.sdk.PlanResourcesResult;
 import dev.cerbos.sdk.builders.AttributeValue;
 import dev.cerbos.sdk.builders.Principal;
@@ -254,8 +253,7 @@ class ElasticsearchAdversarialConformanceTest {
         }
         cerbos.start();
         CerbosTestImage.assertPinned(cerbos);
-        client = new CerbosClientBuilder(cerbos.getHost() + ":" + cerbos.getMappedPort(3593))
-                .withPlaintext().buildBlockingClient();
+        client = CerbosTestImage.client(cerbos);
 
         elasticsearch = new ElasticsearchContainer(ElasticsearchTestImage.IMAGE)
                 .withEnv("xpack.security.enabled", "false");

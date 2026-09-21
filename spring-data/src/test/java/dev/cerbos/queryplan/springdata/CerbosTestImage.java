@@ -1,10 +1,14 @@
 package dev.cerbos.queryplan.springdata;
 
+import dev.cerbos.sdk.CerbosBlockingClient;
+import dev.cerbos.sdk.CerbosClientBuilder;
+
 import org.testcontainers.containers.GenericContainer;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 
 /**
@@ -43,6 +47,16 @@ final class CerbosTestImage {
 
     /** True when a caller replaced the pinned oracle for this run. */
     static final boolean OVERRIDDEN = System.getProperty(OVERRIDE_PROPERTY) != null;
+
+    // A stalled HTTP/2 stream must fail the differential instead of hanging the CI job.
+    // Healthy local calls complete in milliseconds; 30 seconds leaves ample startup/load margin.
+    private static final Duration CALL_TIMEOUT = Duration.ofSeconds(30);
+
+    static CerbosBlockingClient client(GenericContainer<?> container)
+            throws CerbosClientBuilder.InvalidClientConfigurationException {
+        return new CerbosClientBuilder(container.getHost() + ":" + container.getMappedPort(3593))
+                .withPlaintext().withTimeout(CALL_TIMEOUT).buildBlockingClient();
+    }
 
     private CerbosTestImage() {}
 

@@ -21,7 +21,6 @@ import dev.cerbos.queryplan.springdata.testmodel.LabelEntity;
 import dev.cerbos.queryplan.springdata.testmodel.ResourceEntity;
 import dev.cerbos.queryplan.springdata.testmodel.SubCategoryEntity;
 import dev.cerbos.sdk.CerbosBlockingClient;
-import dev.cerbos.sdk.CerbosClientBuilder;
 import dev.cerbos.sdk.PlanResourcesResult;
 import dev.cerbos.sdk.builders.AttributeValue;
 import dev.cerbos.sdk.builders.Principal;
@@ -476,8 +475,7 @@ class AdversarialConformanceTest {
         }
         cerbos.start();
         CerbosTestImage.assertPinned(cerbos);
-        client = new CerbosClientBuilder(cerbos.getHost() + ":" + cerbos.getMappedPort(3593))
-                .withPlaintext().buildBlockingClient();
+        client = CerbosTestImage.client(cerbos);
 
         emf = createEntityManagerFactory();
         seed();

@@ -214,63 +214,63 @@ func openSQLite(t *testing.T) *sql.DB {
 	return db
 }
 
-// The MySQL schema pins a BINARY collation on every string column. MySQL's default
-// utf8mb4_0900_ai_ci is both case- and accent-INSENSITIVE, which over-grants on `cs-eq`
-// ("One" would match "one"), `unicode-eq` and every `hier-*` prefix probe — CEL string
-// equality is byte-exact, so the collation is part of the policy contract here
-// (cerbos/query-plan-adapters#310).
+// The MySQL schema pins a case- and accent-sensitive NO PAD collation on every string
+// column. The default utf8mb4_0900_ai_ci ignores case and accents, over-granting on
+// `cs-eq` ("One" would match "one"), `unicode-eq` and hierarchy prefixes (#310). The older
+// utf8mb4_bin ignores trailing spaces ("a" would match "a "). CEL distinguishes all
+// three, so the collation is part of the policy contract here (#436).
 //
 // DATETIME(6) is microsecond-resolution, the same caveat PostgreSQL's timestamptz carries:
 // the corpus's a5 seed holds microsecond precision and no finer.
 const mysqlDDL = `
 CREATE TABLE adversarial_resource (
-	id                 varchar(64) COLLATE utf8mb4_bin PRIMARY KEY,
+	id                 varchar(64) COLLATE utf8mb4_0900_as_cs PRIMARY KEY,
 	a_bool             boolean          NOT NULL,
-	a_string           varchar(255) COLLATE utf8mb4_bin NOT NULL,
+	a_string           varchar(255) COLLATE utf8mb4_0900_as_cs NOT NULL,
 	a_number           bigint           NOT NULL,
 	a_double           double,
-	a_optional_string  varchar(255) COLLATE utf8mb4_bin,
-	created_by         varchar(64) COLLATE utf8mb4_bin NOT NULL,
-	scope              varchar(255) COLLATE utf8mb4_bin,
+	a_optional_string  varchar(255) COLLATE utf8mb4_0900_as_cs,
+	created_by         varchar(64) COLLATE utf8mb4_0900_as_cs NOT NULL,
+	scope              varchar(255) COLLATE utf8mb4_0900_as_cs,
 	created_at         datetime(6),
 	updated_at         datetime(6)
 );
 CREATE TABLE adversarial_tag (
 	pk           bigint AUTO_INCREMENT PRIMARY KEY,
-	tag_id       varchar(64) COLLATE utf8mb4_bin NOT NULL,
-	name         varchar(255) COLLATE utf8mb4_bin,
-	resource_id  varchar(64) COLLATE utf8mb4_bin NOT NULL REFERENCES adversarial_resource(id)
+	tag_id       varchar(64) COLLATE utf8mb4_0900_as_cs NOT NULL,
+	name         varchar(255) COLLATE utf8mb4_0900_as_cs,
+	resource_id  varchar(64) COLLATE utf8mb4_0900_as_cs NOT NULL REFERENCES adversarial_resource(id)
 );
 CREATE TABLE adversarial_category (
-	id           varchar(64) COLLATE utf8mb4_bin PRIMARY KEY,
-	name         varchar(255) COLLATE utf8mb4_bin NOT NULL,
-	resource_id  varchar(64) COLLATE utf8mb4_bin NOT NULL REFERENCES adversarial_resource(id)
+	id           varchar(64) COLLATE utf8mb4_0900_as_cs PRIMARY KEY,
+	name         varchar(255) COLLATE utf8mb4_0900_as_cs NOT NULL,
+	resource_id  varchar(64) COLLATE utf8mb4_0900_as_cs NOT NULL REFERENCES adversarial_resource(id)
 );
 CREATE TABLE adversarial_sub_category (
-	id           varchar(64) COLLATE utf8mb4_bin PRIMARY KEY,
-	name         varchar(255) COLLATE utf8mb4_bin NOT NULL,
-	category_id  varchar(64) COLLATE utf8mb4_bin NOT NULL REFERENCES adversarial_category(id)
+	id           varchar(64) COLLATE utf8mb4_0900_as_cs PRIMARY KEY,
+	name         varchar(255) COLLATE utf8mb4_0900_as_cs NOT NULL,
+	category_id  varchar(64) COLLATE utf8mb4_0900_as_cs NOT NULL REFERENCES adversarial_category(id)
 );
 CREATE TABLE adversarial_label (
-	id               varchar(64) COLLATE utf8mb4_bin PRIMARY KEY,
-	name             varchar(255) COLLATE utf8mb4_bin,
-	sub_category_id  varchar(64) COLLATE utf8mb4_bin NOT NULL REFERENCES adversarial_sub_category(id)
+	id               varchar(64) COLLATE utf8mb4_0900_as_cs PRIMARY KEY,
+	name             varchar(255) COLLATE utf8mb4_0900_as_cs,
+	sub_category_id  varchar(64) COLLATE utf8mb4_0900_as_cs NOT NULL REFERENCES adversarial_sub_category(id)
 );
 CREATE TABLE adversarial_parent (
-	id                 varchar(64) COLLATE utf8mb4_bin PRIMARY KEY,
+	id                 varchar(64) COLLATE utf8mb4_0900_as_cs PRIMARY KEY,
 	a_bool             boolean NOT NULL,
-	a_string           varchar(255) COLLATE utf8mb4_bin NOT NULL,
+	a_string           varchar(255) COLLATE utf8mb4_0900_as_cs NOT NULL,
 	a_number           bigint  NOT NULL,
-	a_optional_string  varchar(255) COLLATE utf8mb4_bin,
-	resource_id        varchar(64) COLLATE utf8mb4_bin NOT NULL UNIQUE REFERENCES adversarial_resource(id)
+	a_optional_string  varchar(255) COLLATE utf8mb4_0900_as_cs,
+	resource_id        varchar(64) COLLATE utf8mb4_0900_as_cs NOT NULL UNIQUE REFERENCES adversarial_resource(id)
 );
 CREATE TABLE adversarial_inner (
-	id                 varchar(64) COLLATE utf8mb4_bin PRIMARY KEY,
+	id                 varchar(64) COLLATE utf8mb4_0900_as_cs PRIMARY KEY,
 	a_bool             boolean NOT NULL,
-	a_string           varchar(255) COLLATE utf8mb4_bin NOT NULL,
+	a_string           varchar(255) COLLATE utf8mb4_0900_as_cs NOT NULL,
 	a_number           bigint  NOT NULL,
-	a_optional_string  varchar(255) COLLATE utf8mb4_bin,
-	parent_id          varchar(64) COLLATE utf8mb4_bin NOT NULL UNIQUE REFERENCES adversarial_parent(id)
+	a_optional_string  varchar(255) COLLATE utf8mb4_0900_as_cs,
+	parent_id          varchar(64) COLLATE utf8mb4_0900_as_cs NOT NULL UNIQUE REFERENCES adversarial_parent(id)
 );
 `
 

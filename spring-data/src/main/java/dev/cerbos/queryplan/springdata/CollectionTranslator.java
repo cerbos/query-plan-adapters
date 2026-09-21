@@ -55,7 +55,7 @@ final class CollectionTranslator {
      * ERROR maps to SQL UNKNOWN so the row stays excluded under BOTH polarities
      * ({@code NOT(UNKNOWN) = UNKNOWN}). A plain EXISTS is not enough: an element whose body
      * is UNKNOWN silently fails to match, collapsing the error case to FALSE — which
-     * {@code not(...)} flips to TRUE, an authorization leak. Each macro is a SINGLE
+     * {@code not(...)} flips to TRUE, an authorization leak. Each mapped-relation macro is a single
      * correlated aggregate subquery that scores every element into determined-true /
      * determined-false / undetermined and folds the scores into one value whose comparison
      * is TRUE, FALSE, or SQL UNKNOWN exactly per the CEL truth table — see
@@ -69,8 +69,8 @@ final class CollectionTranslator {
      * (positive and negated — Hibernate 6 negation is stateful, see {@link TriPredicate},
      * so a Predicate tree cannot be shared between polarities): twice for the
      * {@code exists} family, three times for {@code exists_one} (which also needs the
-     * positive body inside its match counter). Nested macros therefore multiply — a
-     * depth-d exists chain emits {@code 2^d - 1} correlated subqueries (an exists_one
+     * positive body inside its match counter). Nested relation macros therefore multiply — a
+     * depth-d mapped-relation exists chain emits {@code 2^d - 1} correlated subqueries (an exists_one
      * chain up to {@code (3^d - 1) / 2}) — which is why {@link PlanWalker#enterMacro}
      * bounds the nesting depth ({@link SpringDataQueryPlanAdapter#MAX_MACRO_DEPTH_PROPERTY},
      * default {@value SpringDataQueryPlanAdapter#DEFAULT_MAX_MACRO_DEPTH}).
@@ -89,7 +89,8 @@ final class CollectionTranslator {
         // collection operand. Apply the same fold here instead of demanding a Relation
         // mapping that cannot exist for a literal.
         if (listOperand.getNodeCase() == Operand.NodeCase.VALUE) {
-            return handleKnownValueCollection(op, listOperand.getValue(), lambdaOperand, scope);
+            return walker.enterMacro(op,
+                    () -> handleKnownValueCollection(op, listOperand.getValue(), lambdaOperand, scope));
         }
 
         if (listOperand.getNodeCase() != Operand.NodeCase.VARIABLE) {
