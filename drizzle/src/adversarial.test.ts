@@ -339,6 +339,11 @@ const MANIFEST_ACTIONS = new Set([
 // for that group.
 
 const DEGENERACY_GUARD_ACTIONS = [
+  "projection-exists-eq",
+  "projection-exists-not-eq",
+  "rel-not-eq-hop",
+  "rel-not-contains-hop",
+  "rel-not-hierarchy-hop",
   "pv-in",
   "pv-in-unrolled",
   "vf-le",
@@ -1563,7 +1568,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(274);
+    expect(MANIFEST_ACTIONS.size).toBe(279);
     expect(NULL_REPRESENTATION_OMITTED).toHaveLength(1);
     // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
     // gained or lost has to be re-triaged here rather than joining the suite unnoticed.

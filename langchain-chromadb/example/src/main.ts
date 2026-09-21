@@ -168,10 +168,6 @@ type Filter = Where | undefined | "denied";
  * `conjoin` below. Getting this wrong is not a silent over-grant; it is a loud `ChromaValueError`
  * on the first unconditional plan the application meets.
  *
- * A `CONDITIONAL` plan with no filter is refused rather than defaulted to "no constraint": the
- * published type makes `filters` optional across all three kinds, and reading a missing one as
- * "match everything" is exactly the over-grant this adapter throws to avoid everywhere else.
- *
  * There is no `default` arm. The three cases are every `PlanKind`, so a fourth would fail to
  * compile here rather than reaching a runtime branch nothing exercises.
  */
@@ -183,7 +179,7 @@ function toFilter(result: QueryPlanToChromaDBResult): Filter {
       return undefined;
     case PlanKind.CONDITIONAL: {
       const filters = result.filters;
-      if (!filters || Object.keys(filters).length === 0) {
+      if (Object.keys(filters).length === 0) {
         throw new Error(
           "a KIND_CONDITIONAL plan carried no filter — refusing to query without one"
         );

@@ -405,6 +405,11 @@ const DEGENERACY_GUARD_ACTIONS = [
   "w1-ternary-chain-cond",
   // The real to-one join (#375): one per hazard — the negated hop, the null comparison, two-level
   // depth, the root conjunction, and the disjunction, whose failure direction is an under-grant.
+  "projection-exists-eq",
+  "projection-exists-not-eq",
+  "rel-not-eq-hop",
+  "rel-not-contains-hop",
+  "rel-not-hierarchy-hop",
   "rel-not-bool-hop",
   "rel-ne-null-hop",
   "rel-bool-hop2",
@@ -1034,7 +1039,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
     }
   });
 
-  test("manifest assigns all 274 policy actions exactly one Prisma outcome", () => {
+  test("manifest assigns all 279 policy actions exactly one Prisma outcome", () => {
     const oracle = new Set(ORACLE_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map(([action]) => action));
     const nullOmitted = new Set(
@@ -1050,7 +1055,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(274);
+    expect(MANIFEST_ACTIONS.size).toBe(279);
     // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
     // gained or lost has to be re-triaged here rather than joining the suite unnoticed.
     expect(THROWING_ACTIONS).toHaveLength(106);

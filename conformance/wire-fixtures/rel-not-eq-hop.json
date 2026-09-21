@@ -1,0 +1,27 @@
+{
+  "action": "rel-not-eq-hop",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "not",
+        "operands": [
+          {
+            "expression": {
+              "operator": "eq",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.parent.aString"
+                },
+                {
+                  "value": "One"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

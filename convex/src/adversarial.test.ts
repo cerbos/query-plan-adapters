@@ -10,6 +10,7 @@ import {
   PUSHDOWN_MAPPER,
   type MapperVariant,
 } from "../convex/adversarialMapper";
+import type { AdversarialDocument } from "../convex/schema";
 import type { ExecutionPath } from "../convex/planExecution";
 import type { Mapper } from ".";
 import { PlanKind, queryPlanToConvex } from ".";
@@ -33,44 +34,8 @@ const CONVEX_URL = process.env["CONVEX_URL"] ?? "http://127.0.0.1:3210";
 const convex = new ConvexHttpClient(CONVEX_URL);
 const cerbos = new Cerbos("127.0.0.1:3593", { tls: false });
 
-interface StoredDocument {
-  id: string;
-  aBool: boolean;
-  aString: string;
-  aNumber: number;
-  aDouble?: number;
-  aOptionalString?: string;
-  createdBy: string;
-  createdAt?: string;
-  updatedAt?: string;
-  scope?: string;
-  owner: string | null;
-  coOwner: string | null;
-  tagNames: (string | null)[];
-  obj: { inner: string };
-  tags: { id: string; name?: string }[];
-  categories: {
-    name: string;
-    subCategories: {
-      name: string;
-      labels: { name?: string }[];
-    }[];
-  }[];
-  mainCategory?: {
-    name: string;
-    subCategories: { name: string }[];
-    subNames: string[];
-  };
-  parent?: StoredRelationLevel & { inner?: StoredRelationLevel };
-}
-
-/** One level of the to-one chain as stored: an absent `aOptionalString` is a missing attribute. */
-interface StoredRelationLevel {
-  aBool: boolean;
-  aString: string;
-  aNumber: number;
-  aOptionalString?: string;
-}
+type StoredDocument = AdversarialDocument;
+type StoredRelationLevel = Omit<NonNullable<StoredDocument["parent"]>, "inner">;
 
 // -- the corpus, read once ----------------------------------------------------------------------
 //
@@ -133,6 +98,12 @@ const MANIFEST_ACTIONS = new Set([
 // int()/double()), so they cannot satisfy a non-empty assertion.
 
 const DEGENERACY_GUARD_ACTIONS = [
+  // #430: projection macros and negated leaves through a to-one hop.
+  "projection-exists-eq",
+  "projection-exists-not-eq",
+  "rel-not-eq-hop",
+  "rel-not-contains-hop",
+  "rel-not-hierarchy-hop",
   "pv-in",
   "pv-in-unrolled",
   "vf-le",
@@ -721,10 +692,10 @@ describe("adversarial conformance corpus", () => {
         ].filter(Boolean).length !== 1,
     );
 
-    expect(allActions.size).toBe(274);
+    expect(allActions.size).toBe(279);
     expect(CONVEX_UNSUPPORTED).toHaveLength(24);
     expect(CONVEX_SUPPORTED_EXPECTED).toHaveLength(7);
-    expect(ORACLE_ACTIONS).toHaveLength(244);
+    expect(ORACLE_ACTIONS).toHaveLength(249);
     expect(THROWING_ACTIONS).toHaveLength(28);
     expect(misclassified).toEqual([]);
   });
@@ -850,17 +821,17 @@ describe("adversarial conformance corpus", () => {
       // The pushdown leg only needs to re-execute actions whose routing changes.
       moved: pushdown.db.filter((action) => !base.db.includes(action)),
     }).toEqual({
-      total: 244,
+      total: 249,
       defaultDb: DB_DECIDED_DEFAULT,
       // Exactly one corpus action splits: `buildFilters` only splits a root `and`, and
       // rel-hop-and-root is the one hostile shape rooted there that mixes a pushable conjunct
       // with a non-pushable one (#375). Both mappers split it — the hop is `nullable` under each.
       defaultSplit: SPLIT_ACTIONS,
       defaultUnconditional: UNCONDITIONAL_ACTIONS,
-      defaultPostCount: 208,
+      defaultPostCount: 213,
       pushdownDb: DB_DECIDED_PUSHDOWN,
       pushdownSplit: SPLIT_ACTIONS,
-      pushdownPostCount: 197,
+      pushdownPostCount: 202,
       moved: PUSHDOWN_ONLY_ACTIONS,
     });
   });

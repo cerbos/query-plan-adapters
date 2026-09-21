@@ -499,12 +499,10 @@ side the adapter splits and rejoins — the field's stored value is compared as 
 empty delimiter throws: splitting on it would produce one segment per character plus a trailing
 empty one, and a relation over that segmentation is not the one the policy stated.
 
-**Negated hierarchy relations fail closed.** A SQL adapter gets the exclusion free from
-three-valued logic (`NULL LIKE 'x%'` is UNKNOWN, so the row drops), but a `bool.must_not` around a
-`prefix`, `terms` or `term` query *matches* a document that has no value for the field — which is
-the CEL missing-attribute error the PDP denies on. An `exists`-guarded negation would express it,
-exactly as `eq`, `in`, `contains` and `startsWith` already are, and adding one is a change worth
-proving against the corpus first.
+**Negated overlap requires an indexed field.** The adapter combines `exists` with
+`bool.must_not` around the overlap query, excluding missing fields and absent to-one parents.
+The corpus proves this against the PDP oracle. Negated `ancestorOf` and `descendentOf` remain
+fail-closed pending their own corpus coverage.
 
 A hierarchy path **built by `list()` from a document field** also throws: matching it would mean
 concatenating a stored value into a path before comparing, and the Query DSL has no computed
@@ -518,7 +516,7 @@ field-to-field comparisons, a constant string receiver with a document-field arg
 over document fields, conditional values (a CEL ternary, as a condition or as an operand),
 `except()`, arbitrary collection counts, `size()` over a field not declared as a collection,
 ordered array indexing, positive `all` and negated `exists` over a document collection, negated
-membership in a document collection, negated intersection, negated hierarchy relations, hierarchy
+membership in a document collection, negated intersection, negated strict hierarchy relations, hierarchy
 paths assembled from a document field or split on an empty delimiter, collection-empty checks,
 list and map literals where a scalar is expected, non-finite numeric literals, and membership or
 intersection tests that need to distinguish an explicit null value or array element from a
@@ -579,6 +577,11 @@ convention is the one Elasticsearch's storage already matches. See
 
 The existing five-argument `Options` constructor remains available. Undeclared fields retain historical translation behavior; declare fields used in type-sensitive operations to prevent Elasticsearch coercion or query errors. Operator overrides continue to own their declared operators.
 
+Positive `exists` over a flat scalar collection can now translate a lambda equality between
+its element and a literal. It emits the existing equality query against the collection field.
+A negated lambda body still requires a nested mapping: excluding an equality at document level
+would incorrectly exclude an array containing both matching and nonmatching elements.
+
 ## Conformance contract
 
 The adapter is differentially tested against Cerbos PDP 0.54.0 `check()` decisions using 26 hostile seed documents and real Elasticsearch queries. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
@@ -587,8 +590,8 @@ The harness applies a 30-second deadline to each PDP call, so a stalled RPC fail
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 112 reference conformance actions plus regex and timestamp probes (114 actions) |
-| Fail-closed | 149 reference actions plus ordered list indexing/`get-field`, `int()`/`double()` casts and `filter()`/`map()` used as a condition or a conjunct (158 actions total) |
+| Oracle-tested | 116 reference conformance actions plus regex and timestamp probes (118 actions) |
+| Fail-closed | 150 reference actions plus ordered list indexing/`get-field`, `int()`/`double()` casts and `filter()`/`map()` used as a condition or a conjunct (159 actions total) |
 | Representation-independent | `null-eq-missing` — rejected like every other null-selecting comparison, so no NULL-representation option is required |
 | Attribute NULL convention | Declared, in order to REFUSE. Elasticsearch does not index a JSON null, so an explicitly-null value and a missing field are the same document to every query the DSL can express. Pass the attributes you send as explicit nulls in `explicitNullAttributes`, and the equality family over them throws instead of answering narrowly — every spelling of `!= "x"` either requires the field to exist (dropping the row CEL allows) or matches every document missing it (cerbos/query-plan-adapters#308) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute documents. Until the planner is fixed, use `R.attr.x != null` for indexed attributes instead of `has(R.attr.x)` |
@@ -608,7 +611,7 @@ Every fail-closed shape's error message is pinned in the shared corpus (`conform
 
 `ElasticsearchTranslatorTest` asserts the same classification offline, and adds the property the
 per-action assertions cannot state: the **distribution of the refusals over the sites in the walk
-that raise them**. 159 of the corpus's 274 shapes are refused here — the 158 fail-closed actions
+that raise them**. 160 of the corpus's 279 shapes are refused here — the 159 fail-closed actions
 above plus `null-eq-missing` — so it matters whether that happens at one catch-all or at many. It
 is 29 sites, with 64 actions reaching the computed-operand refusal:
 
@@ -630,7 +633,7 @@ is 29 sites, with 64 actions reaching the computed-operand refusal:
 | computed collection macro | 2 |
 | count over a computed collection | 2 |
 | exists_one | 2 |
-| flat scalar collection macro | 2 |
+| flat scalar collection macro | 3 |
 | hierarchy path built from a field | 2 |
 | negated hasIntersection over a collection | 2 |
 | negated membership in a collection | 2 |

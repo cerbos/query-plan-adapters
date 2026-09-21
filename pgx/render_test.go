@@ -60,3 +60,24 @@ func TestUnknownCastTargetIsRejected(t *testing.T) {
 	cast := queryplan.Cast{X: queryplan.Column{Name: "count"}, To: queryplan.CastType("decimal")}
 	require.ErrorContains(t, renderExpr(t, cast), `cannot render cast to "decimal"`)
 }
+
+// Unknown enum members cannot arise from a planner response. Pin their rejection here so
+// extending the internal tree never silently selects a different SQL operator.
+func TestUnknownRenderEnumsAreRejected(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		node    queryplan.Expr
+		message string
+	}{
+		{"comparison", queryplan.Cmp{Op: "futureComparison", L: queryplan.Lit{V: 1}, R: queryplan.Lit{V: 2}}, `cannot render comparison "futureComparison"`},
+		{"arithmetic", queryplan.Arith{Op: "futureArithmetic", L: queryplan.Lit{V: 1}, R: queryplan.Lit{V: 2}}, `cannot render arithmetic "futureArithmetic"`},
+		{"subquery", queryplan.Subquery{Kind: 255}, "cannot render subquery kind 255"},
+		{"truth", queryplan.TruthTest{X: queryplan.BoolConst{V: true}, Want: 255}, "cannot render truth value 255"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			require.ErrorContains(t, renderExpr(t, tc.node), tc.message)
+		})
+	}
+}

@@ -263,7 +263,7 @@ describe("corpus shapes", () => {
       conditional: CONDITIONAL_ACTIONS.length,
       unconditional: RECORDED_ACTIONS.length - CONDITIONAL_ACTIONS.length,
       throwing: throwing.length,
-    }).toEqual({ conditional: 213, unconditional: 7, throwing: 54 });
+    }).toEqual({ conditional: 218, unconditional: 7, throwing: 54 });
   });
 
   /**
@@ -660,6 +660,28 @@ describe("nullAttributeRepresentation", () => {
       ).sql,
     ).toContain('"a_optional_string" is null');
   });
+
+  test.each(["explicit", "omitted"] as const)(
+    "a reentrant mapper preserves the outer %s representation",
+    (outerRepresentation) => {
+      const innerRepresentation = outerRepresentation === "explicit" ? "omitted" : "explicit";
+      const mapper: Mapper = (reference) => {
+        translate("postgresql", "vf-le", {
+          nullAttributeRepresentation: innerRepresentation,
+        });
+        return MAPPERS.postgresql[reference];
+      };
+      const outer = () => translate("postgresql", "null-eq-missing", {
+        mapper,
+        nullAttributeRepresentation: outerRepresentation,
+      });
+      if (outerRepresentation === "omitted") {
+        expect(outer).toThrow(OMITTED_MESSAGE);
+      } else {
+        expect(outer()).toEqual(translate("postgresql", "null-eq-missing"));
+      }
+    },
+  );
 
   test("omitted: the same plan is refused rather than translated", () => {
     // A NULL column sends no attribute, so check() denies on a missing-attribute error while the

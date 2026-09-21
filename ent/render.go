@@ -130,10 +130,18 @@ func write(b *sql.Builder, e queryplan.Expr) error {
 		return nil
 
 	case queryplan.Cmp:
-		return writeBinary(b, cmpSymbol(t.Op), t.L, t.R)
+		symbol, err := cmpSymbol(t.Op)
+		if err != nil {
+			return err
+		}
+		return writeBinary(b, symbol, t.L, t.R)
 
 	case queryplan.Arith:
-		return writeBinary(b, arithSymbol(t.Op), t.L, t.R)
+		symbol, err := arithSymbol(t.Op)
+		if err != nil {
+			return err
+		}
+		return writeBinary(b, symbol, t.L, t.R)
 
 	case queryplan.Concat:
 		// The same dialect-correct spelling the escaping path already uses: CONCAT() on MySQL,
@@ -282,7 +290,7 @@ func writeNotDistinct(b *sql.Builder, t queryplan.NotDistinct) error {
 //
 // `IS TRUE` / `IS FALSE` are not available on every dialect ent supports, so the test is expanded
 // into comparisons that mean the same thing wherever booleans are stored as 0/1 or as a native
-// boolean: `x = TRUE`, `NOT (x = TRUE)`, and `x IS NULL`.
+// boolean: `x = TRUE`, `x = FALSE`, and `x IS NULL`.
 func writeTruthTest(b *sql.Builder, t queryplan.TruthTest) error {
 	switch t.Want {
 	case queryplan.TruthUnknown:
@@ -298,7 +306,7 @@ func writeTruthTest(b *sql.Builder, t queryplan.TruthTest) error {
 			return nil
 		})
 
-	default: // TruthFalse
+	case queryplan.TruthFalse:
 		return wrap(b, func(b *sql.Builder) error {
 			if err := write(b, t.X); err != nil {
 				return err
@@ -307,6 +315,8 @@ func writeTruthTest(b *sql.Builder, t queryplan.TruthTest) error {
 			b.Arg(false)
 			return nil
 		})
+	default:
+		return fmt.Errorf("cannot render truth value %d", t.Want)
 	}
 }
 
@@ -349,16 +359,10 @@ func writeCall(b *sql.Builder, c queryplan.Call) error {
 	// CEL's size() counts Unicode code points. SQLite's and PostgreSQL's length() do too, but
 	// MySQL's LENGTH() counts bytes — "héllo🚀" is 6 to CEL and 10 to MySQL — so it needs
 	// CHAR_LENGTH instead.
-	charLength := "length"
-	if b.Dialect() == dialect.MySQL {
-		charLength = "char_length"
+	name := functionNames[c.Name]
+	if c.Name == queryplan.FuncCharLength && b.Dialect() == dialect.MySQL {
+		name = "char_length"
 	}
-
-	name := map[queryplan.FuncName]string{
-		queryplan.FuncCharLength: charLength,
-		queryplan.FuncReplace:    "replace",
-		queryplan.FuncNullIf:     "nullif",
-	}[c.Name]
 	if name == "" {
 		return fmt.Errorf("cannot render function %q", c.Name)
 	}
@@ -436,8 +440,10 @@ func writeSubquery(b *sql.Builder, s queryplan.Subquery) error {
 					return err
 				}
 				b.WriteString(" FROM ")
-			default:
+			case queryplan.SubqueryCount:
 				b.WriteString("SELECT COUNT(*) FROM ")
+			default:
+				return fmt.Errorf("cannot render subquery kind %d", s.Kind)
 			}
 
 			for i, item := range s.From {
@@ -494,34 +500,41 @@ func castType(d string, to queryplan.CastType) (string, error) {
 	}
 }
 
-func cmpSymbol(op queryplan.CmpOp) string {
-	switch op {
-	case queryplan.OpEq:
-		return "="
-	case queryplan.OpNe:
-		return "<>"
-	case queryplan.OpLt:
-		return "<"
-	case queryplan.OpLe:
-		return "<="
-	case queryplan.OpGt:
-		return ">"
-	default:
-		return ">="
-	}
+var cmpSymbols = map[queryplan.CmpOp]string{
+	queryplan.OpEq: "=",
+	queryplan.OpNe: "<>",
+	queryplan.OpLt: "<",
+	queryplan.OpLe: "<=",
+	queryplan.OpGt: ">",
+	queryplan.OpGe: ">=",
 }
 
-func arithSymbol(op queryplan.ArithOp) string {
-	switch op {
-	case queryplan.OpAdd:
-		return "+"
-	case queryplan.OpSub:
-		return "-"
-	case queryplan.OpMult:
-		return "*"
-	case queryplan.OpDiv:
-		return "/"
-	default:
-		return "%"
+var arithSymbols = map[queryplan.ArithOp]string{
+	queryplan.OpAdd:  "+",
+	queryplan.OpSub:  "-",
+	queryplan.OpMult: "*",
+	queryplan.OpDiv:  "/",
+	queryplan.OpMod:  "%",
+}
+
+func cmpSymbol(op queryplan.CmpOp) (string, error) {
+	symbol, ok := cmpSymbols[op]
+	if !ok {
+		return "", fmt.Errorf("cannot render comparison %q", op)
 	}
+	return symbol, nil
+}
+
+func arithSymbol(op queryplan.ArithOp) (string, error) {
+	symbol, ok := arithSymbols[op]
+	if !ok {
+		return "", fmt.Errorf("cannot render arithmetic %q", op)
+	}
+	return symbol, nil
+}
+
+var functionNames = map[queryplan.FuncName]string{
+	queryplan.FuncCharLength: "length",
+	queryplan.FuncReplace:    "replace",
+	queryplan.FuncNullIf:     "nullif",
 }

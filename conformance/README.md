@@ -439,6 +439,13 @@ every kind-3 test opens with *Corpus gap.*):
 Error-message context, list cardinality and value redaction remain independent translator
 contracts even where a corpus action already proves the refusal.
 
+**prisma** (`translator.test.ts`): the caller-crafted nested-map boolean-body
+contract is a permanent kind-1 test. The pinned PDP rejects
+`R.attr.tags.all(t, R.attr.tags.map(x, x.name))` with
+`expected type 'bool' but found 'list(dyn)'`. The test exercises the defensive
+fallback anyway, proving that an inner map's nullable projection cannot leak
+into the outer lambda scope (#430).
+
 ### Issue #414 port and planner evidence
 
 The port adds 67 actions. The original families now have corpus spellings: wildcard needles,
@@ -746,6 +753,16 @@ lists and carries its own anti-vacuity assertion in every harness: the other con
 `R.attr.aBool`, which `root-bare-bool` spells on its own and which every adapter can express, so an
 adapter that dropped the untranslatable half would emit that filter and return 14 rows the PDP
 denies. The assertion pins that, not merely that a rejection happens.
+
+The #430 audit adds `projection-exists-eq` and `projection-exists-not-eq` to
+exercise a scalar projection lambda's positive and negated bodies. Negating the
+whole macro, as `lambda-in-literal-neg` does, exercises a different branch. The
+new pair also distinguishes an explicit null list element from a missing object
+attribute: `null != "public"` is true, while reading a missing attribute raises.
+`rel-not-eq-hop`, `rel-not-contains-hop` and `rel-not-hierarchy-hop` test negative
+scalar predicates through the real to-one parent. Parentless rows must stay
+excluded, and every harness guards the new actions for non-empty, non-total PDP
+results on its compared or refusal side.
 
 ### The degeneracy guard
 

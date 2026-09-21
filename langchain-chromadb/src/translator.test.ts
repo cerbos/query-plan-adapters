@@ -228,7 +228,7 @@ describe("corpus shapes", () => {
       conditional: CONDITIONAL_ACTIONS.length,
       unconditional: RECORDED_ACTIONS.length - CONDITIONAL_ACTIONS.length,
       throwing: throwing.length,
-    }).toEqual({ conditional: 42, unconditional: 7, throwing: 225 });
+    }).toEqual({ conditional: 42, unconditional: 7, throwing: 230 });
   });
 });
 
@@ -237,7 +237,7 @@ describe("corpus shapes", () => {
  *
  * `actions.json` pins a substring of the message per action, so the throw suite above proves every
  * refusal is the declared one. It cannot say anything about the *shape* of the refusals taken
- * together, and on an adapter that refuses 225 of 274 shapes that is the more interesting property:
+ * together, and on an adapter that refuses 230 of 279 shapes that is the more interesting property:
  * five sixths of this corpus is rejected, and it matters whether that happens at five sites or at
  * one catch-all.
  *
@@ -304,10 +304,10 @@ describe("the rejection sites the corpus reaches", () => {
     }
 
     expect(counts).toEqual({
-      "computed operand": 130,
+      "computed operand": 132,
       "no such operator": 36,
-      "inequality over an optional key": 13,
-      "not negatable": 15,
+      "inequality over an optional key": 14,
+      "not negatable": 17,
       "field-to-field": 17,
       "mirrored membership": 6,
       "non-scalar literal": 5,

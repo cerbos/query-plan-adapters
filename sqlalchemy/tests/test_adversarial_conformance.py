@@ -234,6 +234,11 @@ SQLALCHEMY_SKIPPED_DIVERGENCES = MANIFEST.skipped_divergences(ADAPTER)
 # Parent-count probes and string-cast thresholds are excluded because their
 # oracles are empty for the current seeds (including h4's numeric string "0").
 DEGENERACY_GUARD_ACTIONS = (
+    "projection-exists-eq",
+    "projection-exists-not-eq",
+    "rel-not-eq-hop",
+    "rel-not-contains-hop",
+    "rel-not-hierarchy-hop",
     "vf-le",
     "like-percent",
     "all-on-empty",
@@ -802,7 +807,7 @@ class TestAdversarialConformance:
 
         # Deliberate tripwires: a corpus edit must bump these in the same
         # change, so a new hostile action cannot join (or vanish) silently.
-        assert len(MANIFEST_ACTIONS) == 274
+        assert len(MANIFEST_ACTIONS) == 279
         assert len(SEEDS) == 26
         # Each of these carries a pinned message, so a shape gained or lost has
         # to be re-triaged here rather than joining the throw suite unnoticed.

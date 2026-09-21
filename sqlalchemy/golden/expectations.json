@@ -1515,6 +1515,28 @@
         "param_3": 2
       }
     },
+    "projection-exists-eq": {
+      "where": {
+        "sqlite": "CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name IS NOT NULL AND adversarial_tag.name = ?)) THEN 1 WHEN (EXISTS (SELECT ? AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name IS NOT NULL AND adversarial_tag.name = ?) IS NULL)) THEN NULL ELSE 0 END",
+        "postgresql": "CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name IS NOT NULL AND adversarial_tag.name = %(name_1)s)) THEN true WHEN (EXISTS (SELECT %(param_2)s AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name IS NOT NULL AND adversarial_tag.name = %(name_1)s) IS NULL)) THEN NULL ELSE false END"
+      },
+      "params": {
+        "param_1": 1,
+        "name_1": "public",
+        "param_2": 1
+      }
+    },
+    "projection-exists-not-eq": {
+      "where": {
+        "sqlite": "CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND NOT (adversarial_tag.name IS NOT NULL AND adversarial_tag.name = ?))) THEN 1 WHEN (EXISTS (SELECT ? AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (NOT (adversarial_tag.name IS NOT NULL AND adversarial_tag.name = ?)) IS NULL)) THEN NULL ELSE 0 END",
+        "postgresql": "CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND NOT (adversarial_tag.name IS NOT NULL AND adversarial_tag.name = %(name_1)s))) THEN true WHEN (EXISTS (SELECT %(param_2)s AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (NOT (adversarial_tag.name IS NOT NULL AND adversarial_tag.name = %(name_1)s)) IS NULL)) THEN NULL ELSE false END"
+      },
+      "params": {
+        "param_1": 1,
+        "name_1": "public",
+        "param_2": 1
+      }
+    },
     "pv-all": {
       "where": {
         "sqlite": "adversarial_resource.a_optional_string != ? AND adversarial_resource.a_optional_string != ? AND adversarial_resource.a_optional_string != ? AND adversarial_resource.a_optional_string != ? AND adversarial_resource.a_optional_string != ? AND adversarial_resource.a_optional_string != ? AND adversarial_resource.a_optional_string != ? AND adversarial_resource.a_optional_string != ? AND adversarial_resource.a_optional_string != ? AND adversarial_resource.a_optional_string != ? AND adversarial_resource.a_optional_string != ?",
@@ -1830,6 +1852,34 @@
         "postgresql": "NOT (SELECT adversarial_parent.a_bool FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id)"
       },
       "params": {}
+    },
+    "rel-not-contains-hop": {
+      "where": {
+        "sqlite": "(SELECT adversarial_parent.a_string FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id) NOT LIKE ? ESCAPE '\\'",
+        "postgresql": "(SELECT adversarial_parent.a_string FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id) NOT LIKE %(param_1)s ESCAPE '\\\\'"
+      },
+      "params": {
+        "param_1": "%done%"
+      }
+    },
+    "rel-not-eq-hop": {
+      "where": {
+        "sqlite": "(SELECT adversarial_parent.a_string FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id) != ?",
+        "postgresql": "(SELECT adversarial_parent.a_string FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id) != %(param_1)s"
+      },
+      "params": {
+        "param_1": "One"
+      }
+    },
+    "rel-not-hierarchy-hop": {
+      "where": {
+        "sqlite": "NOT ((SELECT adversarial_parent.a_string FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id) = ? OR (SELECT adversarial_parent.a_string FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id) IN (SELECT 1 FROM (SELECT 1) WHERE 1!=1) OR (SELECT adversarial_parent.a_string FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id) LIKE ? ESCAPE '\\')",
+        "postgresql": "NOT ((SELECT adversarial_parent.a_string FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id) = %(param_1)s OR (SELECT adversarial_parent.a_string FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id) IN (NULL) AND (1 != 1) OR (SELECT adversarial_parent.a_string FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id) LIKE %(param_3)s ESCAPE '\\\\')"
+      },
+      "params": {
+        "param_1": "one",
+        "param_3": "one.%"
+      }
     },
     "rel-range-hop": {
       "where": {

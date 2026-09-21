@@ -84,16 +84,8 @@ type Column struct {
 	// attribute, so CEL compares a null VALUE rather than raising a missing-attribute error. The
 	// equality family has to render definitely for such a column; see Entry.NullConvention.
 	ExplicitNull bool
-	// IsBool marks a column the caller declared as boolean-typed, which is what lets `string()`
-	// over it fail closed. Nothing in the plan names an operand's type, and a boolean is the one
-	// type whose text rendering differs across the engines this module targets; see
-	// Entry.ValueType and castValue.
-	IsBool bool
-	// IsString marks a column the caller declared as string-typed, which is what lets `+` between
-	// two columns resolve to concatenation rather than fail closed. See Entry.ValueType and add.
-	IsString bool
-	// IsNumber marks a declared numeric column.
-	IsNumber bool
+	// Type retains the caller's scalar declaration for casts, concatenation and coercion guards.
+	Type ValueType
 }
 
 // Lit is a value bound as a query parameter. A nil V renders as SQL NULL.

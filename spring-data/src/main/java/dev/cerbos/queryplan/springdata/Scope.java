@@ -111,6 +111,10 @@ sealed interface Scope permits Scope.RootScope, Scope.LambdaScope {
             chain = List.copyOf(chain);
         }
 
+        boolean isChained() {
+            return chain.size() > 1;
+        }
+
         AttributeMapping.Relation tail() {
             return chain.get(chain.size() - 1);
         }

@@ -34,10 +34,10 @@ export interface QueryPlanToChromaDBArgs {
 // `ReturnType<typeof queryPlanToChromaDB>`. Found by `example/`, which is the only thing here that
 // resolves this package through its published surface
 // (docs/adr/0002-examples-install-the-packed-artifact.md).
-export interface QueryPlanToChromaDBResult {
-  kind: PlanKind;
-  filters?: Where;
-}
+export type QueryPlanToChromaDBResult =
+  | { kind: PK.ALWAYS_ALLOWED; filters: Record<string, never> }
+  | { kind: PK.ALWAYS_DENIED; filters?: undefined }
+  | { kind: PK.CONDITIONAL; filters: Where };
 
 type ChromaLiteral = string | number | boolean;
 
@@ -311,53 +311,13 @@ function mapBooleanVariable(
   return whereFor(field.name, negate ? "ne" : "eq", true);
 }
 
-function negateOperand(
-  operand: PlanExpressionOperand,
-  resolveField: FieldResolver,
-): Where {
-  if (isVariable(operand)) {
-    return mapBooleanVariable(operand, resolveField, true);
-  }
-  if (!isExpression(operand)) {
-    throw Error(
-      `Query plan did not contain an expression for operand ${String(operand)}`,
-    );
-  }
-
-  const { operator, operands } = operand;
-
-  if (operator === "and") {
-    if (operands.length < 2) throw Error("Expected at least 2 operands");
-    return {
-      $or: operands.map((child) => negateOperand(child, resolveField)),
-    };
-  }
-
-  if (operator === "or") {
-    if (operands.length < 2) throw Error("Expected at least 2 operands");
-    return {
-      $and: operands.map((child) => negateOperand(child, resolveField)),
-    };
-  }
-
-  if (operator === "not") {
-    if (operands.length !== 1 || !operands[0])
-      throw Error("Expected exactly one operand");
-    return mapOperand(operands[0], resolveField);
-  }
-
-  if (!NEGATED_OPERATOR[operator]) {
-    throw Error(`Cannot negate operator ${operator}`);
-  }
-  return mapComparison(operator, operands, resolveField, true);
-}
-
 function mapOperand(
   operand: PlanExpressionOperand,
   resolveField: FieldResolver,
+  negate = false,
 ): Where {
   if (isVariable(operand)) {
-    return mapBooleanVariable(operand, resolveField, false);
+    return mapBooleanVariable(operand, resolveField, negate);
   }
   if (!isExpression(operand)) {
     throw Error(
@@ -367,25 +327,22 @@ function mapOperand(
 
   const { operator, operands } = operand;
 
-  if (operator === "and") {
+  if (operator === "and" || operator === "or") {
     if (operands.length < 2) throw Error("Expected at least 2 operands");
-    return {
-      $and: operands.map((child) => mapOperand(child, resolveField)),
-    };
-  }
-
-  if (operator === "or") {
-    if (operands.length < 2) throw Error("Expected at least 2 operands");
-    return {
-      $or: operands.map((child) => mapOperand(child, resolveField)),
-    };
+    const children = operands.map((child) => mapOperand(child, resolveField, negate));
+    return (operator === "and") !== negate ? { $and: children } : { $or: children };
   }
 
   if (operator === "not") {
     if (operands.length !== 1 || !operands[0])
       throw Error("Expected exactly one operand");
-    return negateOperand(operands[0], resolveField);
+    return mapOperand(operands[0], resolveField, !negate);
   }
 
-  return mapComparison(operator, operands, resolveField, false);
+  // Check the raw operator before resolving operands so unsupported shapes keep
+  // their existing refusal message and refusal site under negation.
+  if (negate && !NEGATED_OPERATOR[operator]) {
+    throw Error(`Cannot negate operator ${operator}`);
+  }
+  return mapComparison(operator, operands, resolveField, negate);
 }

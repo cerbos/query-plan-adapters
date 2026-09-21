@@ -714,16 +714,50 @@ def _widen_integral_literals(node):
     return node
 
 
-def _unwrap_expression(operand: dict) -> dict:
-    """Return the `{operator, operands}` node an operand carries, if any."""
-    expression = operand.get("expression")
-    return operand if expression is None else expression
+@dataclass(frozen=True)
+class _Value:
+    value: Any
 
 
-def _carries_null_operand(operand: dict) -> bool:
-    if "value" not in operand:
+@dataclass(frozen=True)
+class _Variable:
+    name: str
+
+
+@dataclass(frozen=True)
+class _Expr:
+    operator: str
+    operands: Tuple[_Operand, ...]
+
+
+_Operand = Union[_Value, _Variable, _Expr]
+
+
+def _parse_operand(node: object) -> _Operand:
+    """Normalize the HTTP/gRPC wire spellings once, before semantic traversal."""
+    if isinstance(node, dict):
+        if set(node) == {"expression"}:
+            return _parse_operand(node["expression"])
+        if set(node) == {"value"}:
+            return _Value(_widen_integral_literals(node["value"]))
+        if set(node) == {"variable"} and isinstance(node["variable"], str):
+            return _Variable(node["variable"])
+        if (
+            set(node) == {"operator", "operands"}
+            and isinstance(node["operator"], str)
+            and isinstance(node["operands"], list)
+        ):
+            return _Expr(
+                node["operator"],
+                tuple(_parse_operand(child) for child in node["operands"]),
+            )
+    raise ValueError(f"Unrecognised operand shape: {node}")
+
+
+def _carries_null_operand(operand: _Operand) -> bool:
+    if not isinstance(operand, _Value):
         return False
-    value = operand["value"]
+    value = operand.value
     if value is None:
         return True
     return isinstance(value, list) and any(member is None for member in value)
@@ -736,29 +770,30 @@ def _carries_null_operand(operand: dict) -> bool:
 _EQUALITY_FAMILY = frozenset({"eq", "ne", "in"})
 
 
-def _compared_attribute_and_literal(node: dict):
+def _compared_attribute_and_literal(node: _Operand):
     """Destructure a binary comparison between a plan variable and a literal.
 
     Returns ``(variable_name, literal_operand)`` in either operand order, or
     ``None`` when the node is not that shape.
     """
-    expression = _unwrap_expression(node)
-    if expression.get("operator") not in _EQUALITY_FAMILY:
+    if not isinstance(node, _Expr) or node.operator not in _EQUALITY_FAMILY:
         return None
-    operands = expression.get("operands", [])
+    operands = node.operands
     if len(operands) != 2:
         return None
     left, right = operands
     variable, literal = left, right
-    if "variable" in right:
+    if isinstance(right, _Variable):
         variable, literal = right, left
-    if "variable" not in variable or "value" not in literal:
+    if not isinstance(variable, _Variable) or not isinstance(literal, _Value):
         return None
-    return variable["variable"], literal
+    return variable.name, literal
 
 
 def _assert_no_null_comparison_operands(
-    node: dict, declarations: Dict[str, "NullAttributeRepresentation"], fallback: str
+    node: _Operand,
+    declarations: Dict[str, "NullAttributeRepresentation"],
+    fallback: str,
 ) -> None:
     """Reject every null literal operand under the ``omitted`` representation.
 
@@ -779,9 +814,10 @@ def _assert_no_null_comparison_operands(
     NULL-selecting predicate. Rejecting every null operand is correct under any
     nesting; narrowing it requires negation-parity tracking.
     """
-    expression = _unwrap_expression(node)
-    operator = expression.get("operator")
-    operands = expression.get("operands", [])
+    if not isinstance(node, _Expr):
+        return
+    operator = node.operator
+    operands = node.operands
 
     # A comparison between a mapped attribute and a literal is decided by that
     # attribute's own declaration, which is what lets one call carry both
@@ -799,7 +835,7 @@ def _assert_no_null_comparison_operands(
             return
 
     if (
-        any(_carries_null_operand(_unwrap_expression(operand)) for operand in operands)
+        any(_carries_null_operand(operand) for operand in operands)
         and fallback == "omitted"
     ):
         raise _null_operand_error(operator)
@@ -819,26 +855,15 @@ def _null_operand_error(operator) -> ValueError:
 
 
 def _substitute_lambda_variable(
-    operand: dict, variable_name: str, element: Any
-) -> dict:
-    """Substitute a lambda iteration variable with a concrete collection element.
-
-    A bare reference to the variable becomes the element itself; a
-    ``variable.path.to.field`` reference drills into the element and fails
-    closed when the path is missing. A nested collection macro whose lambda
-    rebinds the same variable name shadows the outer variable, so substitution
-    only descends into its collection operand.
-    """
-    if (expression := operand.get("expression")) is not None:
-        return {
-            "expression": _substitute_lambda_variable(
-                expression, variable_name, element
-            )
-        }
-
-    if (name := operand.get("variable")) is not None:
+    operand: _Operand, variable_name: str, element: Any
+) -> _Operand:
+    """Substitute a concrete element without crossing a shadowing lambda binding."""
+    if isinstance(operand, _Value):
+        return operand
+    if isinstance(operand, _Variable):
+        name = operand.name
         if name == variable_name:
-            return {"value": element}
+            return _Value(element)
         if name.startswith(f"{variable_name}."):
             current = element
             for segment in name[len(variable_name) + 1 :].split("."):
@@ -848,43 +873,37 @@ def _substitute_lambda_variable(
                         f'"{segment}"'
                     )
                 current = current[segment]
-            return {"value": current}
+            return _Value(current)
         return operand
 
-    if "operator" not in operand:
-        return operand
-
-    operator = operand["operator"]
-    child_operands = operand.get("operands", [])
-
-    if operator in _LAMBDA_BINDING_OPERATORS and len(child_operands) == 2:
-        nested_collection, nested_lambda = child_operands
-        nested_expression = _unwrap_expression(nested_lambda)
-        nested_lambda_operands = nested_expression.get("operands", [])
+    operator = operand.operator
+    children = operand.operands
+    if operator in _LAMBDA_BINDING_OPERATORS and len(children) == 2:
+        nested_collection, nested_lambda = children
         if (
-            nested_expression.get("operator") == "lambda"
-            and len(nested_lambda_operands) == 2
-            and nested_lambda_operands[1].get("variable") == variable_name
+            isinstance(nested_lambda, _Expr)
+            and nested_lambda.operator == "lambda"
+            and len(nested_lambda.operands) == 2
+            and isinstance(nested_lambda.operands[1], _Variable)
+            and nested_lambda.operands[1].name == variable_name
         ):
-            # The nested lambda rebinds our variable: it shadows the outer
-            # binding, so only its collection operand may be substituted.
-            return {
-                "operator": operator,
-                "operands": [
+            return _Expr(
+                operator,
+                (
                     _substitute_lambda_variable(
                         nested_collection, variable_name, element
                     ),
                     nested_lambda,
-                ],
-            }
+                ),
+            )
 
-    return {
-        "operator": operator,
-        "operands": [
+    return _Expr(
+        operator,
+        tuple(
             _substitute_lambda_variable(child, variable_name, element)
-            for child in child_operands
-        ],
-    }
+            for child in children
+        ),
+    )
 
 
 # We support both the legacy HTTP and gRPC clients, so therefore we need to accept both input types
@@ -912,7 +931,7 @@ def _get_table_name(t: GenericTable) -> str:
 
 
 def _variables_outside_overrides(
-    operand: dict, override_operators: frozenset, override_owned: bool = False
+    operand: _Operand, override_operators: frozenset, override_owned: bool = False
 ) -> frozenset:
     """Find variables that still require an ordinary table mapping.
 
@@ -922,19 +941,17 @@ def _variables_outside_overrides(
     ``table_mapping`` requirement. Boolean/ternary traversal is built in and
     cannot itself be overridden, so merely declaring those keys owns nothing.
     """
-    if (expression := operand.get("expression")) is not None:
-        return _variables_outside_overrides(
-            expression, override_operators, override_owned
-        )
-    if "variable" in operand:
-        return frozenset() if override_owned else frozenset({operand["variable"]})
+    if isinstance(operand, _Value):
+        return frozenset()
+    if isinstance(operand, _Variable):
+        return frozenset() if override_owned else frozenset({operand.name})
 
-    operator = operand.get("operator")
+    operator = operand.operator
     operator_owns_children = override_owned or (
         operator in override_operators and operator not in {"and", "or", "not", "if"}
     )
     variables = frozenset()
-    for child in operand.get("operands", []):
+    for child in operand.operands:
         variables |= _variables_outside_overrides(
             child, override_operators, operator_owns_children
         )
@@ -1058,7 +1075,7 @@ def get_query(
     if query_plan.filter.kind in _allow_types:
         return select(table)
 
-    cond = _widen_integral_literals(
+    cond = _parse_operand(
         MessageToDict(query_plan.filter.condition)
         if isinstance(query_plan, response_pb2.PlanResourcesResponse)
         else query_plan.filter.condition.to_dict()
@@ -1246,7 +1263,7 @@ def get_query(
                 return and_(left.isnot(None), plain)
         return plain
 
-    def fold_value_list_macro(operator: str, elements: Any, lambda_operand: dict):
+    def fold_value_list_macro(operator: str, elements: Any, lambda_operand: _Operand):
         """Fold a collection macro whose collection operand is a literal value list.
 
         The planner emits this shape when a known-value collection (typically a
@@ -1273,21 +1290,20 @@ def get_query(
                 f"{operator} over a literal collection requires a list value"
             )
 
-        lambda_expression = _unwrap_expression(lambda_operand)
-        if lambda_expression.get("operator") != "lambda":
+        if not isinstance(lambda_operand, _Expr) or lambda_operand.operator != "lambda":
             raise ValueError(
                 f"Second operand of {operator} must be a lambda expression"
             )
-        lambda_operands = lambda_expression.get("operands", [])
+        lambda_operands = lambda_operand.operands
         if len(lambda_operands) != 2:
             raise ValueError(
                 f"{operator} over a literal collection supports single-variable "
                 "lambdas only"
             )
         body, variable = lambda_operands
-        variable_name = variable.get("variable")
-        if not variable_name:
+        if not isinstance(variable, _Variable) or not variable.name:
             raise ValueError("Lambda variable must have a name")
+        variable_name = variable.name
 
         predicates = [
             traverse_and_map_operands(
@@ -1301,7 +1317,7 @@ def get_query(
             return false() if operator == "exists" else true()
         return or_(*predicates) if operator == "exists" else and_(*predicates)
 
-    def try_fold_value_list_macro(operator: str, child_operands: list):
+    def try_fold_value_list_macro(operator: str, child_operands: Tuple[_Operand, ...]):
         """Return the folded predicate for a value-list macro, else None.
 
         A literal value list can never be a relation marker or a column, so no
@@ -1310,47 +1326,22 @@ def get_query(
         if operator not in _LAMBDA_BINDING_OPERATORS or len(child_operands) != 2:
             return None
         collection, lambda_operand = child_operands
-        if "value" not in collection:
+        if not isinstance(collection, _Value):
             return None
-        return fold_value_list_macro(operator, collection["value"], lambda_operand)
+        return fold_value_list_macro(operator, collection.value, lambda_operand)
 
-    def resolve_operand(operand: dict) -> Any:
-        """Resolve an operand to a SQL value/expression, descending into nested
-        `expression` operands so that value-returning operators (arithmetic,
-        casts, ternary, etc.) compose inside outer comparisons.
-        """
-        if "value" in operand:
-            return operand["value"]
-        if "variable" in operand:
-            return resolve_variable(operand["variable"])
-        if (exp := operand.get("expression")) is not None:
-            return evaluate_expression(exp)
-        raise ValueError(f"Unrecognised operand shape: {operand}")
+    def resolve_operand(operand: _Operand) -> Any:
+        """Resolve a literal, mapped variable, or nested value expression."""
+        if isinstance(operand, _Value):
+            return operand.value
+        if isinstance(operand, _Variable):
+            return resolve_variable(operand.name)
+        return evaluate_expression(operand)
 
-    def evaluate_expression(expression: dict) -> Any:
-        """Evaluate a value-producing expression node (an `{operator, operands}`
-        dict) to a SQL expression. Used for nested non-boolean operators.
-        """
-        operator = expression["operator"]
-        child_operands = expression["operands"]
-        if (
-            operator in ("eq", "ne", "in")
-            and len(child_operands) == 2
-            and all(
-                "variable" in operand or "value" in operand
-                for operand in child_operands
-            )
-        ):
-            # A lambda body is evaluated as a value. Preserve the same per-attribute
-            # NULL conventions that apply when this leaf is at the filter root.
-            return traverse_and_map_operands(expression)
-
-        # Boolean combinators can appear nested inside value expressions
-        # (e.g. a lambda body of `and(...)`); route them back through the
-        # predicate traversal rather than treating them as binary operators.
-        if operator in ("and", "or", "not"):
-            return traverse_and_map_operands(expression)
-
+    def evaluate_expression(expression: _Expr) -> Any:
+        """Evaluate a value-producing node, retaining predicate traversal where needed."""
+        operator = expression.operator
+        child_operands = expression.operands
         if operator == "if":
             # Ternary: if(cond, then, else). The condition may be either a
             # boolean expression or a bare boolean variable/value.
@@ -1362,8 +1353,8 @@ def get_query(
             # conditions, keeping the row excluded under BOTH polarities
             # (`NOT (NULL > 1)` stays UNKNOWN instead of leaking to TRUE).
             first = child_operands[0]
-            if "expression" in first:
-                cond = traverse_and_map_operands(first["expression"])
+            if isinstance(first, _Expr):
+                cond = traverse_and_map_operands(first)
             else:
                 cond = resolve_operand(first)
             then_value = resolve_operand(child_operands[1])
@@ -1373,6 +1364,23 @@ def get_query(
             ):
                 return _ConditionalValue(cond, then_value, else_value)
             return case((cond, then_value), (not_(cond), else_value))
+
+        if (
+            operator in ("eq", "ne", "in")
+            and len(child_operands) == 2
+            and all(
+                isinstance(operand, (_Variable, _Value)) for operand in child_operands
+            )
+        ):
+            # A lambda body is evaluated as a value. Preserve the same per-attribute
+            # NULL conventions that apply when this leaf is at the filter root.
+            return traverse_and_map_operands(expression)
+
+        # Boolean combinators can appear nested inside value expressions
+        # (e.g. a lambda body of `and(...)`); route them back through the
+        # predicate traversal rather than treating them as binary operators.
+        if operator in ("and", "or", "not"):
+            return traverse_and_map_operands(expression)
 
         folded = try_fold_value_list_macro(operator, child_operands)
         if folded is not None:
@@ -1436,22 +1444,16 @@ def get_query(
             )
         return translated
 
-    def traverse_and_map_operands(operand: dict):
-        if exp := operand.get("expression"):
-            return traverse_and_map_operands(exp)
+    def traverse_and_map_operands(operand: _Operand) -> Any:
+        # Bare leaves in a boolean position resolve directly.
+        if isinstance(operand, _Variable):
+            return resolve_variable(operand.name)
+        if isinstance(operand, _Value):
+            return operand.value
 
-        # Bare leaf operands in a boolean position (e.g. `R.attr.aBool` as a
-        # conjunct of an `and`): resolve directly.
-        if "variable" in operand:
-            return resolve_variable(operand["variable"])
-        if "value" in operand:
-            return operand["value"]
+        operator = operand.operator
+        child_operands = operand.operands
 
-        operator = operand["operator"]
-        child_operands = operand["operands"]
-
-        # if `operator` in ["and", "or"], `child_operands` is a nested list of `expression` dicts (handled at the
-        # beginning of this closure)
         if operator in ("and", "or", "not"):
             branches = [
                 require_boolean(traverse_and_map_operands(o), f"{operator!r} operand")
@@ -1474,7 +1476,7 @@ def get_query(
         if folded is not None:
             return folded
 
-        has_nested_expression = any("expression" in o for o in child_operands)
+        has_nested_expression = any(isinstance(o, _Expr) for o in child_operands)
 
         # If the user has supplied an override for this operator and the
         # operands include a nested expression (e.g. size(tags) where tags is
@@ -1486,7 +1488,7 @@ def get_query(
             and (
                 has_nested_expression
                 or len(child_operands) != 2
-                or not all("variable" in o or "value" in o for o in child_operands)
+                or not all(isinstance(o, (_Variable, _Value)) for o in child_operands)
             )
         ):
             resolved = [resolve_operand(o) for o in child_operands]
@@ -1503,17 +1505,17 @@ def get_query(
             right = resolve_operand(child_operands[1])
             return get_operator_fn(operator, left, right)
 
-        # otherwise, they are a list[dict] (len==2), each operand a `variable` or a
-        # `value`. The order is NOT guaranteed to be variable-first: the planner
+        # Both operands are variables or literals. Their order is not guaranteed
+        # to be variable-first: the planner
         # preserves policy source order (`1 < R.attr.x` arrives value-first).
         left_operand, right_operand = child_operands
 
         # Field-to-field: both sides are columns (`R.attr.a == R.attr.b`).
         # Wire order is preserved; SQL three-valued logic keeps rows with a
         # NULL side excluded, matching CEL's missing-attribute deny.
-        if "variable" in left_operand and "variable" in right_operand:
-            left_column = resolve_variable(left_operand["variable"])
-            right_column = resolve_variable(right_operand["variable"])
+        if isinstance(left_operand, _Variable) and isinstance(right_operand, _Variable):
+            left_column = resolve_variable(left_operand.name)
+            right_column = resolve_variable(right_operand.name)
             if operator in ("eq", "ne", "lt", "le", "gt", "ge") and any(
                 isinstance(getattr(column, "type", None), DateTime)
                 for column in (left_column, right_column)
@@ -1529,8 +1531,8 @@ def get_query(
             # A definite predicate returns rows the PDP refuses; a plain one drops
             # rows the PDP allows. Refuse it rather than pick a direction --
             # declare both attributes, or neither.
-            left_explicit = is_explicit_null(left_operand["variable"])
-            right_explicit = is_explicit_null(right_operand["variable"])
+            left_explicit = is_explicit_null(left_operand.name)
+            right_explicit = is_explicit_null(right_operand.name)
             if left_explicit != right_explicit and operator in ("eq", "ne"):
                 raise ValueError(
                     f"Cannot translate `{operator}` between two columns under mixed "
@@ -1550,10 +1552,10 @@ def get_query(
                 get_operator_fn(operator, left_column, right_column),
             )
 
-        if "value" in left_operand and "variable" in right_operand:
-            value = left_operand["value"]
-            column = resolve_variable(right_operand["variable"])
-            explicit = is_explicit_null(right_operand["variable"])
+        if isinstance(left_operand, _Value) and isinstance(right_operand, _Variable):
+            value = left_operand.value
+            column = resolve_variable(right_operand.name)
+            explicit = is_explicit_null(right_operand.name)
             if operator in _MIRRORED_OPERATORS:
                 # Directional: `1 < R.attr.x` means `x > 1`.
                 return get_operator_fn(_MIRRORED_OPERATORS[operator], column, value)
@@ -1570,24 +1572,25 @@ def get_query(
             # order — the value is the receiver, the column the argument.
             return get_operator_fn(operator, value, column)
 
-        if "value" in left_operand and "value" in right_operand:
+        if isinstance(left_operand, _Value) and isinstance(right_operand, _Value):
             # Both sides constant (rare; the planner usually folds these).
-            return get_operator_fn(
-                operator, left_operand["value"], right_operand["value"]
+            return get_operator_fn(operator, left_operand.value, right_operand.value)
+
+        if isinstance(left_operand, _Variable) and isinstance(right_operand, _Value):
+            column = resolve_variable(left_operand.name)
+            value = right_operand.value
+
+            # the operator handlers here are the leaf nodes of the recursion
+            return with_null_conventions(
+                operator,
+                column,
+                value,
+                is_explicit_null(left_operand.name),
+                False,
+                get_operator_fn(operator, column, value),
             )
 
-        column = resolve_variable(left_operand["variable"])
-        value = right_operand["value"]
-
-        # the operator handlers here are the leaf nodes of the recursion
-        return with_null_conventions(
-            operator,
-            column,
-            value,
-            is_explicit_null(left_operand["variable"]),
-            False,
-            get_operator_fn(operator, column, value),
-        )
+        raise ValueError(f"Unrecognised operand shape: {operand}")
 
     condition = traverse_and_map_operands(cond)
     # The root of the plan must translate to a boolean SQL expression. A non-boolean root —

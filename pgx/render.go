@@ -102,10 +102,18 @@ func (r *renderer) write(e queryplan.Expr) error {
 		return nil
 
 	case queryplan.Cmp:
-		return r.writeBinary(cmpSymbol(t.Op), t.L, t.R)
+		symbol, err := cmpSymbol(t.Op)
+		if err != nil {
+			return err
+		}
+		return r.writeBinary(symbol, t.L, t.R)
 
 	case queryplan.Arith:
-		return r.writeBinary(arithSymbol(t.Op), t.L, t.R)
+		symbol, err := arithSymbol(t.Op)
+		if err != nil {
+			return err
+		}
+		return r.writeBinary(symbol, t.L, t.R)
 
 	case queryplan.Concat:
 		// PostgreSQL spells string concatenation `||`, which propagates NULL — so a row whose
@@ -161,8 +169,10 @@ func (r *renderer) write(e queryplan.Expr) error {
 			r.sb.WriteString(" IS TRUE)")
 		case queryplan.TruthFalse:
 			r.sb.WriteString(" IS FALSE)")
-		default:
+		case queryplan.TruthUnknown:
 			r.sb.WriteString(" IS NULL)")
+		default:
+			return fmt.Errorf("cannot render truth value %d", t.Want)
 		}
 		return nil
 
@@ -297,11 +307,7 @@ func (r *renderer) writeCall(c queryplan.Call) error {
 		return nil
 	}
 
-	name := map[queryplan.FuncName]string{
-		queryplan.FuncCharLength: "char_length",
-		queryplan.FuncReplace:    "replace",
-		queryplan.FuncNullIf:     "nullif",
-	}[c.Name]
+	name := functionNames[c.Name]
 	if name == "" {
 		return fmt.Errorf("cannot render function %q", c.Name)
 	}
@@ -332,8 +338,10 @@ func (r *renderer) writeSubquery(s queryplan.Subquery) error {
 			return err
 		}
 		r.sb.WriteString(" FROM ")
-	default:
+	case queryplan.SubqueryCount:
 		r.sb.WriteString("(SELECT count(*) FROM ")
+	default:
+		return fmt.Errorf("cannot render subquery kind %d", s.Kind)
 	}
 
 	for i, item := range s.From {
@@ -364,34 +372,41 @@ func (r *renderer) writeSubquery(s queryplan.Subquery) error {
 	return nil
 }
 
-func cmpSymbol(op queryplan.CmpOp) string {
-	switch op {
-	case queryplan.OpEq:
-		return "="
-	case queryplan.OpNe:
-		return "<>"
-	case queryplan.OpLt:
-		return "<"
-	case queryplan.OpLe:
-		return "<="
-	case queryplan.OpGt:
-		return ">"
-	default:
-		return ">="
-	}
+var cmpSymbols = map[queryplan.CmpOp]string{
+	queryplan.OpEq: "=",
+	queryplan.OpNe: "<>",
+	queryplan.OpLt: "<",
+	queryplan.OpLe: "<=",
+	queryplan.OpGt: ">",
+	queryplan.OpGe: ">=",
 }
 
-func arithSymbol(op queryplan.ArithOp) string {
-	switch op {
-	case queryplan.OpAdd:
-		return "+"
-	case queryplan.OpSub:
-		return "-"
-	case queryplan.OpMult:
-		return "*"
-	case queryplan.OpDiv:
-		return "/"
-	default:
-		return "%"
+var arithSymbols = map[queryplan.ArithOp]string{
+	queryplan.OpAdd:  "+",
+	queryplan.OpSub:  "-",
+	queryplan.OpMult: "*",
+	queryplan.OpDiv:  "/",
+	queryplan.OpMod:  "%",
+}
+
+func cmpSymbol(op queryplan.CmpOp) (string, error) {
+	symbol, ok := cmpSymbols[op]
+	if !ok {
+		return "", fmt.Errorf("cannot render comparison %q", op)
 	}
+	return symbol, nil
+}
+
+func arithSymbol(op queryplan.ArithOp) (string, error) {
+	symbol, ok := arithSymbols[op]
+	if !ok {
+		return "", fmt.Errorf("cannot render arithmetic %q", op)
+	}
+	return symbol, nil
+}
+
+var functionNames = map[queryplan.FuncName]string{
+	queryplan.FuncCharLength: "char_length",
+	queryplan.FuncReplace:    "replace",
+	queryplan.FuncNullIf:     "nullif",
 }

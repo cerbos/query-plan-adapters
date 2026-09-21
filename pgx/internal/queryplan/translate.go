@@ -1141,14 +1141,14 @@ func isStringOperand(v value) bool {
 		return true
 	}
 	c, ok := v.(Column)
-	return ok && c.IsString
+	return ok && c.Type == ValueString
 }
 
 // isUntypedColumn reports whether an operand is a bare column the caller declared no type for.
 // Two of them on one `+` is the only shape whose overload cannot be resolved.
 func isUntypedColumn(v value) bool {
 	c, ok := v.(Column)
-	return ok && !c.IsString && !c.IsBool
+	return ok && c.Type != ValueString && c.Type != ValueBool
 }
 
 // addValue lowers CEL's `+`, choosing between numeric addition and string concatenation.
@@ -1202,7 +1202,7 @@ func addValue(lv, rv value) (value, error) {
 // operand's type, so a caller declares it with ValueBool and the cast fails closed rather than
 // returning every matching row on one engine and none on another (#376).
 func castValue(v value) (value, error) {
-	if c, ok := v.(Column); ok && c.IsBool {
+	if c, ok := v.(Column); ok && c.Type == ValueBool {
 		return nil, fmt.Errorf(
 			"string() over a boolean column is not supported: SQLite and MySQL store a boolean as 1/0 and render \"1\", while CEL and PostgreSQL render \"true\", so no single CAST is correct on every engine",
 		)
@@ -1233,9 +1233,7 @@ func (b *builder) resolveVariable(reference string, m Mapper) (value, error) {
 		Qualifier:    entry.Qualifier,
 		Name:         entry.Column,
 		ExplicitNull: entry.NullConvention == NullConventionExplicit,
-		IsBool:       entry.ValueType == ValueBool,
-		IsString:     entry.ValueType == ValueString,
-		IsNumber:     entry.ValueType == ValueNumber,
+		Type:         entry.ValueType,
 	}, nil
 }
 
@@ -1257,9 +1255,7 @@ func (b *builder) scalarThroughHop(entry Entry) Expr {
 			Qualifier:    alias,
 			Name:         entry.Column,
 			ExplicitNull: entry.NullConvention == NullConventionExplicit,
-			IsBool:       entry.ValueType == ValueBool,
-			IsString:     entry.ValueType == ValueString,
-			IsNumber:     entry.ValueType == ValueNumber,
+			Type:         entry.ValueType,
 		},
 	}
 }

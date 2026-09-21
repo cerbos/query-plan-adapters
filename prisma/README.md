@@ -212,7 +212,7 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` d
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 166 reference actions |
+| Oracle-tested | 171 reference actions |
 | Fail-closed | 95 reference actions plus the 11 reference-unsupported shapes (106 actions total) |
 | Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute the caller sends as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare it per attribute — `nullAttributeRepresentation: "explicit"` on the mapper entry — or the historical rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
@@ -244,6 +244,12 @@ The MySQL legs run under `utf8mb4_0900_as_cs`, applied to the tables after `pris
 SQL Server and CockroachDB are still **not** executed. Where a fail-closed reason names one of them, it is reasoned from that provider's documented `LIKE` and escaping behaviour rather than observed.
 
 > **Breaking change in this release.** `endsWith`/`contains`/`startsWith` with a needle containing a **backslash**, and hierarchy prefixes containing one, now throw instead of returning a filter. A backslash is the default `LIKE` escape character on PostgreSQL and MySQL and has no meaning at all on SQLite, so one needle meant two different things: `contains("a\\b")` matched `"ab"` on PostgreSQL — a row the PDP denies — and `endsWith("\\")` failed the query outright with `SQLSTATE 22025`. There is no needle spelling that is correct on every provider without an `ESCAPE` clause Prisma does not emit, so the shape is refused. If you match on backslashes, compare the whole value with `==` or move the predicate out of the policy.
+
+Projection relations now resolve the scalar lambda variable to the mapped column before
+building its predicate. Negated equality in `tagNames.exists(name, !(name == "public"))`
+includes null list elements, as CEL does; previously it produced an invalid filter or dropped
+those elements. Function mappers may call `queryPlanToPrisma` recursively without overwriting
+the outer call's model, null convention, or collection scope.
 
 ### Mapping hazards
 

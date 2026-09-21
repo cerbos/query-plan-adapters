@@ -71,8 +71,8 @@ final class HierarchyTranslator {
     }
 
     /**
-     * Lower one hierarchy relation. The false direction throws before any operand is examined —
-     * see {@link #negatedHierarchy}.
+     * Lower one hierarchy relation. Negated overlap requires the compared field to exist;
+     * negated strict ancestry remains refused until its own corpus probe covers that lowering.
      *
      * <p>The emitted clauses are built from the DEFAULT term-level forms rather than through
      * {@code operatorOverrides}: an override replaces one named plan OPERATOR, and a hierarchy
@@ -95,7 +95,7 @@ final class HierarchyTranslator {
                 }
             }
         }
-        if (!polarity.holds()) {
+        if (!polarity.holds() && !"overlaps".equals(operator)) {
             throw negatedHierarchy(operator);
         }
         if (operands.size() != 2) {
@@ -103,9 +103,17 @@ final class HierarchyTranslator {
         }
         Hierarchy left = normalizeHierarchy(resolveHierarchy(operator, operands.get(0)));
         Hierarchy right = normalizeHierarchy(resolveHierarchy(operator, operands.get(1)));
-        return "overlaps".equals(operator)
+        Map<String, Object> positive = "overlaps".equals(operator)
                 ? hierarchyOverlaps(operator, left, right)
                 : hierarchyStrict(operator, left, right);
+        if (polarity.holds()) return positive;
+        if (left instanceof Hierarchy.FieldRef field) {
+            return Queries.definedAndNot(field.field(), positive);
+        }
+        if (right instanceof Hierarchy.FieldRef field) {
+            return Queries.definedAndNot(field.field(), positive);
+        }
+        throw negatedHierarchy(operator);
     }
 
     /** {@code ancestorOf(A, B)} and its mirror {@code descendentOf(A, B)}. */
@@ -288,7 +296,7 @@ final class HierarchyTranslator {
     }
 
     /**
-     * Why the false direction of a hierarchy relation is refused rather than negated.
+     * Why strict ancestry remains refused in the false direction.
      *
      * <p>A SQL adapter gets the exclusion free from three-valued logic: {@code NULL LIKE 'x%'} is
      * UNKNOWN, so a row with no scope drops out of a negated hierarchy test on its own. Here the
@@ -296,8 +304,8 @@ final class HierarchyTranslator {
      * {@code bool.must_not} around any of them MATCHES a document that has no value for the field
      * — which is the CEL missing-attribute error, an error the PDP denies on. An
      * {@code exists}-guarded negation would express it, exactly as {@code eq}, {@code in},
-     * {@code contains} and {@code startsWith} already are; no corpus action negates a hierarchy
-     * shape, so that guard would ship unproven and this fails closed instead.
+     * {@code contains} and {@code startsWith} already are. The corpus now proves that guard
+     * for overlap; strict ancestry still lacks its own negated probe and remains refused.
      */
     private static UnsupportedPlanShapeException negatedHierarchy(String operator) {
         return unsupported("Negated " + operator + " cannot be expressed safely: "

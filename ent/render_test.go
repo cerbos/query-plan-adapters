@@ -110,3 +110,28 @@ func TestSelectorReportsPredicateErrors(t *testing.T) {
 	require.ErrorContains(t, selector.Err(), "notAFunction",
 		"a predicate failure must be readable from the selector, or the harness check is vacuous")
 }
+
+// Unknown enum members cannot arise from a planner response. Pin their rejection here so
+// extending the internal tree never silently selects a different SQL operator.
+func TestUnknownRenderEnumsAreRejected(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		node    queryplan.Expr
+		message string
+	}{
+		{"comparison", queryplan.Cmp{Op: "futureComparison", L: queryplan.Lit{V: 1}, R: queryplan.Lit{V: 2}}, `cannot render comparison "futureComparison"`},
+		{"arithmetic", queryplan.Arith{Op: "futureArithmetic", L: queryplan.Lit{V: 1}, R: queryplan.Lit{V: 2}}, `cannot render arithmetic "futureArithmetic"`},
+		{"subquery", queryplan.Subquery{Kind: 255}, "cannot render subquery kind 255"},
+		{"truth", queryplan.TruthTest{X: queryplan.BoolConst{V: true}, Want: 255}, "cannot render truth value 255"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			for _, d := range []string{dialect.SQLite, dialect.Postgres, dialect.MySQL} {
+				predicate, err := render(tc.node, d)
+				require.ErrorContains(t, err, tc.message)
+				require.Nil(t, predicate)
+			}
+		})
+	}
+}

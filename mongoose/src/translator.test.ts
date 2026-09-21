@@ -2582,6 +2582,28 @@ const EXPECTED_FILTERS: Record<string, MongooseFilter> = {
       },
     ],
   },
+  "projection-exists-eq": {
+    tags: {
+      $elemMatch: {
+        name: {
+          $eq: "public"
+        }
+      }
+    }
+  },
+  "projection-exists-not-eq": {
+    tags: {
+      $elemMatch: {
+        $nor: [
+          {
+            name: {
+              $eq: "public"
+            }
+          }
+        ]
+      }
+    }
+  },
   "pv-all": {
     $and: [
       {
@@ -3370,6 +3392,114 @@ const EXPECTED_FILTERS: Record<string, MongooseFilter> = {
         ],
       },
     ],
+  },
+  "rel-not-contains-hop": {
+    $and: [
+      {
+        $expr: {
+          $ne: [
+            {
+              $cond: [
+                {
+                  $and: [
+                    {
+                      $eq: [
+                        {
+                          $type: "$parent.aString"
+                        },
+                        "string"
+                      ]
+                    },
+                    {
+                      $eq: [
+                        {
+                          $type: "done"
+                        },
+                        "string"
+                      ]
+                    }
+                  ]
+                },
+                {
+                  $gte: [
+                    {
+                      $indexOfCP: [
+                        "$parent.aString",
+                        "done"
+                      ]
+                    },
+                    0
+                  ]
+                },
+                null
+              ]
+            },
+            null
+          ]
+        }
+      },
+      {
+        parent: {
+          $ne: null
+        }
+      },
+      {
+        $nor: [
+          {
+            "parent.aString": {
+              $regex: "done"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "rel-not-eq-hop": {
+    $and: [
+      {
+        parent: {
+          $ne: null
+        }
+      },
+      {
+        $nor: [
+          {
+            "parent.aString": {
+              $eq: "One"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "rel-not-hierarchy-hop": {
+    $and: [
+      {
+        parent: {
+          $ne: null
+        }
+      },
+      {
+        $nor: [
+          {
+            $or: [
+              {
+                "parent.aString": {
+                  $in: [
+                    "one"
+                  ]
+                }
+              },
+              {
+                "parent.aString": {
+                  $regex: "^one\\."
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
   },
   "rel-range-hop": {
     $and: [
@@ -6303,7 +6433,7 @@ describe("corpus shapes", () => {
       filters: filters.length,
       kinds: kinds.length,
       throwing: throwing.length,
-    }).toEqual({ filters: 179, kinds: 7, throwing: 88 });
+    }).toEqual({ filters: 184, kinds: 7, throwing: 88 });
   });
 
   // The mapping-hazard contract in README.md rests on one structural fact: this adapter builds no
@@ -6347,6 +6477,31 @@ describe("nullAttributeRepresentation", () => {
       translate("null-eq-missing", { nullAttributeRepresentation: "omitted" }),
     ).toThrow("missing-attribute error");
   });
+
+  test.each(["explicit", "omitted"] as const)(
+    "%s: a reentrant function mapper cannot replace the caller's null representation",
+    (nullAttributeRepresentation) => {
+      const nestedRepresentation = nullAttributeRepresentation === "explicit"
+        ? "omitted"
+        : "explicit";
+      let nestedCalls = 0;
+      const mapper: Mapper = (key) => {
+        translate("cs-eq", { nullAttributeRepresentation: nestedRepresentation });
+        nestedCalls += 1;
+        return typeof MAPPER === "function" ? MAPPER(key) : MAPPER[key] ?? { field: key };
+      };
+      const outer = () => translate("null-eq-missing", {
+        mapper,
+        nullAttributeRepresentation,
+      });
+      if (nullAttributeRepresentation === "explicit") {
+        expect(outer()).toStrictEqual(translate("null-eq-missing"));
+      } else {
+        expect(outer).toThrow("missing-attribute error");
+      }
+      expect(nestedCalls).toBeGreaterThan(0);
+    },
+  );
 
   // The rejection keys off the null OPERAND, not off a list of operators, so a value list carrying
   // one is refused as well. `adversarial.test.ts` proves that over every corpus action against a

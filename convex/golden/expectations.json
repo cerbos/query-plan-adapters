@@ -955,6 +955,14 @@
       "kind": "KIND_CONDITIONAL",
       "path": "post"
     },
+    "projection-exists-eq": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "projection-exists-not-eq": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
     "pv-all": {
       "kind": "KIND_CONDITIONAL",
       "path": "post"
@@ -1084,6 +1092,18 @@
       "path": "post"
     },
     "rel-not-bool-hop": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "rel-not-contains-hop": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "rel-not-eq-hop": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "rel-not-hierarchy-hop": {
       "kind": "KIND_CONDITIONAL",
       "path": "post"
     },

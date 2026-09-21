@@ -528,10 +528,10 @@ const requireLeadingHops = (
   leadingRelations: RelationMapping[],
   inner: SQL,
   reference: string,
-  options?: BuildFilterOptions,
+  options: BuildFilterOptions,
 ): SQL => {
   const required = leadingRelations.filter(
-    (relation) => !options?.skipRelations?.has(relation),
+    (relation) => !options.skipRelations?.has(relation),
   );
   if (required.length === 0) {
     return inner;
@@ -553,11 +553,16 @@ const requireLeadingHops = (
  * (cerbos/query-plan-adapters#315). Guarding the chain construction instead of each operator
  * is what ent and pgx already do, and is why they never had the hole.
  */
+const requiredRelationHops = (relations: RelationMapping[]): RelationMapping[] =>
+  relations[relations.length - 1]?.type === "one"
+    ? relations
+    : relations.slice(0, -1);
+
 const wrapRelationChain = (
   relations: RelationMapping[],
   filter: SQL,
   reference: string,
-  options?: BuildFilterOptions,
+  options: BuildFilterOptions,
 ): SQL => {
   // Every to-ONE relation on the path is a hop that must EXIST — including a TRAILING one,
   // which a chain of to-many relations never produces. `parent.aBool` ends AT its hop, and a
@@ -565,8 +570,7 @@ const wrapRelationChain = (
   // the PDP denies (cerbos/query-plan-adapters#375). A trailing to-MANY relation is the
   // collection being iterated rather than a hop, and keeps its empty-collection semantics:
   // `!exists` over zero rows is TRUE in CEL as well.
-  const last = relations[relations.length - 1];
-  const required = last?.type === "one" ? relations : relations.slice(0, -1);
+  const required = requiredRelationHops(relations);
   return requireLeadingHops(
     required,
     wrapWithRelations(relations, filter, reference, options),
@@ -911,7 +915,7 @@ const buildHierarchyFilter = (
   operator: "ancestorOf" | "descendentOf" | "overlaps",
   operands: PlanExpressionOperand[],
   mapper: Mapper,
-  options?: BuildFilterOptions,
+  options: BuildFilterOptions,
 ): SQL => {
   if (operands.length !== 2) {
     throw new Error(`'${operator}' operator requires exactly two operands`);
@@ -1010,7 +1014,7 @@ const buildHierarchyFilter = (
   }
 
   return field.resolved.relations.length > 0
-    ? wrapWithRelations(
+    ? wrapRelationChain(
         field.resolved.relations,
         filter,
         field.reference,
@@ -1199,7 +1203,7 @@ const resolveCollectionScope = (
 const buildSizeExpression = (
   operand: PlanExpressionOperand,
   mapper: Mapper,
-  options?: BuildFilterOptions,
+  options: BuildFilterOptions,
 ): SQL => {
   // size(filter(coll, lambda)): COUNT with the lambda condition as the predicate. An
   // element whose condition is UNKNOWN (NULL column) poisons the whole count to NULL —
@@ -1225,7 +1229,7 @@ const buildSizeExpression = (
     const rowCondition = buildFilterFromExpression(
       scope.conditionOperand,
       scope.scopedMapper,
-      { skipRelations: scope.skipRelations },
+      { ...options, skipRelations: scope.skipRelations },
     );
     const tableName = resolveTableName(
       scope.primaryRelation.table,
@@ -1318,7 +1322,7 @@ const isStringConcatenation = (
 const buildValueExpression = (
   operand: PlanExpressionOperand,
   mapper: Mapper,
-  options?: BuildFilterOptions,
+  options: BuildFilterOptions,
 ): SQL => {
   if (isValueOperand(operand)) {
     return buildValueExpressionFromValue(operand.value);
@@ -1328,7 +1332,7 @@ const buildValueExpression = (
     // Relations already established by an enclosing lambda subquery (skipRelations) leave
     // the element column directly addressable; anything else cannot be a scalar.
     const unskipped = resolved.relations.filter(
-      (relation) => !options?.skipRelations?.has(relation),
+      (relation) => !options.skipRelations?.has(relation),
     );
     if (unskipped.length > 0) {
       throw new Error(
@@ -1466,7 +1470,7 @@ const buildValueExpression = (
 const buildConditionFromOperand = (
   operand: PlanExpressionOperand,
   mapper: Mapper,
-  options?: BuildFilterOptions,
+  options: BuildFilterOptions,
 ): SQL => buildFilterFromExpression(operand, mapper, options);
 
 /**
@@ -1561,10 +1565,6 @@ const applyComparisonWithExpression = (
   }
 };
 
-// Translation-scoped, set at the queryPlanToDrizzle entry. Translation is synchronous, so
-// module scope is safe.
-let nullRepresentation: NullAttributeRepresentation = "explicit";
-
 /**
  * Guards every site that would emit a NULL-selecting predicate out of a `null` comparison
  * operand.
@@ -1588,9 +1588,10 @@ const mappingNullRepresentation = (
 
 const assertNullOperandTranslatable = (
   context: string,
+  options: BuildFilterOptions,
   declared?: NullAttributeRepresentation,
 ): void => {
-  if ((declared ?? nullRepresentation) === "omitted") {
+  if ((declared ?? options.nullRepresentation) === "omitted") {
     throw new Error(
       `Cannot translate ${context} under nullAttributeRepresentation "omitted": a NULL column ` +
         "sends no attribute, so Cerbos evaluates the comparison as a missing-attribute error " +
@@ -1604,6 +1605,7 @@ const applyComparison = (
   mapping: BaseMapperEntry,
   operator: ComparisonOperator,
   value: Value,
+  options: BuildFilterOptions,
   inherited?: NullAttributeRepresentation,
 ): SQL => {
   // The declaration lives on the mapper entry, but the entry unwraps to a bare column one frame
@@ -1613,10 +1615,15 @@ const applyComparison = (
   if (value === null) {
     assertNullOperandTranslatable(
       `\`${operator}\` against a null operand`,
+      options,
       declared,
     );
   } else if (Array.isArray(value) && value.includes(null)) {
-    assertNullOperandTranslatable("a null element in an `in` list", declared);
+    assertNullOperandTranslatable(
+      "a null element in an `in` list",
+      options,
+      declared,
+    );
   }
   if (isRelationValue(mapping)) {
     return applyRelationComparison(mapping, operator);
@@ -1635,7 +1642,7 @@ const applyComparison = (
     if (!mapping.column) {
       throw new Error("Mapping configuration requires a column or transform");
     }
-    return applyComparison(mapping.column, operator, value, declared);
+    return applyComparison(mapping.column, operator, value, options, declared);
   }
 
   if (!isColumn(mapping)) {
@@ -1725,7 +1732,7 @@ const applyComparison = (
 const buildVariableMembershipFilter = (
   operands: PlanExpressionOperand[],
   mapper: Mapper,
-  options?: BuildFilterOptions,
+  options: BuildFilterOptions,
 ): SQL => {
   if (operands.length !== 2) {
     throw new Error("'in' operator requires exactly two operands");
@@ -1744,7 +1751,7 @@ const buildVariableMembershipFilter = (
 
   const member = resolveFieldReference(memberOperand.name, mapper);
   const unskippedMemberRelations = member.relations.filter(
-    (relation) => !options?.skipRelations?.has(relation),
+    (relation) => !options.skipRelations?.has(relation),
   );
   if (unskippedMemberRelations.length > 0) {
     throw new Error(
@@ -1821,7 +1828,7 @@ interface ResolvedScalarOperand {
 const resolveScalarOperand = (
   operand: PlanExpressionOperand,
   mapper: Mapper,
-  options?: BuildFilterOptions,
+  options: BuildFilterOptions,
 ): ResolvedScalarOperand => {
   if (isValueOperand(operand)) {
     return {
@@ -1850,7 +1857,7 @@ const wrapCombinedRelations = (
   primary: RelationMapping[],
   secondary: RelationMapping[],
   reference: string,
-  options?: BuildFilterOptions,
+  options: BuildFilterOptions,
 ): SQL => {
   let wrapped = filter;
   if (primary.length) {
@@ -1861,7 +1868,12 @@ const wrapCombinedRelations = (
   if (extra.length) {
     wrapped = wrapWithRelations(extra, wrapped, reference, options);
   }
-  return wrapped;
+  return requireLeadingHops(
+    requiredRelationHops(secondary),
+    requireLeadingHops(requiredRelationHops(primary), wrapped, reference, options),
+    reference,
+    options,
+  );
 };
 
 // Field-or-constant string matching (contains/startsWith/endsWith) with the receiver as
@@ -1872,7 +1884,7 @@ const buildStringMatchFilter = (
   operator: StringMatchOperator,
   operands: PlanExpressionOperand[],
   mapper: Mapper,
-  options?: BuildFilterOptions,
+  options: BuildFilterOptions,
 ): SQL => {
   if (operands.length !== 2) {
     throw new Error(`'${operator}' operator requires exactly two operands`);
@@ -1894,9 +1906,9 @@ const buildStringMatchFilter = (
       isRelationValue(mapping) ||
       (isMappingConfig(mapping) && mapping.transform !== undefined)
     ) {
-      const filter = applyComparison(mapping, operator, needleOperand.value);
+      const filter = applyComparison(mapping, operator, needleOperand.value, options);
       return resolved.relations.length
-        ? wrapWithRelations(
+        ? wrapRelationChain(
             resolved.relations,
             filter,
             receiverOperand.name,
@@ -1949,6 +1961,7 @@ const extractArrayValue = (
 const buildHasIntersectionFilter = (
   operands: PlanExpressionOperand[],
   mapper: Mapper,
+  options: BuildFilterOptions,
 ): SQL => {
   if (operands.length !== 2) {
     throw new Error("'hasIntersection' operator requires exactly two operands");
@@ -1984,6 +1997,7 @@ const buildHasIntersectionFilter = (
         resolved.relations.slice(0, -1),
         sql`false`,
         leftOperand.name,
+        options,
       );
     }
     throw new Error(
@@ -1999,10 +2013,10 @@ const buildHasIntersectionFilter = (
     relations: RelationMapping[],
     mapping: BaseMapperEntry,
     reference: string,
-    wrapOptions?: BuildFilterOptions,
+    wrapOptions: BuildFilterOptions,
   ): SQL | undefined => {
     const effective = relations.filter(
-      (relation) => !wrapOptions?.skipRelations?.has(relation),
+      (relation) => !wrapOptions.skipRelations?.has(relation),
     );
     if (!effective.length) {
       return undefined;
@@ -2030,11 +2044,11 @@ const buildHasIntersectionFilter = (
   const buildResolvedFilter = (
     resolved: { relations: RelationMapping[]; mapping: BaseMapperEntry },
     reference: string,
-    wrapOptions?: BuildFilterOptions,
+    wrapOptions: BuildFilterOptions,
     guardNullProjection = false,
   ) => {
     const normalized = resolveRelationDefaultField(resolved, reference);
-    const filter = applyComparison(normalized.mapping, "in", rightValues);
+    const filter = applyComparison(normalized.mapping, "in", rightValues, wrapOptions);
     if (!normalized.relations.length) {
       return filter;
     }
@@ -2101,7 +2115,7 @@ const buildHasIntersectionFilter = (
     const projectedFilter = buildResolvedFilter(
       resolved,
       projectionOperand.name,
-      skipRelations ? { skipRelations } : undefined,
+      skipRelations ? { ...options, skipRelations } : options,
       true,
     );
     if (!metadata) {
@@ -2132,6 +2146,7 @@ const buildHasIntersectionFilter = (
             [metadata.primaryRelation],
             normalizedProjection.mapping,
             projectionOperand.name,
+            options,
           )
         : undefined;
     const guarded = guard
@@ -2153,7 +2168,7 @@ const buildHasIntersectionFilter = (
   }
 
   const resolved = resolveFieldReference(leftOperand.name, mapper);
-  return buildResolvedFilter(resolved, leftOperand.name);
+  return buildResolvedFilter(resolved, leftOperand.name, options);
 };
 
 type CollectionOperator = "exists" | "exists_one" | "filter" | "all" | "except";
@@ -2272,7 +2287,7 @@ const buildKnownValueCollectionFilter = (
   collectionValue: Value,
   lambdaOperand: PlanExpressionOperand,
   mapper: Mapper,
-  options: BuildFilterOptions | undefined,
+  options: BuildFilterOptions,
   negated: boolean,
 ): SQL => {
   if (operator !== "exists" && operator !== "all") {
@@ -2338,7 +2353,7 @@ const buildCollectionOperatorFilter = (
   operands: PlanExpressionOperand[],
   mapper: Mapper,
   negated: boolean,
-  options?: BuildFilterOptions,
+  options: BuildFilterOptions,
 ): SQL => {
   if (operands.length !== 2) {
     throw new Error(`'${operator}' operator requires exactly two operands`);
@@ -2376,7 +2391,7 @@ const buildCollectionOperatorFilter = (
   const rowCondition = buildFilterFromExpression(
     scope.conditionOperand,
     scope.scopedMapper,
-    { skipRelations: scope.skipRelations },
+    { ...options, skipRelations: scope.skipRelations },
   );
 
   // Leading hops already established by an enclosing lambda scope (options.skipRelations)
@@ -2449,6 +2464,7 @@ const buildCollectionOperatorFilter = (
 };
 
 type BuildFilterOptions = {
+  nullRepresentation: NullAttributeRepresentation;
   skipRelations?: Set<RelationMapping>;
 };
 
@@ -2668,7 +2684,7 @@ const buildComparisonFilter = (
   left: PlanExpressionOperand,
   right: PlanExpressionOperand,
   mapper: Mapper,
-  options: BuildFilterOptions | undefined,
+  options: BuildFilterOptions,
   negated: boolean,
 ): SQL => {
   const buildTernary = (
@@ -2908,7 +2924,7 @@ const buildComparisonFilter = (
       const reference = isNameOperand(dynamicOperand)
         ? dynamicOperand.name
         : `'${operator}' operand`;
-      filter = wrapWithRelations(dynamic.relations, filter, reference, options);
+      filter = wrapRelationChain(dynamic.relations, filter, reference, options);
     }
     return negated ? not(filter) : filter;
   };
@@ -3054,9 +3070,9 @@ const buildComparisonFilter = (
     );
   } else if (isNameOperand(left) && isValueOperand(right)) {
     const resolved = resolveFieldReference(left.name, mapper);
-    const comparison = applyComparison(resolved.mapping, operator, right.value);
+    const comparison = applyComparison(resolved.mapping, operator, right.value, options);
     filter = resolved.relations.length
-      ? wrapWithRelations(resolved.relations, comparison, left.name, options)
+      ? wrapRelationChain(resolved.relations, comparison, left.name, options)
       : comparison;
   } else if (isValueOperand(left) && isNameOperand(right)) {
     const mirrored = MIRRORED_OPERATORS[operator];
@@ -3064,9 +3080,9 @@ const buildComparisonFilter = (
       throw new Error(`Unable to mirror comparison operator '${operator}'`);
     }
     const resolved = resolveFieldReference(right.name, mapper);
-    const comparison = applyComparison(resolved.mapping, mirrored, left.value);
+    const comparison = applyComparison(resolved.mapping, mirrored, left.value, options);
     filter = resolved.relations.length
-      ? wrapWithRelations(resolved.relations, comparison, right.name, options)
+      ? wrapRelationChain(resolved.relations, comparison, right.name, options)
       : comparison;
   } else {
     throw new Error(`'${operator}' operator requires field or value operands`);
@@ -3085,7 +3101,7 @@ const buildComparisonFilter = (
 const buildFilterFromExpression = (
   expression: PlanExpressionOperand,
   mapper: Mapper,
-  options?: BuildFilterOptions,
+  options: BuildFilterOptions,
   negated = false,
 ): SQL => {
   // Bare variable in boolean position (e.g. `R.attr.aBool` as an and/or/not operand).
@@ -3094,7 +3110,7 @@ const buildFilterFromExpression = (
   // (cerbos/query-plan-adapters#375).
   if (isNameOperand(expression)) {
     const resolved = resolveFieldReference(expression.name, mapper);
-    const filter = applyComparison(resolved.mapping, "eq", true);
+    const filter = applyComparison(resolved.mapping, "eq", true, options);
     const wrapped = resolved.relations.length
       ? wrapRelationChain(resolved.relations, filter, expression.name, options)
       : filter;
@@ -3234,6 +3250,7 @@ const buildFilterFromExpression = (
         resolved.mapping,
         operator,
         valueOperand.value,
+        options,
       );
       const filter = resolved.relations.length
         ? wrapRelationChain(
@@ -3251,7 +3268,7 @@ const buildFilterFromExpression = (
       );
     }
     case "hasIntersection": {
-      const filter = buildHasIntersectionFilter(operands, mapper);
+      const filter = buildHasIntersectionFilter(operands, mapper, { nullRepresentation: options.nullRepresentation });
       return negated ? not(filter) : filter;
     }
     case "ancestorOf":
@@ -3278,6 +3295,7 @@ const buildFilterFromExpression = (
 
 function rejectNullConstructor(
   operand: PlanExpressionOperand,
+  options: BuildFilterOptions,
   inConstructor = false,
 ): void {
   if (isValueOperand(operand)) {
@@ -3288,13 +3306,14 @@ function rejectNullConstructor(
     ) {
       assertNullOperandTranslatable(
         "a null literal in a collection or struct constructor",
+        options,
       );
     }
   } else if (isExpressionOperand(operand)) {
     const nested =
       inConstructor ||
       ["list", "struct", "set-field"].includes(operand.operator);
-    operand.operands.forEach((child) => rejectNullConstructor(child, nested));
+    operand.operands.forEach((child) => rejectNullConstructor(child, options, nested));
   }
 }
 
@@ -3303,9 +3322,11 @@ export function queryPlanToDrizzle({
   mapper,
   nullAttributeRepresentation = "explicit",
 }: QueryPlanToDrizzleArgs): QueryPlanToDrizzleResult {
-  nullRepresentation = nullAttributeRepresentation;
+  const options: BuildFilterOptions = {
+    nullRepresentation: nullAttributeRepresentation,
+  };
   if (queryPlan.kind === PlanKind.CONDITIONAL)
-    rejectNullConstructor(queryPlan.condition);
+    rejectNullConstructor(queryPlan.condition, options);
   switch (queryPlan.kind) {
     case PlanKind.ALWAYS_ALLOWED:
       return { kind: PlanKind.ALWAYS_ALLOWED };
@@ -3314,7 +3335,7 @@ export function queryPlanToDrizzle({
     case PlanKind.CONDITIONAL:
       return {
         kind: PlanKind.CONDITIONAL,
-        filter: buildFilterFromExpression(queryPlan.condition, mapper),
+        filter: buildFilterFromExpression(queryPlan.condition, mapper, options),
       };
     default:
       throw new Error("Invalid plan kind");

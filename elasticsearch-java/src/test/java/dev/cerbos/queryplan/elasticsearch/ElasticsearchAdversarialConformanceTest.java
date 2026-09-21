@@ -303,7 +303,7 @@ class ElasticsearchAdversarialConformanceTest {
                 "adapterUnsupported.elasticsearch-java contains non-conformance actions");
         assertTrue(expected.containsAll(supportedExpected),
                 "adapterSupportedExpected.elasticsearch-java contains non-expected actions");
-        assertEquals(149, unsupported.size(),
+        assertEquals(150, unsupported.size(),
                 "Elasticsearch unsupported coverage changed without updating the ledger assertion");
         assertEquals(2, supportedExpected.size(),
                 "Elasticsearch supported-expected coverage changed without updating the ledger assertion");
@@ -347,10 +347,10 @@ class ElasticsearchAdversarialConformanceTest {
         manifest.addAll(expected);
         manifest.addAll(nullRepresentationOmittedActions);
         manifest.addAll(divergences);
-        assertEquals(114, oracleActions.size());
-        assertEquals(158, throwingActions.size());
+        assertEquals(118, oracleActions.size());
+        assertEquals(159, throwingActions.size());
         assertEquals(1, nullRepresentationOmittedActions.size());
-        assertEquals(274, classified.size());
+        assertEquals(279, classified.size());
         assertEquals(manifest, classified, "every manifest action must be classified locally");
     }
 
@@ -843,6 +843,7 @@ class ElasticsearchAdversarialConformanceTest {
      * here as PDP/policy liveness probes for a group the list above cannot cover.
      */
     private static final List<String> DEGENERACY_LIVENESS_PROBES = List.of(
+            "projection-exists-not-eq",
             "regex-digit", "regex-case", "regex-posix", "regex-unanchored", "regex-dot", "regex-alternation", "regex-brace", "except-size", "except-eq", "pv-structs", "pv-exists-one", "pv-filter", "pv-map", "lambda-in-literal", "lambda-in-literal-neg", "lambda-ternary", "in-var-var-omitted", "in-var-var-omitted-neg", "not-concat-unsolvable", "not-concat-unsolvable-ne", "hier-overlaps-list-prefix", "not-hasint-empty-chain", "div-by-division", "temporal-raw-eq", "not-nan-ord-le", "hasint-null-vf", "hasint-map-null", "hasint-map-null-vf", "eq-list", "ne-list",
             // Three shapes the audit added the corpus for, each refused by name here and compared
             // on the adapters that can express it: size() over a string, a top-level regex
