@@ -675,12 +675,27 @@ shortest round-trip the default, so a port built on that divergence would pin no
 `cast-string-bool` is the diverging half, and the reason the two are a pair. SQLite and MySQL have
 no boolean type and store 1/0, so `CAST(a_bool AS TEXT)` is `"1"` where CEL and PostgreSQL say
 `"true"`. One translator, one wire node, two answers decided only by the store — which is why an
-adapter spanning both cannot lower it through a `CAST`. activerecord lowers it through
-`CASE WHEN col IS NULL THEN NULL WHEN col THEN 'true' ELSE 'false' END` instead, which spells CEL's
-two words on every engine and keeps a NULL column UNKNOWN
-([#418](https://github.com/cerbos/query-plan-adapters/issues/418)); the other SQL adapters refuse
-it. mongoose and convex lower it correctly, because `$toString` and JavaScript render a bool
-exactly as CEL does.
+adapter spanning both cannot lower it through a `CAST`
+([#418](https://github.com/cerbos/query-plan-adapters/issues/418)):
+
+- **activerecord, sqlalchemy, ent, pgx and drizzle** lower it through
+  `CASE WHEN col IS NULL THEN NULL WHEN col THEN 'true' ELSE 'false' END`, which spells CEL's two
+  words on every engine and keeps a NULL column UNKNOWN.
+- **spring-data** does not build a string at all. It compares the constant in Java: `"true"` and
+  `"false"` become `col = true` and `col = false`, and any other constant matches no row.
+- **mongoose and convex** lower it directly, because `$toString` and JavaScript render a bool
+  exactly as CEL does. **prisma, langchain-chromadb and elasticsearch-java** refuse it: none has a
+  computed string operand.
+
+The `CASE` carries a hazard the corpus action does not reach. Its two words are literals, so MySQL
+compares them in the *connection's* collation rather than a column's, and a driver's default
+connection collation is case-insensitive: on it, `string(flag) == "TRUE"` matches every true row,
+which CEL never does. drizzle renders the literals `COLLATE utf8mb4_0900_bin`, and ent keeps its
+binary-collation `CAST` around the `CASE`, so both are byte-exact on their MySQL legs; activerecord
+and sqlalchemy run no MySQL leg and state the requirement in their READMEs; spring-data never
+compares text. The action only ever compares with `"true"`, and `aBool` is never NULL on any seed,
+so neither the collation nor the `IS NULL` arm is proved against the oracle yet — both are pinned
+in unit tests and golden expectations until the corpus carries a probe for each.
 
 `id-concat` is the same lesson for `add`. The corpus's `add` is numeric everywhere else, and a
 string concatenation dispatched to SQL `+` is a hard error on PostgreSQL, an under-grant on SQLite
