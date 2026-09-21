@@ -12,6 +12,37 @@ trap cleanup EXIT INT TERM
 
 cd "${CONFORMANCE_DIR}"
 
+# Keep entry schemas closed so misspelled metadata cannot be silently ignored by loaders.
+if ! jq -e '
+  def text: type == "string" and length > 0;
+  def entry($required; $optional):
+    type == "object"
+    and (($required - keys) | length == 0)
+    and ((keys - ($required + $optional)) | length == 0)
+    and all(to_entries[] | select(.key != "messages" and .key != "adapters"); .value | text);
+  def entries($required; $optional):
+    type == "array" and all(.[]; entry($required; $optional));
+  def per_adapter($required):
+    type == "object" and all(.[]; entries($required; []));
+  def check($bucket; $valid):
+    if $valid then true else error("invalid " + $bucket + " entry schema") end;
+  check("conformance"; .conformance | type == "array" and all(.[]; text))
+  and check("adapterUnsupported"; .adapterUnsupported | per_adapter(["action", "reason", "message"]))
+  and check("adapterSupportedExpected"; .adapterSupportedExpected | per_adapter(["action", "reason"]))
+  and check("expectedUnsupported";
+    (.expectedUnsupported | entries(["action", "shape", "messages"]; ["reason"]))
+    and all(.expectedUnsupported[]; .messages | type == "object" and all(.[]; text)))
+  and check("nullRepresentationOmitted";
+    (.nullRepresentationOmitted | entries(["action", "reason", "messages"]; ["relatedIssue"]))
+    and all(.nullRepresentationOmitted[]; .messages | type == "object" and all(.[]; text)))
+  and check("knownDivergences";
+    (.knownDivergences | entries(["action", "reason", "adapters"]; ["relatedIssue"]))
+    and all(.knownDivergences[]; .adapters | type == "array" and all(.[]; text)))
+' actions.json >/dev/null; then
+  echo "actions.json entries must use their declared keys and non-empty metadata types" >&2
+  exit 1
+fi
+
 sed -n 's/^[[:space:]]*- actions: \["\([^"]*\)"\].*/\1/p' \
   policies/adversarial.yaml | sort >"${VALIDATION_TMP}/policy-actions"
 
@@ -40,13 +71,15 @@ if ! diff -u "${VALIDATION_TMP}/policy-actions" "${VALIDATION_TMP}/classified-ac
 fi
 
 if ! jq -e '
-  all(
+  .adapters as $roster
+  | all(
     .knownDivergences[];
     (.adapters | type == "array" and length > 0 and length == (unique | length))
     and all(.adapters[]; type == "string" and length > 0)
+    and ((.adapters - $roster) | length == 0)
   )
 ' actions.json >/dev/null; then
-  echo "Each known divergence must name a non-empty, duplicate-free adapters list"
+  echo "Each known divergence must name a non-empty, duplicate-free adapters list drawn from the roster"
   exit 1
 fi
 

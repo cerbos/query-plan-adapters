@@ -874,7 +874,7 @@ class AdversarialConformanceTest {
         Specification<ResourceEntity> spec =
                 SpringDataQueryPlanAdapter.toSpecification(
                         plan(action), mapping, Map.of(), representation);
-        return idsSelectedBy(spec);
+        return executeIds(spec);
     }
 
     /**
@@ -882,7 +882,7 @@ class AdversarialConformanceTest {
      * null, with no authorization clause at all, which is the query a caller runs for an
      * always-allowed plan.
      */
-    private static List<String> idsSelectedBy(Specification<ResourceEntity> spec) {
+    private static List<String> executeIds(Specification<ResourceEntity> spec) {
         EntityManager em = emf.createEntityManager();
         try {
             CriteriaBuilder cb = em.getCriteriaBuilder();
@@ -1150,7 +1150,7 @@ class AdversarialConformanceTest {
         denied.removeAll(oracle);
         assertFalse(denied.isEmpty(), "p-has: check() must deny at least one seed, or there is"
                 + " no over-grant for this tripwire to see");
-        List<String> unfiltered = idsSelectedBy(null);
+        List<String> unfiltered = executeIds(null);
         assertTrue(unfiltered.containsAll(denied), "the unfiltered query must return every"
                 + " row the PDP denies for p-has; denied " + denied + ", got " + unfiltered);
         assertEquals(allIds, unfiltered);
@@ -1222,21 +1222,7 @@ class AdversarialConformanceTest {
         Specification<ResourceEntity> spec =
                 SpringDataQueryPlanAdapter.toSpecification(response, MAPPING, Map.of());
 
-        EntityManager em = emf.createEntityManager();
-        try {
-            CriteriaBuilder cb = em.getCriteriaBuilder();
-            CriteriaQuery<String> cq = cb.createQuery(String.class);
-            Root<ResourceEntity> root = cq.from(ResourceEntity.class);
-            cq.select(root.get("id")).distinct(true);
-            Predicate p = spec.toPredicate(root, cq, cb);
-            if (p != null) {
-                cq.where(p);
-            }
-            cq.orderBy(cb.asc(root.get("id")));
-            return em.createQuery(cq).getResultList();
-        } finally {
-            em.close();
-        }
+        return executeIds(spec);
     }
 
     /**
