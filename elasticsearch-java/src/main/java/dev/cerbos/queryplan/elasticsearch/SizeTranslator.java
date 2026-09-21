@@ -35,13 +35,14 @@ final class SizeTranslator {
         this.root = root;
     }
 
+    private enum SizeThreshold { NON_EMPTY, EMPTY, UNSUPPORTED }
+
     private record SizeComparison(
             String variable,
             String field,
             String operator,
             double value,
-            boolean nonEmpty,
-            boolean empty) {}
+            SizeThreshold threshold) {}
 
     /**
      * The presence query a {@code size()} comparison lowers to under {@code polarity}, or
@@ -52,12 +53,17 @@ final class SizeTranslator {
         if (comparison == null) return null;
 
         Map<String, Object> present = collectionPresentQuery(comparison);
-        boolean holds = polarity.holds();
-        if (holds ? comparison.nonEmpty() : comparison.empty()) return present;
-        if (holds ? comparison.empty() : comparison.nonEmpty()) {
-            throw unsafeEmptyCollectionSize(comparison.variable());
-        }
-        throw unsupportedSizeComparison(comparison);
+        return switch (comparison.threshold()) {
+            case NON_EMPTY -> {
+                if (!polarity.holds()) throw unsafeEmptyCollectionSize(comparison.variable());
+                yield present;
+            }
+            case EMPTY -> {
+                if (polarity.holds()) throw unsafeEmptyCollectionSize(comparison.variable());
+                yield present;
+            }
+            case UNSUPPORTED -> throw unsupportedSizeComparison(comparison);
+        };
     }
 
     private SizeComparison resolveSizeComparison(String operator, List<Operand> operands) {
@@ -116,8 +122,7 @@ final class SizeTranslator {
                 root.field(variable),
                 normalizedOperator,
                 value,
-                nonEmpty,
-                empty);
+                nonEmpty ? SizeThreshold.NON_EMPTY : empty ? SizeThreshold.EMPTY : SizeThreshold.UNSUPPORTED);
     }
 
     /**

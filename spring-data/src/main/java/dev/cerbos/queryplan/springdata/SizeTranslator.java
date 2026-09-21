@@ -209,7 +209,7 @@ final class SizeTranslator {
                 // for a parentless row under BOTH collapses and readmits all of them
                 // (cerbos/query-plan-adapters#333). A CASE with no ELSE yields SQL NULL
                 // instead, leaving the comparison UNKNOWN under both polarities.
-                if (subqueries.leadingHopsExist(scope, ref) == null) {
+                if (!ref.isChained()) {
                     return fractionalCollapse ? cb.conjunction() : cb.disjunction();
                 }
                 return cb.equal(
@@ -229,7 +229,7 @@ final class SizeTranslator {
             // each comparison shortcut is what makes `== 0`, `> 0`, `>= N` and all their
             // negations inherit the guard: the count is SQL NULL without the hop, so
             // every comparison built on it is UNKNOWN under BOTH polarities.
-            boolean chained = subqueries.leadingHopsExist(scope, ref) != null;
+            boolean chained = ref.isChained();
             if (nonEmpty && !chained) {
                 return subqueries.existsSubquery(scope, ref, (sub, tailJoin, rebased) -> cb.conjunction());
             }

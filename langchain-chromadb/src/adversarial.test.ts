@@ -481,6 +481,12 @@ const DEGENERACY_GUARD_ACTIONS = [
  * arithmetic (#311) and the numeric cast. See cerbos/query-plan-adapters#324.
  */
 const DEGENERACY_LIVENESS_PROBES = [
+  "projection-exists-eq",
+  "projection-exists-not-eq",
+  "rel-not-eq-hop",
+  "rel-not-contains-hop",
+  "rel-not-hierarchy-hop",
+
   // size(string) and a hierarchy relation are nested expressions a Chroma `Where` cannot hold,
   // and matches() is never translated here.
   "string-size-gt0",
@@ -879,12 +885,12 @@ describe("adversarial conformance corpus", () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(274);
+    expect(MANIFEST_ACTIONS.size).toBe(279);
     expect(CHROMA_SUPPORTED_ACTIONS).toHaveLength(48);
     expect(oracle.size).toBe(CHROMA_SUPPORTED_ACTIONS.length);
-    expect(CHROMA_UNSUPPORTED).toHaveLength(213);
+    expect(CHROMA_UNSUPPORTED).toHaveLength(218);
     expect(CHROMA_SUPPORTED_EXPECTED).toHaveLength(0);
-    expect(THROWING_ACTIONS).toHaveLength(224);
+    expect(THROWING_ACTIONS).toHaveLength(229);
     expect(misclassified).toEqual([]);
   });
 

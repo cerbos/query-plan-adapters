@@ -23,9 +23,6 @@ final class Queries {
     static final Map<String, OperatorFunction> DEFAULT_OPERATORS = Map.ofEntries(
             Map.entry("eq", (field, value) ->
                     Map.of("term", Map.of(field, Map.of("value", value)))),
-            Map.entry("ne", (field, value) ->
-                    Map.of("bool", Map.of("must_not", List.of(
-                            Map.of("term", Map.of(field, Map.of("value", value))))))),
             Map.entry("lt", (field, value) ->
                     Map.of("range", Map.of(field, Map.of("lt", value)))),
             Map.entry("gt", (field, value) ->

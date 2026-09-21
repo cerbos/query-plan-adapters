@@ -8,60 +8,10 @@ import { MAPPERS } from "./adversarialMapper";
 import { mutation, query } from "./_generated/server";
 import type { DataModel } from "./_generated/dataModel";
 import { executionPathOf, isPlanResourcesResponse } from "./planExecution";
-
-const tag = v.object({ id: v.string(), name: v.optional(v.string()) });
-const label = v.object({ name: v.optional(v.string()) });
-const subCategory = v.object({
-  name: v.string(),
-  labels: v.array(label),
-});
-const category = v.object({
-  name: v.string(),
-  subCategories: v.array(subCategory),
-});
-const mainCategory = v.object({
-  name: v.string(),
-  subCategories: v.array(v.object({ name: v.string() })),
-  subNames: v.array(v.string()),
-});
-
-// The corpus's one real to-one relation. A document store has no join, so both levels are nested
-// objects — but the SHAPE is the same to-one chain every other store carries, and an absent level
-// is a missing path here exactly as it is a missing row there.
-const relationLevel = {
-  aBool: v.boolean(),
-  aString: v.string(),
-  aNumber: v.number(),
-  aOptionalString: v.optional(v.string()),
-};
-const parent = v.object({
-  ...relationLevel,
-  inner: v.optional(v.object(relationLevel)),
-});
-
-const document = {
-  id: v.string(),
-  aBool: v.boolean(),
-  aString: v.string(),
-  aNumber: v.number(),
-  aDouble: v.optional(v.number()),
-  aOptionalString: v.optional(v.string()),
-  createdBy: v.string(),
-  createdAt: v.optional(v.string()),
-  updatedAt: v.optional(v.string()),
-  scope: v.optional(v.string()),
-  owner: v.union(v.string(), v.null()),
-  coOwner: v.union(v.string(), v.null()),
-  tagNames: v.array(v.union(v.string(), v.null())),
-  obj: v.object({ inner: v.string() }),
-  tags: v.array(tag),
-  categories: v.array(category),
-  mainCategory: v.optional(mainCategory),
-  parent: v.optional(parent),
-};
+import { adversarialDocument } from "./schema";
 
 export const insert = mutation({
-  args: document,
+  args: adversarialDocument,
   handler: async (ctx, args) => ctx.db.insert("adversarial", args),
 });
 
@@ -127,13 +77,15 @@ export const executePlan = query({
       return { ids: [], execution };
 
     let queryBuilder = ctx.db.query("adversarial");
-    if (translated.kind === PlanKind.CONDITIONAL && translated.filter) {
+    if (translated.kind === PlanKind.CONDITIONAL && translated.path !== "post") {
       queryBuilder = queryBuilder.filter(translated.filter);
     }
     const docs = await queryBuilder.collect();
     const ids = docs
       .filter((doc) =>
-        translated.postFilter ? translated.postFilter({ ...doc }) : true,
+        translated.kind === PlanKind.CONDITIONAL && translated.path !== "db"
+          ? translated.postFilter({ ...doc })
+          : true,
       )
       .map((doc) => doc.id)
       .sort();

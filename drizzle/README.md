@@ -76,13 +76,22 @@ undeclared side needs UNKNOWN — so the adapter throws rather than picking a di
 [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
 
 
+## Behaviour change: guarded parent relations
+
+Negated scalar comparisons, string matches and hierarchy predicates now exclude rows
+whose to-one parent is absent. Previously those leaves could return parentless rows
+that Cerbos denies. This is a consumer-visible authorization fix (#430), covered by
+`rel-not-eq-hop`, `rel-not-contains-hop` and `rel-not-hierarchy-hop` on every supported
+store. Translation also keeps its null-representation option local to each call,
+including when a mapper starts another translation.
+
 ## Conformance contract
 
 The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 26 hostile seed rows and real Drizzle queries, executed on SQLite, PostgreSQL and MySQL. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 218 reference conformance actions |
+| Oracle-tested | 223 reference conformance actions |
 | Fail-closed corpus shapes | Sub-millisecond `now()` thresholds, regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an untyped string field, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero) `filter()`/`map()` used as a condition (both return a list, not a boolean), `string()` over any column (no SQL `CAST` target spells it on all three stores: `TEXT` and `VARCHAR` are syntax errors on MySQL, which spells it `CHAR`, while `CHAR` is `character(1)` on PostgreSQL — and over a boolean it is wrong rather than merely unspellable, since SQLite and MySQL store 1/0 and render `"1"` where CEL and PostgreSQL render `"true"`), CEL's `+` over strings (`||` concatenates on SQLite and PostgreSQL but is logical OR on MySQL, and the numeric `+` this adapter emits coerces the operands to 0 rather than failing), a hierarchy path constructed by `list()` rather than read from a column, `mod` (reached through the `int()` cast that gives `%` an integer operand), a positional read of a scalar list (row order in a SQL relation is not defined), list equality over a `map()` projection, and a hierarchy with an empty delimiter (Cerbos splits the path per character, and the prefix `LIKE` this adapter emits would match the path itself) (54 actions) |
 | Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute the caller sends as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare it per attribute — `nullAttributeRepresentation: "explicit"` on the mapper entry — or the historical rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |

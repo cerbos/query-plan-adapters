@@ -3016,3 +3016,39 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aOptionalString in P.attr.fewTeams
+
+    # #430: projection lambda bodies and negated scalar leaves through a to-one hop.
+    - actions: ["projection-exists-eq"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.tagNames.exists(tagName, tagName == "public")'
+
+    - actions: ["projection-exists-not-eq"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.tagNames.exists(tagName, !(tagName == "public"))'
+
+    - actions: ["rel-not-eq-hop"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(R.attr.parent.aString == "One")'
+
+    - actions: ["rel-not-contains-hop"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!R.attr.parent.aString.contains("done")'
+
+    - actions: ["rel-not-hierarchy-hop"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!hierarchy(R.attr.parent.aString).overlaps(hierarchy("one"))'

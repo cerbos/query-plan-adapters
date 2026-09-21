@@ -3417,6 +3417,58 @@
         }
       }
     },
+    "projection-exists-eq": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "(case when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and ((\"adversarial_tags\".\"name\" is not null and \"adversarial_tags\".\"name\" = ?)) is true)) then true when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and ((\"adversarial_tags\".\"name\" is not null and \"adversarial_tags\".\"name\" = ?)) is null)) then null else false end)",
+          "params": [
+            "public",
+            "public"
+          ]
+        },
+        "postgresql": {
+          "sql": "(case when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and ((\"adversarial_tags\".\"name\" is not null and \"adversarial_tags\".\"name\" = $1)) is true)) then true when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and ((\"adversarial_tags\".\"name\" is not null and \"adversarial_tags\".\"name\" = $2)) is null)) then null else false end)",
+          "params": [
+            "public",
+            "public"
+          ]
+        },
+        "mysql": {
+          "sql": "(case when exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and ((`adversarial_tags`.`name` is not null and `adversarial_tags`.`name` = ?)) is true)) then true when exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and ((`adversarial_tags`.`name` is not null and `adversarial_tags`.`name` = ?)) is null)) then null else false end)",
+          "params": [
+            "public",
+            "public"
+          ]
+        }
+      }
+    },
+    "projection-exists-not-eq": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "(case when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (not (\"adversarial_tags\".\"name\" is not null and \"adversarial_tags\".\"name\" = ?)) is true)) then true when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (not (\"adversarial_tags\".\"name\" is not null and \"adversarial_tags\".\"name\" = ?)) is null)) then null else false end)",
+          "params": [
+            "public",
+            "public"
+          ]
+        },
+        "postgresql": {
+          "sql": "(case when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (not (\"adversarial_tags\".\"name\" is not null and \"adversarial_tags\".\"name\" = $1)) is true)) then true when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (not (\"adversarial_tags\".\"name\" is not null and \"adversarial_tags\".\"name\" = $2)) is null)) then null else false end)",
+          "params": [
+            "public",
+            "public"
+          ]
+        },
+        "mysql": {
+          "sql": "(case when exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and (not (`adversarial_tags`.`name` is not null and `adversarial_tags`.`name` = ?)) is true)) then true when exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and (not (`adversarial_tags`.`name` is not null and `adversarial_tags`.`name` = ?)) is null)) then null else false end)",
+          "params": [
+            "public",
+            "public"
+          ]
+        }
+      }
+    },
     "pv-all": {
       "kind": "KIND_CONDITIONAL",
       "rendered": {
@@ -3897,19 +3949,19 @@
       "kind": "KIND_CONDITIONAL",
       "rendered": {
         "sqlite": {
-          "sql": "exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and exists (select 1 from \"adversarial_inners\" where (\"adversarial_inners\".\"parent_id\" = \"adversarial_parents\".\"id\" and \"adversarial_inners\".\"a_bool\" = ?))))",
+          "sql": "(case when exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and exists (select 1 from \"adversarial_inners\" where (\"adversarial_inners\".\"parent_id\" = \"adversarial_parents\".\"id\" and 1 = 1)))) then exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and exists (select 1 from \"adversarial_inners\" where (\"adversarial_inners\".\"parent_id\" = \"adversarial_parents\".\"id\" and \"adversarial_inners\".\"a_bool\" = ?)))) end)",
           "params": [
             1
           ]
         },
         "postgresql": {
-          "sql": "exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and exists (select 1 from \"adversarial_inners\" where (\"adversarial_inners\".\"parent_id\" = \"adversarial_parents\".\"id\" and \"adversarial_inners\".\"a_bool\" = $1))))",
+          "sql": "(case when exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and exists (select 1 from \"adversarial_inners\" where (\"adversarial_inners\".\"parent_id\" = \"adversarial_parents\".\"id\" and 1 = 1)))) then exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and exists (select 1 from \"adversarial_inners\" where (\"adversarial_inners\".\"parent_id\" = \"adversarial_parents\".\"id\" and \"adversarial_inners\".\"a_bool\" = $1)))) end)",
           "params": [
             true
           ]
         },
         "mysql": {
-          "sql": "exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and exists (select 1 from `adversarial_inners` where (`adversarial_inners`.`parent_id` = `adversarial_parents`.`id` and `adversarial_inners`.`a_bool` = ?))))",
+          "sql": "(case when exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and exists (select 1 from `adversarial_inners` where (`adversarial_inners`.`parent_id` = `adversarial_parents`.`id` and 1 = 1)))) then exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and exists (select 1 from `adversarial_inners` where (`adversarial_inners`.`parent_id` = `adversarial_parents`.`id` and `adversarial_inners`.`a_bool` = ?)))) end)",
           "params": [
             true
           ]
@@ -3920,21 +3972,21 @@
       "kind": "KIND_CONDITIONAL",
       "rendered": {
         "sqlite": {
-          "sql": "exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and (case when \"adversarial_parents\".\"a_string\" is null then null when ? = '' then true else length(replace(\"adversarial_parents\".\"a_string\", ?, '')) < length(\"adversarial_parents\".\"a_string\") end)))",
+          "sql": "(case when exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and 1 = 1)) then exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and (case when \"adversarial_parents\".\"a_string\" is null then null when ? = '' then true else length(replace(\"adversarial_parents\".\"a_string\", ?, '')) < length(\"adversarial_parents\".\"a_string\") end))) end)",
           "params": [
             "done",
             "done"
           ]
         },
         "postgresql": {
-          "sql": "exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and (case when \"adversarial_parents\".\"a_string\" is null then null when $1 = '' then true else length(replace(\"adversarial_parents\".\"a_string\", $2, '')) < length(\"adversarial_parents\".\"a_string\") end)))",
+          "sql": "(case when exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and 1 = 1)) then exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and (case when \"adversarial_parents\".\"a_string\" is null then null when $1 = '' then true else length(replace(\"adversarial_parents\".\"a_string\", $2, '')) < length(\"adversarial_parents\".\"a_string\") end))) end)",
           "params": [
             "done",
             "done"
           ]
         },
         "mysql": {
-          "sql": "exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and (case when `adversarial_parents`.`a_string` is null then null when ? = '' then true else length(replace(`adversarial_parents`.`a_string`, ?, '')) < length(`adversarial_parents`.`a_string`) end)))",
+          "sql": "(case when exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and 1 = 1)) then exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and (case when `adversarial_parents`.`a_string` is null then null when ? = '' then true else length(replace(`adversarial_parents`.`a_string`, ?, '')) < length(`adversarial_parents`.`a_string`) end))) end)",
           "params": [
             "done",
             "done"
@@ -3946,19 +3998,19 @@
       "kind": "KIND_CONDITIONAL",
       "rendered": {
         "sqlite": {
-          "sql": "exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_parents\".\"a_string\" = ?))",
+          "sql": "(case when exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and 1 = 1)) then exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_parents\".\"a_string\" = ?)) end)",
           "params": [
             "One"
           ]
         },
         "postgresql": {
-          "sql": "exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_parents\".\"a_string\" = $1))",
+          "sql": "(case when exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and 1 = 1)) then exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_parents\".\"a_string\" = $1)) end)",
           "params": [
             "One"
           ]
         },
         "mysql": {
-          "sql": "exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and `adversarial_parents`.`a_string` = ?))",
+          "sql": "(case when exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and 1 = 1)) then exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and `adversarial_parents`.`a_string` = ?)) end)",
           "params": [
             "One"
           ]
@@ -3969,19 +4021,19 @@
       "kind": "KIND_CONDITIONAL",
       "rendered": {
         "sqlite": {
-          "sql": "exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_parents\".\"a_number\" = ?))",
+          "sql": "(case when exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and 1 = 1)) then exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_parents\".\"a_number\" = ?)) end)",
           "params": [
             2
           ]
         },
         "postgresql": {
-          "sql": "exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_parents\".\"a_number\" = $1))",
+          "sql": "(case when exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and 1 = 1)) then exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_parents\".\"a_number\" = $1)) end)",
           "params": [
             2
           ]
         },
         "mysql": {
-          "sql": "exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and `adversarial_parents`.`a_number` = ?))",
+          "sql": "(case when exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and 1 = 1)) then exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and `adversarial_parents`.`a_number` = ?)) end)",
           "params": [
             2
           ]
@@ -3992,19 +4044,19 @@
       "kind": "KIND_CONDITIONAL",
       "rendered": {
         "sqlite": {
-          "sql": "exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_parents\".\"a_number\" >= ?))",
+          "sql": "(case when exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and 1 = 1)) then exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_parents\".\"a_number\" >= ?)) end)",
           "params": [
             2
           ]
         },
         "postgresql": {
-          "sql": "exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_parents\".\"a_number\" >= $1))",
+          "sql": "(case when exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and 1 = 1)) then exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_parents\".\"a_number\" >= $1)) end)",
           "params": [
             2
           ]
         },
         "mysql": {
-          "sql": "exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and `adversarial_parents`.`a_number` >= ?))",
+          "sql": "(case when exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and 1 = 1)) then exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and `adversarial_parents`.`a_number` >= ?)) end)",
           "params": [
             2
           ]
@@ -4015,19 +4067,19 @@
       "kind": "KIND_CONDITIONAL",
       "rendered": {
         "sqlite": {
-          "sql": "exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_parents\".\"a_number\" > ?))",
+          "sql": "(case when exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and 1 = 1)) then exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_parents\".\"a_number\" > ?)) end)",
           "params": [
             2
           ]
         },
         "postgresql": {
-          "sql": "exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_parents\".\"a_number\" > $1))",
+          "sql": "(case when exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and 1 = 1)) then exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_parents\".\"a_number\" > $1)) end)",
           "params": [
             2
           ]
         },
         "mysql": {
-          "sql": "exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and `adversarial_parents`.`a_number` > ?))",
+          "sql": "(case when exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and 1 = 1)) then exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and `adversarial_parents`.`a_number` > ?)) end)",
           "params": [
             2
           ]
@@ -4038,7 +4090,7 @@
       "kind": "KIND_CONDITIONAL",
       "rendered": {
         "sqlite": {
-          "sql": "(\"adversarial_resources\".\"a_bool\" = ? and exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and (case when \"adversarial_parents\".\"a_string\" is null then null when ? = '' then true else length(replace(\"adversarial_parents\".\"a_string\", ?, '')) < length(\"adversarial_parents\".\"a_string\") end))))",
+          "sql": "(\"adversarial_resources\".\"a_bool\" = ? and (case when exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and 1 = 1)) then exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and (case when \"adversarial_parents\".\"a_string\" is null then null when ? = '' then true else length(replace(\"adversarial_parents\".\"a_string\", ?, '')) < length(\"adversarial_parents\".\"a_string\") end))) end))",
           "params": [
             1,
             "re",
@@ -4046,7 +4098,7 @@
           ]
         },
         "postgresql": {
-          "sql": "(\"adversarial_resources\".\"a_bool\" = $1 and exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and (case when \"adversarial_parents\".\"a_string\" is null then null when $2 = '' then true else length(replace(\"adversarial_parents\".\"a_string\", $3, '')) < length(\"adversarial_parents\".\"a_string\") end))))",
+          "sql": "(\"adversarial_resources\".\"a_bool\" = $1 and (case when exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and 1 = 1)) then exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and (case when \"adversarial_parents\".\"a_string\" is null then null when $2 = '' then true else length(replace(\"adversarial_parents\".\"a_string\", $3, '')) < length(\"adversarial_parents\".\"a_string\") end))) end))",
           "params": [
             true,
             "re",
@@ -4054,7 +4106,7 @@
           ]
         },
         "mysql": {
-          "sql": "(`adversarial_resources`.`a_bool` = ? and exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and (case when `adversarial_parents`.`a_string` is null then null when ? = '' then true else length(replace(`adversarial_parents`.`a_string`, ?, '')) < length(`adversarial_parents`.`a_string`) end))))",
+          "sql": "(`adversarial_resources`.`a_bool` = ? and (case when exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and 1 = 1)) then exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and (case when `adversarial_parents`.`a_string` is null then null when ? = '' then true else length(replace(`adversarial_parents`.`a_string`, ?, '')) < length(`adversarial_parents`.`a_string`) end))) end))",
           "params": [
             true,
             "re",
@@ -4067,7 +4119,7 @@
       "kind": "KIND_CONDITIONAL",
       "rendered": {
         "sqlite": {
-          "sql": "(exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and exists (select 1 from \"adversarial_inners\" where (\"adversarial_inners\".\"parent_id\" = \"adversarial_parents\".\"id\" and \"adversarial_inners\".\"a_bool\" = ?)))) or (case when exists (select 1 from \"adversarial_categories\" where (\"adversarial_categories\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_categories\".\"name\" = ?) is true)) then true when exists (select 1 from \"adversarial_categories\" where (\"adversarial_categories\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_categories\".\"name\" = ?) is null)) then null else false end))",
+          "sql": "((case when exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and exists (select 1 from \"adversarial_inners\" where (\"adversarial_inners\".\"parent_id\" = \"adversarial_parents\".\"id\" and 1 = 1)))) then exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and exists (select 1 from \"adversarial_inners\" where (\"adversarial_inners\".\"parent_id\" = \"adversarial_parents\".\"id\" and \"adversarial_inners\".\"a_bool\" = ?)))) end) or (case when exists (select 1 from \"adversarial_categories\" where (\"adversarial_categories\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_categories\".\"name\" = ?) is true)) then true when exists (select 1 from \"adversarial_categories\" where (\"adversarial_categories\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_categories\".\"name\" = ?) is null)) then null else false end))",
           "params": [
             1,
             "business",
@@ -4075,7 +4127,7 @@
           ]
         },
         "postgresql": {
-          "sql": "(exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and exists (select 1 from \"adversarial_inners\" where (\"adversarial_inners\".\"parent_id\" = \"adversarial_parents\".\"id\" and \"adversarial_inners\".\"a_bool\" = $1)))) or (case when exists (select 1 from \"adversarial_categories\" where (\"adversarial_categories\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_categories\".\"name\" = $2) is true)) then true when exists (select 1 from \"adversarial_categories\" where (\"adversarial_categories\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_categories\".\"name\" = $3) is null)) then null else false end))",
+          "sql": "((case when exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and exists (select 1 from \"adversarial_inners\" where (\"adversarial_inners\".\"parent_id\" = \"adversarial_parents\".\"id\" and 1 = 1)))) then exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and exists (select 1 from \"adversarial_inners\" where (\"adversarial_inners\".\"parent_id\" = \"adversarial_parents\".\"id\" and \"adversarial_inners\".\"a_bool\" = $1)))) end) or (case when exists (select 1 from \"adversarial_categories\" where (\"adversarial_categories\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_categories\".\"name\" = $2) is true)) then true when exists (select 1 from \"adversarial_categories\" where (\"adversarial_categories\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_categories\".\"name\" = $3) is null)) then null else false end))",
           "params": [
             true,
             "business",
@@ -4083,7 +4135,7 @@
           ]
         },
         "mysql": {
-          "sql": "(exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and exists (select 1 from `adversarial_inners` where (`adversarial_inners`.`parent_id` = `adversarial_parents`.`id` and `adversarial_inners`.`a_bool` = ?)))) or (case when exists (select 1 from `adversarial_categories` where (`adversarial_categories`.`resource_id` = `adversarial_resources`.`id` and (`adversarial_categories`.`name` = ?) is true)) then true when exists (select 1 from `adversarial_categories` where (`adversarial_categories`.`resource_id` = `adversarial_resources`.`id` and (`adversarial_categories`.`name` = ?) is null)) then null else false end))",
+          "sql": "((case when exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and exists (select 1 from `adversarial_inners` where (`adversarial_inners`.`parent_id` = `adversarial_parents`.`id` and 1 = 1)))) then exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and exists (select 1 from `adversarial_inners` where (`adversarial_inners`.`parent_id` = `adversarial_parents`.`id` and `adversarial_inners`.`a_bool` = ?)))) end) or (case when exists (select 1 from `adversarial_categories` where (`adversarial_categories`.`resource_id` = `adversarial_resources`.`id` and (`adversarial_categories`.`name` = ?) is true)) then true when exists (select 1 from `adversarial_categories` where (`adversarial_categories`.`resource_id` = `adversarial_resources`.`id` and (`adversarial_categories`.`name` = ?) is null)) then null else false end))",
           "params": [
             true,
             "business",
@@ -4096,19 +4148,19 @@
       "kind": "KIND_CONDITIONAL",
       "rendered": {
         "sqlite": {
-          "sql": "exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_parents\".\"a_number\" <= ?))",
+          "sql": "(case when exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and 1 = 1)) then exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_parents\".\"a_number\" <= ?)) end)",
           "params": [
             2
           ]
         },
         "postgresql": {
-          "sql": "exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_parents\".\"a_number\" <= $1))",
+          "sql": "(case when exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and 1 = 1)) then exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_parents\".\"a_number\" <= $1)) end)",
           "params": [
             2
           ]
         },
         "mysql": {
-          "sql": "exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and `adversarial_parents`.`a_number` <= ?))",
+          "sql": "(case when exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and 1 = 1)) then exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and `adversarial_parents`.`a_number` <= ?)) end)",
           "params": [
             2
           ]
@@ -4119,19 +4171,19 @@
       "kind": "KIND_CONDITIONAL",
       "rendered": {
         "sqlite": {
-          "sql": "exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_parents\".\"a_number\" < ?))",
+          "sql": "(case when exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and 1 = 1)) then exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_parents\".\"a_number\" < ?)) end)",
           "params": [
             2
           ]
         },
         "postgresql": {
-          "sql": "exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_parents\".\"a_number\" < $1))",
+          "sql": "(case when exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and 1 = 1)) then exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_parents\".\"a_number\" < $1)) end)",
           "params": [
             2
           ]
         },
         "mysql": {
-          "sql": "exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and `adversarial_parents`.`a_number` < ?))",
+          "sql": "(case when exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and 1 = 1)) then exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and `adversarial_parents`.`a_number` < ?)) end)",
           "params": [
             2
           ]
@@ -4142,15 +4194,15 @@
       "kind": "KIND_CONDITIONAL",
       "rendered": {
         "sqlite": {
-          "sql": "exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and not \"adversarial_parents\".\"a_optional_string\" is null))",
+          "sql": "(case when exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and 1 = 1)) then exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and not \"adversarial_parents\".\"a_optional_string\" is null)) end)",
           "params": []
         },
         "postgresql": {
-          "sql": "exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and not \"adversarial_parents\".\"a_optional_string\" is null))",
+          "sql": "(case when exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and 1 = 1)) then exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and not \"adversarial_parents\".\"a_optional_string\" is null)) end)",
           "params": []
         },
         "mysql": {
-          "sql": "exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and not `adversarial_parents`.`a_optional_string` is null))",
+          "sql": "(case when exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and 1 = 1)) then exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and not `adversarial_parents`.`a_optional_string` is null)) end)",
           "params": []
         }
       }
@@ -4178,25 +4230,103 @@
         }
       }
     },
+    "rel-not-contains-hop": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "not (case when exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and 1 = 1)) then exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and (case when \"adversarial_parents\".\"a_string\" is null then null when ? = '' then true else length(replace(\"adversarial_parents\".\"a_string\", ?, '')) < length(\"adversarial_parents\".\"a_string\") end))) end)",
+          "params": [
+            "done",
+            "done"
+          ]
+        },
+        "postgresql": {
+          "sql": "not (case when exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and 1 = 1)) then exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and (case when \"adversarial_parents\".\"a_string\" is null then null when $1 = '' then true else length(replace(\"adversarial_parents\".\"a_string\", $2, '')) < length(\"adversarial_parents\".\"a_string\") end))) end)",
+          "params": [
+            "done",
+            "done"
+          ]
+        },
+        "mysql": {
+          "sql": "not (case when exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and 1 = 1)) then exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and (case when `adversarial_parents`.`a_string` is null then null when ? = '' then true else length(replace(`adversarial_parents`.`a_string`, ?, '')) < length(`adversarial_parents`.`a_string`) end))) end)",
+          "params": [
+            "done",
+            "done"
+          ]
+        }
+      }
+    },
+    "rel-not-eq-hop": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "not (case when exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and 1 = 1)) then exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_parents\".\"a_string\" = ?)) end)",
+          "params": [
+            "One"
+          ]
+        },
+        "postgresql": {
+          "sql": "not (case when exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and 1 = 1)) then exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_parents\".\"a_string\" = $1)) end)",
+          "params": [
+            "One"
+          ]
+        },
+        "mysql": {
+          "sql": "not (case when exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and 1 = 1)) then exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and `adversarial_parents`.`a_string` = ?)) end)",
+          "params": [
+            "One"
+          ]
+        }
+      }
+    },
+    "rel-not-hierarchy-hop": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "not (case when exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and 1 = 1)) then exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_parents\".\"a_string\" = ? or substr(\"adversarial_parents\".\"a_string\", 1, length(?)) = ?))) end)",
+          "params": [
+            "one",
+            "one.",
+            "one."
+          ]
+        },
+        "postgresql": {
+          "sql": "not (case when exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and 1 = 1)) then exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_parents\".\"a_string\" = $1 or substr(\"adversarial_parents\".\"a_string\", 1, length($2)) = $3))) end)",
+          "params": [
+            "one",
+            "one.",
+            "one."
+          ]
+        },
+        "mysql": {
+          "sql": "not (case when exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and 1 = 1)) then exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and (`adversarial_parents`.`a_string` = ? or substr(`adversarial_parents`.`a_string`, 1, length(?)) = ?))) end)",
+          "params": [
+            "one",
+            "one.",
+            "one."
+          ]
+        }
+      }
+    },
     "rel-range-hop": {
       "kind": "KIND_CONDITIONAL",
       "rendered": {
         "sqlite": {
-          "sql": "(exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_parents\".\"a_number\" > ?)) and exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_parents\".\"a_number\" < ?)))",
+          "sql": "((case when exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and 1 = 1)) then exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_parents\".\"a_number\" > ?)) end) and (case when exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and 1 = 1)) then exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_parents\".\"a_number\" < ?)) end))",
           "params": [
             2,
             12
           ]
         },
         "postgresql": {
-          "sql": "(exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_parents\".\"a_number\" > $1)) and exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_parents\".\"a_number\" < $2)))",
+          "sql": "((case when exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and 1 = 1)) then exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_parents\".\"a_number\" > $1)) end) and (case when exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and 1 = 1)) then exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_parents\".\"a_number\" < $2)) end))",
           "params": [
             2,
             12
           ]
         },
         "mysql": {
-          "sql": "(exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and `adversarial_parents`.`a_number` > ?)) and exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and `adversarial_parents`.`a_number` < ?)))",
+          "sql": "((case when exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and 1 = 1)) then exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and `adversarial_parents`.`a_number` > ?)) end) and (case when exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and 1 = 1)) then exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and `adversarial_parents`.`a_number` < ?)) end))",
           "params": [
             2,
             12
@@ -4208,21 +4338,21 @@
       "kind": "KIND_CONDITIONAL",
       "rendered": {
         "sqlite": {
-          "sql": "exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and exists (select 1 from \"adversarial_inners\" where (\"adversarial_inners\".\"parent_id\" = \"adversarial_parents\".\"id\" and substr(\"adversarial_inners\".\"a_string\", 1, length(?)) = ?))))",
+          "sql": "(case when exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and exists (select 1 from \"adversarial_inners\" where (\"adversarial_inners\".\"parent_id\" = \"adversarial_parents\".\"id\" and 1 = 1)))) then exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and exists (select 1 from \"adversarial_inners\" where (\"adversarial_inners\".\"parent_id\" = \"adversarial_parents\".\"id\" and substr(\"adversarial_inners\".\"a_string\", 1, length(?)) = ?)))) end)",
           "params": [
             "100",
             "100"
           ]
         },
         "postgresql": {
-          "sql": "exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and exists (select 1 from \"adversarial_inners\" where (\"adversarial_inners\".\"parent_id\" = \"adversarial_parents\".\"id\" and substr(\"adversarial_inners\".\"a_string\", 1, length($1)) = $2))))",
+          "sql": "(case when exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and exists (select 1 from \"adversarial_inners\" where (\"adversarial_inners\".\"parent_id\" = \"adversarial_parents\".\"id\" and 1 = 1)))) then exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and exists (select 1 from \"adversarial_inners\" where (\"adversarial_inners\".\"parent_id\" = \"adversarial_parents\".\"id\" and substr(\"adversarial_inners\".\"a_string\", 1, length($1)) = $2)))) end)",
           "params": [
             "100",
             "100"
           ]
         },
         "mysql": {
-          "sql": "exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and exists (select 1 from `adversarial_inners` where (`adversarial_inners`.`parent_id` = `adversarial_parents`.`id` and substr(`adversarial_inners`.`a_string`, 1, length(?)) = ?))))",
+          "sql": "(case when exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and exists (select 1 from `adversarial_inners` where (`adversarial_inners`.`parent_id` = `adversarial_parents`.`id` and 1 = 1)))) then exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and exists (select 1 from `adversarial_inners` where (`adversarial_inners`.`parent_id` = `adversarial_parents`.`id` and substr(`adversarial_inners`.`a_string`, 1, length(?)) = ?)))) end)",
           "params": [
             "100",
             "100"

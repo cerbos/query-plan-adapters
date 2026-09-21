@@ -46,11 +46,36 @@ export interface QueryPlanToConvexArgs {
   nullAttributeRepresentation?: NullAttributeRepresentation;
 }
 
-export interface QueryPlanToConvexResult<Q = unknown, R = unknown> {
-  kind: PlanKind;
-  filter?: ConvexFilter<Q, R>;
-  postFilter?: (doc: Record<string, unknown>) => boolean;
-}
+type PostFilter = (doc: Record<string, unknown>) => boolean;
+
+type ConditionalResult<Q, R> =
+  | {
+      kind: PlanKind.CONDITIONAL;
+      path: "db";
+      filter: ConvexFilter<Q, R>;
+      postFilter?: undefined;
+    }
+  | {
+      kind: PlanKind.CONDITIONAL;
+      path: "post";
+      filter?: undefined;
+      postFilter: PostFilter;
+    }
+  | {
+      kind: PlanKind.CONDITIONAL;
+      path: "split";
+      filter: ConvexFilter<Q, R>;
+      postFilter: PostFilter;
+    };
+
+export type QueryPlanToConvexResult<Q = unknown, R = unknown> =
+  | {
+      kind: PlanKind.ALWAYS_ALLOWED | PlanKind.ALWAYS_DENIED;
+      path?: undefined;
+      filter?: undefined;
+      postFilter?: undefined;
+    }
+  | ConditionalResult<Q, R>;
 
 const DB_PUSHABLE_OPERATORS = new Set([
   "and",
@@ -1144,19 +1169,16 @@ const evaluateExpression = (
   }
 };
 
-interface SplitResult {
-  filter?: ConvexFilter<FilterQ>;
-  postFilter?: (doc: Record<string, unknown>) => boolean;
-}
-
 const buildFilters = (
   expression: PlanExpressionOperand,
   mapper: Mapper,
-): SplitResult => {
+): ConditionalResult<FilterQ, unknown> => {
   validateStructure(expression);
 
   if (canPushToDb(expression, mapper)) {
     return {
+      kind: PlanKind.CONDITIONAL,
+      path: "db",
       filter: (q: FilterQ) => translateExpression(expression, q, mapper),
     };
   }
@@ -1189,6 +1211,8 @@ const buildFilters = (
           : ({ operator: "and", operands: nonPushable } as PlanExpression);
 
       return {
+        kind: PlanKind.CONDITIONAL,
+        path: "split",
         filter: (q: FilterQ) => translateExpression(dbExpr, q, mapper),
         postFilter: (doc: Record<string, unknown>) =>
           evaluateExpression(jsExpr, doc, mapper, {}) === true,
@@ -1197,6 +1221,8 @@ const buildFilters = (
   }
 
   return {
+    kind: PlanKind.CONDITIONAL,
+    path: "post",
     postFilter: (doc: Record<string, unknown>) =>
       evaluateExpression(expression, doc, mapper, {}) === true,
   };
@@ -1296,7 +1322,8 @@ export function queryPlanToConvex<Q = unknown, R = unknown>({
       if (nullAttributeRepresentation === "omitted") {
         assertNoNullComparisonOperands(queryPlan.condition);
       }
-      const { filter, postFilter } = buildFilters(queryPlan.condition, mapper);
+      const result = buildFilters(queryPlan.condition, mapper);
+      const { postFilter } = result;
 
       if (postFilter && !allowPostFilter) {
         throw new Error(
@@ -1307,12 +1334,13 @@ export function queryPlanToConvex<Q = unknown, R = unknown>({
         );
       }
 
-      const result: QueryPlanToConvexResult<Q, R> = {
-        kind: PlanKind.CONDITIONAL,
-      };
-      if (filter) result.filter = filter as ConvexFilter<Q, R>;
-      if (postFilter) result.postFilter = postFilter;
-      return result;
+      switch (result.path) {
+        case "post":
+          return result;
+        case "db":
+        case "split":
+          return { ...result, filter: result.filter as ConvexFilter<Q, R> };
+      }
     }
     default:
       throw Error("Invalid query plan.");

@@ -391,7 +391,7 @@ function handleKnownValueCollectionOperator(
   operator: string,
   collection: ValueOperand,
   lambda: PlanExpressionOperand,
-  mapper: Mapper,
+  context: TranslationContext,
   negated: boolean
 ): PrismaFilter {
   if (operator !== "exists" && operator !== "all") {
@@ -438,8 +438,8 @@ function handleKnownValueCollectionOperator(
       element
     );
     return negated
-      ? buildNegatedFilter(substituted, mapper)
-      : buildPrismaFilterFromCerbosExpression(substituted, mapper);
+      ? buildNegatedFilter(substituted, context)
+      : buildPrismaFilterFromCerbosExpression(substituted, context);
   });
 
   const combinesWithOr = operator === "exists" ? !negated : negated;
@@ -449,7 +449,7 @@ function handleKnownValueCollectionOperator(
 function tryHandleKnownValueCollectionOperator(
   operator: string,
   operands: PlanExpressionOperand[],
-  mapper: Mapper,
+  context: TranslationContext,
   negated: boolean
 ): PrismaFilter | undefined {
   if (operands.length !== 2) {
@@ -473,7 +473,7 @@ function tryHandleKnownValueCollectionOperator(
     operator,
     collection,
     lambda,
-    mapper,
+    context,
     negated
   );
 }
@@ -484,14 +484,6 @@ function getLeafField(path: string[]): string {
     throw new Error("Field path cannot be empty");
   }
   return fieldName;
-}
-
-function getFilterEntry(filter: Record<string, unknown>): [string, unknown] {
-  const entry = Object.entries(filter)[0];
-  if (!entry) {
-    throw new Error("Filter must contain at least one entry");
-  }
-  return entry;
 }
 
 // Field reference resolution types
@@ -635,6 +627,7 @@ function assertStringField(
 }
 
 function buildMembershipFilter(
+  context: TranslationContext,
   fieldRef: ResolvedFieldReference,
   values: Value[],
 ): PrismaFilter {
@@ -643,6 +636,7 @@ function buildMembershipFilter(
   const carriesNull = nonNullValues.length !== values.length;
   if (carriesNull) {
     assertNullOperandTranslatable(
+      context,
       "a null element in an `in` list",
       fieldRef.nullAttributeRepresentation
     );
@@ -681,20 +675,20 @@ type TernaryBranchPredicate =
   | { kind: "constant"; value: boolean }
   | { kind: "filter"; filter: PrismaFilter };
 
-// Translation-scoped context. Set at queryPlanToPrisma entry; the lambda stack tracks which
-// collection variable (and related Prisma model) encloses the expression currently being built,
-// so leaf handlers can distinguish element columns from outer columns and collect nullable
-// element fields for three-valued-logic guards. Translation is synchronous, so module scope is
-// safe.
+// Each translation owns its lambda scopes, including when a function mapper re-enters the
+// adapter. Scopes collect nullable element fields for three-valued-logic guards.
 type LambdaScope = {
   variableName: string;
   relationModel: string | undefined;
   nullableFields: Set<string>;
   unknownFilters: PrismaFilter[];
 };
-let lambdaScopes: LambdaScope[] = [];
-let rootModelName: string | undefined;
-let nullRepresentation: NullAttributeRepresentation = "explicit";
+type TranslationContext = {
+  readonly mapper: Mapper;
+  readonly rootModel: string | undefined;
+  readonly nullRepresentation: NullAttributeRepresentation;
+  readonly scopes: readonly LambdaScope[];
+};
 
 /**
  * Guards every site that would emit a NULL-selecting predicate out of a `null` comparison
@@ -709,10 +703,11 @@ let nullRepresentation: NullAttributeRepresentation = "explicit";
  * under any nesting; narrowing it requires negation-parity tracking.
  */
 function assertNullOperandTranslatable(
+  translation: TranslationContext,
   context: string,
   declared?: NullAttributeRepresentation
 ): void {
-  if ((declared ?? nullRepresentation) === "omitted") {
+  if ((declared ?? translation.nullRepresentation) === "omitted") {
     throw new Error(
       `Cannot translate ${context} under nullAttributeRepresentation "omitted": a NULL column ` +
         "sends no attribute, so Cerbos evaluates the comparison as a missing-attribute error " +
@@ -724,28 +719,29 @@ function assertNullOperandTranslatable(
 
 function assertStructuralNulls(
   operand: PlanExpressionOperand,
-  mapper: Mapper,
+  context: TranslationContext,
   declared?: NullAttributeRepresentation,
 ): void {
   if (!isOperatorOperand(operand)) return;
   const sibling = operand.operands.find(isNamedOperand);
   const mapping =
     sibling &&
-    (typeof mapper === "function"
-      ? mapper(sibling.name)
-      : mapper[sibling.name]);
+    (typeof context.mapper === "function"
+      ? context.mapper(sibling.name)
+      : context.mapper[sibling.name]);
   const convention = mapping?.nullAttributeRepresentation ?? declared;
   if (
     operand.operator === "set-field" &&
     operand.operands.some((part) => isValueOperand(part) && part.value === null)
   ) {
     assertNullOperandTranslatable(
+      context,
       "a null member in a struct literal",
       convention,
     );
   }
   operand.operands.forEach((part) =>
-    assertStructuralNulls(part, mapper, convention),
+    assertStructuralNulls(part, context, convention),
   );
 }
 
@@ -758,16 +754,19 @@ export function queryPlanToPrisma({
   model,
   nullAttributeRepresentation = "explicit",
 }: QueryPlanToPrismaArgs): QueryPlanToPrismaResult {
-  nullRepresentation = nullAttributeRepresentation;
+  const context: TranslationContext = {
+    mapper,
+    rootModel: model,
+    nullRepresentation: nullAttributeRepresentation,
+    scopes: [],
+  };
   switch (queryPlan.kind) {
     case PlanKind.ALWAYS_ALLOWED:
       return { kind: PlanKind.ALWAYS_ALLOWED };
     case PlanKind.ALWAYS_DENIED:
       return { kind: PlanKind.ALWAYS_DENIED };
     case PlanKind.CONDITIONAL: {
-      lambdaScopes = [];
-      rootModelName = model;
-      assertStructuralNulls(queryPlan.condition, mapper);
+      assertStructuralNulls(queryPlan.condition, context);
       const condition = constantFoldExpression(
         hoistOuterScopeReferences(queryPlan.condition, [])
       );
@@ -797,7 +796,7 @@ export function queryPlanToPrisma({
       }
       return {
         kind: PlanKind.CONDITIONAL,
-        filters: buildPrismaFilterFromCerbosExpression(condition, mapper),
+        filters: buildPrismaFilterFromCerbosExpression(condition, context),
       };
     }
     default:
@@ -1178,11 +1177,13 @@ function constantFoldExpression(
  */
 function resolveFieldReference(
   reference: string,
-  mapper: Mapper,
+  context: TranslationContext,
 ): ResolvedFieldReference {
   const parts = reference.split(".");
   const config =
-    typeof mapper === "function" ? mapper(reference) : mapper[reference];
+    typeof context.mapper === "function"
+      ? context.mapper(reference)
+      : context.mapper[reference];
 
   let matchedPrefix = "";
   let matchedConfig: MapperConfig | undefined;
@@ -1192,7 +1193,9 @@ function resolveFieldReference(
     for (let i = parts.length - 1; i >= 0; i--) {
       const prefix = parts.slice(0, i + 1).join(".");
       const prefixConfig =
-        typeof mapper === "function" ? mapper(prefix) : mapper[prefix];
+        typeof context.mapper === "function"
+          ? context.mapper(prefix)
+          : context.mapper[prefix];
 
       if (prefixConfig) {
         matchedPrefix = prefix;
@@ -1210,9 +1213,14 @@ function resolveFieldReference(
     const matchedParts = matchedPrefix ? matchedPrefix.split(".") : [];
     const remainingParts = matchedPrefix
       ? parts.slice(matchedParts.length)
-      : parts.slice(1);
+      : [];
 
-    let field: string | undefined;
+    const lastPart = parts[parts.length - 1];
+    // A function mapper may return a relation config for the full leaf reference.
+    // Resolve that leaf here too, before any filter is constructed.
+    let field = activeConfig.relation.field ?? (
+      config && fields && lastPart ? fields[lastPart]?.field ?? lastPart : undefined
+    );
     const relations: RelationConfig[] = [
       {
         name,
@@ -1249,6 +1257,7 @@ function resolveFieldReference(
             nestedMapper: nextConfig.relation.fields,
             subqueryFilter: nextConfig.relation.subqueryFilter,
           });
+          field = nextConfig.relation.field;
           currentMapper = nextConfig.relation.fields || {};
           currentParts = currentParts.slice(1);
         } else {
@@ -1390,7 +1399,7 @@ function buildHopsExistFilter(
  */
 function buildExpressionHopsExistFilter(
   operand: PlanExpressionOperand,
-  mapper: Mapper
+  context: TranslationContext
 ): PrismaFilter | undefined {
   const hops: PrismaFilter[] = [];
   const seen = new Set<string>();
@@ -1401,7 +1410,7 @@ function buildExpressionHopsExistFilter(
         return;
       }
       seen.add(expr.name);
-      const { relations } = resolveFieldReference(expr.name, mapper);
+      const { relations } = resolveFieldReference(expr.name, context);
       if (!relations || relations.length === 0) {
         return;
       }
@@ -1446,9 +1455,9 @@ function buildExpressionHopsExistFilter(
 function negateRequiringHops(
   operand: PlanExpressionOperand,
   filter: PrismaFilter,
-  mapper: Mapper
+  context: TranslationContext
 ): PrismaFilter {
-  const hops = buildExpressionHopsExistFilter(operand, mapper);
+  const hops = buildExpressionHopsExistFilter(operand, context);
   return hops === undefined ? { NOT: filter } : { AND: [hops, { NOT: filter }] };
 }
 
@@ -1468,16 +1477,6 @@ function buildNestedRelationFilter(
     }
     const relationOperator = getPrismaRelationOperator(relation);
 
-    // Handle special case for the deepest relation
-    if (relation.field && i === relations.length - 1) {
-      const [key, filterValue] = getFilterEntry(currentFilter);
-      if (key === "NOT") {
-        currentFilter = { NOT: { [relation.field]: filterValue } };
-      } else {
-        currentFilter = { [relation.field]: filterValue };
-      }
-    }
-
     currentFilter = relationFilter(relation, relationOperator, currentFilter);
   }
 
@@ -1489,19 +1488,19 @@ function buildNestedRelationFilter(
  */
 function resolveOperand(
   operand: PlanExpressionOperand,
-  mapper: Mapper
+  context: TranslationContext
 ): ResolvedOperand {
   if (isNamedOperand(operand)) {
-    return resolveFieldReference(operand.name, mapper);
+    return resolveFieldReference(operand.name, context);
   } else if (isValueOperand(operand)) {
     return { value: operand.value };
   } else if (isOperatorOperand(operand)) {
     if (operand.operator === "timestamp") {
-      return resolveTimestampOperand(operand, mapper);
+      return resolveTimestampOperand(operand, context);
     }
-    const folded = tryFoldValueExpression(operand, mapper);
+    const folded = tryFoldValueExpression(operand, context);
     if (folded !== null) return { value: folded };
-    const nestedResult = buildPrismaFilterFromCerbosExpression(operand, mapper);
+    const nestedResult = buildPrismaFilterFromCerbosExpression(operand, context);
     return { value: nestedResult };
   }
   throw new Error("Operand must have name, value, or be an expression");
@@ -1509,7 +1508,7 @@ function resolveOperand(
 
 function resolveTimestampOperand(
   expression: OperatorOperand,
-  mapper: Mapper,
+  context: TranslationContext,
 ): ResolvedOperand {
   if (expression.operands.length !== 1) {
     throw new Error("timestamp() requires exactly one operand");
@@ -1520,7 +1519,7 @@ function resolveTimestampOperand(
     "timestamp() requires an operand"
   );
   if (isNamedOperand(operand)) {
-    const fieldRef = resolveFieldReference(operand.name, mapper);
+    const fieldRef = resolveFieldReference(operand.name, context);
     if (fieldRef.valueType !== "dateTime") {
       throw new Error(
         `timestamp() field ${operand.name} must be mapped with valueType: \"dateTime\"`
@@ -1537,16 +1536,16 @@ function resolveTimestampOperand(
 
 function tryFoldValueExpression(
   expr: OperatorOperand,
-  mapper: Mapper
+  context: TranslationContext
 ): Value | null {
   if (!ARITHMETIC_OPERATORS.has(expr.operator)) return null;
   const leftOp = expr.operands[0];
   const rightOp = expr.operands[1];
   if (!leftOp || !rightOp) return null;
 
-  const left = resolveOperand(leftOp, mapper);
+  const left = resolveOperand(leftOp, context);
   if (!isResolvedValue(left)) return null;
-  const right = resolveOperand(rightOp, mapper);
+  const right = resolveOperand(rightOp, context);
   if (!isResolvedValue(right)) return null;
 
   try {
@@ -1561,25 +1560,49 @@ function tryFoldValueExpression(
  * enclosing collection operator can add its three-valued-logic guard.
  */
 function recordNullableElementField(
+  context: TranslationContext,
   config: MapperConfig,
   defaultField: string
 ): void {
   if (!config.nullable) {
     return;
   }
-  const scope = lambdaScopes[lambdaScopes.length - 1];
+  const scope = context.scopes[context.scopes.length - 1];
   scope?.nullableFields.add(config.field || defaultField);
 }
 
 /**
  * Creates a scoped mapper for collection operations
  */
+function enterLambdaScope(
+  context: TranslationContext,
+  collectionPath: string,
+  scope: LambdaScope,
+): TranslationContext {
+  return createScopedMapper(collectionPath, scope.variableName, {
+    ...context,
+    scopes: [...context.scopes, scope],
+  });
+}
+
 function createScopedMapper(
   collectionPath: string,
   variableName: string,
-  fullMapper: Mapper
-): Mapper {
-  return (key: string) => {
+  context: TranslationContext
+): TranslationContext {
+  const fullMapper = context.mapper;
+  const scopedMapper: Mapper = (key: string) => {
+    if (key === variableName) {
+      const { relations } = resolveFieldReference(collectionPath, context);
+      const projection = relations?.[relations.length - 1]?.field;
+      if (projection) {
+        return {
+          field: projection,
+          // A projected list carries null values, unlike missing fields on object elements.
+          nullAttributeRepresentation: "explicit",
+        };
+      }
+    }
     // If the key starts with the variable name, it's accessing the collection item
     if (key.startsWith(variableName + ".")) {
       const strippedKey = key.replace(variableName + ".", "");
@@ -1623,7 +1646,7 @@ function createScopedMapper(
 
         // Return the field config if it exists, otherwise create a default one
         const fieldConfig = currentConfig[field] || { field };
-        recordNullableElementField(fieldConfig, field);
+        recordNullableElementField(context, fieldConfig, field);
         return fieldConfig;
       }
       return { field: strippedKey };
@@ -1635,6 +1658,7 @@ function createScopedMapper(
     }
     return fullMapper[key] || { field: key };
   };
+  return { ...context, mapper: scopedMapper };
 }
 
 /**
@@ -1642,11 +1666,11 @@ function createScopedMapper(
  */
 function buildPrismaFilterFromCerbosExpression(
   expression: PlanExpressionOperand,
-  mapper: Mapper
+  context: TranslationContext
 ): PrismaFilter {
   // A bare named operand represents a boolean field reference (e.g. `R.attr.booleanAttr`)
   if (isNamedOperand(expression)) {
-    const fieldRef = resolveFieldReference(expression.name, mapper);
+    const fieldRef = resolveFieldReference(expression.name, context);
     return buildFieldEqualsFilter(fieldRef, true);
   }
 
@@ -1661,14 +1685,14 @@ function buildPrismaFilterFromCerbosExpression(
     case "and":
       return {
         AND: operands.map((operand) =>
-          buildPrismaFilterFromCerbosExpression(operand, mapper)
+          buildPrismaFilterFromCerbosExpression(operand, context)
         ),
       };
 
     case "or":
       return {
         OR: operands.map((operand) =>
-          buildPrismaFilterFromCerbosExpression(operand, mapper)
+          buildPrismaFilterFromCerbosExpression(operand, context)
         ),
       };
 
@@ -1677,11 +1701,11 @@ function buildPrismaFilterFromCerbosExpression(
       if (!operand) {
         throw new Error("not operator requires an operand");
       }
-      return buildNegatedFilter(operand, mapper);
+      return buildNegatedFilter(operand, context);
     }
 
     case "if": {
-      return handleBooleanTernaryOperator(operands, mapper);
+      return handleBooleanTernaryOperator(operands, context);
     }
 
     case "eq":
@@ -1690,25 +1714,25 @@ function buildPrismaFilterFromCerbosExpression(
     case "le":
     case "gt":
     case "ge": {
-      return handleRelationalOperator(operator, operands, mapper);
+      return handleRelationalOperator(operator, operands, context);
     }
 
     case "in": {
-      return handleInOperator(operands, mapper);
+      return handleInOperator(operands, context);
     }
 
     case "contains":
     case "startsWith":
     case "endsWith": {
-      return handleStringOperator(operator, operands, mapper);
+      return handleStringOperator(operator, operands, context);
     }
 
     case "hasIntersection": {
-      return handleHasIntersectionOperator(operands, mapper);
+      return handleHasIntersectionOperator(operands, context);
     }
 
     case "lambda": {
-      return handleLambdaOperator(operands);
+      return handleLambdaOperator(operands, context);
     }
 
     case "exists":
@@ -1716,23 +1740,23 @@ function buildPrismaFilterFromCerbosExpression(
     case "all":
     case "except":
     case "filter": {
-      return handleCollectionOperator(operator, operands, mapper);
+      return handleCollectionOperator(operator, operands, context);
     }
 
     case "map": {
-      return handleMapOperator(operands, mapper);
+      return handleMapOperator(operands, context);
     }
 
     case "overlaps": {
-      return handleOverlapsOperator(operands, mapper);
+      return handleOverlapsOperator(operands, context);
     }
 
     case "ancestorOf": {
-      return handleAncestorDescendantOperator(operands, mapper, "ancestor");
+      return handleAncestorDescendantOperator(operands, context, "ancestor");
     }
 
     case "descendentOf": {
-      return handleAncestorDescendantOperator(operands, mapper, "descendant");
+      return handleAncestorDescendantOperator(operands, context, "descendant");
     }
 
     default:
@@ -1756,17 +1780,17 @@ function containsCollectionOperator(expr: PlanExpressionOperand): boolean {
  */
 function referencesChainedRelation(
   expr: PlanExpressionOperand,
-  mapper: Mapper
+  context: TranslationContext
 ): boolean {
   if (isNamedOperand(expr)) {
-    const { relations } = resolveFieldReference(expr.name, mapper);
+    const { relations } = resolveFieldReference(expr.name, context);
     return relations !== undefined && relations.length > 1;
   }
   if (!isOperatorOperand(expr) || expr.operator === "lambda") {
     return false;
   }
   return expr.operands.some((operand) =>
-    referencesChainedRelation(operand, mapper)
+    referencesChainedRelation(operand, context)
   );
 }
 
@@ -1787,13 +1811,13 @@ function referencesChainedRelation(
  */
 function buildNegatedFilter(
   operand: PlanExpressionOperand,
-  mapper: Mapper,
+  context: TranslationContext,
 ): PrismaFilter {
   if (isOperatorOperand(operand)) {
     if (operand.operator === "not") {
       return buildPrismaFilterFromCerbosExpression(
         assertDefined(operand.operands[0], "not requires an operand"),
-        mapper,
+      context,
       );
     }
     const complement: Record<string, string> = {
@@ -1813,21 +1837,21 @@ function buildNegatedFilter(
     ) {
       // Negate the comparison in each ternary arm. Unordered NaN stays denied instead
       // of turning a discarded error arm into true through an outer NOT.
-      return handleRelationalOperator(opposite, operand.operands, mapper);
+      return handleRelationalOperator(opposite, operand.operands, context);
     }
   }
   if (isNamedOperand(operand)) {
     const { relations, ...fieldRef } = resolveFieldReference(
       operand.name,
-      mapper
+      context
     );
     if (!relations || relations.length === 0) {
       return buildFieldEqualsFilter(fieldRef, false);
     }
     return negateRequiringHops(
       operand,
-      buildPrismaFilterFromCerbosExpression(operand, mapper),
-      mapper
+      buildPrismaFilterFromCerbosExpression(operand, context),
+      context
     );
   }
 
@@ -1839,16 +1863,16 @@ function buildNegatedFilter(
   if (
     isOperatorOperand(operand) &&
     (containsCollectionOperator(operand) ||
-      referencesChainedRelation(operand, mapper))
+      referencesChainedRelation(operand, context))
   ) {
     switch (operand.operator) {
       case "and":
         return {
-          OR: operand.operands.map((o) => buildNegatedFilter(o, mapper)),
+          OR: operand.operands.map((o) => buildNegatedFilter(o, context)),
         };
       case "or":
         return {
-          AND: operand.operands.map((o) => buildNegatedFilter(o, mapper)),
+          AND: operand.operands.map((o) => buildNegatedFilter(o, context)),
         };
       case "not":
         return buildPrismaFilterFromCerbosExpression(
@@ -1856,7 +1880,7 @@ function buildNegatedFilter(
             operand.operands[0],
             "not operator requires an operand"
           ),
-          mapper
+          context
         );
       case "exists":
       case "all":
@@ -1866,15 +1890,15 @@ function buildNegatedFilter(
         return buildNegatedCollectionFilter(
           operand.operator,
           operand.operands,
-          mapper
+          context
         );
     }
   }
 
   return negateRequiringHops(
     operand,
-    buildPrismaFilterFromCerbosExpression(operand, mapper),
-    mapper
+    buildPrismaFilterFromCerbosExpression(operand, context),
+    context
   );
 }
 
@@ -1919,12 +1943,12 @@ function getConstantBooleanCondition(
 
 function buildBooleanBranchFilter(
   branch: PlanExpressionOperand,
-  mapper: Mapper
+  context: TranslationContext
 ): TernaryBranchPredicate {
   if (!isValueOperand(branch)) {
     return {
       kind: "filter",
-      filter: buildPrismaFilterFromCerbosExpression(branch, mapper),
+      filter: buildPrismaFilterFromCerbosExpression(branch, context),
     };
   }
   if (typeof branch.value !== "boolean") {
@@ -1949,31 +1973,31 @@ function buildBooleanBranchFilter(
  */
 function buildFalseConditionFilter(
   condition: PlanExpressionOperand,
-  mapper: Mapper
+  context: TranslationContext
 ): PrismaFilter {
   if (isValueOperand(condition)) {
     throw new Error("Constant ternary conditions must be folded before use");
   }
 
-  return buildNegatedFilter(condition, mapper);
+  return buildNegatedFilter(condition, context);
 }
 
 function buildGuardedTernaryFilter({
   condition,
   thenFilter,
   elseFilter,
-  mapper,
+  context,
 }: {
   condition: PlanExpressionOperand;
   thenFilter: TernaryBranchPredicate;
   elseFilter: TernaryBranchPredicate;
-  mapper: Mapper;
+  context: TranslationContext;
 }): PrismaFilter {
   const conditionTrue = buildPrismaFilterFromCerbosExpression(
     condition,
-    mapper
+    context
   );
-  const conditionFalse = buildFalseConditionFilter(condition, mapper);
+  const conditionFalse = buildFalseConditionFilter(condition, context);
   const guardedBranches: PrismaFilter[] = [];
 
   if (thenFilter.kind === "filter") {
@@ -2016,7 +2040,7 @@ function finalizeTernaryBranchPredicate(
 
 function handleBooleanTernaryOperator(
   operands: PlanExpressionOperand[],
-  mapper: Mapper
+  context: TranslationContext
 ): PrismaFilter {
   const { condition, thenBranch, elseBranch } = getTernaryOperands(operands);
   const constantCondition = getConstantBooleanCondition(condition);
@@ -2024,16 +2048,16 @@ function handleBooleanTernaryOperator(
     return finalizeTernaryBranchPredicate(
       buildBooleanBranchFilter(
         constantCondition ? thenBranch : elseBranch,
-        mapper
+        context
       )
     );
   }
 
   return buildGuardedTernaryFilter({
     condition,
-    thenFilter: buildBooleanBranchFilter(thenBranch, mapper),
-    elseFilter: buildBooleanBranchFilter(elseBranch, mapper),
-    mapper,
+    thenFilter: buildBooleanBranchFilter(thenBranch, context),
+    elseFilter: buildBooleanBranchFilter(elseBranch, context),
+  context,
   });
 }
 
@@ -2042,13 +2066,13 @@ function buildTernaryComparisonBranch({
   operands,
   ternaryIndex,
   branch,
-  mapper,
+  context,
 }: {
   operator: string;
   operands: PlanExpressionOperand[];
   ternaryIndex: number;
   branch: PlanExpressionOperand;
-  mapper: Mapper;
+  context: TranslationContext;
 }): TernaryBranchPredicate {
   const substitutedOperands = operands.map((operand, index) =>
     index === ternaryIndex ? branch : operand
@@ -2079,14 +2103,14 @@ function buildTernaryComparisonBranch({
 
   return {
     kind: "filter",
-    filter: buildPrismaFilterFromCerbosExpression(normalized, mapper),
+    filter: buildPrismaFilterFromCerbosExpression(normalized, context),
   };
 }
 
 function tryHandleTernaryComparison(
   operator: string,
   operands: PlanExpressionOperand[],
-  mapper: Mapper
+  context: TranslationContext
 ): PrismaFilter | null {
   if (CERBOS_TO_PRISMA_OPERATOR[operator] === undefined) {
     return null;
@@ -2123,7 +2147,7 @@ function tryHandleTernaryComparison(
         operands,
         ternaryIndex,
         branch: constantCondition ? thenBranch : elseBranch,
-        mapper,
+      context,
       })
     );
   }
@@ -2135,16 +2159,16 @@ function tryHandleTernaryComparison(
       operands,
       ternaryIndex,
       branch: thenBranch,
-      mapper,
+    context,
     }),
     elseFilter: buildTernaryComparisonBranch({
       operator,
       operands,
       ternaryIndex,
       branch: elseBranch,
-      mapper,
+    context,
     }),
-    mapper,
+  context,
   });
 }
 
@@ -2258,7 +2282,7 @@ function handleSizeComparison(
   operator: string,
   sizeOperand: OperatorOperand,
   valueOperand: PlanExpressionOperand,
-  mapper: Mapper
+  context: TranslationContext
 ): PrismaFilter {
   const collectionOperand = sizeOperand.operands[0];
   if (!collectionOperand || !isNamedOperand(collectionOperand)) {
@@ -2288,7 +2312,7 @@ function handleSizeComparison(
     );
   }
 
-  const { relations } = resolveFieldReference(collectionOperand.name, mapper);
+  const { relations } = resolveFieldReference(collectionOperand.name, context);
   if (!relations || relations.length === 0) {
     throw new Error("size operator requires a relation mapping");
   }
@@ -2314,12 +2338,12 @@ function handleSizeComparison(
 function handleRelationalOperator(
   operator: string,
   operands: PlanExpressionOperand[],
-  mapper: Mapper,
+  context: TranslationContext,
 ): PrismaFilter {
   const ternaryFilter = tryHandleTernaryComparison(
     operator,
     operands,
-    mapper
+    context
   );
   if (ternaryFilter) {
     return ternaryFilter;
@@ -2341,7 +2365,7 @@ function handleRelationalOperator(
   if (!rightOperand) throw new Error("No valid right operand found");
 
   if (isOperatorOperand(leftOperand) && leftOperand.operator === "size") {
-    return handleSizeComparison(operator, leftOperand, rightOperand, mapper);
+    return handleSizeComparison(operator, leftOperand, rightOperand, context);
   }
 
   const arithOperand = [leftOperand, rightOperand].find(
@@ -2356,7 +2380,7 @@ function handleRelationalOperator(
       arithOperand,
       otherOperand,
       arithOperand === leftOperand,
-      mapper
+      context
     );
   }
 
@@ -2371,8 +2395,8 @@ function handleRelationalOperator(
     );
   }
 
-  const left = resolveOperand(leftOperand, mapper);
-  const right = resolveOperand(rightOperand, mapper);
+  const left = resolveOperand(leftOperand, context);
+  const right = resolveOperand(rightOperand, context);
 
   if (isResolvedFieldReference(left) && isResolvedFieldReference(right)) {
     if (
@@ -2394,6 +2418,7 @@ function handleRelationalOperator(
       );
     }
     return buildFieldToFieldFilter(
+      context,
       operator,
       leftOperand,
       left,
@@ -2404,6 +2429,7 @@ function handleRelationalOperator(
 
   if (isResolvedValue(left) && isResolvedFieldReference(right)) {
     return buildComparisonFilter(
+      context,
       right,
       MIRRORED_OPERATOR[operator] ?? operator,
       left.value
@@ -2430,7 +2456,7 @@ function handleRelationalOperator(
   );
 
   if (isResolvedFieldReference(left)) {
-    return buildComparisonFilter(left, operator, rightValue.value);
+    return buildComparisonFilter(context, left, operator, rightValue.value);
   }
 
   return { [prismaOperator]: rightValue.value };
@@ -2445,6 +2471,7 @@ function handleRelationalOperator(
  * redundant) and Int columns (whichever way Prisma truncates or floors the fraction).
  */
 function buildComparisonFilter(
+  context: TranslationContext,
   fieldRef: ResolvedFieldReference,
   operator: string,
   value: Value,
@@ -2458,6 +2485,7 @@ function buildComparisonFilter(
 
   if (value === null) {
     assertNullOperandTranslatable(
+      context,
       `\`${operator}\` against a null operand`,
       fieldRef.nullAttributeRepresentation
     );
@@ -2536,6 +2564,7 @@ function buildComparisonFilter(
  * (an element column against an outer column) are cross-model and must fail loudly.
  */
 function buildFieldToFieldFilter(
+  context: TranslationContext,
   operator: string,
   leftOperand: PlanExpressionOperand,
   left: ResolvedFieldReference,
@@ -2551,7 +2580,7 @@ function buildFieldToFieldFilter(
     throw new Error("Field-to-field comparison requires two named operands");
   }
 
-  const scope = lambdaScopes[lambdaScopes.length - 1];
+  const scope = context.scopes[context.scopes.length - 1];
   let container: string | undefined;
 
   if (scope) {
@@ -2583,7 +2612,7 @@ function buildFieldToFieldFilter(
         "Cannot compare columns across relations: Prisma field references only work between fields of the same model"
       );
     }
-    container = rootModelName;
+    container = context.rootModel;
     if (!container) {
       throw new Error(
         "Field-to-field comparison requires the `model` option (the Prisma model name) to build a field reference"
@@ -2649,7 +2678,7 @@ function buildFieldToFieldFilter(
  */
 function handleInOperator(
   operands: PlanExpressionOperand[],
-  mapper: Mapper
+  context: TranslationContext
 ): PrismaFilter {
   if (operands.length !== 2) {
     throw new Error("in requires exactly two operands");
@@ -2661,16 +2690,17 @@ function handleInOperator(
   );
 
   if (isNamedOperand(member) && isValueOperand(collection)) {
-    const fieldRef = resolveFieldReference(member.name, mapper);
+    const fieldRef = resolveFieldReference(member.name, context);
     const values = Array.isArray(collection.value)
       ? collection.value
       : [collection.value];
-    return buildMembershipFilter(fieldRef, values);
+    return buildMembershipFilter(context, fieldRef, values);
   }
 
   if (isValueOperand(member) && isNamedOperand(collection)) {
     return buildMembershipFilter(
-      resolveFieldReference(collection.name, mapper),
+      context,
+      resolveFieldReference(collection.name, context),
       [member.value]
     );
   }
@@ -2699,18 +2729,18 @@ const MAX_ENUMERATED_NEEDLES = 1000;
 function handleStringOperator(
   operator: string,
   operands: PlanExpressionOperand[],
-  mapper: Mapper,
+  context: TranslationContext,
 ): PrismaFilter {
   if (operands.length !== 2) {
     throw new Error(`${operator} requires exactly two operands`);
   }
   const receiver = resolveOperand(
     assertDefined(operands[0], `${operator} requires a receiver operand`),
-    mapper
+    context
   );
   const needle = resolveOperand(
     assertDefined(operands[1], `${operator} requires a needle operand`),
-    mapper
+    context
   );
 
   if (isResolvedFieldReference(receiver)) assertStringField(receiver, operator);
@@ -2800,7 +2830,7 @@ function handleStringOperator(
  */
 function handleHasIntersectionOperator(
   operands: PlanExpressionOperand[],
-  mapper: Mapper,
+  context: TranslationContext,
 ): PrismaFilter {
   if (operands.length !== 2) {
     throw new Error("hasIntersection requires exactly two operands");
@@ -2852,14 +2882,7 @@ function handleHasIntersectionOperator(
     throw new Error("Lambda variable must have a name");
   }
 
-    // Create scoped mapper for the collection
-    const scopedMapper = createScopedMapper(
-    collection.name,
-    variable.name,
-    mapper
-  );
-
-    const { relations } = resolveFieldReference(collection.name, mapper);
+      const { relations } = resolveFieldReference(collection.name, context);
     if (!relations || relations.length === 0) {
       throw new Error("Map operation requires relations");
     }
@@ -2879,13 +2902,8 @@ function handleHasIntersectionOperator(
       nullableFields: new Set(),
       unknownFilters: [],
     };
-    lambdaScopes.push(scope);
-    let resolved: ResolvedFieldReference;
-    try {
-      resolved = resolveFieldReference(projection.name, scopedMapper);
-    } finally {
-      lambdaScopes.pop();
-    }
+    const scopedContext = enterLambdaScope(context, collection.name, scope);
+    const resolved = resolveFieldReference(projection.name, scopedContext);
     const fieldName = getLeafField(resolved.path);
 
     if (!Array.isArray(rightOperand.value))
@@ -2893,6 +2911,7 @@ function handleHasIntersectionOperator(
     const base = buildNestedRelationFilter(
       relations,
       buildMembershipFilter(
+        context,
         { ...resolved, path: [fieldName], relations: [] },
         rightOperand.value,
       ),
@@ -2927,14 +2946,14 @@ function handleHasIntersectionOperator(
     throw new Error("Second operand of hasIntersection must be a value");
   }
 
-  const { path, relations } = resolveFieldReference(leftOperand.name, mapper);
+  const { path, relations } = resolveFieldReference(leftOperand.name, context);
 
   if (!Array.isArray(rightOperand.value)) {
     throw new Error("hasIntersection requires an array value");
   }
 
   if (relations && relations.length > 0) {
-    return buildMembershipFilter({ path, relations }, rightOperand.value);
+    return buildMembershipFilter(context, { path, relations }, rightOperand.value);
   }
 
   const fieldName = getLeafField(path);
@@ -2944,7 +2963,10 @@ function handleHasIntersectionOperator(
 /**
  * Helper function to handle "lambda" operator
  */
-function handleLambdaOperator(operands: PlanExpressionOperand[]): PrismaFilter {
+function handleLambdaOperator(
+  operands: PlanExpressionOperand[],
+  context: TranslationContext,
+): PrismaFilter {
   const condition = assertDefined(
     operands[0],
     "Lambda requires a condition operand"
@@ -2958,9 +2980,10 @@ function handleLambdaOperator(operands: PlanExpressionOperand[]): PrismaFilter {
     throw new Error("Lambda variable must have a name");
   }
 
-  return buildPrismaFilterFromCerbosExpression(condition, (key: string) => ({
-    field: key.replace(`${variable.name}.`, ""),
-  }));
+  return buildPrismaFilterFromCerbosExpression(condition, {
+    ...context,
+    mapper: (key: string) => ({ field: key.replace(`${variable.name}.`, "") }),
+  });
 }
 
 type CollectionLambdaParts = {
@@ -2977,7 +3000,7 @@ type CollectionLambdaParts = {
 function buildCollectionLambdaParts(
   operator: string,
   operands: PlanExpressionOperand[],
-  mapper: Mapper
+  context: TranslationContext
 ): CollectionLambdaParts {
   if (operands.length !== 2) {
     throw new Error(`${operator} requires exactly two operands`);
@@ -3013,14 +3036,7 @@ function buildCollectionLambdaParts(
     throw new Error("Lambda variable must have a name");
   }
 
-  // Create scoped mapper for the collection
-  const scopedMapper = createScopedMapper(
-    collection.name,
-    variable.name,
-    mapper
-  );
-
-  const { relations } = resolveFieldReference(collection.name, mapper);
+  const { relations } = resolveFieldReference(collection.name, context);
   if (!relations || relations.length === 0) {
     throw new Error(`${operator} operator requires a relation mapping`);
   }
@@ -3046,16 +3062,11 @@ function buildCollectionLambdaParts(
     nullableFields: new Set(),
     unknownFilters: [],
   };
-  lambdaScopes.push(scope);
-  let lambdaCondition: PrismaFilter;
-  try {
-    lambdaCondition = buildPrismaFilterFromCerbosExpression(
-      lambdaConditionOperand, // Use the condition part of the lambda
-      scopedMapper
-    );
-  } finally {
-    lambdaScopes.pop();
-  }
+  const scopedContext = enterLambdaScope(context, collection.name, scope);
+  const lambdaCondition = buildPrismaFilterFromCerbosExpression(
+    lambdaConditionOperand,
+    scopedContext,
+  );
 
   let filterValue = lambdaCondition;
 
@@ -3063,23 +3074,6 @@ function buildCollectionLambdaParts(
     // Chained collection reference (e.g. R.attr.a.b): the lambda's elements live at the END
     // of the chain, so the element predicate must join through every intermediate hop.
     filterValue = buildNestedRelationFilter(restRelations, lambdaCondition);
-  } else if (lambdaCondition["AND"] || lambdaCondition["OR"]) {
-    // If the lambda condition already has a logical structure, use it as-is
-    filterValue = lambdaCondition;
-  } else {
-    const lambdaKeys = Object.keys(lambdaCondition);
-    const defaultKey = lambdaKeys[0];
-    if (!defaultKey) {
-      throw new Error("Lambda condition must have at least one field");
-    }
-    const lambdaFieldValue = lambdaCondition[defaultKey];
-    if (lambdaFieldValue === undefined) {
-      throw new Error("Lambda condition field value cannot be undefined");
-    }
-    const filterField = head.field || defaultKey;
-    filterValue = {
-      [filterField]: lambdaFieldValue,
-    };
   }
 
   return {
@@ -3116,8 +3110,11 @@ function buildUnknownElementFilter(
   return { OR: filters };
 }
 
-function recordNestedCollectionUnknownFilter(filter: PrismaFilter): void {
-  const enclosingScope = lambdaScopes[lambdaScopes.length - 1];
+function recordNestedCollectionUnknownFilter(
+  context: TranslationContext,
+  filter: PrismaFilter,
+): void {
+  const enclosingScope = context.scopes[context.scopes.length - 1];
   enclosingScope?.unknownFilters.push(filter);
 }
 
@@ -3152,12 +3149,12 @@ function throwUnsupportedCollectionOperator(operator: string): never {
 function handleCollectionOperator(
   operator: string,
   operands: PlanExpressionOperand[],
-  mapper: Mapper
+  context: TranslationContext
 ): PrismaFilter {
   const knownValueFilter = tryHandleKnownValueCollectionOperator(
     operator,
     operands,
-    mapper,
+    context,
     false
   );
   if (knownValueFilter !== undefined) {
@@ -3168,7 +3165,7 @@ function handleCollectionOperator(
     throwUnsupportedCollectionOperator(operator);
   }
 
-  const parts = buildCollectionLambdaParts(operator, operands, mapper);
+  const parts = buildCollectionLambdaParts(operator, operands, context);
   const { head, filterValue, nullableFields } = parts;
 
   switch (operator) {
@@ -3178,7 +3175,7 @@ function handleCollectionOperator(
       const filter = relationFilter(head, "some", filterValue);
       const unknownElement = buildUnknownElementFilter(parts);
       if (unknownElement !== undefined) {
-        recordNestedCollectionUnknownFilter({
+        recordNestedCollectionUnknownFilter(context, {
           AND: [
             { NOT: filter },
             wrapCollectionElementFilter(parts, unknownElement),
@@ -3222,12 +3219,12 @@ function handleCollectionOperator(
 function buildNegatedCollectionFilter(
   operator: string,
   operands: PlanExpressionOperand[],
-  mapper: Mapper
+  context: TranslationContext
 ): PrismaFilter {
   const knownValueFilter = tryHandleKnownValueCollectionOperator(
     operator,
     operands,
-    mapper,
+    context,
     true
   );
   if (knownValueFilter !== undefined) {
@@ -3238,7 +3235,7 @@ function buildNegatedCollectionFilter(
     throwUnsupportedCollectionOperator(operator);
   }
 
-  const parts = buildCollectionLambdaParts(operator, operands, mapper);
+  const parts = buildCollectionLambdaParts(operator, operands, context);
   const { head, filterValue, nullableFields } = parts;
   // An absent to-one parent must stay denied under negation rather than satisfying it
   // vacuously (#309).
@@ -3303,7 +3300,7 @@ function buildNegatedCollectionFilter(
  */
 function handleMapOperator(
   operands: PlanExpressionOperand[],
-  mapper: Mapper
+  context: TranslationContext
 ): PrismaFilter {
   if (operands.length !== 2) {
     throw new Error("map requires exactly two operands");
@@ -3339,20 +3336,18 @@ function handleMapOperator(
     throw new Error("Invalid map lambda expression structure");
   }
 
-  // Create scoped mapper for the collection
-  const scopedMapper = createScopedMapper(
-    collection.name,
-    variable.name,
-    mapper
-  );
-
-  const { relations } = resolveFieldReference(collection.name, mapper);
+  const { relations } = resolveFieldReference(collection.name, context);
   if (!relations || relations.length === 0) {
     throw new Error("map operator requires a relation mapping");
   }
 
-  // Use scoped mapper for resolving the projection
-  const resolved = resolveFieldReference(projection.name, scopedMapper);
+  const scopedContext = enterLambdaScope(context, collection.name, {
+    variableName: variable.name,
+    relationModel: relations[relations.length - 1]?.model,
+    nullableFields: new Set(),
+    unknownFilters: [],
+  });
+  const resolved = resolveFieldReference(projection.name, scopedContext);
   const fieldName = getLeafField(resolved.path);
   const lastRelation = assertDefined(
     relations[relations.length - 1],
@@ -3386,7 +3381,7 @@ function handleArithmeticComparison(
   arithExpr: OperatorOperand,
   otherOperand: PlanExpressionOperand,
   arithIsLeft: boolean,
-  mapper: Mapper,
+  context: TranslationContext,
 ): PrismaFilter {
   const arithOp = arithExpr.operator;
   const arithLeftOp = assertDefined(
@@ -3401,16 +3396,16 @@ function handleArithmeticComparison(
   if (
     isOperatorOperand(otherOperand) &&
     ARITHMETIC_OPERATORS.has(otherOperand.operator) &&
-    tryFoldValueExpression(otherOperand, mapper) === null
+    tryFoldValueExpression(otherOperand, context) === null
   ) {
     throw new Error(
       "Arithmetic on both sides of a comparison is not supported: the expression cannot be solved to a plain column filter"
     );
   }
 
-  const arithLeft = resolveOperand(arithLeftOp, mapper);
-  const arithRight = resolveOperand(arithRightOp, mapper);
-  const other = resolveOperand(otherOperand, mapper);
+  const arithLeft = resolveOperand(arithLeftOp, context);
+  const arithRight = resolveOperand(arithRightOp, context);
+  const other = resolveOperand(otherOperand, context);
 
   // Fully constant arithmetic: fold and compare the other side against the result. The
   // arithmetic side keeps its source position, so when the folded constant was written
@@ -3425,7 +3420,7 @@ function handleArithmeticComparison(
     const effectiveOperator = arithIsLeft
       ? (MIRRORED_OPERATOR[operator] ?? operator)
       : operator;
-    return buildComparisonFilter(other, effectiveOperator, folded);
+    return buildComparisonFilter(context, other, effectiveOperator, folded);
   }
 
   if (!isResolvedValue(other)) {
@@ -3478,7 +3473,7 @@ function handleArithmeticComparison(
         ? { AND: [equality, inequality] }
         : { OR: [equality, inequality] };
     }
-    return buildComparisonFilter(fieldRef, effectiveOperator, solvedValue);
+    return buildComparisonFilter(context, fieldRef, effectiveOperator, solvedValue);
   }
 
   if (typeof constant !== "number" || typeof other.value !== "number") {
@@ -3542,7 +3537,7 @@ function handleArithmeticComparison(
       throw new Error(`Unsupported operator: ${arithOp}`);
   }
 
-  return buildComparisonFilter(fieldRef, effectiveOperator, solved);
+  return buildComparisonFilter(context, fieldRef, effectiveOperator, solved);
 }
 
 function foldArithmetic(operator: string, left: Value, right: Value): Value {
@@ -3617,7 +3612,7 @@ type ResolvedHierarchy = ConstantHierarchy | FieldHierarchy | SegmentedHierarchy
 
 function resolveHierarchy(
   expr: OperatorOperand,
-  mapper: Mapper
+  context: TranslationContext
 ): ResolvedHierarchy {
   const operands = expr.operands;
 
@@ -3650,7 +3645,7 @@ function resolveHierarchy(
     if (isNamedOperand(strOperand)) {
       return {
         type: "field",
-        fieldRef: resolveFieldReference(strOperand.name, mapper),
+        fieldRef: resolveFieldReference(strOperand.name, context),
         delimiter,
       };
     }
@@ -3668,14 +3663,14 @@ function resolveHierarchy(
     if (isNamedOperand(inner)) {
       return {
         type: "field",
-        fieldRef: resolveFieldReference(inner.name, mapper),
+        fieldRef: resolveFieldReference(inner.name, context),
         delimiter: ".",
       };
     }
 
     if (isOperatorOperand(inner) && inner.operator === "list") {
       const segments = inner.operands.map((op): HierarchySegment => {
-        const resolved = resolveOperand(op, mapper);
+        const resolved = resolveOperand(op, context);
         if (isResolvedValue(resolved)) {
           return { type: "constant", value: String(resolved.value) };
         }
@@ -3753,9 +3748,9 @@ function checkPrefixConditions(
 
 function handleOverlapsOperator(
   operands: PlanExpressionOperand[],
-  mapper: Mapper,
+  context: TranslationContext,
 ): PrismaFilter {
-  const [left, right] = extractHierarchyOperands("overlaps", operands, mapper);
+  const [left, right] = extractHierarchyOperands("overlaps", operands, context);
 
   if (left.type === "field" || right.type === "field") {
     return handleFieldOverlaps(left, right);
@@ -3869,7 +3864,7 @@ function handleFieldOverlaps(
 function extractHierarchyOperands(
   operatorName: string,
   operands: PlanExpressionOperand[],
-  mapper: Mapper
+  context: TranslationContext
 ): [ResolvedHierarchy, ResolvedHierarchy] {
   if (operands.length !== 2) {
     throw new Error(`${operatorName} requires exactly two operands`);
@@ -3885,8 +3880,8 @@ function extractHierarchyOperands(
   }
 
   return [
-    normalizeHierarchy(resolveHierarchy(leftOp, mapper)),
-    normalizeHierarchy(resolveHierarchy(rightOp, mapper)),
+    normalizeHierarchy(resolveHierarchy(leftOp, context)),
+    normalizeHierarchy(resolveHierarchy(rightOp, context)),
   ];
 }
 
@@ -3904,11 +3899,11 @@ function getStrictPrefixes(segments: string[], delimiter: string): string[] {
 
 function handleAncestorDescendantOperator(
   operands: PlanExpressionOperand[],
-  mapper: Mapper,
+  context: TranslationContext,
   direction: "ancestor" | "descendant",
 ): PrismaFilter {
   const operatorName = direction === "ancestor" ? "ancestorOf" : "descendentOf";
-  const [left, right] = extractHierarchyOperands(operatorName, operands, mapper);
+  const [left, right] = extractHierarchyOperands(operatorName, operands, context);
 
   // ancestorOf(A, B) = A is strict prefix of B
   // descendentOf(A, B) = B is strict prefix of A

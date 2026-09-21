@@ -94,49 +94,7 @@ final class ArithmeticTranslator {
         if (folded != null) {
             return folded;
         }
-        NumericOperand left = resolveNumericOperand(operands.get(0), scope);
-        NumericOperand right = resolveNumericOperand(operands.get(1), scope);
-
-        // Both sides folded to constants (e.g. ternary substitution producing
-        // gt(add(1.0, 2.0), 4.0)) — evaluate statically with IEEE semantics.
-        if (left instanceof NumericOperand.Constant lc
-                && right instanceof NumericOperand.Constant rc) {
-            return comparisons.constantComparison(op, lc.value(), rc.value());
-        }
-        // Keep the SQL side on the left (mirroring the operator) so a constant right side
-        // can bind through the plain-Number overloads. Normalization usually guarantees
-        // this already, but an expression that FOLDS to a constant (add(1.0, 2.0)) ranks
-        // as an expression and can still arrive first.
-        if (left instanceof NumericOperand.Constant) {
-            NumericOperand tmp = left;
-            left = right;
-            right = tmp;
-            op = NormalizedBinary.mirror(op);
-        }
-        jakarta.persistence.criteria.Expression<Double> lhs =
-                ((NumericOperand.Sql) left).expr();
-
-        if (right instanceof NumericOperand.Constant rc) {
-            // Plain-value overloads bind the constant as a genuine double PARAMETER; a
-            // cb.literal would inline `0.3`, which H2/Postgres type as exact NUMERIC and
-            // drag the comparison out of IEEE space (see resolveNumericOperand).
-            String cmpOp = op;
-            double v = rc.value();
-            return leaf.withOverride(cmpOp, lhs, rc.value(), () -> switch (cmpOp) {
-                case "eq" -> cb.equal(lhs, v);
-                case "ne" -> cb.notEqual(lhs, v);
-                case "lt" -> cb.lt(lhs, v);
-                case "gt" -> cb.gt(lhs, v);
-                case "le" -> cb.le(lhs, v);
-                case "ge" -> cb.ge(lhs, v);
-                default -> throw Refusals.internal(
-                        "Unsupported arithmetic comparison operator: " + cmpOp);
-            });
-        }
-
-        jakarta.persistence.criteria.Expression<Double> rhs =
-                ((NumericOperand.Sql) right).expr();
-        return comparisons.comparePredicate(op, lhs, rhs);
+        return numericComparisonWithoutZeroGuard(op, operands, scope);
     }
 
     /**
@@ -277,6 +235,8 @@ final class ArithmeticTranslator {
         jakarta.persistence.criteria.Expression<Double> lhs =
                 ((NumericOperand.Sql) left).expr();
         if (right instanceof NumericOperand.Constant rc) {
+            // Bind a genuine double parameter: cb.literal would inline an exact NUMERIC
+            // literal on H2/Postgres and pull the comparison out of IEEE space.
             String cmpOp = op;
             double v = rc.value();
             return leaf.withOverride(cmpOp, lhs, rc.value(), () -> switch (cmpOp) {

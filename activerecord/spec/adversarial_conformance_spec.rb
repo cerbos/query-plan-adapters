@@ -77,6 +77,12 @@ RSpec.describe "adversarial conformance" do
   # under the `omitted` representation. Both pin WHY the refusal is required, not merely that
   # one happens.
   DEGENERACY_GUARD_ACTIONS = (%w[
+    projection-exists-eq
+    projection-exists-not-eq
+    rel-not-eq-hop
+    rel-not-contains-hop
+    rel-not-hierarchy-hop
+
     vf-le
     in-single
     like-percent
@@ -198,14 +204,14 @@ RSpec.describe "adversarial conformance" do
   describe "corpus" do
     # Corpus additions must update both the classification and degeneracy tripwires.
     it "pins the corpus size" do
-      expect(ConformanceCorpus::ACTIONS_FILE.fetch("conformance").size).to eq(261)
+      expect(ConformanceCorpus::ACTIONS_FILE.fetch("conformance").size).to eq(266)
       expect(ConformanceCorpus::EXPECTED_UNSUPPORTED.size).to eq(11)
       expect(ConformanceCorpus::NULL_REPRESENTATION_OMITTED.size).to eq(1)
-      expect(ConformanceCorpus::MANIFEST_ACTIONS.size).to eq(274)
+      expect(ConformanceCorpus::MANIFEST_ACTIONS.size).to eq(279)
       # Refusals must retain their pinned messages.
       expect(ConformanceCorpus::THROWING_ACTIONS.size).to eq(55)
       # Each new hostile group needs a non-degenerate representative.
-      expect(DEGENERACY_GUARD_ACTIONS.size).to eq(90)
+      expect(DEGENERACY_GUARD_ACTIONS.size).to eq(95)
     end
 
     # Adding a throwing action without a pinned message must fail the run and must not turn the

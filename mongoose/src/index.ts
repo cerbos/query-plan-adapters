@@ -200,6 +200,7 @@ const isRfc3339Timestamp = (value: string): boolean => {
  */
 function rejectNullConstructor(
   operand: PlanExpressionOperand,
+  ctx: TranslateContext,
   inConstructor = false,
 ): void {
   if (isValue(operand)) {
@@ -209,6 +210,7 @@ function rejectNullConstructor(
         (Array.isArray(operand.value) && operand.value.includes(null)))
     ) {
       assertNullOperandTranslatable(
+        ctx,
         "a null literal in a collection or struct constructor",
       );
     }
@@ -216,7 +218,7 @@ function rejectNullConstructor(
     const nested =
       inConstructor ||
       ["list", "struct", "set-field"].includes(operand.operator);
-    operand.operands.forEach((child) => rejectNullConstructor(child, nested));
+    operand.operands.forEach((child) => rejectNullConstructor(child, ctx, nested));
   }
 }
 
@@ -225,9 +227,13 @@ export function queryPlanToMongoose({
   mapper = {},
   nullAttributeRepresentation = "explicit",
 }: QueryPlanToMongooseArgs): QueryPlanToMongooseResult {
-  nullRepresentation = nullAttributeRepresentation;
+  const ctx: TranslateContext = {
+    mapper,
+    nullRepresentation: nullAttributeRepresentation,
+    scope: { kind: "root" },
+  };
   if (queryPlan.kind === PlanKind.CONDITIONAL)
-    rejectNullConstructor(queryPlan.condition);
+    rejectNullConstructor(queryPlan.condition, ctx);
   switch (queryPlan.kind) {
     case PlanKind.ALWAYS_ALLOWED:
       return {
@@ -240,7 +246,7 @@ export function queryPlanToMongoose({
         kind: PlanKind.CONDITIONAL,
         filters: buildMongooseFilterFromCerbosExpression(
           queryPlan.condition,
-          mapper,
+          ctx,
         ),
       };
     default:
@@ -489,9 +495,13 @@ const buildNestedObject = (path: string[], value: any) =>
 const buildFieldFilter = (path: string[], value: any) =>
   path.length === 0 ? value : buildNestedObject(path, value);
 
-// Translation-scoped, set at the queryPlanToMongoose entry. Translation is synchronous, so
-// module scope is safe.
-let nullRepresentation: NullAttributeRepresentation = "explicit";
+type TranslateContext = {
+  readonly mapper: Mapper;
+  readonly nullRepresentation: NullAttributeRepresentation;
+  readonly scope:
+    | { readonly kind: "root" }
+    | { readonly kind: "collection"; readonly variable: string };
+};
 
 /**
  * Guards every site that would emit a null-selecting predicate out of a `null` comparison
@@ -505,8 +515,11 @@ let nullRepresentation: NullAttributeRepresentation = "explicit";
  * `not` will flip a not-null predicate back into a null-selecting one. Rejecting every null
  * operand is correct under any nesting; narrowing it requires negation-parity tracking.
  */
-const assertNullOperandTranslatable = (context: string): void => {
-  if (nullRepresentation === "omitted") {
+const assertNullOperandTranslatable = (
+  ctx: TranslateContext,
+  context: string,
+): void => {
+  if (ctx.nullRepresentation === "omitted") {
     throw new Error(
       `Cannot translate ${context} under nullAttributeRepresentation "omitted": a NULL field ` +
         "sends no attribute, so Cerbos evaluates the comparison as a missing-attribute error " +
@@ -545,6 +558,26 @@ const buildGuardedFieldFilter = (
   return {
     $and: [...guards, filter],
   };
+};
+
+/** Every leaf resolves its field in the active collection scope before emission. */
+const emitLeafComparison = (
+  ctx: TranslateContext,
+  fieldName: string,
+  comparison: unknown,
+  guards: { nullable: boolean; requireExists: boolean },
+): MongooseFilter => {
+  assertCollectionScopedReference(fieldName, ctx);
+  const { path, relation } = resolveFieldReference(fieldName, ctx.mapper);
+  const filter = buildGuardedFieldFilter(
+    relation?.type === "many" ? path.slice(1) : path,
+    comparison,
+    guards.nullable,
+    guards.requireExists,
+  );
+  return relation?.type === "many"
+    ? { [relation.name]: { $elemMatch: filter } }
+    : filter;
 };
 
 const withNullableGuards = (
@@ -1145,14 +1178,12 @@ const createScopedMapper =
 
 const assertCollectionScopedReference = (
   reference: string,
-  collectionDepth: number,
-  collectionVariable: string | undefined,
+  ctx: TranslateContext,
 ): void => {
   if (
-    collectionDepth > 0 &&
-    collectionVariable &&
-    reference !== collectionVariable &&
-    !reference.startsWith(`${collectionVariable}.`)
+    ctx.scope.kind === "collection" &&
+    reference !== ctx.scope.variable &&
+    !reference.startsWith(`${ctx.scope.variable}.`)
   ) {
     throw new Error(
       `Outer reference ${reference} inside a collection predicate is unsupported`,
@@ -1239,7 +1270,7 @@ const buildHierarchyFilter = (
     throw new Error(`${operator} requires one field and one value`);
   }
   const { path, relation } = resolveFieldReference(field.name, mapper);
-  if (relation) {
+  if (relation?.type === "many") {
     throw new Error("Hierarchy fields cannot be collection relations");
   }
 
@@ -1391,9 +1422,7 @@ const handleKnownValueCollectionOperator = (
   operator: string,
   collection: PlanExpressionValue,
   lambda: PlanExpressionOperand,
-  mapper: Mapper,
-  collectionDepth: number,
-  collectionVariable: string | undefined,
+  ctx: TranslateContext,
 ): MongooseFilter => {
   if (operator !== "exists" && operator !== "all") {
     throw new Error(
@@ -1447,9 +1476,7 @@ const handleKnownValueCollectionOperator = (
   const filters = elements.map((element) =>
     buildMongooseFilterFromCerbosExpression(
       substituteLambdaVariable(body, variable.name, element),
-      mapper,
-      collectionDepth,
-      collectionVariable,
+      ctx,
     ),
   );
 
@@ -1461,16 +1488,11 @@ const handleKnownValueCollectionOperator = (
  */
 const buildMongooseFilterFromCerbosExpression = (
   expression: PlanExpressionOperand,
-  mapper: Mapper,
-  collectionDepth = 0,
-  collectionVariable?: string,
+  ctx: TranslateContext,
 ): MongooseFilter => {
+  const { mapper } = ctx;
   if (isVariable(expression)) {
-    assertCollectionScopedReference(
-      expression.name,
-      collectionDepth,
-      collectionVariable,
-    );
+    assertCollectionScopedReference(expression.name, ctx);
     const { path, relation } = resolveFieldReference(expression.name, mapper);
     // A to-MANY relation in boolean position is a collection, and a collection has no truth
     // value. A to-ONE relation is a different thing wearing the same field: it flattens to a
@@ -1493,20 +1515,6 @@ const buildMongooseFilterFromCerbosExpression = (
   const { operator, operands } = expression;
   const requireOperandAt = (index: number, message: string) =>
     getOperandAt(operands, index, message);
-  const resolveOperand = (operand: PlanExpressionOperand): any => {
-    if (isVariable(operand)) {
-      return resolveFieldReference(operand.name, mapper);
-    } else if (isValue(operand)) {
-      return { value: operand.value };
-    } else if (isExpression(operand)) {
-      const nestedResult = buildMongooseFilterFromCerbosExpression(
-        operand,
-        mapper,
-      );
-      return { value: nestedResult };
-    }
-    throw new Error("Invalid operand structure");
-  };
 
   // A literal value list arrives as a macro's collection operand when the
   // planner could not unroll it over a known collection (more than 10
@@ -1524,9 +1532,7 @@ const buildMongooseFilterFromCerbosExpression = (
         operator,
         collectionOperand,
         lambdaOperand,
-        mapper,
-        collectionDepth,
-        collectionVariable,
+        ctx,
       );
     }
   }
@@ -1534,25 +1540,13 @@ const buildMongooseFilterFromCerbosExpression = (
   switch (operator) {
     case "and":
       return {
-        $and: operands.map((op) =>
-          buildMongooseFilterFromCerbosExpression(
-            op,
-            mapper,
-            collectionDepth,
-            collectionVariable,
-          ),
-        ),
+        $and: operands.map((op) => buildMongooseFilterFromCerbosExpression(op, ctx)),
       };
 
     case "or":
       return {
         $or: operands.map((op) =>
-          buildMongooseFilterFromCerbosExpression(
-            op,
-            mapper,
-            collectionDepth,
-            collectionVariable,
-          ),
+          buildMongooseFilterFromCerbosExpression(op, ctx),
         ),
       };
 
@@ -1572,12 +1566,7 @@ const buildMongooseFilterFromCerbosExpression = (
       }
       const negatedFilter = {
         $nor: [
-          buildMongooseFilterFromCerbosExpression(
-            operand,
-            mapper,
-            collectionDepth,
-            collectionVariable,
-          ),
+          buildMongooseFilterFromCerbosExpression(operand, ctx),
         ],
       };
       // withEvaluationGuards ANDs its conjuncts OUTSIDE this $nor, which is where the
@@ -1650,7 +1639,7 @@ const buildMongooseFilterFromCerbosExpression = (
             "Mongoose cannot cast comparisons between two conditional expressions",
           );
         }
-        if (collectionDepth > 0) {
+        if (ctx.scope.kind === "collection") {
           throw new Error(
             `${operator} aggregation expressions inside collection predicates are unsupported`,
           );
@@ -1681,20 +1670,12 @@ const buildMongooseFilterFromCerbosExpression = (
           `${operator} requires a field/value pair or aggregation operands`,
         );
       }
-      assertCollectionScopedReference(
-        variableOperand.name,
-        collectionDepth,
-        collectionVariable,
-      );
+      assertCollectionScopedReference(variableOperand.name, ctx);
 
       const effectiveOperator =
         variableOperand === leftOperand
           ? operator
           : mirroredComparisonOperator(operator);
-      const { path, relation } = resolveFieldReference(
-        variableOperand.name,
-        mapper,
-      );
       const config = resolveMapperConfig(variableOperand.name, mapper);
       if (
         (effectiveOperator === "eq" || effectiveOperator === "ne") &&
@@ -1721,22 +1702,14 @@ const buildMongooseFilterFromCerbosExpression = (
       const requireExists = carriesNullOperand(valueOperand.value);
       if (requireExists) {
         assertNullOperandTranslatable(
+          ctx,
           `\`${effectiveOperator}\` against a null operand`,
         );
       }
-      if (relation?.type === "many") {
-        return {
-          [relation.name]: {
-            $elemMatch: buildGuardedFieldFilter(
-              path.slice(1),
-              comparison,
-              nullable,
-              requireExists,
-            ),
-          },
-        };
-      }
-      return buildGuardedFieldFilter(path, comparison, nullable, requireExists);
+      return emitLeafComparison(ctx, variableOperand.name, comparison, {
+        nullable,
+        requireExists,
+      });
     }
 
     case "in": {
@@ -1749,10 +1722,6 @@ const buildMongooseFilterFromCerbosExpression = (
             "in with a field on the left requires an array value",
           );
         }
-        const { path, relation } = resolveFieldReference(
-          leftOperand.name,
-          mapper,
-        );
         const comparison = {
           $in: rightOperand.value.map((value) =>
             applyValueParser(leftOperand.name, value, mapper),
@@ -1761,26 +1730,12 @@ const buildMongooseFilterFromCerbosExpression = (
         const nullable = isNullableReference(leftOperand.name, mapper);
         const requireExists = carriesNullOperand(rightOperand.value);
         if (requireExists) {
-          assertNullOperandTranslatable("a null element in an `in` list");
+          assertNullOperandTranslatable(ctx, "a null element in an `in` list");
         }
-        if (relation?.type === "many") {
-          return {
-            [relation.name]: {
-              $elemMatch: buildGuardedFieldFilter(
-                path.slice(1),
-                comparison,
-                nullable,
-                requireExists,
-              ),
-            },
-          };
-        }
-        return buildGuardedFieldFilter(
-          path,
-          comparison,
+        return emitLeafComparison(ctx, leftOperand.name, comparison, {
           nullable,
           requireExists,
-        );
+        });
       }
 
       if (isValue(leftOperand) && Array.isArray(leftOperand.value)) {
@@ -1789,10 +1744,6 @@ const buildMongooseFilterFromCerbosExpression = (
         );
       }
       if (isValue(leftOperand) && isVariable(rightOperand)) {
-        const { path, relation } = resolveFieldReference(
-          rightOperand.name,
-          mapper,
-        );
         const comparison = {
           $eq: applyValueParser(rightOperand.name, leftOperand.value, mapper),
         };
@@ -1800,27 +1751,14 @@ const buildMongooseFilterFromCerbosExpression = (
         const requireExists = carriesNullOperand(leftOperand.value);
         if (requireExists) {
           assertNullOperandTranslatable(
+            ctx,
             "a null needle in a mapped-collection `in`",
           );
         }
-        if (relation?.type === "many") {
-          return {
-            [relation.name]: {
-              $elemMatch: buildGuardedFieldFilter(
-                path.slice(1),
-                comparison,
-                nullable,
-                requireExists,
-              ),
-            },
-          };
-        }
-        return buildGuardedFieldFilter(
-          path,
-          comparison,
+        return emitLeafComparison(ctx, rightOperand.name, comparison, {
           nullable,
           requireExists,
-        );
+        });
       }
 
       throw new Error(
@@ -1845,22 +1783,12 @@ const buildMongooseFilterFromCerbosExpression = (
         throw new Error("matches operator requires a string regex pattern");
       }
 
-      const { path, relation } = resolveOperand(fieldOperand);
-      const regexFilter = {
-        $regex: normalizeRe2PatternForMongo(patternOperand.value),
-      };
-
-      if (relation) {
-        if (relation.type === "many") {
-          return {
-            [relation.name]: {
-              $elemMatch: buildFieldFilter(path.slice(1), regexFilter),
-            },
-          };
-        }
-        return buildFieldFilter(path, regexFilter);
-      }
-      return buildFieldFilter(path, regexFilter);
+      return emitLeafComparison(
+        ctx,
+        fieldOperand.name,
+        { $regex: normalizeRe2PatternForMongo(patternOperand.value) },
+        { nullable: false, requireExists: false },
+      );
     }
 
     case "contains":
@@ -1882,7 +1810,7 @@ const buildMongooseFilterFromCerbosExpression = (
           undefined &&
           resolveMapperConfig(leftOperand.name, mapper)?.valueType !== "string")
       ) {
-        if (collectionDepth > 0) {
+        if (ctx.scope.kind === "collection") {
           throw new Error(
             `${operator} aggregation expressions inside collection predicates are unsupported`,
           );
@@ -1910,27 +1838,10 @@ const buildMongooseFilterFromCerbosExpression = (
             ? `^${escapedValue}`
             : `${escapedValue}\\z`;
 
-      const { path, relation } = resolveFieldReference(
-        leftOperand.name,
-        mapper,
-      );
-      const nullable = isNullableReference(leftOperand.name, mapper);
-      if (relation) {
-        const elementPath = path.slice(1);
-        if (relation.type === "many") {
-          return {
-            [relation.name]: {
-              $elemMatch: buildGuardedFieldFilter(
-                elementPath,
-                { $regex: regexStr },
-                nullable,
-              ),
-            },
-          };
-        }
-        return buildGuardedFieldFilter(path, { $regex: regexStr }, nullable);
-      }
-      return buildGuardedFieldFilter(path, { $regex: regexStr }, nullable);
+      return emitLeafComparison(ctx, leftOperand.name, { $regex: regexStr }, {
+        nullable: isNullableReference(leftOperand.name, mapper),
+        requireExists: false,
+      });
     }
 
     case "hasIntersection": {
@@ -1939,7 +1850,7 @@ const buildMongooseFilterFromCerbosExpression = (
           (operand) => isValue(operand) && carriesNullOperand(operand.value),
         )
       ) {
-        assertNullOperandTranslatable("a null element in hasIntersection");
+        assertNullOperandTranslatable(ctx, "a null element in hasIntersection");
       }
       if (operands.length !== 2) {
         throw new Error("hasIntersection requires exactly two operands");
@@ -1966,6 +1877,7 @@ const buildMongooseFilterFromCerbosExpression = (
       // it does for `in`, so it is subject to the same representation guard.
       if (isValue(rightOperand) && carriesNullOperand(rightOperand.value)) {
         assertNullOperandTranslatable(
+          ctx,
           "a null element in a `hasIntersection` list",
         );
       }
@@ -2070,42 +1982,13 @@ const buildMongooseFilterFromCerbosExpression = (
         throw new Error("Invalid operands for hasIntersection");
       }
 
-      const { path, relation } = resolveFieldReference(
-        leftOperand.name,
-        mapper,
-      );
-
       if (!Array.isArray(rightOperand.value)) {
         throw new Error("hasIntersection requires an array value");
       }
-
-      if (relation) {
-        if (relation.type === "many") {
-          return {
-            [relation.name]: {
-              $elemMatch: buildGuardedFieldFilter(
-                path.slice(1),
-                { $in: rightOperand.value },
-                false,
-                rightOperand.value.includes(null),
-              ),
-            },
-          };
-        }
-        return buildGuardedFieldFilter(
-          path,
-          { $in: rightOperand.value },
-          false,
-          rightOperand.value.includes(null),
-        );
-      }
-
-      return buildGuardedFieldFilter(
-        path,
-        { $in: rightOperand.value },
-        false,
-        rightOperand.value.includes(null),
-      );
+      return emitLeafComparison(ctx, leftOperand.name, { $in: rightOperand.value }, {
+        nullable: false,
+        requireExists: rightOperand.value.includes(null),
+      });
     }
 
     // Collection operations
@@ -2180,9 +2063,11 @@ const buildMongooseFilterFromCerbosExpression = (
 
       const lambdaCondition = buildMongooseFilterFromCerbosExpression(
         conditionOperand,
-        scopedMapper,
-        collectionDepth + 1,
-        variableOperand.name,
+        {
+          ...ctx,
+          mapper: scopedMapper,
+          scope: { kind: "collection", variable: variableOperand.name },
+        },
       );
 
       return {
@@ -2208,11 +2093,17 @@ const buildMongooseFilterFromCerbosExpression = (
       // Create a mapper that strips the variable prefix from field references
       return buildMongooseFilterFromCerbosExpression(
         conditionOperand,
-        (key: string) => ({
-          field: key.replace(`${variableOperand.name}.`, ""),
-        }),
-        collectionDepth,
-        variableOperand.name,
+        {
+          ...ctx,
+          mapper: (key: string) => ({
+            field: key.replace(`${variableOperand.name}.`, ""),
+          }),
+          // A standalone lambda preserves whether its caller entered a collection.
+          scope:
+            ctx.scope.kind === "root"
+              ? ctx.scope
+              : { kind: "collection", variable: variableOperand.name },
+        },
       );
     }
 
@@ -2283,9 +2174,11 @@ const buildMongooseFilterFromCerbosExpression = (
 
       const lambdaCondition = buildMongooseFilterFromCerbosExpression(
         conditionOperand,
-        scopedMapper,
-        collectionDepth + 1,
-        variableOperand.name,
+        {
+          ...ctx,
+          mapper: scopedMapper,
+          scope: { kind: "collection", variable: variableOperand.name },
+        },
       );
 
       return {
@@ -2301,7 +2194,7 @@ const buildMongooseFilterFromCerbosExpression = (
     }
 
     case "if": {
-      if (collectionDepth > 0) {
+      if (ctx.scope.kind === "collection") {
         throw new Error(
           "if aggregation expressions inside collection predicates are unsupported",
         );

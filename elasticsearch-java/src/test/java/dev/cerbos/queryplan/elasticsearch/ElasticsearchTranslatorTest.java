@@ -307,7 +307,7 @@ class ElasticsearchTranslatorTest {
 
         // Update these tripwires only after replaying new actions against the oracle.
         assertEquals(
-                Map.of("conditional", 108, "unconditional", 7, "throwing", 159),
+                Map.of("conditional", 112, "unconditional", 7, "throwing", 160),
                 Map.of("conditional", actionsOfKind("CONDITIONAL").size(),
                         "unconditional", unconditionalActions().size(),
                         "throwing", THROWING.size()));
@@ -630,7 +630,7 @@ class ElasticsearchTranslatorTest {
                             Map.entry("regex brace syntax", 1),
                             Map.entry("computed collection macro", 2),
                             Map.entry("literal exists-one", 1),
-                            Map.entry("flat scalar collection macro", 2),
+                            Map.entry("flat scalar collection macro", 3),
                             Map.entry("list-valued member", 1),
                             Map.entry("two-list difference", 3),
                             Map.entry("whole-list comparison", 2),

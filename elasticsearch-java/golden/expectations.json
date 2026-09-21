@@ -839,6 +839,16 @@
         }
       }
     },
+    "projection-exists-eq": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "term": {
+          "tagNames": {
+            "value": "public"
+          }
+        }
+      }
+    },
     "pv-all": {
       "kind": "CONDITIONAL",
       "query": {
@@ -2250,6 +2260,101 @@
           "parent.aBool": {
             "value": false
           }
+        }
+      }
+    },
+    "rel-not-contains-hop": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "must": [
+            {
+              "exists": {
+                "field": "parent.aString"
+              }
+            },
+            {
+              "bool": {
+                "must_not": [
+                  {
+                    "wildcard": {
+                      "parent.aString": {
+                        "value": "*done*"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "rel-not-eq-hop": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "must": [
+            {
+              "exists": {
+                "field": "parent.aString"
+              }
+            },
+            {
+              "bool": {
+                "must_not": [
+                  {
+                    "term": {
+                      "parent.aString": {
+                        "value": "One"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "rel-not-hierarchy-hop": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "must": [
+            {
+              "exists": {
+                "field": "parent.aString"
+              }
+            },
+            {
+              "bool": {
+                "must_not": [
+                  {
+                    "bool": {
+                      "minimum_should_match": 1,
+                      "should": [
+                        {
+                          "term": {
+                            "parent.aString": {
+                              "value": "one"
+                            }
+                          }
+                        },
+                        {
+                          "prefix": {
+                            "parent.aString": {
+                              "value": "one."
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
         }
       }
     },

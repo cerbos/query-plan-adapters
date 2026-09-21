@@ -4,6 +4,7 @@
 package cerbosent_test
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1102,4 +1103,27 @@ func TestOmittedRelatedMembershipNeedlePreservesMissing(t *testing.T) {
 	cond := expr("not", expr("in", variable("request.resource.attr.name"), variable("request.resource.attr.tags")))
 	query, _ := translateWith(t, mapper, cond)
 	require.Contains(t, query, `IS NOT NULL) THEN (NOT (CASE`, "a missing related needle must remain UNKNOWN even for an empty collection")
+}
+
+// Dialect is caller configuration, including when a constant plan needs no SQL.
+func TestDialectValidation(t *testing.T) {
+	t.Parallel()
+	for _, d := range []string{"gremlin", "postgresql", "", dialect.SQLite, dialect.Postgres, dialect.MySQL} {
+		t.Run(d, func(t *testing.T) {
+			t.Parallel()
+			for _, plan := range []*responsev1.PlanResourcesResponse{
+				conditional(expr("eq", variable("request.resource.attr.name"), val(t, "x"))),
+				{Filter: &enginev1.PlanResourcesFilter{Kind: enginev1.PlanResourcesFilter_KIND_ALWAYS_ALLOWED}},
+			} {
+				_, err := cerbosent.Translate(plan, "resource", testMapper(), cerbosent.WithDialect(d))
+				switch d {
+				case dialect.SQLite, dialect.Postgres, dialect.MySQL:
+					require.NoError(t, err)
+				default:
+					require.ErrorContains(t, err, "unknown dialect "+strconv.Quote(d))
+					require.NotErrorIs(t, err, cerbosent.ErrUnsupported)
+				}
+			}
+		})
+	}
 }

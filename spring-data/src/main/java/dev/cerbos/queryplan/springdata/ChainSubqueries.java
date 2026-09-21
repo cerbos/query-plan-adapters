@@ -208,7 +208,7 @@ final class ChainSubqueries {
      * (cerbos/query-plan-adapters#309).
      */
     Predicate leadingHopsExist(Scope scope, Scope.ResolvedRelation ref) {
-        if (ref.chain().size() < 2) {
+        if (!ref.isChained()) {
             return null;
         }
         Scope.ResolvedRelation hops = new Scope.ResolvedRelation(
@@ -256,7 +256,7 @@ final class ChainSubqueries {
      */
     Predicate chainContains(Scope scope, Scope.ResolvedRelation ref,
                             SubqueryBodyBuilder bodyBuilder) {
-        if (leadingHopsExist(scope, ref) == null) {
+        if (!ref.isChained()) {
             return existsSubquery(scope, ref, bodyBuilder);
         }
         ChainSubquery<Long> cs = countSubquery(scope, ref);

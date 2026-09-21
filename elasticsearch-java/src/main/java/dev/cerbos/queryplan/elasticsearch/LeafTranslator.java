@@ -42,14 +42,9 @@ final class LeafTranslator {
     private static final Map<String, String> NEGATED_RANGE = Map.of(
             "lt", "ge", "le", "gt", "gt", "le", "ge", "lt");
 
-    private record ResolvedOperand(String variable, Object value, boolean isVariable) {
-        static ResolvedOperand variable(String variable) {
-            return new ResolvedOperand(variable, null, true);
-        }
-
-        static ResolvedOperand value(Object value) {
-            return new ResolvedOperand(null, value, false);
-        }
+    private sealed interface ResolvedOperand {
+        record Field(String variable) implements ResolvedOperand {}
+        record Literal(Object value) implements ResolvedOperand {}
     }
 
     private final Options options;
@@ -67,17 +62,25 @@ final class LeafTranslator {
 
         ResolvedOperand left = resolveLeafOperand(operands.get(0));
         ResolvedOperand right = resolveLeafOperand(operands.get(1));
-        if (left.isVariable() == right.isVariable()) {
-            if (left.isVariable()) {
-                throw unsupported(
-                        "Elasticsearch Query DSL cannot compare two document fields without scripts");
-            }
+        String variable;
+        Object value;
+        boolean variableFirst;
+        if (left instanceof ResolvedOperand.Field leftField
+                && right instanceof ResolvedOperand.Literal rightValue) {
+            variable = leftField.variable();
+            value = rightValue.value();
+            variableFirst = true;
+        } else if (left instanceof ResolvedOperand.Literal leftValue
+                && right instanceof ResolvedOperand.Field rightField) {
+            variable = rightField.variable();
+            value = leftValue.value();
+            variableFirst = false;
+        } else if (left instanceof ResolvedOperand.Field) {
+            throw unsupported(
+                    "Elasticsearch Query DSL cannot compare two document fields without scripts");
+        } else {
             throw malformed("Leaf expression must contain exactly one document field");
         }
-
-        boolean variableFirst = left.isVariable();
-        String variable = variableFirst ? left.variable() : right.variable();
-        Object value = variableFirst ? right.value() : left.value();
         String field = scope.field(variable);
 
         String normalizedOperator = normalizeLeafOperator(operator, variableFirst);
@@ -197,11 +200,11 @@ final class LeafTranslator {
 
     private static ResolvedOperand resolveLeafOperand(Operand operand) {
         return switch (operand.getNodeCase()) {
-            case VARIABLE -> ResolvedOperand.variable(operand.getVariable());
+            case VARIABLE -> new ResolvedOperand.Field(operand.getVariable());
             case VALUE -> {
                 Object value = PlanValues.protoValueToJava(operand.getValue());
                 PlanValues.rejectNonFinite(value);
-                yield ResolvedOperand.value(value);
+                yield new ResolvedOperand.Literal(value);
             }
             case EXPRESSION -> {
                 Expression expression = operand.getExpression();
@@ -214,8 +217,8 @@ final class LeafTranslator {
                             "Unexpected " + expression.getOperator() + " expression in leaf operand");
                 }
                 ResolvedOperand resolved = resolveLeafOperand(expression.getOperands(0));
-                if (!resolved.isVariable()) {
-                    PlanValues.validateTimestampLiteral(resolved.value());
+                if (resolved instanceof ResolvedOperand.Literal literal) {
+                    PlanValues.validateTimestampLiteral(literal.value());
                 }
                 yield resolved;
             }

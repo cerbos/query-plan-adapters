@@ -18,13 +18,15 @@ func scalarKind(v value) string {
 			return scalarKind(typed.Select)
 		}
 	case Column:
-		switch {
-		case typed.IsString:
+		switch typed.Type {
+		case ValueString:
 			return "string"
-		case typed.IsBool:
+		case ValueBool:
 			return "bool"
-		case typed.IsNumber:
+		case ValueNumber:
 			return "number"
+		case ValueDefault, ValueTimestamp:
+			return ""
 		}
 	}
 	return ""

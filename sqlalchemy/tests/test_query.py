@@ -1256,3 +1256,22 @@ class TestDeclarativeStyles:
             {"request.resource.attr.aBool": core_resource.c.aBool},
         )
         assert {row.name for row in conn.execute(query)} == {"resource1", "resource3"}
+
+
+class TestPlanOperandBoundary:
+    @pytest.mark.parametrize(
+        "operand",
+        [
+            {"value": False, "variable": "request.resource.attr.aBool"},
+            {"expression": {"value": True}, "value": None},
+            {"operator": "eq", "operands": None},
+            {"variable": ["request.resource.attr.aBool"]},
+        ],
+    )
+    def test_malformed_nodes_are_rejected_before_semantic_traversal(self, operand):
+        # Malformed oneof/discriminator values cannot come from the planner. Reject
+        # them at the decode boundary instead of choosing a branch by key order.
+        from cerbos_sqlalchemy.query import _parse_operand
+
+        with pytest.raises(ValueError, match="Unrecognised operand shape"):
+            _parse_operand(operand)

@@ -986,6 +986,20 @@
         "mysql": "re1_0.a_bool=1 and (re1_0.a_string='' and re1_0.a_number>1 or not(re1_0.a_string='') and re1_0.a_number>2 or not((re1_0.a_string='' or not(re1_0.a_string='')))) or not(re1_0.a_bool=1) and (re1_0.a_string='' and 1<>1 or not(re1_0.a_string='') and 1<>1 or not((re1_0.a_string='' or not(re1_0.a_string='')))) or not((re1_0.a_bool=1 or not(re1_0.a_bool=1)))"
       }
     },
+    "projection-exists-eq": {
+      "where": {
+        "h2": "(select nullif(coalesce(max(case when t1_0.name is not null and t1_0.name='public' then 2 when not(t1_0.name is not null and t1_0.name='public') then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2",
+        "postgresql": "(select nullif(coalesce(max(case when t1_0.name is not null and t1_0.name='public' then 2 when not(t1_0.name is not null and t1_0.name='public') then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2",
+        "mysql": "(select nullif(coalesce(max(case when t1_0.name is not null and t1_0.name='public' then 2 when not(t1_0.name is not null and t1_0.name='public') then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2"
+      }
+    },
+    "projection-exists-not-eq": {
+      "where": {
+        "h2": "(select nullif(coalesce(max(case when not(t1_0.name is not null and t1_0.name='public') then 2 when not(not(t1_0.name is not null and t1_0.name='public')) then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2",
+        "postgresql": "(select nullif(coalesce(max(case when not(t1_0.name is not null and t1_0.name='public') then 2 when not(not(t1_0.name is not null and t1_0.name='public')) then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2",
+        "mysql": "(select nullif(coalesce(max(case when not(t1_0.name is not null and t1_0.name='public') then 2 when not(not(t1_0.name is not null and t1_0.name='public')) then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2"
+      }
+    },
     "pv-all": {
       "where": {
         "h2": "re1_0.a_optional_string<>'set' and re1_0.a_optional_string<>'same' and re1_0.a_optional_string<>'' and re1_0.a_optional_string<>'%_o' and re1_0.a_optional_string<>'X' and re1_0.a_optional_string<>'Y' and re1_0.a_optional_string<>'MIRROR' and re1_0.a_optional_string<>'filler-1' and re1_0.a_optional_string<>'filler-2' and re1_0.a_optional_string<>'filler-3' and re1_0.a_optional_string<>'filler-4'",
@@ -1239,6 +1253,42 @@
         "h2": "not(p1_0.a_bool=true)",
         "postgresql": "not(p1_0.a_bool=true)",
         "mysql": "not(p1_0.a_bool=1)"
+      }
+    },
+    "rel-not-contains-hop": {
+      "joins": {
+        "h2": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id",
+        "postgresql": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id",
+        "mysql": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id"
+      },
+      "where": {
+        "h2": "not(p1_0.a_string like '%done%' escape '\\')",
+        "postgresql": "not(p1_0.a_string like '%done%' escape '\\')",
+        "mysql": "not(p1_0.a_string like '%done%' escape '\\\\')"
+      }
+    },
+    "rel-not-eq-hop": {
+      "joins": {
+        "h2": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id",
+        "postgresql": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id",
+        "mysql": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id"
+      },
+      "where": {
+        "h2": "not(p1_0.a_string='One')",
+        "postgresql": "not(p1_0.a_string='One')",
+        "mysql": "not(p1_0.a_string='One')"
+      }
+    },
+    "rel-not-hierarchy-hop": {
+      "joins": {
+        "h2": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id",
+        "postgresql": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id",
+        "mysql": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id"
+      },
+      "where": {
+        "h2": "not((p1_0.a_string='one' or p1_0.a_string like 'one.%' escape '\\'))",
+        "postgresql": "not((p1_0.a_string='one' or p1_0.a_string like 'one.%' escape '\\'))",
+        "mysql": "not((p1_0.a_string='one' or p1_0.a_string like 'one.%' escape '\\\\'))"
       }
     },
     "rel-range-hop": {

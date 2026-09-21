@@ -14,9 +14,20 @@ import (
 )
 
 // A resolved operand is either a plain Go constant folded out of the plan (float64, string, bool,
-// nil, []any), an Expr, or one of the two symbolic forms below. Keeping constants unlifted lets
+// nil, []any), an Expr, or a symbolic form. Keeping constants unlifted lets
 // whole comparisons fold at translation time — `"const".contains("other")` never reaches SQL.
 type value = any
+
+// symbolicValue marks operands that must be consumed before lowering to SQL parameters.
+// Keep isSymbolic separate: it identifies only values that need non-finite folding.
+type symbolicValue interface {
+	isSymbolicValue()
+}
+
+func (ieeeConst) isSymbolicValue()          {}
+func (condValue) isSymbolicValue()          {}
+func (hierarchyValue) isSymbolicValue()     {}
+func (deferredCollection) isSymbolicValue() {}
 
 // ieeeConst is a non-finite CEL double. It is deliberately NOT lowered into SQL: no portable SQL
 // literal denotes NaN or an infinity, and PostgreSQL's NaN ordering is not IEEE's. Comparisons
@@ -791,6 +802,8 @@ func asExpr(v value) (Expr, error) {
 		// translator emitted a filter for a shape it cannot express and only the driver's
 		// encoder refused it, at execution time (cerbos/query-plan-adapters#387).
 		return nil, fmt.Errorf("'%s' produces a collection rather than a plain value; it only translates inside size() or hasIntersection(), which give the collection a scalar meaning", t.macro())
+	case symbolicValue:
+		return nil, fmt.Errorf("symbolic value %T has no SQL representation", v)
 	default:
 		return Lit{V: v}, nil
 	}

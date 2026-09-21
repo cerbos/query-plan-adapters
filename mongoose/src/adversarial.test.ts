@@ -472,6 +472,11 @@ const DEGENERACY_GUARD_ACTIONS = [
   "size-ge-one",
   "wildcard-contains",
   "wildcard-endswith",
+  "projection-exists-eq",
+  "projection-exists-not-eq",
+  "rel-not-eq-hop",
+  "rel-not-contains-hop",
+  "rel-not-hierarchy-hop",
 ] as const;
 
 /**
@@ -955,10 +960,10 @@ describe("adversarial conformance corpus", () => {
       return count !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(274);
+    expect(MANIFEST_ACTIONS.size).toBe(279);
     expect(unsupportedCount).toBe(81);
     expect(supportedExpectedCount).toBe(4);
-    expect(ORACLE_ACTIONS).toHaveLength(184);
+    expect(ORACLE_ACTIONS).toHaveLength(189);
     expect(THROWING_ACTIONS).toHaveLength(88);
     expect(misclassified).toEqual([]);
   });

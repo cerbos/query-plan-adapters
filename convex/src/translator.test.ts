@@ -309,7 +309,7 @@ describe("corpus shapes", () => {
       post: POST_ACTIONS.length,
       unconditional: UNCONDITIONAL_ACTIONS.length,
       throwing: throwing.length,
-    }).toEqual({ pushed: 30, post: 209, unconditional: 7, throwing: 28 });
+    }).toEqual({ pushed: 30, post: 214, unconditional: 7, throwing: 28 });
   });
 });
 
@@ -773,4 +773,29 @@ describe("the golden asset", () => {
     expect({ runner, run }).toEqual({ runner: "npm", run: "run" });
     expect(Object.keys(manifest.scripts)).toContain(script);
   });
+});
+
+// Type-only API contracts: these assignments stop compiling if an impossible result returns.
+test("result types require the payload declared by each execution path", () => {
+  type Result = QueryPlanToConvexResult<Recorder, unknown>;
+  type Rejects<T> = T extends Result ? false : true;
+  const bareConditional: Rejects<{ kind: PlanKind.CONDITIONAL }> = true;
+  const missingDbFilter: Rejects<{ kind: PlanKind.CONDITIONAL; path: "db" }> = true;
+  const missingPostFilter: Rejects<{ kind: PlanKind.CONDITIONAL; path: "post" }> = true;
+  const missingSplitPostFilter: Rejects<{
+    kind: PlanKind.CONDITIONAL;
+    path: "split";
+    filter: (q: Recorder) => unknown;
+  }> = true;
+  const unconditionalFilter: Rejects<{
+    kind: PlanKind.ALWAYS_ALLOWED;
+    filter: (q: Recorder) => unknown;
+  }> = true;
+  expect([
+    bareConditional,
+    missingDbFilter,
+    missingPostFilter,
+    missingSplitPostFilter,
+    unconditionalFilter,
+  ]).toEqual([true, true, true, true, true]);
 });

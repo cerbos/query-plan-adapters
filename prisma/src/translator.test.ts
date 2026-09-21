@@ -562,9 +562,49 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
     },
   },
   "in-single": { aString: { equals: "one" } },
-  "lambda-in-literal": { tags: { some: { name: { in: ["public", "other"] } } } },
+  "lambda-in-literal": {
+    tags: {
+      some: {
+        AND: [
+          {
+            name: {
+              not: null
+            }
+          },
+          {
+            name: {
+              in: [
+                "public",
+                "other"
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
   "lambda-in-literal-neg": {
-    NOT: { tags: { some: { name: { in: ["public", "other"] } } } },
+    NOT: {
+      tags: {
+        some: {
+          AND: [
+            {
+              name: {
+                not: null
+              }
+            },
+            {
+              name: {
+                in: [
+                  "public",
+                  "other"
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
   },
   "lambda-in-principal": { tags: { some: { name: { in: ["public", "special"] } } } },
   "lambda-ternary": {
@@ -1128,6 +1168,46 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
       { AND: [{ aBool: { equals: true } }, { aBool: { equals: false } }] },
     ],
   },
+  "projection-exists-eq": {
+    tags: {
+      some: {
+        AND: [
+          {
+            name: {
+              not: null
+            }
+          },
+          {
+            name: {
+              equals: "public"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "projection-exists-not-eq": {
+    tags: {
+      some: {
+        NOT: {
+          AND: [
+            {
+              name: {
+                not: null
+              }
+            },
+            {
+              name: {
+                equals: "public"
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+
+
   "pv-all": {
     AND: [
       { aOptionalString: { not: "set" } },
@@ -1343,6 +1423,82 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
       { NOT: { parent: { is: { aBool: { equals: true } } } } },
     ],
   },
+  "rel-not-contains-hop": {
+    AND: [
+      {
+        parent: {
+          is: {}
+        }
+      },
+      {
+        NOT: {
+          parent: {
+            is: {
+              aString: {
+                contains: "done"
+              }
+            }
+          }
+        }
+      }
+    ]
+  },
+  "rel-not-eq-hop": {
+    AND: [
+      {
+        parent: {
+          is: {}
+        }
+      },
+      {
+        NOT: {
+          parent: {
+            is: {
+              aString: {
+                equals: "One"
+              }
+            }
+          }
+        }
+      }
+    ]
+  },
+  "rel-not-hierarchy-hop": {
+    AND: [
+      {
+        parent: {
+          is: {}
+        }
+      },
+      {
+        NOT: {
+          OR: [
+            {
+              parent: {
+                is: {
+                  aString: {
+                    equals: "one"
+                  }
+                }
+              }
+            },
+            {
+              parent: {
+                is: {
+                  aString: {
+                    startsWith: "one."
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+
+
+
   "rel-range-hop": {
     AND: [
       { parent: { is: { aNumber: { gt: 2 } } } },
@@ -1598,7 +1754,7 @@ describe("corpus shapes", () => {
       filters: filters.length,
       kinds: kinds.length,
       throwing: throwing.length,
-    }).toEqual({ filters: 161, kinds: 7, throwing: 106 });
+    }).toEqual({ filters: 166, kinds: 7, throwing: 106 });
   });
 });
 
@@ -1638,6 +1794,66 @@ describe("nullAttributeRepresentation", () => {
     expect(() =>
       translate("null-eq-missing", { nullAttributeRepresentation: "omitted" })
     ).toThrow("missing-attribute error");
+  });
+});
+
+describe("reentrant function mappers", () => {
+  // Function mappers are caller-supplied, so the corpus cannot exercise nested adapter calls.
+  test.each(["null-eq-missing", "field-to-field", "all-on-empty"])(
+    "keeps %s isolated from a nested translation",
+    (action) => {
+      const expected = translate(action);
+      let calls = 0;
+      const mapper: Mapper = (key) => {
+        calls++;
+        queryPlanToPrisma({
+          queryPlan: planFromWireFixture("arith-add"),
+          mapper: MAPPER,
+          model: "NestedModel",
+          nullAttributeRepresentation: "omitted",
+        });
+        return MAPPER[key] ?? { field: key };
+      };
+      expect(translate(action, { mapper })).toStrictEqual(expected);
+      expect(calls).toBeGreaterThan(0);
+    },
+  );
+});
+
+test("an unplannable nested map does not register nullable fields on the outer lambda", () => {
+  // CEL cannot reach this branch: Cerbos 0.54.0 rejects
+  // R.attr.tags.all(t, R.attr.tags.map(x, x.name)) with
+  // "expected type 'bool' but found 'list(dyn)'". This is a hand-crafted plan contract.
+  const condition: PlanExpressionOperand = {
+    operator: "all",
+    operands: [
+      { name: "request.resource.attr.tags" },
+      {
+        operator: "lambda",
+        operands: [
+          {
+            operator: "map",
+            operands: [
+              { name: "request.resource.attr.tags" },
+              {
+                operator: "lambda",
+                operands: [{ name: "x.name" }, { name: "x" }],
+              },
+            ],
+          },
+          { name: "t" },
+        ],
+      },
+    ],
+  };
+  const result = queryPlanToPrisma({
+    queryPlan: { ...planFromWireFixture("all-on-empty"), kind: PlanKind.CONDITIONAL, condition },
+    mapper: MAPPER,
+    model: MODEL,
+  });
+  expect(result).toStrictEqual({
+    kind: PlanKind.CONDITIONAL,
+    filters: { tags: { every: { tags: { some: { some: { select: { name: true } } } } } } },
   });
 });
 
@@ -1820,6 +2036,33 @@ describe("the mapper contract", () => {
       filters: { parent: { is: { aBool: { equals: true } } } },
     });
   });
+
+  test.each(["projection-exists-eq", "projection-exists-not-eq"])(
+    "%s resolves a projection supplied through a prefix mapper",
+    (action) => {
+      const direct = translate(action);
+      if (direct.kind !== PlanKind.CONDITIONAL) {
+        throw new Error("Expected a conditional projection fixture");
+      }
+      const mapper: Mapper = {
+        "request.resource.attr": {
+          relation: {
+            name: "categories",
+            type: "many",
+            fields: {
+              tagNames: {
+                relation: { name: "tags", type: "many", field: "name" },
+              },
+            },
+          },
+        },
+      };
+      expect(translate(action, { mapper })).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters: { categories: { some: direct.filters } },
+      });
+    },
+  );
 
   test("size() against a scalar mapping is refused rather than guessed", () => {
     expect(() =>

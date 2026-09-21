@@ -83,6 +83,9 @@ final class CollectionTranslator {
 
         if (!options.nestedPaths().contains(esField)) {
             if (options.collectionFields().contains(esField)) {
+                Map<String, Object> equality = flatScalarExistsEquality(
+                        operator, lambdaOperand, esField, polarity);
+                if (equality != null) return equality;
                 throw unsupported("Collection macros over flat scalar arrays cannot preserve per-element predicates without a nested mapping");
             }
             throw unmapped("Field '" + esField + "' is not declared in nestedPaths. "
@@ -133,6 +136,32 @@ final class CollectionTranslator {
         // prevents both true and false, preserving CEL errors.
         Map<String, Object> innerFalse = walker.operand(bodyOperand, scope, Polarity.FALSE);
         return Queries.nestedQuery(esField, innerFalse);
+    }
+
+    /** A positive scalar equality needs one matching term, not per-element correlation. */
+    private Map<String, Object> flatScalarExistsEquality(
+            String operator, Operand lambdaOperand, String field, Polarity polarity) {
+        if (!"exists".equals(operator) || !polarity.holds()
+                || lambdaOperand.getNodeCase() != Operand.NodeCase.EXPRESSION) return null;
+        Expression lambda = lambdaOperand.getExpression();
+        if (!"lambda".equals(lambda.getOperator()) || lambda.getOperandsCount() != 2
+                || lambda.getOperands(1).getNodeCase() != Operand.NodeCase.VARIABLE
+                || lambda.getOperands(0).getNodeCase() != Operand.NodeCase.EXPRESSION) return null;
+        Expression body = lambda.getOperands(0).getExpression();
+        if (!"eq".equals(body.getOperator()) || body.getOperandsCount() != 2) return null;
+        String variable = lambda.getOperands(1).getVariable();
+        Operand left = body.getOperands(0);
+        Operand right = body.getOperands(1);
+        boolean variableFirst = left.getNodeCase() == Operand.NodeCase.VARIABLE
+                && left.getVariable().equals(variable)
+                && right.getNodeCase() == Operand.NodeCase.VALUE;
+        boolean valueFirst = right.getNodeCase() == Operand.NodeCase.VARIABLE
+                && right.getVariable().equals(variable)
+                && left.getNodeCase() == Operand.NodeCase.VALUE;
+        if (!variableFirst && !valueFirst) return null;
+        // Reuse the leaf's scalar/null validation and the caller's operator overrides.
+        return leaf.applyResolvedLeaf("eq", body.getOperandsList(),
+                Scope.root(Map.of(variable, field)), Polarity.TRUE);
     }
 
     /**

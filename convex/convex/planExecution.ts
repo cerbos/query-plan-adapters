@@ -53,6 +53,5 @@ export const executionPathOf = <Q, R>(
   translated: QueryPlanToConvexResult<Q, R>,
 ): ExecutionPath => {
   if (translated.kind !== PlanKind.CONDITIONAL) return "unconditional";
-  if (translated.filter && translated.postFilter) return "split";
-  return translated.filter ? "db" : "post";
+  return translated.path;
 };

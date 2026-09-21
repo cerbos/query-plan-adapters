@@ -64,13 +64,18 @@ built filter rather than pushing it into the leaf, so a leaf cannot tell whether
 is correct under any nesting. See
 [#302](https://github.com/cerbos/query-plan-adapters/issues/302).
 
+Collection predicates reject references outside their lambda scope across all leaf comparison
+operators. This is a breaking change for previously accepted outer references: MongoDB's
+`$elemMatch` cannot evaluate them against the root document. Hierarchy comparisons through
+to-one relations are supported, including negation, with missing-parent guards.
+
 ## Conformance contract
 
 The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 26 hostile seed documents and real MongoDB 7 and 8 queries. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 180 reference conformance actions plus regex, ordered indexing/`get-field`, timestamp and mixed-null field-to-field probes (184 actions) |
+| Oracle-tested | 185 reference conformance actions plus regex, ordered indexing/`get-field`, timestamp and mixed-null field-to-field probes (189 actions) |
 | Fail-closed | 81 reference actions plus the 7 reference-unsupported shapes (88 actions total) |
 | Operand types the plan does not carry | CEL overloads `+` on strings and a query plan names no field types. One string operand settles it, so `R.attr.a + "x"` translates as `$concat`. Between **two field paths** neither does, and MongoDB spells the two differently — `$add` takes numeric and date types only — so the shape is refused at translation. It previously reached the server as `$add`, which aborts the whole query (cerbos/query-plan-adapters#391) |
 | Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`. Under the default it already returns the empty set the PDP demands, because `nullable: true` on a mapper entry declares per-attribute that a stored null is a missing Cerbos attribute; the global option is the backstop for mappings that do not declare it |

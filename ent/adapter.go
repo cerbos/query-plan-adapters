@@ -135,6 +135,7 @@ type Option func(*options)
 // WithDialect declares which SQL dialect the predicate will be rendered for. It must match the
 // dialect of the ent client the predicate is handed to, since cast spellings and timestamp storage
 // differ between them. Defaults to dialect.SQLite, matching ent's own default.
+// Translate rejects values other than dialect.SQLite, dialect.Postgres and dialect.MySQL.
 func WithDialect(d string) Option {
 	return func(o *options) { o.dialect = d }
 }
@@ -168,6 +169,12 @@ func Translate(plan *responsev1.PlanResourcesResponse, table string, mapper Mapp
 	cfg := options{dialect: dialect.SQLite}
 	for _, opt := range opts {
 		opt(&cfg)
+	}
+
+	switch cfg.dialect {
+	case dialect.SQLite, dialect.Postgres, dialect.MySQL:
+	default:
+		return Result{}, fmt.Errorf("cerbosent: unknown dialect %q; expected sqlite3, postgres or mysql", cfg.dialect)
 	}
 
 	filter := plan.GetFilter()
