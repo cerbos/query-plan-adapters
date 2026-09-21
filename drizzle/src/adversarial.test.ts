@@ -64,7 +64,7 @@ import type { ActionsFile, ThrowingAction } from "./corpus";
  */
 
 // Dedicated ports (gRPC 3621) so this suite can run alongside other adapters' sidecars.
-const cerbos = new Cerbos("127.0.0.1:3621", { tls: false });
+const cerbos = new Cerbos(process.env["CERBOS_GRPC_ADDR"] ?? "127.0.0.1:3621", { tls: false });
 
 interface Tag {
   id: string;
@@ -339,6 +339,10 @@ const MANIFEST_ACTIONS = new Set([
 // for that group.
 
 const DEGENERACY_GUARD_ACTIONS = [
+  "index-not-oob",
+  "index-scalar-list",
+  "index-scalar-list-not-eq",
+  "index-scalar-list-null",
   "projection-exists-eq",
   "projection-exists-not-eq",
   "rel-not-eq-hop",
@@ -484,7 +488,6 @@ const DEGENERACY_LIVENESS_PROBES = [
   "cast-not-timestamp",
   "index-fractional",
   "index-negative",
-  "index-not-oob",
   "regex-eq-true",
   "regex-final-newline",
   "regex-lookahead",
@@ -580,6 +583,7 @@ interface ResourceRow {
   scope: string | null;
   createdAt: string | null;
   updatedAt: string | null;
+  tagNamesJson: (string | null)[];
 }
 
 interface TagRow {
@@ -659,6 +663,7 @@ function seedRows(): SeedRows {
       scope: scopeFor(seed),
       createdAt: timestampFor(seed),
       updatedAt: derivedFor(seed).updatedAt,
+      tagNamesJson: seed.tags.map((tag) => tag.name),
     });
     const parentSeed = parentSeedOf(seed);
     if (parentSeed !== undefined) {
@@ -749,6 +754,7 @@ const STORE_ENGINES: Record<StoreName, string> = {
 interface AdversarialStore {
   readonly name: StoreName;
   readonly mapper: Record<string, MapperEntry>;
+  readonly indexMappers?: Record<string, MapperEntry>[];
   start(): Promise<void>;
   stop(): Promise<void>;
   selectIds(filter: SQL | undefined): Promise<string[]>;
@@ -797,7 +803,8 @@ function sqliteStore(): AdversarialStore {
           created_by TEXT NOT NULL,
           scope TEXT,
           created_at TEXT,
-          updated_at TEXT
+          updated_at TEXT,
+          tag_names_json TEXT
         );
         CREATE TABLE adversarial_parents (
           id TEXT PRIMARY KEY,
@@ -936,6 +943,10 @@ function postgresStore(): AdversarialStore {
   return {
     name: "postgres",
     mapper: buildMapper(schema),
+    indexMappers: [
+      { ...buildMapper(schema), "request.resource.attr.tagNames": { column: resources.tagNamesArray, indexable: "pgArray" } },
+      { ...buildMapper(schema), "request.resource.attr.tagNames": { column: resources.tagNamesPlainJson, indexable: "json" } },
+    ],
 
     async start(): Promise<void> {
       container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
@@ -953,7 +964,10 @@ function postgresStore(): AdversarialStore {
           created_by         text NOT NULL,
           scope              text,
           created_at         timestamptz,
-          updated_at         timestamptz
+          updated_at         timestamptz,
+          tag_names_json     jsonb,
+          tag_names_plain_json json,
+          tag_names_array    text[]
         );
         CREATE TABLE adversarial_parents (
           id                 text PRIMARY KEY,
@@ -995,6 +1009,12 @@ function postgresStore(): AdversarialStore {
 
       const rows = seedRows();
       await db.insert(resources).values(rows.resources);
+      await db.execute(sql`update adversarial_resources set
+        tag_names_plain_json = tag_names_json::json,
+        tag_names_array = case when jsonb_array_length(tag_names_json) > 0 then
+          ('[0:' || (jsonb_array_length(tag_names_json) - 1) || ']=' ||
+            array(select jsonb_array_elements_text(tag_names_json))::text)::text[]
+          else array[]::text[] end`);
       await db.insert(parents).values(rows.parents);
       await db.insert(inners).values(rows.inners);
       await db.insert(tags).values(rows.tags);
@@ -1148,7 +1168,8 @@ function mysqlStore(): AdversarialStore {
        created_by         varchar(64) NOT NULL,
        scope              varchar(255),
        created_at         datetime(6),
-       updated_at         datetime(6)
+       updated_at         datetime(6),
+       tag_names_json     json
      )`,
     `CREATE TABLE adversarial_parents (
        id                 varchar(64) PRIMARY KEY,
@@ -1331,7 +1352,8 @@ const MAPPER = store.mapper;
  * the only thing governing null operands.
  *
  * The #302 completeness guard is a statement about that option: every corpus action carrying a
- * null literal must be rejected under `"omitted"`. Declaring `owner`/`coOwner` as explicit-null
+ * attribute-null literal must be rejected under `"omitted"`. Null list elements retain their
+ * value independently of that option. Declaring `owner`/`coOwner` as explicit-null
  * (#308) deliberately overrides the option for those two attributes — which would otherwise read
  * as the guard going quiet, when in fact it is the per-attribute declaration doing exactly its
  * job. Stripping the declarations keeps the guard testing what it was written to test.
@@ -1580,11 +1602,11 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(290);
+    expect(MANIFEST_ACTIONS.size).toBe(292);
     expect(NULL_REPRESENTATION_OMITTED).toHaveLength(1);
     // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
     // gained or lost has to be re-triaged here rather than joining the suite unnoticed.
-    expect(THROWING_ACTIONS).toHaveLength(65);
+    expect(THROWING_ACTIONS).toHaveLength(63);
     expect(misclassified).toEqual([]);
     expect(
       [...DRIZZLE_SUPPORTED_EXPECTED].filter(
@@ -1599,6 +1621,19 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       adapterFilteredIds(action),
     ]);
     expect(filtered).toEqual(oracle);
+  });
+
+  test.each([
+    "index-scalar-list",
+    "index-scalar-list-not-eq",
+    "index-scalar-list-null",
+    "index-not-oob",
+  ])("declared indexed storage: %s matches the oracle for every representation", async (action) => {
+    const oracle = await oracleAllowedIds(action);
+    await expectNonDegenerateOracle(action);
+    for (const mapper of [MAPPER, ...(store.indexMappers ?? [])]) {
+      expect(await adapterFilteredIds(action, "explicit", mapper)).toEqual(oracle);
+    }
   });
 
   // Shapes the adapter does not support must fail during translation, never produce a
@@ -1697,7 +1732,8 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
   // operators: `hasIntersection(tagNames, ["public", null])` carries one in its value list, and
   // an allowlist of eq/ne/in silently misses it. Enumerating the corpus rather than naming
   // shapes means a newly added action carrying a null constant is covered automatically.
-  test("every corpus action carrying a null literal is rejected under omitted", async () => {
+  // Indexed null ELEMENTS are values, not missing attributes; their exception is oracle-proved.
+  test("null literals under omitted are rejected unless they compare an indexed element", async () => {
     const nullCarrying: string[] = [];
     for (const action of [...MANIFEST_ACTIONS].sort()) {
       const queryPlan = await cerbos.planResources({
@@ -1716,9 +1752,15 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
     // Guard the guard: if the walk stopped finding null operands the loop below is vacuous.
     expect(nullCarrying).toContain("null-eq-missing");
     expect(nullCarrying).toContain("in-null-elem-hasint");
+    expect(nullCarrying).toContain("index-scalar-list-null");
 
     const notRejected: string[] = [];
     for (const action of nullCarrying) {
+      if (action === "index-scalar-list-null") {
+        expect(await adapterFilteredIds(action, "omitted", MAPPER_WITHOUT_NULL_CONVENTIONS))
+          .toEqual(await oracleAllowedIds(action));
+        continue;
+      }
       try {
         await adapterFilteredIds(
           action,

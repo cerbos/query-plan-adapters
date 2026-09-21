@@ -102,7 +102,7 @@ RSpec.describe "translator" do
         "conditional" => conditional.size,
         "unconditional" => unconditional.size,
         "throwing" => THROWING_ACTIONS.size
-      }).to eq({"conditional" => 219, "unconditional" => 7, "throwing" => 64})
+      }).to eq({"conditional" => 219, "unconditional" => 7, "throwing" => 66})
     end
 
     # The unconditional folds are the planner's, not this adapter's, and each is pinned

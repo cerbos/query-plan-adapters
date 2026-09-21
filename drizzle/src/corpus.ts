@@ -16,6 +16,8 @@ import {
   boolean,
   doublePrecision,
   integer as pgInteger,
+  json as pgJson,
+  jsonb,
   pgTable,
   text as pgText,
   timestamp,
@@ -25,6 +27,7 @@ import {
   datetime,
   double,
   int as mysqlInt,
+  json as mysqlJson,
   mysqlTable,
   varchar,
 } from "drizzle-orm/mysql-core";
@@ -457,6 +460,7 @@ export interface AdversarialSchema {
     scope: AnyColumn;
     createdAt: AnyColumn;
     updatedAt: AnyColumn;
+    tagNamesJson: AnyColumn;
   };
   parents: Table & {
     id: AnyColumn;
@@ -506,6 +510,7 @@ export function sqliteSchema() {
       scope: text("scope"),
       createdAt: text("created_at"),
       updatedAt: text("updated_at"),
+      tagNamesJson: text("tag_names_json", { mode: "json" }).$type<(string | null)[]>(),
     }),
 
     // The corpus's one real to-one chain, one owned row per level and per resource.
@@ -579,6 +584,9 @@ export function postgresSchema() {
         withTimezone: true,
         mode: "string",
       }),
+      tagNamesJson: jsonb("tag_names_json").$type<(string | null)[]>(),
+      tagNamesPlainJson: pgJson("tag_names_plain_json").$type<(string | null)[]>(),
+      tagNamesArray: pgText("tag_names_array").array(),
       updatedAt: timestamp("updated_at", {
         withTimezone: true,
         mode: "string",
@@ -669,6 +677,7 @@ export function mysqlSchema() {
       scope: varchar("scope", { length: 255 }),
       createdAt: datetime("created_at", { mode: "string", fsp: 6 }),
       updatedAt: datetime("updated_at", { mode: "string", fsp: 6 }),
+      tagNamesJson: mysqlJson("tag_names_json").$type<(string | null)[]>(),
     }),
 
     // The corpus's one real to-one chain, one owned row per level and per resource.
@@ -827,6 +836,8 @@ export function buildMapper(
       },
     },
     "request.resource.attr.tagNames": {
+      column: schema.resources.tagNamesJson,
+      indexable: "json",
       collectionValueType: "scalar",
       relation: {
         type: "many",

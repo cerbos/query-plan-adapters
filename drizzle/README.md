@@ -13,6 +13,50 @@ An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanRe
 - Supports relation-aware mappings, including nested relations and many-to-many joins
 - Works with Drizzle SQLite, PostgreSQL, MySQL and PlanetScale drivers
 
+## Indexed collection columns
+
+Declare ordered column storage to translate `R.attr.tags[0] == "public"`:
+
+```ts
+import type { Mapper } from "@cerbos/orm-drizzle";
+
+const mapper = {
+  "request.resource.attr.tags": {
+    column: resources.tags,
+    indexable: "json", // or "pgArray" for a PostgreSQL array column
+  },
+} satisfies Mapper;
+```
+
+`json` supports PostgreSQL JSON/JSONB, SQLite JSON text, and MySQL JSON columns. `pgArray`
+supports PostgreSQL arrays of text, varchar, boolean, integer and smallint.
+Numeric, bigint, temporal and custom array decoders are rejected because their application values
+can differ from their SQL representation. Floating-point arrays are also refused: PostgreSQL
+serializes their NaN and infinity elements as JSON strings. Array positions are zero-based, including PostgreSQL
+arrays with a nonstandard lower bound. Values and paths are bound parameters.
+
+The supported form is a direct `==` or `!=` comparison with a scalar literal (string, finite
+number, boolean or null), in either operand order and under logical operators. The index must be
+a constant non-negative 32-bit integer. Dynamic or negative indexes, object-field projection,
+ordered comparisons and indexes nested inside other value expressions still throw. Undeclared
+storage also throws: a related table alone does not define list order. This is opt-in; existing
+mappings keep their behavior.
+
+An absent element, SQL NULL collection, or non-array JSON value produces SQL UNKNOWN, so it stays
+excluded under negation. A null **element** is a value: `[null][0] == null` is true, and
+`[null][0] != "public"` is true. JSON strings, numbers and booleans retain their types. The
+attribute's null-representation option does not change these list-element semantics.
+
+A mapper entry may carry both a `column` with `indexable` and a `relation`: indexing reads the
+ordered column, while collection predicates read the relation. Both must represent exactly the
+same list sent to Cerbos, including null elements; the caller owns keeping those representations
+consistent. Do not apply custom decoding that changes the collection values.
+
+**Behavior change:** the indexed scalar equality action and its negated and null variants now
+execute against the corpus oracle on SQLite, PostgreSQL and MySQL. PostgreSQL additionally runs
+them against JSON and native text arrays with a zero lower bound. Each query still runs entirely
+in the database.
+
 ## NULL attribute representation
 
 `R.attr.x == null` compiles to the same `eq(x, null)` plan node however your application represents
@@ -91,8 +135,8 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` d
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 223 reference conformance actions |
-| Fail-closed corpus shapes | Sub-millisecond `now()` thresholds, regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an untyped string field, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero) `filter()`/`map()` used as a condition (both return a list, not a boolean), `string()` over any column (no SQL `CAST` target spells it on all three stores: `TEXT` and `VARCHAR` are syntax errors on MySQL, which spells it `CHAR`, while `CHAR` is `character(1)` on PostgreSQL — and over a boolean it is wrong rather than merely unspellable, since SQLite and MySQL store 1/0 and render `"1"` where CEL and PostgreSQL render `"true"`), CEL's `+` over strings (`||` concatenates on SQLite and PostgreSQL but is logical OR on MySQL, and the numeric `+` this adapter emits coerces the operands to 0 rather than failing), a hierarchy path constructed by `list()` rather than read from a column, `mod` (reached through the `int()` cast that gives `%` an integer operand), a positional read of a scalar list (row order in a SQL relation is not defined), list equality over a `map()` projection, and a hierarchy with an empty delimiter (Cerbos splits the path per character, and the prefix `LIKE` this adapter emits would match the path itself) (65 actions) |
+| Oracle-tested | 227 reference conformance actions |
+| Fail-closed corpus shapes | Sub-millisecond `now()` thresholds, regex `matches()`, indexed object projection (`get-field`), `timestamp()` over an untyped string field, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero) `filter()`/`map()` used as a condition (both return a list, not a boolean), `string()` over any column (no SQL `CAST` target spells it on all three stores: `TEXT` and `VARCHAR` are syntax errors on MySQL, which spells it `CHAR`, while `CHAR` is `character(1)` on PostgreSQL — and over a boolean it is wrong rather than merely unspellable, since SQLite and MySQL store 1/0 and render `"1"` where CEL and PostgreSQL render `"true"`), CEL's `+` over strings (`||` concatenates on SQLite and PostgreSQL but is logical OR on MySQL, and the numeric `+` this adapter emits coerces the operands to 0 rather than failing), a hierarchy path constructed by `list()` rather than read from a column, `mod` (reached through the `int()` cast that gives `%` an integer operand), list equality over a `map()` projection, and a hierarchy with an empty delimiter (Cerbos splits the path per character, and the prefix `LIKE` this adapter emits would match the path itself) (63 actions) |
 | Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute the caller sends as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare it per attribute — `nullAttributeRepresentation: "explicit"` on the mapper entry — or the historical rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |

@@ -2169,6 +2169,96 @@ const EXPECTED_FILTERS: Record<string, MongooseFilter> = {
       },
     ],
   },
+  "index-scalar-list-not-eq": {
+    $and: [
+      {
+        $expr: {
+          $cond: {
+            if: {
+              $isArray: "$tags.name",
+            },
+            then: {
+              $gt: [
+                {
+                  $size: "$tags.name",
+                },
+                0,
+              ],
+            },
+            else: false,
+          },
+        },
+      },
+      {
+        $nor: [
+          {
+            $and: [
+              {
+                $expr: {
+                  $cond: {
+                    if: {
+                      $isArray: "$tags.name",
+                    },
+                    then: {
+                      $gt: [
+                        {
+                          $size: "$tags.name",
+                        },
+                        0,
+                      ],
+                    },
+                    else: false,
+                  },
+                },
+              },
+              {
+                $expr: {
+                  $eq: [
+                    {
+                      $arrayElemAt: ["$tags.name", 0],
+                    },
+                    "public",
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+  "index-scalar-list-null": {
+    $and: [
+      {
+        $expr: {
+          $cond: {
+            if: {
+              $isArray: "$tags.name",
+            },
+            then: {
+              $gt: [
+                {
+                  $size: "$tags.name",
+                },
+                0,
+              ],
+            },
+            else: false,
+          },
+        },
+      },
+      {
+        $expr: {
+          $eq: [
+            {
+              $arrayElemAt: ["$tags.name", 0],
+            },
+            null,
+          ],
+        },
+      },
+    ],
+  },
   "lambda-in-literal": {
     tags: {
       $elemMatch: {
@@ -6897,7 +6987,7 @@ describe("corpus shapes", () => {
       filters: filters.length,
       kinds: kinds.length,
       throwing: throwing.length,
-    }).toEqual({ filters: 189, kinds: 7, throwing: 94 });
+    }).toEqual({ filters: 191, kinds: 7, throwing: 94 });
   });
 
   // The mapping-hazard contract in README.md rests on one structural fact: this adapter builds no

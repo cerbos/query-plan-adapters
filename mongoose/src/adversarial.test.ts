@@ -447,6 +447,8 @@ const DEGENERACY_GUARD_ACTIONS = [
   // collection, the shape a principal with three teams produces.
   "not-and",
   "index-scalar-list",
+  "index-scalar-list-not-eq",
+  "index-scalar-list-null",
   "vf-hasint",
   "pv-exists-unrolled",
   // The shapes an Elasticsearch audit found unguarded: size(string) as an emptiness check,
@@ -973,10 +975,10 @@ describe("adversarial conformance corpus", () => {
       return count !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(290);
+    expect(MANIFEST_ACTIONS.size).toBe(292);
     expect(unsupportedCount).toBe(87);
     expect(supportedExpectedCount).toBe(4);
-    expect(ORACLE_ACTIONS).toHaveLength(194);
+    expect(ORACLE_ACTIONS).toHaveLength(196);
     expect(THROWING_ACTIONS).toHaveLength(94);
     expect(misclassified).toEqual([]);
   });
@@ -1094,7 +1096,7 @@ describe("adversarial conformance corpus", () => {
   // operators: `hasIntersection(tagNames, ["public", null])` carries one in its value list, and
   // an allowlist of eq/ne/in silently misses it. Enumerating the corpus rather than naming
   // shapes means a newly added action carrying a null constant is covered automatically.
-  test("every corpus action carrying a null literal is rejected under omitted", async () => {
+  test("null field comparisons are rejected under omitted; indexed null elements remain values", async () => {
     const nullCarrying: string[] = [];
     for (const action of [...MANIFEST_ACTIONS].sort()) {
       const queryPlan = await cerbos.planResources({
@@ -1116,6 +1118,14 @@ describe("adversarial conformance corpus", () => {
 
     const notRejected: string[] = [];
     for (const action of nullCarrying) {
+      // The representation option describes absent fields, not null list elements. An indexed
+      // element retains its explicit null value, and the bounds guard excludes missing positions.
+      if (action === "index-scalar-list-null") {
+        expect(await adapterFilteredIds(action, "omitted")).toEqual(
+          await oracleAllowedIds(action),
+        );
+        continue;
+      }
       try {
         await adapterFilteredIds(action, "omitted");
         notRejected.push(action);

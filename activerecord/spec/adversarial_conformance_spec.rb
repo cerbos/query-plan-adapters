@@ -184,9 +184,9 @@ RSpec.describe "adversarial conformance" do
   # column, and arithmetic composed ON a division. cr-div-then-add-ne is the second sub-shape
   # again, so one action speaks for it.
   #
-  # The other two are positional access into a scalar list and a map() projection compared to a
-  # literal list. Each is the only member of its group this adapter refuses, so each stays a
-  # probe until the adapter learns to translate it.
+  # Positional scalar-list access probes equality, negation and explicit-null elements.
+  # A map() projection compared to a literal list is also refused. Each stays a probe until
+  # the adapter learns to translate it.
   #
   # An empty hierarchy delimiter is refused before the prefix LIKE is built, and a regex with a
   # top-level alternation is a matches(), which this adapter never translates.
@@ -195,6 +195,7 @@ RSpec.describe "adversarial conformance" do
     index-negative index-fractional index-not-oob
     cast-not-int cast-not-timestamp cast-not-double
     cr-div-other-column cr-div-then-add index-scalar-list map-eq-list
+    index-scalar-list-not-eq index-scalar-list-null
     hier-empty-delim matches-alt
     regex-digit regex-case regex-posix
     regex-unanchored regex-dot regex-alternation
@@ -208,12 +209,12 @@ RSpec.describe "adversarial conformance" do
   describe "corpus" do
     # Corpus additions must update both the classification and degeneracy tripwires.
     it "pins the corpus size" do
-      expect(ConformanceCorpus::ACTIONS_FILE.fetch("conformance").size).to eq(277)
+      expect(ConformanceCorpus::ACTIONS_FILE.fetch("conformance").size).to eq(279)
       expect(ConformanceCorpus::EXPECTED_UNSUPPORTED.size).to eq(11)
       expect(ConformanceCorpus::NULL_REPRESENTATION_OMITTED.size).to eq(1)
-      expect(ConformanceCorpus::MANIFEST_ACTIONS.size).to eq(290)
+      expect(ConformanceCorpus::MANIFEST_ACTIONS.size).to eq(292)
       # Refusals must retain their pinned messages.
-      expect(ConformanceCorpus::THROWING_ACTIONS.size).to eq(64)
+      expect(ConformanceCorpus::THROWING_ACTIONS.size).to eq(66)
       # Each new hostile group needs a non-degenerate representative.
       expect(DEGENERACY_GUARD_ACTIONS.size).to eq(97)
     end
