@@ -642,8 +642,12 @@ shortest round-trip the default, so a port built on that divergence would pin no
 `cast-string-bool` is the diverging half, and the reason the two are a pair. SQLite and MySQL have
 no boolean type and store 1/0, so `CAST(a_bool AS TEXT)` is `"1"` where CEL and PostgreSQL say
 `"true"`. One translator, one wire node, two answers decided only by the store — which is why an
-adapter spanning both cannot lower it store-blind. Every SQL adapter refuses it; mongoose and
-convex lower it correctly, because `$toString` and JavaScript render a bool exactly as CEL does.
+adapter spanning both cannot lower it through a `CAST`. activerecord lowers it through
+`CASE WHEN col IS NULL THEN NULL WHEN col THEN 'true' ELSE 'false' END` instead, which spells CEL's
+two words on every engine and keeps a NULL column UNKNOWN
+([#418](https://github.com/cerbos/query-plan-adapters/issues/418)); the other SQL adapters refuse
+it. mongoose and convex lower it correctly, because `$toString` and JavaScript render a bool
+exactly as CEL does.
 
 `id-concat` is the same lesson for `add`. The corpus's `add` is numeric everywhere else, and a
 string concatenation dispatched to SQL `+` is a hard error on PostgreSQL, an under-grant on SQLite
