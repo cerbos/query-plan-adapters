@@ -113,10 +113,15 @@ class AdversarialConformanceTest {
      * One seeded row; the single source of truth for BOTH the DB entity and the oracle attributes.
      * {@code note} is corpus documentation this harness never reads; it is named so that strict
      * decoding accepts it, and it is the one seed key {@link #SEED_KEYS} omits.
+     *
+     * <p>{@code aNumberList} and {@code aBoolList} are the one exception to "both sides": they
+     * reach {@code check()} and nothing else (see {@link #asCheckResource}). Their elements are
+     * boxed because the corpus carries null elements, and a null element is a value CEL compares.
      */
     private record Seed(String id, boolean aBool, String aString, int aNumber,
-                        String aOptionalString, List<Tag> tags, List<String> subCategoryNames,
-                        String parentSeedId, String note) {}
+                        String aOptionalString, List<Double> aNumberList, List<Boolean> aBoolList,
+                        List<Tag> tags, List<String> subCategoryNames, String parentSeedId,
+                        String note) {}
 
     /**
      * {@code attr} is typed as raw JSON rather than {@code Map<String, List<String>>}: the corpus
@@ -160,8 +165,8 @@ class AdversarialConformanceTest {
     // here reads, and a key this harness reads that the corpus no longer carries.
 
     private static final List<String> SEED_KEYS = List.of(
-            "id", "aBool", "aString", "aNumber", "aOptionalString", "tags", "subCategoryNames",
-            "parentSeedId");
+            "id", "aBool", "aString", "aNumber", "aOptionalString", "aNumberList", "aBoolList",
+            "tags", "subCategoryNames", "parentSeedId");
 
     /** Corpus prose, never read by a harness: the one documented exclusion from SEED_KEYS. */
     private static final String SEED_NOTE_KEY = "note";
@@ -759,6 +764,20 @@ class AdversarialConformanceTest {
                         ? AttributeValue.stringValue(t.name())
                         : nullAttributeValue())
                 .toList()));
+        // aNumberList / aBoolList: sent verbatim, every element in place and a null element as an
+        // EXPLICIT null — `[null, 2][0] == 2` is a definite false in CEL, not an error, and a6
+        // exists to witness exactly that. They are deliberately NOT persisted and Corpus.MAPPING
+        // names neither: every action that reads them is a positional read (`[0]`), which this
+        // adapter refuses in the leaf operand before the list attribute is ever resolved, so no
+        // column would be read. SpringDataTranslatorTest's noRefusalIsTheMappingComingUpShort is
+        // what keeps that true — were index() ever lowered, the refusal would turn into the
+        // mapping's "Unknown attribute" and fail there rather than pass here.
+        r = r.withAttribute("aNumberList", AttributeValue.listValue(s.aNumberList().stream()
+                .map(n -> n != null ? AttributeValue.doubleValue(n) : nullAttributeValue())
+                .toList()));
+        r = r.withAttribute("aBoolList", AttributeValue.listValue(s.aBoolList().stream()
+                .map(b -> b != null ? AttributeValue.boolValue(b) : nullAttributeValue())
+                .toList()));
         if (doubleFor(s) != null) {
             r = r.withAttribute("aDouble", AttributeValue.doubleValue(doubleFor(s)));
         }
@@ -1309,14 +1328,14 @@ class AdversarialConformanceTest {
                         .filter(Boolean::booleanValue).count() != 1)
                 .toList();
 
-        assertEquals(295, manifest.size(),
+        assertEquals(301, manifest.size(),
                 "corpus size changed; triage the new action(s) before bumping this pin");
         assertEquals(27, SEEDS.size(), "seed count changed");
         // Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
         // lost has to be re-triaged here rather than joining the throw suite unnoticed. The two
         // @MethodSource streams that feed the throw cases are what resolve those messages, and
         // both fail loudly on a missing one.
-        assertEquals(61, throwing.size(), "throwing action count changed");
+        assertEquals(67, throwing.size(), "throwing action count changed");
         assertEquals(throwing.size(),
                 adapterUnsupportedActions().count() + unsupportedShapes().count(),
                 "every throwing action must reach a parameterised throw case");
@@ -1454,6 +1473,10 @@ class AdversarialConformanceTest {
             "arith-mod", "index-scalar-list", "map-eq-list",
             // Index errors and explicit-null elements must stay distinguishable under negation.
             "index-scalar-list-not-eq", "index-scalar-list-null",
+            // The same positional read over a list of numbers and a list of booleans, both
+            // polarities, and the two cross-type probes CEL answers false for every element.
+            "index-number-list", "index-number-list-not-eq", "index-bool-list",
+            "index-bool-list-not-eq", "index-bool-list-vs-number", "index-number-list-vs-bool",
             // An empty hierarchy delimiter is refused before the prefix LIKE is built (the LIKE
             // would match the path itself), and a regex with a top-level alternation is a
             // matches(), which the reference never translates.

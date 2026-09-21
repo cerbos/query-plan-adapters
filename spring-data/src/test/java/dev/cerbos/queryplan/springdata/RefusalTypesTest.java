@@ -137,6 +137,12 @@ class RefusalTypesTest {
                     Map.entry("index-scalar-list", UnsupportedPlanShapeException.class),
                     Map.entry("index-scalar-list-not-eq", UnsupportedPlanShapeException.class),
                     Map.entry("index-scalar-list-null", UnsupportedPlanShapeException.class),
+                    Map.entry("index-number-list", UnsupportedPlanShapeException.class),
+                    Map.entry("index-number-list-not-eq", UnsupportedPlanShapeException.class),
+                    Map.entry("index-bool-list", UnsupportedPlanShapeException.class),
+                    Map.entry("index-bool-list-not-eq", UnsupportedPlanShapeException.class),
+                    Map.entry("index-bool-list-vs-number", UnsupportedPlanShapeException.class),
+                    Map.entry("index-number-list-vs-bool", UnsupportedPlanShapeException.class),
                     Map.entry("map-as-condition", UnsupportedPlanShapeException.class),
                     Map.entry("map-eq-list", UnsupportedPlanShapeException.class),
                     Map.entry("matches-alt", UnsupportedPlanShapeException.class),
@@ -179,7 +185,7 @@ class RefusalTypesTest {
             counts.merge(ex.getClass().getSimpleName(), 1, Integer::sum);
         }
         assertEquals(new TreeMap<>(Map.of(
-                        "UnsupportedPlanShapeException", 58,
+                        "UnsupportedPlanShapeException", 64,
                         "UnmappedAttributeException", 3)),
                 counts);
         assertEquals(THROWING.size(), counts.values().stream().mapToInt(Integer::intValue).sum());
