@@ -243,7 +243,7 @@ describe("corpus shapes", () => {
       conditional: CONDITIONAL_ACTIONS.length,
       unconditional: RECORDED_ACTIONS.length - CONDITIONAL_ACTIONS.length,
       throwing: throwing.length,
-    }).toEqual({ conditional: 42, unconditional: 7, throwing: 246 });
+    }).toEqual({ conditional: 42, unconditional: 7, throwing: 252 });
   });
 });
 
@@ -252,7 +252,7 @@ describe("corpus shapes", () => {
  *
  * `actions.json` pins a substring of the message per action, so the throw suite above proves every
  * refusal is the declared one. It cannot say anything about the *shape* of the refusals taken
- * together, and on an adapter that refuses 246 of 295 shapes that is the more interesting property:
+ * together, and on an adapter that refuses 252 of 301 shapes that is the more interesting property:
  * five sixths of this corpus is rejected, and it matters whether that happens at five sites or at
  * one catch-all.
  *
@@ -261,7 +261,7 @@ describe("corpus shapes", () => {
  * as a declared limitation, which is the #326 trap at corpus scale. **Pinned counts**: a translator
  * change that moves a shape from one site to another shows up as a diff even though both sites throw
  * and `actions.json` is unchanged. The distribution below is the honest summary of this adapter:
- * `binaryOperands` rejecting a computed operand is the single mechanism behind 146 of the 246, and
+ * `binaryOperands` rejecting a computed operand is the single mechanism behind 152 of the 252, and
  * every reason in `actions.json` for those shapes — arithmetic, casts, ternaries, projections,
  * macros above the unroll cap — reduces to the same thing at the wire level, an operand that is not
  * a bare metadata key or a literal.
@@ -319,7 +319,7 @@ describe("the rejection sites the corpus reaches", () => {
     }
 
     expect(counts).toEqual({
-      "computed operand": 146,
+      "computed operand": 152,
       "no such operator": 38,
       "inequality over an optional key": 14,
       "not negatable": 17,
@@ -374,7 +374,7 @@ describe("the rejection sites the corpus reaches", () => {
       hasIntersection: 10,
       if: 18,
       in: 11,
-      index: 6,
+      index: 12,
       int: 3,
       list: 1,
       map: 3,
