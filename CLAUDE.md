@@ -338,7 +338,14 @@ Each adapter has its own GitHub Actions workflow triggered by changes in its dir
 
 Adding a new adversarial job — or dropping the Node gate so the corpus replays on every Node leg — multiplies runner minutes for no extra coverage. Adding a *store* leg does buy coverage; adding a Node leg does not. `conformance.yaml` additionally replans the golden wire fixtures against the pinned PDP and fails on drift.
 
-Tag-based publishing: `prisma/v*` -> npm, `sqla/v*` -> PyPI, `activerecord/v*` -> RubyGems; `ent/v*` and `pgx/v*` are Go
+Npm releases use `<package-name>@v<version>` tags (for example, `@cerbos/orm-prisma@v5.0.0`),
+as declared in each `*-publish.yaml` workflow. The publish workflow calls the adapter's test
+workflow at the tagged commit and publishes only after its full matrix, conformance suite and
+packaged example succeed. Adapter test workflows run directly on pull requests and through
+`workflow_call` for releases, so a release runs the checks once. Keep the publish workflow
+filenames stable: npm trusted publishing is configured against them.
+
+Other release tags: `sqla/v*` -> PyPI, `activerecord/v*` -> RubyGems; `ent/v*` and `pgx/v*` are Go
 module tags resolved directly from the repository. `elasticsearch-java/v*` and `spring-data/v*` only run that adapter's CI
 workflow: neither build configures a Maven Central release (both are `publishToMavenLocal` only, and their `publishing` blocks
 say what wiring a release still needs), so no Maven Central publish is wired yet.
