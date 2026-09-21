@@ -236,6 +236,16 @@ const DEGENERACY_GUARD_ACTIONS = [
   "index-not-oob",
   "regex-eq-true",
   "regex-final-newline",
+  // Number and boolean list elements (conformance/README.md, "Number and boolean list elements").
+  // The post-filter reads the stored element with its JSON type intact, so `true` never equals 1,
+  // and a null element is a value that negation admits. The two cross-type probes are compared
+  // rather than probed: their `aNumber == 5` branch keeps a1 in the oracle.
+  "index-number-list",
+  "index-number-list-not-eq",
+  "index-bool-list",
+  "index-bool-list-not-eq",
+  "index-bool-list-vs-number",
+  "index-number-list-vs-bool",
 ] as const;
 
 /**
@@ -512,6 +522,9 @@ function storedDocument(seed: Seed): StoredDocument {
     // conventions and the field-to-field probe has two explicit nulls to compare.
     coOwner: scopeFor(seed),
     tagNames: seed.tags.map((tag) => tag.name),
+    // Verbatim, null elements included: the same arrays go to check() below.
+    aNumberList: seed.aNumberList,
+    aBoolList: seed.aBoolList,
     obj: { inner: seed.aString },
     tags: seed.tags.map((tag) =>
       tag.name === null ? { id: tag.id } : { id: tag.id, name: tag.name },
@@ -560,6 +573,8 @@ function checkResource(seed: Seed): Resource {
     owner: seed.aOptionalString,
     coOwner: scopeFor(seed),
     tagNames: seed.tags.map((tag) => tag.name),
+    aNumberList: seed.aNumberList,
+    aBoolList: seed.aBoolList,
     obj: { inner: seed.aString },
     tags: seed.tags.map((tag): Record<string, Value> =>
       tag.name === null ? { id: tag.id } : { id: tag.id, name: tag.name },
@@ -710,10 +725,10 @@ describe("adversarial conformance corpus", () => {
         ].filter(Boolean).length !== 1,
     );
 
-    expect(allActions.size).toBe(295);
+    expect(allActions.size).toBe(301);
     expect(CONVEX_UNSUPPORTED).toHaveLength(26);
     expect(CONVEX_SUPPORTED_EXPECTED).toHaveLength(7);
-    expect(ORACLE_ACTIONS).toHaveLength(263);
+    expect(ORACLE_ACTIONS).toHaveLength(269);
     expect(THROWING_ACTIONS).toHaveLength(30);
     expect(misclassified).toEqual([]);
   });
@@ -839,17 +854,17 @@ describe("adversarial conformance corpus", () => {
       // The pushdown leg only needs to re-execute actions whose routing changes.
       moved: pushdown.db.filter((action) => !base.db.includes(action)),
     }).toEqual({
-      total: 263,
+      total: 269,
       defaultDb: DB_DECIDED_DEFAULT,
       // Exactly one corpus action splits: `buildFilters` only splits a root `and`, and
       // rel-hop-and-root is the one hostile shape rooted there that mixes a pushable conjunct
       // with a non-pushable one (#375). Both mappers split it — the hop is `nullable` under each.
       defaultSplit: SPLIT_ACTIONS,
       defaultUnconditional: UNCONDITIONAL_ACTIONS,
-      defaultPostCount: 227,
+      defaultPostCount: 233,
       pushdownDb: DB_DECIDED_PUSHDOWN,
       pushdownSplit: SPLIT_ACTIONS,
-      pushdownPostCount: 216,
+      pushdownPostCount: 222,
       moved: PUSHDOWN_ONLY_ACTIONS,
     });
   });

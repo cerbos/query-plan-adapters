@@ -531,6 +531,18 @@
       "kind": "KIND_CONDITIONAL",
       "path": "post"
     },
+    "index-bool-list": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "index-bool-list-not-eq": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "index-bool-list-vs-number": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
     "index-fractional": {
       "kind": "KIND_CONDITIONAL",
       "path": "post"
@@ -540,6 +552,18 @@
       "path": "post"
     },
     "index-not-oob": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "index-number-list": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "index-number-list-not-eq": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "index-number-list-vs-bool": {
       "kind": "KIND_CONDITIONAL",
       "path": "post"
     },
