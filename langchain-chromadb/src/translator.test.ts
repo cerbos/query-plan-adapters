@@ -340,9 +340,9 @@ describe("the rejection sites the corpus reaches", () => {
    * reports the enclosing comparison instead of the computed operand, or the raw operator instead
    * of the negated one, moves this and nothing else.
    *
-   * `lambda` is the largest entry because a collection macro is refused at its lambda operand, the
-   * computed-operand site, so `exists(...)` reports `lambda`; under negation it is refused before
-   * its operands are read, so `!exists(...)` reports `exists`.
+   * A collection macro reports itself whichever site refuses it: `exists(...)` is refused at its
+   * lambda operand, the computed-operand site, and `!exists(...)` before its operands are read, and
+   * both report `exists`. No refusal reports `lambda`, which names nothing a caller wrote.
    */
   test("every refusal names the operator it is about, in these numbers", () => {
     const counts: Record<string, number> = {};
@@ -357,32 +357,33 @@ describe("the rejection sites the corpus reaches", () => {
 
     expect(counts).toEqual({
       add: 14,
-      all: 3,
+      all: 8,
+      ancestorOf: 3,
       contains: 11,
+      descendentOf: 6,
       div: 8,
       double: 2,
       endsWith: 7,
       eq: 9,
       except: 2,
-      exists: 7,
-      exists_one: 1,
+      exists: 30,
+      exists_one: 3,
+      filter: 2,
       ge: 1,
       "get-field": 1,
-      hasIntersection: 5,
-      hierarchy: 14,
+      hasIntersection: 10,
       if: 18,
       in: 11,
       index: 6,
       int: 3,
-      lambda: 31,
-      list: 4,
-      map: 6,
+      list: 1,
+      map: 3,
       matches: 15,
       mod: 1,
       mult: 2,
       ne: 14,
       nin: 2,
-      overlaps: 1,
+      overlaps: 6,
       size: 21,
       startsWith: 11,
       string: 4,

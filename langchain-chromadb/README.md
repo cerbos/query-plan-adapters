@@ -309,8 +309,8 @@ An `UnsupportedOperatorError` is thrown when:
 
 - An operator in the plan is not supported by ChromaDB's filter syntax.
 - A comparison operand is a computed expression rather than a bare metadata key or a literal. Here
-  `operator` is that expression's operator (`add`, `size`), and for a collection macro such as
-  `exists` it is usually `lambda`.
+  `operator` is that expression's operator (`add`, `size`); for a collection macro such as `exists`
+  it is the macro itself.
 - A comparison is between two metadata keys or two literals, or tests whether a literal is contained
   in a metadata field.
 - A `not` expression wraps an operator that cannot be negated.

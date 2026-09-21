@@ -46,8 +46,9 @@ export type QueryPlanToChromaDBResult =
  * (cerbos/query-plan-adapters#228). A malformed plan or a mapper misconfiguration is a plain `Error`.
  *
  * `operator` is the plan operator the refusal is about: the one the message names, after mirroring
- * and negation (`not(eq)` over an optional key reports `ne`); a computed operand's own (`add`,
- * `size`); the comparison itself for two keys or two literals; `if` for a ternary.
+ * and negation (`not(eq)` over an optional key reports `ne`); a computed operand's own inside a
+ * comparison (`add`, `size`), and the enclosing operator anywhere else (`exists`, not its lambda);
+ * the comparison itself for two keys or two literals; `if` for a ternary.
  */
 export class UnsupportedOperatorError extends Error {
   readonly operator: string;
@@ -202,8 +203,11 @@ function binaryOperands(
       }
       value = operand;
     } else {
+      // Inside a comparison, the computed operand is the part Chroma cannot evaluate. Inside
+      // anything else — a collection macro, whose second operand is always its lambda — the
+      // operator itself is what has no `Where` form, and `lambda` would tell a caller nothing.
       throw new UnsupportedOperatorError(
-        operand.operator,
+        COMPARISON_OPERATORS.has(operator) ? operand.operator : operator,
         "Nested expressions are not supported by ChromaDB filters",
       );
     }
