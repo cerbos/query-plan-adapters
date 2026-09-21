@@ -328,6 +328,17 @@ The adapter returns a sealed `Result` type with three variants:
 | `Result.AlwaysDenied` | Principal has no access | Return empty results, skip the search |
 | `Result.Conditional` | Access depends on resource attributes | Use `query()` in a `bool.filter` clause |
 
+The three are kept apart on purpose ([ADR 0009](../docs/adr/0009-elasticsearch-java-keeps-its-result-tagged-union.md)):
+unlike Spring Data's `null` predicate, Elasticsearch has no clause that costs nothing. If you compose
+the authorization clause with filters of your own and want one code path, collapse it yourself —
+`match_all` for `AlwaysAllowed`, `match_none` for `AlwaysDenied`, as
+[`example/`](example/README.md#how-each-shape-is-expressed) does. The cost is a search for a denial
+that you could have skipped.
+
+The `switch` examples above use pattern matching for `switch`, which is standard from Java 21. On the
+Java 17 floor this adapter declares, match with an `instanceof` chain that ends in a `throw`, as the
+example does. The compiler does not check that all three kinds are handled there.
+
 ### Field mapping
 
 The field map translates Cerbos attribute paths to Elasticsearch field names:
