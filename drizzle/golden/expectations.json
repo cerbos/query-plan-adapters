@@ -3593,6 +3593,88 @@
         }
       }
     },
+    "pv-in": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "\"adversarial_resources\".\"a_optional_string\" in (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          "params": [
+            "set",
+            "same",
+            "",
+            "%_o",
+            "X",
+            "Y",
+            "MIRROR",
+            "filler-1",
+            "filler-2",
+            "filler-3",
+            "filler-4"
+          ]
+        },
+        "postgresql": {
+          "sql": "\"adversarial_resources\".\"a_optional_string\" in ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+          "params": [
+            "set",
+            "same",
+            "",
+            "%_o",
+            "X",
+            "Y",
+            "MIRROR",
+            "filler-1",
+            "filler-2",
+            "filler-3",
+            "filler-4"
+          ]
+        },
+        "mysql": {
+          "sql": "`adversarial_resources`.`a_optional_string` in (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          "params": [
+            "set",
+            "same",
+            "",
+            "%_o",
+            "X",
+            "Y",
+            "MIRROR",
+            "filler-1",
+            "filler-2",
+            "filler-3",
+            "filler-4"
+          ]
+        }
+      }
+    },
+    "pv-in-unrolled": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "\"adversarial_resources\".\"a_optional_string\" in (?, ?, ?)",
+          "params": [
+            "set",
+            "",
+            "%_o"
+          ]
+        },
+        "postgresql": {
+          "sql": "\"adversarial_resources\".\"a_optional_string\" in ($1, $2, $3)",
+          "params": [
+            "set",
+            "",
+            "%_o"
+          ]
+        },
+        "mysql": {
+          "sql": "`adversarial_resources`.`a_optional_string` in (?, ?, ?)",
+          "params": [
+            "set",
+            "",
+            "%_o"
+          ]
+        }
+      }
+    },
     "pv-not-all": {
       "kind": "KIND_CONDITIONAL",
       "rendered": {

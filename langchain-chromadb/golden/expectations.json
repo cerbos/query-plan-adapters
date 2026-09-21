@@ -241,6 +241,38 @@
         ]
       }
     },
+    "pv-in": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "aOptionalString": {
+          "$in": [
+            "set",
+            "same",
+            "",
+            "%_o",
+            "X",
+            "Y",
+            "MIRROR",
+            "filler-1",
+            "filler-2",
+            "filler-3",
+            "filler-4"
+          ]
+        }
+      }
+    },
+    "pv-in-unrolled": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "aOptionalString": {
+          "$in": [
+            "set",
+            "",
+            "%_o"
+          ]
+        }
+      }
+    },
     "pv-structs-missing": {
       "kind": "KIND_ALWAYS_DENIED"
     },

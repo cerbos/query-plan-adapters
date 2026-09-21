@@ -596,6 +596,14 @@
       "kind": "KIND_CONDITIONAL",
       "where": "(\"adversarial_resources\".\"a_optional_string\" = 'set' OR (\"adversarial_resources\".\"a_optional_string\" = '' OR \"adversarial_resources\".\"a_optional_string\" = '%_o'))"
     },
+    "pv-in": {
+      "kind": "KIND_CONDITIONAL",
+      "where": "\"adversarial_resources\".\"a_optional_string\" IN ('set', 'same', '', '%_o', 'X', 'Y', 'MIRROR', 'filler-1', 'filler-2', 'filler-3', 'filler-4')"
+    },
+    "pv-in-unrolled": {
+      "kind": "KIND_CONDITIONAL",
+      "where": "\"adversarial_resources\".\"a_optional_string\" IN ('set', '', '%_o')"
+    },
     "pv-not-all": {
       "kind": "KIND_CONDITIONAL",
       "where": "NOT (('set' = \"adversarial_resources\".\"a_optional_string\" AND 'same' = \"adversarial_resources\".\"a_optional_string\" AND '' = \"adversarial_resources\".\"a_optional_string\" AND '%_o' = \"adversarial_resources\".\"a_optional_string\" AND 'X' = \"adversarial_resources\".\"a_optional_string\" AND 'Y' = \"adversarial_resources\".\"a_optional_string\" AND 'MIRROR' = \"adversarial_resources\".\"a_optional_string\" AND 'filler-1' = \"adversarial_resources\".\"a_optional_string\" AND 'filler-2' = \"adversarial_resources\".\"a_optional_string\" AND 'filler-3' = \"adversarial_resources\".\"a_optional_string\" AND 'filler-4' = \"adversarial_resources\".\"a_optional_string\"))"

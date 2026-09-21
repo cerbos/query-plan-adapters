@@ -706,6 +706,13 @@ bug to several adapters, and no existing action reaches it:
   `manyTeams` holds eleven elements deliberately, so `pv-exists`/`pv-all` only ever produced the
   value-list form; `fewTeams` is the same witness set at three, which the planner unrolls into an
   or/and chain — the shape most real principals actually produce.
+- **`pv-in` / `pv-in-unrolled`** ([#411](https://github.com/cerbos/query-plan-adapters/issues/411))
+  use direct membership of the omitted-convention `aOptionalString` in `manyTeams` and
+  `fewTeams`. The pinned planner emits `in(variable, value-list)` for both eleven and three
+  elements: the `-unrolled` name identifies the small-list partner, but direct membership does
+  not cross the macro unroll boundary. The pair shares its respective oracle with
+  `pv-exists` / `pv-exists-unrolled`; the different lists discriminate `same`, and missing
+  resource attributes must remain denied.
 - **`filter-as-conjunct`** puts a `filter()` one level below the root. `filter-as-condition` pins
   the rejection at the root, which is the position an adapter checks explicitly; an adapter can
   reject there and still walk a macro sitting in a conjunct.
@@ -934,10 +941,8 @@ the acceptance test for these guards; run it before trusting them.
    alongside the classification — see "Pinned throw messages" above. Run the adapter first and pin
    what it actually says; the harness refuses to run with a message missing, so there is no way to
    forget one.
-6. Each harness pins the corpus size AND its throwing-action count as tripwires (e.g.
-   `expect(MANIFEST_ACTIONS.size).toBe(199)` and `expect(THROWING_ACTIONS).toHaveLength(61)` in
-   `prisma/src/adversarial.test.ts`; the oracle counts too in the convex, langchain-chromadb and
-   elasticsearch-java harnesses). Bump them deliberately — those assertions exist so a new action
+6. Each harness pins the corpus size and its throwing-action count as tripwires; convex,
+   langchain-chromadb and elasticsearch-java also pin oracle counts. Bump them deliberately — those assertions exist so a new action
    cannot slip past an adapter unnoticed. The convex harness additionally pins WHICH actions its
    filter engine decides on its own, under each of its two mappers, because its README quotes those
    counts as the coverage the differential actually buys

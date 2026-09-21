@@ -229,19 +229,16 @@ SQLALCHEMY_SKIPPED_DIVERGENCES = MANIFEST.skipped_divergences(ADAPTER)
 
 # -- the degeneracy guard (conformance/README.md, "The degeneracy guard") ----
 #
-# A representative sample of the actions this adapter ORACLE-COMPARES, one per
-# hostile group it can express. The two lists are asserted to be complements of
-# ORACLE_ACTIONS, so neither can drift into the other unnoticed.
-#
-# w1-size-zero-chain, w1-not-size-chain, w1-size-frac-chain and the two
-# string-cast actions are deliberately absent: their oracles are empty by
-# CONSTRUCTION (no seed holds a to-one parent with zero children, nor one with
-# two or more; every seed's aString raises in int()/double()), so they cannot
-# satisfy this guard.
+# Representative compared actions must have non-empty, non-total oracles. The
+# assertions below keep compared and liveness-only entries in their proper lists.
+# Parent-count probes and string-cast thresholds are excluded because their
+# oracles are empty for the current seeds (including h4's numeric string "0").
 DEGENERACY_GUARD_ACTIONS = (
     "vf-le",
     "like-percent",
     "all-on-empty",
+    "pv-in",
+    "pv-in-unrolled",
     "pv-exists",
     "pv-all",
     "null-eq",
@@ -805,7 +802,7 @@ class TestAdversarialConformance:
 
         # Deliberate tripwires: a corpus edit must bump these in the same
         # change, so a new hostile action cannot join (or vanish) silently.
-        assert len(MANIFEST_ACTIONS) == 272
+        assert len(MANIFEST_ACTIONS) == 274
         assert len(SEEDS) == 26
         # Each of these carries a pinned message, so a shape gained or lost has
         # to be re-triaged here rather than joining the throw suite unnoticed.

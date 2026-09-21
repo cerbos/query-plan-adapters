@@ -43,58 +43,15 @@ import type {
 } from "./corpus";
 
 /**
- * Translator unit test: for every action in the shared `../conformance/` corpus, the SQL this
- * adapter emits. Offline — no Cerbos sidecar, no database, no containers.
- *
- * A per-adapter suite used to braid four assertions into every test. Three of them are somebody
- * else's job now, and this file makes only the fourth:
- *
- * | assertion | who owns it |
- * | --- | --- |
- * | the plan the PDP produces for a policy | `conformance/wire-fixtures/`, replanned and diffed by the `Conformance Corpus` workflow |
- * | which shapes this adapter must refuse, and with what message | `conformance/actions.json` — read below, not restated |
- * | the rows a filter returns | `adversarial.test.ts`, against real SQLite and PostgreSQL with `check()` as the oracle |
- * | **the SQL this adapter emits for a plan** | **here** |
- *
- * **The plans are read, not written.** A hand-built plan is a *belief* about what the planner
- * emits, and this repository keeps golden fixtures because that belief has been wrong before: a
- * planner change used to fail fixture regeneration and silently leave every adapter's hand-written
- * plans describing a wire contract that no longer existed. See
- * [ADR 0006](../../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md).
- *
- * **The expectations are data, not literals.** The SQL this adapter is pinned to emit lives in
- * `golden/expectations.json`, a **golden expectation** file this adapter owns — never under
- * `conformance/`, where every adapter workflow triggers and one adapter re-pinning one filter would
- * re-run all the others. The file is regenerated with `npm run golden:update` and reviewed as a
- * diff, exactly like the wire fixtures it is asserted against. See
- * [ADR 0007](../../docs/adr/0007-adapters-share-data-not-code.md) and the "Golden expectations"
- * section of `conformance/README.md`.
- *
- * **What a pinned filter buys over the harness.** The harness proves the filter returns the right
- * rows *against the rows it seeds*. Two different filters can agree on all of them and disagree on
- * the row a consumer has, so a rewrite that quietly changes the emitted SQL passes there and shows
- * up here as a diff a reviewer reads. It is also the only place a `nullAttributeRepresentation`
- * boundary, a timestamp literal, a `subqueryFilter`, or MySQL — claimed by the peer range and
- * executed by nothing in this repository — can be asserted at all.
- *
- * **Adding a corpus action fails this file.** Every wire fixture must be accounted for here
- * exactly once — a golden expectation (an emitted filter or an unconditional plan kind) or a throw
- * carrying the message `actions.json` pins — and the completeness guard below is what makes a new
- * action land as a failure rather than as silence.
+ * Offline contract for planner wire fixtures: emitted filters, plan kinds, pinned refusals,
+ * and caller options that the shared corpus cannot vary. The adversarial suite separately
+ * executes filters against a store and compares them with the PDP oracle.
+ * Every fixture must appear exactly once in the completeness guard below (ADR 0006).
  */
 
 const actionsFile = readCorpusJson("actions.json") as ActionsFile;
 
-/**
- * The shapes `actions.json` says this adapter must refuse, each with the message it must refuse
- * them with. Identical to the classification `adversarial.test.ts` asserts against a live PDP;
- * asserting it here as well is what lets the completeness guard below be total, and it costs a
- * millisecond rather than two containers.
- *
- * A throwing action needs no golden expectation of its own: the message is already corpus data,
- * pinned once in `actions.json` and read by every adapter. Writing it into this adapter's asset
- * too would create two places to change one string with nothing to say which is authoritative.
- */
+// Refusal messages come from the same classification ledger as the live harness.
 const { throwingActions: THROWING_ACTIONS } = classifyActionsForAdapter(
   actionsFile,
   ADAPTER,
@@ -306,7 +263,7 @@ describe("corpus shapes", () => {
       conditional: CONDITIONAL_ACTIONS.length,
       unconditional: RECORDED_ACTIONS.length - CONDITIONAL_ACTIONS.length,
       throwing: throwing.length,
-    }).toEqual({ conditional: 211, unconditional: 7, throwing: 54 });
+    }).toEqual({ conditional: 213, unconditional: 7, throwing: 54 });
   });
 
   /**

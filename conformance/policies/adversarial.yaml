@@ -3000,3 +3000,19 @@ resourcePolicy:
       condition:
         match:
           expr: 'hasIntersection(R.attr.tagNames, [{"a": 1}])'
+
+    # #411: direct principal-list membership must preserve the omitted resource needle.
+    # Eleven values retain a single list operand; three values exercise the small-list plan.
+    - actions: ["pv-in"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aOptionalString in P.attr.manyTeams
+
+    - actions: ["pv-in-unrolled"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aOptionalString in P.attr.fewTeams

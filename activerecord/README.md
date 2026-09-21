@@ -67,7 +67,7 @@ server. Rewrite it with `./scripts/golden-update.sh` and review the diff.
 
 | Classification | Coverage |
 | --- | --- |
-| Tested against the oracle | 214 corpus actions |
+| Tested against the oracle | 216 corpus actions |
 | Fail-closed | 55 actions: 44 that this adapter cannot show, and the 11 that the reference adapter does not support either. Each one must raise an error whose message the corpus pins, so a typo or a transport error cannot pass as the refusal |
 | Refused under the `omitted` NULL convention | 1 action — see [The NULL convention of the caller](#the-null-convention-of-the-caller) |
 | Known difference in the planner | The Cerbos planner changes `has()` on a missing attribute into `ALWAYS_ALLOWED`, but `checkResource` denies the rows in which the attribute is missing. Until the planner has a correction, use `R.attr.x != null` and not `has(R.attr.x)` for the attributes in your database |

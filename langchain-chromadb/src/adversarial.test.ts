@@ -425,6 +425,8 @@ const MANIFEST_ACTIONS = new Set([
 // (`x in []` is false for every seed) and so cannot satisfy a non-empty assertion.
 
 const DEGENERACY_GUARD_ACTIONS = [
+  "pv-in",
+  "pv-in-unrolled",
   "vf-le",
   "vf-ge",
   "vf-ne",
@@ -877,8 +879,8 @@ describe("adversarial conformance corpus", () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(272);
-    expect(CHROMA_SUPPORTED_ACTIONS).toHaveLength(46);
+    expect(MANIFEST_ACTIONS.size).toBe(274);
+    expect(CHROMA_SUPPORTED_ACTIONS).toHaveLength(48);
     expect(oracle.size).toBe(CHROMA_SUPPORTED_ACTIONS.length);
     expect(CHROMA_UNSUPPORTED).toHaveLength(213);
     expect(CHROMA_SUPPORTED_EXPECTED).toHaveLength(0);

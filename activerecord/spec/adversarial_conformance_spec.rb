@@ -144,6 +144,8 @@ RSpec.describe "adversarial conformance" do
     # the wire the other way round; and the BELOW-cliff unroll of a principal collection, the
     # shape a principal holding three teams produces.
     %w[not-and not-contains vf-hasint pv-exists-unrolled] +
+    # Direct membership keeps a value list at both principal-list sizes (#411).
+    %w[pv-in pv-in-unrolled] +
     # CEL `%`, which is integer-only and so arrives under an int() cast. This adapter lowers
     # both, which is why the entry is here rather than among the probes below: ent, pgx and
     # spring-data all refuse the shape at the cast.
@@ -194,21 +196,16 @@ RSpec.describe "adversarial conformance" do
   ].freeze
 
   describe "corpus" do
-    # This test is a control and not a formality. A new action in the corpus must not go past
-    # this adapter without a test. Increase these numbers only when you know why
-    # conformance/actions.json is larger.
+    # Corpus additions must update both the classification and degeneracy tripwires.
     it "pins the corpus size" do
-      expect(ConformanceCorpus::ACTIONS_FILE.fetch("conformance").size).to eq(259)
+      expect(ConformanceCorpus::ACTIONS_FILE.fetch("conformance").size).to eq(261)
       expect(ConformanceCorpus::EXPECTED_UNSUPPORTED.size).to eq(11)
       expect(ConformanceCorpus::NULL_REPRESENTATION_OMITTED.size).to eq(1)
-      expect(ConformanceCorpus::MANIFEST_ACTIONS.size).to eq(272)
-      # Every one of these carries a pinned message, so a throwing action that appears or
-      # disappears must be triaged here and cannot join the suite quietly.
+      expect(ConformanceCorpus::MANIFEST_ACTIONS.size).to eq(274)
+      # Refusals must retain their pinned messages.
       expect(ConformanceCorpus::THROWING_ACTIONS.size).to eq(55)
-      # The guard has one entry for each group of hostile shapes. A new group arrives with a
-      # new action, which the count above already stops. This number makes the second half of
-      # that decision explicit: name a representative for the new group here.
-      expect(DEGENERACY_GUARD_ACTIONS.size).to eq(88)
+      # Each new hostile group needs a non-degenerate representative.
+      expect(DEGENERACY_GUARD_ACTIONS.size).to eq(90)
     end
 
     # Adding a throwing action without a pinned message must fail the run and must not turn the

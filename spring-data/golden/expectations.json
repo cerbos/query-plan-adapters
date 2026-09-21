@@ -1042,6 +1042,20 @@
         "mysql": "re1_0.a_optional_string='set' or re1_0.a_optional_string='' or re1_0.a_optional_string='%_o'"
       }
     },
+    "pv-in": {
+      "where": {
+        "h2": "re1_0.a_optional_string in ('set','same','','%_o','X','Y','MIRROR','filler-1','filler-2','filler-3','filler-4')",
+        "postgresql": "re1_0.a_optional_string in ('set','same','','%_o','X','Y','MIRROR','filler-1','filler-2','filler-3','filler-4')",
+        "mysql": "re1_0.a_optional_string in ('set','same','','%_o','X','Y','MIRROR','filler-1','filler-2','filler-3','filler-4')"
+      }
+    },
+    "pv-in-unrolled": {
+      "where": {
+        "h2": "re1_0.a_optional_string in ('set','','%_o')",
+        "postgresql": "re1_0.a_optional_string in ('set','','%_o')",
+        "mysql": "re1_0.a_optional_string in ('set','','%_o')"
+      }
+    },
     "pv-not-all": {
       "where": {
         "h2": "not(re1_0.a_optional_string='set' and re1_0.a_optional_string='same' and re1_0.a_optional_string='' and re1_0.a_optional_string='%_o' and re1_0.a_optional_string='X' and re1_0.a_optional_string='Y' and re1_0.a_optional_string='MIRROR' and re1_0.a_optional_string='filler-1' and re1_0.a_optional_string='filler-2' and re1_0.a_optional_string='filler-3' and re1_0.a_optional_string='filler-4')",

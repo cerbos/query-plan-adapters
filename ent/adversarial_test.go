@@ -842,7 +842,7 @@ func runConformance(t *testing.T, h *harness) {
 		}
 		// Corpus-size tripwire: bump deliberately when the corpus grows, so a new hostile shape
 		// cannot slip past this adapter unnoticed.
-		require.Len(t, seen, 272, "corpus size changed; triage the new action(s) before bumping")
+		require.Len(t, seen, 274, "corpus size changed; triage the new action(s) before bumping")
 		require.Len(t, h.corpus.Seeds.Seeds, 26, "seed count changed")
 		// Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
 		// lost has to be re-triaged here rather than joining the throw suite unnoticed.
@@ -1051,8 +1051,8 @@ func runConformance(t *testing.T, h *harness) {
 		//
 		// w1-size-zero-chain, w1-not-size-chain, w1-size-frac-chain, cast-int-string and
 		// cast-double-string are deliberately absent: their oracles are empty by CONSTRUCTION (no
-		// seed holds a to-one parent with zero children, nor one with two or more; every seed's
-		// aString raises in int()/double()), so they cannot satisfy this guard.
+		// seed holds a to-one parent with zero children, nor one with two or more; no aString
+		// converts to a number greater than 50), so they cannot satisfy this guard.
 		compared := []string{
 			"vf-le", "in-single", "like-percent", "exists-on-empty", "not-exists",
 			"nary-and", "field-to-field", "ternary-cmp", "arith-add", "size-threshold",
@@ -1100,6 +1100,8 @@ func runConformance(t *testing.T, h *harness) {
 			// operands are not interchangeable in the emitted SQL; and the BELOW-cliff unroll of
 			// a principal collection, the shape a principal with three teams produces.
 			"not-and", "not-contains", "vf-hasint", "pv-exists-unrolled",
+			// #411: direct membership keeps a list operand at both principal list sizes.
+			"pv-in", "pv-in-unrolled",
 			// The shapes an Elasticsearch audit found unguarded: size(string) as an emptiness check,
 			// membership in a map literal (the planner folds it to its key list), and a double
 			// literal beyond int64 on a double field. double-huge-lt has an EMPTY oracle by

@@ -305,10 +305,9 @@ class ElasticsearchTranslatorTest {
         // classified cannot hide behind an actions.json that never named it.
         assertEquals(new TreeSet<>(Corpus.wireFixtureActions()), ACTIONS.manifestActions());
 
-        // Tripwires. Bump them deliberately: a count that moves without anyone noticing is how a
-        // shape gets dropped from an asset nobody reads end to end.
+        // Update these tripwires only after replaying new actions against the oracle.
         assertEquals(
-                Map.of("conditional", 106, "unconditional", 7, "throwing", 159),
+                Map.of("conditional", 108, "unconditional", 7, "throwing", 159),
                 Map.of("conditional", actionsOfKind("CONDITIONAL").size(),
                         "unconditional", unconditionalActions().size(),
                         "throwing", THROWING.size()));

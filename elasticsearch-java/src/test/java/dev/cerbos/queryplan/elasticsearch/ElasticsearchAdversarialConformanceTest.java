@@ -347,10 +347,10 @@ class ElasticsearchAdversarialConformanceTest {
         manifest.addAll(expected);
         manifest.addAll(nullRepresentationOmittedActions);
         manifest.addAll(divergences);
-        assertEquals(112, oracleActions.size());
+        assertEquals(114, oracleActions.size());
         assertEquals(158, throwingActions.size());
         assertEquals(1, nullRepresentationOmittedActions.size());
-        assertEquals(272, classified.size());
+        assertEquals(274, classified.size());
         assertEquals(manifest, classified, "every manifest action must be classified locally");
     }
 

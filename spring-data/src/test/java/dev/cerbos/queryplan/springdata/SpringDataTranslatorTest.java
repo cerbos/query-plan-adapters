@@ -447,10 +447,9 @@ class SpringDataTranslatorTest {
         assertEquals(new ArrayList<>(new TreeSet<>(recordedActions)), recordedActions,
                 "golden/expectations.json must stay sorted by action");
 
-        // Tripwires. Bump them deliberately: a count that moves without anyone noticing is how a
-        // shape gets dropped from an asset nobody reads end to end.
+        // Update these tripwires only after replaying new actions against the oracle.
         assertEquals(
-                Map.of("conditional", 222, "unconditional", 3, "throwing", 47),
+                Map.of("conditional", 224, "unconditional", 3, "throwing", 47),
                 Map.of("conditional", conditionalActions().size(),
                         "unconditional", unconditionalActions().size(),
                         "throwing", THROWING.size()));

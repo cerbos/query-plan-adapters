@@ -22,46 +22,15 @@ import {
 } from "./corpus";
 
 /**
- * Translator unit test: for every action in the shared `../conformance/` corpus, the filter this
- * adapter emits. Offline — no Cerbos sidecar, no MongoDB.
- *
- * The per-adapter suite this replaced braided four assertions into every test. Three of them are
- * somebody else's job now, and this file makes only the fourth:
- *
- * | assertion | who owns it |
- * | --- | --- |
- * | the plan the PDP produces for a policy | `conformance/wire-fixtures/`, replanned and diffed by the `Conformance Corpus` workflow |
- * | which shapes this adapter must refuse, and with what message | `conformance/actions.json` — read below, not restated |
- * | the documents a filter returns | `adversarial.test.ts`, against a real MongoDB with `check()` as the oracle |
- * | **the filter this adapter emits for a plan** | **here** |
- *
- * **The plans are read, not written.** A hand-built plan is a *belief* about what the planner
- * emits, and this repository keeps golden fixtures because that belief has been wrong before: a
- * planner change used to fail fixture regeneration and silently leave every adapter's hand-written
- * plans describing a wire contract that no longer existed. Sourcing from fixtures inverts that —
- * the drift check now protects the plans this file asserts against. See
- * [ADR 0006](../../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md).
- *
- * **What a pinned filter buys over the harness.** The harness proves the filter returns the right
- * documents *against the 22 it seeds*. Two different filters can agree on all of them and disagree
- * on the document a consumer has, so a rewrite that quietly changes the emitted query passes there
- * and shows up here as a diff a reviewer reads. It is also the only place a
- * `nullAttributeRepresentation` boundary, a timestamp literal, or a caller-supplied `valueParser`
- * can be pinned at all.
- *
- * **Adding a corpus action fails this file.** Every wire fixture must be classified here exactly
- * once — expected filter, expected plan kind, or expected throw — and the guard at the bottom is
- * what makes a new action land as a failure rather than as silence.
+ * Offline contract for planner wire fixtures: emitted filters, plan kinds, pinned refusals,
+ * and caller options that the shared corpus cannot vary. The adversarial suite separately
+ * executes filters against a store and compares them with the PDP oracle.
+ * Every fixture must appear exactly once in the completeness guard below (ADR 0006).
  */
 
 const actionsFile = parseActionsFile(readJson("actions.json"));
 
-/**
- * The shapes `actions.json` says this adapter must refuse, each with the message it must refuse
- * them with. Identical to the classification `adversarial.test.ts` asserts against a live PDP;
- * asserting it here as well is what lets the completeness guard below be total, and it costs a
- * millisecond rather than a container.
- */
+// Refusal messages come from the same classification ledger as the live harness.
 const { throwingActions: THROWING_ACTIONS } = classifyActionsForAdapter(
   actionsFile,
   "mongoose",
@@ -84,7 +53,7 @@ function translate(
 }
 
 /**
- * The plan kind for the two corpus actions the planner resolves without a condition.
+ * Plan kinds for actions the planner resolves without a condition.
  *
  * `p-has` is `knownDivergences` for every adapter — the planner folds `has(unknown attr)` to
  * ALWAYS_ALLOWED, so the harness cannot compare it against the oracle. Translation is still
@@ -3029,6 +2998,46 @@ const EXPECTED_FILTERS: Record<string, MongooseFilter> = {
             ],
           },
         ],
+      },
+    ],
+  },
+  "pv-in": {
+    $and: [
+      {
+        aOptionalString: {
+          $ne: null,
+        },
+      },
+      {
+        aOptionalString: {
+          $in: [
+            "set",
+            "same",
+            "",
+            "%_o",
+            "X",
+            "Y",
+            "MIRROR",
+            "filler-1",
+            "filler-2",
+            "filler-3",
+            "filler-4",
+          ],
+        },
+      },
+    ],
+  },
+  "pv-in-unrolled": {
+    $and: [
+      {
+        aOptionalString: {
+          $ne: null,
+        },
+      },
+      {
+        aOptionalString: {
+          $in: ["set", "", "%_o"],
+        },
       },
     ],
   },
@@ -6294,7 +6303,7 @@ describe("corpus shapes", () => {
       filters: filters.length,
       kinds: kinds.length,
       throwing: throwing.length,
-    }).toEqual({ filters: 177, kinds: 7, throwing: 88 });
+    }).toEqual({ filters: 179, kinds: 7, throwing: 88 });
   });
 
   // The mapping-hazard contract in README.md rests on one structural fact: this adapter builds no

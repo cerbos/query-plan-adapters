@@ -585,7 +585,7 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `check()` decisio
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 110 reference conformance actions plus regex and timestamp probes (112 actions) |
+| Oracle-tested | 112 reference conformance actions plus regex and timestamp probes (114 actions) |
 | Fail-closed | 149 reference actions plus ordered list indexing/`get-field`, `int()`/`double()` casts and `filter()`/`map()` used as a condition or a conjunct (158 actions total) |
 | Representation-independent | `null-eq-missing` — rejected like every other null-selecting comparison, so no NULL-representation option is required |
 | Attribute NULL convention | Declared, in order to REFUSE. Elasticsearch does not index a JSON null, so an explicitly-null value and a missing field are the same document to every query the DSL can express. Pass the attributes you send as explicit nulls in `explicitNullAttributes`, and the equality family over them throws instead of answering narrowly — every spelling of `!= "x"` either requires the field to exist (dropping the row CEL allows) or matches every document missing it (cerbos/query-plan-adapters#308) |
@@ -606,7 +606,7 @@ Every fail-closed shape's error message is pinned in the shared corpus (`conform
 
 `ElasticsearchTranslatorTest` asserts the same classification offline, and adds the property the
 per-action assertions cannot state: the **distribution of the refusals over the sites in the walk
-that raise them**. 159 of the corpus's 272 shapes are refused here — the 158 fail-closed actions
+that raise them**. 159 of the corpus's 274 shapes are refused here — the 158 fail-closed actions
 above plus `null-eq-missing` — so it matters whether that happens at one catch-all or at many. It
 is 29 sites, with 64 actions reaching the computed-operand refusal:
 

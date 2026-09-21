@@ -385,6 +385,8 @@ const NULL_OMITTED_MESSAGE = NULL_REPRESENTATION_OMITTED[0]?.message ?? "";
 // int()/double()), so they cannot satisfy a non-empty assertion.
 
 const DEGENERACY_GUARD_ACTIONS = [
+  "pv-in",
+  "pv-in-unrolled",
   "vf-le",
   "like-percent",
   "all-on-empty",
@@ -953,10 +955,10 @@ describe("adversarial conformance corpus", () => {
       return count !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(272);
+    expect(MANIFEST_ACTIONS.size).toBe(274);
     expect(unsupportedCount).toBe(81);
     expect(supportedExpectedCount).toBe(4);
-    expect(ORACLE_ACTIONS).toHaveLength(182);
+    expect(ORACLE_ACTIONS).toHaveLength(184);
     expect(THROWING_ACTIONS).toHaveLength(88);
     expect(misclassified).toEqual([]);
   });

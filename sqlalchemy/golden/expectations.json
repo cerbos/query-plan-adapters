@@ -1603,6 +1603,36 @@
         "a_optional_string_3": "%_o"
       }
     },
+    "pv-in": {
+      "where": {
+        "sqlite": "CASE WHEN (adversarial_resource.a_optional_string IS NOT NULL) THEN adversarial_resource.a_optional_string IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) END = 1",
+        "postgresql": "CASE WHEN (adversarial_resource.a_optional_string IS NOT NULL) THEN adversarial_resource.a_optional_string IN (%(a_optional_string_1_1)s, %(a_optional_string_1_2)s, %(a_optional_string_1_3)s, %(a_optional_string_1_4)s, %(a_optional_string_1_5)s, %(a_optional_string_1_6)s, %(a_optional_string_1_7)s, %(a_optional_string_1_8)s, %(a_optional_string_1_9)s, %(a_optional_string_1_10)s, %(a_optional_string_1_11)s) END"
+      },
+      "params": {
+        "a_optional_string_1_1": "set",
+        "a_optional_string_1_2": "same",
+        "a_optional_string_1_3": "",
+        "a_optional_string_1_4": "%_o",
+        "a_optional_string_1_5": "X",
+        "a_optional_string_1_6": "Y",
+        "a_optional_string_1_7": "MIRROR",
+        "a_optional_string_1_8": "filler-1",
+        "a_optional_string_1_9": "filler-2",
+        "a_optional_string_1_10": "filler-3",
+        "a_optional_string_1_11": "filler-4"
+      }
+    },
+    "pv-in-unrolled": {
+      "where": {
+        "sqlite": "CASE WHEN (adversarial_resource.a_optional_string IS NOT NULL) THEN adversarial_resource.a_optional_string IN (?, ?, ?) END = 1",
+        "postgresql": "CASE WHEN (adversarial_resource.a_optional_string IS NOT NULL) THEN adversarial_resource.a_optional_string IN (%(a_optional_string_1_1)s, %(a_optional_string_1_2)s, %(a_optional_string_1_3)s) END"
+      },
+      "params": {
+        "a_optional_string_1_1": "set",
+        "a_optional_string_1_2": "",
+        "a_optional_string_1_3": "%_o"
+      }
+    },
     "pv-not-all": {
       "where": {
         "sqlite": "NOT (adversarial_resource.a_optional_string = ? AND adversarial_resource.a_optional_string = ? AND adversarial_resource.a_optional_string = ? AND adversarial_resource.a_optional_string = ? AND adversarial_resource.a_optional_string = ? AND adversarial_resource.a_optional_string = ? AND adversarial_resource.a_optional_string = ? AND adversarial_resource.a_optional_string = ? AND adversarial_resource.a_optional_string = ? AND adversarial_resource.a_optional_string = ? AND adversarial_resource.a_optional_string = ?)",

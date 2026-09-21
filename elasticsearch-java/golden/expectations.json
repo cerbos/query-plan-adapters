@@ -1336,6 +1336,38 @@
         }
       }
     },
+    "pv-in": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "terms": {
+          "aOptionalString": [
+            "set",
+            "same",
+            "",
+            "%_o",
+            "X",
+            "Y",
+            "MIRROR",
+            "filler-1",
+            "filler-2",
+            "filler-3",
+            "filler-4"
+          ]
+        }
+      }
+    },
+    "pv-in-unrolled": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "terms": {
+          "aOptionalString": [
+            "set",
+            "",
+            "%_o"
+          ]
+        }
+      }
+    },
     "pv-not-all": {
       "kind": "CONDITIONAL",
       "query": {

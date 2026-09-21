@@ -114,7 +114,7 @@ The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` d
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 46 reference actions: directional and inequality comparisons, single/empty membership, Unicode and empty strings, negative numbers, n-ary/double/triple negation, membership on an optional resource field, mapped nested-field equality, case-sensitive equality, the primary key against a literal, and the root-position and bare-operand forms — bare `>`/`<=` on a metadata key, either ordering under a negation, a bare boolean key as the whole condition, and a disjunction of two scalar predicates; plus the De Morgan branch over a conjunction, a value-first ordering against a metadata key, the below-cliff unroll of a principal collection, which folds to a plain disjunction of equalities, membership in a map literal (folded by the planner to its key list), and a double literal beyond int64 on a double field — the first corpus shapes to compare `aDouble` here, every other one being a nested expression |
+| Oracle-tested | 48 reference actions: directional and inequality comparisons, single/empty membership, Unicode and empty strings, negative numbers, n-ary/double/triple negation, membership on an optional resource field, mapped nested-field equality, case-sensitive equality, the primary key against a literal, and the root-position and bare-operand forms — bare `>`/`<=` on a metadata key, either ordering under a negation, a bare boolean key as the whole condition, and a disjunction of two scalar predicates; plus the De Morgan branch over a conjunction, a value-first ordering against a metadata key, the below-cliff unroll of a principal collection, which folds to a plain disjunction of equalities, membership in a map literal (folded by the planner to its key list), and a double literal beyond int64 on a double field — the first corpus shapes to compare `aDouble` here, every other one being a nested expression |
 | Fail-closed | 213 reference conformance actions plus regex, ordered indexing/`get-field`, timestamp, cast and non-boolean-macro probes (224 actions total) |
 | Representation-independent | `null-eq-missing` — rejected like every other null comparison operand, so no `nullAttributeRepresentation` option is required |
 | Attribute NULL convention | Also representation-independent, and for the same reason: Chroma metadata has no null value, so a NULL column is stored as an ABSENT key and `$ne`/`$nin` match absent records. All five `null-value-*` probes for the explicit convention (cerbos/query-plan-adapters#308) are refused rather than answered narrowly |
@@ -346,7 +346,7 @@ literal is one the deployed adapter could not have put in a query body either.
 
 An action this adapter refuses carries **no entry**: its pinned message is corpus data, in
 `conformance/actions.json`, and duplicating it here would be two places to change one string — which
-on an adapter that refuses 225 of the corpus's 272 shapes would make the asset almost entirely
+on an adapter that refuses 225 of the corpus's 274 shapes would make the asset almost entirely
 restatement. A wire fixture that is neither in this file nor declared unsupported fails the suite,
 which is what makes a new corpus action land as a failure rather than as silence
 ([ADR 0006](../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md),

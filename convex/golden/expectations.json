@@ -991,6 +991,14 @@
       "kind": "KIND_CONDITIONAL",
       "path": "post"
     },
+    "pv-in": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "pv-in-unrolled": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
     "pv-map": {
       "kind": "KIND_CONDITIONAL",
       "path": "post"

@@ -187,7 +187,7 @@ semantics for this compatibility snapshot.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 224 reference conformance actions |
+| Oracle-tested | 226 reference conformance actions |
 | Fail-closed corpus shapes | Regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an untyped string field, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero) `filter()`/`map()` used as a condition (both return a list, not a boolean), `string()` over a column declared `ValueBool` (rejected in the shared vendored translator, which serves MySQL and SQLite too, even though PostgreSQL alone would render it correctly), a hierarchy path constructed by `list()` rather than read from a column, `mod` (reached through the `int()` cast that gives `%` an integer operand), a positional read of a scalar list (row order in a SQL relation is not defined), list equality over a `map()` projection, and a hierarchy with an empty delimiter (the vendored translator refuses it: a path cannot be split on an empty string, and the prefix `LIKE` would match the path itself), two-list `except`, structured constructor/list operands, unsupported principal-list macros, conditional divisors, and bare temporal-column comparisons (46 actions) |
 | Operand types the plan does not carry | CEL overloads `+` on strings, and a query plan names no operand types. One string operand settles it, so `R.attr.a + "x"` and `"x" + R.attr.a` translate on their own. Between **two columns** neither does: declare the string column with `ValueType: cerbospgx.ValueString` and the adapter emits concatenation, or it fails closed rather than emitting a numeric `+` — which is a hard error on PostgreSQL, `0` on SQLite, and on MySQL a silent match against every row (cerbos/query-plan-adapters#391) |
 | Representation-dependent | `null-eq-missing` — rejected under `NullOmitted`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
@@ -211,7 +211,7 @@ Two-list `except`, structured list operands and constructor expressions are refu
 
 **Breaking change (#391).** `R.attr.a + R.attr.b` between two columns now returns an error unless one column is declared `ValueString`. It previously emitted a numeric `+`; on PostgreSQL that is a hard `operator does not exist: text + text` for text columns, so the change turns a runtime failure into a translation-time one and refuses the shape the shared translator cannot type.
 
-The eleven fail-closed shapes return an error wrapping `ErrUnsupported` rather than a broader SQL
+Fail-closed shapes return an error wrapping `ErrUnsupported` rather than a broader SQL
 filter. `matches()` is rejected because SQL regex dialects do not guarantee CEL/RE2 semantics.
 
 Every fail-closed shape's error message is pinned in the shared corpus (`conformance/actions.json`) and asserted by this adapter's conformance run, so a classification proves the throw names its declared mechanism rather than merely that something threw.
