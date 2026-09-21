@@ -1044,25 +1044,28 @@ describe("adversarial conformance corpus", () => {
     );
   });
 
-  test("oracle is not degenerate", async () => {
-    // Guard the guard: each of these actions must produce a non-empty, non-total oracle set,
-    // otherwise the differential comparison could pass vacuously (e.g. PDP denying all).
-    //
-    // Every entry is asserted to be an action Convex actually oracle-compares. A list copied
-    // from another harness drifts into naming shapes this adapter never compares, which guard
-    // nothing (cerbos/query-plan-adapters#324); the membership assertion turns moving an action
-    // into Convex's `adapterUnsupported` set into a failure here rather than a silent no-op.
-    for (const action of DEGENERACY_GUARD_ACTIONS) {
+  // Each action gets its own test budget: the combined serial oracle calls grow with the corpus.
+  // Guard the guard: every action must produce a non-empty, non-total oracle set, otherwise the
+  // differential comparison could pass vacuously (e.g. PDP denying all).
+  // Every entry must be an action Convex actually oracle-compares. Moving one into Convex's
+  // `adapterUnsupported` set must fail here rather than silently guard nothing (#324).
+  test.each(DEGENERACY_GUARD_ACTIONS)(
+    "%s has a non-degenerate compared oracle",
+    async (action) => {
       expect(ORACLE_ACTIONS).toContain(action);
       await expectNonDegenerateOracle(action);
-    }
-    // Asserting the complement keeps the split honest — an action Convex gains support for
-    // must move up into the guard proper.
-    for (const action of DEGENERACY_LIVENESS_PROBES) {
+    },
+  );
+
+  // Asserting the complement keeps the split honest: an action Convex gains support for must
+  // move into the compared list.
+  test.each(DEGENERACY_LIVENESS_PROBES)(
+    "%s has a non-degenerate liveness oracle",
+    async (action) => {
       expect(ORACLE_ACTIONS).not.toContain(action);
       await expectNonDegenerateOracle(action);
-    }
-  });
+    },
+  );
   // These shapes intentionally have empty or total oracles: type errors, unequal runtime
   // types, or empty-list identities. Pin the live planner kind as well as the oracle so
   // dropping their inputs cannot silently turn a conditional error probe into a folded plan.
