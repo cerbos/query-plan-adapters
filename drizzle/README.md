@@ -367,7 +367,7 @@ Those `EXISTS` expressions read the mapped table bare. If your own reads of that
 - `hasIntersection`: Use for multi-valued attributes such as tags. When Cerbos emits `hasIntersection(map(resource.tags, lambda t => t.name), ["tag"])`, the mapper looks up the nested field and the adapter converts it into a `column IN (...)` condition.
 - `exists`, `exists_one`, and `all`: When policies reference array attributes (e.g., `request.resource.attr.tags`), mark the mapper entry as a relation. The adapter scopes the lambda variable, generates the `EXISTS` subquery, and correlates it with the parent table automatically.
 - Scalar collections stored through a relation can opt in with `collectionValueType: "scalar"` and set the relation's `field`. This enables direct membership such as `R.attr.owner in R.attr.tagNames`, including explicit `null` elements.
-- `filter`: Cerbos uses `filter` during plan construction. The adapter discards those lambdas because the entire filter is rerun in Drizzle land.
+- `filter`: Supported inside `size(filter(...))`, where the lambda restricts the rows counted. A standalone `filter()` returns a list rather than a boolean and is rejected as a condition.
 
 ## Example application
 

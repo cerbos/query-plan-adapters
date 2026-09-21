@@ -30,8 +30,8 @@ Both halves are load-bearing and both have been checked by breaking them:
 
 | Break                                   | Example                  | `npm test`  | `npm run test:adversarial` |
 | --------------------------------------- | ------------------------ | ----------- | -------------------------- |
-| `exports["."]` points at a missing file  | fails (TS2307)           | 104 passing | 158 passing                |
-| `lib/**/*.js` dropped from `files`       | fails (MODULE_NOT_FOUND) | 104 passing | 158 passing                |
+| `exports["."]` points at a missing file  | fails (TS2307)           | passes | passes                |
+| `lib/**/*.js` dropped from `files`       | fails (MODULE_NOT_FOUND) | passes | passes                |
 
 `tsconfig.json` sets `moduleResolution: "nodenext"` for the first row specifically: the legacy
 `node10` resolver ignores `exports` entirely and falls back to `main`/`types`, so a broken
@@ -148,7 +148,7 @@ This example is a JSON-printing CLI, not an onboarding artifact — that is
 [`spring-data/example/`](../../spring-data/example/), and the floor/ceiling rule in
 [ADR 0001](../../docs/adr/0001-demo-domain-has-no-per-adapter-exceptions.md) is why both exist.
 
-There is no declared peer range for it to prove, unlike `prisma/example/` and `drizzle/example/`.
+There is no declared Mongoose peer range for it to prove, unlike `prisma/example/` and `drizzle/example/`.
 `@cerbos/orm-mongoose` never imports `mongoose` — it returns a plain filter object, and `mongoose`
 is a dev dependency of the adapter only — so nothing in the published package constrains, or
 needs to constrain, which Mongoose a consumer pairs it with. What the example does add is that

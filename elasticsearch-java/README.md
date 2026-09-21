@@ -583,6 +583,8 @@ The existing five-argument `Options` constructor remains available. Undeclared f
 
 The adapter is differentially tested against Cerbos PDP 0.54.0 `check()` decisions using 26 hostile seed documents and real Elasticsearch queries. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
 
+The harness applies a 30-second deadline to each PDP call, so a stalled RPC fails the run.
+
 | Classification | Coverage |
 | --- | --- |
 | Oracle-tested | 112 reference conformance actions plus regex and timestamp probes (114 actions) |

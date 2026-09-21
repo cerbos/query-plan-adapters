@@ -52,7 +52,7 @@ equivalent spellings, and only one of them translates reliably here:
 # Fragile — translates for some principals and throws for others
 expr: P.attr.teams.exists(t, R.attr.team == t)
 
-# Portable — always a single $in
+# Direct membership — a non-empty list maps to one $in
 expr: R.attr.team in P.attr.teams
 ```
 
@@ -70,10 +70,9 @@ adapter only accepts when the mapper declares `required: true` for the field,
 because a document missing the metadata key would otherwise match `$ne` and be
 over-granted.
 
-The membership form has no such threshold. It reaches the adapter as `in`
-against a literal list at every collection size and maps to a single `$in`
-filter, which is also cheaper for ChromaDB to evaluate than an `or` chain, and
-needs no `required` assertion.
+The membership form has no such threshold. A non-empty principal list reaches
+the adapter as `in` against a literal list and maps to a single `$in` filter,
+without a `required` assertion. An empty list is folded to an always-denied plan.
 
 The cliff itself is pinned in the shared corpus rather than here, by a pair of
 actions over the same policy at two collection sizes: `pv-exists-unrolled`
@@ -83,16 +82,11 @@ are the `all` half of the same pair, and both throw — the unrolled `$ne` chain
 targets an optional metadata key, which is the over-grant `required: true`
 exists to prevent.
 
-**The membership spelling has no such pair, because it has no boundary to
-straddle.** `P.attr.*` is folded before the adapter sees anything, so
-`R.attr.x in P.attr.xs` reaches the wire as `in(key, [literals])` at every
-collection size — structurally the corpus's `p-in-null-multi`, which is
-oracle-tested — and there is no size at which the planner emits something else.
-What the retired suite pinned by planning at 9, 10, 11 and 40 elements was
-therefore a **planner** property, not a translator one, and a wire fixture
-cannot carry it. A corpus action that spells the recommendation directly is
-tracked in
-[#411](https://github.com/cerbos/query-plan-adapters/issues/411).
+The membership spelling is proved directly by `pv-in` (eleven principal values)
+and `pv-in-unrolled` (three). Despite the latter action's name, both wire fixtures
+contain `in(key, [literals])`; neither uses a lambda or an unrolled `or` chain.
+Both actions execute against ChromaDB and compare the returned IDs with the PDP
+oracle, including records where the optional metadata key is absent.
 
 ## NULL attribute representation
 

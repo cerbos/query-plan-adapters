@@ -175,10 +175,12 @@ export type MapperConfig = {
   field?: string;
   nullable?: boolean;
   valueParser?: (value: any) => any;
+  valueType?: "number" | "string" | "boolean" | "dateTime";
   relation?: {
     name: string;
     type: "one" | "many";
     field?: string;
+    requiresParent?: string;
     fields?: Record<string, MapperConfig>;
   };
 };

@@ -18,9 +18,9 @@ An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanRe
 
 - One-to-one: `is`, `isNot`
 - One-to-many/Many-to-many: `some`, `none`, `every`
-- Collection operators: `exists`, `all`, `except` (`exists_one` requires counting matches,
-  which Prisma where-filters cannot express — it throws rather than silently degrading to
-  `exists`; `filter` only appears inside other expressions)
+- Collection macros: `exists` and `all`. `exists_one` requires counting matches,
+  which Prisma where-filters cannot express, so it throws. The two-list `except`
+  function is also rejected; `filter` is only supported inside other expressions.
 - Set operations: `hasIntersection`
 
 #### Arithmetic
@@ -70,11 +70,11 @@ throw — Prisma only supports references between fields of the same model.
 #### Known limitations (loud failures, never silently-wrong filters)
 
 - LIKE wildcards: Prisma emits `LIKE` without an `ESCAPE` clause, so `contains`/`startsWith`/
-  `endsWith` with a needle containing `%` or `_`, or with a column-valued needle, throws.
+  `endsWith` with a needle containing `%`, `_` or `\`, or with a column-valued needle, throws.
   (A constant *receiver* with a column needle — `"a-b".startsWith(R.attr.x)` — is translated
   exactly by enumerating candidate needles into an `in` filter.)
 - Hierarchy prefixes: `ancestorOf`, `descendentOf` and `overlaps` narrow a column with a
-  `startsWith`, so they throw when the constant hierarchy contains `%`, `_` or `[`. `[` is
+  `startsWith`, so they throw when the constant hierarchy contains `%`, `_`, `\` or `[`. `[` is
   rejected as well as the two LIKE wildcards because SQL Server opens a character class on
   `[` even when an `ESCAPE` clause is declared, so it cannot be matched literally at all.
 - Counting: `exists_one`, `size()` thresholds other than empty/non-empty, and string-length
@@ -293,7 +293,7 @@ const result = queryPlanToPrisma({
 
 ## System Requirements
 
-- Node.js >= 22.0.
+- Node.js >= 22.0.0
 - Prisma CLI & Client >= 6.0 (v7 supported)
 - A database supported by Prisma (SQLite/PostgreSQL/MySQL/etc.) so the Prisma client can communicate with stored data
 

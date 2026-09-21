@@ -363,6 +363,11 @@ query = get_query(
 )
 ```
 
+An entry whose value is `None` uses the default handler, including inside nested expressions.
+Omitting `operator_override_fns` validates every `attr_map` entry. Passing an explicit mapping
+(including `{}` or a map containing only `None` entries) validates the attributes reached outside
+active overrides; an override owns the operands it translates.
+
 The types are as follows:
 
 ```python

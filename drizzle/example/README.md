@@ -13,10 +13,13 @@ directory's `run.sh` packs the adapter, installs the tarball, builds, and runs.
 
 It follows [`prisma/example/`](../../prisma/example/), which is the reference implementation.
 
+Install the adapter's build dependencies with `npm ci` in [`../`](..) before running
+the example; `run.sh` builds the adapter before packing it.
+
 ## What it proves
 
 Not what the adapter translates — [`../src/adversarial.test.ts`](../src/adversarial.test.ts)
-proves that against a hostile corpus with a live PDP as the oracle, on SQLite and on PostgreSQL.
+proves that against a hostile corpus with a live PDP as the oracle, on SQLite, PostgreSQL and MySQL.
 This proves the two things that harness structurally cannot:
 
 **Packaging.** `run.sh` builds the artifact `npm publish` would upload and installs *that*, so the
@@ -29,8 +32,8 @@ Both halves are load-bearing and both have been checked by breaking them:
 
 | Break                                   | Example                  | `npm test`  | `npm run test:adversarial` |
 | --------------------------------------- | ------------------------ | ----------- | -------------------------- |
-| `exports["."]` points at a missing file  | fails (TS2307)           | 135 passing | 159 passing                |
-| `lib/**/*.js` dropped from `files`       | fails (MODULE_NOT_FOUND) | 135 passing | 159 passing                |
+| `exports["."]` points at a missing file  | fails (TS2307)           | passes | passes                |
+| `lib/**/*.js` dropped from `files`       | fails (MODULE_NOT_FOUND) | passes | passes                |
 
 `tsconfig.json` sets `moduleResolution: "nodenext"` for the first row specifically: the legacy
 `node10` resolver ignores `exports` entirely and falls back to `main`/`types`, so a broken
@@ -117,8 +120,8 @@ This example is a JSON-printing CLI, not an onboarding artifact — that is
 [`spring-data/example/`](../../spring-data/example/), and the floor/ceiling rule in
 [ADR 0001](../../docs/adr/0001-demo-domain-has-no-per-adapter-exceptions.md) is why both exist.
 
-It runs SQLite only. The PostgreSQL leg in
-[`../src/adversarial.test.ts`](../src/adversarial.test.ts) exists to discriminate collation, LIKE
+It runs SQLite only. The PostgreSQL and MySQL legs in
+[`../src/adversarial.test.ts`](../src/adversarial.test.ts) discriminate collation, LIKE
 escaping and parameter typing — semantics, already covered there. It also does **not** prove the
 declared peer range: `@cerbos/orm-drizzle` claims `^0.44.0 || ^0.45.0` and this example installs
 0.45. Widening the harness matrix is the fix for that, and it is out of scope here.

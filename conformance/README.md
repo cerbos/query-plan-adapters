@@ -107,6 +107,12 @@ Deliberately **not** here: the filter each adapter is pinned to emit for each ac
 per-adapter **golden expectations**, they live in the adapter's own directory, and the format is
 documented under "Golden expectations" below.
 
+`scripts/validate-corpus.sh` enforces closed entry schemas in `actions.json`: unknown keys,
+missing required fields and empty or incorrectly typed metadata fail validation. Optional
+`relatedIssue` values must be non-empty strings, not `null`, and every adapter named by a known
+divergence must belong to the canonical roster. When moving an action between buckets, use the
+destination bucket's declared fields.
+
 ## The oracle recipe
 
 The differential harness pattern (implemented per-adapter, since translation and query execution

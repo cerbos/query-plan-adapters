@@ -135,9 +135,10 @@ Leaving an attribute undeclared keeps the historical rendering — so nothing ch
 that says nothing, and `!=` against a constant keeps under-granting the NULL rows until you declare
 it.
 
-**Declare both sides of a field-to-field comparison, or neither.** Mixing the conventions across one
-comparison has no faithful rendering — the declared side needs a definite answer for its NULL, the
-undeclared side needs UNKNOWN — so the adapter throws rather than picking a direction. See
+**Declare both sides of a field-to-field equality, or neither.** For operands with the same or
+undeclared scalar types, mixing conventions is rejected: the explicit-null side needs a definite
+answer for its NULL, while the omitted side needs UNKNOWN. Incompatible declared scalar types can
+be compared through their NULL states without comparing the stored values. See
 [#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
 [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
 
@@ -244,7 +245,7 @@ reads it: `RestrictIn` then hides every row, `RestrictNotIn` hides none.
 | --- | --- |
 | SQLite | Proved — full corpus, text timestamps compared lexicographically |
 | PostgreSQL | Proved — full corpus, native `boolean` and `timestamptz` columns |
-| MySQL | Proved — full corpus, `DATETIME(6)` columns, binary collation |
+| MySQL | Proved — full corpus, `DATETIME(6)` columns, case- and accent-sensitive NO PAD collation |
 
 The three proved dialects are not the same test three times: SQLite stores instants as text and
 booleans as integers, PostgreSQL has real types for both, MySQL needs `CONCAT` rather than `||`
@@ -253,7 +254,8 @@ booleans as integers, PostgreSQL has real types for both, MySQL needs `CONCAT` r
 DISTINCT FROM`, `<=>`) and different cast spellings (`real`, `double precision`, `double`).
 Running all three is what makes `WithDialect` a checked claim rather than an assertion.
 
-The MySQL schema pins a **binary collation** on every string column. MySQL's default
+The MySQL schema pins **`utf8mb4_0900_as_cs`**, a case- and accent-sensitive NO PAD
+collation, on every string column. MySQL's default
 `utf8mb4_0900_ai_ci` is both case- and accent-insensitive, which over-grants on `cs-eq`,
 `unicode-eq` and every hierarchy prefix probe — see [Collation](#collation) below.
 
@@ -282,7 +284,7 @@ at once. Treat them as constraints on the policies you write.
 
 | Gap | Effect |
 | --- | --- |
-| A NaN stored in a floating-point column | Ordered comparisons follow the database's NaN ordering rather than IEEE's. Only NaNs the adapter folds itself are handled exactly. |
+| A NaN stored in a floating-point column | Ordered comparisons follow the database's NaN ordering rather than CEL's error semantics. Only NaNs the adapter folds itself are handled exactly. |
 | Division by a **stored** negative zero | SQL cannot tell `-0.0` from `0.0` — both satisfy `= 0` and no portable function reads the sign bit — so the sign of the resulting infinity is unknowable when the denominator is a column. A constant denominator is handled exactly: the planner ships the sign and the adapter applies it (`cr-div-neg-zero`). |
 | `!=` / `not in` against an explicit null under `NullExplicit` | CEL evaluates `null != "x"` as true; SQL leaves it UNKNOWN and excludes the row. This under-grants — it fails closed — but is not exact equivalence. See cerbos/query-plan-adapters#308. |
 

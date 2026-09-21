@@ -21,14 +21,15 @@ directory is for. See [`CONTEXT.md`](../CONTEXT.md) for the full glossary.
 
 ## What an example covers that a conformance harness cannot
 
-Every harness already plans against a live PDP over gRPC, translates, runs a real ORM call against
+Every harness already plans against a live PDP, translates, runs a real ORM call against
 a real store, and compares ids against per-row `check()`. That chain is covered for every
 adapter and nothing here adds to it. Two gaps remain, and they are gaps *because of how the
 harnesses are built*:
 
 1. **Packaging.** Every harness imports its adapter from source (`from "."`). The published
    surface — `exports` maps, type declarations, `files` allowlists, peer ranges, POM scopes — is
-   executed nowhere. Examples install the packed artifact instead; see
+   executed nowhere. Examples install the packed artifact instead; Ent and pgx use local module
+   replacements and prove usage shapes only. See
    [ADR 0002](../docs/adr/0002-examples-install-the-packed-artifact.md).
 2. **Usage shape.** A harness runs one flat filtered query. Consumers also paginate, and compose
    the adapter's filter with predicates of their own. That second category is where a "returns a
@@ -137,7 +138,11 @@ authorization bug. Here the id lists are frozen on purpose: this proves plumbing
 import, did the ORM accept the filter, did rows come back — where a frozen list is the better
 tripwire and reads as documentation.
 
-The rot risk is real, and `validate-demo.sh` is what answers it:
+`validate-demo.sh` first requires a non-empty adapter roster of non-empty, single-line names from
+`conformance/actions.json`. It reads that roster once and reuses it for every adapter check, so a
+missing or malformed roster cannot silently skip validation.
+
+It then checks:
 
 1. **Structural.** `expected.json` declares exactly the five shapes and every entry is well-formed
    for its shape — an `alwaysAllowed` entry carrying a conditional kind would leave that kind

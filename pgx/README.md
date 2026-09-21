@@ -65,6 +65,9 @@ if err != nil {
     return err
 }
 
+if result.Kind == cerbospgx.KindAlwaysDenied {
+    return nil // no rows are accessible; do not run the application-only query
+}
 if result.Kind == cerbospgx.KindConditional {
     where += " AND (" + result.Where + ")"
     args = append(args, result.Args...)                  // …so Result.Args must follow yours
@@ -74,7 +77,7 @@ rows, err := pool.Query(ctx, `SELECT id FROM contact WHERE `+where, args...)
 
 **The fragment first**, with your parameters after it — pagination is the usual case. There is no
 option for this side: the fragment keeps its own numbering from `$1`, and you number yours from
-`len(result.Args)+1`:
+`len(result.Args)+1`. This example assumes you have handled the unconditional plan kinds above:
 
 ```go
 stmt := fmt.Sprintf(`SELECT id FROM contact WHERE %s ORDER BY id LIMIT $%d OFFSET $%d`,
@@ -171,9 +174,10 @@ Leaving an attribute undeclared keeps the historical rendering — so nothing ch
 that says nothing, and `!=` against a constant keeps under-granting the NULL rows until you declare
 it.
 
-**Declare both sides of a field-to-field comparison, or neither.** Mixing the conventions across one
-comparison has no faithful rendering — the declared side needs a definite answer for its NULL, the
-undeclared side needs UNKNOWN — so the adapter throws rather than picking a direction. See
+**Declare both sides of a field-to-field equality, or neither.** For operands with the same or
+undeclared scalar types, mixing conventions is rejected: the explicit-null side needs a definite
+answer for its NULL, while the omitted side needs UNKNOWN. Incompatible declared scalar types can
+be compared through their NULL states without comparing the stored values. See
 [#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
 [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
 
@@ -282,7 +286,7 @@ at once. Treat them as constraints on the policies you write.
 
 | Gap | Effect |
 | --- | --- |
-| A NaN stored in a floating-point column | Ordered comparisons follow the database's NaN ordering rather than IEEE's. Only NaNs the adapter folds itself are handled exactly. |
+| A NaN stored in a floating-point column | Ordered comparisons follow the database's NaN ordering rather than CEL's error semantics. Only NaNs the adapter folds itself are handled exactly. |
 | Division by a stored negative zero | The sign of the resulting infinity is taken from the numerator alone, so `1.0 / -0.0` classifies as `+Inf` where CEL gives `-Inf`. |
 | Timestamp literals finer than a microsecond | PostgreSQL stores microsecond resolution, so a sub-microsecond bound is silently truncated and a boundary comparison can flip. Keep policy timestamps at microsecond precision or coarser. |
 | `!=` / `not in` against an explicit null under `NullExplicit` | CEL evaluates `null != "x"` as true; SQL leaves it UNKNOWN and excludes the row. This under-grants — it fails closed — but is not exact equivalence. |
